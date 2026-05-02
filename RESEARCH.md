@@ -618,6 +618,31 @@ const { profile } = await client.profile({ containerTag: 'org-acme.user-alice' }
 
 ---
 
+### Candidate 3: QMD (tobi/qmd)
+
+**Status:** Evaluated, not a good fit. Saved for reference.
+
+Local-first search engine by Tobi Lütke. BM25 + vector + LLM re-ranking, all on-device via GGUF models (node-llama-cpp). Zero API calls.
+
+**What it does:** Indexes files on a filesystem, provides hybrid search. CLI + SDK + MCP server.
+
+**What it doesn't do:** Storage, persistence, memory extraction, user profiles, connectors. It's a search layer, not a knowledge store.
+
+**Why not a fit:**
+- Doesn't solve persistence (where files live)
+- GGUF models need ~2GB download per sandbox spawn
+- Index must be rebuilt each sandbox spawn (not persistent)
+- Solves search but Yolk needs storage + search + memory
+- Supermemory covers search AND storage AND intelligence
+
+**Could complement other storage** as a local search accelerator, but adds complexity without solving the core problem.
+
+**Links:**
+- [GitHub](https://github.com/tobi/qmd)
+- SDK: `@tobilu/qmd` — `createStore()` for Node.js embedding
+
+---
+
 ## References
 
 - [Block: From Hierarchy to Intelligence](https://block.xyz/inside/from-hierarchy-to-intelligence)
