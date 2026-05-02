@@ -1092,6 +1092,219 @@ Don't use Supermemory as a dependency for a core feature. The concepts are good 
 
 ---
 
+## Knowledge Architecture: Knowledge DO with Workspace
+
+**Status:** Decided. This is the architecture.
+
+### Core concept
+
+The org's knowledge lives in a **dedicated Durable Object** with a Workspace filesystem. It's the world model — the most important piece of Yolk. Not a database. Not an object store. Not git. A rich filesystem service that agents and humans access equally via RPC/HTTP.
+
+No local copies. No sync. No versioning machinery. No git. The Knowledge DO is the single source of truth. Agents call it like any other tool.
+
+### Knowledge DO (one per org)
+
+```
+Knowledge DO
+│
+├── Workspace (SQLite + R2)
+│   Full filesystem API:
+│   ├── read, write, append, delete
+│   ├── mkdir, cp, mv, rm
+│   ├── glob, find, readdir, stat
+│   ├── searchFiles (text/regex across all files)
+│   ├── searchText (within a file)
+│   ├── replaceInFile, replaceInFiles
+│   ├── diff, diffContent
+│   ├── readJson, writeJson, queryJson, updateJson
+│   ├── walkTree, summarizeTree
+│   ├── planEdits, applyEditPlan (transactional multi-file writes)
+│   └── createArchive, extractArchive
+│
+├── Vectorize (semantic search)
+│   └── Embeddings generated on every write via Workers AI
+│
+├── Hybrid search
+│   ├── searchFiles() → text/regex match (instant, built-in)
+│   ├── Vectorize.query() → semantic similarity (~50ms)
+│   └── Combined → reciprocal rank fusion, ranked results
+│
+├── History (SQLite table alongside Workspace)
+│   ├── path, previous content, author, action, timestamp
+│   ├── author: 'user:alice' or 'agent:session-xyz'
+│   ├── action: 'create' | 'update' | 'delete'
+│   └── Simple append-only log. No staging, no commits, no branches.
+│
+└── RPC interface (called by agent DOs and Next.js proxy)
+    ├── read(path)
+    ├── write(path, content, author)
+    ├── search(query, mode: 'text' | 'semantic' | 'hybrid')
+    ├── list(prefix?)
+    ├── delete(path)
+    ├── diff(pathA, pathB)
+    └── history(path)
+```
+
+### Why Workspace, not Postgres or R2
+
+The Workspace API gives agents a **rich filesystem to think with**:
+
+```typescript
+// Things an agent can do via RPC to the Knowledge DO:
+await knowledge.searchFiles('**/*.md', 'pricing strategy')
+await knowledge.diff('/research/q3-v1.md', '/research/q3-v2.md')
+await knowledge.queryJson('/data/metrics.json', '$.revenue.q3')
+await knowledge.replaceInFiles('people/*.md', 'Q2', 'Q3')
+await knowledge.summarizeTree('/')
+await knowledge.find('/', { pattern: '*.md', modifiedAfter: lastWeek })
+```
+
+None of this is possible with Postgres rows or R2 objects. Workspace gives agents the same power as a real filesystem — without the filesystem.
+
+### Two-workspace model
+
+Each agent session has its own scratch space AND access to shared org knowledge:
+
+```
+┌─────────────────────────────────────────┐
+│         Knowledge DO (per org)           │
+│                                          │
+│  Workspace: the world model              │
+│  ├── about/company.md                    │
+│  ├── people/alice.md                     │
+│  ├── research/q3-pricing.md              │
+│  ├── decisions/2026-04-pricing.md        │
+│  └── projects/q3-launch/status.md        │
+│                                          │
+│  Vectorize: semantic search index        │
+│  History: change log (who, what, when)   │
+│                                          │
+│  Accessed by ALL agents via RPC          │
+│  Accessed by React UI via HTTP           │
+└────────────▲──────────▲─────────────────┘
+             │ RPC      │ RPC
+             │          │
+┌────────────┴───┐  ┌───┴────────────┐
+│ Alice's Agent  │  │ Bob's Agent    │
+│ DO             │  │ DO             │
+│                │  │                │
+│ Local Workspace│  │ Local Workspace│
+│ (scratch/temp) │  │ (scratch/temp) │
+│                │  │                │
+│ Session state  │  │ Session state  │
+│ (SQLite)       │  │ (SQLite)       │
+│                │  │                │
+│ WebSocket →    │  │ WebSocket →    │
+│ Alice's browser│  │ Bob's browser  │
+└────────────────┘  └────────────────┘
+```
+
+- **Knowledge DO** = the library. Persistent, shared, searchable. The world model.
+- **Agent DO local Workspace** = the desk. Scratch work, drafts, temp files. Per-session.
+
+Agent workflow:
+1. Read from Knowledge DO ("what do we know about Q3 pricing?")
+2. Work locally on scratch Workspace (draft analysis, iterate)
+3. Write back to Knowledge DO ("save this research")
+4. Knowledge DO generates embedding, updates search index, logs history
+
+### Search: hybrid from Cloudflare primitives
+
+```
+Agent: knowledge.search("quarterly pricing trends")
+                │
+    ┌───────────┴───────────┐
+    ▼                       ▼
+Workspace.searchFiles()  Vectorize.query()
+(text/regex match)       (semantic similarity)
+    │                       │
+    └───────────┬───────────┘
+                ▼
+        Merge + rank results
+        (reciprocal rank fusion)
+                │
+                ▼
+        Return top results with snippets
+```
+
+Text search is instant (SQLite). Semantic search ~50ms (Vectorize). Combined gives hybrid search without GGUF models.
+
+QMD won't work on Cloudflare (needs node-llama-cpp + GGUF models, V8 isolates can't run native modules). But Workspace `searchFiles` + Vectorize achieves the same hybrid BM25 + vector pattern.
+
+### History: lightweight, not git
+
+```sql
+knowledge_history (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  content TEXT,              -- previous content (null for creates)
+  author TEXT NOT NULL,      -- 'user:alice' or 'agent:session-xyz'
+  action TEXT NOT NULL,      -- 'create' | 'update' | 'delete'
+  created_at INTEGER NOT NULL
+)
+```
+
+No staging. No commits. No branches. Just: who changed what, when. Append-only.
+
+### Human access
+
+React UI talks to Knowledge DO through Next.js proxy. Humans get:
+- File browser (tree view of knowledge)
+- Markdown editor (read/write same files agent uses)
+- Search (same hybrid search)
+- History (who changed what — human or agent)
+- Live updates (agent writes → UI updates)
+
+Humans and agents use the **exact same knowledge store, same API, same files.**
+
+### Full architecture
+
+```
+┌──────────────────────────────┐
+│ React UI (browser)            │
+│ ├── Chat (WebSocket → Agent)  │
+│ ├── Knowledge browser         │
+│ │   (tree, editor, search,    │
+│ │    history)                  │
+│ └── Settings, teams, etc.     │
+└──────────┬───────────────────┘
+           │
+           ▼
+┌──────────────────────────────┐
+│ Next.js + Effect (Vercel)     │  ← control plane
+│ ├── Auth, teams, settings     │
+│ ├── Integration OAuth         │
+│ ├── Proxy to Knowledge DO     │  (for React UI access)
+│ └── Integration APIs          │  (Gmail, Calendar, Notion)
+└──────────┬───────────────────┘
+           │
+     ┌─────┴──────────────┐
+     ▼                    ▼
+┌──────────────┐  ┌──────────────────────┐
+│ Knowledge DO  │  │ Agent DOs            │
+│ (per org)     │  │ (per user session)   │
+│               │  │                      │
+│ Workspace     │◄─┤ Effect harness       │
+│ Vectorize     │  │ Tools (knowledge_*,  │
+│ History       │  │   gmail_*, etc.)     │
+│               │  │ Local scratch space  │
+│ The world     │  │ Session state        │
+│ model         │  │ WebSocket → browser  │
+└──────────────┘  └──────────────────────┘
+```
+
+### What's decided
+
+- Knowledge = Workspace filesystem in a centralized DO per org
+- No git, no sync, no local copies, no versioning machinery
+- Search = Workspace text search + Cloudflare Vectorize (hybrid)
+- History = simple append-only log in SQLite (not git)
+- Agents access knowledge via RPC (tool calls)
+- Humans access knowledge via Next.js proxy (same API)
+- Agent DOs have local scratch Workspace (ephemeral, per-session)
+
+---
+
 ## References
 
 - [Block: From Hierarchy to Intelligence](https://block.xyz/inside/from-hierarchy-to-intelligence)
