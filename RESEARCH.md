@@ -472,6 +472,152 @@ Built with [mini-lit](https://github.com/badlogic/mini-lit) (Lit web components)
 
 ---
 
+## Knowledge Store Candidates
+
+### Candidate 1: Cloudflare Artifacts
+
+**Status:** Evaluated, viable but repo-as-primitive has limitations.
+
+Git-compatible versioned file storage. Managed, durable, REST API + Git protocol.
+
+**Pros:**
+- Just files, no schema
+- Git semantics (versioning, history, branching, forking)
+- Durable (replicated across data centers)
+- Pi works with files natively (`git clone` → `read`/`write`/`edit` → `git push`)
+- REST API for repo/token management from server
+- Namespaces for per-team isolation
+- Git notes for agent metadata
+
+**Cons:**
+- **Repo is all-or-nothing** — clone everything, even if agent needs 3 files
+- **Concurrent writes** — multiple agents writing to same repo = merge conflicts
+- **No semantic search** — need separate embedding index (Cloudflare Vectorize or pgvector)
+- **No automatic memory extraction** — files are just files, no intelligence on top
+- **No user profiles** — would need to maintain profile documents manually
+- Scale: large knowledge bases mean slow clones
+
+**Best for:** Projects where Git semantics (versioning, branching, diffing) are important. Less ideal as a "world model" for an org.
+
+**Links:**
+- [Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/)
+- [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)
+- [Best practices](https://developers.cloudflare.com/artifacts/concepts/best-practices/)
+
+---
+
+### Candidate 2: Supermemory
+
+**Status:** Strong candidate. Best conceptual fit for the "world model."
+
+Hosted memory/context engine. Not just storage — extracts facts, builds profiles, handles contradictions, auto-forgets expired info. #1 on LongMemEval, LoCoMo, ConvoMem benchmarks.
+
+**Core API:**
+```
+POST /v3/documents          → add content (text, URL, file)
+POST /v3/search             → hybrid search (RAG + memory)
+GET  /v3/profiles           → auto-maintained user profile (~50ms)
+POST /v3/documents/upload   → upload files (PDF, images, video, code)
+```
+
+**Key features:**
+- **Memory engine** — extracts facts from content, tracks updates, resolves contradictions, auto-forgets expired info
+- **User profiles** — auto-maintained static facts + dynamic context per user. One API call, ~50ms.
+- **Hybrid search** — RAG + memory in single query. Knowledge base + personalized context together.
+- **Container tags** — organize by org, project, user. Scope searches. Merge containers.
+- **Knowledge graph** — entity relationships, spatial coordinates, graph viewport
+- **Connectors** — Gmail, Google Drive, Notion, OneDrive, GitHub, S3, Web Crawler (auto-sync with webhooks)
+- **Multi-modal** — PDFs, images (OCR), videos (transcription), code (AST-aware chunking)
+- **SMFS** — Supermemory Filesystem. Mounts as filesystem in containers. Agent reads/writes with standard file tools. Supports Vercel, E2B, Daytona, Cloudflare.
+
+**SMFS (Supermemory Filesystem):**
+
+The killer feature for Yolk. Mounts Supermemory as a filesystem in the sandbox:
+```
+Vercel Sandbox
+└── /workspace/              ← SMFS mount
+    ├── about/company.md     ← Pi's read/write/edit work directly
+    ├── people/alice.md      ← facts auto-extracted into memories
+    └── research/q3.md       ← semantically searchable immediately
+```
+
+Pi's native file tools work without custom tools. No sync layer needed.
+
+Also available as a bash tool wrapper for serverless (`@supermemory/bash`).
+
+**User profiles solve "the system knows the user":**
+```typescript
+const { profile } = await client.profile({ containerTag: 'user-alice' })
+// profile.static  → ["Head of Product", "Prefers async"]
+// profile.dynamic → ["Working on Q3 pricing", "Meeting Thursday"]
+```
+
+Inject into Pi system prompt. Agent knows who it's talking to. Gets smarter over time.
+
+**Container tag structure for orgs:**
+```
+containerTag: "org-acme"              ← org-wide knowledge
+containerTag: "org-acme.project-q3"   ← project-scoped
+containerTag: "org-acme.user-alice"   ← Alice's context
+```
+
+**Complementary with VLTRA integrations (not replacement):**
+
+| Supermemory (remember) | Yolk integrations (act) |
+|---|---|
+| Gmail → indexes into memory | Gmail → draft, send |
+| Notion → syncs into memory | Notion → create page, update |
+| Drive → syncs into memory | Calendar → CRUD events |
+| Web → crawls into memory | Telegram → send messages |
+
+**Pricing:**
+- Free: 1M tokens/mo, 10K searches
+- Pro: $19/mo, 3M tokens, 100K searches
+- Scale: $399/mo, 80M tokens, 20M searches
+- Enterprise: custom, unlimited
+- Overage: $0.01/1K tokens, $0.10/1K queries
+
+**Concerns:**
+- SMFS maturity — new, need to verify Vercel Sandbox compatibility
+- Vendor lock-in — all knowledge in hosted service
+- Pricing at scale — model usage for multi-agent orgs
+- Connector overlap — two systems touching Gmail/Notion
+- Latency — SMFS operations go through API vs local filesystem
+
+**SDK:**
+```typescript
+import Supermemory from 'supermemory'
+const client = new Supermemory()
+
+// Store
+await client.add({
+  content: 'Market analysis shows 30% growth in Q3',
+  containerTag: 'org-acme.project-q3',
+})
+
+// Search
+const results = await client.search.memories({
+  q: 'Q3 market trends',
+  containerTag: 'org-acme',
+  searchMode: 'hybrid',
+})
+
+// Profile
+const { profile } = await client.profile({ containerTag: 'org-acme.user-alice' })
+```
+
+**Framework integrations:** Vercel AI SDK, LangChain, LangGraph, OpenAI Agents SDK, Mastra, n8n
+
+**Links:**
+- [supermemory.ai](https://supermemory.ai)
+- [Docs](https://docs.supermemory.ai)
+- [GitHub](https://github.com/supermemoryai/supermemory)
+- [SMFS docs](https://supermemory.ai/docs/smfs/overview)
+- [Pricing](https://supermemory.ai/pricing)
+- [API reference](https://docs.supermemory.ai/api-reference)
+
+---
+
 ## References
 
 - [Block: From Hierarchy to Intelligence](https://block.xyz/inside/from-hierarchy-to-intelligence)
