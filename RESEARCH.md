@@ -815,6 +815,283 @@ Local-first search engine by Tobi Lütke. BM25 + vector + LLM re-ranking, all on
 
 ---
 
+## Architecture Decision: Custom Effect-TS Harness on Cloudflare Agent SDK
+
+**Status:** Leading candidate. Best fit for Yolk's constraints.
+
+### The Insight
+
+Pi is a great harness. Think is great infrastructure. But:
+- Pi's extension system exists because Pi is a general-purpose tool for anyone. Yolk is our product — we control the agent behavior directly. Extensions are indirection we don't need.
+- Think's `Think` class is an opinionated loop using Vercel AI SDK. We don't need their opinions — we have our own.
+- Both add abstraction layers between us and the agent behavior.
+
+**Build the harness in Effect-TS. Run it on Cloudflare's Agent SDK infrastructure.**
+
+Take the best patterns from Pi and OpenCode. Skip the parts designed for extensibility. Own the core loop.
+
+### Why this is smart
+
+1. **Zero wasted abstraction.** No extension system, no TUI, no SDK adaptation layer. Just our code.
+2. **Effect-TS is a genuine advantage** over Pi's plain TypeScript — typed errors, structured concurrency, service composition, streams.
+3. **We control the protocol.** Events, streaming format, tool call shape — all designed for our React UI, not adapted from someone else's.
+4. **Cloudflare handles the hard infra.** Durability, hibernation, scaling, WebSocket — we don't build these.
+5. **The harness is the smallest part.** The core loop is ~200 lines. Everything else is tools, context assembly, and UI — which we're building custom anyway.
+6. **We already have the expertise.** VLTRA's Effect services, OpenCode integration, sandbox management — this is evolution, not greenfield.
+
+### What we take from Pi (patterns, not code)
+
+| Pi pattern | Our implementation |
+|---|---|
+| Context injection before each LLM call | Function call in our loop — no event system needed |
+| Tool interception (before/after execution) | Wrap the execute step directly |
+| File mutation queue (per-file serialization) | Effect Semaphore (~50 lines) |
+| Adaptive system prompt (based on active tools) | Template that varies by tool configuration |
+| Mutable tool_call inputs (chained transforms) | Pipeline of transforms before execution |
+| Streaming events to client | Effect Stream over WebSocket |
+| AGENTS.md convention | Load from workspace as context |
+| Skills (on-demand context) | Inject relevant context when task matches |
+
+### What we DON'T need from Pi
+
+- Extension system (30+ events, plugin loading, hot-reload) — we own the code
+- TUI / terminal UI — we're building a web UI
+- RPC mode / stdin-stdout protocol — we use WebSocket
+- Custom provider registration — we configure providers directly
+- Package system (npm/git skill distribution) — not a platform for third parties
+- Session tree with branching/forking — flat sessions for v1, add tree later
+- Compaction — manage context window size directly for v1
+
+### The core loop in Effect
+
+```typescript
+const agentLoop = (messages: AgentMessage[], tools: ToolSet, systemPrompt: string) =>
+  Effect.gen(function* () {
+    while (true) {
+      // 1. Assemble context (inject knowledge, user profile, etc.)
+      const context = yield* assembleContext(messages, systemPrompt)
+
+      // 2. Stream LLM response (broadcast tokens to WebSocket)
+      const response = yield* streamLLM(context, tools)
+
+      // 3. No tool calls? Done.
+      if (!response.toolCalls.length) return response
+
+      // 4. Execute tools (parallel with per-file serialization)
+      const results = yield* executeTools(response.toolCalls)
+
+      // 5. Append and loop
+      messages.push(response.message, ...results)
+    }
+  })
+```
+
+### Why Effect is better than Pi's plain TypeScript for this
+
+```typescript
+// Typed errors — know exactly what can fail
+class LLMError extends Data.TaggedError('LLMError')<{ message: string }> {}
+class ToolError extends Data.TaggedError('ToolError')<{ tool: string; cause: unknown }> {}
+
+// Structured concurrency — parallel tools with abort
+const executeTools = (calls: ToolCall[]) =>
+  Effect.forEach(calls, executeOneTool, { concurrency: 'unbounded' })
+
+// Streaming — LLM tokens as Effect Stream
+const streamLLM = (context: Context) =>
+  Stream.fromAsyncIterable(provider.stream(context))
+    .pipe(Stream.tap(event => broadcast(event)))
+
+// Service layer — swap providers, tools, storage via layers
+class AgentLoop extends Effect.Service<AgentLoop>()('AgentLoop', {
+  effect: Effect.gen(function* () {
+    const llm = yield* LLMProvider
+    const tools = yield* ToolRegistry
+    const storage = yield* SessionStorage
+    // ...
+  })
+}) {}
+```
+
+### Running on Cloudflare Agent SDK (not Think)
+
+Use the `Agent` base class directly, not `Think`:
+
+```typescript
+import { Agent } from 'agents'
+
+export class YolkAgent extends Agent<Env> {
+  // Effect-based harness runs inside a Durable Object
+
+  async onMessage(connection, message) {
+    const result = await Effect.runPromise(
+      agentLoop(message, this.tools, this.systemPrompt).pipe(
+        Effect.provide(this.layers)
+      )
+    )
+  }
+}
+```
+
+**What Cloudflare gives us (infrastructure):**
+- Durable Objects — per-agent actor, SQLite, hibernation, zero-idle-cost
+- Workspace (`@cloudflare/shell`) — durable filesystem for knowledge
+- WebSocket — built into DO, streaming to browser
+- DO Alarms — scheduling (replaces QStash)
+- Dynamic Workers — sandboxed code execution if needed
+- R2 — object storage for large files
+
+**What we build (harness):**
+- Agent loop (Effect-TS)
+- Context assembly (system prompt + knowledge + user profile + history)
+- Tool execution (with interception, per-file serialization)
+- LLM streaming (Effect Stream → WebSocket)
+- Session persistence (DO SQLite)
+- React chat UI
+
+### Full architecture
+
+```
+┌──────────────────────────────┐
+│ Next.js + Effect (Vercel)     │  ← control plane
+│ Auth, teams, integrations     │
+│ OAuth flows, settings         │
+│ Integration API (Gmail,       │
+│   Calendar, Notion, etc.)     │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│ Cloudflare Agent SDK          │  ← infrastructure
+│ Durable Objects + Workspace   │
+│                               │
+│ ┌───────────────────────────┐│
+│ │ YolkAgent extends Agent   ││  ← OUR harness (Effect-TS)
+│ │                           ││
+│ │ Effect agent loop:        ││
+│ │ ├── assembleContext()     ││  (inject knowledge, profile, history)
+│ │ ├── streamLLM()           ││  (stream tokens, broadcast events)
+│ │ ├── executeTools()        ││  (parallel + per-file serialization)
+│ │ ├── persistSession()      ││  (DO SQLite)
+│ │ └── broadcastEvents()     ││  (WebSocket → browser)
+│ │                           ││
+│ │ Workspace = knowledge     ││  (durable filesystem)
+│ │ SQLite = sessions/state   ││  (conversation history)
+│ │ WebSocket = streaming     ││  (real-time to React UI)
+│ │ Tools = integration calls ││  (call Next.js API for Gmail, etc.)
+│ └───────────────────────────┘│
+└──────────────────────────────┘
+               │ WebSocket
+               ▼
+┌──────────────────────────────┐
+│ React UI (our design)         │  ← our chat interface
+│ WebSocket → event stream      │
+│ Custom components             │
+│ Base UI + Tailwind            │
+└──────────────────────────────┘
+```
+
+### v1 scope for the harness
+
+| Component | Effort | Priority |
+|---|---|---|
+| Basic loop (stream → tools → loop) | 1 week | Must have |
+| Context injection seam | Trivial | Must have |
+| Tool interception (before/after) | Trivial | Must have |
+| LLM streaming over WebSocket | 1 week | Must have |
+| Flat session persistence (DO SQLite) | 1 week | Must have |
+| Integration tools (Gmail, Calendar, Notion) | Port from VLTRA | Must have |
+| File mutation queue | ~50 lines | Nice to have |
+| Adaptive system prompt | Medium | Nice to have |
+| Tree sessions | Harder | v2 |
+| Compaction | Harder | v2 |
+
+**Estimated total: 3-4 weeks** for a working agent with streaming, tools, and persistence.
+
+### Risks
+
+- **Edge cases** Pi already handles: streaming error recovery, token counting, model-specific quirks, context window overflow. Solvable with Effect's error model but need to discover them.
+- **Cloudflare Agent SDK maturity** — Project Think is preview. The lower-level `Agent` base class is more stable but still evolving.
+- **Two platforms** — Next.js on Vercel (control plane) + Agent SDK on Cloudflare (agents). Two deploys, two runtimes. Clean separation but operational complexity.
+- **Effect in Cloudflare Workers** — need to verify Effect-TS works in Workers runtime (V8 isolate, not Node.js). Likely fine but untested.
+
+### Open questions
+
+1. Does Effect-TS run in Cloudflare Workers? (V8 isolate, no Node.js APIs)
+2. Can a Durable Object make HTTP calls to our Next.js API? (for integration tools)
+3. How does Workspace (`@cloudflare/shell`) work programmatically? (SDK surface for read/write/search)
+4. What's the WebSocket protocol for the Agent base class? (message format, connection lifecycle)
+5. How do we handle auth between browser → Cloudflare DO → Next.js API? (token chain)
+
+---
+
+## Supermemory Deep Dive (Build vs Buy)
+
+**Status:** Not viable for self-hosting. Engine is entirely proprietary.
+
+### What's open source (just clients)
+
+- `apps/web` — consumer web app frontend (Next.js)
+- `apps/mcp` — MCP server (Cloudflare Worker, calls API)
+- `apps/browser-extension` — Chrome extension
+- `packages/memory-graph` — React Canvas 2D graph visualization (display only)
+- `packages/tools` — framework integrations (AI SDK, Mastra, etc.)
+- `packages/validation` — Zod schemas
+
+### What's proprietary (the entire engine)
+
+- API backend (Hono on Cloudflare Workers)
+- Memory extraction pipeline
+- Relationship discovery (updates/extends/derives)
+- Contradiction resolution
+- User profile generation
+- Embedding pipeline
+- Database schema (Postgres via Hyperdrive)
+- Ingestion workflows (Cloudflare Workflows)
+- Connector sync engine
+- Automatic forgetting logic
+- SMFS binary (compiled, closed-source)
+
+### Under the hood
+
+| Layer | Technology |
+|---|---|
+| Compute | Cloudflare Workers |
+| Database | PostgreSQL via Cloudflare Hyperdrive |
+| Vectors | Cloudflare AI (embeddings) |
+| Cache | Cloudflare KV |
+| Async | Cloudflare Workflows (`IngestContentWorkflow`) |
+| Auth | better-auth |
+| ORM | Drizzle |
+
+### The "intelligence" is LLM prompt engineering
+
+Not custom ML. The pipeline:
+- Extract facts from text → structured output LLM call
+- Compare new fact vs existing → embedding similarity + LLM judgment
+- Detect contradictions → LLM with temporal reasoning
+- Build user profiles → periodic LLM summarization
+- Auto-forget → parse temporal markers + expiry timestamps
+
+### Build cost for equivalent
+
+| Component | Effort |
+|---|---|
+| Memory extraction (LLM fact extraction) | 1-2 weeks |
+| Relationship discovery (updates/extends) | 1-2 weeks |
+| Contradiction resolution + forgetting | 1 week |
+| User profiles (auto-maintained) | 1 week |
+| Hybrid search (embeddings + keyword) | 1-2 weeks |
+| Content extraction (PDF, images, etc.) | 2-4 weeks |
+
+**Total: ~2-3 months.** But for v1, the Workspace filesystem + basic search may be enough. Memory intelligence can be added later.
+
+### Verdict
+
+Don't use Supermemory as a dependency for a core feature. The concepts are good — implement them ourselves on Cloudflare's primitives (Workspace + Vectorize + Workers AI) when needed.
+
+---
+
 ## References
 
 - [Block: From Hierarchy to Intelligence](https://block.xyz/inside/from-hierarchy-to-intelligence)
