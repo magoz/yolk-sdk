@@ -1,5 +1,52 @@
 # Yolk — Research Notes
 
+## Status: Research Complete
+
+All architecture decisions made. Zero open research questions. Ready to build.
+
+### Decisions summary
+
+| Layer | Decision |
+|---|---|
+| Control plane | Next.js + Effect-TS on Vercel (auth, teams, integrations, OAuth) |
+| Agent runtime | Custom Effect-TS harness on Cloudflare Agent SDK (`Agent` base class) |
+| Agent ↔ browser | WebSocket via Agent SDK. React `useAgent()`. `@callable()` for typed RPC + streaming. |
+| Knowledge store | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors). |
+| Knowledge write | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2). |
+| Knowledge read | Agentic search — RAG as index, agent reads full files for comprehension. No auto-RAG. |
+| Embeddings | Workers AI `bge-base-en-v1.5` (768d). DIY chunking + embedding pipeline. |
+| Chunking | Recursive (paragraph → sentence → token). ~300 tokens, 15% overlap. |
+| DO-to-DO | `getAgentByName()` → typed RPC. Agent DO ↔ Knowledge DO. |
+| DO → external | `fetch()` to Next.js API with service token. |
+| Auth | JWT in WS query params → verify in `onConnect()`. Service token for DO → API. |
+| Search | Hybrid: FTS5 (text, local) + Vectorize (semantic, ~50ms). |
+| Always-on context | `/.context/org.md` + `/.context/people/{userId}.md` auto-injected. |
+
+### Rejected (and why)
+
+| Rejected | Why |
+|---|---|
+| Pi SDK | Don't need extension system — we own the code |
+| Think (`@cloudflare/think`) | Too opinionated — use lower-level `Agent` class |
+| Workspace (`@cloudflare/shell`) | Preview/experimental — DIY on GA primitives |
+| Cloudflare Artifacts | Replaced by R2 + DO SQLite |
+| Supermemory | Proprietary engine, can't self-host |
+| QMD | Needs GGUF models, doesn't run on Workers |
+| AI Search | 4MB file limit, 5 metadata fields, beta |
+| Auto-RAG | Agent decides when to search |
+| pgvector | Latency from DO, connection management friction |
+
+### Not yet discussed
+
+- Session model (one DO per session vs per user vs per project)
+- Integration tools structure (Gmail/Calendar/Notion OAuth token flow from DO)
+- Monorepo structure (Workers + Next.js package layout)
+- React UI (chat interface, knowledge browser)
+- Deployment (Wrangler config, CI/CD)
+- v1 scope (prioritized task list)
+
+---
+
 ## Vision
 
 Build the **intelligence layer** for organizations. Inspired by [Block's "From Hierarchy to Intelligence"](https://block.xyz/inside/from-hierarchy-to-intelligence).
