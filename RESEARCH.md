@@ -1357,6 +1357,38 @@ Up to 10 KiB metadata per vector. Up to 10 metadata indexes per index. Operators
 
 No egress fees. No charge for idle indexes. Billing = (queried dimensions × $0.01/M) + (stored dimensions × $0.05/100M).
 
+### Embedding models
+
+Vectorize stores float arrays. Any embedding model works — just match index dimensions.
+
+**Workers AI (free tier):**
+
+| Model | Dimensions | Notes |
+|---|---|---|
+| `bge-base-en-v1.5` (BAAI) | 768 | English, solid general-purpose. Default for v1. |
+| `bge-large-en-v1.5` (BAAI) | 1024 | Better quality, more compute |
+| `bge-small-en-v1.5` (BAAI) | 384 | Fastest, lower quality |
+| `bge-m3` (BAAI) | 1024 | Multilingual, multi-granularity |
+| `embeddinggemma-300m` (Google) | — | 100+ languages |
+| `qwen3-embedding-0.6b` (Qwen) | — | Latest Qwen |
+
+**External (call their API, store vectors in Vectorize):**
+- OpenAI `text-embedding-3-small` (1536d, $0.02/M tokens)
+- OpenAI `text-embedding-3-large` (3072d, higher quality)
+- Cohere `embed-english-v3.0` (1024d)
+
+### Cloudflare AI Search — evaluated, rejected
+
+AI Search is managed RAG-as-a-service. Handles chunking, embedding, vector storage, BM25, hybrid search, reranking, PDF conversion — the entire pipeline.
+
+**Why rejected:**
+- **4 MB file limit** — too restrictive for real documents (contracts, slide decks, scanned PDFs routinely 10-30MB)
+- **5 custom metadata fields max** — tight for per-org knowledge with multiple dimensions
+- **Beta** — pricing TBD, APIs could change
+- **Black box** — less control over chunking, embedding model, search behavior
+
+**The right call:** own the pipeline. ~250 lines of code (chunker + embedding + sync). All GA primitives. No limits that matter. Swap embedding models freely. Handle files of any size.
+
 ### Links
 
 - [Vectorize docs](https://developers.cloudflare.com/vectorize/)
@@ -1364,6 +1396,7 @@ No egress fees. No charge for idle indexes. Billing = (queried dimensions × $0.
 - [Metadata filtering](https://developers.cloudflare.com/vectorize/reference/metadata-filtering/)
 - [Limits](https://developers.cloudflare.com/vectorize/platform/limits/)
 - [Pricing](https://developers.cloudflare.com/vectorize/platform/pricing/)
+- [AI Search docs](https://developers.cloudflare.com/ai-search/) (evaluated, not used)
 
 ---
 
