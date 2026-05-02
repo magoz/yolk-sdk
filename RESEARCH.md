@@ -36,11 +36,15 @@ All architecture decisions made. Zero open research questions. Ready to build.
 | Auto-RAG | Agent decides when to search |
 | pgvector | Latency from DO, connection management friction |
 
+### Decided but not in detailed sections
+
+- **Harness as monorepo package** — `packages/harness/` is generic (loop, streaming, tools, context). No Cloudflare, no Yolk specifics. Portable. Don't publish until second consumer exists.
+
 ### Not yet discussed
 
 - Session model (one DO per session vs per user vs per project)
 - Integration tools structure (Gmail/Calendar/Notion OAuth token flow from DO)
-- Monorepo structure (Workers + Next.js package layout)
+- Monorepo structure detail (beyond harness package)
 - React UI (chat interface, knowledge browser)
 - Deployment (Wrangler config, CI/CD)
 - v1 scope (prioritized task list)
