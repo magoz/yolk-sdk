@@ -618,6 +618,178 @@ const { profile } = await client.profile({ containerTag: 'org-acme.user-alice' }
 
 ---
 
+### Candidate 4: Cloudflare Project Think (@cloudflare/think)
+
+**Status:** Strong candidate. Could replace BOTH Pi AND Vercel Sandbox.
+
+Announced April 15, 2026. Next-gen Agents SDK from Cloudflare. An opinionated base class + standalone primitives for building long-running, durable AI agents on Cloudflare infrastructure.
+
+**Blog post:** https://blog.cloudflare.com/project-think/
+**Docs:** https://github.com/cloudflare/agents/blob/main/docs/think/index.md
+**Example:** https://github.com/cloudflare/agents/tree/main/examples/assistant
+
+**What it provides (all built-in):**
+
+| Feature | Details |
+|---|---|
+| Agent runtime | Agentic loop: streamText → tool calls → iterate → persist |
+| Streaming | WebSocket, token-by-token to any client |
+| React client | `useAgentChat()` — drop-in chat UI hook |
+| Sessions | Tree-structured messages, forking, compaction, FTS5 search |
+| Persistent memory | Context blocks — structured system prompt sections the model reads/updates, survives hibernation |
+| Durable filesystem | Workspace (SQLite + R2) — read, write, edit, search, grep, diff via `@cloudflare/shell` |
+| Zero idle cost | Durable Objects hibernate — $0 when agent isn't active |
+| Crash recovery | Fibers — checkpointing, automatic keepalive, recovery |
+| Sub-agents | Facets — isolated child agents with own SQLite + typed RPC |
+| Code execution | Dynamic Workers — sandboxed V8 isolates, ms startup, capability-based security |
+| npm at runtime | `@cloudflare/worker-bundler` — LLM writes `import { z } from "zod"` and it works |
+| Browser | Headless Chrome via Browser Run |
+| Full sandbox | Cloudflare Sandbox — git, compilers, test runners (Tier 4) |
+| Self-authored extensions | Agent writes its own TypeScript tools at runtime |
+| Scheduling | DO Alarms + Fibers for proactive agents |
+
+**The execution ladder (agent escalates as needed):**
+
+```
+Tier 0: Workspace      — durable virtual filesystem (SQLite + R2). @cloudflare/shell
+Tier 1: Dynamic Worker  — sandboxed JS execution, no network. @cloudflare/codemode
+Tier 2: + npm           — runtime package resolution. @cloudflare/worker-bundler
+Tier 3: + Browser       — headless Chrome. Browser Run
+Tier 4: + Sandbox       — full OS (git, npm test, cargo build). Cloudflare Sandbox
+```
+
+Key: "Agent should be useful at Tier 0 alone. Each tier is additive."
+
+**Minimal example:**
+```typescript
+import { Think } from "@cloudflare/think"
+import { createWorkersAI } from "workers-ai-provider"
+
+export class MyAgent extends Think<Env> {
+  getModel() {
+    return createWorkersAI({ binding: this.env.AI })("@cf/moonshotai/kimi-k2.5")
+  }
+}
+```
+
+That gives you: streaming, persistence, abort/cancel, error handling, resumable streams, workspace filesystem.
+
+**React client:**
+```typescript
+const agent = useAgent({ agent: "MyAgent" })
+const { messages, sendMessage, status } = useAgentChat({ agent })
+```
+
+**Persistent memory (context blocks):**
+```typescript
+configureSession(session: Session) {
+  return session
+    .withContext("soul", {
+      provider: { get: async () => "You are a helpful assistant." }
+    })
+    .withContext("memory", {
+      description: "Important facts learned during conversation.",
+      maxTokens: 2000
+    })
+    .withCachedPrompt()
+}
+```
+
+Model sees context blocks in system prompt, can update them via `set_context` tool. Persists across hibernation. Non-destructive compaction for long conversations.
+
+**Sub-agents:**
+```typescript
+const researcher = await this.subAgent(ResearchAgent, "research")
+const reviewer = await this.subAgent(ReviewAgent, "review")
+const [research, review] = await Promise.all([
+  researcher.search(task),
+  reviewer.analyze(task)
+])
+```
+
+Each child gets own SQLite, conversation tree, memory, tools, model.
+
+**Why this could replace Pi + Vercel Sandbox:**
+
+| Aspect | Pi + Vercel Sandbox | Cloudflare Think |
+|---|---|---|
+| Agent runtime | Pi SDK in sandbox process | Think on Durable Objects |
+| Cost when idle | Sandbox costs (even paused) | Zero (hibernated) |
+| Persistence | Must manage (sandbox FS, ephemeral) | Built-in (SQLite + R2, durable) |
+| Streaming to browser | Must build WebSocket bridge | Built-in WebSocket |
+| Sessions | Must manage persistence | Built-in tree-structured + FTS5 |
+| Memory | Must build | Context blocks built-in |
+| Crash recovery | Must handle | Fibers + checkpointing |
+| Sub-agents | Must build | Facets built-in |
+| Workspace/Files | Sandbox FS (lost on destroy) | Durable FS (survives restarts) |
+| React client | Must build | `useAgentChat()` built-in |
+| Search | Must build | FTS5 built-in |
+| Extensions | Pi extensions (TS in sandbox) | Self-authored (Dynamic Workers) |
+| Scheduling | QStash (external) | DO Alarms (built-in) |
+
+**The Workspace IS the knowledge store.** Tier 0 gives you a durable virtual filesystem backed by SQLite + R2. Files survive restarts, hibernation, deploys. Read, write, edit, search, grep, diff — all built in via `@cloudflare/shell`. No separate knowledge store needed.
+
+**What you'd give up vs Pi:**
+- Pi's 15+ provider support (Think uses AI Gateway or BYOM)
+- Pi's extension ecosystem / packages
+- Pi's AGENTS.md / skills conventions
+- Pi's community
+- Vercel Sandbox (move to Cloudflare Sandbox)
+- Effect-TS on the server? (Think is Cloudflare Workers, not Next.js — though your control plane could still be Next.js + Effect)
+
+**What you'd gain:**
+- Zero idle cost (huge at scale — Block's "one agent per customer")
+- Built-in everything (streaming, sessions, memory, filesystem, search, scheduling)
+- Durable by default (crash recovery, hibernation, persistent state)
+- Sub-agents with typed RPC
+- Self-authored extensions
+- Cloudflare's global network
+- The execution ladder (escalate from workspace to full sandbox as needed)
+
+**Architecture with Think:**
+```
+┌────────────────────────────┐
+│ Next.js (Effect-TS)        │  ← control plane (auth, teams, integrations, OAuth)
+│ ├── Auth, Teams, Settings  │
+│ ├── Integration OAuth      │
+│ └── Yolk API               │
+└────────────┬───────────────┘
+             │ routes to
+             ▼
+┌────────────────────────────┐
+│ Cloudflare Think Agent     │  ← per-user or per-task Durable Object
+│ ├── Workspace (Tier 0)     │  ← durable filesystem = knowledge store
+│ ├── Context blocks         │  ← persistent memory
+│ ├── Sessions (tree)        │  ← conversation history + FTS5
+│ ├── Custom tools           │  ← integrations (Gmail, Calendar, Notion via your API)
+│ ├── Sub-agents             │  ← specialized child agents
+│ └── WebSocket → browser    │  ← built-in streaming
+└────────────────────────────┘
+```
+
+**Concerns:**
+- Project Think is "preview" / experimental — APIs may change
+- Cloudflare lock-in (deeper than Vercel)
+- Think vs Pi: Think is younger, less proven, no community yet
+- Two platforms: Next.js on Vercel (control plane) + Think on Cloudflare (agents)
+- Need to verify: can Think agents call external APIs (your Next.js server) for integration tools?
+
+**Pricing:**
+- Durable Objects: $0.15/million requests, $0.001/GB-hour storage
+- Workers AI: pay-per-token or free tier
+- R2: $0.015/GB-month
+- Zero when hibernated
+
+**Links:**
+- [Blog post](https://blog.cloudflare.com/project-think/)
+- [Docs](https://github.com/cloudflare/agents/blob/main/docs/think/index.md)
+- [Example](https://github.com/cloudflare/agents/tree/main/examples/assistant)
+- [Agents SDK](https://developers.cloudflare.com/agents/)
+- [@cloudflare/shell](https://www.npmjs.com/package/@cloudflare/shell)
+- [@cloudflare/codemode](https://github.com/cloudflare/agents/tree/main/packages/codemode)
+
+---
+
 ### Candidate 3: QMD (tobi/qmd)
 
 **Status:** Evaluated, not a good fit. Saved for reference.
