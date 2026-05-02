@@ -591,7 +591,7 @@ No hook registry. No event system for extensibility. Effect's Layer system IS th
 | Swap LLM provider | `LLMProvider` | None (consumer must provide) |
 | Intercept tool execution | `ToolExecutor` | Direct execution |
 | Transform context before LLM | `ContextTransformer` | Identity |
-| Control max turns | `LoopConfig` | `{ maxTurns: 100 }` |
+| Control max turns | `LoopConfig` | `{ maxTurns: 500 }` |
 | Custom accumulator | `ResponseAccumulator` | Default token accumulation |
 
 Consumer composes:
@@ -681,11 +681,69 @@ packages/harness/
 
 ---
 
-## Open Questions
+### 13. `Stream.asyncScoped` queue sizing: unbounded
 
-1. **`Stream.asyncScoped` queue sizing** — unbounded ok, or explicit bound? Unbounded is simpler. Agent loops are naturally bounded (LLM tokens are slow). Leaning unbounded.
-2. **Final messages from stream** — should `run` also return accumulated messages alongside the stream? Or consumer reconstructs from `AssistantMessage` + `ToolResult` events? Leaning events-only (simpler API, single return type).
-3. **Faux queue exhaustion** — wrap around (Pi style) or error? Wrap-around hides bugs. Error is strict. Leaning error.
-4. **Max turns** — hard limit in the loop, or consumer's job via `Stream.take`? Leaning: harness has `LoopConfig.maxTurns` (defense against runaway loops) AND consumer can `Stream.takeUntil` for softer control.
+**Status: Decided.**
+
+Both Pi (`EventStream` with plain `T[]` buffer) and OpenCode (`PubSub.unbounded()`) use unbounded buffers. Neither has backpressure concerns in practice.
+
+Agent loop event rates: LLM tokens at ~50-100/sec, tool results bursty but bounded. Even 10 turns deep, low thousands of events. Memory pressure is negligible. Bounded adds complexity: if consumer deadlocks, producer blocks forever.
+
+Unbounded. Non-issue.
+
+---
+
+### 14. Final messages: `AgentEnd` carries them
+
+**Status: Decided.**
+
+Pi's low-level `agentLoop()` carries new messages in the `agent_end` event:
+```typescript
+await emit({ type: "agent_end", messages: newMessages })
+```
+Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — harness is stateless).
+
+Our `AgentEnd` event carries the accumulated messages from this run. Consumer can also reconstruct from per-turn `AssistantMessage` + `ToolResult` events. Both paths available, `AgentEnd` is the convenience path.
+
+```typescript
+type AgentEnd = {
+  readonly _tag: "AgentEnd"
+  readonly messages: ReadonlyArray<AgentMessage>  // messages created during this run
+  readonly turns: number
+  readonly usage: { input: number; output: number }
+}
+```
+
+---
+
+### 15. Faux queue exhaustion: error
+
+**Status: Decided.**
+
+Pi errors strictly — creates `AssistantMessage` with `stopReason: "error"` and `errorMessage: "No more faux responses queued"`. Loop terminates. Tests fail visibly.
+
+OpenCode auto-responds with `"ok"`. Silent. Masks bugs where the loop makes unexpected extra LLM calls.
+
+Our faux provider errors on exhaustion. `Queue.take` on an empty queue produces `FauxExhaustedError`. Tests should know exactly how many LLM calls the loop will make. An unexpected call is a bug.
+
+---
+
+### 16. Max turns: hard limit, default 500
+
+**Status: Decided.**
+
+Pi has no limit (hook-based `shouldStopAfterTurn`, no default). OpenCode has a soft limit (prompt injection telling the model to stop, default `Infinity`). Neither has a real safety net.
+
+Our harness enforces a hard limit via `LoopConfig.maxTurns` (default 500). When hit, emits `AbortError({ reason: "max_turns" })` in the stream error channel. Not advisory — the loop stops.
+
+500 is generous enough to never hit during normal use. Defense against runaway loops on headless DOs where no human is watching. Token burn is the real risk — 500 LLM calls at $0.01-0.10/call = $5-50 wasted.
+
+Consumer overrides:
+```typescript
+LoopConfig.layer({ maxTurns: 50 })       // tight for simple agents
+LoopConfig.layer({ maxTurns: Infinity })  // opt out (not recommended for headless)
+```
+
+Consumer can also `Stream.takeUntil` for softer per-run control without changing the global default.
 
 
