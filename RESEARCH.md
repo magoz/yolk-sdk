@@ -1092,92 +1092,124 @@ Don't use Supermemory as a dependency for a core feature. The concepts are good 
 
 ---
 
-## Knowledge Architecture: Knowledge DO with Workspace
+## Knowledge Architecture: Knowledge DO with R2 + SQLite
 
 **Status:** Decided. This is the architecture.
 
 ### Core concept
 
-The org's knowledge lives in a **dedicated Durable Object** with a Workspace filesystem. It's the world model — the most important piece of Yolk. Not a database. Not an object store. Not git. A rich filesystem service that agents and humans access equally via RPC/HTTP.
+The org's knowledge lives in a **dedicated Durable Object**. It's the world model — the most important piece of Yolk. Not a database. Not an object store. Not git. A document engine that agents and humans access equally via RPC/HTTP.
 
 No local copies. No sync. No versioning machinery. No git. The Knowledge DO is the single source of truth. Agents call it like any other tool.
 
-### Knowledge DO (one per org)
+### Why not Workspace (`@cloudflare/shell`)
+
+Workspace is part of Project Think — preview/experimental. It's an opaque abstraction tied to a framework we decided not to use. Everything it provides, we can build from GA primitives with full control over the schema.
+
+### Storage split: R2 for files, SQLite for everything else
+
+**Problem:** DO SQLite has a 1GB limit. Storing file content + chunks + FTS index in one DB triples storage usage — 200MB of source content becomes ~700MB. An org accumulating knowledge over years (Gmail threads, Notion pages, research, decisions) would hit the ceiling.
+
+**Solution:** Files in R2 (no size limit), derived data in SQLite (used efficiently).
+
+```
+1GB of source content produces:
+  R2:     ~1GB    (actual files — no limit)
+  SQLite: ~410MB  (chunks ~150MB + FTS ~200MB + metadata ~10MB + history ~50MB)
+```
+
+1GB of SQLite now supports **~1GB+ of source files** instead of ~300MB.
+
+### Knowledge DO internals (one per org)
 
 ```
 Knowledge DO
 │
-├── Workspace (SQLite + R2)
-│   Full filesystem API:
-│   ├── read, write, append, delete
-│   ├── mkdir, cp, mv, rm
-│   ├── glob, find, readdir, stat
-│   ├── searchFiles (text/regex across all files)
-│   ├── searchText (within a file)
-│   ├── replaceInFile, replaceInFiles
-│   ├── diff, diffContent
-│   ├── readJson, writeJson, queryJson, updateJson
-│   ├── walkTree, summarizeTree
-│   ├── planEdits, applyEditPlan (transactional multi-file writes)
-│   └── createArchive, extractArchive
+├── DO SQLite (≤1GB, derived data only)
+│   ├── documents (path, r2_key, status, content_type, chunk_count, size, updated_at)
+│   ├── chunks (id, source_path, chunk_index, page, content, token_count)
+│   ├── chunks_fts USING fts5 (content)    ← text search across all content
+│   └── history (path, author, action, created_at)
 │
-├── Vectorize (semantic search)
-│   └── Embeddings generated on every write via Workers AI
+├── R2 (no size limit, actual files)
+│   └── org-{orgId}/
+│       ├── .context/org.md                 ← always-on context
+│       ├── .context/people/alice.md
+│       ├── about/company.md
+│       ├── research/q3-pricing.md
+│       ├── decisions/2026-04-pricing.md
+│       └── uploads/report.pdf              ← binary files (v2)
 │
-├── Hybrid search
-│   ├── searchFiles() → text/regex match (instant, built-in)
-│   ├── Vectorize.query() → semantic similarity (~50ms)
-│   └── Combined → reciprocal rank fusion, ranked results
+├── Vectorize (via binding)
+│   └── semantic search vectors with metadata: { source_path, page, org_id }
 │
-├── History (SQLite table alongside Workspace)
-│   ├── path, previous content, author, action, timestamp
-│   ├── author: 'user:alice' or 'agent:session-xyz'
-│   ├── action: 'create' | 'update' | 'delete'
-│   └── Simple append-only log. No staging, no commits, no branches.
+├── Workers AI (via binding)
+│   └── embedding model (bge-base-en-v1.5, 768d)
 │
-└── RPC interface (called by agent DOs and Next.js proxy)
-    ├── read(path)
-    ├── write(path, content, author)
-    ├── search(query, mode: 'text' | 'semantic' | 'hybrid')
-    ├── list(prefix?)
-    ├── delete(path)
-    ├── diff(pathA, pathB)
-    └── history(path)
+└── [v2] Queue (via binding)
+    └── ingestion jobs for async PDF/image processing
 ```
 
-### Why Workspace, not Postgres or R2
+### Schema
 
-The Workspace API gives agents a **rich filesystem to think with**:
+```sql
+-- File metadata (actual content in R2)
+documents (
+  path TEXT PRIMARY KEY,
+  r2_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ready',   -- 'processing' | 'ready' | 'failed'
+  content_type TEXT DEFAULT 'text/markdown',
+  chunk_count INTEGER DEFAULT 0,
+  size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)
 
-```typescript
-// Things an agent can do via RPC to the Knowledge DO:
-await knowledge.searchFiles('**/*.md', 'pricing strategy')
-await knowledge.diff('/research/q3-v1.md', '/research/q3-v2.md')
-await knowledge.queryJson('/data/metrics.json', '$.revenue.q3')
-await knowledge.replaceInFiles('people/*.md', 'Q2', 'Q3')
-await knowledge.summarizeTree('/')
-await knowledge.find('/', { pattern: '*.md', modifiedAfter: lastWeek })
+-- Chunk text (for retrieval after vector search)
+chunks (
+  id TEXT PRIMARY KEY,              -- "research/q3-pricing.md#chunk-3"
+  source_path TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  page INTEGER,
+  content TEXT NOT NULL,
+  token_count INTEGER
+)
+
+-- FTS5 on chunks (covers full file content since chunks span everything)
+chunks_fts USING fts5 (content, content='chunks', content_rowid='rowid')
+
+-- Change log
+history (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  author TEXT NOT NULL,             -- 'user:alice' or 'agent:session-xyz'
+  action TEXT NOT NULL,             -- 'create' | 'update' | 'delete'
+  created_at INTEGER NOT NULL
+)
 ```
 
-None of this is possible with Postgres rows or R2 objects. Workspace gives agents the same power as a real filesystem — without the filesystem.
+### RPC interface
 
-### Two-workspace model
+```
+read(path)                   → fetch from R2 (~30ms)
+write(path, content, author) → R2 + chunk + embed + upsert Vectorize
+delete(path)                 → cascade: R2 + chunks + vectors + history
+search(query)                → hybrid: FTS5 on chunks + Vectorize semantic
+list(prefix?)                → SELECT from documents table
+grep(pattern, prefix?)       → FTS5 match on chunks_fts
+history(path?)               → SELECT from history table
+status(path)                 → document processing state
+```
 
-Each agent session has its own scratch space AND access to shared org knowledge:
+### Two-DO model
 
 ```
 ┌─────────────────────────────────────────┐
 │         Knowledge DO (per org)           │
 │                                          │
-│  Workspace: the world model              │
-│  ├── about/company.md                    │
-│  ├── people/alice.md                     │
-│  ├── research/q3-pricing.md              │
-│  ├── decisions/2026-04-pricing.md        │
-│  └── projects/q3-launch/status.md        │
-│                                          │
+│  R2: the files (source of truth)         │
+│  SQLite: chunks, FTS, metadata, history  │
 │  Vectorize: semantic search index        │
-│  History: change log (who, what, when)   │
 │                                          │
 │  Accessed by ALL agents via RPC          │
 │  Accessed by React UI via HTTP           │
@@ -1188,11 +1220,11 @@ Each agent session has its own scratch space AND access to shared org knowledge:
 │ Alice's Agent  │  │ Bob's Agent    │
 │ DO             │  │ DO             │
 │                │  │                │
-│ Local Workspace│  │ Local Workspace│
+│ Local SQLite   │  │ Local SQLite   │
 │ (scratch/temp) │  │ (scratch/temp) │
 │                │  │                │
 │ Session state  │  │ Session state  │
-│ (SQLite)       │  │ (SQLite)       │
+│ (conversation) │  │ (conversation) │
 │                │  │                │
 │ WebSocket →    │  │ WebSocket →    │
 │ Alice's browser│  │ Bob's browser  │
@@ -1200,51 +1232,7 @@ Each agent session has its own scratch space AND access to shared org knowledge:
 ```
 
 - **Knowledge DO** = the library. Persistent, shared, searchable. The world model.
-- **Agent DO local Workspace** = the desk. Scratch work, drafts, temp files. Per-session.
-
-Agent workflow:
-1. Read from Knowledge DO ("what do we know about Q3 pricing?")
-2. Work locally on scratch Workspace (draft analysis, iterate)
-3. Write back to Knowledge DO ("save this research")
-4. Knowledge DO generates embedding, updates search index, logs history
-
-### Search: hybrid from Cloudflare primitives
-
-```
-Agent: knowledge.search("quarterly pricing trends")
-                │
-    ┌───────────┴───────────┐
-    ▼                       ▼
-Workspace.searchFiles()  Vectorize.query()
-(text/regex match)       (semantic similarity)
-    │                       │
-    └───────────┬───────────┘
-                ▼
-        Merge + rank results
-        (reciprocal rank fusion)
-                │
-                ▼
-        Return top results with snippets
-```
-
-Text search is instant (SQLite). Semantic search ~50ms (Vectorize). Combined gives hybrid search without GGUF models.
-
-QMD won't work on Cloudflare (needs node-llama-cpp + GGUF models, V8 isolates can't run native modules). But Workspace `searchFiles` + Vectorize achieves the same hybrid BM25 + vector pattern.
-
-### History: lightweight, not git
-
-```sql
-knowledge_history (
-  id TEXT PRIMARY KEY,
-  path TEXT NOT NULL,
-  content TEXT,              -- previous content (null for creates)
-  author TEXT NOT NULL,      -- 'user:alice' or 'agent:session-xyz'
-  action TEXT NOT NULL,      -- 'create' | 'update' | 'delete'
-  created_at INTEGER NOT NULL
-)
-```
-
-No staging. No commits. No branches. Just: who changed what, when. Append-only.
+- **Agent DO local SQLite** = the desk. Scratch work, session state. Per-session.
 
 ### Human access
 
@@ -1280,28 +1268,35 @@ Humans and agents use the **exact same knowledge store, same API, same files.**
            │
      ┌─────┴──────────────┐
      ▼                    ▼
-┌──────────────┐  ┌──────────────────────┐
+┌─���────────────┐  ┌──────────────────────┐
 │ Knowledge DO  │  │ Agent DOs            │
 │ (per org)     │  │ (per user session)   │
 │               │  │                      │
-│ Workspace     │◄─┤ Effect harness       │
-│ Vectorize     │  │ Tools (knowledge_*,  │
-│ History       │  │   gmail_*, etc.)     │
-│               │  │ Local scratch space  │
+│ R2 (files)    │◄─┤ Effect harness       │
+│ SQLite        │  │ Tools (knowledge_*,  │
+│ Vectorize     │  │   gmail_*, etc.)     │
+│               │  │ Local SQLite         │
 │ The world     │  │ Session state        │
 │ model         │  │ WebSocket → browser  │
 └──────────────┘  └──────────────────────┘
 ```
 
+### Scaling beyond 1GB SQLite (future)
+
+If an org outgrows 1GB of chunks + FTS:
+1. **Shard by project** — one Knowledge DO per project. Cross-project search via fan-out.
+2. **Evict old chunks** — keep recent in SQLite, older only in Vectorize metadata.
+3. **Compress chunk text** — repetitive text compresses well.
+4. **Cloudflare may raise the limit** — was 256MB → 512MB → 1GB. Trend is up.
+
 ### What's decided
 
-- Knowledge = Workspace filesystem in a centralized DO per org
-- No git, no sync, no local copies, no versioning machinery
-- Search = Workspace text search + Cloudflare Vectorize (hybrid)
-- History = simple append-only log in SQLite (not git)
-- Agents access knowledge via RPC (tool calls)
-- Humans access knowledge via Next.js proxy (same API)
-- Agent DOs have local scratch Workspace (ephemeral, per-session)
+- Knowledge DO per org. Single source of truth. No git, no sync, no local copies.
+- **No Workspace dependency** — built on GA primitives only (DO SQLite + R2 + Vectorize + Workers AI).
+- Files in R2 (no size limit). Chunks + FTS + metadata + history in DO SQLite.
+- `knowledge_read()` fetches from R2 (~30ms). Search/grep use local SQLite (instant).
+- Agents access via RPC tool calls. Humans via Next.js proxy. Same API.
+- Agent DOs have local SQLite for scratch/session state (ephemeral, per-session).
 
 ---
 
@@ -1419,29 +1414,6 @@ User uploads 100-page PDF
   7. Update document status: "ready"
 ```
 
-### Knowledge DO internals
-
-```
-Knowledge DO (per org)
-│
-├── Workspace (raw files)
-│   └── /research/q3.pdf, /about/company.md, etc.
-│
-├── DO SQLite
-│   ├── chunks (id, source_path, chunk_index, page, content, token_count)
-│   ├── documents (path, status, content_type, chunk_count, last_processed)
-│   └── history (path, author, action, timestamp)
-│
-├── Vectorize index (via binding)
-│   └── vectors: { id: "path#chunk-N", values, metadata: { source_path, page, org_id } }
-│
-├── Workers AI (via binding)
-│   └── embedding model (bge-base-en-v1.5, 768d)
-│
-└── [v2] Queue (via binding)
-    └── ingestion jobs for async processing
-```
-
 ### v1 scope
 
 Markdown-native. No PDFs, no images, no file extraction. Agents and humans write text. Everything is chunked, embedded, searchable. PDF support comes in v2.
@@ -1464,7 +1436,7 @@ Sub-agent with filesystem access (list, read, grep, follow references) produces 
 
 ```
 Vectorize = INDEX    (finds relevant files, fast, imprecise)
-Workspace = LIBRARY  (actual content, full files)
+R2        = LIBRARY  (actual content, full files)
 Agent     = RESEARCHER (uses index, reads library, thinks)
 ```
 
@@ -1477,13 +1449,13 @@ knowledge_search(query, limit?)     → hybrid search (text + semantic)
                                       returns chunks with scores (~500ms)
                                       DISCOVERY — find what's relevant
 
-knowledge_read(path)                → full file from Workspace
+knowledge_read(path)                → full file from R2 (~30ms)
                                       COMPREHENSION — understand it fully
 
 knowledge_list(prefix?)             → directory listing
                                       BROWSING — explore structure
 
-knowledge_grep(pattern, prefix?)    → regex search across files
+knowledge_grep(pattern, prefix?)    → FTS5 search on chunks
                                       EXACT MATCHING — find specific text
 
 knowledge_write(path, content)      → store + chunk + embed
