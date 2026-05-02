@@ -1305,6 +1305,63 @@ Humans and agents use the **exact same knowledge store, same API, same files.**
 
 ---
 
+## Effect-TS in Cloudflare Workers
+
+**Status:** Confirmed working. Effect team actively supports Workers as a target.
+
+### Official Cloudflare packages (in Effect monorepo)
+
+| Package | Purpose |
+|---|---|
+| `@effect/sql-d1` | SQL client for Cloudflare D1 |
+| `@effect/sql-sqlite-do` | SQL client for Durable Object SQLite storage |
+
+### Past breaking issue — fixed
+
+[#3057](https://github.com/Effect-TS/effect/issues/3057) (Jun 2024): Effect 3.4.0 hoisted `new AbortController()` to global scope. Workers forbid async I/O in global scope. Fixed same day in [PR #3095](https://github.com/Effect-TS/effect/pull/3095).
+
+### Recent Cloudflare-specific fixes (April 2026)
+
+- [#6191](https://github.com/Effect-TS/effect/pull/6191): Updated msgpackr — `new Function()` blocked in V8 isolates. Fixed.
+- [#6169](https://github.com/Effect-TS/effect/issues/6169): RPC msgPack serialization silently failed in Workers. Fixed.
+
+### Production apps using Effect + Cloudflare Workers
+
+| Project | Usage |
+|---|---|
+| [crosshatch/liminal](https://github.com/crosshatch/liminal) | Full `effect-workerd` abstraction: D1, R2, DO state, AI, Images, DurableObject namespaces |
+| [livestorejs/livestore](https://github.com/livestorejs/livestore) | Effect RPC over DurableObjects, WebSocket transport, DO sync |
+| [RhysSullivan/executor](https://github.com/RhysSullivan/executor) | `Effect.runPromise` inside DurableObject `rpc()`, OpenTelemetry tracing |
+| [dmmulroy/effect-cloudflare](https://github.com/dmmulroy/effect-cloudflare) | Community library wrapping KV, R2 in typed Effect services |
+
+### Known current issues (minor)
+
+| Issue | Severity | Workaround |
+|---|---|---|
+| [#5398](https://github.com/Effect-TS/effect/issues/5398): `Logger.pretty` drops first arg in Workers | Low | Use `Logger.structured` or default logger |
+| [#6006](https://github.com/Effect-TS/effect/issues/6006): `@effect/sql-sqlite-do` `withTransaction` uses SQL `BEGIN/COMMIT` which DO SQLite forbids | Medium | Use `state.storage.transaction()` directly |
+
+### What works
+
+| Category | Status |
+|---|---|
+| Core Effect (`Effect`, `Stream`, `Layer`, `Schema`, etc.) | ✅ |
+| `Effect.gen`, `Effect.runPromise`, fibers, concurrency | ✅ |
+| `@effect/sql-d1` (D1 database) | ✅ |
+| `@effect/sql-sqlite-do` (DO SQLite) | ⚠️ Works except `withTransaction` |
+| `@effect/rpc` (JSON serialization) | ✅ |
+| `@effect/rpc` (msgPack serialization) | ✅ (fixed Apr 2026) |
+| `Logger.pretty` | ⚠️ Cosmetic bug |
+| Node.js-only APIs (`fs`, `child_process`) | ❌ Use platform-agnostic APIs |
+
+### Implication for Yolk
+
+Effect-TS in Cloudflare Workers / Durable Objects is viable. The `@effect/sql-sqlite-do` transaction bug means wrapping DO SQLite transactions via `state.storage.transaction()` in our own Effect service rather than using `SqlClient.withTransaction`.
+
+**Open question resolved.** ✅
+
+---
+
 ## References
 
 - [Block: From Hierarchy to Intelligence](https://block.xyz/inside/from-hierarchy-to-intelligence)
