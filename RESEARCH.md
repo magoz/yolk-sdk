@@ -1015,13 +1015,13 @@ export class YolkAgent extends Agent<Env> {
 - **Two platforms** — Next.js on Vercel (control plane) + Agent SDK on Cloudflare (agents). Two deploys, two runtimes. Clean separation but operational complexity.
 - **Effect in Cloudflare Workers** — need to verify Effect-TS works in Workers runtime (V8 isolate, not Node.js). Likely fine but untested.
 
-### Open questions
+### Open questions — ALL RESOLVED ✅
 
-1. Does Effect-TS run in Cloudflare Workers? (V8 isolate, no Node.js APIs)
-2. Can a Durable Object make HTTP calls to our Next.js API? (for integration tools)
-3. How does Workspace (`@cloudflare/shell`) work programmatically? (SDK surface for read/write/search)
-4. What's the WebSocket protocol for the Agent base class? (message format, connection lifecycle)
-5. How do we handle auth between browser → Cloudflare DO → Next.js API? (token chain)
+1. ~~Does Effect-TS run in Cloudflare Workers?~~ → **Yes.** See "Effect-TS in Cloudflare Workers" section.
+2. ~~Can a DO make HTTP calls to our Next.js API?~~ → **Yes.** See "DO HTTP + RPC" section.
+3. ~~How does Workspace work?~~ → **Rejected.** Using DO SQLite + R2 instead. See "Knowledge Architecture" section.
+4. ~~WebSocket protocol for Agent base class?~~ → **Fully documented.** See "Agent SDK WebSocket + Client" section.
+5. ~~Auth between browser → DO → Next.js API?~~ → **JWT in WS query params.** See "Auth Chain" section.
 
 ---
 
@@ -1555,13 +1555,239 @@ Sub-agents (Cloudflare Agent SDK facets) become useful in v2 when:
 - Chunks are pointers; agent reads full files for comprehension
 - Sub-agents for research in v2, primary agent does its own research in v1
 
-### Unresolved
+### Previously unresolved — NOW RESOLVED ✅
 
-1. Context window pressure — agent reads 5 files = ~10K tokens. Plus history. When is this a problem?
-2. Should search return chunk text or just file paths + snippets?
-3. Caching — agent re-reads same file multiple turns later. Cache in Agent DO?
-4. Embedding model: Workers AI free tier (768d) vs OpenAI (1536d, better, costs money)?
-5. Chunking strategy: fixed window with overlap? Paragraph-aware? What quality bar for v1?
+1. ~~Context window pressure~~ → Not a problem for v1. 10K knowledge + 10K history + 2K system prompt = ~22K tokens. Modern models have 128K-200K context. Becomes a concern only with very long conversations + many file reads.
+2. ~~Search return format~~ → Return chunk text + metadata. Agent needs content to decide which files to read in full. Paths-only would force a read per result.
+3. ~~Caching~~ → Cache always-on context (org.md, user profile) in `this.state` (survives hibernation). Other files: re-read from R2 (~30ms, fast enough). Don't over-optimize.
+4. ~~Embedding model~~ → Workers AI `bge-base-en-v1.5` (768d) for v1. Free, good enough. See Vectorize section.
+5. ~~Chunking strategy~~ → Recursive chunking. See "Chunking Strategy" section.
+
+---
+
+## DO HTTP Calls + DO-to-DO RPC
+
+**Status:** Resolved. ✅
+
+### Can a DO make HTTP calls to external APIs?
+
+**Yes.** DOs are Workers. They have full `fetch()` capability. The Agent base class exposes `this.env` for all bindings.
+
+```typescript
+// Agent DO calling Next.js API for integration tools
+class YolkAgent extends Agent<Env> {
+  async sendEmail(to: string, subject: string, body: string) {
+    const response = await fetch("https://yolk-api.vercel.app/api/gmail/send", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.serviceToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ to, subject, body, userId: this.userId }),
+    })
+    return response.json()
+  }
+}
+```
+
+### DO-to-DO RPC
+
+DOs call other DOs via **stubs** — typed, async, serializable. No `@callable()` needed (that's for WebSocket clients only).
+
+```typescript
+import { getAgentByName } from "agents"
+
+// Agent DO calling Knowledge DO
+class YolkAgent extends Agent<Env> {
+  async searchKnowledge(query: string) {
+    const knowledge = await getAgentByName(this.env.KNOWLEDGE, `org-${this.orgId}`)
+    return knowledge.search(query)  // direct RPC call
+  }
+
+  async readFile(path: string) {
+    const knowledge = await getAgentByName(this.env.KNOWLEDGE, `org-${this.orgId}`)
+    return knowledge.read(path)  // direct RPC call
+  }
+}
+```
+
+**Two RPC patterns:**
+
+| Pattern | Transport | When |
+|---|---|---|
+| DO-to-DO RPC | Internal Cloudflare network | Agent → Knowledge, Agent → Agent |
+| `@callable()` decorator | WebSocket | Browser → Agent |
+| `fetch()` | HTTP | DO → external API (Next.js) |
+
+---
+
+## Agent SDK: WebSocket + Client
+
+**Status:** Resolved. ✅
+
+### Server-side (Agent class)
+
+The `Agent` base class from `agents` provides:
+
+| Hook | When |
+|---|---|
+| `onStart(props?)` | Instance wakes up (before any connections) |
+| `onConnect(connection, ctx)` | WebSocket connection established |
+| `onMessage(connection, message)` | Message received (string or ArrayBuffer) |
+| `onClose(connection, code, reason, wasClean)` | Connection closed |
+| `onError(connection, error)` | WebSocket error |
+
+**Key features:**
+- `this.broadcast(message, exclude?)` — send to all connections
+- `connection.setState(state)` / `connection.state` — per-connection state
+- `this.getConnections(tag?)` — iterate connections, filter by tag
+- `this.sql` — embedded SQLite (template tag)
+- `this.state` / `this.setState()` — agent state (survives hibernation)
+- **Hibernation** — DO sleeps when idle, WebSocket stays open, wakes on message
+
+**`@callable()` decorator** for typed RPC over WebSocket:
+
+```typescript
+import { Agent, callable, StreamingResponse } from "agents"
+
+class YolkAgent extends Agent<Env> {
+  @callable()
+  async prompt(message: string): Promise<string> {
+    return this.runAgentLoop(message)
+  }
+
+  @callable({ streaming: true })
+  async streamPrompt(stream: StreamingResponse, message: string) {
+    for await (const token of this.streamAgentLoop(message)) {
+      stream.send(token)
+    }
+    stream.end()
+  }
+}
+```
+
+### Client-side SDK
+
+| Client | Use case |
+|---|---|
+| `useAgent()` | React hook — auto-reconnect, state sync, typed stubs |
+| `AgentClient` | Vanilla JS — any environment |
+| `agentFetch()` | HTTP — one-off requests, no WebSocket |
+
+```typescript
+// React
+import { useAgent } from "agents/react"
+import type { YolkAgent } from "./server"
+
+function Chat() {
+  const agent = useAgent<YolkAgent>({
+    agent: "YolkAgent",
+    name: `session-${sessionId}`,
+    query: async () => ({ token: await getAuthToken() }),
+    onStateUpdate: (state) => updateUI(state),
+  })
+
+  // Typed RPC
+  const result = await agent.stub.prompt("What's our pricing strategy?")
+
+  // Streaming RPC
+  await agent.call("streamPrompt", ["Analyze Q3"], {
+    stream: {
+      onChunk: (token) => appendToOutput(token),
+      onDone: () => markComplete(),
+    }
+  })
+}
+```
+
+**What persists across hibernation:** `this.state`, `connection.state`, SQLite data.
+**What doesn't persist:** in-memory variables, timers, promises in flight, local caches.
+
+---
+
+## Auth Chain: Browser → DO → Next.js API
+
+**Status:** Resolved. ✅
+
+### The constraint
+
+WebSocket upgrade requests **cannot send custom headers**. No `Authorization: Bearer ...`. Cookies only work same-origin. For cross-origin (Next.js on Vercel → Agent on Cloudflare), must use **query params**.
+
+### The flow
+
+```
+1. Browser gets JWT from Next.js auth (better-auth)
+2. Browser connects to Agent DO:
+   useAgent({ query: async () => ({ token: await getJWT() }) })
+   → wss://agents.yolk.workers.dev/agents/yolk-agent/session-123?token=xxx
+
+3. Agent DO verifies JWT in onConnect():
+   const token = url.searchParams.get("token")
+   if (!verifyJWT(token)) connection.close(4001, "Unauthorized")
+   connection.setState({ userId, orgId, authenticated: true })
+
+4. Agent DO calls Next.js API for integrations:
+   fetch("https://yolk.vercel.app/api/gmail/send", {
+     headers: { Authorization: `Bearer ${serviceToken}` }
+   })
+   → service-to-service auth, not user's JWT
+```
+
+### Token types
+
+| Token | Who creates it | Who verifies it | Purpose |
+|---|---|---|---|
+| User JWT | Next.js (better-auth) | Agent DO | Browser → DO auth |
+| Service token | Shared secret or minted JWT | Next.js API | DO → Next.js API auth |
+
+### Security best practices (from Cloudflare docs)
+
+- Short-lived tokens in URLs (minutes, not hours)
+- Scope tokens to agent/instance
+- Verify on every `onConnect`, not just once
+- HTTPS / `wss://` only
+- Rotate secrets regularly
+- Async query function on client → cache invalidated on disconnect → fresh token on reconnect
+
+---
+
+## Chunking Strategy
+
+**Status:** Decided for v1.
+
+### Recursive chunking
+
+Split at natural boundaries, then subdivide if too long:
+
+```
+1. Split by double newlines (paragraphs)
+2. If paragraph > max_tokens → split by sentences
+3. If sentence > max_tokens → split by token count
+4. Add overlap between adjacent chunks (10-20%)
+```
+
+### Config for v1
+
+| Parameter | Value |
+|---|---|
+| Chunk size | ~300 tokens |
+| Overlap | 15% (~45 tokens) |
+| Boundary | Paragraph → sentence → token |
+
+### Implementation
+
+~100 lines. Or use `RecursiveCharacterTextSplitter` from `@langchain/textsplitters` (works in Workers, no native deps).
+
+```typescript
+const splitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 1200,      // ~300 tokens
+  chunkOverlap: 180,    // ~15%
+  separators: ["\n\n", "\n", ". ", " "],
+})
+const chunks = await splitter.splitText(content)
+```
+
+Because chunks are discovery pointers (not final answers), chunking quality is less critical. Agent reads full files for comprehension anyway.
 
 ---
 
