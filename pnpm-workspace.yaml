@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+allowBuilds:
+  '@sentry/cli': true
+  core-js: true
+  esbuild: true
+  msgpackr-extract: true
+  msw: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true

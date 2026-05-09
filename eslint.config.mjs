@@ -1,0 +1,42 @@
+import { defineConfig, globalIgnores } from 'eslint/config'
+import nextVitals from 'eslint-config-next/core-web-vitals'
+import nextTs from 'eslint-config-next/typescript'
+import prettier from 'eslint-config-prettier/flat'
+import { recommended as localRules } from './eslint-local-rules/index.js'
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  prettier,
+  // Local Effect-TS rules (see patterns/EFFECT_BEST_PRACTICES.md)
+  localRules,
+  // Strict TypeScript rules (see patterns/TYPESCRIPT_CONVENTIONS.md)
+  {
+    files: ['**/*.ts', '**/*.tsx'],
+    rules: {
+      // Ban `any` type - use proper types, generics, or unknown
+      '@typescript-eslint/no-explicit-any': 'error',
+      // Ban type assertions (as) - use Schema.make(), identity<T>(), etc.
+      '@typescript-eslint/consistent-type-assertions': ['error', { assertionStyle: 'never' }],
+      // Enforce type-only imports for better tree-shaking
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'separate-type-imports' }
+      ],
+      // Allow unused vars with underscore prefix (for destructuring to omit)
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+      ]
+    }
+  },
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    '.next/**',
+    'out/**',
+    'build/**',
+    'next-env.d.ts'
+  ])
+])
+
+export default eslintConfig

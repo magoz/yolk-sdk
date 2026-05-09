@@ -10,7 +10,7 @@ packages/
   harness/        pure LLM <> tool loop
   agent-runtime/  reusable session/runtime shell
   client/         browser/client SDK
-  app/            Yolk product layer
+app/              Yolk product layer at repo root
 ```
 
 ## Dependency rule
