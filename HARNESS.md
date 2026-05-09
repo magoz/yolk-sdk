@@ -16,6 +16,31 @@ const run = (config: {
 
 Config in, event stream out. Consumer owns session persistence, transport (WebSocket, stdio, etc.), and UI. System prompt is a plain field — static for the duration of a run. Dynamic per-turn instructions go through `ContextTransformer`.
 
+This package is one layer in the reusable stack. See `ARCHITECTURE.md`.
+
+```txt
+protocol → harness → agent-runtime → app
+```
+
+The harness is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent-runtime/` or the app layer.
+
+Hard boundary: no users, teams, orgs, projects, billing, OAuth, knowledge store, or product-specific permissions in this package.
+
+### Harness vs agent runtime
+
+| Concern | Harness | Agent runtime |
+|---|---|---|
+| LLM <> tool loop | Yes | Calls harness |
+| Event taxonomy | Emits | Streams/reduces/persists |
+| Provider interface | Defines | Provides/configures |
+| Tool executor interface | Defines | Wraps with permissions |
+| Sessions | No | Yes, generic |
+| Persistence | No | Via `SessionStore` |
+| Transport | No | WS/SSE/RPC adapters |
+| Compaction | No policy | Strategy interface |
+| Context injection | Interface only | Adapter orchestration |
+| Domain concepts | Never | Opaque `Ctx` only |
+
 ---
 
 ## Inspirations
@@ -189,19 +214,31 @@ Pi's loop stores and forwards `AgentMessage[]` without inspecting roles beyond `
 **Decision:** Harness defines a closed union of types it needs for the loop. Consumer converts domain types to core types before calling `run()`.
 
 ```typescript
+const ContentPart = Schema.Union(
+  Schema.TaggedStruct("Text", { text: Schema.String }),
+  Schema.TaggedStruct("Image", { data: Schema.String, mimeType: Schema.String }),
+  Schema.TaggedStruct("Audio", { data: Schema.String, format: AudioFormat }),
+)
+
+type AudioFormat = "pcm16" | "wav" | "mp3" | "opus"
+
+const Content = Schema.Union(Schema.String, Schema.Array(ContentPart))
+
 const AgentMessage = Schema.Union(
-  Schema.TaggedStruct("User", { content: Schema.String }),
-  Schema.TaggedStruct("Assistant", { content: Schema.String, toolCalls: Schema.Array(ToolCall) }),
-  Schema.TaggedStruct("ToolResult", { toolCallId: Schema.String, content: Schema.String }),
+  Schema.TaggedStruct("User", { content: Content }),
+  Schema.TaggedStruct("Assistant", { content: Content, toolCalls: Schema.Array(ToolCall) }),
+  Schema.TaggedStruct("ToolResult", { toolCallId: Schema.String, content: Content }),
 )
 ```
 
-Three types. That's it. No `Notification`, `CompactionSummary`, `ContextInjection` — those are consumer concerns:
+Three message types, multimodal content from day one. `Content` is either a plain string (shorthand for text-only) or an array of `ContentPart` (text, image, audio mixed). Voice support requires no message model changes later.
+
+No `Notification`, `CompactionSummary`, `ContextInjection` — those are consumer concerns:
 - Compaction summaries → consumer wraps as `User` messages before calling `run()`
 - Context injections → happen in `ContextTransformer.transform()`, which prepends real `User` messages
 - Notifications → UI-level, never enter the harness
 
-`toLLMMessages` is harness-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion).
+`toLLMMessages` is harness-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion). Provider layer decides how to encode audio parts for the specific API (base64 for audio completions, PCM16 chunks for realtime).
 
 Consumer's domain types (e.g., `KnowledgeResult`, `IntegrationEvent`) live in their session storage and UI layer. They convert to `AgentMessage` at the boundary before entering the harness.
 
@@ -328,17 +365,26 @@ interface LLMRequest {
 }
 ```
 
-`LLMEvent` (discriminated union):
+`LLMEvent` (discriminated union, multimodal):
 ```typescript
 type LLMEvent =
+  // Text
   | { readonly _tag: "TextDelta"; readonly text: string }
+  | { readonly _tag: "ThinkingDelta"; readonly text: string }
+  // Audio
+  | { readonly _tag: "AudioDelta"; readonly data: string }          // base64 audio chunk
+  | { readonly _tag: "AudioDone" }
+  | { readonly _tag: "OutputTranscript"; readonly text: string }    // transcript of model's audio
+  // Tool calls
   | { readonly _tag: "ToolCallStart"; readonly id: string; readonly name: string }
   | { readonly _tag: "ToolCallDelta"; readonly id: string; readonly args: string }
   | { readonly _tag: "ToolCallEnd"; readonly id: string }
-  | { readonly _tag: "ThinkingDelta"; readonly text: string }
+  // Meta
   | { readonly _tag: "Usage"; readonly input: number; readonly output: number }
   | { readonly _tag: "Done"; readonly stopReason: StopReason }
 ```
+
+Audio events are emitted by providers that support audio output (OpenAI audio completions, future Anthropic audio). Text-only providers never emit `AudioDelta`/`AudioDone`. The harness passes them through — it doesn't interpret audio data.
 
 The harness accumulates `LLMEvent`s into a complete response (assistant message + tool calls) via `Accumulator.add`. Provider implementations live outside the harness package.
 
@@ -544,10 +590,12 @@ Discriminated union. Effect Schema for serialization (WebSocket, logging, replay
 
 ```typescript
 type AgentEvent =
+  // Lifecycle
   | AgentStart
-  | AgentEnd
+  | AgentEnd                    // carries final messages, turn count, usage
   | TurnStart
   | TurnEnd
+  // LLM streaming — text
   | LLMStreamStart
   | LLMTextDelta
   | LLMThinkingDelta
@@ -555,15 +603,30 @@ type AgentEvent =
   | LLMToolCallDelta
   | LLMToolCallEnd
   | LLMStreamEnd
+  // LLM streaming — audio
+  | LLMAudioDelta              // audio chunk from provider
+  | LLMAudioDone
+  | LLMOutputTranscript        // text transcript of model's audio output
+  // Tool execution
   | ToolExecutionStart
-  | ToolExecutionUpdate    // progress from long-running tools
+  | ToolExecutionUpdate        // progress from long-running tools
   | ToolExecutionEnd
-  | AssistantMessage       // full accumulated message (for persistence)
-  | ToolResult             // full tool result (for persistence)
-  | UsageReport            // token counts
+  // Persistence helpers
+  | AssistantMessage           // full accumulated message (for persistence)
+  | ToolResult                 // full tool result (for persistence)
+  | UsageReport                // token counts
+  // Realtime session (v1.1, only emitted by RealtimeSession)
+  | SessionCreated
+  | SessionClosed
+  | UserSpeechStarted          // VAD detected speech
+  | UserSpeechStopped
+  | InputTranscript            // STT transcript of user's audio
+  | ResponseInterrupted        // user interrupted model mid-speech
 ```
 
-Sequence per turn:
+Text mode emits lifecycle + text + tool + persistence events. Audio completions add `LLMAudioDelta`/`LLMAudioDone`/`LLMOutputTranscript`. Realtime session adds session lifecycle + speech events. Consumer handles what they need — text-only consumers ignore audio events.
+
+Sequence per turn (text mode):
 ```
 TurnStart
   -> LLMStreamStart
@@ -576,11 +639,25 @@ TurnStart
 TurnEnd
 ```
 
+Sequence per turn (audio completions):
+```
+TurnStart
+  -> LLMStreamStart
+    -> (LLMTextDelta | LLMAudioDelta | LLMOutputTranscript | LLMToolCallStart | ...)*
+  -> LLMAudioDone
+  -> LLMStreamEnd
+  -> AssistantMessage
+  -> [if tool calls:]
+    -> (ToolExecutionStart -> ... -> ToolResult)*
+  -> UsageReport
+TurnEnd
+```
+
 Wrapped by `AgentStart` / `AgentEnd` for the full run.
 
 ---
 
-### 10. Extensibility model: Layers all the way down
+### 11. Extensibility model: Layers all the way down
 
 **Status: Decided.**
 
@@ -593,6 +670,9 @@ No hook registry. No event system for extensibility. Effect's Layer system IS th
 | Transform context before LLM | `ContextTransformer` | Identity |
 | Control max turns | `LoopConfig` | `{ maxTurns: 500 }` |
 | Custom accumulator | `ResponseAccumulator` | Default token accumulation |
+| Speech-to-text | `STTProvider` | None (optional, chained voice only) |
+| Text-to-speech | `TTSProvider` | None (optional, chained voice only) |
+| Native realtime | `RealtimeProvider` | None (optional, v1.1) |
 
 Consumer composes:
 
@@ -612,7 +692,37 @@ const events = yield* harness.run(messages).pipe(
 
 ---
 
-### 11. Abort: fiber interruption, no explicit handle
+### 12. Hooks: deferred, but seams preserved
+
+**Status: Decided. Not implemented. Architecture supports future addition.**
+
+The harness has no hook registry or event-based extension system. Effect's Layer system handles all current interception needs. However, the loop preserves explicit seams where hooks would attach if ever needed:
+
+| Loop call site | Current layer | Future hook |
+|---|---|---|
+| `yield* executor.execute(call)` | `ToolExecutor` | `beforeToolCall` / `afterToolCall` |
+| `yield* transformer.transform(msgs)` | `ContextTransformer` | `beforeLLMCall` |
+| `yield* emit.single(AgentEvent.AssistantMessage(...))` | Consumer reads stream | `afterLLMResponse` |
+| `yield* provider.stream(request)` | `LLMProvider` | `beforeLLMStream` / `afterLLMStream` |
+
+**Invariant: the loop must always call through these services, never bypass them.** These are the hook attachment points. If a future `Hooks` convenience service is added, it wraps these existing layers — no loop changes needed.
+
+A `Hooks` service would look like:
+```typescript
+// Future (not implemented)
+Hooks.layer({
+  beforeToolCall: (call) => ...,
+  afterToolCall: (call, result) => ...,
+  beforeLLMCall: (msgs) => ...,
+})
+// Internally wraps ToolExecutor + ContextTransformer layers
+```
+
+Multiple independent handlers (fan-out) would require a `PubSub`-based hook registry. Only needed if third-party extensibility becomes a requirement. Currently rejected — Yolk owns the code.
+
+---
+
+### 13. Abort: fiber interruption, no explicit handle
 
 **Status: Decided.**
 
@@ -637,7 +747,95 @@ For graceful stops (finish current turn but don't start another), consumer uses 
 
 ---
 
-### 12. Portability scope
+### 14. Voice: first-class, three architectures
+
+**Status: Decided.**
+
+Researched OpenAI Realtime API (GA, WebSocket/WebRTC, native speech-to-speech), OpenAI audio completions (same API as text, audio content parts), Google Gemini Live (WebSocket, bidirectional), Anthropic (no audio support), ElevenLabs (separate TTS/STT). Neither Pi nor OpenCode has any audio support.
+
+Voice is first-class in the harness design. Three architectures supported, sharing the same core:
+
+**Architecture 1: Audio completions (same `LLMProvider`, multimodal content)**
+
+No separate voice provider. The existing `LLMProvider.stream()` handles audio — it's just richer content parts in the request/response. Provider layer encodes audio for the specific API (base64 for OpenAI `gpt-audio`).
+
+```
+User speaks → STT → AgentMessage.User({ content: [Audio({ data, format: "pcm16" })] })
+  → harness.run() → LLMAudioDelta events → consumer plays audio
+```
+
+Works through the existing `run()` API unchanged. The multimodal `ContentPart` union (Text | Image | Audio) makes this transparent.
+
+**Architecture 2: Chained (STT → LLM → TTS)**
+
+Works with any LLM including Claude (no native audio). The harness runs text mode as normal. Consumer wraps with STT/TTS at the boundaries.
+
+```
+Mic → STTProvider.transcribe() → text → harness.run() → LLMTextDelta → TTSProvider.synthesize() → Speaker
+```
+
+`STTProvider` and `TTSProvider` are optional service interfaces. Consumer provides layers (ElevenLabs, OpenAI TTS, Deepgram, etc.).
+
+```typescript
+class STTProvider extends Context.Service<STTProvider>()("@harness/STTProvider") {
+  readonly transcribe: (audio: Stream<Uint8Array>) => Stream<TranscriptEvent>
+}
+
+class TTSProvider extends Context.Service<TTSProvider>()("@harness/TTSProvider") {
+  readonly synthesize: (text: Stream<string>) => Stream<Uint8Array>
+}
+```
+
+Higher latency (~1-2s) than native realtime. More control over each component. Works today with zero harness changes beyond the interfaces.
+
+**Architecture 3: Native realtime (v1.1)**
+
+For sub-second full-duplex voice. OpenAI Realtime API, Gemini Live. Fundamentally different protocol — persistent bidirectional WebSocket, LLM server drives the conversation.
+
+Cannot fit into `run()` (which is one-shot, harness-driven). Separate API:
+
+```typescript
+const session: (config: {
+  systemPrompt: string
+  tools: ReadonlyArray<ToolDef>
+  voice: VoiceConfig
+}) => Effect<RealtimeSession, HarnessError, RealtimeProvider | ToolExecutor>
+
+interface RealtimeSession {
+  readonly events: Stream<AgentEvent>
+  readonly sendAudio: (chunk: Uint8Array) => Effect<void>
+  readonly sendText: (text: string) => Effect<void>
+  readonly interrupt: Effect<void>
+  readonly close: Effect<void>
+}
+```
+
+Shares with text mode: `ToolExecutor`, `ToolDef`, `AgentEvent` taxonomy, error types. The harness handles tool execution inside the session — when the realtime provider emits a tool call, the harness executes it and feeds the result back.
+
+```typescript
+class RealtimeProvider extends Context.Service<RealtimeProvider>()("@harness/RealtimeProvider") {
+  readonly connect: (config: RealtimeConfig) => Effect<RealtimeConnection>
+}
+
+interface RealtimeConnection {
+  readonly events: Stream<RealtimeEvent>
+  readonly sendAudio: (chunk: Uint8Array) => Effect<void>
+  readonly sendText: (text: string) => Effect<void>
+  readonly sendToolResult: (result: ToolResult) => Effect<void>
+  readonly interrupt: Effect<void>
+  readonly close: Effect<void>
+}
+```
+
+**Phasing:**
+- v1: Multimodal content model + audio events + STT/TTS interfaces. Audio completions work through existing `run()`. Chained voice works via consumer piping.
+- v1.1: `session()` API + `RealtimeProvider` interface for native realtime.
+
+**Key insight: voice doesn't require a separate LLM provider in the common case.** The same `LLMProvider` handles text and audio completions. `RealtimeProvider` is only for the native realtime experience (persistent WebSocket). STT/TTS are only for chained mode.
+
+---
+
+### 15. Portability scope
 
 **Status: Decided.**
 
@@ -658,30 +856,38 @@ Consumer packages (outside harness) bridge to platform-specific APIs via layers.
 packages/harness/
   src/
     index.ts                  # Public API re-exports
-    run.ts                    # The agent loop (Stream.asyncScoped + Effect.gen)
-    message.ts                # AgentMessage schema (discriminated union)
-    event.ts                  # AgentEvent schema (discriminated union)
+    run.ts                    # Text mode agent loop (Stream.asyncScoped + Effect.gen)
+    session.ts                # Realtime mode session (v1.1)
+    content.ts                # ContentPart schema (Text | Image | Audio)
+    message.ts                # AgentMessage schema (User | Assistant | ToolResult)
+    event.ts                  # AgentEvent schema (full discriminated union)
     error.ts                  # HarnessError types (Data.TaggedError)
     tool.ts                   # ToolDef, ToolCall, ToolResult types
     accumulator.ts            # LLMEvent -> accumulated response
     services/
-      llm-provider.ts         # LLMProvider service (interface only)
+      llm-provider.ts         # LLMProvider service (text + audio completions)
+      realtime-provider.ts    # RealtimeProvider service (v1.1, native realtime)
+      stt-provider.ts         # STTProvider service (optional, chained voice)
+      tts-provider.ts         # TTSProvider service (optional, chained voice)
       tool-executor.ts        # ToolExecutor service + default layer
       context-transformer.ts  # ContextTransformer service + default layer
       loop-config.ts          # LoopConfig service + default layer
     testing/
-      faux-provider.ts        # FauxProvider layer + Reply builders
+      faux-provider.ts        # FauxProvider layer + Reply builders (text + audio)
+      faux-realtime.ts        # FauxRealtimeProvider layer (v1.1)
       test-executor.ts        # Canned tool results for tests
   test/
-    run.test.ts               # Core loop tests
+    run.test.ts               # Text mode loop tests
+    session.test.ts           # Realtime mode tests (v1.1)
     accumulator.test.ts       # Response accumulation
     tool-executor.test.ts     # Tool execution + interception
     faux-provider.test.ts     # Faux provider behavior
+    content.test.ts           # Multimodal content round-trip
 ```
 
 ---
 
-### 13. `Stream.asyncScoped` queue sizing: unbounded
+### 16. `Stream.asyncScoped` queue sizing: unbounded
 
 **Status: Decided.**
 
@@ -693,7 +899,7 @@ Unbounded. Non-issue.
 
 ---
 
-### 14. Final messages: `AgentEnd` carries them
+### 17. Final messages: `AgentEnd` carries them
 
 **Status: Decided.**
 
@@ -716,7 +922,7 @@ type AgentEnd = {
 
 ---
 
-### 15. Faux queue exhaustion: error
+### 18. Faux queue exhaustion: error
 
 **Status: Decided.**
 
@@ -728,7 +934,7 @@ Our faux provider errors on exhaustion. `Queue.take` on an empty queue produces 
 
 ---
 
-### 16. Max turns: hard limit, default 500
+### 19. Max turns: hard limit, default 500
 
 **Status: Decided.**
 
@@ -745,5 +951,4 @@ LoopConfig.layer({ maxTurns: Infinity })  // opt out (not recommended for headle
 ```
 
 Consumer can also `Stream.takeUntil` for softer per-run control without changing the global default.
-
 

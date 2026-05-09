@@ -1,16 +1,18 @@
 # Yolk — Research Notes
 
-## Status: Research Complete
+## Status: Architecture Direction Set
 
-All architecture decisions made. Zero open research questions. Ready to build.
+Core package boundaries decided. Product-layer details still open.
 
 ### Decisions summary
 
 | Layer | Decision |
 |---|---|
-| Control plane | Next.js + Effect-TS on Vercel (auth, teams, integrations, OAuth) |
-| Agent runtime | Custom Effect-TS harness on Cloudflare Agent SDK (`Agent` base class) |
-| Agent ↔ browser | WebSocket via Agent SDK. React `useAgent()`. `@callable()` for typed RPC + streaming. |
+| Protocol | `packages/protocol/` shared schemas, events, wire types. No domain. |
+| Harness | `packages/harness/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
+| Agent runtime | `packages/agent-runtime/` reusable session/runtime shell over harness. Generic over opaque `Ctx`. |
+| Client | `packages/client/` browser protocol SDK + event reducer. Does not run harness by default. |
+| App layer | Project-specific Next.js/Worker layer: auth, users, teams, integrations, OAuth, billing, UI. |
 | Knowledge store | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors). |
 | Knowledge write | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2). |
 | Knowledge read | Agentic search — RAG as index, agent reads full files for comprehension. No auto-RAG. |
@@ -26,7 +28,7 @@ All architecture decisions made. Zero open research questions. Ready to build.
 
 | Rejected | Why |
 |---|---|
-| Pi SDK | Don't need extension system — we own the code |
+| Pi SDK as runtime | Useful reference, but runtime/harness should be ours and reusable |
 | Think (`@cloudflare/think`) | Too opinionated — use lower-level `Agent` class |
 | Workspace (`@cloudflare/shell`) | Preview/experimental — DIY on GA primitives |
 | Cloudflare Artifacts | Replaced by R2 + DO SQLite |
@@ -38,13 +40,15 @@ All architecture decisions made. Zero open research questions. Ready to build.
 
 ### Decided but not in detailed sections
 
-- **Harness as monorepo package** — `packages/harness/` is generic (loop, streaming, tools, context). No Cloudflare, no Yolk specifics. Portable. Don't publish until second consumer exists.
+- **Reusable package split** — `protocol`, `harness`, `agent-runtime`, `client`, app. See `ARCHITECTURE.md`.
+- **No domain below app** — no users, teams, orgs, projects, billing, OAuth, or product permissions below the project-specific app layer.
+- **Harness stays pure** — generic loop only. No sessions, persistence, transport, or compaction policy.
+- **Runtime is generic** — session orchestration over opaque `Ctx`; project adapters decide what `Ctx` means.
 
 ### Not yet discussed
 
-- Session model (one DO per session vs per user vs per project)
-- Integration tools structure (Gmail/Calendar/Notion OAuth token flow from DO)
-- Monorepo structure detail (beyond harness package)
+- Concrete app-layer session topology (one DO per session vs actor vs workspace)
+- Integration tools structure (Gmail/Calendar/Notion OAuth token flow from app/runtime adapters)
 - React UI (chat interface, knowledge browser)
 - Deployment (Wrangler config, CI/CD)
 - v1 scope (prioritized task list)
@@ -64,8 +68,8 @@ Yolk is the platform that makes this real for companies that aren't Block.
 | Block concept | Yolk equivalent |
 |---|---|
 | **Capabilities** (atomic financial primitives) | Integrations: Gmail, Calendar, Notion, Todoist, LinkedIn, Telegram, R2, etc. |
-| **World model** (company + customer) | Knowledge store — flat files in Cloudflare Artifacts, versioned, per-team |
-| **Intelligence layer** (composes capabilities) | Pi agents with access to world model + capabilities |
+| **World model** (company + customer) | Knowledge store — R2 files + DO SQLite + Vectorize, app-defined scope |
+| **Intelligence layer** (composes capabilities) | Yolk agent runtime + harness with access to context/tools |
 | **Interfaces** (delivery surfaces) | Web app, scheduled agents, notifications |
 
 ### Three Roles (from Block)
@@ -76,7 +80,9 @@ Yolk is the platform that makes this real for companies that aren't Block.
 
 ---
 
-## Agent Runtime: Pi
+## Reference Runtime: Pi
+
+Historical research. Current decision: learn from Pi's separation and loop, but build Yolk's own `protocol` / `harness` / `agent-runtime` packages. Do not use Pi SDK as the runtime.
 
 [pi.dev](https://pi.dev) — minimal terminal coding agent harness by Mario Zechner (Earendil Inc.).
 
@@ -137,7 +143,9 @@ Pi's three modes:
 
 The web-ui package runs `Agent` in the browser — not connected to a remote agent. `ChatPanel.setAgent(agent)` takes a local `Agent` instance.
 
-### Best Approach: Pi SDK + Custom HTTP Server in Sandbox
+### Historical Option: Pi SDK + Custom HTTP Server in Sandbox
+
+Rejected for current architecture. Kept as reference for session/API shape.
 
 ```
 Browser ←→ SSE/WebSocket ←→ Next.js API Route ←→ Sandbox HTTP Server ←→ Pi SDK (in-process)
