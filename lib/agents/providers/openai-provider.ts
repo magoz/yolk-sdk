@@ -1,6 +1,19 @@
 import { Config, Context, Effect, Layer, Redacted, Stream } from 'effect'
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  type HttpClientError,
+  type HttpClientResponse
+} from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { ToolCall, type AgentMessage, type Content, type ContentPart, type ToolDef } from '@yolk/protocol'
+import {
+  ToolCall,
+  type AgentMessage,
+  type Content,
+  type ContentPart,
+  type ToolDef
+} from '@yolk/protocol'
 import {
   LLMError,
   LLMDone,
@@ -13,7 +26,6 @@ import {
 
 type OpenAiConfigShape = {
   readonly apiKey: Redacted.Redacted<string>
-  readonly fetch: typeof fetch
 }
 
 type OpenAiTextContentPart = {
@@ -65,18 +77,20 @@ type OpenAiRequestBody = {
   readonly tools?: ReadonlyArray<OpenAiTool>
 }
 
-class OpenAiFunctionResponse extends Schema.Class<OpenAiFunctionResponse>('OpenAiFunctionResponse')({
-  name: Schema.String,
-  arguments: Schema.String
-}) {}
+class OpenAiFunctionResponse extends Schema.Class<OpenAiFunctionResponse>('OpenAiFunctionResponse')(
+  {
+    name: Schema.String,
+    arguments: Schema.String
+  }
+) {}
 
-class OpenAiToolCallResponse extends Schema.Class<OpenAiToolCallResponse>(
-  'OpenAiToolCallResponse'
-)({
-  id: Schema.String,
-  type: Schema.Literals(['function']),
-  function: OpenAiFunctionResponse
-}) {}
+class OpenAiToolCallResponse extends Schema.Class<OpenAiToolCallResponse>('OpenAiToolCallResponse')(
+  {
+    id: Schema.String,
+    type: Schema.Literals(['function']),
+    function: OpenAiFunctionResponse
+  }
+) {}
 
 class OpenAiMessageResponse extends Schema.Class<OpenAiMessageResponse>('OpenAiMessageResponse')({
   content: Schema.NullOr(Schema.String),
@@ -93,13 +107,15 @@ class OpenAiChatCompletionResponse extends Schema.Class<OpenAiChatCompletionResp
   choices: Schema.Array(OpenAiChoiceResponse)
 }) {}
 
-class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiConfigShape>()('@app/OpenAiConfig') {}
+class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiConfigShape>()(
+  '@app/OpenAiConfig'
+) {}
 
 const OpenAiConfigLayer = Layer.effect(
   OpenAiConfig,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-    return { apiKey, fetch: globalThis.fetch }
+    return { apiKey }
   }).pipe(
     Effect.mapError(
       () =>
@@ -245,9 +261,7 @@ export const toOpenAiRequestBody = (
   request: LLMRequest
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
-    const messages: Array<OpenAiMessage> = [
-      { role: 'system', content: request.systemPrompt }
-    ]
+    const messages: Array<OpenAiMessage> = [{ role: 'system', content: request.systemPrompt }]
 
     for (const message of request.messages) {
       messages.push(yield* toOpenAiMessage(message))
@@ -282,9 +296,6 @@ const responseStatusToCause = (status: number): LLMError['cause'] => {
 }
 
 const isRetryableStatus = (status: number) => status === 429 || status >= 500
-
-const parseJson = (response: Response): Promise<unknown> => response.json()
-const readText = (response: Response): Promise<string> => response.text()
 
 const parseToolArguments = (raw: string) =>
   Effect.try({
@@ -329,9 +340,32 @@ const toLlmEvents = (
     return events
   })
 
+const toHttpClientLlmError =
+  (message: string, retryable: boolean) => (error: HttpClientError.HttpClientError) =>
+    new LLMError({
+      cause: 'provider_error',
+      message: `${message}: ${error.message}`,
+      retryable
+    })
+
+const parseOpenAiResponseJson = (
+  response: HttpClientResponse.HttpClientResponse
+): Effect.Effect<unknown, LLMError> =>
+  response.json.pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `Could not parse OpenAI response JSON: ${error.message}`,
+          retryable: false
+        })
+    )
+  )
+
 const sendOpenAiRequest = (
   config: OpenAiConfigShape,
-  request: LLMRequest
+  request: LLMRequest,
+  client: HttpClient.HttpClient
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toOpenAiRequestBody(request)
@@ -345,36 +379,29 @@ const sendOpenAiRequest = (
         })
     })
 
-    const response = yield* Effect.tryPromise({
-      try: signal =>
-        config.fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            accept: 'application/json',
-            authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-            'content-type': 'application/json'
-          },
-          body: serializedBody,
-          signal
-        }),
-      catch: error =>
-        new LLMError({
-          cause: 'provider_error',
-          message: `OpenAI request failed: ${unknownToMessage(error)}`,
-          retryable: true
-        })
-    })
+    const httpRequest = HttpClientRequest.post('https://api.openai.com/v1/chat/completions').pipe(
+      HttpClientRequest.setHeaders({
+        accept: 'application/json',
+        authorization: `Bearer ${Redacted.value(config.apiKey)}`,
+        'content-type': 'application/json'
+      }),
+      HttpClientRequest.bodyText(serializedBody, 'application/json')
+    )
+    const response = yield* client
+      .execute(httpRequest)
+      .pipe(Effect.mapError(toHttpClientLlmError('OpenAI request failed', true)))
 
-    if (!response.ok) {
-      const errorText = yield* Effect.tryPromise({
-        try: () => readText(response),
-        catch: error =>
-          new LLMError({
-            cause: 'provider_error',
-            message: `Could not read OpenAI error body: ${unknownToMessage(error)}`,
-            retryable: false
-          })
-      })
+    if (response.status < 200 || response.status >= 300) {
+      const errorText = yield* response.text.pipe(
+        Effect.mapError(
+          error =>
+            new LLMError({
+              cause: 'provider_error',
+              message: `Could not read OpenAI error body: ${error.message}`,
+              retryable: false
+            })
+        )
+      )
 
       return yield* Effect.fail(
         new LLMError({
@@ -385,15 +412,7 @@ const sendOpenAiRequest = (
       )
     }
 
-    const json = yield* Effect.tryPromise({
-      try: () => parseJson(response),
-      catch: error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Could not parse OpenAI response JSON: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    })
+    const json = yield* parseOpenAiResponseJson(response)
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
       Effect.mapError(
         error =>
@@ -420,13 +439,17 @@ const sendOpenAiRequest = (
   }).pipe(Effect.withSpan('OpenAiProvider.stream'))
 
 export const makeOpenAiProviderLayer = (config: OpenAiConfigShape) =>
-  Layer.succeed(
+  Layer.effect(
     LLMProvider,
-    LLMProvider.of({
-      stream: request =>
-        Stream.fromEffect(sendOpenAiRequest(config, request)).pipe(
-          Stream.flatMap(events => Stream.fromIterable(events))
-        )
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient
+
+      return LLMProvider.of({
+        stream: request =>
+          Stream.fromEffect(sendOpenAiRequest(config, request, client)).pipe(
+            Stream.flatMap(events => Stream.fromIterable(events))
+          )
+      })
     })
   )
 
@@ -434,12 +457,13 @@ export const OpenAiProviderLayer = Layer.effect(
   LLMProvider,
   Effect.gen(function* () {
     const config = yield* OpenAiConfig
+    const client = yield* HttpClient.HttpClient
 
     return LLMProvider.of({
       stream: request =>
-        Stream.fromEffect(sendOpenAiRequest(config, request)).pipe(
+        Stream.fromEffect(sendOpenAiRequest(config, request, client)).pipe(
           Stream.flatMap(events => Stream.fromIterable(events))
         )
     })
   })
-).pipe(Layer.provide(OpenAiConfigLayer))
+).pipe(Layer.provide(Layer.mergeAll(OpenAiConfigLayer, FetchHttpClient.layer)))

@@ -1,4 +1,10 @@
-import { Effect, Option, Stream } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
+import {
+  Headers,
+  HttpClient,
+  HttpClientResponse,
+  type HttpClientRequest
+} from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk/protocol'
 import { LLMProvider } from '@yolk/agent-loop'
@@ -7,8 +13,7 @@ import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/sc
 import { makeOpenAiCodexProviderLayer } from './openai-codex-provider'
 
 type CapturedRequest = {
-  readonly input: RequestInfo | URL
-  readonly init?: RequestInit
+  readonly request: HttpClientRequest.HttpClientRequest
 }
 
 const token: OpenAiCodexOAuthToken = {
@@ -19,90 +24,123 @@ const token: OpenAiCodexOAuthToken = {
   accountId: 'acct_test'
 }
 
-const makeFetch = (responseBody: unknown, requests: Array<CapturedRequest>, status = 200): typeof fetch =>
-  (input, init) => {
-    requests.push({ input, init })
-    return Promise.resolve(
-      new Response(JSON.stringify(responseBody), {
-        status,
-        headers: { 'content-type': 'application/json' }
+const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
+  makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(httpClientLayer))
+
+const makeHttpClientLayer = (
+  responseBody: unknown,
+  requests: Array<CapturedRequest>,
+  status = 200
+) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        requests.push({ request })
+
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(JSON.stringify(responseBody), {
+            status,
+            headers: { 'content-type': 'application/json' }
+          })
+        )
       })
     )
-  }
+  )
 
-const makeRawFetch = (responseBody: string, requests: Array<CapturedRequest>): typeof fetch =>
-  (input, init) => {
-    requests.push({ input, init })
-    return Promise.resolve(
-      new Response(responseBody, {
-        status: 200,
-        headers: { 'content-type': 'text/plain' }
+const makeRawHttpClientLayer = (responseBody: string, requests: Array<CapturedRequest>) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        requests.push({ request })
+
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(responseBody, {
+            status: 200,
+            headers: { 'content-type': 'text/plain' }
+          })
+        )
       })
     )
-  }
+  )
 
-const makeOpenSseFetch = (responseChunk: string, requests: Array<CapturedRequest>): typeof fetch =>
-  (input, init) => {
-    requests.push({ input, init })
+const makeOpenSseHttpClientLayer = (responseChunk: string, requests: Array<CapturedRequest>) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        requests.push({ request })
 
-    return Promise.resolve(
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start: controller => {
-            controller.enqueue(new TextEncoder().encode(responseChunk))
-          }
-        }),
-        {
-          status: 200,
-          headers: { 'content-type': 'text/plain' }
-        }
-      )
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start: controller => {
+                controller.enqueue(new TextEncoder().encode(responseChunk))
+              }
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'text/plain' }
+            }
+          )
+        )
+      })
     )
-  }
+  )
 
-const makeCancelableOpenSseFetch = (input: {
+const makeCancelableOpenSseHttpClientLayer = (input: {
   readonly responseChunk: string
   readonly requests: Array<CapturedRequest>
   readonly onCancel: () => void
-}): typeof fetch =>
-  (requestInput, init) => {
-    input.requests.push({ input: requestInput, init })
+}) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        input.requests.push({ request })
 
-    return Promise.resolve(
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start: controller => {
-            controller.enqueue(new TextEncoder().encode(input.responseChunk))
-          },
-          cancel: () => {
-            input.onCancel()
-          }
-        }),
-        {
-          status: 200,
-          headers: { 'content-type': 'text/plain' }
-        }
-      )
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start: controller => {
+                controller.enqueue(new TextEncoder().encode(input.responseChunk))
+              },
+              cancel: () => {
+                input.onCancel()
+              }
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'text/plain' }
+            }
+          )
+        )
+      })
     )
-  }
+  )
 
 const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
-  const body = requests[0]?.init?.body
-  expect(typeof body).toBe('string')
+  const body = requests[0]?.request.body
+  expect(body?._tag).toBe('Uint8Array')
 
-  if (typeof body !== 'string') {
-    expect.fail('Expected OpenAI Codex request body to be a string')
+  if (body?._tag !== 'Uint8Array') {
+    expect.fail('Expected OpenAI Codex request body to be text')
   }
 
-  return JSON.parse(body)
+  return JSON.parse(new TextDecoder().decode(body.body))
 }
 
 const readCapturedHeaders = (requests: ReadonlyArray<CapturedRequest>) => {
-  const headers = requests[0]?.init?.headers
-  expect(headers).toBeInstanceOf(Headers)
+  const headers = requests[0]?.request.headers
+  expect(headers).toBeDefined()
 
-  if (!(headers instanceof Headers)) {
-    expect.fail('Expected OpenAI Codex request headers to be Headers')
+  if (headers === undefined) {
+    expect.fail('Expected OpenAI Codex request headers')
   }
 
   return headers
@@ -112,10 +150,9 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('maps a text request to OpenAI Codex responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const layer = makeOpenAiCodexProviderLayer({
-        token,
-        fetch: makeFetch({ output_text: 'ok', output: [] }, requests)
-      })
+      const layer = makeProviderLayer(
+        makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
+      )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -132,9 +169,11 @@ describe('OpenAiCodexProviderLayer', () => {
       const requestBody = readCapturedBody(requests)
       const headers = readCapturedHeaders(requests)
 
-      expect(requests[0]?.input).toBe(OPENAI_CODEX_RESPONSES_URL)
-      expect(headers.get('authorization')).toBe('Bearer access-token')
-      expect(headers.get('ChatGPT-Account-Id')).toBe('acct_test')
+      expect(requests[0]?.request.url).toBe(OPENAI_CODEX_RESPONSES_URL)
+      expect(Option.getOrUndefined(Headers.get(headers, 'authorization'))).toBe(
+        'Bearer access-token'
+      )
+      expect(Option.getOrUndefined(Headers.get(headers, 'ChatGPT-Account-Id'))).toBe('acct_test')
       expect(requestBody).toMatchObject({
         model: 'gpt-5.4',
         instructions: 'Be brief.',
@@ -143,14 +182,14 @@ describe('OpenAiCodexProviderLayer', () => {
         stream: true
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done'])
-    }))
+    })
+  )
 
   it.effect('maps OpenAI Codex function calls to tool call events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const layer = makeOpenAiCodexProviderLayer({
-        token,
-        fetch: makeFetch(
+      const layer = makeProviderLayer(
+        makeHttpClientLayer(
           {
             output: [
               {
@@ -163,16 +202,14 @@ describe('OpenAiCodexProviderLayer', () => {
           },
           requests
         )
-      })
+      )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
-            tools: [
-              ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })
-            ],
+            tools: [ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })],
             model: 'gpt-5.4',
             systemPrompt: 'Use tools.'
           })
@@ -196,14 +233,14 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(events[0]).toMatchObject({
         call: { id: 'call_1', name: 'weather', params: { city: 'Paris' } }
       })
-    }))
+    })
+  )
 
   it.effect('parses OpenAI Codex SSE even when content type is not event-stream', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const layer = makeOpenAiCodexProviderLayer({
-        token,
-        fetch: makeRawFetch(
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
           [
             'event: response.output_text.delta',
             'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
@@ -217,7 +254,7 @@ describe('OpenAiCodexProviderLayer', () => {
           ].join('\n'),
           requests
         )
-      })
+      )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -233,17 +270,19 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual(['TextDelta', 'TextDelta', 'Done'])
-      expect(
-        events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))
-      ).toEqual(['oauth ', 'smoke ok', 'Done'])
-    }))
+      expect(events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))).toEqual([
+        'oauth ',
+        'smoke ok',
+        'Done'
+      ])
+    })
+  )
 
   it.effect('emits OpenAI Codex SSE deltas before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const layer = makeOpenAiCodexProviderLayer({
-        token,
-        fetch: makeOpenSseFetch(
+      const layer = makeProviderLayer(
+        makeOpenSseHttpClientLayer(
           [
             'event: response.output_text.delta',
             'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
@@ -252,7 +291,7 @@ describe('OpenAiCodexProviderLayer', () => {
           ].join('\n'),
           requests
         )
-      })
+      )
 
       const eventsOption = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -273,15 +312,15 @@ describe('OpenAiCodexProviderLayer', () => {
       const events = Array.from(eventsOption.value)
       expect(events).toHaveLength(1)
       expect(events[0]).toMatchObject({ _tag: 'TextDelta', text: 'oauth ' })
-    }))
+    })
+  )
 
   it.effect('cancels OpenAI Codex response body when stream stops early', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       let cancelled = false
-      const layer = makeOpenAiCodexProviderLayer({
-        token,
-        fetch: makeCancelableOpenSseFetch({
+      const layer = makeProviderLayer(
+        makeCancelableOpenSseHttpClientLayer({
           responseChunk: [
             'event: response.output_text.delta',
             'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
@@ -293,7 +332,7 @@ describe('OpenAiCodexProviderLayer', () => {
             cancelled = true
           }
         })
-      })
+      )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -310,5 +349,6 @@ describe('OpenAiCodexProviderLayer', () => {
       const events = Array.from(eventsChunk)
       expect(events).toHaveLength(1)
       expect(cancelled).toBe(true)
-    }))
+    })
+  )
 })

@@ -1,5 +1,10 @@
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { Config, Data, Effect } from 'effect'
+import {
+  FetchHttpClient,
+  HttpEffect,
+  HttpServerRequest,
+  HttpServerResponse
+} from 'effect/unstable/http'
+import { Config, Data, Effect, Layer } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayer } from '@/lib/agents/runtime-layer'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
@@ -42,7 +47,9 @@ const makeAgentResponseWithProvider = (
 ) =>
   Effect.gen(function* () {
     const token = yield* getValidOpenAiCodexToken(userId)
-    const providerLayer = makeOpenAiCodexProviderLayer({ token, fetch: globalThis.fetch })
+    const providerLayer = makeOpenAiCodexProviderLayer({ token }).pipe(
+      Layer.provide(FetchHttpClient.layer)
+    )
 
     return yield* makeAgentPostResponse(input, config).pipe(
       Effect.provide(makeAgentRuntimeLayer(providerLayer))
@@ -72,13 +79,17 @@ const handler = Effect.gen(function* () {
     reportError(new AgentRouteError({ message: 'Invalid request body', cause: error }), {
       operation: 'agent.route',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }))
+    )
   ),
   Effect.catchTag('SchemaError', error =>
     reportError(new AgentRouteError({ message: 'Invalid request body', cause: error }), {
       operation: 'agent.route',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }))
+    )
   ),
   Effect.catchTag('OpenAiCodexAuthNotFoundError', () =>
     HttpServerResponse.json({ error: 'OpenAI Codex not connected' }, { status: 409 })
@@ -88,14 +99,20 @@ const handler = Effect.gen(function* () {
       operation: 'agent.route',
       status: 409
     }).pipe(
-      Effect.andThen(HttpServerResponse.json({ error: 'OpenAI Codex auth invalid' }, { status: 409 }))
+      Effect.andThen(
+        HttpServerResponse.json({ error: 'OpenAI Codex auth invalid' }, { status: 409 })
+      )
     )
   ),
   Effect.catchTag('OpenAiCodexOAuthError', error =>
     reportError(new AgentRouteError({ message: 'OpenAI Codex OAuth failed', cause: error }), {
       operation: 'agent.route',
       status: 502
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'OpenAI Codex OAuth failed' }, { status: 502 })))
+    }).pipe(
+      Effect.andThen(
+        HttpServerResponse.json({ error: 'OpenAI Codex OAuth failed' }, { status: 502 })
+      )
+    )
   ),
   Effect.catch(error =>
     reportError(new AgentRouteError({ message: 'Agent request failed', cause: error }), {
