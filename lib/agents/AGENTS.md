@@ -7,7 +7,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Unified `/agent` UI with text input and mic voice mode
 - `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
-- Text-only web tools wired for fetch/search smoke tests
+- Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
@@ -25,7 +25,7 @@ Hardcoded in `app/api/agent/route.ts`:
 | --- | --- | --- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary.
+Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex text provider is text-only; image/audio user input is rejected.
 
 Reasoning:
 
@@ -41,13 +41,14 @@ Reasoning:
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
+- `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
 - App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No durable transcript or product permissions yet
 
 ## JSON Boundaries
 
-- Production encode/decode uses `Schema.UnknownFromJsonString` + Effect mapping.
+- Use Effect Schema at production JSON boundaries; prefer `Schema.UnknownFromJsonString` for unknown JSON strings, and use specific schemas (`Schema.fromJsonString(...)`) when the payload shape is known.
 - Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages.
 - Browser-only Realtime hook may use raw JSON for data-channel payloads; HTTP uses Effect `HttpClient`.
 - Direct JSON helpers are fine in tests.
@@ -58,6 +59,7 @@ Reasoning:
 - Hook: `app/agent/use-realtime-voice.ts`
 - SDP route: `app/api/agent/realtime/call/route.ts`
 - Tool route: `app/api/agent/realtime/tool/route.ts`
+- `/call` mints OpenAI Realtime SDP using `OPENAI_API_KEY`; `/tool` executes provider-neutral voice tool calls
 - Adapter helpers: `realtime/openai-realtime.ts`, `realtime/tool-bridge.ts`
 - Model: `gpt-realtime-2`; voice: `marin`; reasoning effort: `low`
 - Input transcription: user-selectable in agent console via `transcriptionModel` query param; default `gpt-realtime-whisper`; also supports `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`
@@ -87,7 +89,13 @@ Reasoning:
 - Used for ChatGPT Plus/Pro/Max subscription access
 - Does **not** use `OPENAI_API_KEY`
 - Requires per-user Codex OAuth token from `lib/core/agent/openai-codex-auth.ts`
-- Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`
+- Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`; `accountId` stores ChatGPT account id when present
+- Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
+- `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use
+
+Route status conventions:
+
+- Text route returns `401` unauthenticated, `409` missing/invalid Codex auth, `502` OAuth/provider failures
 
 Codex backend quirks:
 

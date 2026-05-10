@@ -138,7 +138,7 @@ E2E scripts set `NODE_ENV=test`, so `playwright.config.ts` loads **only** `.env.
 
 **Never add a direct `dotenv.config()` call** — always `import '@/lib/dotenv'` (or `import '../lib/dotenv'` from root config files). This is the single source of truth.
 
-`playwright.config.ts` fails fast if required test env is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN`.
+`playwright.config.ts` fails fast if bootstrap env is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN`. Route-specific app env can still be required by pages under test.
 
 ## How It Works
 
@@ -151,6 +151,8 @@ E2E scripts set `NODE_ENV=test`, so `playwright.config.ts` loads **only** `.env.
 3. `fixtures.ts` provides test-scoped `authedContext`/`authedPage` and `apiContext` with JSON accept header
 4. Each test gets an isolated authenticated page ready to navigate
 5. `global-teardown.ts` runs TRUNCATE CASCADE after all tests
+
+`process.env.TEST_SESSION_TOKEN` is an approved Playwright setup → fixture handoff boundary; do not copy this pattern into app/services.
 
 ## Key Patterns
 
@@ -180,6 +182,8 @@ await Effect.gen(function* () {
 ```
 
 `Effect.runPromise` is acceptable here because Playwright hooks are the async boundary. Do not use it inside reusable helpers; helpers should return `Effect` values.
+
+Root Vitest currently may discover package tests; `pnpm test:run` then also runs `packages/*` tests. If scripts/config change, update root/package docs together.
 
 ### Per-file data seeding
 

@@ -18,9 +18,11 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 
 - Prefer chat language: `AgentChatItem`, `buildAgentChatItems`; avoid “timeline”.
 - Stable messages come from protocol `AgentMessage[]`; streaming text/reasoning remain drafts until finalized.
-- `AgentClientState.liveMessages` anchors completed assistant/tool turns during an active run; render `messages + liveMessages + drafts`.
-- Tool rows derive from `AgentToolRun` (`Called`/`Running`/`Completed`) keyed by tool call id; timing lives in the run state.
-- Render tool calls at the assistant message position; never append live tool rows after the current assistant draft.
+- `AgentClientState.liveMessages` stores committed assistant/tool-result protocol messages during an active run; render `messages + liveMessages`, then drafts/status.
+- Tool rows are anchored by `Assistant.toolCalls`; `AgentToolRun` supplies lifecycle state, timing, and result by `call.id`.
+- Do not render active tool rows from `toolRuns` alone before the assistant message exists; use `AssistantStatus` for pre-anchor activity.
+- Matching `ToolResultMessage`s fold into the anchored `ToolRun`; render standalone `ToolResult` only for orphan results.
+- Completed tool duration is known only from `AgentToolRun`; protocol-only results use unknown duration.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - User and assistant drafts are render items; keep projection pure and deterministic.
 - Tool result display names come from prior assistant tool calls; fall back to tool call id.
@@ -40,5 +42,6 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 
 - `.repos/ai` and `.repos/opencode` model tools as message parts; prefer that over detached tool arrays.
 - `.repos/t3code` is layout inspiration only; do not copy UI implementation.
+- Keep tests for live result visibility, row-before-draft anchoring, orphan result fallback, and status labels.
 - `lib/agents/AGENTS.md` covers server/provider/runtime wiring.
 - `packages/AGENTS.md` covers reusable package boundaries.

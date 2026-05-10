@@ -40,6 +40,7 @@ app -> client -> protocol + Effect
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
+- `packages/harness/` is stale/empty and not a real workspace package unless a `package.json` is added.
 
 ## Reasoning
 
@@ -88,3 +89,5 @@ app -> client -> protocol + Effect
 
 - `@yolk/agent-loop` root export currently includes `testing/faux-provider` and `testing/test-tool-executor` for local tests.
 - Prefer a future `./testing` subpath for additional test helpers; do not grow the production root API casually.
+- Package exports point to TypeScript source (`src/index.ts`), not `dist`.
+- `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.

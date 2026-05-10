@@ -31,6 +31,12 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **Patterns describe intent; code describes reality.** Check the codebase first before assuming something is/isn't implemented.
 - **Use patterns as guidance.** Follow patterns, types, and architecture defined in relevant files.
 
+## ENV BOUNDARIES
+
+- Effect app/service code uses `Config.*` (`yield* Config.*` inside `Effect.gen`; map config errors around the whole block).
+- Direct `process.env` is allowed only in sync framework/config boundaries: root configs, `lib/dotenv.ts`, Sentry/instrumentation files, Playwright setup/fixtures env handoff, and sync SDK callbacks like `TelemetryLayer`.
+- Never add direct `dotenv.config()` calls outside `lib/dotenv.ts`; import the centralized module from root configs.
+
 ## CAPABILITIES
 
 | Capability         | Service   | Details                                              |
@@ -50,11 +56,12 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 
 | Task                 | Location                             | Notes                                        |
 | -------------------- | ------------------------------------ | -------------------------------------------- |
-| Add server action    | `lib/core/[domain]/*-action.ts`      | One action per file, see EFFECT_SERVER_ACTIONS |
+| Add app page/UI      | `app/`                               | See `app/AGENTS.md` + EFFECT_PAGES           |
+| Add server action    | `lib/core/[domain]/*-action.ts`      | One action per file, see `lib/core/AGENTS.md` |
 | Add domain function  | `lib/core/[domain]/*.ts`             | Pure Effect functions, see EFFECT_DOMAIN_FUNCTIONS |
 | Add new service      | `lib/services/[name]/`               | Follow `lib/services/AGENTS.md` pattern      |
 | Add dynamic page     | `app/*/page.tsx`                     | See EFFECT_PAGES for Suspense pattern        |
-| Add API route        | `app/api/[route]/route.ts`           | HTTP boundaries (auth/agent/webhooks); CRUD via actions; see EFFECT_API_ROUTES |
+| Add API route        | `app/api/[route]/route.ts`           | HTTP boundaries only; see `app/api/AGENTS.md` |
 | Add UI component     | `components/ui/`                     | Uses Base UI, not Radix                      |
 | Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs |
 | Add E2E tests        | `e2e/`                               | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md` |
@@ -69,6 +76,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add agent tool       | `lib/agents/tools/`                  | App `ToolModule`s; scope via `resolveAgentTools` |
 | Agent auth actions   | `lib/core/agent/*-action.ts`         | OpenAI Codex connect/disconnect actions      |
 | Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
+| Local lint rule      | `eslint-local-rules/`                | See `eslint-local-rules/AGENTS.md`           |
 | Agent loop design    | `AGENT_LOOP.md`                      | Stateless loop details and decisions         |
 
 ## CODE MAP
@@ -115,7 +123,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | API routes for CRUD operations                      | Server actions (`lib/core/[domain]/*-action.ts`)                                         |
 | Streaming files through server                      | Signed direct uploads (R2/S3); add file service first                                    |
-| `process.env.X` with throws                         | `yield* Config.string('X')`                                                              |
+| Raw `process.env` in Effect app/service code         | `yield* Config.*`; direct env only in documented sync boundaries                         |
 | `router.push()` for logout                          | `window.location.href = '/'` (layout cache issue)                                        |
 | Barrel files (`index.ts` re-exports)                | Import from `live-layer.ts` directly                                                     |
 | `Effect.runPromise()` in pages                      | `NextEffect.runPromise()` (handles redirects)                                            |
@@ -153,13 +161,20 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **`@effect/platform-node` removed** - Db uses `PgDrizzle.make()` + `@effect/sql-pg` directly
 - **LSP shows stale v3 errors** - always use `pnpm tsc` for accurate type checking
 - **NextEffect.runPromise** required because Next.js redirects must be called outside try-catch
+- **Root Vitest may discover package tests** - `pnpm test:run` then also runs package tests; update scripts/docs together if this changes
+- **`packages/harness/` is stale/empty** - not a real workspace package unless a `package.json` is added
+- **`CLAUDE.md` is a pointer** - `AGENTS.md` is the canonical project knowledge base
 
 ## SUBDIRECTORY DOCS
 
 - `patterns/README.md` - Architecture and convention patterns index
+- `app/AGENTS.md` - App Router page/layout/auth/API boundaries
+- `app/api/AGENTS.md` - HTTP route handler and Realtime route patterns
 - `app/agent/AGENTS.md` - Agent chat UI composition and headless boundaries
+- `lib/core/AGENTS.md` - Server actions, domain functions, shared errors
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `components/ui/AGENTS.md` - UI component install sources and customizations
 - `e2e/AGENTS.md` - E2E test patterns, locator priority, streaming guards, auth cookies
+- `eslint-local-rules/AGENTS.md` - Custom ESLint rule conventions

@@ -15,6 +15,7 @@ lib/services/
 
 - **No barrel files** - Import directly from `live-layer.ts`
 - **One service per directory** - Keep services focused and single-purpose
+- `as const` is allowed for literal/discriminant inference; `as Type` casts remain banned.
 
 ## Service Definition Pattern
 
@@ -151,17 +152,20 @@ layerConfig({ url: Config.redacted('DATABASE_URL') })
 For optional environment variables:
 
 ```typescript
+import { Option } from 'effect'
+
 const optional = yield* Config.option(Config.string('OPTIONAL_VAR'))
-// Returns Option<string>
-const value = optional._tag === 'Some' ? optional.value : undefined
+const value = Option.getOrUndefined(optional)
 ```
+
+Raw `process.env` is allowed only in sync infra callbacks/config boundaries; document any exception inline.
 
 ## External HTTP Pattern
 
 - Use Effect `HttpClient` from `effect/unstable/http` inside services.
 - Static live layers provide `FetchHttpClient.layer` internally.
-- Test factories should accept `Layer.Layer<HttpClient.HttpClient>` and inject test clients.
-- `makeOpenAiCodexOAuthLayer(httpClientLayer)` is the canonical injectable HTTP service helper.
+- HTTP-backed services should expose an injectable layer factory accepting `Layer.Layer<HttpClient.HttpClient>`.
+- `makeOpenAiCodexOAuthLayer(httpClientLayer)` is the current example.
 - Avoid raw `fetch` or storing `typeof fetch` in service config.
 
 ## Observability Pattern
@@ -247,8 +251,10 @@ Effect.runPromise(program.pipe(Effect.provide(Auth.layer)))
 - [ ] Add static `layer` property (fully composed with all deps)
 - [ ] Create `errors.ts` with `Data.TaggedError` or `Schema.TaggedErrorClass` errors (if needed)
 - [ ] Use `Config` for environment variables (`yield*` in `Effect.gen`, direct Config for config-aware APIs)
+- [ ] Use `Config.redacted` for secrets
+- [ ] Use `Config.option` + `Option.match`/`Option.getOrUndefined` for optional env
 - [ ] Add `Effect.withSpan()` to all methods
 - [ ] Add `Effect.annotateCurrentSpan()` for relevant attributes
 - [ ] Add `Effect.tapError()` where boundary error logs help without duplication
 - [ ] Add to `lib/layers.ts` AppLayer if app code needs service directly
-- [ ] Return `as const` from service make effect for type inference
+- [ ] Return `as const` from service make effect for type inference; never cast with `as Type`
