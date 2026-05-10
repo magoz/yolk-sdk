@@ -1,5 +1,6 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Config, Data, Effect } from 'effect'
+import type { LLMError } from '@yolk/agent-loop'
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayer } from '@/lib/agents/runtime-layer'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
@@ -15,6 +16,18 @@ class AgentRouteError extends Data.TaggedError('AgentRouteError')<{
   message: string
   cause?: unknown
 }> {}
+
+const llmStatus = (error: LLMError) => {
+  switch (error.cause) {
+    case 'rate_limit':
+      return 429
+    case 'context_overflow':
+      return 413
+    case 'invalid_response':
+    case 'provider_error':
+      return 502
+  }
+}
 
 const defaultSystemPrompt = 'You are Yolk assistant. Be concise and practical.'
 
@@ -129,6 +142,13 @@ const handler = Effect.gen(function* () {
       status: 502
     }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'OpenAI Codex OAuth failed' }, { status: 502 })))
   ),
+  Effect.catchTag('LLMError', error => {
+    const status = llmStatus(error)
+    return reportError(new AgentRouteError({ message: error.message, cause: error }), {
+      operation: 'agent.route',
+      status
+    }).pipe(Effect.andThen(HttpServerResponse.json({ error: error.message }, { status })))
+  }),
   Effect.catch(error =>
     reportError(new AgentRouteError({ message: 'Agent request failed', cause: error }), {
       operation: 'agent.route',

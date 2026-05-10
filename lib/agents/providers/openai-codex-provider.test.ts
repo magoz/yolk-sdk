@@ -83,7 +83,8 @@ describe('OpenAiCodexProviderLayer', () => {
         model: 'gpt-5.4',
         instructions: 'Be brief.',
         input: [{ role: 'user', content: 'hello' }],
-        max_output_tokens: 4096
+        store: false,
+        stream: true
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done'])
     }))

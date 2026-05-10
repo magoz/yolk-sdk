@@ -52,7 +52,8 @@ type OpenAiCodexRequestBody = {
   readonly model: string
   readonly instructions: string
   readonly input: ReadonlyArray<OpenAiCodexInputItem>
-  readonly max_output_tokens: number
+  readonly store: false
+  readonly stream: true
   readonly tools?: ReadonlyArray<OpenAiCodexTool>
 }
 
@@ -193,11 +194,12 @@ export const toOpenAiCodexRequestBody = (
       input.push(...(yield* messageToCodexInput(message)))
     }
 
-    const body = {
+    const body: Omit<OpenAiCodexRequestBody, 'tools'> = {
       model: request.model,
       instructions: request.systemPrompt,
       input,
-      max_output_tokens: 4096
+      store: false,
+      stream: true
     }
 
     if (request.tools.length === 0) {
@@ -224,8 +226,10 @@ const responseStatusToCause = (status: number): LLMError['cause'] => {
 
 const isRetryableStatus = (status: number) => status === 429 || status >= 500
 
-const parseJson = (response: Response): Promise<unknown> => response.json()
 const readText = (response: Response): Promise<string> => response.text()
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
 
 const parseToolArguments = (raw: string) =>
   Effect.try({
@@ -278,6 +282,97 @@ const toLlmEvents = (response: OpenAiCodexResponse): Effect.Effect<ReadonlyArray
     const hasToolCall = events.some(event => event._tag === 'ToolCall')
     events.push(LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
 
+    return events
+  })
+
+const decodeOpenAiCodexResponse = (json: unknown) =>
+  Schema.decodeUnknownEffect(OpenAiCodexResponse)(json).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `Invalid OpenAI Codex response: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
+const parseSseData = (raw: string): ReadonlyArray<string> => {
+  const data: Array<string> = []
+
+  for (const block of raw.split('\n\n')) {
+    const lines: Array<string> = []
+
+    for (const line of block.split('\n')) {
+      if (line.startsWith('data:')) {
+        lines.push(line.slice(5).trimStart())
+      }
+    }
+
+    const joined = lines.join('\n').trim()
+    if (joined.length > 0 && joined !== '[DONE]') {
+      data.push(joined)
+    }
+  }
+
+  return data
+}
+
+const parseStreamingCodexResponse = (raw: string): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const events: Array<LLMEvent> = []
+    let finalResponse: unknown | undefined
+
+    for (const data of parseSseData(raw)) {
+      const parsed = yield* Effect.try({
+        try: (): unknown => JSON.parse(data),
+        catch: error =>
+          new LLMError({
+            cause: 'invalid_response',
+            message: `Could not parse OpenAI Codex stream event JSON: ${unknownToMessage(error)}`,
+            retryable: false
+          })
+      })
+
+      if (!isRecord(parsed)) {
+        continue
+      }
+
+      if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+        events.push(LLMTextDelta.make({ text: parsed.delta }))
+      }
+
+      if (parsed.type === 'response.completed') {
+        finalResponse = parsed.response
+      }
+
+      if (parsed.type === 'error' && typeof parsed.message === 'string') {
+        return yield* Effect.fail(
+          new LLMError({
+            cause: 'provider_error',
+            message: `OpenAI Codex stream error: ${parsed.message}`,
+            retryable: false
+          })
+        )
+      }
+    }
+
+    if (finalResponse !== undefined) {
+      const parsedFinal = yield* decodeOpenAiCodexResponse(finalResponse)
+      const finalEvents = yield* toLlmEvents(parsedFinal)
+      const hasTextDelta = events.some(event => event._tag === 'TextDelta')
+
+      for (const event of finalEvents) {
+        if (event._tag === 'TextDelta' && hasTextDelta) {
+          continue
+        }
+        events.push(event)
+      }
+
+      return events
+    }
+
+    events.push(LLMDone.make({ stopReason: 'stop' }))
     return events
   })
 
@@ -344,8 +439,22 @@ const sendOpenAiCodexRequest = (
       )
     }
 
-    const json = yield* Effect.tryPromise({
-      try: () => parseJson(response),
+    const raw = yield* Effect.tryPromise({
+      try: () => readText(response),
+      catch: error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `Could not read OpenAI Codex response: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    })
+
+    if (raw.trimStart().startsWith('event:') || raw.trimStart().startsWith('data:')) {
+      return yield* parseStreamingCodexResponse(raw)
+    }
+
+    const json = yield* Effect.try({
+      try: (): unknown => JSON.parse(raw),
       catch: error =>
         new LLMError({
           cause: 'invalid_response',
@@ -353,16 +462,7 @@ const sendOpenAiCodexRequest = (
           retryable: false
         })
     })
-    const parsed = yield* Schema.decodeUnknownEffect(OpenAiCodexResponse)(json).pipe(
-      Effect.mapError(
-        error =>
-          new LLMError({
-            cause: 'invalid_response',
-            message: `Invalid OpenAI Codex response: ${unknownToMessage(error)}`,
-            retryable: false
-          })
-      )
-    )
+    const parsed = yield* decodeOpenAiCodexResponse(json)
 
     return yield* toLlmEvents(parsed)
   }).pipe(Effect.withSpan('OpenAiCodexProvider.stream'))
