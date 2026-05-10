@@ -118,11 +118,11 @@ export const isServiceConfigError = Schema.is(ServiceConfigError)
 - Prefix with service name: `AuthApiError`, `EmailConfigError`
 - Common suffixes: `ApiError`, `ConfigError`, `ValidationError`
 
-**Domain errors** belong in each `lib/core/[domain]/errors.ts` file, colocated with domain logic.
+**Domain-owned errors** belong in `lib/core/[domain]/errors.ts`; service-owned integration errors may be reused by domain code when the failure originates in that service.
 
 ## Configuration Pattern
 
-Always use Effect's `Config` module — never use `process.env` directly with throws.
+Use Effect's `Config` module for environment values. Only infrastructure-level sync callbacks may read `process.env` directly (example: `TelemetryLayer`, because `NodeSdk.layer()` requires sync setup).
 
 Config values are **Yieldable** but NOT `Effect` subtypes — yield directly, map errors on the whole block:
 
@@ -142,6 +142,12 @@ Effect.gen(function* () {
 Config.string('URL').pipe(Effect.mapError(...)) // ERROR in v4
 ```
 
+Config-aware APIs may receive Config values directly:
+
+```typescript
+layerConfig({ url: Config.redacted('DATABASE_URL') })
+```
+
 For optional environment variables:
 
 ```typescript
@@ -155,11 +161,12 @@ const value = optional._tag === 'Some' ? optional.value : undefined
 - Use Effect `HttpClient` from `effect/unstable/http` inside services.
 - Static live layers provide `FetchHttpClient.layer` internally.
 - Test factories should accept `Layer.Layer<HttpClient.HttpClient>` and inject test clients.
+- `makeOpenAiCodexOAuthLayer(httpClientLayer)` is the canonical injectable HTTP service helper.
 - Avoid raw `fetch` or storing `typeof fetch` in service config.
 
 ## Observability Pattern
 
-All service methods must include tracing:
+All service methods must include tracing; add `tapError` where it gives useful external/boundary diagnostics without duplicate noise:
 
 ```typescript
 const methodName = (arg: string) =>
@@ -204,7 +211,7 @@ export const AppLayer = Layer.mergeAll(
 )
 ```
 
-`Auth.layer` provides `Email.layer` internally for OTP delivery. `OpenAiCodexOAuth.layer` is standalone because agent route/actions need it directly. Add standalone services to `AppLayer` only when app code needs them directly.
+`Auth.layer` provides `Email.layer` internally for OTP delivery. Auth uses its own Neon HTTP `AuthDb` for the better-auth adapter; do not dedupe with `Db.layer` unless the adapter supports it. `OpenAiCodexOAuth.layer` is standalone because agent route/actions need it directly. Add standalone services to `AppLayer` only when app code needs them directly.
 
 **Note:** `Logger.consolePretty()` is required for `Effect.logError` / `Effect.logWarning` to produce output. Without it, logs are silent.
 
@@ -239,9 +246,9 @@ Effect.runPromise(program.pipe(Effect.provide(Auth.layer)))
 - [ ] Create `live-layer.ts` with `Context.Service` + `make` pattern
 - [ ] Add static `layer` property (fully composed with all deps)
 - [ ] Create `errors.ts` with `Data.TaggedError` or `Schema.TaggedErrorClass` errors (if needed)
-- [ ] Use `yield* Config.string(...)` for all environment variables
+- [ ] Use `Config` for environment variables (`yield*` in `Effect.gen`, direct Config for config-aware APIs)
 - [ ] Add `Effect.withSpan()` to all methods
 - [ ] Add `Effect.annotateCurrentSpan()` for relevant attributes
-- [ ] Add `Effect.tapError()` for error logging
+- [ ] Add `Effect.tapError()` where boundary error logs help without duplication
 - [ ] Add to `lib/layers.ts` AppLayer if app code needs service directly
 - [ ] Return `as const` from service make effect for type inference

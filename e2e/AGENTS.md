@@ -119,7 +119,7 @@ e2e/
   global-setup.ts                 — reset DB + seed user + create auth session
   global-teardown.ts              — TRUNCATE CASCADE cleanup
   test-ids.ts                     — deterministic IDs shared between setup and specs
-  fixtures.ts                     — authedContext + authedPage (session cookie injection)
+  fixtures.ts                     — authedContext/authedPage (session cookie injection) + apiContext
   utils/
     test-db.ts                    — TestDbLayer alias for test infra
     cleanup.ts                    — schema-aware TRUNCATE all tables CASCADE
@@ -134,7 +134,7 @@ e2e/
 
 ## Env Isolation
 
-E2E tests load **only** `.env.test`. All env loading is centralized in `lib/dotenv.ts` — when `NODE_ENV=test` it loads `.env.test` exclusively; otherwise `.env.local` + `.env`.
+E2E scripts set `NODE_ENV=test`, so `playwright.config.ts` loads **only** `.env.test` via centralized `lib/dotenv.ts`; otherwise the app loads `.env.local` + `.env`.
 
 **Never add a direct `dotenv.config()` call** — always `import '@/lib/dotenv'` (or `import '../lib/dotenv'` from root config files). This is the single source of truth.
 
@@ -142,13 +142,13 @@ E2E tests load **only** `.env.test`. All env loading is centralized in `lib/dote
 
 ## How It Works
 
-1. `playwright.config.ts` loads `.env.test`, starts Next.js via `webServer` on `E2E_PORT` or default `3007`
+1. `pnpm test:e2e*` sets `NODE_ENV=test`; `playwright.config.ts` loads `.env.test`, starts Next.js via `webServer` on `E2E_PORT` or default `3007`
 2. `global-setup.ts` runs:
    - Resets database via `drizzle-seed` (truncate + reseed)
    - Creates test user with deterministic ID from `test-ids.ts`
    - Creates better-auth session with HMAC-SHA256 signed cookie
    - Shares signed session token via `process.env.TEST_SESSION_TOKEN`
-3. `fixtures.ts` provides test-scoped `authedContext` (BrowserContext with session cookie) and `authedPage`
+3. `fixtures.ts` provides test-scoped `authedContext`/`authedPage` and `apiContext` with JSON accept header
 4. Each test gets an isolated authenticated page ready to navigate
 5. `global-teardown.ts` runs TRUNCATE CASCADE after all tests
 
@@ -276,7 +276,7 @@ await expect.soft(page.getByText('Settings')).toBeVisible()
 
 ## Adding a New Spec
 
-1. Create `e2e/ui/my-feature.spec.ts` or `e2e/api/my-route.spec.ts`
+1. Create `e2e/ui/my-feature.spec.ts`; create `e2e/api/` first if adding API specs
 2. Import `{ test, expect }` from `../fixtures` (authenticated) or `@playwright/test` (public)
 3. Add `test.describe.configure({ mode: 'serial' })` if using `beforeAll`
 4. **Start `beforeAll` with cleanup** for all deterministic IDs — retries re-run `beforeAll`

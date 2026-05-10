@@ -7,7 +7,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Unified `/agent` UI with text input and mic voice mode
 - `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
-- Calculator tool wired for tool-call smoke tests
+- Text-only web tools wired for fetch/search smoke tests
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
@@ -35,13 +35,15 @@ Reasoning:
 
 ## Current Tools
 
-- File: `tools/calculator-tool.ts`
-- Tool name: `calculate`
-- Supports `add`, `subtract`, `multiply`, `divide`
+- `tools/web-fetch-tool.ts`: `web_fetch`; text-only public URL fetch; markdown/text/html; no search/browser automation/cookies
+- `tools/web-search-tool.ts`: `web_search`; text-only Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
+- Both app tools are gated to `surface === 'text'`; voice currently resolves no enabled tools
+- No calculator tool is registered
+- `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
+- `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
-- Shared by text and Realtime voice smoke tests
-- Smoke-test only; no durable transcript or product permissions yet
+- No durable transcript or product permissions yet
 
 ## JSON Boundaries
 
@@ -58,14 +60,16 @@ Reasoning:
 - Tool route: `app/api/agent/realtime/tool/route.ts`
 - Adapter helpers: `realtime/openai-realtime.ts`, `realtime/tool-bridge.ts`
 - Model: `gpt-realtime-2`; voice: `marin`; reasoning effort: `low`
-- Input transcription: `gpt-realtime-whisper`; completed user transcripts append to shared messages
-- Event names: user transcripts `conversation.item.input_audio_transcription.*`; assistant transcript `response.output_audio_transcript.*`; tool calls in `response.done`
+- Input transcription: user-selectable in agent console via `transcriptionModel` query param; default `gpt-realtime-whisper`; also supports `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`
+- Prompted transcription models receive prompt `Transcribe English speech. Preserve exact words.`; `gpt-realtime-whisper` omits prompt
+- Completed user transcripts append to shared messages
+- Event names: input transcripts `conversation.item.input_audio_transcription.*`; assistant transcripts `response.output_audio_transcript.*` or `response.audio_transcript.*`; session config `session.created`/`session.updated`; tool calls are `function_call` items inside `response.done.response.output`
 - Uses `OPENAI_API_KEY`, not Codex OAuth
 - OpenRouter is not supported for Realtime voice: no `gpt-realtime-2`/Realtime endpoints there
 - Voice tool context route is `/agent`; `/agent/voice` is legacy redirect only
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
 - Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
-- `@yolk/voice-runtime` owns provider-neutral tool execution bridge
+- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset currently empty until a tool enables `surface === 'voice'`
 - OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 
 ## OpenAI API-Key Provider
@@ -95,6 +99,7 @@ Codex backend quirks:
 - Send `ChatGPT-Account-Id` when token has account id
 - Response may be SSE even with `content-type: text/plain`; detect by raw `event:`/`data:` body
 - Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
+- Tool calls may arrive before completion as `response.output_item.done` with `item.type = 'function_call'`; parse immediately and tolerate empty final `response.completed`
 
 ## Tests
 

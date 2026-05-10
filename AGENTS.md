@@ -36,14 +36,14 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Capability         | Service   | Details                                              |
 | ------------------ | --------- | ---------------------------------------------------- |
 | Authentication     | Auth      | Sign up, sign in, sign out, sessions, OTP email flow |
-| Database           | Db        | PostgreSQL via Drizzle ORM (Neon serverless)         |
+| Database           | Db        | PostgreSQL via Effect PgDrizzle; Auth adapter uses Neon HTTP |
 | Email sending      | Email     | Transactional email via Resend                       |
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client |
 | Text agent         | app/lib   | `/agent` + `/api/agent`; client-owned transcript + Codex OAuth + `gpt-5.4` + reasoning summaries |
-| Voice agent        | app/lib   | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` |
-| Dummy tool calling | app/lib   | `calculate` calculator tool; smoke-test only         |
+| Voice agent        | app/lib   | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
+| Web tools          | app/lib   | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
 
 ## WHERE TO LOOK
@@ -54,9 +54,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add domain function  | `lib/core/[domain]/*.ts`             | Pure Effect functions, see EFFECT_DOMAIN_FUNCTIONS |
 | Add new service      | `lib/services/[name]/`               | Follow `lib/services/AGENTS.md` pattern      |
 | Add dynamic page     | `app/*/page.tsx`                     | See EFFECT_PAGES for Suspense pattern        |
-| Add API route        | `app/api/[route]/route.ts`           | Only webhooks/external APIs, see EFFECT_API_ROUTES |
+| Add API route        | `app/api/[route]/route.ts`           | HTTP boundaries (auth/agent/webhooks); CRUD via actions; see EFFECT_API_ROUTES |
 | Add UI component     | `components/ui/`                     | Uses Base UI, not Radix                      |
-| Add tests            | `lib/core/[domain]/*.test.ts`        | Colocated with source, use @effect/vitest    |
+| Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs |
 | Add E2E tests        | `e2e/`                               | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md` |
 | Database schema      | `lib/services/db/schema.ts`          | Drizzle ORM                                  |
 | Auth flow            | `app/(auth)/`                        | better-auth + OTP email                      |
@@ -125,13 +125,13 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Import `parseAs*` from `nuqs`                       | Import from `nuqs/server` in search-params.ts                                            |
 | Direct data fetch in page component                 | Suspense + Content pattern (see EFFECT_PAGES)                                            |
 | Ad hoc nested async components                      | Use EFFECT_PAGES Shell + independent streaming sections pattern                          |
-| Missing `export const dynamic`                      | Add `export const dynamic = 'force-dynamic'` for auth                                    |
+| Static protected/session-gated pages                | Add `export const dynamic = 'force-dynamic'` or use dynamic APIs like `cookies()`         |
 | `matchEffect` for error handling                    | `catchTag` chains + `Effect.catch` catch-all                                             |
 | `Config.string('X').pipe(Effect.mapError(...))`     | Yield Config directly, map errors on whole block                                         |
 | `ServiceMap.Service<Self>()(id, { make })`          | `Context.Service<Self>()(id, { make })` — `ServiceMap` renamed to `Context` in Effect v4 |
 | `Logger.pretty`                                     | `Logger.layer([Logger.consolePretty()])` — `Logger.pretty` removed in v4                 |
 | `@effect/platform-node` for Db service              | `PgDrizzle.make()` from `drizzle-orm/effect-postgres` — handles connection internally    |
-| `drizzle(client, { schema })` manual setup          | `PgDrizzle.make({ relations })` — Effect-native, every query is an Effect                |
+| `drizzle(client, { schema })` in Db service         | `PgDrizzle.make({ relations })`; Auth intentionally uses Neon HTTP better-auth adapter   |
 | `Schema.TaggedError`                                | `Schema.TaggedErrorClass` — renamed in v4. Or use `Data.TaggedError` for simpler errors  |
 | `Either.isRight(r)` / `r.right`                     | `Result.isSuccess(r)` / `r.success` — `Either` renamed to `Result` in v4                 |
 | `Effect.catchAll(handler)`                          | `Effect.catch(handler)` — v4 rename                                                      |

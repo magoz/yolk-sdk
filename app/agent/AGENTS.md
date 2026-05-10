@@ -10,7 +10,8 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 - `agent-chat-items.ts` projects protocol/client state to `AgentChatItem[]`; test every new item/status in `agent-chat-items.test.ts`.
 - `agent-conversation.tsx` renders `AgentChatItem[]`; no transport or protocol mutation.
 - `agent-composer.tsx` owns input UX only.
-- `agent-console-dialog.tsx` is test harness chrome: provider/status/config toggles stay out of chat layout.
+- `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
+- `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/status badges.
 - `agent-activity-model.ts` maps events to activity rows; `agent-activity.tsx` renders them.
 
 ## Chat Model
@@ -28,6 +29,8 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 - Auto-scroll only when user is near bottom.
 - Show provider reasoning only (`LLMReasoningDelta` / `Assistant.reasoning`); never invent reasoning.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
+- Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
+- Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 
 ## References

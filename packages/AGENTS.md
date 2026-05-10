@@ -11,7 +11,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/tool-registry` | Scoped tool modules + executor layer | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol` |
+| `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol`, Effect |
 
 ## Dependency Rule
 
@@ -20,7 +20,7 @@ app -> agent-runtime -> agent-loop -> protocol
 app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
-app -> client -> protocol
+app -> client -> protocol + Effect
 ```
 
 ## Naming
@@ -43,7 +43,8 @@ app -> client -> protocol
 
 ## Reasoning
 
-- `AgentReasoningEffort` is protocol-only request config; app chooses values, packages pass through.
+- `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
+- `agent-runtime` does not yet thread `reasoningEffort`; text `/api/agent` calls agent-loop through app route helpers.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
 
@@ -60,6 +61,7 @@ app -> client -> protocol
 
 - `VoiceToolCallRequest` accepts provider-normalized `{ callId, name, arguments }`.
 - `executeVoiceToolCall` decodes/encodes JSON via `Schema.UnknownFromJsonString`.
+- `VoiceToolExecutionResult.output` is a JSON string envelope: `{ result }` or `{ error }`.
 - Provider adapters convert `VoiceToolExecutionResult` into provider-specific tool output events.
 - Do not import OpenAI Realtime, WebRTC, auth, or app tool catalogs here.
 
@@ -71,9 +73,15 @@ app -> client -> protocol
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
 - `collectAgentEventsEffect` = Effect-native collection helper.
+- `collectAgentEvents` = async collection helper.
 - Requests send a non-empty client-owned `AgentTranscript` (`messages`), not just the latest prompt.
 - Optional `reasoningEffort` is forwarded to the server; provider support is app-owned.
 - `StreamAgentEventsRequest.signal` interrupts Effect `HttpClient` request/body reads.
 - Mock client HTTP with `HttpClient` layers, not fetch-style helpers.
 - Keep parsing/schema errors typed as `AgentTransportError`.
 - Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.
+
+## Test Helpers
+
+- `@yolk/agent-loop` root export currently includes `testing/faux-provider` and `testing/test-tool-executor` for local tests.
+- Prefer a future `./testing` subpath for additional test helpers; do not grow the production root API casually.
