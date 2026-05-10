@@ -1,15 +1,33 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Option } from 'effect'
 import {
   AgentEnd,
   AssistantAgentMessage,
+  LLMToolCall,
   LLMTextDelta,
+  ToolCall,
+  ToolExecutionEnd,
+  ToolExecutionStart,
+  ToolResult,
   UserMessage,
   type AgentEvent,
   type AgentMessage,
   type Content
 } from '@yolk/protocol'
+import {
+  decodeOpenAiRealtimeServerEvent,
+  decodeOpenAiRealtimeToolExecutionResponse,
+  makeOpenAiRealtimeAssistantMessageItem,
+  makeOpenAiRealtimeConversationItemCreateEvent,
+  makeOpenAiRealtimeResponseCreateEvent,
+  makeOpenAiRealtimeUserMessageItem,
+  readOpenAiRealtimeToolOutput,
+  type OpenAiRealtimeClientEvent,
+  type OpenAiRealtimeConversationMessageItem,
+  type OpenAiRealtimeFunctionCall
+} from '@/lib/agents/realtime/openai-realtime-events'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -19,12 +37,6 @@ type ActiveVoiceSession = {
   readonly mediaStream: MediaStream
 }
 
-type RealtimeFunctionCall = {
-  readonly callId: string
-  readonly name: string
-  readonly argumentsJson: string
-}
-
 type UseRealtimeVoiceInput = {
   readonly messages: ReadonlyArray<AgentMessage>
   readonly onAgentEvent: (event: AgentEvent) => void
@@ -32,30 +44,7 @@ type UseRealtimeVoiceInput = {
   readonly onError: (message: string) => void
 }
 
-type RealtimeTextContent =
-  | { readonly type: 'input_text'; readonly text: string }
-  | { readonly type: 'output_text'; readonly text: string }
-
-type RealtimeConversationMessage = {
-  readonly type: 'message'
-  readonly role: 'user' | 'assistant'
-  readonly content: ReadonlyArray<RealtimeTextContent>
-}
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === 'object' && value !== null
-
-const readProperty = (value: unknown, key: string): unknown =>
-  isRecord(value) ? value[key] : undefined
-
-const readStringProperty = (value: unknown, key: string): string | null => {
-  const property = readProperty(value, key)
-  return typeof property === 'string' ? property : null
-}
-
-const parseJson = (raw: string): unknown => JSON.parse(raw)
-
-const encodeClientEvent = (event: unknown) => {
+const encodeClientEvent = (event: OpenAiRealtimeClientEvent) => {
   const encoded = JSON.stringify(event)
 
   if (encoded === undefined) {
@@ -72,14 +61,10 @@ const contentToText = (content: Content) =>
 
 const toRealtimeConversationMessage = (
   message: AgentMessage
-): RealtimeConversationMessage | null => {
+): OpenAiRealtimeConversationMessageItem | null => {
   switch (message._tag) {
     case 'User':
-      return {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: contentToText(message.content) }]
-      }
+      return makeOpenAiRealtimeUserMessageItem(contentToText(message.content))
     case 'Assistant': {
       const text = contentToText(message.content)
 
@@ -87,43 +72,19 @@ const toRealtimeConversationMessage = (
         return null
       }
 
-      return {
-        type: 'message',
-        role: 'assistant',
-        content: [{ type: 'output_text', text }]
-      }
+      return makeOpenAiRealtimeAssistantMessageItem(text)
     }
     case 'ToolResult':
       return null
   }
 }
 
-const readFunctionCalls = (event: unknown): ReadonlyArray<RealtimeFunctionCall> => {
-  if (readStringProperty(event, 'type') !== 'response.done') {
-    return []
-  }
-
-  const response = readProperty(event, 'response')
-  const output = readProperty(response, 'output')
-  const outputItems: ReadonlyArray<unknown> = Array.isArray(output) ? output : []
-  const calls: Array<RealtimeFunctionCall> = []
-
-  for (const item of outputItems) {
-    if (readStringProperty(item, 'type') !== 'function_call') {
-      continue
-    }
-
-    const callId = readStringProperty(item, 'call_id')
-    const name = readStringProperty(item, 'name')
-    const argumentsJson = readStringProperty(item, 'arguments')
-
-    if (callId !== null && name !== null && argumentsJson !== null) {
-      calls.push({ callId, name, argumentsJson })
-    }
-  }
-
-  return calls
-}
+const toolCallFromRealtime = (call: OpenAiRealtimeFunctionCall) =>
+  ToolCall.make({
+    id: call.callId,
+    name: call.name,
+    params: call.argumentsJson
+  })
 
 const remoteErrorMessage = async (response: Response) => {
   const body = await response.text()
@@ -188,7 +149,7 @@ export const useRealtimeVoice = ({
     }
   }, [])
 
-  const sendClientEvent = useCallback((dataChannel: RTCDataChannel, event: unknown) => {
+  const sendClientEvent = useCallback((dataChannel: RTCDataChannel, event: OpenAiRealtimeClientEvent) => {
     if (dataChannel.readyState !== 'open') {
       throw new Error('Realtime data channel is not open')
     }
@@ -202,7 +163,7 @@ export const useRealtimeVoice = ({
         const item = toRealtimeConversationMessage(message)
 
         if (item !== null) {
-          sendClientEvent(dataChannel, { type: 'conversation.item.create', item })
+          sendClientEvent(dataChannel, makeOpenAiRealtimeConversationItemCreateEvent(item))
         }
       }
     },
@@ -210,7 +171,11 @@ export const useRealtimeVoice = ({
   )
 
   const executeToolCall = useCallback(
-    async (call: RealtimeFunctionCall, dataChannel: RTCDataChannel) => {
+    async (call: OpenAiRealtimeFunctionCall, dataChannel: RTCDataChannel) => {
+      const toolCall = toolCallFromRealtime(call)
+      onAgentEvent(LLMToolCall.make({ call: toolCall }))
+      onAgentEvent(ToolExecutionStart.make({ call: toolCall }))
+
       const response = await fetch('/api/agent/realtime/tool', {
         method: 'POST',
         headers: {
@@ -228,15 +193,27 @@ export const useRealtimeVoice = ({
       }
 
       const payload: unknown = await response.json()
-      const outputEvent = readProperty(payload, 'event')
+      const decoded = decodeOpenAiRealtimeToolExecutionResponse(payload)
 
-      if (!isRecord(outputEvent)) {
+      if (Option.isNone(decoded)) {
         throw new Error('Tool response did not include a Realtime event')
       }
 
+      const outputEvent = decoded.value.event
+
       sendClientEvent(dataChannel, outputEvent)
+
+      onAgentEvent(
+        ToolExecutionEnd.make({
+          call: toolCall,
+          result: ToolResult.make({
+            toolCallId: call.callId,
+            content: readOpenAiRealtimeToolOutput(outputEvent)
+          })
+        })
+      )
     },
-    [sendClientEvent]
+    [onAgentEvent, sendClientEvent]
   )
 
   const commitAssistantTranscript = useCallback(
@@ -260,47 +237,33 @@ export const useRealtimeVoice = ({
         return
       }
 
-      const event = parseJson(message.data)
-      const eventType = readStringProperty(event, 'type') ?? 'unknown'
-      const delta = readStringProperty(event, 'delta')
-      const transcript = readStringProperty(event, 'transcript')
-      const calls = readFunctionCalls(event)
+      const event = decodeOpenAiRealtimeServerEvent(message.data)
 
-      if (eventType === 'conversation.item.input_audio_transcription.delta' && delta !== null) {
-        setUserDraft(current => `${current}${delta}`)
-        return
-      }
-
-      if (
-        eventType === 'conversation.item.input_audio_transcription.completed' &&
-        transcript !== null
-      ) {
-        setUserDraft('')
-        onUserMessage(UserMessage.make({ content: transcript }))
-        return
-      }
-
-      if (eventType === 'response.output_audio_transcript.delta' && delta !== null) {
-        assistantDraftRef.current = `${assistantDraftRef.current}${delta}`
-        onAgentEvent(LLMTextDelta.make({ text: delta }))
-        return
-      }
-
-      if (eventType === 'response.output_audio_transcript.done') {
-        commitAssistantTranscript(transcript)
-        return
-      }
-
-      if (calls.length > 0) {
-        await Promise.all(calls.map(call => executeToolCall(call, dataChannel)))
-        sendClientEvent(dataChannel, { type: 'response.create' })
-        return
-      }
-
-      if (eventType === 'error') {
-        const messageText = readStringProperty(readProperty(event, 'error'), 'message') ?? 'Realtime error'
-        setStatus('error')
-        onError(messageText)
+      switch (event._tag) {
+        case 'InputAudioTranscriptionDelta':
+          setUserDraft(current => `${current}${event.delta}`)
+          return
+        case 'InputAudioTranscriptionCompleted':
+          setUserDraft('')
+          onUserMessage(UserMessage.make({ content: event.transcript }))
+          return
+        case 'OutputAudioTranscriptDelta':
+          assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
+          onAgentEvent(LLMTextDelta.make({ text: event.delta }))
+          return
+        case 'OutputAudioTranscriptDone':
+          commitAssistantTranscript(event.transcript)
+          return
+        case 'FunctionCalls':
+          await Promise.all(event.calls.map(call => executeToolCall(call, dataChannel)))
+          sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent())
+          return
+        case 'Error':
+          setStatus('error')
+          onError(event.message)
+          return
+        case 'Ignored':
+          return
       }
     },
     [commitAssistantTranscript, executeToolCall, onAgentEvent, onError, onUserMessage, sendClientEvent]

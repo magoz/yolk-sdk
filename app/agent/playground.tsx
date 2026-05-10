@@ -1,9 +1,7 @@
 'use client'
 
-import type { FormEvent } from 'react'
-import { UserMessage, type AgentEvent, type AgentMessage, type Content } from '@yolk/protocol'
-import { useEffect, useReducer, useRef, useState } from 'react'
-import { LoaderCircleIcon, MicIcon, PhoneOffIcon, SendIcon, SquareIcon } from 'lucide-react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { UserMessage, type AgentEvent, type AgentMessage } from '@yolk/protocol'
 import {
   applyAgentEvent,
   appendAgentMessage,
@@ -12,14 +10,21 @@ import {
   markAgentError,
   streamAgentEvents,
   submitAgentUserMessage,
+  type AgentClientState,
   type AgentTranscript
 } from '@yolk/client'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Textarea } from '@/components/ui/textarea'
-import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
-import { useRealtimeVoice, type VoiceStatus } from './use-realtime-voice'
+import {
+  AgentActivityPanel,
+  activityItemFromAgentEvent,
+  maxActivityItems,
+  type AgentActivityItem
+} from './agent-activity'
+import { AgentComposer } from './agent-composer'
+import { AgentConversation } from './agent-conversation'
+import { AgentConversationHeader } from './agent-conversation-header'
+import { AgentStatusPanel } from './agent-status'
+import { useRealtimeVoice } from './use-realtime-voice'
 
 type AgentPlaygroundProps = {
   readonly sessionId: string
@@ -33,7 +38,7 @@ type AgentUiAction =
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
-const reducer = (state: typeof initialAgentClientState, action: AgentUiAction) => {
+const reducer = (state: AgentClientState, action: AgentUiAction): AgentClientState => {
   switch (action._tag) {
     case 'Submit':
       return submitAgentUserMessage(state, action.message)
@@ -53,107 +58,88 @@ const errorMessage = (error: unknown) =>
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
-const contentPreview = (content: Content) =>
-  typeof content === 'string'
-    ? content
-    : content.map(part => (part._tag === 'Text' ? part.text : part._tag)).join(', ')
-
-const messagePreview = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'User':
-    case 'ToolResult':
-      return contentPreview(message.content)
-    case 'Assistant': {
-      const content = contentPreview(message.content)
-
-      if (content.length > 0) {
-        return content
-      }
-
-      const toolNames = message.toolCalls.map(call => call.name).join(', ')
-      return toolNames.length > 0 ? `Tool call: ${toolNames}` : ''
-    }
-  }
-}
-
-const messageCardClass = (message: AgentMessage) => {
-  switch (message._tag) {
-    case 'User':
-      return 'ml-auto max-w-[85%] bg-primary text-primary-foreground'
-    case 'Assistant':
-      return 'max-w-[85%]'
-    case 'ToolResult':
-      return 'max-w-[85%] border-dashed bg-muted/40 text-muted-foreground shadow-none'
-  }
-}
-
-const voiceStatusVariant = (status: VoiceStatus) => {
-  switch (status) {
-    case 'live':
-      return 'secondary'
-    case 'error':
-      return 'destructive'
-    case 'connecting':
-    case 'idle':
-      return 'outline'
-  }
-}
-
-const statusVariant = (status: typeof initialAgentClientState.status) => {
-  switch (status) {
-    case 'done':
-      return 'secondary'
-    case 'error':
-      return 'destructive'
-    case 'aborted':
-    case 'idle':
-    case 'running':
-      return 'outline'
-  }
-}
-
 export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
   const [state, dispatch] = useReducer(reducer, initialAgentClientState)
   const [input, setInput] = useState('')
+  const [activityVisible, setActivityVisible] = useState(false)
+  const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const abortControllerRef = useRef<AbortController | null>(null)
+  const nextActivityIdRef = useRef(0)
   const isRunning = state.status === 'running'
+
+  const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
+    const id = nextActivityIdRef.current
+    nextActivityIdRef.current += 1
+    setActivityItems(current => [...current.slice(-(maxActivityItems - 1)), { id, ...item }])
+  }, [])
+
+  const handleAgentEvent = useCallback(
+    (event: AgentEvent) => {
+      const item = activityItemFromAgentEvent(event)
+
+      if (item !== null) {
+        recordActivity(item)
+      }
+
+      dispatch({ _tag: 'Event', event })
+    },
+    [recordActivity]
+  )
+
+  const handleAgentError = useCallback(
+    (message: string) => {
+      recordActivity({ title: 'Request error', detail: message, tone: 'error' })
+      dispatch({ _tag: 'Error', message })
+    },
+    [recordActivity]
+  )
+
+  const handleAgentAbort = useCallback(() => {
+    recordActivity({ title: 'Run aborted', detail: 'User stopped the active response.', tone: 'neutral' })
+    dispatch({ _tag: 'Abort' })
+  }, [recordActivity])
+
+  const handleUserMessage = useCallback((message: UserMessage) => {
+    dispatch({ _tag: 'AppendMessage', message })
+  }, [])
+
   const voice = useRealtimeVoice({
     messages: state.messages,
-    onAgentEvent: event => dispatch({ _tag: 'Event', event }),
-    onUserMessage: message => dispatch({ _tag: 'AppendMessage', message }),
-    onError: message => dispatch({ _tag: 'Error', message })
+    onAgentEvent: handleAgentEvent,
+    onUserMessage: handleUserMessage,
+    onError: handleAgentError
   })
   const isVoiceMode = voice.isConnecting || voice.isLive
   const inputDisabled = isRunning || isVoiceMode
+  const liveActivityCount =
+    (isRunning ? 1 : 0) + state.activeToolCalls.length + (voice.isConnecting || voice.isLive ? 1 : 0)
 
-  useEffect(() => () => {
-    abortControllerRef.current?.abort()
-  }, [])
+  const runAgent = useCallback(
+    async (messages: AgentTranscript) => {
+      const controller = new AbortController()
+      abortControllerRef.current = controller
 
-  const runAgent = async (messages: AgentTranscript) => {
-    const controller = new AbortController()
-    abortControllerRef.current = controller
+      try {
+        for await (const event of streamAgentEvents({ sessionId, messages, signal: controller.signal })) {
+          handleAgentEvent(event)
+        }
+      } catch (caught) {
+        if (controller.signal.aborted || isAbortError(caught)) {
+          handleAgentAbort()
+          return
+        }
 
-    try {
-      for await (const event of streamAgentEvents({ sessionId, messages, signal: controller.signal })) {
-        dispatch({ _tag: 'Event', event })
+        handleAgentError(errorMessage(caught))
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null
+        }
       }
-    } catch (caught) {
-      if (controller.signal.aborted || isAbortError(caught)) {
-        dispatch({ _tag: 'Abort' })
-        return
-      }
+    },
+    [handleAgentAbort, handleAgentError, handleAgentEvent, sessionId]
+  )
 
-      dispatch({ _tag: 'Error', message: errorMessage(caught) })
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null
-      }
-    }
-  }
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const handleSubmit = useCallback(() => {
     const content = input.trim()
 
     if (content.length === 0 || inputDisabled || abortControllerRef.current !== null) {
@@ -164,13 +150,26 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     const messages = appendAgentMessage(state.messages, message)
 
     setInput('')
+    recordActivity({ title: 'Prompt submitted', detail: content, tone: 'neutral' })
     dispatch({ _tag: 'Submit', message })
     void runAgent(messages)
-  }
+  }, [input, inputDisabled, recordActivity, runAgent, state.messages])
 
-  const handleStop = () => {
+  const handleInputChange = useCallback((value: string) => {
+    setInput(value)
+  }, [])
+
+  const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
-  }
+  }, [])
+
+  const handleActivityToggle = useCallback(() => {
+    setActivityVisible(current => !current)
+  }, [])
+
+  useEffect(() => () => {
+    abortControllerRef.current?.abort()
+  }, [])
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem)] p-4 md:p-8">
@@ -190,141 +189,55 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             </div>
           </div>
 
-          <div className="mt-10 space-y-4">
-            <OpenAiCodexAuthPanel initialConnected={openAiCodexConnected} />
-            <div className="grid gap-3 text-xs text-muted-foreground">
-              <div className="flex items-center justify-between border-t border-foreground/10 pt-3">
-                <span>Session</span>
-                <code className="rounded bg-muted px-2 py-1 text-foreground">{sessionId}</code>
-              </div>
-              <div className="flex items-center justify-between border-t border-foreground/10 pt-3">
-                <span>Status</span>
-                <Badge variant={statusVariant(state.status)}>{state.status}</Badge>
-              </div>
-              <div className="flex items-center justify-between border-t border-foreground/10 pt-3">
-                <span>Voice</span>
-                <Badge variant={voiceStatusVariant(voice.status)}>{voice.status}</Badge>
-              </div>
-            </div>
-          </div>
+          <AgentStatusPanel
+            sessionId={sessionId}
+            openAiCodexConnected={openAiCodexConnected}
+            textStatus={state.status}
+            voiceStatus={voice.status}
+          />
         </section>
 
         <section className="flex min-h-[34rem] flex-col rounded-3xl border border-foreground/10 bg-card shadow-sm">
-          <div className="flex items-center justify-between border-b border-foreground/10 px-5 py-4">
-            <div>
-              <p className="text-sm font-medium">Conversation</p>
-              <p className="text-xs text-muted-foreground">Type, or tap the mic to talk.</p>
-            </div>
-            {isRunning || voice.isConnecting ? (
-              <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
-            ) : voice.isLive ? (
-              <MicIcon className="size-4 text-primary" />
-            ) : null}
-          </div>
+          <AgentConversationHeader
+            activityVisible={activityVisible}
+            activityCount={activityItems.length}
+            liveActivityCount={liveActivityCount}
+            isRunning={isRunning}
+            isVoiceConnecting={voice.isConnecting}
+            isVoiceLive={voice.isLive}
+            onToggleActivity={handleActivityToggle}
+          />
 
-          <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            {state.messages.length === 0 ? (
-              <Card size="sm" className="border-dashed bg-transparent shadow-none">
-                <CardHeader>
-                  <CardTitle>Ask anything</CardTitle>
-                  <CardDescription>
-                    Client-owned transcript with a calculator tool. Ask something like “what is
-                    19 * 23?” to test tool calling.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            ) : null}
+          {activityVisible ? (
+            <AgentActivityPanel
+              items={activityItems}
+              textStatus={state.status}
+              voiceStatus={voice.status}
+              activeToolCallCount={state.activeToolCalls.length}
+              toolResultCount={state.toolResults.length}
+              error={state.error}
+            />
+          ) : null}
 
-            {state.messages.map((message, index) => {
-              const preview = messagePreview(message)
+          <AgentConversation
+            messages={state.messages}
+            voiceUserDraft={voice.userDraft}
+            assistantDraft={state.text}
+            error={state.error}
+          />
 
-              return preview.length > 0 ? (
-                <Card size="sm" key={`${message._tag}-${index}`} className={messageCardClass(message)}>
-                  <CardContent className="whitespace-pre-wrap leading-6">{preview}</CardContent>
-                </Card>
-              ) : null
-            })}
-
-            {voice.userDraft.length > 0 ? (
-              <Card size="sm" className="ml-auto max-w-[85%] bg-primary/80 text-primary-foreground">
-                <CardContent className="whitespace-pre-wrap leading-6">{voice.userDraft}</CardContent>
-              </Card>
-            ) : null}
-
-            {state.text.length > 0 ? (
-              <Card size="sm" className="max-w-[85%]">
-                <CardContent className="whitespace-pre-wrap leading-6">{state.text}</CardContent>
-              </Card>
-            ) : null}
-
-            {isRunning && state.activeToolCalls.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {state.activeToolCalls.map(call => (
-                  <Badge key={call.id} variant="outline">
-                    {call.name}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-
-            {isRunning && state.toolResults.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {state.toolResults.map(result => (
-                  <Badge key={result.toolCallId} variant="secondary">
-                    tool: {contentPreview(result.content)}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
-
-            {state.error !== null ? (
-              <Card size="sm" className="border-destructive/20 bg-destructive/5 text-destructive">
-                <CardContent>{state.error}</CardContent>
-              </Card>
-            ) : null}
-          </div>
-
-          <form onSubmit={handleSubmit} className="border-t border-foreground/10 p-4">
-            <div className="flex gap-2">
-              <Textarea
-                value={input}
-                onChange={event => setInput(event.target.value)}
-                placeholder={isVoiceMode ? 'Voice mode is active...' : 'Ask the agent...'}
-                className="min-h-12 resize-none"
-                disabled={inputDisabled}
-                aria-label="Agent prompt"
-              />
-              <Button
-                type="button"
-                size="icon-lg"
-                variant={isVoiceMode ? 'destructive' : 'outline'}
-                onClick={voice.toggleSession}
-                disabled={isRunning}
-                aria-pressed={isVoiceMode}
-                className="size-11"
-              >
-                {voice.isConnecting ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : voice.isLive ? (
-                  <PhoneOffIcon />
-                ) : (
-                  <MicIcon />
-                )}
-                <span className="sr-only">{isVoiceMode ? 'Stop voice mode' : 'Start voice mode'}</span>
-              </Button>
-              {isRunning ? (
-                <Button type="button" size="icon-lg" variant="destructive" onClick={handleStop}>
-                  <SquareIcon />
-                  <span className="sr-only">Stop</span>
-                </Button>
-              ) : (
-                <Button type="submit" size="icon-lg" disabled={input.trim().length === 0 || inputDisabled}>
-                  <SendIcon />
-                  <span className="sr-only">Send</span>
-                </Button>
-              )}
-            </div>
-          </form>
+          <AgentComposer
+            input={input}
+            inputDisabled={inputDisabled}
+            isRunning={isRunning}
+            isVoiceMode={isVoiceMode}
+            isVoiceConnecting={voice.isConnecting}
+            isVoiceLive={voice.isLive}
+            onInputChange={handleInputChange}
+            onSubmit={handleSubmit}
+            onStop={handleStop}
+            onToggleVoice={voice.toggleSession}
+          />
         </section>
       </div>
     </main>

@@ -1,13 +1,10 @@
 import type { VoiceToolExecutionResult } from '@yolk/voice-runtime'
+import {
+  makeOpenAiRealtimeFunctionCallOutputEvent,
+  type OpenAiRealtimeConversationItemCreateEvent
+} from './openai-realtime-events'
 
-export type RealtimeFunctionCallOutputEvent = {
-  readonly type: 'conversation.item.create'
-  readonly item: {
-    readonly type: 'function_call_output'
-    readonly call_id: string
-    readonly output: string
-  }
-}
+export type RealtimeFunctionCallOutputEvent = OpenAiRealtimeConversationItemCreateEvent
 
 export type OpenAiRealtimeToolExecutionResponse = {
   readonly event: RealtimeFunctionCallOutputEvent
@@ -16,14 +13,7 @@ export type OpenAiRealtimeToolExecutionResponse = {
 export const makeRealtimeFunctionCallOutputEvent = (
   callId: string,
   output: string
-): RealtimeFunctionCallOutputEvent => ({
-  type: 'conversation.item.create',
-  item: {
-    type: 'function_call_output',
-    call_id: callId,
-    output
-  }
-})
+): RealtimeFunctionCallOutputEvent => makeOpenAiRealtimeFunctionCallOutputEvent(callId, output)
 
 export const toOpenAiRealtimeToolExecutionResponse = (
   result: VoiceToolExecutionResult
