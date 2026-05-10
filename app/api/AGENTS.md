@@ -33,7 +33,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Text route requires Codex OAuth token, model `gpt-5.4`, and non-empty protocol transcript.
 - Text route resolves tools with `{ surface: 'text', route: '/agent', userId }`.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
-- Realtime `/tool` uses `@yolk/voice-runtime`; current registry returns no voice tools until a tool enables `surface === 'voice'`.
+- Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
 - Realtime routes resolve voice tools with `{ surface: 'voice', route: '/agent', userId }`.
 
 ## Exceptions

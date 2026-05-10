@@ -53,4 +53,19 @@ describe('executeVoiceToolCall', () => {
       expect(response.toolCallId).toBe('call_1')
       expect(response.output).toContain('No canned result for tool: missing')
     }))
+
+  it.effect('truncates large voice tool results', () =>
+    Effect.gen(function* () {
+      const response = yield* executeVoiceToolCall(
+        VoiceToolCallRequest.make({
+          callId: 'call_1',
+          name: 'big',
+          arguments: '{}'
+        })
+      ).pipe(Effect.provide(TestToolExecutor.layer({ big: 'x'.repeat(7000) })))
+
+      expect(response.toolCallId).toBe('call_1')
+      expect(response.output).toContain('[truncated for voice; summarize from available excerpt]')
+      expect(response.output.length).toBeLessThan(6200)
+    }))
 })

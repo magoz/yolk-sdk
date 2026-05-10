@@ -36,7 +36,7 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
           output: { voice: 'marin' }
         }
       })
-      expect(config.tools).toEqual([])
+      expect(config.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
     }))
 
   it('uses the selected prompted transcription model', () => {

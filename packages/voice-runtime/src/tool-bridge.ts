@@ -4,6 +4,7 @@ import { ToolExecutor, type ToolError } from '@yolk/agent-loop'
 import { ToolCall, type Content } from '@yolk/protocol'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+const maxVoiceToolResultCharacters = 6000
 
 export class VoiceToolCallRequest extends Schema.Class<VoiceToolCallRequest>(
   'VoiceToolCallRequest'
@@ -50,8 +51,16 @@ const stringifyToolOutput = (value: unknown) =>
     )
   )
 
+const truncateVoiceToolResult = (value: string) => {
+  if (value.length <= maxVoiceToolResultCharacters) {
+    return value
+  }
+
+  return `${value.slice(0, maxVoiceToolResultCharacters)}\n\n[truncated for voice; summarize from available excerpt]`
+}
+
 const contentToSerializable = (content: Content): unknown =>
-  typeof content === 'string' ? content : content
+  typeof content === 'string' ? truncateVoiceToolResult(content) : content
 
 const makeVoiceToolExecutionResult = (toolCallId: string, output: string) =>
   VoiceToolExecutionResult.make({ toolCallId, output })

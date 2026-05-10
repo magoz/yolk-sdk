@@ -101,12 +101,12 @@ describe('web_fetch tool', () => {
       expect(requested).toEqual([])
     }))
 
-  it.effect('enables web_fetch only for text agents', () =>
+  it.effect('enables web_fetch for text and voice agents', () =>
     Effect.gen(function* () {
       const textTools = yield* resolveAgentTools({ surface: 'text', route: '/agent', userId: 'user_1' })
       const voiceTools = yield* resolveAgentTools({ surface: 'voice', route: '/agent', userId: 'user_1' })
 
       expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
-      expect(voiceTools.tools.map(tool => tool.name)).toEqual([])
+      expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
     }))
 })

@@ -63,6 +63,7 @@ app -> client -> protocol + Effect
 - `VoiceToolCallRequest` accepts provider-normalized `{ callId, name, arguments }`.
 - `executeVoiceToolCall` decodes/encodes JSON via `Schema.UnknownFromJsonString`.
 - `VoiceToolExecutionResult.output` is a JSON string envelope: `{ result }` or `{ error }`.
+- Voice string tool results are truncated before encoding to keep Realtime responses live.
 - Provider adapters convert `VoiceToolExecutionResult` into provider-specific tool output events.
 - Do not import OpenAI Realtime, WebRTC, auth, or app tool catalogs here.
 

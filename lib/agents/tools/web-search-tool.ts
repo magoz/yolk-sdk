@@ -381,7 +381,7 @@ export const executeWebSearchTool = (
 export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = {
   def: webSearchToolDef,
   access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
+  isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
   execute: ({ call }) => executeWebSearchTool(call)
 }
 

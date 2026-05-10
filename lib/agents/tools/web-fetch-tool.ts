@@ -467,7 +467,7 @@ export const executeWebFetchTool = (
 export const webFetchToolRegistration: ToolRegistration<AgentToolContext> = {
   def: webFetchToolDef,
   access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
+  isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
   execute: ({ call }) => executeWebFetchTool(call)
 }
 

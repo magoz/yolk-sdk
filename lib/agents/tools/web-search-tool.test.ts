@@ -105,12 +105,12 @@ describe('web_search tool', () => {
       expect(result.content).toContain('Fallback result.')
     }))
 
-  it.effect('enables web_search only for text agents', () =>
+  it.effect('enables web_search for text and voice agents', () =>
     Effect.gen(function* () {
       const textTools = yield* resolveAgentTools({ surface: 'text', route: '/agent', userId: 'user_1' })
       const voiceTools = yield* resolveAgentTools({ surface: 'voice', route: '/agent', userId: 'user_1' })
 
       expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
-      expect(voiceTools.tools.map(tool => tool.name)).toEqual([])
+      expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
     }))
 })

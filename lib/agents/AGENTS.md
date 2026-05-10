@@ -35,9 +35,9 @@ Reasoning:
 
 ## Current Tools
 
-- `tools/web-fetch-tool.ts`: `web_fetch`; text-only public URL fetch; markdown/text/html; no search/browser automation/cookies
-- `tools/web-search-tool.ts`: `web_search`; text-only Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
-- Both app tools are gated to `surface === 'text'`; voice currently resolves no enabled tools
+- `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
+- `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
+- Both app tools are enabled for text and voice surfaces
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
@@ -71,7 +71,7 @@ Reasoning:
 - Voice tool context route is `/agent`; `/agent/voice` is legacy redirect only
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
 - Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
-- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset currently empty until a tool enables `surface === 'voice'`
+- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch` and `web_search`
 - OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 
 ## OpenAI API-Key Provider

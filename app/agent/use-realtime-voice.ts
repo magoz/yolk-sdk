@@ -253,6 +253,9 @@ export const useRealtimeVoice = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeSessionRef = useRef<ActiveVoiceSession | null>(null)
   const assistantDraftRef = useRef('')
+  const userDraftRef = useRef('')
+  const inputTranscriptPendingRef = useRef(false)
+  const bufferedAgentEventsRef = useRef<ReadonlyArray<AgentEvent>>([])
   const voiceCreatedMessagesRef = useRef<ReadonlyArray<AgentMessage>>([])
   const startAttemptIdRef = useRef(0)
   const isConnecting = status === 'connecting'
@@ -272,6 +275,9 @@ export const useRealtimeVoice = ({
     )
     activeSessionRef.current = null
     assistantDraftRef.current = ''
+    userDraftRef.current = ''
+    inputTranscriptPendingRef.current = false
+    bufferedAgentEventsRef.current = []
     voiceCreatedMessagesRef.current = []
     setUserDraft('')
 
@@ -287,6 +293,27 @@ export const useRealtimeVoice = ({
 
     dataChannel.send(encodeClientEvent(event))
   }, [])
+
+  const emitAgentEvent = useCallback(
+    (event: AgentEvent) => {
+      if (!inputTranscriptPendingRef.current) {
+        onAgentEvent(event)
+        return
+      }
+
+      bufferedAgentEventsRef.current = [...bufferedAgentEventsRef.current, event]
+    },
+    [onAgentEvent]
+  )
+
+  const flushBufferedAgentEvents = useCallback(() => {
+    const events = bufferedAgentEventsRef.current
+    bufferedAgentEventsRef.current = []
+
+    for (const event of events) {
+      onAgentEvent(event)
+    }
+  }, [onAgentEvent])
 
   const seedConversation = useCallback(
     (dataChannel: RTCDataChannel) => {
@@ -307,8 +334,8 @@ export const useRealtimeVoice = ({
       const call = request.realtimeCall
       const toolCall = request.toolCall
       yield* Effect.sync(() => {
-        onAgentEvent(LLMToolCall.make({ call: toolCall }))
-        onAgentEvent(ToolExecutionStart.make({ call: toolCall }))
+        emitAgentEvent(LLMToolCall.make({ call: toolCall }))
+        emitAgentEvent(ToolExecutionStart.make({ call: toolCall }))
       })
 
       const payload = yield* requestToolExecution(call)
@@ -328,7 +355,7 @@ export const useRealtimeVoice = ({
       })
 
       yield* Effect.sync(() => {
-        onAgentEvent(
+        emitAgentEvent(
           ToolExecutionEnd.make({
             call: toolCall,
             result
@@ -338,7 +365,7 @@ export const useRealtimeVoice = ({
 
       return ToolResultMessage.make({ toolCallId: result.toolCallId, content: result.content })
     }),
-    [onAgentEvent, sendClientEvent]
+    [emitAgentEvent, sendClientEvent]
   )
 
   const commitAssistantTranscript = useCallback(
@@ -351,11 +378,11 @@ export const useRealtimeVoice = ({
         return
       }
 
-      onAgentEvent(assistantEndEvent(content, toolMessages))
+      emitAgentEvent(assistantEndEvent(content, toolMessages))
       assistantDraftRef.current = ''
       voiceCreatedMessagesRef.current = []
     },
-    [onAgentEvent]
+    [emitAgentEvent]
   )
 
   const handleRealtimeMessage = useCallback(
@@ -369,10 +396,16 @@ export const useRealtimeVoice = ({
 
       switch (event._tag) {
         case 'InputAudioTranscriptionDelta':
-          yield* Effect.sync(() => setUserDraft(current => `${current}${event.delta}`))
+          yield* Effect.sync(() => {
+            inputTranscriptPendingRef.current = true
+            userDraftRef.current = `${userDraftRef.current}${event.delta}`
+            setUserDraft(userDraftRef.current)
+          })
           return
         case 'InputAudioTranscriptionCompleted':
           yield* Effect.sync(() => {
+            inputTranscriptPendingRef.current = false
+            userDraftRef.current = ''
             onDebug({
               _tag: 'InputTranscript',
               itemId: event.itemId,
@@ -380,12 +413,13 @@ export const useRealtimeVoice = ({
             })
             setUserDraft('')
             onUserMessage(UserMessage.make({ content: event.transcript }))
+            flushBufferedAgentEvents()
           })
           return
         case 'OutputAudioTranscriptDelta':
           yield* Effect.sync(() => {
             assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
-            onAgentEvent(LLMTextDelta.make({ text: event.delta }))
+            emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
           })
           return
         case 'OutputAudioTranscriptDone':
@@ -441,7 +475,16 @@ export const useRealtimeVoice = ({
           return
       }
     }),
-    [commitAssistantTranscript, executeToolCall, onAgentEvent, onDebug, onError, onUserMessage, sendClientEvent]
+    [
+      commitAssistantTranscript,
+      emitAgentEvent,
+      executeToolCall,
+      flushBufferedAgentEvents,
+      onDebug,
+      onError,
+      onUserMessage,
+      sendClientEvent
+    ]
   )
 
   const startSession = useCallback(() => {
@@ -461,6 +504,9 @@ export const useRealtimeVoice = ({
     setStatus('connecting')
     setUserDraft('')
     assistantDraftRef.current = ''
+    userDraftRef.current = ''
+    inputTranscriptPendingRef.current = false
+    bufferedAgentEventsRef.current = []
     voiceCreatedMessagesRef.current = []
 
     const peerConnection = new RTCPeerConnection()
