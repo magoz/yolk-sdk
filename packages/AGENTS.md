@@ -46,12 +46,13 @@ app -> client -> protocol
 - `resolveTools(modules, context)` filters enabled tools and rejects duplicate names.
 - `makeToolExecutorLayer(toolSet)` adapts resolved tools to `ToolExecutor`.
 - `access: read | write | destructive` is metadata for policy/approvals; enforcement is host-owned.
+- Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Do not import auth, storage, provider SDKs, or product tool catalogs here.
 
 ## Voice Runtime
 
 - `VoiceToolCallRequest` accepts provider-normalized `{ callId, name, arguments }`.
-- `executeVoiceToolCall` parses JSON args, executes `ToolExecutor`, returns JSON output string.
+- `executeVoiceToolCall` decodes/encodes JSON via `Schema.UnknownFromJsonString`.
 - Provider adapters convert `VoiceToolExecutionResult` into provider-specific tool output events.
 - Do not import OpenAI Realtime, WebRTC, auth, or app tool catalogs here.
 
@@ -62,3 +63,4 @@ app -> client -> protocol
 - `collectAgentEventsEffect` = Effect-native collection helper.
 - `StreamAgentEventsRequest.signal` passes `AbortSignal` through to fetch/body reads.
 - Keep parsing/schema errors typed as `AgentTransportError`.
+- Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.

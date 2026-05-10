@@ -4,7 +4,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- Text-only `/agent` UI and `/api/agent` route
+- Text `/agent` UI and `/api/agent` route
 - Realtime voice `/agent/voice` UI and `/api/agent/realtime/*` routes
 - Calculator tool wired for tool-call smoke tests
 - No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
@@ -28,8 +28,15 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools
 - Tool name: `calculate`
 - Supports `add`, `subtract`, `multiply`, `divide`
 - App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
+- Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - Shared by text and Realtime voice smoke tests
 - Smoke-test only; no durable transcript or product permissions yet
+
+## JSON Boundaries
+
+- Production encode/decode uses `Schema.UnknownFromJsonString` + Effect mapping.
+- Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages.
+- Direct JSON helpers are fine in tests.
 
 ## Realtime Voice
 

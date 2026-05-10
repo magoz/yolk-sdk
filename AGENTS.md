@@ -64,6 +64,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | URL state (filters)  | `app/*/search-params.ts`             | nuqs/server imports only, see NUQS pattern   |
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md` | Prettier, kebab-case, file naming            |
 | Agent providers      | `lib/agents/AGENTS.md`               | Runtime layer, provider modes, Codex quirks  |
+| Add agent tool       | `lib/agents/tools/`                  | App `ToolModule`s; scope via `resolveAgentTools` |
 | Agent auth actions   | `lib/core/agent/*-action.ts`         | OpenAI Codex connect/disconnect actions      |
 | Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
 | Agent loop design    | `AGENT_LOOP.md`                      | Stateless loop details and decisions         |
@@ -86,6 +87,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
 | `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Injects provider into text runtime with no tools    |
 | `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`     | Injects provider + app tool executor into text runtime |
+| `resolveAgentTools`     | Function | `lib/agents/tools/registry.ts`            | Resolves app-scoped text/voice toolsets             |
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 
@@ -132,6 +134,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `FiberRef.unsafeMake` / `FiberRef.get`              | `Context.Reference` + `References.*` — `FiberRef` removed in v4                          |
 | `dotenv.config({ path: '.env.local' })` in a module | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`            |
 | Raw `fetch` in Effect services/providers            | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer     |
+| Raw `JSON.parse/stringify` in production Effect code | `Schema.UnknownFromJsonString` + Effect encode/decode; direct JSON is fine in tests       |
 
 ## NOTES
 
