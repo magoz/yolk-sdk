@@ -29,12 +29,15 @@ const notFoundEffect = () => Effect.fail(new NotFoundError())
  */
 type NavigationError = RedirectError | NotFoundError
 
+const isNavigationError = (error: unknown): error is NavigationError =>
+  error instanceof RedirectError || error instanceof NotFoundError
+
 const runPromise = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
   const result = await Effect.runPromise(
     Effect.catch(
       Effect.map(effect, (a): Result.Result<A, NavigationError> => Result.succeed(a)),
       e =>
-        e instanceof RedirectError || e instanceof NotFoundError
+        isNavigationError(e)
           ? Effect.succeed<Result.Result<A, NavigationError>>(Result.fail(e))
           : Effect.fail(e)
     )
@@ -52,5 +55,6 @@ const runPromise = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
 export const NextEffect = {
   redirect: redirectEffect,
   notFound: notFoundEffect,
+  isNavigationError,
   runPromise
 }

@@ -39,4 +39,5 @@ app -> client -> protocol
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
 - `collectAgentEventsEffect` = Effect-native collection helper.
+- `StreamAgentEventsRequest.signal` passes `AbortSignal` through to fetch/body reads.
 - Keep parsing/schema errors typed as `AgentTransportError`.

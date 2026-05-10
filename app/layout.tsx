@@ -7,8 +7,8 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
 
 export const metadata: Metadata = {
-  title: 'TruckApp',
-  description: 'Next.js app with Effect-TS integration'
+  title: 'Yolk',
+  description: 'Yolk'
 }
 
 export default function RootLayout({

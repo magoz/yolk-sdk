@@ -2,15 +2,14 @@ import { Effect } from 'effect'
 import { createId } from '@paralleldrive/cuid2'
 import { Db } from '@/lib/services/db/live-layer'
 import { user, type InsertUser } from '@/lib/services/db/schema'
-import { ensureTestEnvironment } from './ensure-test-environment'
+import { ensureTestEnv } from './ensure-test-env'
 
-export const createTestUser = (input?: Partial<InsertUser>) => {
-  ensureTestEnvironment('Create Test User')
-
-  return Effect.gen(function* () {
+export const createTestUser = (input?: Partial<InsertUser>) =>
+  Effect.gen(function* () {
+    yield* ensureTestEnv('Create Test User')
     const db = yield* Db
 
-    const results = yield* db
+    const [createdUser] = yield* db
       .insert(user)
       .values({
         id: createId(),
@@ -21,6 +20,9 @@ export const createTestUser = (input?: Partial<InsertUser>) => {
       })
       .returning()
 
-    return results[0]
+    if (createdUser === undefined) {
+      return yield* Effect.die(new Error('Failed to create test user'))
+    }
+
+    return createdUser
   })
-}

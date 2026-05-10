@@ -39,9 +39,11 @@ async function Content() {
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('UnauthorizedError', () => NextEffect.redirect('/')),
       Effect.catch(error =>
-        reportError(error, { operation: 'page.posts' }).pipe(
-          Effect.as(<ErrorMessage message="Something went wrong" />)
-        )
+        NextEffect.isNavigationError(error)
+          ? Effect.fail(error)
+          : reportError(error, { operation: 'page.posts' }).pipe(
+              Effect.as(<ErrorMessage message="Something went wrong" />)
+            )
       )
     )
   )
@@ -86,9 +88,11 @@ async function Shell({ projectId }: { readonly projectId: string }) {
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catch(error =>
-        reportError(error, { operation: 'page.project.shell' }).pipe(
-          Effect.as(<ErrorMessage message="Something went wrong" />)
-        )
+        NextEffect.isNavigationError(error)
+          ? Effect.fail(error)
+          : reportError(error, { operation: 'page.project.shell' }).pipe(
+              Effect.as(<ErrorMessage message="Something went wrong" />)
+            )
       )
     )
   )
@@ -160,13 +164,14 @@ Client filters use nuqs with `{ shallow: false, history: 'replace' }` so changes
 
 ## Anti-patterns
 
-| Anti-pattern | Use instead |
-| --- | --- |
-| `Effect.runPromise` in redirecting pages | `NextEffect.runPromise` |
-| Direct `redirect()` inside Effect | `NextEffect.redirect()` |
-| Missing `dynamic = 'force-dynamic'` | Add it to auth/dynamic pages |
-| Reporting auth/not-found page redirects to Sentry | Report only catch-all unexpected errors |
-| Pre-resolving `searchParams` in Page before Suspense | Pass Promise to Shell |
+| Anti-pattern                                         | Use instead                                                    |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| `Effect.runPromise` in redirecting pages             | `NextEffect.runPromise`                                        |
+| Direct `redirect()` inside Effect                    | `NextEffect.redirect()`                                        |
+| Catch-all swallowing `NextEffect.redirect()`         | Re-fail `NextEffect.isNavigationError(error)` before reporting |
+| Missing `dynamic = 'force-dynamic'`                  | Add it to auth/dynamic pages                                   |
+| Reporting auth/not-found page redirects to Sentry    | Report only catch-all unexpected errors                        |
+| Pre-resolving `searchParams` in Page before Suspense | Pass Promise to Shell                                          |
 
 ## Checklist
 
@@ -176,4 +181,5 @@ Client filters use nuqs with `{ shallow: false, history: 'replace' }` so changes
 - [ ] `Effect.withSpan` on Shell/Content
 - [ ] One composed layer via `Effect.provide(AppLayer)` or a request-specific layer
 - [ ] Auth errors redirect via `NextEffect.redirect`
+- [ ] Catch-all re-fails `NextEffect.isNavigationError(error)`
 - [ ] Catch-all reports with `reportError` and renders safe UI

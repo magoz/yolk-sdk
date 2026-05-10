@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Impressions',
-  description: 'Impressions'
+  title: 'Yolk',
+  description: 'Yolk'
 }
 
 export default async function Layout({

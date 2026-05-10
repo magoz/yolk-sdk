@@ -52,7 +52,9 @@ async function Content() {
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catch(error =>
-        reportError(error, { operation: 'page.agent' }).pipe(Effect.as(<ErrorMessage />))
+        NextEffect.isNavigationError(error)
+          ? Effect.fail(error)
+          : reportError(error, { operation: 'page.agent' }).pipe(Effect.as(<ErrorMessage />))
       )
     )
   )

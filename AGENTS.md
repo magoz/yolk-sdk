@@ -54,7 +54,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add API route        | `app/api/[route]/route.ts`           | Only webhooks/external APIs, see EFFECT_API_ROUTES |
 | Add UI component     | `components/ui/`                     | Uses Base UI, not Radix                      |
 | Add tests            | `lib/core/[domain]/*.test.ts`        | Colocated with source, use @effect/vitest    |
-| Add E2E tests        | `e2e/`                               | Playwright tests (api/, ui/, fixtures)       |
+| Add E2E tests        | `e2e/`                               | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md` |
 | Database schema      | `lib/services/db/schema.ts`          | Drizzle ORM                                  |
 | Auth flow            | `app/(auth)/`                        | better-auth + OTP email                      |
 | Service dependencies | `lib/layers.ts`                      | AppLayer merges all services                 |
@@ -74,6 +74,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `NextEffect.runPromise` | Function | `lib/next-effect/index.ts`                 | Handles redirects + notFound outside Effect context |
 | `NextEffect.redirect`   | Function | `lib/next-effect/index.ts`                 | Redirect intent (use inside Effect pipelines)       |
 | `NextEffect.notFound`   | Function | `lib/next-effect/index.ts`                 | NotFound intent (use inside Effect pipelines)       |
+| `NextEffect.isNavigationError` | Function | `lib/next-effect/index.ts`          | Re-fail redirect/notFound inside catch-all handlers  |
 | `Auth`                  | Service  | `lib/services/auth/live-layer.ts`          | Authentication (sign in/up/out, sessions)           |
 | `Db`                    | Service  | `lib/services/db/live-layer.ts`            | Database (returns Drizzle client)                   |
 | `Email`                 | Service  | `lib/services/email/live-layer.ts`         | Resend email sending                                |
@@ -95,6 +96,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `router.push()` for logout                          | `window.location.href = '/'` (layout cache issue)                                        |
 | Barrel files (`index.ts` re-exports)                | Import from `live-layer.ts` directly                                                     |
 | `Effect.runPromise()` in pages                      | `NextEffect.runPromise()` (handles redirects)                                            |
+| Catch-all swallowing `NextEffect.redirect/notFound` | Re-fail `NextEffect.isNavigationError(error)` before reporting                            |
 | Layer `dependencies` option                         | `Layer.provide()` externally                                                             |
 | Multiple services per directory                     | One service per directory                                                                |
 | Multiple actions per file                           | One action per file ending in `-action.ts`                                               |

@@ -21,14 +21,16 @@ async function Content() {
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => Effect.succeed(<LoginForm />)),
       Effect.catch(error =>
-        Effect.succeed(
-          <main className="p-8">
-            <p>Something went wrong.</p>
-            <p className="text-red-500">
-              Error: {error instanceof Error ? error.message : 'Unknown error'}
-            </p>
-          </main>
-        )
+        NextEffect.isNavigationError(error)
+          ? Effect.fail(error)
+          : Effect.succeed(
+              <main className="p-8">
+                <p>Something went wrong.</p>
+                <p className="text-red-500">
+                  Error: {error instanceof Error ? error.message : 'Unknown error'}
+                </p>
+              </main>
+            )
       )
     )
   )

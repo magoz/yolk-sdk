@@ -1,6 +1,6 @@
 # E2E Tests
 
-Playwright tests with Effect-based global setup. Uses `.env.test` with a separate test database. No mocking — all tests run against real services.
+Playwright tests with Effect-based setup/teardown. Uses `.env.test` with a separate test database. No mocking — tests run against real app services.
 
 ## Playwright Best Practices
 
@@ -87,6 +87,8 @@ await expect(page.getByText('Published')).toBeVisible({ timeout: 10_000 })
 
 Each test must be completely independent. No test should depend on another test's side effects. Tests across files run in **parallel** (separate workers). Tests within a `describe` block with `{ mode: 'serial' }` share a worker.
 
+Authenticated fixtures are **test-scoped**: each test gets a fresh `BrowserContext` with the shared signed session cookie injected. Never switch these to worker scope unless the test suite explicitly accepts state leakage.
+
 #### User-level state needs a dedicated user
 
 **NEVER mutate user-level state** (role, etc.) **on `TEST_USER_ID`**. Other files running in parallel share this user. If a test needs to change user-level state, create a **dedicated user** in `beforeAll`:
@@ -97,7 +99,7 @@ const MY_USER_ID = 'e2e-my-feature-user-001'
 test.beforeAll(async () => {
   await Effect.gen(function* () {
     // ... create user + session
-  }).pipe(Effect.provide(Db.layer), Effect.scoped, Effect.runPromise)
+  }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
 })
 ```
 
@@ -119,16 +121,15 @@ e2e/
   test-ids.ts                     — deterministic IDs shared between setup and specs
   fixtures.ts                     — authedContext + authedPage (session cookie injection)
   utils/
+    test-db.ts                    — TestDbLayer alias for test infra
+    cleanup.ts                    — schema-aware TRUNCATE all tables CASCADE
     create-test-auth-session.ts   — session row + HMAC-SHA256 signed cookie
     create-authed-context.ts      — BrowserContext with session cookie for multi-user tests
     ensure-test-env.ts            — Effect.die guard for NODE_ENV=test
     create-test-user.ts           — inserts user with random email
-    setup.ts                      — legacy setup helper
-    ensure-test-environment.ts    — legacy plain JS guard
-  api/
-    example.spec.ts               — API endpoint tests
+    setup.ts                      — Effect setup helper
   ui/
-    login.spec.ts                 — Login flow UI tests
+    login.spec.ts                 — Public smoke tests
 ```
 
 ## Env Isolation
@@ -137,16 +138,18 @@ E2E tests load **only** `.env.test`. All env loading is centralized in `lib/dote
 
 **Never add a direct `dotenv.config()` call** — always `import '@/lib/dotenv'` (or `import '../lib/dotenv'` from root config files). This is the single source of truth.
 
+`playwright.config.ts` fails fast if required test env is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN`.
+
 ## How It Works
 
-1. `playwright.config.ts` loads `.env.test`, starts Next.js via `webServer`
+1. `playwright.config.ts` loads `.env.test`, starts Next.js via `webServer` on `E2E_PORT` or default `3007`
 2. `global-setup.ts` runs:
    - Resets database via `drizzle-seed` (truncate + reseed)
    - Creates test user with deterministic ID from `test-ids.ts`
    - Creates better-auth session with HMAC-SHA256 signed cookie
    - Shares signed session token via `process.env.TEST_SESSION_TOKEN`
-3. `fixtures.ts` provides `authedContext` (BrowserContext with session cookie) and `authedPage`
-4. Each test gets an authenticated page ready to navigate
+3. `fixtures.ts` provides test-scoped `authedContext` (BrowserContext with session cookie) and `authedPage`
+4. Each test gets an isolated authenticated page ready to navigate
 5. `global-teardown.ts` runs TRUNCATE CASCADE after all tests
 
 ## Key Patterns
@@ -164,6 +167,20 @@ return encodeURIComponent(`${value}.${signature}`)
 
 Cookie name: `better-auth.session_token`, domain: `localhost`, secure: `false`.
 
+### Effect at Playwright boundaries
+
+Keep DB/auth setup inside Effect; run it only at Playwright edges (`globalSetup`, `globalTeardown`, `beforeAll`). Use `ensureTestEnv()` before destructive operations.
+
+```ts
+await Effect.gen(function* () {
+  yield* ensureTestEnv('Seed My Feature')
+  const db = yield* Db
+  // cleanup + seed
+}).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
+```
+
+`Effect.runPromise` is acceptable here because Playwright hooks are the async boundary. Do not use it inside reusable helpers; helpers should return `Effect` values.
+
 ### Per-file data seeding
 
 Each spec file that needs specific data should create it in `test.beforeAll`:
@@ -179,7 +196,7 @@ test.describe('My feature', () => {
       yield* db.delete(schema.post).where(eq(schema.post.id, MY_POST_ID))
       // Then seed
       yield* db.insert(schema.post).values({ id: MY_POST_ID, ... })
-    }).pipe(Effect.provide(Db.layer), Effect.scoped, Effect.runPromise)
+    }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
   })
 })
 ```
@@ -276,9 +293,9 @@ await expect.soft(page.getByText('Settings')).toBeVisible()
 - **Serial `beforeAll` re-runs on retry** — Playwright retries re-run `beforeAll`, causing unique constraint errors. Delete before re-creating at the top of `beforeAll`.
 - **`waitForURL` glob vs function predicate** — `waitForURL('**/login**')` waits for `load` event. Use function predicate `waitForURL(url => url.toString().includes('/login'))` — resolves on navigation match, not just `load`.
 - **Streaming ghost clicks** — clicking a button during hydration can target a DOM element about to be detached. The click appears to succeed but has no effect. Fix: `toHaveCount(1)` before clicking.
-- **Port conflicts** — Use a dedicated port (e.g. 3007) in playwright.config.ts to avoid conflicts with dev server on 3000.
+- **Port conflicts** — E2E defaults to port 3007 to avoid dev server conflicts. Override with `E2E_PORT=... pnpm test:e2e`.
 - **`getByRole('heading')` matches multiple levels** — use `{ level: 1 }` or `{ name: '...' }` to disambiguate h1 from h2.
 - **`process.env` propagation** — `globalSetup` shares env vars with workers. Deterministic IDs in `test-ids.ts` are more reliable than env vars.
 - **Test IDs must not be substrings of each other** — e.g. `e2e-project-foo` is a prefix of `e2e-project-foobar`, breaking `url.includes()` checks. Use distinct stems.
-- **Full suite flaky under cold start** — parallel workers hitting a cold Next.js dev server can cause timeouts. Config `retries: 1` local, `retries: 2` CI.
+- **Full suite flaky under cold start** — parallel workers hitting a cold Next.js dev server can cause timeouts. Config is `retries: 1` local, `retries: 2` CI.
 - **Filter buttons with similar names** — `/saved/i` regex matches both "Saved" and "Unsaved". Use `{ name: 'Saved', exact: true }`.

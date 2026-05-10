@@ -1,5 +1,5 @@
 import '../lib/dotenv'
-import { Effect } from 'effect'
+import { Config, Effect } from 'effect'
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 import { reset } from 'drizzle-seed'
@@ -7,6 +7,8 @@ import { reset } from 'drizzle-seed'
 import * as schema from '@/lib/services/db/schema'
 import { Db } from '@/lib/services/db/live-layer'
 import { createTestAuthSession } from './utils/create-test-auth-session'
+import { ensureTestEnv } from './utils/ensure-test-env'
+import { TestDbLayer } from './utils/test-db'
 import { TEST_USER_ID } from './test-ids'
 
 /**
@@ -17,25 +19,24 @@ import { TEST_USER_ID } from './test-ids'
  * 3. Shares signed session token via process.env for test workers
  */
 const globalSetup = async () => {
-  console.log('🧹 Resetting database...')
-
-  // Reset DB via drizzle-seed (direct connection — not Effect-wrapped)
-  const databaseUrl = process.env.DATABASE_URL
-  if (databaseUrl === undefined) {
-    throw new Error('DATABASE_URL is required')
-  }
-
-  const sql = neon(databaseUrl)
-  const db = drizzle({ client: sql, relations: schema.relations })
-  await reset(db, schema)
-
-  console.log('✅ Database reset complete')
-
-  // Seed shared test data and create auth session
   const token = await Effect.gen(function* () {
+    yield* ensureTestEnv('Global Setup')
+
+    yield* Effect.log('Resetting database')
+    const databaseUrl = yield* Config.string('DATABASE_URL')
+    const sql = neon(databaseUrl)
+    const resetDb = drizzle({ client: sql, relations: schema.relations })
+
+    yield* Effect.tryPromise({
+      try: () => reset(resetDb, schema),
+      catch: cause => new Error('Failed to reset database', { cause })
+    })
+    yield* Effect.log('Database reset complete')
+
+    // Seed shared test data and create auth session
     const effectDb = yield* Db
 
-    console.log('👤 Creating test user...')
+    yield* Effect.log('Creating test user')
     const [user] = yield* effectDb
       .insert(schema.user)
       .values({
@@ -46,12 +47,16 @@ const globalSetup = async () => {
       })
       .returning()
 
-    console.log('🔐 Creating auth session...')
+    if (user === undefined) {
+      return yield* Effect.die(new Error('Failed to create test user'))
+    }
+
+    yield* Effect.log('Creating auth session')
     const { token } = yield* createTestAuthSession(user.id)
 
-    console.log(`✅ Setup complete — user: ${user.email}`)
+    yield* Effect.log(`Setup complete — user: ${user.email}`)
     return token
-  }).pipe(Effect.provide(Db.layer), Effect.scoped, Effect.runPromise)
+  }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
 
   // Share session token with test workers via env
   process.env.TEST_SESSION_TOKEN = token

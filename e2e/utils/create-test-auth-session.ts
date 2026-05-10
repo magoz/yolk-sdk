@@ -45,6 +45,10 @@ export const createTestAuthSession = (userId: string) =>
       })
       .returning()
 
+    if (session === undefined) {
+      return yield* Effect.die(new Error('Failed to create auth session'))
+    }
+
     const signedToken = signCookieValue(token, secret)
     return { session, token: signedToken }
   })
