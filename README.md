@@ -67,6 +67,8 @@ AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
 
 Connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key.
 
+Future: provider selection will become configurable again. The API-key OpenAI provider remains as tested scaffold, but `/api/agent` is Codex-only for now.
+
 Then:
 
 1. `pnpm dev`
