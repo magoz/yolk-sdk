@@ -17,6 +17,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol
@@ -58,9 +59,13 @@ app -> client -> protocol
 
 ## Client Transport
 
+- `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
+- `AgentClientState.messages` stores stable protocol messages; `text` is the current streaming assistant draft.
+- `submitAgentUserMessage` appends user messages locally before transport starts.
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
 - `collectAgentEventsEffect` = Effect-native collection helper.
+- Requests send a non-empty client-owned `AgentTranscript` (`messages`), not just the latest prompt.
 - `StreamAgentEventsRequest.signal` passes `AbortSignal` through to fetch/body reads.
 - Keep parsing/schema errors typed as `AgentTransportError`.
 - Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.

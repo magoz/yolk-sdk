@@ -7,7 +7,10 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text `/agent` UI and `/api/agent` route
 - Realtime voice `/agent/voice` UI and `/api/agent/realtime/*` routes
 - Calculator tool wired for tool-call smoke tests
-- No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
+- No durable transcript: text client sends full protocol transcript each turn
+- Text route request: `{ sessionId, messages }`, where `messages` is non-empty `AgentMessage[]`
+- Text route calls `agent-loop` directly; `agent-runtime` is reserved for durable session lifecycle
+- `StatelessSessionStoreLayer` remains no-op scaffolding for future runtime persistence
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Browser/client cancellation aborts active response body readers
 - Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
@@ -20,7 +23,7 @@ Hardcoded in `app/api/agent/route.ts`:
 | --- | --- | --- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` when tools are enabled; keep provider choice at app boundary.
+Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary.
 
 ## Current Tools
 

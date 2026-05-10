@@ -40,7 +40,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client |
-| Text agent         | app/lib   | `/agent` + `/api/agent`; hardcoded Codex OAuth + `gpt-5.4` |
+| Text agent         | app/lib   | `/agent` + `/api/agent`; client-owned transcript + Codex OAuth + `gpt-5.4` |
 | Voice agent        | app/lib   | `/agent/voice` + Realtime WebRTC routes; `gpt-realtime-2` |
 | Dummy tool calling | app/lib   | `calculate` calculator tool; smoke-test only         |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
@@ -85,11 +85,12 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `TelemetryLayer`        | Layer    | `lib/services/telemetry/live-layer.ts`     | OpenTelemetry + Sentry span/log processing          |
 | `reportError`           | Function | `lib/services/telemetry/report-error.ts`   | Log error + Sentry capture (boundaries only)        |
 | `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
-| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Injects provider into text runtime with no tools    |
-| `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`     | Injects provider + app tool executor into text runtime |
+| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Provides provider + default loop deps with no tools  |
+| `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`     | Provides provider + app tool executor for agent routes |
 | `resolveAgentTools`     | Function | `lib/agents/tools/registry.ts`            | Resolves app-scoped text/voice toolsets             |
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
+| `AgentTranscript`       | Type     | `packages/client/src/state.ts`             | Non-empty client-owned protocol transcript          |
 
 ## REFERENCE REPOS
 
