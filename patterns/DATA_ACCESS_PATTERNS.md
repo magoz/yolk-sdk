@@ -25,7 +25,7 @@ Need webhook endpoints for external services?
 
 Load data directly in Server Components using Effect-TS. This is the **default pattern** for all read operations.
 
-> **Important:** For pages that require authentication, see `patterns/PAGE_PATTERNS.md` for the required Suspense + Content pattern with `export const dynamic = 'force-dynamic'`.
+> **Important:** For pages that require authentication, see `patterns/EFFECT_PAGES.md` for the required Suspense + Content pattern with `export const dynamic = 'force-dynamic'`.
 
 ### When to Use
 
@@ -107,6 +107,8 @@ export const getPosts = () =>
 ## Pattern 2: Server Actions for Mutations
 
 Use Server Actions for all data mutations. One action per file, always ending in `-action.ts`.
+
+See [`EFFECT_SERVER_ACTIONS.md`](./EFFECT_SERVER_ACTIONS.md) for the canonical pipe ordering.
 
 ### When to Use
 
@@ -465,6 +467,8 @@ Only use API routes when:
 1. **External webhooks** - Services calling your app (Stripe, auth callbacks)
 2. **Parallelization needed** - Multiple independent DB queries that benefit from parallel execution
 3. **Non-browser clients** - Mobile apps, CLI tools, third-party integrations
+
+See [`EFFECT_API_ROUTES.md`](./EFFECT_API_ROUTES.md) for the canonical `HttpEffect.toWebHandlerLayer` pattern.
 
 ### When NOT to Use API Routes
 

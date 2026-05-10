@@ -45,11 +45,11 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 
 | Task                 | Location                             | Notes                                        |
 | -------------------- | ------------------------------------ | -------------------------------------------- |
-| Add server action    | `lib/core/[domain]/*-action.ts`      | One action per file, see DATA_ACCESS pattern |
-| Add domain function  | `lib/core/[domain]/*.ts`             | Pure Effect functions for business logic     |
+| Add server action    | `lib/core/[domain]/*-action.ts`      | One action per file, see EFFECT_SERVER_ACTIONS |
+| Add domain function  | `lib/core/[domain]/*.ts`             | Pure Effect functions, see EFFECT_DOMAIN_FUNCTIONS |
 | Add new service      | `lib/services/[name]/`               | Follow `lib/services/AGENTS.md` pattern      |
-| Add dynamic page     | `app/*/page.tsx`                     | See PAGE_PATTERNS for Suspense pattern       |
-| Add API route        | `app/api/[route]/route.ts`           | Only for webhooks/external APIs              |
+| Add dynamic page     | `app/*/page.tsx`                     | See EFFECT_PAGES for Suspense pattern        |
+| Add API route        | `app/api/[route]/route.ts`           | Only webhooks/external APIs, see EFFECT_API_ROUTES |
 | Add UI component     | `components/ui/`                     | Uses Base UI, not Radix                      |
 | Add tests            | `lib/core/[domain]/*.test.ts`        | Colocated with source, use @effect/vitest    |
 | Add E2E tests        | `e2e/`                               | Playwright tests (api/, ui/, fixtures)       |
@@ -94,8 +94,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Multiple actions per file                           | One action per file ending in `-action.ts`                                               |
 | `useState` for shareable UI state                   | nuqs URL state (`app/*/search-params.ts`)                                                |
 | Import `parseAs*` from `nuqs`                       | Import from `nuqs/server` in search-params.ts                                            |
-| Direct data fetch in page component                 | Suspense + Content pattern (see PAGE_PATTERNS)                                           |
-| Nested Suspense with async components               | Single Content component fetches all data                                                |
+| Direct data fetch in page component                 | Suspense + Content pattern (see EFFECT_PAGES)                                            |
+| Ad hoc nested async components                      | Use EFFECT_PAGES Shell + independent streaming sections pattern                          |
 | Missing `export const dynamic`                      | Add `export const dynamic = 'force-dynamic'` for auth                                    |
 | `matchEffect` for error handling                    | `catchTag` chains + `Effect.catch` catch-all                                             |
 | `Config.string('X').pipe(Effect.mapError(...))`     | Yield Config directly, map errors on whole block                                         |
