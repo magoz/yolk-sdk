@@ -5,6 +5,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## Current Mode
 
 - Unified `/agent` UI with text input and mic voice mode
+- `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
 - Calculator tool wired for tool-call smoke tests
 - No durable transcript: text client sends full protocol transcript each turn

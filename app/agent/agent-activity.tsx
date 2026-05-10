@@ -1,64 +1,9 @@
 import type { AgentRunStatus } from '@yolk/client'
-import type { AgentEvent } from '@yolk/protocol'
 import { Badge } from '@/components/ui/badge'
-import { contentPreview, countLabel, truncate, unknownPreview } from './agent-format'
+import { countLabel } from './agent-format'
+import { activityPanelId, type ActivityTone, type AgentActivityItem } from './agent-activity-model'
 import { textStatusVariant, voiceStatusVariant } from './agent-status'
 import type { VoiceStatus } from './use-realtime-voice'
-
-type ActivityTone = 'neutral' | 'active' | 'success' | 'error' | 'tool'
-
-export type AgentActivityItem = {
-  readonly id: number
-  readonly title: string
-  readonly detail: string
-  readonly tone: ActivityTone
-}
-
-export const maxActivityItems = 80
-export const activityPanelId = 'agent-activity-panel'
-
-export const activityItemFromAgentEvent = (
-  event: AgentEvent
-): Omit<AgentActivityItem, 'id'> | null => {
-  switch (event._tag) {
-    case 'AgentStart':
-      return { title: 'Run started', detail: 'Server accepted the transcript.', tone: 'active' }
-    case 'TurnStart':
-      return { title: 'Thinking', detail: `Turn ${event.turn}`, tone: 'active' }
-    case 'LLMStreamStart':
-      return { title: 'Model stream started', detail: `Turn ${event.turn}`, tone: 'active' }
-    case 'LLMToolCall':
-      return {
-        title: `Tool requested: ${event.call.name}`,
-        detail: unknownPreview(event.call.params),
-        tone: 'tool'
-      }
-    case 'ToolExecutionStart':
-      return { title: `Running tool: ${event.call.name}`, detail: event.call.id, tone: 'tool' }
-    case 'ToolExecutionEnd':
-      return {
-        title: `Tool result: ${event.call.name}`,
-        detail: truncate(contentPreview(event.result.content)),
-        tone: 'success'
-      }
-    case 'TurnEnd':
-      return { title: 'Turn ended', detail: event.reason, tone: 'neutral' }
-    case 'AgentEnd':
-      return {
-        title: 'Run finished',
-        detail: `${countLabel(event.turns, 'turn')} · ${countLabel(event.messages.length, 'message')}`,
-        tone: 'success'
-      }
-    case 'AgentError':
-      return { title: 'Agent error', detail: event.message, tone: 'error' }
-    case 'AssistantMessage':
-    case 'LLMReasoningDelta':
-    case 'LLMStreamEnd':
-    case 'LLMTextDelta':
-    case 'ToolResult':
-      return null
-  }
-}
 
 const activityToneClass = (tone: ActivityTone) => {
   switch (tone) {
@@ -129,13 +74,18 @@ export function AgentActivityPanel({
         {items.length > 0 ? (
           <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
             {items.map(item => (
-              <div key={item.id} className={`rounded-xl border px-3 py-2 text-xs ${activityToneClass(item.tone)}`}>
+              <div
+                key={item.id}
+                className={`rounded-xl border px-3 py-2 text-xs ${activityToneClass(item.tone)}`}
+              >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-foreground">{item.title}</span>
                   <Badge variant={activityToneVariant(item.tone)}>{item.tone}</Badge>
                 </div>
                 {item.detail.length > 0 ? (
-                  <div className="mt-1 whitespace-pre-wrap break-words leading-5">{item.detail}</div>
+                  <div className="mt-1 whitespace-pre-wrap break-words leading-5">
+                    {item.detail}
+                  </div>
                 ) : null}
               </div>
             ))}

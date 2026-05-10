@@ -65,6 +65,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | URL state (filters)  | `app/*/search-params.ts`             | nuqs/server imports only, see NUQS pattern   |
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md` | Prettier, kebab-case, file naming            |
 | Agent providers      | `lib/agents/AGENTS.md`               | Runtime layer, provider modes, Codex quirks  |
+| Agent chat UI        | `app/agent/AGENTS.md`                | Headless chat hook/items, composer, console chrome |
 | Add agent tool       | `lib/agents/tools/`                  | App `ToolModule`s; scope via `resolveAgentTools` |
 | Agent auth actions   | `lib/core/agent/*-action.ts`         | OpenAI Codex connect/disconnect actions      |
 | Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
@@ -100,9 +101,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `effect-smol`   | `.repos/effect`         | Effect v4 source/docs; source for current Effect API shifts                                     |
 | `pi-mono`       | `.repos/pi`             | Pi monorepo; agent/product architecture reference                                               |
 | `opencode`      | `.repos/opencode`       | Opencode fork; Codex/OpenAI agent protocol/provider reference                                   |
+| `t3code`        | `.repos/t3code`         | Agent chat/product UI reference                                                                 |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
-- `effect` version pinned to package.json; `pi`/`opencode` track branches.
+- `effect` version pinned to package.json; `pi`/`opencode`/`t3code` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -153,6 +155,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 ## SUBDIRECTORY DOCS
 
 - `patterns/README.md` - Architecture and convention patterns index
+- `app/agent/AGENTS.md` - Agent chat UI composition and headless boundaries
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries

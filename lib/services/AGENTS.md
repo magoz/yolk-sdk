@@ -81,7 +81,7 @@ Key patterns:
 
 ## Error Definition Pattern
 
-Define errors in a separate `errors.ts` file using `Schema.TaggedErrorClass`:
+Define errors in a separate `errors.ts` file. Use `Data.TaggedError` for simple internal service errors; use `Schema.TaggedErrorClass` when you need `Schema.is`, serialization, or schema-boundary validation.
 
 ```typescript
 import * as Schema from 'effect/Schema'
@@ -105,13 +105,13 @@ export const isServiceApiError = Schema.is(ServiceApiError)
 export const isServiceConfigError = Schema.is(ServiceConfigError)
 ```
 
-**Why Schema.TaggedErrorClass over Data.TaggedError:**
+**When to choose Schema.TaggedErrorClass:**
 
 - `Schema.is()` creates type guards automatically
 - Better integration with Schema validation
 - Enables serialization/deserialization of errors
 - See `patterns/EFFECT_BEST_PRACTICES.md` for detailed patterns
-- For simpler internal errors, `Data.TaggedError` is also fine — no schema overhead
+- Existing simple internal errors (`Auth`, `Email`) use `Data.TaggedError`; schema-boundary errors (`OpenAiCodexOAuth`) use `Schema.TaggedErrorClass`
 
 **Error naming:**
 
@@ -238,7 +238,7 @@ Effect.runPromise(program.pipe(Effect.provide(Auth.layer)))
 - [ ] Create directory: `lib/services/[name]/`
 - [ ] Create `live-layer.ts` with `Context.Service` + `make` pattern
 - [ ] Add static `layer` property (fully composed with all deps)
-- [ ] Create `errors.ts` with `Schema.TaggedErrorClass` errors (if needed)
+- [ ] Create `errors.ts` with `Data.TaggedError` or `Schema.TaggedErrorClass` errors (if needed)
 - [ ] Use `yield* Config.string(...)` for all environment variables
 - [ ] Add `Effect.withSpan()` to all methods
 - [ ] Add `Effect.annotateCurrentSpan()` for relevant attributes

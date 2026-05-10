@@ -60,6 +60,12 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 'opencode',
     repo: 'git@github.com:anomalyco/opencode.git',
     branch: 'dev'
+  },
+  {
+    mode: 'branch',
+    name: 't3code',
+    repo: 'https://github.com/pingdotgg/t3code.git',
+    branch: 'main'
   }
 ]
 

@@ -95,7 +95,7 @@ export function AgentStatusPanel({
   onReasoningEffortChange
 }: AgentStatusPanelProps) {
   return (
-    <div className="mt-10 space-y-4">
+    <div className="space-y-4">
       <OpenAiCodexAuthPanel initialConnected={openAiCodexConnected} />
       <div className="grid gap-3 text-xs text-muted-foreground">
         <StatusRow label="Session">

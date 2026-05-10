@@ -1,95 +1,58 @@
 'use client'
 
-import { ChevronDownIcon, ChevronRightIcon, LoaderCircleIcon, MicIcon } from 'lucide-react'
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  LoaderCircleIcon,
+  MicIcon,
+  SlidersHorizontalIcon
+} from 'lucide-react'
+import type { AgentRunStatus } from '@yolk/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import { cn } from '@/lib/utils'
-import { activityPanelId } from './agent-activity'
-
-type DisplaySwitchProps = {
-  readonly label: string
-  readonly description: string
-  readonly checked: boolean
-  readonly disabled?: boolean
-  readonly onCheckedChange: (checked: boolean) => void
-}
-
-function DisplaySwitch({
-  label,
-  description,
-  checked,
-  disabled = false,
-  onCheckedChange
-}: DisplaySwitchProps) {
-  return (
-    <label
-      className={cn(
-        'flex min-h-11 items-center gap-3 rounded-xl border border-foreground/10 bg-background px-3 py-2 text-xs shadow-xs',
-        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-      )}
-    >
-      <span className="grid gap-0.5">
-        <span className="font-medium leading-none">{label}</span>
-        <span className="text-[11px] leading-none text-muted-foreground">{description}</span>
-      </span>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={nextChecked => onCheckedChange(nextChecked)}
-      />
-    </label>
-  )
-}
+import { activityPanelId } from './agent-activity-model'
+import { textStatusVariant, voiceStatusVariant } from './agent-status'
+import type { VoiceStatus } from './use-realtime-voice'
 
 type AgentConversationHeaderProps = {
   readonly activityVisible: boolean
   readonly activityCount: number
   readonly liveActivityCount: number
-  readonly showInlineTools: boolean
-  readonly showReasoning: boolean
-  readonly hasReasoningSummary: boolean
+  readonly textStatus: AgentRunStatus
+  readonly voiceStatus: VoiceStatus
   readonly isRunning: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
   readonly onToggleActivity: () => void
-  readonly onShowInlineToolsChange: (checked: boolean) => void
-  readonly onShowReasoningChange: (checked: boolean) => void
+  readonly onOpenConsole: () => void
 }
 
 export function AgentConversationHeader({
   activityVisible,
   activityCount,
   liveActivityCount,
-  showInlineTools,
-  showReasoning,
-  hasReasoningSummary,
+  textStatus,
+  voiceStatus,
   isRunning,
   isVoiceConnecting,
   isVoiceLive,
   onToggleActivity,
-  onShowInlineToolsChange,
-  onShowReasoningChange
+  onOpenConsole
 }: AgentConversationHeaderProps) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-foreground/10 px-5 py-4">
-      <div>
-        <p className="text-sm font-medium">Conversation</p>
-        <p className="text-xs text-muted-foreground">Type, or tap the mic to talk.</p>
+    <div className="flex items-center justify-between gap-3 border-b border-foreground/10 bg-background/60 px-4 py-3 backdrop-blur sm:px-5">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium">Yolk agent</p>
+        <p className="truncate text-xs text-muted-foreground">Text + voice console</p>
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <DisplaySwitch
-          label="Tools"
-          description="Inline calls"
-          checked={showInlineTools}
-          onCheckedChange={onShowInlineToolsChange}
-        />
-        <DisplaySwitch
-          label="Reasoning"
-          description={hasReasoningSummary ? 'Summaries' : 'Waiting'}
-          checked={showReasoning}
-          onCheckedChange={onShowReasoningChange}
-        />
+
+      <div className="flex shrink-0 items-center justify-end gap-2">
+        <Badge variant={textStatusVariant(textStatus)} className="hidden sm:inline-flex">
+          {textStatus}
+        </Badge>
+        <Badge variant={voiceStatusVariant(voiceStatus)} className="hidden sm:inline-flex">
+          voice {voiceStatus}
+        </Badge>
         <Button
           type="button"
           size="sm"
@@ -97,12 +60,22 @@ export function AgentConversationHeader({
           aria-expanded={activityVisible}
           aria-controls={activityPanelId}
           onClick={onToggleActivity}
-          className="min-h-11"
+          className="min-h-10 rounded-full"
         >
           {activityVisible ? <ChevronDownIcon /> : <ChevronRightIcon />}
           Activity
           {activityCount > 0 ? <Badge variant="outline">{activityCount}</Badge> : null}
           {liveActivityCount > 0 ? <span className="size-2 rounded-full bg-primary" /> : null}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onOpenConsole}
+          className="min-h-10 rounded-full"
+        >
+          <SlidersHorizontalIcon />
+          <span className="hidden sm:inline">Console</span>
         </Button>
         {isRunning || isVoiceConnecting ? (
           <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
