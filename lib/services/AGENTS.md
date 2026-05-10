@@ -150,6 +150,13 @@ const optional = yield * Config.option(Config.string('OPTIONAL_VAR'))
 const value = optional._tag === 'Some' ? optional.value : undefined
 ```
 
+## External HTTP Pattern
+
+- Use Effect `HttpClient` from `effect/unstable/http` inside services.
+- Static live layers provide `FetchHttpClient.layer` internally.
+- Test factories should accept `Layer.Layer<HttpClient.HttpClient>` and inject test clients.
+- Avoid raw `fetch` or storing `typeof fetch` in service config.
+
 ## Observability Pattern
 
 All service methods must include tracing:

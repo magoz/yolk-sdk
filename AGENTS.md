@@ -114,6 +114,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Effect.catchAll(handler)`                          | `Effect.catch(handler)` — v4 rename                                                      |
 | `FiberRef.unsafeMake` / `FiberRef.get`              | `Context.Reference` + `References.*` — `FiberRef` removed in v4                          |
 | `dotenv.config({ path: '.env.local' })` in a module | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`            |
+| Raw `fetch` in Effect services/providers            | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer     |
 
 ## NOTES
 

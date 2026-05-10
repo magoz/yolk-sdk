@@ -9,7 +9,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/protocol` | Shared schemas, messages, tools, events | Effect |
 | `@yolk/agent-loop` | Stateless LLM ⇄ tool turn loop | `@yolk/protocol`, Effect |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/client` | Client event reducer/state helpers | `@yolk/protocol` |
+| `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol` |
 
 ## Dependency Rule
 
@@ -33,3 +33,10 @@ app -> client -> protocol
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
+
+## Client Transport
+
+- `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
+- `streamAgentEvents` = async generator compatibility wrapper for browser UI.
+- `collectAgentEventsEffect` = Effect-native collection helper.
+- Keep parsing/schema errors typed as `AgentTransportError`.

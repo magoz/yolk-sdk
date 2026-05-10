@@ -9,6 +9,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Browser/client cancellation aborts active response body readers
+- Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
 
 ## Current Provider
 
@@ -27,6 +28,7 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayer(provider
 - Uses `https://api.openai.com/v1/chat/completions`
 - Requires `OPENAI_API_KEY`
 - Supports text + image user input; no audio
+- Dormant scaffold; tests inject an Effect `HttpClient` layer
 
 ## OpenAI Codex OAuth Provider
 
@@ -51,3 +53,4 @@ Codex backend quirks:
 - Provider tests: `providers/*-provider.test.ts`
 - Route encoding/schema tests: `route-handler.test.ts`
 - Keep regression tests for provider quirks close to provider implementation.
+- Mock HTTP with `HttpClient` test layers, not fetch-style helpers.
