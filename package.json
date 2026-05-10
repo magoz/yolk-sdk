@@ -36,6 +36,7 @@
     "@sentry/opentelemetry": "^10.34.0",
     "@yolk/agent-loop": "workspace:*",
     "@yolk/agent-runtime": "workspace:*",
+    "@yolk/client": "workspace:*",
     "@yolk/protocol": "workspace:*",
     "better-auth": "^1.4.14",
     "class-variance-authority": "^0.7.1",

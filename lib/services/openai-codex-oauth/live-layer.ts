@@ -1,0 +1,340 @@
+import { Context, Effect, Layer } from 'effect'
+import * as Schema from 'effect/Schema'
+import { OpenAiCodexOAuthError } from './errors'
+import {
+  OpenAiCodexDeviceAuthTokenResponseSchema,
+  OpenAiCodexDeviceAuthUserCodeResponseSchema,
+  OpenAiCodexTokenResponseSchema,
+  type OpenAiCodexDeviceAuthTokenResponse,
+  type OpenAiCodexOAuthToken,
+  type OpenAiCodexTokenResponse
+} from './schemas'
+
+const OPENAI_ISSUER = 'https://auth.openai.com'
+
+export const OPENAI_CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
+export const OPENAI_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
+export const OPENAI_DEVICE_AUTH_USERCODE_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/usercode`
+export const OPENAI_DEVICE_AUTH_TOKEN_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/token`
+export const OPENAI_DEVICE_AUTH_CALLBACK_REDIRECT = `${OPENAI_ISSUER}/deviceauth/callback`
+export const OPENAI_DEVICE_VERIFICATION_URL = `${OPENAI_ISSUER}/codex/device`
+export const OPENAI_TOKEN_ENDPOINT = `${OPENAI_ISSUER}/oauth/token`
+export const OPENAI_CODEX_REFRESH_BUFFER_MS = 5 * 60 * 1000
+
+type OpenAiCodexOAuthConfigShape = {
+  readonly fetch: typeof fetch
+}
+
+class OpenAiCodexOAuthConfig extends Context.Service<
+  OpenAiCodexOAuthConfig,
+  OpenAiCodexOAuthConfigShape
+>()('@app/OpenAiCodexOAuthConfig') {}
+
+const OpenAiCodexOAuthConfigLayer = Layer.succeed(OpenAiCodexOAuthConfig, {
+  fetch: globalThis.fetch
+})
+
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const readText = (response: Response): Promise<string> => response.text()
+const parseJson = (response: Response): Promise<unknown> => response.json()
+
+const parseJwtPayload = (token: string): unknown | undefined => {
+  const parts = token.split('.')
+  const payload = parts[1]
+
+  if (parts.length !== 3 || payload === undefined) {
+    return undefined
+  }
+
+  try {
+    return JSON.parse(Buffer.from(payload, 'base64url').toString())
+  } catch {
+    return undefined
+  }
+}
+
+const accountIdFromPayload = (payload: unknown): string | undefined => {
+  if (!isRecord(payload)) {
+    return undefined
+  }
+
+  const direct = payload.chatgpt_account_id
+  if (typeof direct === 'string') {
+    return direct
+  }
+
+  const auth = payload['https://api.openai.com/auth']
+  if (isRecord(auth) && typeof auth.chatgpt_account_id === 'string') {
+    return auth.chatgpt_account_id
+  }
+
+  const organizations = payload.organizations
+  if (Array.isArray(organizations)) {
+    for (const organization of organizations) {
+      if (isRecord(organization) && typeof organization.id === 'string') {
+        return organization.id
+      }
+    }
+  }
+
+  return undefined
+}
+
+export const extractAccountId = (token: string): string | undefined =>
+  accountIdFromPayload(parseJwtPayload(token))
+
+const extractAccountIdFromTokens = (tokens: OpenAiCodexTokenResponse): string | undefined =>
+  extractAccountId(tokens.id_token) ?? extractAccountId(tokens.access_token)
+
+const toOAuthToken = (
+  tokens: OpenAiCodexTokenResponse,
+  currentAccountId: string | undefined
+): OpenAiCodexOAuthToken => {
+  const accountId = extractAccountIdFromTokens(tokens) ?? currentAccountId
+  const expiresIn = tokens.expires_in ?? 3600
+  const base: Omit<OpenAiCodexOAuthToken, 'accountId'> = {
+    type: 'oauth',
+    refresh: tokens.refresh_token,
+    access: tokens.access_token,
+    expires: Date.now() + expiresIn * 1000
+  }
+
+  if (accountId === undefined) {
+    return base
+  }
+
+  return { ...base, accountId }
+}
+
+const readErrorBody = (response: Response, operation: string) =>
+  Effect.tryPromise({
+    try: () => readText(response),
+    catch: error =>
+      new OpenAiCodexOAuthError({
+        message: `Could not read OpenAI Codex ${operation} error body: ${unknownToMessage(error)}`,
+        cause: error
+      })
+  })
+
+const failOpenAiResponse = (response: Response, operation: string) =>
+  Effect.gen(function* () {
+    const text = yield* readErrorBody(response, operation)
+    return yield* Effect.fail(
+      new OpenAiCodexOAuthError({
+        message: `OpenAI Codex ${operation} failed: ${response.status} ${text}`,
+        status: response.status
+      })
+    )
+  })
+
+const decodeJson = <S extends Schema.Top>(schema: S, value: unknown, operation: string) =>
+  Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError(
+      error =>
+        new OpenAiCodexOAuthError({
+          message: `Invalid OpenAI Codex ${operation} response: ${unknownToMessage(error)}`,
+          cause: error
+        })
+    )
+  )
+
+export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()(
+  '@app/OpenAiCodexOAuth',
+  {
+    make: Effect.gen(function* () {
+      const config = yield* OpenAiCodexOAuthConfig
+
+      const postJson = (url: string, body: unknown, operation: string) =>
+        Effect.gen(function* () {
+          const serialized = yield* Effect.try({
+            try: () => JSON.stringify(body),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `Could not serialize OpenAI Codex ${operation} request: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+
+          const response = yield* Effect.tryPromise({
+            try: signal =>
+              config.fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: serialized,
+                signal
+              }),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `OpenAI Codex ${operation} request failed: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+
+          return response
+        })
+
+      const postForm = (url: string, body: URLSearchParams, operation: string) =>
+        Effect.gen(function* () {
+          const response = yield* Effect.tryPromise({
+            try: signal =>
+              config.fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/x-www-form-urlencoded' },
+                body: body.toString(),
+                signal
+              }),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `OpenAI Codex ${operation} request failed: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+
+          if (!response.ok) {
+            return yield* failOpenAiResponse(response, operation)
+          }
+
+          return yield* Effect.tryPromise({
+            try: () => parseJson(response),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `Could not parse OpenAI Codex ${operation} JSON: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+        })
+
+      const startDeviceFlow = () =>
+        Effect.gen(function* () {
+          const response = yield* postJson(
+            OPENAI_DEVICE_AUTH_USERCODE_URL,
+            { client_id: OPENAI_CODEX_CLIENT_ID },
+            'device authorization'
+          )
+
+          if (!response.ok) {
+            return yield* failOpenAiResponse(response, 'device authorization')
+          }
+
+          const json = yield* Effect.tryPromise({
+            try: () => parseJson(response),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `Could not parse OpenAI Codex device authorization JSON: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+          const deviceAuth = yield* decodeJson(
+            OpenAiCodexDeviceAuthUserCodeResponseSchema,
+            json,
+            'device authorization'
+          )
+          const interval = Math.max(Number.parseInt(deviceAuth.interval, 10) || 5, 1)
+
+          return {
+            userCode: deviceAuth.user_code,
+            verificationUrl: OPENAI_DEVICE_VERIFICATION_URL,
+            deviceAuthId: deviceAuth.device_auth_id,
+            interval
+          }
+        }).pipe(Effect.withSpan('OpenAiCodexOAuth.startDeviceFlow'))
+
+      const pollDeviceFlow = (input: { readonly deviceAuthId: string; readonly userCode: string }) =>
+        Effect.gen(function* () {
+          const response = yield* postJson(
+            OPENAI_DEVICE_AUTH_TOKEN_URL,
+            {
+              device_auth_id: input.deviceAuthId,
+              user_code: input.userCode
+            },
+            'device token poll'
+          )
+
+          if (response.status === 403 || response.status === 404) {
+            return { _tag: 'Pending' as const }
+          }
+
+          if (!response.ok) {
+            const text = yield* readErrorBody(response, 'device token poll')
+            return {
+              _tag: 'Failed' as const,
+              message: `Device authorization failed: ${response.status} ${text}`
+            }
+          }
+
+          const json = yield* Effect.tryPromise({
+            try: () => parseJson(response),
+            catch: error =>
+              new OpenAiCodexOAuthError({
+                message: `Could not parse OpenAI Codex device token JSON: ${unknownToMessage(error)}`,
+                cause: error
+              })
+          })
+          const deviceToken = yield* decodeJson(
+            OpenAiCodexDeviceAuthTokenResponseSchema,
+            json,
+            'device token poll'
+          )
+
+          return { _tag: 'Authorized' as const, deviceToken }
+        }).pipe(Effect.withSpan('OpenAiCodexOAuth.pollDeviceFlow'))
+
+      const exchangeDeviceToken = (deviceToken: OpenAiCodexDeviceAuthTokenResponse) =>
+        Effect.gen(function* () {
+          const json = yield* postForm(
+            OPENAI_TOKEN_ENDPOINT,
+            new URLSearchParams({
+              grant_type: 'authorization_code',
+              code: deviceToken.authorization_code,
+              redirect_uri: OPENAI_DEVICE_AUTH_CALLBACK_REDIRECT,
+              client_id: OPENAI_CODEX_CLIENT_ID,
+              code_verifier: deviceToken.code_verifier
+            }),
+            'token exchange'
+          )
+          const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token exchange')
+
+          return toOAuthToken(tokens, undefined)
+        }).pipe(Effect.withSpan('OpenAiCodexOAuth.exchangeDeviceToken'))
+
+      const refreshToken = (refreshTokenValue: string, currentAccountId: string | undefined) =>
+        Effect.gen(function* () {
+          const json = yield* postForm(
+            OPENAI_TOKEN_ENDPOINT,
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshTokenValue,
+              client_id: OPENAI_CODEX_CLIENT_ID
+            }),
+            'token refresh'
+          )
+          const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token refresh')
+
+          return toOAuthToken(tokens, currentAccountId)
+        }).pipe(Effect.withSpan('OpenAiCodexOAuth.refreshToken'))
+
+      const needsRefresh = (token: OpenAiCodexOAuthToken) =>
+        !token.access || token.expires < Date.now() + OPENAI_CODEX_REFRESH_BUFFER_MS
+
+      return {
+        startDeviceFlow,
+        pollDeviceFlow,
+        exchangeDeviceToken,
+        refreshToken,
+        needsRefresh
+      } as const
+    })
+  }
+) {
+  static layer = Layer.effect(this, this.make).pipe(Layer.provide(OpenAiCodexOAuthConfigLayer))
+}
+
+export const makeOpenAiCodexOAuthLayer = (fetchImpl: typeof fetch) =>
+  Layer.effect(OpenAiCodexOAuth, OpenAiCodexOAuth.make).pipe(
+    Layer.provide(Layer.succeed(OpenAiCodexOAuthConfig, { fetch: fetchImpl }))
+  )

@@ -11,12 +11,20 @@ export default function Page() {
         </p>
       </div>
 
-      <Link
-        href="/login"
-        className="bg-primary text-primary-foreground w-fit rounded-md px-4 py-2 text-sm font-medium"
-      >
-        Sign in
-      </Link>
+      <div className="flex gap-3">
+        <Link
+          href="/agent"
+          className="bg-primary text-primary-foreground w-fit rounded-md px-4 py-2 text-sm font-medium"
+        >
+          Open agent
+        </Link>
+        <Link
+          href="/login"
+          className="border-border w-fit rounded-md border px-4 py-2 text-sm font-medium"
+        >
+          Sign in
+        </Link>
+      </div>
     </main>
   )
 }

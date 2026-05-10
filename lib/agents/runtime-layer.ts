@@ -1,13 +1,16 @@
 import { Layer } from 'effect'
-import { ContextTransformer, LoopConfig } from '@yolk/agent-loop'
+import { ContextTransformer, LoopConfig, type LLMProvider } from '@yolk/agent-loop'
 import { NoToolExecutorLayer } from './no-tool-executor-layer'
-import { AnthropicProviderLayer } from './providers/anthropic-provider'
-import { VolatileSessionStoreLayer } from './volatile-session-store-layer'
+import { OpenAiProviderLayer } from './providers/openai-provider'
+import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 
-export const AgentRuntimeLayer = Layer.mergeAll(
-  ContextTransformer.identity,
-  LoopConfig.defaultLayer,
-  AnthropicProviderLayer,
-  NoToolExecutorLayer,
-  VolatileSessionStoreLayer
-)
+export const makeAgentRuntimeLayer = <E, R>(providerLayer: Layer.Layer<LLMProvider, E, R>) =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    LoopConfig.defaultLayer,
+    providerLayer,
+    NoToolExecutorLayer,
+    StatelessSessionStoreLayer
+  )
+
+export const AgentRuntimeLayer = makeAgentRuntimeLayer(OpenAiProviderLayer)

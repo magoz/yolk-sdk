@@ -9,7 +9,8 @@ import {
   Reply,
   TestToolExecutor
 } from '@yolk/agent-loop'
-import { makeVolatileSessionStoreLayer, type VolatileSessionStorage } from './volatile-session-store-layer'
+import type { LLMRequest } from '@yolk/agent-loop'
+import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
 
 const config = {
@@ -30,23 +31,22 @@ const decodeEvents = (body: string) =>
     decodeEvent
   )
 
-const makeLayer = (storage: VolatileSessionStorage) =>
+const makeLayer = () =>
   Layer.mergeAll(
     ContextTransformer.identity,
     LoopConfig.defaultLayer,
     FauxProvider.layer(Reply.text('ok')),
     TestToolExecutor.layer({}),
-    makeVolatileSessionStoreLayer(storage)
+    StatelessSessionStoreLayer
   )
 
 describe('makeAgentPostResponse', () => {
-  it.effect('returns ndjson agent events and saves the session transcript', () =>
+  it.effect('returns ndjson agent events for a text-only turn', () =>
     Effect.gen(function* () {
-      const storage: VolatileSessionStorage = new Map()
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
         config
-      ).pipe(Effect.provide(makeLayer(storage)))
+      ).pipe(Effect.provide(makeLayer()))
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -63,9 +63,34 @@ describe('makeAgentPostResponse', () => {
         'TurnEnd',
         'AgentEnd'
       ])
-      expect(storage.get('session_1')?.messages.map(message => message.content)).toEqual([
-        'hello',
-        'ok'
+    }))
+
+  it.effect('does not carry transcript across turns', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const layer = Layer.mergeAll(
+        ContextTransformer.identity,
+        LoopConfig.defaultLayer,
+        FauxProvider.layerWithRequests({
+          responses: [Reply.text('ok'), Reply.text('next')],
+          requests
+        }),
+        TestToolExecutor.layer({}),
+        StatelessSessionStoreLayer
+      )
+
+      yield* makeAgentPostResponse(
+        AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
+        config
+      ).pipe(Effect.provide(layer))
+      yield* makeAgentPostResponse(
+        AgentRouteRequest.make({ sessionId: 'session_1', content: 'again' }),
+        config
+      ).pipe(Effect.provide(layer))
+
+      expect(requests.map(request => request.messages.map(message => message.content))).toEqual([
+        ['hello'],
+        ['again']
       ])
     }))
 

@@ -48,5 +48,11 @@ export const applyAgentEvent = (
   }
 }
 
+export const markAgentError = (state: AgentClientState): AgentClientState => ({
+  ...state,
+  status: 'error',
+  activeToolCalls: []
+})
+
 export const reduceAgentEvents = (events: ReadonlyArray<AgentEvent>) =>
   events.reduce(applyAgentEvent, initialAgentClientState)

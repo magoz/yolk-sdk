@@ -9,7 +9,7 @@ import {
   ToolCall,
   ToolResult
 } from '@yolk/protocol'
-import { reduceAgentEvents } from '../src'
+import { markAgentError, reduceAgentEvents } from '../src'
 
 describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
@@ -31,5 +31,11 @@ describe('reduceAgentEvents', () => {
     expect(state.activeToolCalls).toEqual([])
     expect(state.toolResults).toEqual([result])
     expect(state.messages).toEqual([message])
+  })
+
+  it('marks client state as errored', () => {
+    const state = reduceAgentEvents([AgentStart.make({})])
+
+    expect(markAgentError(state)).toMatchObject({ status: 'error', activeToolCalls: [] })
   })
 })

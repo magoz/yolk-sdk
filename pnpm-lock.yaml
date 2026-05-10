@@ -44,6 +44,9 @@ importers:
       '@yolk/agent-runtime':
         specifier: workspace:*
         version: link:packages/agent-runtime
+      '@yolk/client':
+        specifier: workspace:*
+        version: link:packages/client
       '@yolk/protocol':
         specifier: workspace:*
         version: link:packages/protocol
@@ -192,6 +195,9 @@ importers:
       '@yolk/protocol':
         specifier: workspace:*
         version: link:../protocol
+      effect:
+        specifier: beta
+        version: 4.0.0-beta.64
 
   packages/protocol:
     dependencies:

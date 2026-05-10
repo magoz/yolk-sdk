@@ -43,6 +43,43 @@ cp .env.example .env.local
 pnpm dev
 ```
 
+## Text agent smoke test
+
+Current agent mode is intentionally minimal:
+
+- text-only
+- no tools
+- no durable persistence
+- each `/api/agent` request runs one turn from the submitted prompt
+
+API-key mode:
+
+```txt
+OPENAI_PROVIDER=api_key # optional default
+OPENAI_API_KEY=...
+OPENAI_MODEL=...
+# optional
+AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
+```
+
+ChatGPT subscription mode:
+
+```txt
+OPENAI_PROVIDER=codex_oauth
+OPENAI_MODEL=gpt-5.4
+# optional
+AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
+```
+
+Then connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key.
+
+Then:
+
+1. `pnpm dev`
+2. sign in
+3. open `/agent`
+4. send a prompt
+
 ## Checks
 
 ```bash
