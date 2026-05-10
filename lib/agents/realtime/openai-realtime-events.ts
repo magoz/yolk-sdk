@@ -79,29 +79,75 @@ export type OpenAiRealtimeClientEvent = typeof OpenAiRealtimeClientEvent.Type
 
 const OpenAiRealtimeResponseDoneEvent = Schema.Struct({
   type: Schema.Literals(['response.done']),
+  response_id: Schema.optional(Schema.String),
   response: Schema.Struct({
+    id: Schema.optional(Schema.String),
+    status: Schema.optional(Schema.String),
     output: Schema.Array(Schema.Unknown)
   })
 })
 
 const OpenAiRealtimeInputAudioTranscriptionDeltaEvent = Schema.Struct({
   type: Schema.Literals(['conversation.item.input_audio_transcription.delta']),
+  item_id: Schema.optional(Schema.String),
   delta: Schema.String
 })
 
 const OpenAiRealtimeInputAudioTranscriptionCompletedEvent = Schema.Struct({
   type: Schema.Literals(['conversation.item.input_audio_transcription.completed']),
+  item_id: Schema.optional(Schema.String),
   transcript: Schema.String
 })
 
-const OpenAiRealtimeOutputAudioTranscriptDeltaEvent = Schema.Struct({
-  type: Schema.Literals(['response.output_audio_transcript.delta']),
-  delta: Schema.String
-})
+const OpenAiRealtimeOutputAudioTranscriptDeltaEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literals(['response.output_audio_transcript.delta']),
+    item_id: Schema.optional(Schema.String),
+    response_id: Schema.optional(Schema.String),
+    delta: Schema.String
+  }),
+  Schema.Struct({
+    type: Schema.Literals(['response.audio_transcript.delta']),
+    item_id: Schema.optional(Schema.String),
+    response_id: Schema.optional(Schema.String),
+    delta: Schema.String
+  })
+])
 
-const OpenAiRealtimeOutputAudioTranscriptDoneEvent = Schema.Struct({
-  type: Schema.Literals(['response.output_audio_transcript.done']),
-  transcript: Schema.optional(Schema.String)
+const OpenAiRealtimeOutputAudioTranscriptDoneEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literals(['response.output_audio_transcript.done']),
+    item_id: Schema.optional(Schema.String),
+    response_id: Schema.optional(Schema.String),
+    transcript: Schema.optional(Schema.String)
+  }),
+  Schema.Struct({
+    type: Schema.Literals(['response.audio_transcript.done']),
+    item_id: Schema.optional(Schema.String),
+    response_id: Schema.optional(Schema.String),
+    transcript: Schema.optional(Schema.String)
+  })
+])
+
+const OpenAiRealtimeSessionConfigEvent = Schema.Struct({
+  type: Schema.String,
+  session: Schema.Struct({
+    model: Schema.optional(Schema.String),
+    audio: Schema.optional(
+      Schema.Struct({
+        input: Schema.optional(
+          Schema.Struct({
+            transcription: Schema.optional(
+              Schema.Struct({
+                model: Schema.optional(Schema.String),
+                language: Schema.optional(Schema.String)
+              })
+            )
+          })
+        )
+      })
+    )
+  })
 })
 
 const OpenAiRealtimeErrorEvent = Schema.Struct({
@@ -118,22 +164,48 @@ export type OpenAiRealtimeToolExecutionResponse = typeof OpenAiRealtimeToolExecu
 
 export class OpenAiRealtimeInputAudioTranscriptionDelta extends Schema.TaggedClass<OpenAiRealtimeInputAudioTranscriptionDelta>()(
   'InputAudioTranscriptionDelta',
-  { delta: Schema.String }
+  { itemId: Schema.NullOr(Schema.String), delta: Schema.String }
 ) {}
 
 export class OpenAiRealtimeInputAudioTranscriptionCompleted extends Schema.TaggedClass<OpenAiRealtimeInputAudioTranscriptionCompleted>()(
   'InputAudioTranscriptionCompleted',
-  { transcript: Schema.String }
+  { itemId: Schema.NullOr(Schema.String), transcript: Schema.String }
 ) {}
 
 export class OpenAiRealtimeOutputAudioTranscriptDelta extends Schema.TaggedClass<OpenAiRealtimeOutputAudioTranscriptDelta>()(
   'OutputAudioTranscriptDelta',
-  { delta: Schema.String }
+  {
+    itemId: Schema.NullOr(Schema.String),
+    responseId: Schema.NullOr(Schema.String),
+    delta: Schema.String
+  }
 ) {}
 
 export class OpenAiRealtimeOutputAudioTranscriptDone extends Schema.TaggedClass<OpenAiRealtimeOutputAudioTranscriptDone>()(
   'OutputAudioTranscriptDone',
-  { transcript: Schema.NullOr(Schema.String) }
+  {
+    itemId: Schema.NullOr(Schema.String),
+    responseId: Schema.NullOr(Schema.String),
+    transcript: Schema.NullOr(Schema.String)
+  }
+) {}
+
+export class OpenAiRealtimeSessionConfigured extends Schema.TaggedClass<OpenAiRealtimeSessionConfigured>()(
+  'SessionConfigured',
+  {
+    eventType: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    transcriptionModel: Schema.NullOr(Schema.String),
+    transcriptionLanguage: Schema.NullOr(Schema.String)
+  }
+) {}
+
+export class OpenAiRealtimeResponseDone extends Schema.TaggedClass<OpenAiRealtimeResponseDone>()(
+  'ResponseDone',
+  {
+    responseId: Schema.NullOr(Schema.String),
+    status: Schema.NullOr(Schema.String)
+  }
 ) {}
 
 export class OpenAiRealtimeFunctionCalls extends Schema.TaggedClass<OpenAiRealtimeFunctionCalls>()(
@@ -152,6 +224,8 @@ export const OpenAiRealtimeServerEvent = Schema.Union([
   OpenAiRealtimeInputAudioTranscriptionCompleted,
   OpenAiRealtimeOutputAudioTranscriptDelta,
   OpenAiRealtimeOutputAudioTranscriptDone,
+  OpenAiRealtimeSessionConfigured,
+  OpenAiRealtimeResponseDone,
   OpenAiRealtimeFunctionCalls,
   OpenAiRealtimeError,
   OpenAiRealtimeIgnored
@@ -232,6 +306,9 @@ const readFunctionCalls = (value: unknown): ReadonlyArray<OpenAiRealtimeFunction
 
 const decodeJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
+const isSessionConfigEventType = (eventType: string) =>
+  eventType === 'session.created' || eventType === 'session.updated'
+
 export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServerEvent => {
   const value = decodeJsonString(raw)
 
@@ -239,12 +316,29 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
     return OpenAiRealtimeIgnored.make({})
   }
 
+  const sessionConfig = Schema.decodeUnknownOption(OpenAiRealtimeSessionConfigEvent)(value.value)
+
+  if (Option.isSome(sessionConfig) && isSessionConfigEventType(sessionConfig.value.type)) {
+    const input = sessionConfig.value.session.audio?.input
+    const transcription = input?.transcription
+
+    return OpenAiRealtimeSessionConfigured.make({
+      eventType: sessionConfig.value.type,
+      model: sessionConfig.value.session.model ?? null,
+      transcriptionModel: transcription?.model ?? null,
+      transcriptionLanguage: transcription?.language ?? null
+    })
+  }
+
   const inputDelta = Schema.decodeUnknownOption(OpenAiRealtimeInputAudioTranscriptionDeltaEvent)(
     value.value
   )
 
   if (Option.isSome(inputDelta)) {
-    return OpenAiRealtimeInputAudioTranscriptionDelta.make({ delta: inputDelta.value.delta })
+    return OpenAiRealtimeInputAudioTranscriptionDelta.make({
+      itemId: inputDelta.value.item_id ?? null,
+      delta: inputDelta.value.delta
+    })
   }
 
   const inputCompleted = Schema.decodeUnknownOption(OpenAiRealtimeInputAudioTranscriptionCompletedEvent)(
@@ -253,6 +347,7 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
 
   if (Option.isSome(inputCompleted)) {
     return OpenAiRealtimeInputAudioTranscriptionCompleted.make({
+      itemId: inputCompleted.value.item_id ?? null,
       transcript: inputCompleted.value.transcript
     })
   }
@@ -262,7 +357,11 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
   )
 
   if (Option.isSome(outputDelta)) {
-    return OpenAiRealtimeOutputAudioTranscriptDelta.make({ delta: outputDelta.value.delta })
+    return OpenAiRealtimeOutputAudioTranscriptDelta.make({
+      itemId: outputDelta.value.item_id ?? null,
+      responseId: outputDelta.value.response_id ?? null,
+      delta: outputDelta.value.delta
+    })
   }
 
   const outputDone = Schema.decodeUnknownOption(OpenAiRealtimeOutputAudioTranscriptDoneEvent)(
@@ -271,6 +370,8 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
 
   if (Option.isSome(outputDone)) {
     return OpenAiRealtimeOutputAudioTranscriptDone.make({
+      itemId: outputDone.value.item_id ?? null,
+      responseId: outputDone.value.response_id ?? null,
       transcript: outputDone.value.transcript ?? null
     })
   }
@@ -279,6 +380,15 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
 
   if (calls.length > 0) {
     return OpenAiRealtimeFunctionCalls.make({ calls })
+  }
+
+  const responseDone = Schema.decodeUnknownOption(OpenAiRealtimeResponseDoneEvent)(value.value)
+
+  if (Option.isSome(responseDone)) {
+    return OpenAiRealtimeResponseDone.make({
+      responseId: responseDone.value.response.id ?? responseDone.value.response_id ?? null,
+      status: responseDone.value.response.status ?? null
+    })
   }
 
   const error = Schema.decodeUnknownOption(OpenAiRealtimeErrorEvent)(value.value)

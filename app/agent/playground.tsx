@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { AgentEvent } from '@yolk/protocol'
 import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
+import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
 import {
   activityItemFromAgentEvent,
@@ -15,8 +16,9 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { buildAgentChatItems } from './agent-chat-items'
+import { truncate } from './agent-format'
 import { useAgentChat } from './use-agent-chat'
-import { useRealtimeVoice } from './use-realtime-voice'
+import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
 type AgentPlaygroundProps = {
   readonly sessionId: string
@@ -30,6 +32,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [showInlineTools, setShowInlineTools] = useState(true)
   const [showReasoning, setShowReasoning] = useState(true)
   const [reasoningEffort, setReasoningEffort] = useState(agentTextReasoningEffort)
+  const [transcriptionModel, setTranscriptionModel] = useState(defaultOpenAiRealtimeTranscriptionModel)
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const nextActivityIdRef = useRef(0)
 
@@ -65,6 +68,53 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     })
   }, [recordActivity])
 
+  const recordVoiceDebug = useCallback(
+    (event: VoiceDebugEvent) => {
+      switch (event._tag) {
+        case 'SessionOpened':
+          recordActivity({
+            title: 'Voice session opened',
+            detail: `${event.seededMessageCount} seeded messages`,
+            tone: 'neutral'
+          })
+          return
+        case 'SessionConfigured':
+          recordActivity({
+            title: `Realtime ${event.eventType}`,
+            detail: [
+              `model=${event.model ?? 'unknown'}`,
+              `transcription=${event.transcriptionModel ?? 'off'}`,
+              `language=${event.transcriptionLanguage ?? 'auto'}`
+            ].join(' · '),
+            tone: 'neutral'
+          })
+          return
+        case 'InputTranscript':
+          recordActivity({
+            title: `Input transcript ${event.itemId ?? 'unknown item'}`,
+            detail: truncate(event.transcript),
+            tone: 'neutral'
+          })
+          return
+        case 'OutputTranscript':
+          recordActivity({
+            title: `Output transcript ${event.responseId ?? 'unknown response'}`,
+            detail: truncate(event.transcript),
+            tone: 'neutral'
+          })
+          return
+        case 'ResponseDone':
+          recordActivity({
+            title: `Realtime response ${event.responseId ?? 'unknown'}`,
+            detail: `status=${event.status ?? 'unknown'}`,
+            tone: 'neutral'
+          })
+          return
+      }
+    },
+    [recordActivity]
+  )
+
   const agentChat = useAgentChat({
     sessionId,
     reasoningEffort,
@@ -84,9 +134,11 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     toggleSession: toggleVoice
   } = useRealtimeVoice({
     messages: state.messages,
+    transcriptionModel,
     onAgentEvent: applyEvent,
     onUserMessage: appendMessage,
-    onError: fail
+    onError: fail,
+    onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const submitDisabled = isRunning || isVoiceMode
@@ -103,10 +155,22 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         assistantDraft: state.text,
         reasoningDraft: state.reasoning,
         activeToolCalls: state.activeToolCalls,
+        completedToolCalls: state.completedToolCalls,
+        liveToolResults: state.toolResults,
         isRunning,
         error: state.error
       }),
-    [isRunning, state.activeToolCalls, state.error, state.messages, state.reasoning, state.text, voiceUserDraft]
+    [
+      isRunning,
+      state.activeToolCalls,
+      state.completedToolCalls,
+      state.error,
+      state.messages,
+      state.reasoning,
+      state.text,
+      state.toolResults,
+      voiceUserDraft
+    ]
   )
 
   const handleSubmit = useCallback(() => {
@@ -205,10 +269,13 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         voiceStatus={voiceStatus}
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isRunning}
+        transcriptionModel={transcriptionModel}
+        transcriptionModelDisabled={isVoiceMode}
         showInlineTools={showInlineTools}
         showReasoning={showReasoning}
         onOpenChange={handleConsoleOpenChange}
         onReasoningEffortChange={setReasoningEffort}
+        onTranscriptionModelChange={setTranscriptionModel}
         onShowInlineToolsChange={handleInlineToolsChange}
         onShowReasoningChange={handleReasoningChange}
       />

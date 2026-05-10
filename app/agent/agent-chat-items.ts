@@ -1,10 +1,15 @@
-import type { AgentMessage, Content, ToolCall } from '@yolk/protocol'
+import type { AgentMessage, Content, ToolCall, ToolResult } from '@yolk/protocol'
+
+export type LiveToolState =
+  | { readonly _tag: 'Running' }
+  | { readonly _tag: 'Completed'; readonly result: ToolResult }
 
 export type AgentChatItem =
   | { readonly _tag: 'UserMessage'; readonly id: string; readonly content: Content }
   | { readonly _tag: 'AssistantMessage'; readonly id: string; readonly content: Content }
   | { readonly _tag: 'Reasoning'; readonly id: string; readonly text: string }
   | { readonly _tag: 'ToolCall'; readonly id: string; readonly call: ToolCall }
+  | { readonly _tag: 'LiveTool'; readonly id: string; readonly call: ToolCall; readonly state: LiveToolState }
   | {
       readonly _tag: 'ToolResult'
       readonly id: string
@@ -23,6 +28,8 @@ export type BuildAgentChatItemsInput = {
   readonly assistantDraft: string
   readonly reasoningDraft: string
   readonly activeToolCalls: ReadonlyArray<ToolCall>
+  readonly completedToolCalls: ReadonlyArray<ToolCall>
+  readonly liveToolResults: ReadonlyArray<ToolResult>
   readonly isRunning: boolean
   readonly error: string | null
 }
@@ -65,17 +72,39 @@ const collectToolNames = (messages: ReadonlyArray<AgentMessage>) => {
   return names
 }
 
+const addToolCallNames = (names: Map<string, string>, calls: ReadonlyArray<ToolCall>) => {
+  for (const call of calls) {
+    names.set(call.id, call.name)
+  }
+}
+
+const collectToolCallsById = (calls: ReadonlyArray<ToolCall>) => {
+  const callsById = new Map<string, ToolCall>()
+
+  for (const call of calls) {
+    callsById.set(call.id, call)
+  }
+
+  return callsById
+}
+
 export const buildAgentChatItems = ({
   messages,
   userDraft,
   assistantDraft,
   reasoningDraft,
   activeToolCalls,
+  completedToolCalls,
+  liveToolResults,
   isRunning,
   error
 }: BuildAgentChatItemsInput): ReadonlyArray<AgentChatItem> => {
   const toolNames = collectToolNames(messages)
   const items: Array<AgentChatItem> = []
+
+  addToolCallNames(toolNames, activeToolCalls)
+  addToolCallNames(toolNames, completedToolCalls)
+  const completedToolCallsById = collectToolCallsById(completedToolCalls)
 
   messages.forEach((message, index) => {
     switch (message._tag) {
@@ -123,6 +152,38 @@ export const buildAgentChatItems = ({
 
   if (assistantDraft.length > 0) {
     items.push({ _tag: 'AssistantDraft', id: 'draft-assistant', text: assistantDraft })
+  }
+
+  for (const call of activeToolCalls) {
+    items.push({
+      _tag: 'LiveTool',
+      id: `live-tool-${call.id}`,
+      call,
+      state: { _tag: 'Running' }
+    })
+  }
+
+  if (isRunning) {
+    for (const result of liveToolResults) {
+      const call = completedToolCallsById.get(result.toolCallId)
+
+      if (call === undefined) {
+        items.push({
+          _tag: 'ToolResult',
+          id: `live-tool-result-${result.toolCallId}`,
+          toolCallId: result.toolCallId,
+          name: toolNames.get(result.toolCallId) ?? result.toolCallId,
+          content: result.content
+        })
+      } else {
+        items.push({
+          _tag: 'LiveTool',
+          id: `live-tool-${call.id}`,
+          call,
+          state: { _tag: 'Completed', result }
+        })
+      }
+    }
   }
 
   if (isRunning) {

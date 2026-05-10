@@ -10,8 +10,10 @@ import {
 } from '@/lib/agents/text-agent-config'
 import {
   defaultOpenAiRealtimeReasoningEffort,
+  openAiRealtimeTranscriptionModelOptions,
   openAiRealtimeModel
 } from '@/lib/agents/realtime/openai-realtime'
+import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
 import type { VoiceStatus } from './use-realtime-voice'
 
@@ -47,7 +49,10 @@ type AgentStatusPanelProps = {
   readonly voiceStatus: VoiceStatus
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
+  readonly transcriptionModelDisabled: boolean
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
+  readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
 }
 
 function StatusRow({ label, children }: { readonly label: string; readonly children: ReactNode }) {
@@ -85,6 +90,34 @@ function ReasoningEffortControl({ value, disabled, onChange }: ReasoningEffortCo
   )
 }
 
+type TranscriptionModelControlProps = {
+  readonly value: OpenAiRealtimeTranscriptionModel
+  readonly disabled: boolean
+  readonly onChange: (model: OpenAiRealtimeTranscriptionModel) => void
+}
+
+function TranscriptionModelControl({ value, disabled, onChange }: TranscriptionModelControlProps) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {openAiRealtimeTranscriptionModelOptions.map(option => (
+        <Button
+          key={option.model}
+          type="button"
+          size="sm"
+          variant={value === option.model ? 'secondary' : 'outline'}
+          disabled={disabled}
+          className="min-h-11 px-2 text-[11px]"
+          title={option.description}
+          aria-pressed={value === option.model}
+          onClick={() => onChange(option.model)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 export function AgentStatusPanel({
   sessionId,
   openAiCodexConnected,
@@ -92,7 +125,10 @@ export function AgentStatusPanel({
   voiceStatus,
   reasoningEffort,
   reasoningEffortDisabled,
-  onReasoningEffortChange
+  transcriptionModel,
+  transcriptionModelDisabled,
+  onReasoningEffortChange,
+  onTranscriptionModelChange
 }: AgentStatusPanelProps) {
   return (
     <div className="space-y-4">
@@ -116,6 +152,13 @@ export function AgentStatusPanel({
         </StatusRow>
         <StatusRow label="Voice model">
           <Badge variant="outline">{openAiRealtimeModel}</Badge>
+        </StatusRow>
+        <StatusRow label="Transcription">
+          <TranscriptionModelControl
+            value={transcriptionModel}
+            disabled={transcriptionModelDisabled}
+            onChange={onTranscriptionModelChange}
+          />
         </StatusRow>
         <StatusRow label="Voice reasoning">
           <Badge variant="outline">{defaultOpenAiRealtimeReasoningEffort}</Badge>

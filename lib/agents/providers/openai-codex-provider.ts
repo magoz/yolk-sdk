@@ -398,6 +398,7 @@ type OpenAiCodexBodyFormat = 'undecided' | 'sse' | 'json'
 type OpenAiCodexSseState = {
   readonly hasTextDelta: boolean
   readonly hasReasoningDelta: boolean
+  readonly hasToolCall: boolean
   readonly hasDone: boolean
 }
 
@@ -415,6 +416,7 @@ type OpenAiCodexBodyState = {
 const initialSseState: OpenAiCodexSseState = {
   hasTextDelta: false,
   hasReasoningDelta: false,
+  hasToolCall: false,
   hasDone: false
 }
 
@@ -469,15 +471,62 @@ const dataFromSseBlock = (block: string) => {
 const parseOpenAiCodexSseJson = (data: string) =>
   decodeJsonString(data, 'Could not parse OpenAI Codex stream event JSON')
 
+const stringField = (record: Record<string, unknown>, key: string) => {
+  const value = record[key]
+
+  return typeof value === 'string' ? value : undefined
+}
+
+const invalidFunctionCallSseItemError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Invalid OpenAI Codex function call stream item',
+    retryable: false
+  })
+
+const toolCallFromOutputItemDone = (event: Record<string, unknown>) =>
+  Effect.gen(function* () {
+    if (event.type !== 'response.output_item.done') {
+      return Option.none<LLMToolCall>()
+    }
+
+    const item = event.item
+    if (!isRecord(item) || item.type !== 'function_call') {
+      return Option.none<LLMToolCall>()
+    }
+
+    const callId = stringField(item, 'call_id')
+    const name = stringField(item, 'name')
+    const rawArguments = stringField(item, 'arguments')
+
+    if (callId === undefined || name === undefined || rawArguments === undefined) {
+      return yield* Effect.fail(invalidFunctionCallSseItemError())
+    }
+
+    const params = yield* parseToolArguments(rawArguments)
+
+    return Option.some(
+      LLMToolCall.make({
+        call: ToolCall.make({
+          id: callId,
+          name,
+          params
+        })
+      })
+    )
+  })
+
 const finalResponseToEvents = (
   response: unknown,
   state: OpenAiCodexSseState
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const parsedFinal = yield* decodeOpenAiCodexResponse(response)
-    const finalEvents = yield* toLlmEvents(parsedFinal, { allowEmptyStop: state.hasTextDelta })
+    const finalEvents = yield* toLlmEvents(parsedFinal, {
+      allowEmptyStop: state.hasTextDelta || state.hasToolCall
+    })
 
-    if (!state.hasTextDelta && !state.hasReasoningDelta) {
+    if (!state.hasTextDelta && !state.hasReasoningDelta && !state.hasToolCall) {
       return finalEvents
     }
 
@@ -487,6 +536,10 @@ const finalResponseToEvents = (
       }
 
       if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
+        return false
+      }
+
+      if (state.hasToolCall && event._tag === 'ToolCall') {
         return false
       }
 
@@ -523,15 +576,25 @@ const processSseData = (
       }
     }
 
+    const streamedToolCall = yield* toolCallFromOutputItemDone(parsed)
+    if (Option.isSome(streamedToolCall)) {
+      return {
+        state: { ...state, hasToolCall: true },
+        events: [streamedToolCall.value]
+      }
+    }
+
     if (parsed.type === 'response.completed') {
       const events = yield* finalResponseToEvents(parsed.response, state)
       const emittedText = events.some(event => event._tag === 'TextDelta')
       const emittedReasoning = events.some(event => event._tag === 'ReasoningDelta')
+      const emittedToolCall = events.some(event => event._tag === 'ToolCall')
 
       return {
         state: {
           hasTextDelta: state.hasTextDelta || emittedText,
           hasReasoningDelta: state.hasReasoningDelta || emittedReasoning,
+          hasToolCall: state.hasToolCall || emittedToolCall,
           hasDone: true
         },
         events

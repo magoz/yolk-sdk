@@ -32,9 +32,25 @@ describe('reduceAgentEvents', () => {
     expect(state.status).toBe('done')
     expect(state.text).toBe('')
     expect(state.activeToolCalls).toEqual([])
+    expect(state.completedToolCalls).toEqual([])
     expect(state.toolResults).toEqual([result])
     expect(state.messages).toEqual([message])
     expect(state.error).toBeNull()
+  })
+
+  it('keeps completed tool calls during active runs', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+    const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
+
+    const state = reduceAgentEvents([
+      AgentStart.make({}),
+      LLMToolCall.make({ call }),
+      ToolExecutionEnd.make({ call, result })
+    ])
+
+    expect(state.activeToolCalls).toEqual([])
+    expect(state.completedToolCalls).toEqual([call])
+    expect(state.toolResults).toEqual([result])
   })
 
   it('stores in-band agent errors', () => {
@@ -46,6 +62,7 @@ describe('reduceAgentEvents', () => {
     expect(state).toMatchObject({
       status: 'error',
       activeToolCalls: [],
+      completedToolCalls: [],
       error: 'Provider failed'
     })
   })
@@ -56,6 +73,7 @@ describe('reduceAgentEvents', () => {
     expect(markAgentError(state)).toMatchObject({
       status: 'error',
       activeToolCalls: [],
+      completedToolCalls: [],
       error: 'Agent request failed'
     })
   })
@@ -69,6 +87,7 @@ describe('reduceAgentEvents', () => {
       messages: [message],
       text: '',
       activeToolCalls: [],
+      completedToolCalls: [],
       toolResults: [],
       reasoning: '',
       error: null
@@ -107,6 +126,7 @@ describe('reduceAgentEvents', () => {
       status: 'aborted',
       text: 'partial',
       activeToolCalls: [],
+      completedToolCalls: [],
       error: null
     })
   })

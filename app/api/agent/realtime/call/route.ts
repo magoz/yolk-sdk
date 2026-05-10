@@ -7,10 +7,15 @@ import {
   HttpServerRequest,
   HttpServerResponse
 } from 'effect/unstable/http'
-import { Config, Data, Effect, Layer, Redacted } from 'effect'
+import { Config, Data, Effect, Layer, Option, Redacted } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AppLayer } from '@/lib/layers'
-import { makeOpenAiRealtimeSessionConfig } from '@/lib/agents/realtime/openai-realtime'
+import {
+  defaultOpenAiRealtimeTranscriptionModel,
+  makeOpenAiRealtimeSessionConfig,
+  OpenAiRealtimeTranscriptionModelSchema,
+  type OpenAiRealtimeTranscriptionModel
+} from '@/lib/agents/realtime/openai-realtime'
 import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -32,8 +37,6 @@ const openAiRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls'
 
 const realtimeInstructions = [
   'You are Yolk voice assistant. Be concise and practical.',
-  'Use a short spoken preamble before tool calls, e.g. “Let me calculate that.”',
-  'Use the calculate tool for arithmetic. Say the final result clearly.',
   'If a tool fails, explain briefly and keep the conversation moving.'
 ].join('\n')
 
@@ -42,11 +45,37 @@ const safetyIdentifier = (userId: string) =>
 
 const isBlank = (value: string) => value.trim().length === 0
 
-const makeSessionConfigJson = (tools: ReadonlyArray<ToolDef>) =>
+const readTranscriptionModel = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const url = new URL(request.url, 'http://localhost')
+  const rawModel = url.searchParams.get('transcriptionModel')
+
+  if (rawModel === null) {
+    return defaultOpenAiRealtimeTranscriptionModel
+  }
+
+  const decoded = Schema.decodeUnknownOption(OpenAiRealtimeTranscriptionModelSchema)(rawModel)
+
+  if (Option.isSome(decoded)) {
+    return decoded.value
+  }
+
+  return yield* Effect.fail(
+    new RealtimeCallRouteError({
+      message: `Unsupported transcription model: ${rawModel}`
+    })
+  )
+})
+
+const makeSessionConfigJson = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
+}) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(
     makeOpenAiRealtimeSessionConfig({
       instructions: realtimeInstructions,
-      tools
+      tools: input.tools,
+      transcriptionModel: input.transcriptionModel
     })
   ).pipe(
     Effect.mapError(
@@ -62,11 +91,15 @@ const requestOpenAiRealtimeAnswer = (input: {
   readonly apiKey: Redacted.Redacted<string>
   readonly sdp: string
   readonly tools: ReadonlyArray<ToolDef>
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
   readonly userId: string
 }) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
-    const sessionConfig = yield* makeSessionConfigJson(input.tools)
+    const sessionConfig = yield* makeSessionConfigJson({
+      tools: input.tools,
+      transcriptionModel: input.transcriptionModel
+    })
     const formData = new FormData()
     formData.set('sdp', input.sdp)
     formData.set('session', sessionConfig)
@@ -127,6 +160,7 @@ const readSdp = Effect.gen(function* () {
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const sdp = yield* readSdp
+  const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const toolSet = yield* resolveAgentTools({
     surface: 'voice',
@@ -137,6 +171,7 @@ const handler = Effect.gen(function* () {
     apiKey,
     sdp,
     tools: toolSet.tools,
+    transcriptionModel,
     userId: session.user.id
   })
 

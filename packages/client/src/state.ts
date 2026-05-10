@@ -8,6 +8,7 @@ export type AgentClientState = {
   readonly text: string
   readonly reasoning: string
   readonly activeToolCalls: ReadonlyArray<ToolCall>
+  readonly completedToolCalls: ReadonlyArray<ToolCall>
   readonly toolResults: ReadonlyArray<ToolResult>
   readonly error: string | null
 }
@@ -20,6 +21,7 @@ export const initialAgentClientState: AgentClientState = {
   text: '',
   reasoning: '',
   activeToolCalls: [],
+  completedToolCalls: [],
   toolResults: [],
   error: null
 }
@@ -49,6 +51,7 @@ export const applyAgentEvent = (
         text: '',
         reasoning: '',
         activeToolCalls: [],
+        completedToolCalls: [],
         toolResults: [],
         error: null
       }
@@ -64,6 +67,7 @@ export const applyAgentEvent = (
       return {
         ...state,
         activeToolCalls: state.activeToolCalls.filter(call => call.id !== event.call.id),
+        completedToolCalls: [...state.completedToolCalls, event.call],
         toolResults: [...state.toolResults, event.result]
       }
     case 'AgentEnd':
@@ -73,7 +77,8 @@ export const applyAgentEvent = (
         messages: [...state.messages, ...event.messages],
         text: '',
         reasoning: '',
-        activeToolCalls: []
+        activeToolCalls: [],
+        completedToolCalls: []
       }
     case 'AssistantMessage':
     case 'LLMStreamEnd':
@@ -96,6 +101,7 @@ export const submitAgentUserMessage = (
   text: '',
   reasoning: '',
   activeToolCalls: [],
+  completedToolCalls: [],
   toolResults: [],
   error: null
 })
@@ -107,6 +113,7 @@ export const markAgentError = (
   ...state,
   status: 'error',
   activeToolCalls: [],
+  completedToolCalls: [],
   error: message
 })
 
@@ -114,6 +121,7 @@ export const markAgentAborted = (state: AgentClientState): AgentClientState => (
   ...state,
   status: 'aborted',
   activeToolCalls: [],
+  completedToolCalls: [],
   error: null
 })
 

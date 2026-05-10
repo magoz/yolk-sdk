@@ -169,6 +169,7 @@ export function useAgentChat({
     messages: state.messages,
     status: state.status,
     activeToolCalls: state.activeToolCalls,
+    completedToolCalls: state.completedToolCalls,
     toolResults: state.toolResults,
     error: state.error,
     isRunning,

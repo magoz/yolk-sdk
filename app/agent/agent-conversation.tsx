@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
-import type { AgentChatItem } from './agent-chat-items'
+import type { AgentChatItem, LiveToolState } from './agent-chat-items'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
 
@@ -97,6 +97,43 @@ function ToolCallCard({ call }: { readonly call: ToolCall }) {
           <div className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
             {unknownPreview(call.params)}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LiveToolCard({ call, state }: { readonly call: ToolCall; readonly state: LiveToolState }) {
+  const isRunning = state._tag === 'Running'
+
+  return (
+    <div className={chatRowClass}>
+      <div className="flex gap-3">
+        <UtilityIcon role="tool" />
+        <div
+          role={isRunning ? 'status' : undefined}
+          aria-live={isRunning ? 'polite' : undefined}
+          className="min-w-0 flex-1 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-3.5 py-3 text-amber-900 shadow-xs dark:text-amber-200"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <Badge variant="outline">{isRunning ? 'running tool' : 'tool result'}</Badge>
+            {isRunning ? (
+              <LoaderCircleIcon
+                className="size-3 animate-spin text-muted-foreground motion-reduce:animate-none"
+                aria-hidden
+              />
+            ) : null}
+            <span className="font-medium text-foreground">{call.name}</span>
+            <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
+          </div>
+          <div className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
+            {unknownPreview(call.params)}
+          </div>
+          {state._tag === 'Completed' ? (
+            <div className="mt-2 whitespace-pre-wrap break-words border-t border-amber-500/15 pt-2 text-xs leading-5">
+              {contentPreview(state.result.content)}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -230,6 +267,8 @@ function AgentChatItemView({
       return showReasoning ? <ReasoningCard text={item.text} /> : null
     case 'ToolCall':
       return showInlineTools ? <ToolCallCard call={item.call} /> : null
+    case 'LiveTool':
+      return showInlineTools ? <LiveToolCard call={item.call} state={item.state} /> : null
     case 'ToolResult':
       return showInlineTools ? (
         <ToolResultCard name={item.name} content={contentPreview(item.content)} />
@@ -299,7 +338,7 @@ export function AgentConversation({
               </div>
               <CardTitle>Ask anything</CardTitle>
               <CardDescription>
-                Try “what is 19 * 23?” to smoke-test tool calling, or start a normal chat.
+                Try “summarize https://example.com” or “search latest AI news”.
               </CardDescription>
             </CardHeader>
           </Card>

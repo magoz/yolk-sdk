@@ -37,8 +37,27 @@ import {
   type OpenAiRealtimeConversationMessageItem,
   type OpenAiRealtimeFunctionCall
 } from '@/lib/agents/realtime/openai-realtime-events'
+import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
+
+export type VoiceDebugEvent =
+  | { readonly _tag: 'SessionOpened'; readonly seededMessageCount: number }
+  | {
+      readonly _tag: 'SessionConfigured'
+      readonly eventType: string
+      readonly model: string | null
+      readonly transcriptionModel: string | null
+      readonly transcriptionLanguage: string | null
+    }
+  | { readonly _tag: 'InputTranscript'; readonly itemId: string | null; readonly transcript: string }
+  | {
+      readonly _tag: 'OutputTranscript'
+      readonly itemId: string | null
+      readonly responseId: string | null
+      readonly transcript: string
+    }
+  | { readonly _tag: 'ResponseDone'; readonly responseId: string | null; readonly status: string | null }
 
 type ActiveVoiceSession = {
   readonly peerConnection: RTCPeerConnection
@@ -55,9 +74,11 @@ type VoiceStartOutcome = { readonly _tag: 'Started' } | { readonly _tag: 'Stale'
 
 type UseRealtimeVoiceInput = {
   readonly messages: ReadonlyArray<AgentMessage>
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
   readonly onAgentEvent: (event: AgentEvent) => void
   readonly onUserMessage: (message: UserMessage) => void
   readonly onError: (message: string) => void
+  readonly onDebug: (event: VoiceDebugEvent) => void
 }
 
 const encodeClientEvent = (event: OpenAiRealtimeClientEvent) => {
@@ -160,15 +181,24 @@ const requestToolExecution = (call: OpenAiRealtimeFunctionCall) =>
     )
   })
 
-const requestRealtimeAnswerSdp = (sdp: string) =>
+const realtimeCallUrl = (transcriptionModel: OpenAiRealtimeTranscriptionModel) => {
+  const params = new URLSearchParams({ transcriptionModel })
+
+  return `/api/agent/realtime/call?${params.toString()}`
+}
+
+const requestRealtimeAnswerSdp = (input: {
+  readonly sdp: string
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
+}) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
-    const request = HttpClientRequest.post('/api/agent/realtime/call').pipe(
+    const request = HttpClientRequest.post(realtimeCallUrl(input.transcriptionModel)).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/sdp',
         'content-type': 'application/sdp'
       }),
-      HttpClientRequest.bodyText(sdp, 'application/sdp')
+      HttpClientRequest.bodyText(input.sdp, 'application/sdp')
     )
     const response = yield* client
       .execute(request)
@@ -212,9 +242,11 @@ const assistantEndEvent = (content: string, toolMessages: ReadonlyArray<AgentMes
 
 export const useRealtimeVoice = ({
   messages,
+  transcriptionModel,
   onAgentEvent,
   onUserMessage,
-  onError
+  onError,
+  onDebug
 }: UseRealtimeVoiceInput) => {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [userDraft, setUserDraft] = useState('')
@@ -341,6 +373,11 @@ export const useRealtimeVoice = ({
           return
         case 'InputAudioTranscriptionCompleted':
           yield* Effect.sync(() => {
+            onDebug({
+              _tag: 'InputTranscript',
+              itemId: event.itemId,
+              transcript: event.transcript
+            })
             setUserDraft('')
             onUserMessage(UserMessage.make({ content: event.transcript }))
           })
@@ -352,7 +389,21 @@ export const useRealtimeVoice = ({
           })
           return
         case 'OutputAudioTranscriptDone':
-          yield* Effect.sync(() => commitAssistantTranscript(event.transcript))
+          yield* Effect.sync(() => {
+            onDebug({
+              _tag: 'OutputTranscript',
+              itemId: event.itemId,
+              responseId: event.responseId,
+              transcript: event.transcript ?? assistantDraftRef.current
+            })
+            commitAssistantTranscript(event.transcript)
+          })
+          return
+        case 'SessionConfigured':
+          yield* Effect.sync(() => onDebug(event))
+          return
+        case 'ResponseDone':
+          yield* Effect.sync(() => onDebug(event))
           return
         case 'FunctionCalls': {
           const requests = event.calls.map(call => ({
@@ -390,7 +441,7 @@ export const useRealtimeVoice = ({
           return
       }
     }),
-    [commitAssistantTranscript, executeToolCall, onAgentEvent, onError, onUserMessage, sendClientEvent]
+    [commitAssistantTranscript, executeToolCall, onAgentEvent, onDebug, onError, onUserMessage, sendClientEvent]
   )
 
   const startSession = useCallback(() => {
@@ -464,6 +515,7 @@ export const useRealtimeVoice = ({
         dataChannel.addEventListener('open', () => {
           if (activeSessionRef.current?.dataChannel === dataChannel) {
             seedConversation(dataChannel)
+            onDebug({ _tag: 'SessionOpened', seededMessageCount: messages.length })
           }
         })
         dataChannel.addEventListener('message', message => {
@@ -497,7 +549,7 @@ export const useRealtimeVoice = ({
           return yield* Effect.fail(new Error('WebRTC offer SDP missing'))
         }
 
-        const answerSdp = yield* requestRealtimeAnswerSdp(offer.sdp)
+        const answerSdp = yield* requestRealtimeAnswerSdp({ sdp: offer.sdp, transcriptionModel })
 
         if (startAttemptIdRef.current !== startAttemptId) {
           closeSessionResources(peerConnection, dataChannel, mediaStream)
@@ -537,8 +589,11 @@ export const useRealtimeVoice = ({
     handleRealtimeMessage,
     isConnecting,
     isLive,
+    messages.length,
+    onDebug,
     onError,
-    seedConversation
+    seedConversation,
+    transcriptionModel
   ])
 
   const stopSession = useCallback(() => {

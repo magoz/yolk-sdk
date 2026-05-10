@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentEvent, AssistantAgentMessage, UserMessage, type AgentMessage } from '@yolk/protocol'
+import { AgentEvent, AssistantAgentMessage, ToolDef, UserMessage, type AgentMessage } from '@yolk/protocol'
 import {
   ContextTransformer,
   FauxProvider,
@@ -13,10 +13,8 @@ import {
   TestToolExecutor
 } from '@yolk/agent-loop'
 import type { LLMRequest } from '@yolk/agent-loop'
-import { makeToolExecutorLayer } from '@yolk/tool-registry'
 import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
-import { resolveAgentTools } from './tools/registry'
 
 const config = {
   model: 'faux',
@@ -221,13 +219,13 @@ describe('makeAgentPostResponse', () => {
       expect(requests[0]).toMatchObject({ reasoningEffort: 'medium' })
     }))
 
-  it.effect('executes calculator tool calls', () =>
+  it.effect('executes configured tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
-      const toolSet = yield* resolveAgentTools({
-        surface: 'text',
-        route: '/agent',
-        userId: 'user_1'
+      const tool = ToolDef.make({
+        name: 'echo',
+        description: 'Echo fixture tool.',
+        parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] }
       })
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
@@ -236,22 +234,22 @@ describe('makeAgentPostResponse', () => {
           responses: [
             Reply.toolCall({
               id: 'call_1',
-              name: 'calculate',
-              params: { operation: 'add', left: 2, right: 2 }
+              name: 'echo',
+              params: {}
             }),
-            Reply.text('4')
+            Reply.text('p')
           ],
           requests
         }),
-        makeToolExecutorLayer(toolSet),
+        TestToolExecutor.layer({ echo: 'pong' }),
         StatelessSessionStoreLayer
       )
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
-          messages: [UserMessage.make({ content: 'what is 2 + 2?' })]
+          messages: [UserMessage.make({ content: 'run echo' })]
         }),
-        { ...config, tools: toolSet.tools }
+        { ...config, tools: [tool] }
       ).pipe(Effect.provide(layer))
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
@@ -279,10 +277,10 @@ describe('makeAgentPostResponse', () => {
         'AgentEnd'
       ])
       expect(requests.map(request => request.tools.map(tool => tool.name))).toEqual([
-        ['calculate'],
-        ['calculate']
+        ['echo'],
+        ['echo']
       ])
-      expect(toolResultContents).toEqual(['4'])
+      expect(toolResultContents).toEqual(['pong'])
     }))
 
   it.effect('rejects empty transcripts at request boundary', () =>

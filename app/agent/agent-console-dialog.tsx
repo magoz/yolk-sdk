@@ -4,6 +4,7 @@ import { useEffect, useRef, type MouseEvent } from 'react'
 import { XIcon } from 'lucide-react'
 import type { AgentRunStatus } from '@yolk/client'
 import type { AgentReasoningEffort } from '@yolk/protocol'
+import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { VoiceStatus } from './use-realtime-voice'
@@ -36,10 +37,13 @@ type AgentConsoleDialogProps = {
   readonly voiceStatus: VoiceStatus
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
+  readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
+  readonly transcriptionModelDisabled: boolean
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
   readonly onOpenChange: (open: boolean) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
+  readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
   readonly onShowInlineToolsChange: (checked: boolean) => void
   readonly onShowReasoningChange: (checked: boolean) => void
 }
@@ -52,10 +56,13 @@ export function AgentConsoleDialog({
   voiceStatus,
   reasoningEffort,
   reasoningEffortDisabled,
+  transcriptionModel,
+  transcriptionModelDisabled,
   showInlineTools,
   showReasoning,
   onOpenChange,
   onReasoningEffortChange,
+  onTranscriptionModelChange,
   onShowInlineToolsChange,
   onShowReasoningChange
 }: AgentConsoleDialogProps) {
@@ -132,7 +139,10 @@ export function AgentConsoleDialog({
           voiceStatus={voiceStatus}
           reasoningEffort={reasoningEffort}
           reasoningEffortDisabled={reasoningEffortDisabled}
+          transcriptionModel={transcriptionModel}
+          transcriptionModelDisabled={transcriptionModelDisabled}
           onReasoningEffortChange={onReasoningEffortChange}
+          onTranscriptionModelChange={onTranscriptionModelChange}
         />
       </div>
     </dialog>
