@@ -5,7 +5,6 @@ import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayer } from '@/lib/agents/runtime-layer'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
-import { OpenAiProviderLayer } from '@/lib/agents/providers/openai-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -30,45 +29,21 @@ const llmStatus = (error: LLMError) => {
 }
 
 const defaultSystemPrompt = 'You are Yolk assistant. Be concise and practical.'
-
-type AgentProviderMode = 'api_key' | 'codex_oauth'
+const agentModel = 'gpt-5.4'
 
 type AgentRouteRuntimeConfig = {
-  readonly provider: AgentProviderMode
   readonly model: string
   readonly systemPrompt: string
 }
 
 const RouteLayer = AppLayer
 
-const parseProviderMode = (value: string | undefined) => {
-  if (value === undefined || value === 'api_key') {
-    return Effect.succeed('api_key' as const)
-  }
-
-  if (value === 'codex_oauth') {
-    return Effect.succeed('codex_oauth' as const)
-  }
-
-  return Effect.fail(
-    new AgentRouteError({
-      message: `Unsupported OPENAI_PROVIDER: ${value}`
-    })
-  )
-}
-
 const getAgentRouteConfig = () =>
   Effect.gen(function* () {
-    const providerConfig = yield* Config.option(Config.string('OPENAI_PROVIDER'))
-    const provider = yield* parseProviderMode(
-      providerConfig._tag === 'Some' ? providerConfig.value : undefined
-    )
-    const model = yield* Config.string('OPENAI_MODEL')
     const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
 
     return {
-      provider,
-      model,
+      model: agentModel,
       systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt
     }
   })
@@ -77,14 +52,8 @@ const makeAgentResponseWithProvider = (
   input: AgentRouteRequest,
   config: AgentRouteRuntimeConfig,
   userId: string
-) => {
-  if (config.provider === 'api_key') {
-    return makeAgentPostResponse(input, config).pipe(
-      Effect.provide(makeAgentRuntimeLayer(OpenAiProviderLayer))
-    )
-  }
-
-  return Effect.gen(function* () {
+) =>
+  Effect.gen(function* () {
     const token = yield* getValidOpenAiCodexToken(userId)
     const providerLayer = makeOpenAiCodexProviderLayer({ token, fetch: globalThis.fetch })
 
@@ -92,7 +61,6 @@ const makeAgentResponseWithProvider = (
       Effect.provide(makeAgentRuntimeLayer(providerLayer))
     )
   })
-}
 
 const toHttpResponse = (response: Response) =>
   HttpServerResponse.raw(response.body, {

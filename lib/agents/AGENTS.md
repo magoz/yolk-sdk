@@ -9,22 +9,20 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
 - Route returns NDJSON batch response, not browser token streaming
 
-## Provider Selection
+## Current Provider
 
-Configured in `app/api/agent/route.ts`:
+Hardcoded in `app/api/agent/route.ts`:
 
 | Env | Values | Notes |
 | --- | --- | --- |
-| `OPENAI_PROVIDER` | `api_key` (default), `codex_oauth` | Provider mode |
-| `OPENAI_MODEL` | model id | Required |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
-| `OPENAI_API_KEY` | secret | API-key mode only |
 
-Use `makeAgentRuntimeLayer(providerLayer)` to inject the selected provider; keep provider choice at app boundary.
+Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayer(providerLayer)` to inject the provider; keep provider choice at app boundary.
 
 ## OpenAI API-Key Provider
 
 - File: `providers/openai-provider.ts`
+- Not wired to `/api/agent` while provider/model are hardcoded
 - Uses `https://api.openai.com/v1/chat/completions`
 - Requires `OPENAI_API_KEY`
 - Supports text + image user input; no audio

@@ -40,7 +40,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, agent-loop, runtime, client    |
-| Text agent         | app/lib   | `/agent` + `/api/agent`; OpenAI API-key or Codex OAuth |
+| Text agent         | app/lib   | `/agent` + `/api/agent`; hardcoded Codex OAuth + `gpt-5.4` |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
 
 ## WHERE TO LOOK
