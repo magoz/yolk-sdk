@@ -48,12 +48,12 @@ pnpm dev
 Current agent mode is intentionally minimal:
 
 - text-only
-- no tools
+- calculator tool enabled for tool-call smoke tests
 - no durable persistence
 - streaming NDJSON token events
 - in-band `AgentError` events for stream failures
 - stop/cancel aborts active response streams
-- each `/api/agent` request runs one turn from the submitted prompt
+- each `/api/agent` request runs one stateless exchange from the submitted prompt
 
 Provider/model are hardcoded for now:
 
@@ -68,9 +68,20 @@ Optional prompt override:
 AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
 ```
 
-Connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key.
+Connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key. Ask arithmetic prompts like `what is 19 * 23?` to test the calculator tool.
 
 Future: provider selection will become configurable again. The API-key OpenAI provider remains as tested scaffold, but `/api/agent` is Codex-only for now.
+
+## Voice agent smoke test
+
+`/agent/voice` uses GPT-Realtime-2 over WebRTC:
+
+- browser: mic, model audio, Realtime data channel
+- server: SDP exchange, `OPENAI_API_KEY`, tool execution
+- shared tool boundary: `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`
+- calculator tool enabled for voice-to-action smoke tests
+
+Set `OPENAI_API_KEY`, sign in, open `/agent/voice`, start voice, and ask `what is 19 times 23?`.
 
 Then:
 

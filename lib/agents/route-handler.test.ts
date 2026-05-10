@@ -15,10 +15,12 @@ import {
 import type { LLMRequest } from '@yolk/agent-loop'
 import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
+import { CalculatorToolExecutorLayer, calculatorTools } from './tools/calculator-tool'
 
 const config = {
   model: 'faux',
-  systemPrompt: 'Be brief.'
+  systemPrompt: 'Be brief.',
+  tools: []
 }
 
 const parseJson = (line: string): unknown => JSON.parse(line)
@@ -193,6 +195,66 @@ describe('makeAgentPostResponse', () => {
         ['hello'],
         ['again']
       ])
+    }))
+
+  it.effect('executes calculator tool calls', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const layer = Layer.mergeAll(
+        ContextTransformer.identity,
+        LoopConfig.defaultLayer,
+        FauxProvider.layerWithRequests({
+          responses: [
+            Reply.toolCall({
+              id: 'call_1',
+              name: 'calculate',
+              params: { operation: 'add', left: 2, right: 2 }
+            }),
+            Reply.text('4')
+          ],
+          requests
+        }),
+        CalculatorToolExecutorLayer,
+        StatelessSessionStoreLayer
+      )
+      const response = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({ sessionId: 'session_1', content: 'what is 2 + 2?' }),
+        { ...config, tools: calculatorTools }
+      ).pipe(Effect.provide(layer))
+      const body = yield* Effect.promise(() => response.text())
+      const events = yield* decodeEvents(body)
+      const toolResultContents: Array<unknown> = []
+
+      for (const event of events) {
+        if (event._tag === 'ToolExecutionEnd') {
+          toolResultContents.push(event.result.content)
+        }
+      }
+
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMToolCall',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'ToolExecutionStart',
+        'ToolExecutionEnd',
+        'ToolResult',
+        'TurnEnd',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMTextDelta',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'TurnEnd',
+        'AgentEnd'
+      ])
+      expect(requests.map(request => request.tools.map(tool => tool.name))).toEqual([
+        ['calculate'],
+        ['calculate']
+      ])
+      expect(toolResultContents).toEqual(['4'])
     }))
 
   it.effect('rejects blank content at request boundary', () =>

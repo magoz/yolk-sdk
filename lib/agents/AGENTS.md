@@ -5,7 +5,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## Current Mode
 
 - Text-only `/agent` UI and `/api/agent` route
-- No tools: `NoToolExecutorLayer` rejects accidental tool execution
+- Realtime voice `/agent/voice` UI and `/api/agent/realtime/*` routes
+- Calculator tool wired for tool-call smoke tests
 - No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Browser/client cancellation aborts active response body readers
@@ -19,7 +20,26 @@ Hardcoded in `app/api/agent/route.ts`:
 | --- | --- | --- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayer(providerLayer)` to inject the provider; keep provider choice at app boundary.
+Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` when tools are enabled; keep provider choice at app boundary.
+
+## Current Tools
+
+- File: `tools/calculator-tool.ts`
+- Tool name: `calculate`
+- Supports `add`, `subtract`, `multiply`, `divide`
+- Shared by text and Realtime voice smoke tests
+- Smoke-test only; no durable transcript or product permissions yet
+
+## Realtime Voice
+
+- UI: `app/agent/voice/voice-playground.tsx`
+- SDP route: `app/api/agent/realtime/call/route.ts`
+- Tool route: `app/api/agent/realtime/tool/route.ts`
+- Adapter helpers: `realtime/openai-realtime.ts`, `realtime/tool-bridge.ts`
+- Model: `gpt-realtime-2`; voice: `marin`; reasoning effort: `low`
+- Uses `OPENAI_API_KEY`, not Codex OAuth
+- Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
+- Package integration is only shared `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`
 
 ## OpenAI API-Key Provider
 

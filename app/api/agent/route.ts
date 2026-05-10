@@ -5,11 +5,13 @@ import {
   HttpServerResponse
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer } from 'effect'
+import type { ToolDef } from '@yolk/protocol'
 import { AppLayer } from '@/lib/layers'
-import { makeAgentRuntimeLayer } from '@/lib/agents/runtime-layer'
+import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
+import { CalculatorToolExecutorLayer, calculatorTools } from '@/lib/agents/tools/calculator-tool'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -26,6 +28,7 @@ const agentModel = 'gpt-5.4'
 type AgentRouteRuntimeConfig = {
   readonly model: string
   readonly systemPrompt: string
+  readonly tools: ReadonlyArray<ToolDef>
 }
 
 const RouteLayer = AppLayer
@@ -36,7 +39,8 @@ const getAgentRouteConfig = () =>
 
     return {
       model: agentModel,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt
+      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt,
+      tools: calculatorTools
     }
   })
 
@@ -52,7 +56,7 @@ const makeAgentResponseWithProvider = (
     )
 
     return yield* makeAgentPostResponse(input, config).pipe(
-      Effect.provide(makeAgentRuntimeLayer(providerLayer))
+      Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, CalculatorToolExecutorLayer))
     )
   })
 

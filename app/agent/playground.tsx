@@ -1,7 +1,7 @@
 'use client'
 
 import type { FormEvent } from 'react'
-import type { AgentEvent } from '@yolk/protocol'
+import type { AgentEvent, Content } from '@yolk/protocol'
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { LoaderCircleIcon, SendIcon, SquareIcon } from 'lucide-react'
 import {
@@ -42,6 +42,9 @@ const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Agent request failed'
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
+
+const contentPreview = (content: Content) =>
+  typeof content === 'string' ? content : content.map(part => part._tag).join(', ')
 
 const statusVariant = (status: typeof initialAgentClientState.status) => {
   switch (status) {
@@ -123,7 +126,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">Yolk agent</h1>
               <p className="max-w-md text-sm leading-6 text-muted-foreground md:text-base">
                 Minimal server-run text agent using the reusable protocol, loop, runtime, and
-                client packages. No durable persistence or tools yet.
+                client packages. No durable persistence yet; calculator tool calls are enabled.
               </p>
             </div>
           </div>
@@ -162,8 +165,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 <CardHeader>
                   <CardTitle>Ask anything</CardTitle>
                   <CardDescription>
-                    This first slice is one-shot text only: no tools, no durable persistence. It
-                    proves auth, route, runtime, provider, and client event reduction.
+                    This first slice is one-shot text with a calculator tool. Ask something like
+                    “what is 19 * 23?” to test tool calling.
                   </CardDescription>
                 </CardHeader>
               </Card>
@@ -180,6 +183,16 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 {state.activeToolCalls.map(call => (
                   <Badge key={call.id} variant="outline">
                     {call.name}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+
+            {state.toolResults.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {state.toolResults.map(result => (
+                  <Badge key={result.toolCallId} variant="secondary">
+                    tool: {contentPreview(result.content)}
                   </Badge>
                 ))}
               </div>

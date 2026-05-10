@@ -8,6 +8,7 @@ import {
 } from '@yolk/protocol'
 import { runRuntime, type RuntimeError } from '@yolk/agent-runtime'
 import type { AgentLoopError } from '@yolk/agent-loop'
+import type { ToolDef } from '@yolk/protocol'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
@@ -26,6 +27,7 @@ export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRou
 export type AgentRouteConfig = {
   readonly model: string
   readonly systemPrompt: string
+  readonly tools: ReadonlyArray<ToolDef>
 }
 
 const ndjsonHeaders = {
@@ -112,7 +114,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       input: UserMessage.make({ content: input.content }),
       context: undefined,
       systemPrompt: config.systemPrompt,
-      tools: [],
+      tools: config.tools,
       model: config.model
     }).pipe(recoverAgentStreamErrors, Stream.mapEffect(encodeNdjsonEvent), Stream.toReadableStreamEffect())
 
