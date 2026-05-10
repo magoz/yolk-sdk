@@ -40,6 +40,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, agent-loop, runtime, client    |
+| Text agent         | app/lib   | `/agent` + `/api/agent`; OpenAI API-key or Codex OAuth |
+| OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
 
 ## WHERE TO LOOK
 
@@ -59,6 +61,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Error types          | `lib/core/errors/index.ts`           | Shared domain errors                         |
 | URL state (filters)  | `app/*/search-params.ts`             | nuqs/server imports only, see NUQS pattern   |
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md` | Prettier, kebab-case, file naming            |
+| Agent providers      | `lib/agents/AGENTS.md`               | Runtime layer, provider modes, Codex quirks  |
+| Agent auth actions   | `lib/core/agent/*-action.ts`         | OpenAI Codex connect/disconnect actions      |
 | Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
 | Agent loop design    | `AGENT_LOOP.md`                      | Stateless loop details and decisions         |
 
@@ -73,9 +77,11 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Auth`                  | Service  | `lib/services/auth/live-layer.ts`          | Authentication (sign in/up/out, sessions)           |
 | `Db`                    | Service  | `lib/services/db/live-layer.ts`            | Database (returns Drizzle client)                   |
 | `Email`                 | Service  | `lib/services/email/live-layer.ts`         | Resend email sending                                |
+| `OpenAiCodexOAuth`      | Service  | `lib/services/openai-codex-oauth/live-layer.ts` | Codex OAuth device flow + refresh              |
 | `TelemetryLayer`        | Layer    | `lib/services/telemetry/live-layer.ts`     | OpenTelemetry + Sentry span/log processing          |
 | `reportError`           | Function | `lib/services/telemetry/report-error.ts`   | Log error + Sentry capture (boundaries only)        |
 | `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
+| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Injects selected LLM provider into runtime          |
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 
@@ -123,6 +129,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 ## SUBDIRECTORY DOCS
 
 - `patterns/README.md` - Architecture and convention patterns index
+- `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `components/ui/AGENTS.md` - UI component install sources and customizations

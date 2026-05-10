@@ -30,6 +30,17 @@ const makeFetch = (responseBody: unknown, requests: Array<CapturedRequest>, stat
     )
   }
 
+const makeRawFetch = (responseBody: string, requests: Array<CapturedRequest>): typeof fetch =>
+  (input, init) => {
+    requests.push({ input, init })
+    return Promise.resolve(
+      new Response(responseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/plain' }
+      })
+    )
+  }
+
 const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   const body = requests[0]?.init?.body
   expect(typeof body).toBe('string')
@@ -140,5 +151,45 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(events[0]).toMatchObject({
         call: { id: 'call_1', name: 'weather', params: { city: 'Paris' } }
       })
+    }))
+
+  it.effect('parses OpenAI Codex SSE even when content type is not event-stream', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiCodexProviderLayer({
+        token,
+        fetch: makeRawFetch(
+          [
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
+            '',
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"smoke ok","item_id":"msg_1"}',
+            '',
+            'event: response.completed',
+            'data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"oauth smoke ok"}]}]}}',
+            ''
+          ].join('\n'),
+          requests
+        )
+      })
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual(['TextDelta', 'TextDelta', 'Done'])
+      expect(
+        events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))
+      ).toEqual(['oauth ', 'smoke ok', 'Done'])
     }))
 })

@@ -9,6 +9,7 @@ lib/services/
 ├── [service-name]/
 │   ├── live-layer.ts    # Service definition and layer
 │   ├── errors.ts        # Service-specific errors (optional)
+│   ├── schemas.ts       # Service boundary schemas (optional)
 │   └── [helpers].ts     # Additional utilities (optional)
 ```
 
@@ -183,18 +184,20 @@ Services are composed in `lib/layers.ts`:
 import { Layer, Logger } from 'effect'
 import { Auth } from './services/auth/live-layer'
 import { Db } from './services/db/live-layer'
+import { OpenAiCodexOAuth } from './services/openai-codex-oauth/live-layer'
 import { TelemetryLayer } from './services/telemetry/live-layer'
 
 // Combined app layer — each .layer is fully self-contained
 export const AppLayer = Layer.mergeAll(
   Auth.layer,
   Db.layer,
+  OpenAiCodexOAuth.layer,
   Logger.layer([Logger.consolePretty()]),
   TelemetryLayer
 )
 ```
 
-`Auth.layer` provides `Email.layer` internally for OTP delivery. Add standalone services to `AppLayer` only when app code needs them directly.
+`Auth.layer` provides `Email.layer` internally for OTP delivery. `OpenAiCodexOAuth.layer` is standalone because agent route/actions need it directly. Add standalone services to `AppLayer` only when app code needs them directly.
 
 **Note:** `Logger.consolePretty()` is required for `Effect.logError` / `Effect.logWarning` to produce output. Without it, logs are silent.
 

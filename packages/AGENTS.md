@@ -29,6 +29,7 @@ app -> client -> protocol
 ## Boundaries
 
 - App/server owns auth, prompts, domain context, tool policy, integrations, model choice.
+- App/server owns LLM provider implementations, OAuth flows, and token storage (`lib/agents`, `lib/services/*oauth*`).
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
