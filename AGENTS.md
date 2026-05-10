@@ -101,8 +101,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `pi-mono`       | `.repos/pi`             | Pi monorepo; agent/product architecture reference                                               |
 | `opencode`      | `.repos/opencode`       | Opencode fork; Codex/OpenAI agent protocol/provider reference                                   |
 
-- Repos are squashed git subtrees; reference only, not app code.
-- Update all with `pnpm repos:update`.
+- Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
+- `effect` version pinned to package.json; `pi`/`opencode` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)

@@ -11,7 +11,7 @@
     "check": "pnpm tsc && pnpm lint && pnpm --filter './packages/*' check",
     "packages:build": "pnpm --filter './packages/*' build",
     "packages:check": "pnpm --filter './packages/*' check",
-    "repos:update": "node --experimental-strip-types scripts/update-reference-repos.ts",
+    "clone-repos": "node --experimental-strip-types scripts/clone-repos.ts",
     "knip": "node --env-file .env.local node_modules/knip/bin/knip.js",
     "prettier:check": "pnpm prettier . --check",
     "prettier:fix": "pnpm prettier . --write",
