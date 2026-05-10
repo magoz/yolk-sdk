@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { isActiveToolRun } from '@yolk/client'
+import { Option } from 'effect'
 import type { AgentEvent } from '@yolk/protocol'
 import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
@@ -11,7 +11,11 @@ import {
   maxActivityItems,
   type AgentActivityItem
 } from './agent-activity-model'
-import { getAgentChatLiveActivityCount } from './agent-chat-core'
+import {
+  getActiveChatToolParts,
+  getAgentChatLiveActivityCount,
+  getCompletedChatToolParts
+} from './agent-chat-core'
 import { AgentComposer } from './agent-composer'
 import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
@@ -134,7 +138,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     isLive: isVoiceLive,
     toggleSession: toggleVoice
   } = useRealtimeVoice({
-    messages: state.messages,
+    messages: agentChat.messages,
     transcriptionModel,
     onAgentEvent: applyEvent,
     onUserMessage: appendMessage,
@@ -143,34 +147,56 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const submitDisabled = isRunning || isVoiceMode
-  const activeToolRunCount = state.toolRuns.filter(isActiveToolRun).length
-  const completedToolRunCount = state.toolRuns.length - activeToolRunCount
+  const activeToolParts = useMemo(() => getActiveChatToolParts(state.chatMessages), [state.chatMessages])
+  const completedToolParts = useMemo(
+    () => getCompletedChatToolParts(state.chatMessages),
+    [state.chatMessages]
+  )
+  const activeToolRunCount = activeToolParts.length
+  const completedToolRunCount = completedToolParts.length
   const liveActivityCount = getAgentChatLiveActivityCount({
     isTextRunning: isRunning,
     activeToolCallCount: activeToolRunCount,
     isVoiceActive: isVoiceMode
   })
+  const activeToolLabel = useMemo(() => {
+    const firstRun = activeToolParts[0]
+
+    if (firstRun === undefined) {
+      return Option.none()
+    }
+
+    return Option.some(
+      activeToolParts.length === 1
+        ? `Running ${firstRun.call.name}`
+        : `Running ${activeToolParts.length} tools`
+    )
+  }, [activeToolParts])
   const chatItems = useMemo(
     () =>
       buildAgentChatItems({
-        messages: [...state.messages, ...state.liveMessages],
-        userDraft: voiceUserDraft,
-        assistantDraft: state.text,
-        reasoningDraft: state.reasoning,
-        toolRuns: state.toolRuns,
+        messages:
+          voiceUserDraft.length > 0
+            ? [
+                ...state.chatMessages,
+                {
+                  id: 'draft-user',
+                  role: 'user',
+                  parts: [
+                    {
+                      _tag: 'Text',
+                      id: 'draft-user-text',
+                      content: voiceUserDraft,
+                      state: 'streaming'
+                    }
+                  ]
+                }
+              ]
+            : state.chatMessages,
         isRunning,
-        error: state.error
+        activeToolLabel
       }),
-    [
-      isRunning,
-      state.error,
-      state.liveMessages,
-      state.messages,
-      state.reasoning,
-      state.text,
-      state.toolRuns,
-      voiceUserDraft
-    ]
+    [activeToolLabel, isRunning, state.chatMessages, voiceUserDraft]
   )
 
   const handleSubmit = useCallback(() => {

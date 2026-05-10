@@ -1,13 +1,14 @@
 # Agent Chat UI
 
-App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to `packages/*` only after they settle.
+App-local parts-native chat UI. `@yolk/client` is transport-only here; move stable APIs to `packages/*` only after they settle.
 
 ## Boundaries
 
 - `playground.tsx` owns page composition/wiring: text chat, voice hook, activity, console, input state.
 - `use-agent-chat.ts` is the headless React hook: transport, abort, reducer dispatch, callbacks. No UI imports.
-- `agent-chat-core.ts` is pure reducer/selectors over `AgentClientState`; test in `agent-chat-core.test.ts`.
-- `agent-chat-items.ts` projects protocol/client state to `AgentChatItem[]`; test every new item/status in `agent-chat-items.test.ts`.
+- `agent-chat-core.ts` is pure reducer/selectors over parts-native `AgentChatState`; test in `agent-chat-core.test.ts`.
+- `agent-chat-messages.ts` owns `AgentChatMessage`/`AgentChatPart`, AgentEvent → parts reduction, and `toAgentMessages()` protocol replay.
+- `agent-chat-items.ts` projects `AgentChatMessage[]` to `AgentChatItem[]`; test every new item/status in `agent-chat-items.test.ts`.
 - `agent-conversation.tsx` renders `AgentChatItem[]`; no transport or protocol mutation.
 - `agent-composer.tsx` owns input UX only.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
@@ -16,16 +17,15 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 
 ## Chat Model
 
-- Prefer chat language: `AgentChatItem`, `buildAgentChatItems`; avoid “timeline”.
-- Stable messages come from protocol `AgentMessage[]`; streaming text/reasoning remain drafts until finalized.
-- `AgentClientState.liveMessages` stores committed assistant/tool-result protocol messages during an active run; render `messages + liveMessages`, then drafts/status.
-- Tool rows are anchored by `Assistant.toolCalls`; `AgentToolRun` supplies lifecycle state, timing, and result by `call.id`.
-- Do not render active tool rows from `toolRuns` alone before the assistant message exists; use `AssistantStatus` for pre-anchor activity.
-- Matching `ToolResultMessage`s fold into the anchored `ToolRun`; render standalone `ToolResult` only for orphan results.
-- Completed tool duration is known only from `AgentToolRun`; protocol-only results use unknown duration.
+- Prefer chat language: `AgentChatMessage`, `AgentChatPart`, `AgentChatItem`; avoid “timeline”.
+- `AgentChatState.chatMessages` is UI source of truth; protocol `AgentMessage[]` is replay format only.
+- Use `toAgentMessages(chatMessages)` before text transport; keep protocol conversion at the boundary.
+- Agent events update parts directly: text/reasoning stream as parts; tool calls transition `Called` → `Running` → `Completed`.
+- Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` when later `ToolResult` events re-merge results.
+- Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
-- User and assistant drafts are render items; keep projection pure and deterministic.
-- Tool result display names come from prior assistant tool calls; fall back to tool call id.
+- Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.
+- Keep projection pure/deterministic; use Effect `Array`/`Option` helpers over mutable/null side channels.
 
 ## UX Rules
 

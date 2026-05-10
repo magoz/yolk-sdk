@@ -1,5 +1,6 @@
-import type { AgentToolRun } from '@yolk/client'
-import { ToolResult, type AgentMessage, type Content, type ToolCall } from '@yolk/protocol'
+import { Array as Arr, Option } from 'effect'
+import type { ToolResult, Content, ToolCall } from '@yolk/protocol'
+import type { AgentChatMessage, ChatToolState } from './agent-chat-messages'
 
 export type ToolDuration =
   | { readonly _tag: 'Known'; readonly milliseconds: number }
@@ -33,214 +34,134 @@ export type AgentChatItem =
   | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
 
 export type BuildAgentChatItemsInput = {
-  readonly messages: ReadonlyArray<AgentMessage>
-  readonly userDraft: string
-  readonly assistantDraft: string
-  readonly reasoningDraft: string
-  readonly toolRuns: ReadonlyArray<AgentToolRun>
+  readonly messages: ReadonlyArray<AgentChatMessage>
   readonly isRunning: boolean
-  readonly error: string | null
+  readonly activeToolLabel: Option.Option<string>
 }
 
 const activeStatusLabel = ({
-  toolRuns,
-  assistantDraft,
-  reasoningDraft
-}: Pick<BuildAgentChatItemsInput, 'toolRuns' | 'assistantDraft' | 'reasoningDraft'>) => {
-  const activeRuns = toolRuns.filter(run => run._tag !== 'Completed')
-  const firstRun = activeRuns[0]
-
-  if (firstRun !== undefined) {
-    return activeRuns.length === 1
-      ? `Running ${firstRun.call.name}`
-      : `Running ${activeRuns.length} tools`
+  messages,
+  activeToolLabel
+}: Pick<BuildAgentChatItemsInput, 'messages' | 'activeToolLabel'>) => {
+  if (Option.isSome(activeToolLabel)) {
+    return activeToolLabel.value
   }
 
-  if (assistantDraft.length > 0) {
-    return 'Responding'
-  }
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part._tag === 'Text' && part.state === 'streaming' && message.role === 'assistant') {
+        return 'Responding'
+      }
 
-  if (reasoningDraft.length > 0) {
-    return 'Thinking'
+      if (part._tag === 'Reasoning' && part.state === 'streaming') {
+        return 'Thinking'
+      }
+    }
   }
 
   return 'Thinking'
 }
 
-const collectToolNames = (
-  messages: ReadonlyArray<AgentMessage>,
-  toolRuns: ReadonlyArray<AgentToolRun>
-) => {
-  const names = new Map<string, string>()
-
-  for (const run of toolRuns) {
-    names.set(run.call.id, run.call.name)
-  }
-
-  for (const message of messages) {
-    if (message._tag === 'Assistant') {
-      for (const call of message.toolCalls) {
-        names.set(call.id, call.name)
-      }
-    }
-  }
-
-  return names
-}
-
-const collectToolResultsById = (messages: ReadonlyArray<AgentMessage>) => {
-  const resultsById = new Map<string, ToolResult>()
-
-  for (const message of messages) {
-    if (message._tag === 'ToolResult') {
-      resultsById.set(
-        message.toolCallId,
-        ToolResult.make({
-          toolCallId: message.toolCallId,
-          content: message.content
-        })
-      )
-    }
-  }
-
-  return resultsById
-}
-
-const collectToolCallIds = (messages: ReadonlyArray<AgentMessage>) => {
-  const ids = new Set<string>()
-
-  for (const message of messages) {
-    if (message._tag === 'Assistant') {
-      for (const call of message.toolCalls) {
-        ids.add(call.id)
-      }
-    }
-  }
-
-  return ids
-}
-
-const collectToolRunsById = (runs: ReadonlyArray<AgentToolRun>) => {
-  const runsById = new Map<string, AgentToolRun>()
-
-  for (const run of runs) {
-    runsById.set(run.call.id, run)
-  }
-
-  return runsById
-}
-
-const durationFromRun = (run: AgentToolRun | undefined): ToolDuration => {
-  if (run === undefined || run._tag !== 'Completed') {
+const durationFromToolState = (state: ChatToolState): ToolDuration => {
+  if (state._tag !== 'Completed' || state.startedAtMs === undefined || state.endedAtMs === undefined) {
     return { _tag: 'Unknown' }
   }
 
-  return { _tag: 'Known', milliseconds: Math.max(0, run.endedAtMs - run.startedAtMs) }
+  return { _tag: 'Known', milliseconds: Math.max(0, state.endedAtMs - state.startedAtMs) }
 }
 
-const toolRunStateFor = (
-  run: AgentToolRun | undefined,
-  result: ToolResult | undefined
-): ToolRunState => {
-  if (run?._tag === 'Running') {
+const toolRunStateFor = (state: ChatToolState): ToolRunState => {
+  if (state._tag === 'Running') {
     return { _tag: 'Running', duration: { _tag: 'Unknown' } }
   }
 
-  if (run?._tag === 'Completed') {
-    return { _tag: 'Completed', duration: durationFromRun(run), result: run.result }
-  }
-
-  if (result !== undefined) {
-    return { _tag: 'Completed', duration: { _tag: 'Unknown' }, result }
+  if (state._tag === 'Completed') {
+    return { _tag: 'Completed', duration: durationFromToolState(state), result: state.result }
   }
 
   return { _tag: 'Called', duration: { _tag: 'Unknown' } }
 }
 
+const draftTextFromContent = (content: Content) =>
+  typeof content === 'string'
+    ? content
+    : content
+        .filter(part => part._tag === 'Text')
+        .map(part => part.text)
+        .join('')
+
+const textItemFromPart = (
+  message: AgentChatMessage,
+  part: Extract<AgentChatMessage['parts'][number], { readonly _tag: 'Text' }>
+): Option.Option<AgentChatItem> => {
+  if (part.state === 'streaming') {
+    switch (message.role) {
+      case 'user':
+        return Option.some({ _tag: 'UserDraft', id: part.id, text: draftTextFromContent(part.content) })
+      case 'assistant':
+        return Option.some({ _tag: 'AssistantDraft', id: part.id, text: draftTextFromContent(part.content) })
+      case 'system':
+        return Option.none()
+    }
+  }
+
+  switch (message.role) {
+    case 'user':
+      return Option.some({ _tag: 'UserMessage', id: part.id, content: part.content })
+    case 'assistant':
+      return Option.some({ _tag: 'AssistantMessage', id: part.id, content: part.content })
+    case 'system':
+      return Option.none()
+  }
+}
+
+const itemFromPart = (
+  message: AgentChatMessage,
+  part: AgentChatMessage['parts'][number]
+): Option.Option<AgentChatItem> => {
+  switch (part._tag) {
+    case 'Text':
+      return textItemFromPart(message, part)
+    case 'Reasoning':
+      return Option.some({ _tag: 'Reasoning', id: part.id, text: part.text })
+    case 'ToolCall':
+      return Option.some({
+        _tag: 'ToolRun',
+        id: part.id,
+        call: part.call,
+        state: toolRunStateFor(part.state)
+      })
+    case 'ToolResult':
+      return Option.some({
+        _tag: 'ToolResult',
+        id: part.id,
+        toolCallId: part.toolCallId,
+        name: part.name,
+        content: part.content
+      })
+    case 'Error':
+      return Option.some({ _tag: 'Error', id: part.id, message: part.message })
+  }
+}
+
 export const buildAgentChatItems = ({
   messages,
-  userDraft,
-  assistantDraft,
-  reasoningDraft,
-  toolRuns,
   isRunning,
-  error
+  activeToolLabel
 }: BuildAgentChatItemsInput): ReadonlyArray<AgentChatItem> => {
-  const toolNames = collectToolNames(messages, toolRuns)
-  const toolResultsById = collectToolResultsById(messages)
-  const toolCallIds = collectToolCallIds(messages)
-  const toolRunsById = collectToolRunsById(toolRuns)
-  const items: Array<AgentChatItem> = []
-
-  messages.forEach((message, index) => {
-    switch (message._tag) {
-      case 'User':
-        items.push({ _tag: 'UserMessage', id: `message-${index}-user`, content: message.content })
-        return
-      case 'Assistant':
-        if (message.reasoning !== undefined && message.reasoning.length > 0) {
-          items.push({
-            _tag: 'Reasoning',
-            id: `message-${index}-reasoning`,
-            text: message.reasoning
-          })
-        }
-
-        items.push({
-          _tag: 'AssistantMessage',
-          id: `message-${index}-assistant`,
-          content: message.content
-        })
-
-        for (const call of message.toolCalls) {
-          const result = toolResultsById.get(call.id)
-
-          items.push({
-            _tag: 'ToolRun',
-            id: `message-${index}-tool-run-${call.id}`,
-            call,
-            state: toolRunStateFor(toolRunsById.get(call.id), result)
-          })
-        }
-        return
-      case 'ToolResult':
-        if (toolCallIds.has(message.toolCallId)) {
-          return
-        }
-
-        items.push({
-          _tag: 'ToolResult',
-          id: `message-${index}-tool-result-${message.toolCallId}`,
-          toolCallId: message.toolCallId,
-          name: toolNames.get(message.toolCallId) ?? message.toolCallId,
-          content: message.content
-        })
-        return
-    }
-  })
-
-  if (reasoningDraft.length > 0) {
-    items.push({ _tag: 'Reasoning', id: 'draft-reasoning', text: reasoningDraft })
-  }
-
-  if (userDraft.length > 0) {
-    items.push({ _tag: 'UserDraft', id: 'draft-user', text: userDraft })
-  }
-
-  if (assistantDraft.length > 0) {
-    items.push({ _tag: 'AssistantDraft', id: 'draft-assistant', text: assistantDraft })
-  }
+  const items = Arr.getSomes(
+    Arr.flatMap(messages, message => Arr.map(message.parts, part => itemFromPart(message, part)))
+  )
 
   if (isRunning) {
-    items.push({
-      _tag: 'AssistantStatus',
-      id: 'assistant-status',
-      label: activeStatusLabel({ toolRuns, assistantDraft, reasoningDraft })
-    })
-  }
-
-  if (error !== null) {
-    items.push({ _tag: 'Error', id: 'error', message: error })
+    return [
+      ...items,
+      {
+        _tag: 'AssistantStatus',
+        id: 'assistant-status',
+        label: activeStatusLabel({ messages, activeToolLabel })
+      }
+    ]
   }
 
   return items

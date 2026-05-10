@@ -2,19 +2,19 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { Effect, Stream } from 'effect'
-import {
-  initialAgentClientState,
-  streamAgentEvents,
-  appendAgentMessage,
-  type AgentTranscript
-} from '@yolk/client'
+import { streamAgentEvents, type AgentTranscript } from '@yolk/client'
 import {
   UserMessage,
   type AgentEvent,
   type AgentMessage,
   type AgentReasoningEffort
 } from '@yolk/protocol'
-import { hasAgentChatReasoningSummary, reduceAgentChatState } from './agent-chat-core'
+import {
+  hasAgentChatReasoningSummary,
+  initialAgentChatState,
+  reduceAgentChatState
+} from './agent-chat-core'
+import { toAgentMessages } from './agent-chat-messages'
 
 export type AgentChatTransportRequest = {
   readonly sessionId: string
@@ -48,6 +48,19 @@ const errorMessage = (error: unknown) =>
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
+const appendTranscriptMessage = (
+  messages: ReadonlyArray<AgentMessage>,
+  message: AgentMessage
+): AgentTranscript => {
+  const first = messages[0]
+
+  if (first === undefined) {
+    return [message]
+  }
+
+  return [first, ...messages.slice(1), message]
+}
+
 export function useAgentChat({
   sessionId,
   reasoningEffort,
@@ -56,7 +69,7 @@ export function useAgentChat({
   onError,
   onAbort
 }: UseAgentChatOptions) {
-  const [state, dispatch] = useReducer(reduceAgentChatState, initialAgentClientState)
+  const [state, dispatch] = useReducer(reduceAgentChatState, initialAgentChatState)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isRunning = state.status === 'running'
 
@@ -143,14 +156,14 @@ export function useAgentChat({
       }
 
       const message = UserMessage.make({ content })
-      const messages = appendAgentMessage(state.messages, message)
+      const messages = appendTranscriptMessage(toAgentMessages(state.chatMessages), message)
 
       dispatch({ _tag: 'Submit', message })
       runAgent(messages)
 
       return { _tag: 'Submitted', content, message, messages }
     },
-    [canSubmitText, runAgent, state.messages]
+    [canSubmitText, runAgent, state.chatMessages]
   )
 
   const stop = useCallback(() => {
@@ -166,9 +179,8 @@ export function useAgentChat({
 
   return {
     state,
-    messages: state.messages,
+    messages: toAgentMessages(state.chatMessages),
     status: state.status,
-    toolRuns: state.toolRuns,
     error: state.error,
     isRunning,
     hasReasoningSummary: hasAgentChatReasoningSummary(state),

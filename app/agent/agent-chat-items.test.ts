@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
+import { Option } from 'effect'
 import {
   AssistantAgentMessage,
   ToolCall,
@@ -6,7 +7,56 @@ import {
   ToolResultMessage,
   UserMessage
 } from '@yolk/protocol'
+import { buildAgentChatMessages, toAgentMessages } from './agent-chat-messages'
 import { buildAgentChatItems } from './agent-chat-items'
+
+describe('buildAgentChatMessages', () => {
+  it('projects protocol transcript into ordered message parts', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://example.com' } })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'summarize https://example.com' }),
+        AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+        ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+      ],
+      userDraft: '',
+      assistantDraft: 'Done.',
+      reasoningDraft: '',
+      toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1250 }],
+      error: null
+    })
+
+    expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'assistant'])
+    expect(messages[1]?.parts.map(part => part._tag)).toEqual(['Reasoning', 'Text', 'ToolCall'])
+    expect(messages[2]?.parts).toEqual([
+      { _tag: 'Text', id: 'draft-assistant-text', content: 'Done.', state: 'streaming' }
+    ])
+  })
+
+  it('converts chat parts back to protocol transcript', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://example.com' } })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'summarize https://example.com' }),
+        AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+        ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1250 }],
+      error: null
+    })
+
+    expect(toAgentMessages(messages)).toEqual([
+      UserMessage.make({ content: 'summarize https://example.com' }),
+      AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+      ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+    ])
+  })
+})
 
 describe('buildAgentChatItems', () => {
   it('normalizes protocol messages, tools, drafts, and errors', () => {
@@ -15,7 +65,7 @@ describe('buildAgentChatItems', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
-    const items = buildAgentChatItems({
+    const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
         AssistantAgentMessage.make({
@@ -37,23 +87,23 @@ describe('buildAgentChatItems', () => {
           endedAtMs: 1250
         }
       ],
-      isRunning: false,
       error: 'boom'
     })
+    const items = buildAgentChatItems({ messages, isRunning: false, activeToolLabel: Option.none() })
 
     expect(items.map(item => item._tag)).toEqual([
       'UserMessage',
       'Reasoning',
       'AssistantMessage',
       'ToolRun',
-      'Reasoning',
       'UserDraft',
+      'Reasoning',
       'AssistantDraft',
       'Error'
     ])
     expect(items).toContainEqual({
       _tag: 'ToolRun',
-      id: 'message-1-tool-run-call_1',
+      id: 'message-1-tool-call-call_1',
       call,
       state: {
         _tag: 'Completed',
@@ -64,15 +114,15 @@ describe('buildAgentChatItems', () => {
   })
 
   it('falls back to tool call id when result has no matching call', () => {
-    const items = buildAgentChatItems({
+    const messages = buildAgentChatMessages({
       messages: [ToolResultMessage.make({ toolCallId: 'missing_call', content: 'ok' })],
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
       toolRuns: [],
-      isRunning: false,
       error: null
     })
+    const items = buildAgentChatItems({ messages, isRunning: false, activeToolLabel: Option.none() })
 
     expect(items).toEqual([
       {
@@ -91,16 +141,20 @@ describe('buildAgentChatItems', () => {
       name: 'web_search',
       params: { query: 'latest news' }
     })
-    const thinkingItems = buildAgentChatItems({
+    const thinkingMessages = buildAgentChatMessages({
       messages: [UserMessage.make({ content: 'hello' })],
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
       toolRuns: [],
-      isRunning: true,
       error: null
     })
-    const toolItems = buildAgentChatItems({
+    const thinkingItems = buildAgentChatItems({
+      messages: thinkingMessages,
+      isRunning: true,
+      activeToolLabel: Option.none()
+    })
+    const toolMessages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
         AssistantAgentMessage.make({ content: '', toolCalls: [call] })
@@ -109,8 +163,12 @@ describe('buildAgentChatItems', () => {
       assistantDraft: '',
       reasoningDraft: '',
       toolRuns: [{ _tag: 'Running', call, startedAtMs: 1000 }],
-      isRunning: true,
       error: null
+    })
+    const toolItems = buildAgentChatItems({
+      messages: toolMessages,
+      isRunning: true,
+      activeToolLabel: Option.some('Running web_search')
     })
 
     expect(thinkingItems.at(-1)).toEqual({
@@ -120,7 +178,7 @@ describe('buildAgentChatItems', () => {
     })
     expect(toolItems.at(-2)).toEqual({
       _tag: 'ToolRun',
-      id: 'message-1-tool-run-call_1',
+      id: 'message-1-tool-call-call_1',
       call,
       state: { _tag: 'Running', duration: { _tag: 'Unknown' } }
     })
@@ -138,7 +196,7 @@ describe('buildAgentChatItems', () => {
       params: { url: 'https://example.com' }
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
-    const items = buildAgentChatItems({
+    const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
         AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
@@ -148,13 +206,13 @@ describe('buildAgentChatItems', () => {
       assistantDraft: '',
       reasoningDraft: '',
       toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1800 }],
-      isRunning: true,
       error: null
     })
+    const items = buildAgentChatItems({ messages, isRunning: true, activeToolLabel: Option.none() })
 
     expect(items.at(-2)).toEqual({
       _tag: 'ToolRun',
-      id: 'message-1-tool-run-call_1',
+      id: 'message-1-tool-call-call_1',
       call,
       state: {
         _tag: 'Completed',
@@ -176,7 +234,7 @@ describe('buildAgentChatItems', () => {
       params: { query: 'latest news' }
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Search result' })
-    const items = buildAgentChatItems({
+    const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
         AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
@@ -186,9 +244,9 @@ describe('buildAgentChatItems', () => {
       assistantDraft: 'Here is what I found.',
       reasoningDraft: '',
       toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1300 }],
-      isRunning: true,
       error: null
     })
+    const items = buildAgentChatItems({ messages, isRunning: true, activeToolLabel: Option.none() })
 
     expect(items.map(item => item._tag)).toEqual([
       'UserMessage',

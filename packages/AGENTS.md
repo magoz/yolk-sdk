@@ -11,7 +11,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/tool-registry` | Scoped tool modules + executor layer | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol`, Effect |
+| `@yolk/client` | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect |
 
 ## Dependency Rule
 
@@ -38,7 +38,7 @@ app -> client -> protocol + Effect
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
-- Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
+- Client transport should work for Next UI and Chrome extension by consuming protocol events from a server endpoint; app UI may own richer parts state.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
 - `packages/harness/` is stale/empty and not a real workspace package unless a `package.json` is added.
 
@@ -68,6 +68,7 @@ app -> client -> protocol + Effect
 
 ## Client Transport
 
+- `/agent` uses app-local parts state (`app/agent/agent-chat-messages.ts`) and imports `@yolk/client` primarily for transport.
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
 - `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant/tool turns during active runs.
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
