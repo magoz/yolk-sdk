@@ -23,6 +23,7 @@ packages/
   protocol/       shared schemas, events, wire types
   agent-loop/     pure LLM <> tool loop
   agent-runtime/  reusable session/runtime shell
+  voice-runtime/  provider-neutral voice tool bridge
   client/         browser/client SDK
 ```
 
@@ -30,6 +31,7 @@ Dependency rule:
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol
 ```
 

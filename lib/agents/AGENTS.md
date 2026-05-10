@@ -40,8 +40,8 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools
 - Uses `OPENAI_API_KEY`, not Codex OAuth
 - OpenRouter is not supported for Realtime voice: no `gpt-realtime-2`/Realtime endpoints there
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
-- Package integration is only shared `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`
-- Keep OpenAI Realtime/WebRTC specifics in app layer until a provider-neutral voice runtime emerges
+- `@yolk/voice-runtime` owns provider-neutral tool execution bridge
+- OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 
 ## OpenAI API-Key Provider
 

@@ -39,7 +39,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email     | Transactional email via Resend                       |
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
-| Agent stack        | packages  | Domain-free protocol, agent-loop, runtime, client    |
+| Agent stack        | packages  | Domain-free protocol, agent-loop/runtime, voice-runtime, client |
 | Text agent         | app/lib   | `/agent` + `/api/agent`; hardcoded Codex OAuth + `gpt-5.4` |
 | Voice agent        | app/lib   | `/agent/voice` + Realtime WebRTC routes; `gpt-realtime-2` |
 | Dummy tool calling | app/lib   | `calculate` calculator tool; smoke-test only         |

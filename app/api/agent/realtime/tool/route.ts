@@ -1,7 +1,8 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Data, Effect, Layer } from 'effect'
+import { VoiceToolCallRequest, executeVoiceToolCall } from '@yolk/voice-runtime'
 import { AppLayer } from '@/lib/layers'
-import { RealtimeToolCallRequest, executeRealtimeToolCall } from '@/lib/agents/realtime/tool-bridge'
+import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'
 import { CalculatorToolExecutorLayer } from '@/lib/agents/tools/calculator-tool'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -15,8 +16,9 @@ class RealtimeToolRouteError extends Data.TaggedError('RealtimeToolRouteError')<
 
 const handler = Effect.gen(function* () {
   yield* getSession()
-  const input = yield* HttpServerRequest.schemaBodyJson(RealtimeToolCallRequest)
-  const response = yield* executeRealtimeToolCall(input)
+  const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
+  const result = yield* executeVoiceToolCall(input)
+  const response = toOpenAiRealtimeToolExecutionResponse(result)
 
   return yield* HttpServerResponse.json(response, {
     headers: {

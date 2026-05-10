@@ -9,12 +9,14 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/protocol` | Shared schemas, messages, tools, events | Effect |
 | `@yolk/agent-loop` | Stateless LLM ⇄ tool turn loop | `@yolk/protocol`, Effect |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol` |
 
 ## Dependency Rule
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol
 ```
 
@@ -33,7 +35,14 @@ app -> client -> protocol
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
-- Realtime voice/WebRTC stays in app layer for now; packages only share `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`.
+- Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
+
+## Voice Runtime
+
+- `VoiceToolCallRequest` accepts provider-normalized `{ callId, name, arguments }`.
+- `executeVoiceToolCall` parses JSON args, executes `ToolExecutor`, returns JSON output string.
+- Provider adapters convert `VoiceToolExecutionResult` into provider-specific tool output events.
+- Do not import OpenAI Realtime, WebRTC, auth, or app tool catalogs here.
 
 ## Client Transport
 
