@@ -155,42 +155,25 @@ const contentPartToUserPart = (
 }
 
 const contentToUserContent = (content: Content): Effect.Effect<OpenAiUserContent, LLMError> =>
-  Effect.gen(function* () {
-    if (typeof content === 'string') {
-      return content
-    }
+  typeof content === 'string' ? Effect.succeed(content) : Effect.forEach(content, contentPartToUserPart)
 
-    const parts: Array<OpenAiTextContentPart | OpenAiImageContentPart> = []
-
-    for (const part of content) {
-      parts.push(yield* contentPartToUserPart(part))
-    }
-
-    return parts
-  })
+const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
+  switch (part._tag) {
+    case 'Text':
+      return Effect.succeed(part.text)
+    case 'Image':
+      return Effect.fail(unsupportedContentError(`${owner} image`))
+    case 'Audio':
+      return Effect.fail(unsupportedContentError(`${owner} audio`))
+  }
+}
 
 const contentToText = (content: Content, owner: string): Effect.Effect<string, LLMError> =>
-  Effect.gen(function* () {
-    if (typeof content === 'string') {
-      return content
-    }
-
-    const textParts: Array<string> = []
-
-    for (const part of content) {
-      switch (part._tag) {
-        case 'Text':
-          textParts.push(part.text)
-          break
-        case 'Image':
-          return yield* Effect.fail(unsupportedContentError(`${owner} image`))
-        case 'Audio':
-          return yield* Effect.fail(unsupportedContentError(`${owner} audio`))
-      }
-    }
-
-    return textParts.join('\n')
-  })
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, part => contentPartToText(part, owner)).pipe(
+        Effect.map(textParts => textParts.join('\n'))
+      )
 
 const serializeToolArguments = (params: unknown) =>
   Effect.try({
@@ -221,10 +204,7 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
       case 'User':
         return { role: 'user', content: yield* contentToUserContent(message.content) }
       case 'Assistant': {
-        const toolCalls: Array<OpenAiToolCall> = []
-        for (const call of message.toolCalls) {
-          toolCalls.push(yield* toolCallToOpenAiToolCall(call))
-        }
+        const toolCalls = yield* Effect.forEach(message.toolCalls, toolCallToOpenAiToolCall)
 
         if (toolCalls.length > 0) {
           return {
@@ -261,11 +241,9 @@ export const toOpenAiRequestBody = (
   request: LLMRequest
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
-    const messages: Array<OpenAiMessage> = [{ role: 'system', content: request.systemPrompt }]
-
-    for (const message of request.messages) {
-      messages.push(yield* toOpenAiMessage(message))
-    }
+    const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
+    const requestMessages = yield* Effect.forEach(request.messages, toOpenAiMessage)
+    const messages = [systemMessage, ...requestMessages]
 
     const body = {
       model: request.model,
@@ -312,32 +290,27 @@ const toLlmEvents = (
   message: OpenAiMessageResponse
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const events: Array<LLMEvent> = []
     const content = message.content ?? ''
-
-    if (content.length > 0) {
-      events.push(LLMTextDelta.make({ text: content }))
-    }
-
-    if (message.tool_calls !== undefined && message.tool_calls.length > 0) {
-      for (const call of message.tool_calls) {
-        events.push(
+    const textEvents = content.length > 0 ? [LLMTextDelta.make({ text: content })] : []
+    const toolCallEvents = yield* Effect.forEach(message.tool_calls ?? [], call =>
+      parseToolArguments(call.function.arguments).pipe(
+        Effect.map(params =>
           LLMToolCall.make({
             call: ToolCall.make({
               id: call.id,
               name: call.function.name,
-              params: yield* parseToolArguments(call.function.arguments)
+              params
             })
           })
         )
-      }
+      )
+    )
 
-      events.push(LLMDone.make({ stopReason: 'tool_use' }))
-      return events
+    if (toolCallEvents.length > 0) {
+      return [...textEvents, ...toolCallEvents, LLMDone.make({ stopReason: 'tool_use' })]
     }
 
-    events.push(LLMDone.make({ stopReason: 'stop' }))
-    return events
+    return [...textEvents, LLMDone.make({ stopReason: 'stop' })]
   })
 
 const toHttpClientLlmError =

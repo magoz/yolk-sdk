@@ -9,6 +9,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/protocol` | Shared schemas, messages, tools, events | Effect |
 | `@yolk/agent-loop` | Stateless LLM ⇄ tool turn loop | `@yolk/protocol`, Effect |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/tool-registry` | Scoped tool modules + executor layer | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client` | Effect stream transport + reducer/state helpers | `@yolk/protocol` |
 
@@ -16,6 +17,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol
 ```
@@ -34,8 +36,17 @@ app -> client -> protocol
 - App/server owns LLM provider implementations, OAuth flows, and token storage (`lib/agents`, `lib/services/*oauth*`).
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
+- Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
+
+## Tool Registry
+
+- Host apps define `ToolModule<Context>` and `ToolRegistration<Context>`.
+- `resolveTools(modules, context)` filters enabled tools and rejects duplicate names.
+- `makeToolExecutorLayer(toolSet)` adapts resolved tools to `ToolExecutor`.
+- `access: read | write | destructive` is metadata for policy/approvals; enforcement is host-owned.
+- Do not import auth, storage, provider SDKs, or product tool catalogs here.
 
 ## Voice Runtime
 

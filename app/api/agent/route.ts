@@ -5,13 +5,14 @@ import {
   HttpServerResponse
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer } from 'effect'
+import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
 import type { ToolDef } from '@yolk/protocol'
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
-import { CalculatorToolExecutorLayer, calculatorTools } from '@/lib/agents/tools/calculator-tool'
+import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -39,14 +40,14 @@ const getAgentRouteConfig = () =>
 
     return {
       model: agentModel,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt,
-      tools: calculatorTools
+      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt
     }
   })
 
 const makeAgentResponseWithProvider = (
   input: AgentRouteRequest,
   config: AgentRouteRuntimeConfig,
+  toolSet: ResolvedToolSet,
   userId: string
 ) =>
   Effect.gen(function* () {
@@ -56,7 +57,7 @@ const makeAgentResponseWithProvider = (
     )
 
     return yield* makeAgentPostResponse(input, config).pipe(
-      Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, CalculatorToolExecutorLayer))
+      Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(toolSet)))
     )
   })
 
@@ -70,8 +71,18 @@ const toHttpResponse = (response: Response) =>
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
-  const config = yield* getAgentRouteConfig()
-  const response = yield* makeAgentResponseWithProvider(input, config, session.user.id)
+  const baseConfig = yield* getAgentRouteConfig()
+  const toolSet = yield* resolveAgentTools({
+    surface: 'text',
+    route: '/agent',
+    userId: session.user.id
+  })
+  const response = yield* makeAgentResponseWithProvider(
+    input,
+    { ...baseConfig, tools: toolSet.tools },
+    toolSet,
+    session.user.id
+  )
 
   return toHttpResponse(response)
 }).pipe(

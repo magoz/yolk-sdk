@@ -39,6 +39,7 @@
     "@yolk/agent-runtime": "workspace:*",
     "@yolk/client": "workspace:*",
     "@yolk/protocol": "workspace:*",
+    "@yolk/tool-registry": "workspace:*",
     "@yolk/voice-runtime": "workspace:*",
     "better-auth": "^1.4.14",
     "class-variance-authority": "^0.7.1",

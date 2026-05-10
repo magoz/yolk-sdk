@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { AgentEvent } from '@yolk/protocol'
@@ -13,9 +13,10 @@ import {
   TestToolExecutor
 } from '@yolk/agent-loop'
 import type { LLMRequest } from '@yolk/agent-loop'
+import { makeToolExecutorLayer } from '@yolk/tool-registry'
 import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
-import { CalculatorToolExecutorLayer, calculatorTools } from './tools/calculator-tool'
+import { resolveAgentTools } from './tools/registry'
 
 const config = {
   model: 'faux',
@@ -200,6 +201,11 @@ describe('makeAgentPostResponse', () => {
   it.effect('executes calculator tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+      const toolSet = yield* resolveAgentTools({
+        surface: 'text',
+        route: '/agent',
+        userId: 'user_1'
+      })
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
         LoopConfig.defaultLayer,
@@ -214,22 +220,18 @@ describe('makeAgentPostResponse', () => {
           ],
           requests
         }),
-        CalculatorToolExecutorLayer,
+        makeToolExecutorLayer(toolSet),
         StatelessSessionStoreLayer
       )
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({ sessionId: 'session_1', content: 'what is 2 + 2?' }),
-        { ...config, tools: calculatorTools }
+        { ...config, tools: toolSet.tools }
       ).pipe(Effect.provide(layer))
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
-      const toolResultContents: Array<unknown> = []
-
-      for (const event of events) {
-        if (event._tag === 'ToolExecutionEnd') {
-          toolResultContents.push(event.result.content)
-        }
-      }
+      const toolResultContents = Arr.filterMap(events, event =>
+        event._tag === 'ToolExecutionEnd' ? Result.succeed(event.result.content) : Result.failVoid
+      )
 
       expect(events.map(event => event._tag)).toEqual([
         'AgentStart',

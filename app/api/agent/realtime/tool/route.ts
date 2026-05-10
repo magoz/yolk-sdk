@@ -1,9 +1,10 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { Data, Effect, Layer } from 'effect'
+import { Data, Effect } from 'effect'
 import { VoiceToolCallRequest, executeVoiceToolCall } from '@yolk/voice-runtime'
+import { makeToolExecutorLayer } from '@yolk/tool-registry'
 import { AppLayer } from '@/lib/layers'
 import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'
-import { CalculatorToolExecutorLayer } from '@/lib/agents/tools/calculator-tool'
+import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -15,9 +16,16 @@ class RealtimeToolRouteError extends Data.TaggedError('RealtimeToolRouteError')<
 }> {}
 
 const handler = Effect.gen(function* () {
-  yield* getSession()
+  const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
-  const result = yield* executeVoiceToolCall(input)
+  const toolSet = yield* resolveAgentTools({
+    surface: 'voice',
+    route: '/agent/voice',
+    userId: session.user.id
+  })
+  const result = yield* executeVoiceToolCall(input).pipe(
+    Effect.provide(makeToolExecutorLayer(toolSet))
+  )
   const response = toOpenAiRealtimeToolExecutionResponse(result)
 
   return yield* HttpServerResponse.json(response, {
@@ -51,7 +59,6 @@ const handler = Effect.gen(function* () {
   )
 )
 
-const RouteLayer = Layer.mergeAll(AppLayer, CalculatorToolExecutorLayer)
-const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(handler, RouteLayer)
+const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(handler, AppLayer)
 
 export const POST = (request: Request) => effectHandler(request)

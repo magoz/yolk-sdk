@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Ref, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -105,27 +105,18 @@ const unsupportedContentError = (contentType: string) =>
   })
 
 const contentToText = (content: Content, owner: string): Effect.Effect<string, LLMError> =>
-  Effect.gen(function* () {
-    if (typeof content === 'string') {
-      return content
-    }
-
-    const textParts: Array<string> = []
-
-    for (const part of content) {
-      switch (part._tag) {
-        case 'Text':
-          textParts.push(part.text)
-          break
-        case 'Image':
-          return yield* Effect.fail(unsupportedContentError(`${owner} image`))
-        case 'Audio':
-          return yield* Effect.fail(unsupportedContentError(`${owner} audio`))
-      }
-    }
-
-    return textParts.join('\n')
-  })
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, part => {
+        switch (part._tag) {
+          case 'Text':
+            return Effect.succeed(part.text)
+          case 'Image':
+            return Effect.fail(unsupportedContentError(`${owner} image`))
+          case 'Audio':
+            return Effect.fail(unsupportedContentError(`${owner} audio`))
+        }
+      }).pipe(Effect.map(textParts => textParts.join('\n')))
 
 const serializeToolArguments = (params: unknown) =>
   Effect.try({
@@ -158,18 +149,16 @@ const messageToCodexInput = (
       case 'User':
         return [{ role: 'user', content: yield* contentToText(message.content, 'User') }]
       case 'Assistant': {
-        const items: Array<OpenAiCodexInputItem> = []
         const content = yield* contentToText(message.content, 'Assistant')
+        const toolCallInputs = yield* Effect.forEach(message.toolCalls, toolCallToCodexInput)
 
         if (content.length > 0) {
-          items.push({ role: 'assistant', content })
+          const assistantMessage: OpenAiCodexInputItem = { role: 'assistant', content }
+
+          return [assistantMessage, ...toolCallInputs]
         }
 
-        for (const call of message.toolCalls) {
-          items.push(yield* toolCallToCodexInput(call))
-        }
-
-        return items
+        return toolCallInputs
       }
       case 'ToolResult':
         return [
@@ -193,11 +182,7 @@ export const toOpenAiCodexRequestBody = (
   request: LLMRequest
 ): Effect.Effect<OpenAiCodexRequestBody, LLMError> =>
   Effect.gen(function* () {
-    const input: Array<OpenAiCodexInputItem> = []
-
-    for (const message of request.messages) {
-      input.push(...(yield* messageToCodexInput(message)))
-    }
+    const input = Arr.flatten(yield* Effect.forEach(request.messages, messageToCodexInput))
 
     const body: Omit<OpenAiCodexRequestBody, 'tools'> = {
       model: request.model,
@@ -245,16 +230,17 @@ const parseToolArguments = (raw: string) =>
       })
   })
 
-const textFromOutputItems = (items: ReadonlyArray<OpenAiCodexOutputItem>) => {
-  const textParts: Array<string> = []
-
-  for (const item of items) {
-    if (item.type === 'message') {
-      for (const content of item.content) {
-        textParts.push(content.text)
-      }
-    }
+const textFromOutputItem = (item: OpenAiCodexOutputItem) => {
+  switch (item.type) {
+    case 'message':
+      return Arr.map(item.content, content => content.text)
+    case 'function_call':
+      return []
   }
+}
+
+const textFromOutputItems = (items: ReadonlyArray<OpenAiCodexOutputItem>) => {
+  const textParts = Arr.flatten(Arr.map(items, textFromOutputItem))
 
   return textParts.join('')
 }
@@ -263,31 +249,36 @@ const toLlmEvents = (
   response: OpenAiCodexResponse
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const events: Array<LLMEvent> = []
     const text = response.output_text ?? textFromOutputItems(response.output)
+    const textEvents = text.length > 0 ? [LLMTextDelta.make({ text })] : []
+    const toolCallEvents = Arr.getSomes(
+      yield* Effect.forEach(response.output, item => {
+        switch (item.type) {
+          case 'message':
+            return Effect.succeed(Option.none())
+          case 'function_call':
+            return parseToolArguments(item.arguments).pipe(
+              Effect.map(params =>
+                Option.some(
+                  LLMToolCall.make({
+                    call: ToolCall.make({
+                      id: item.call_id,
+                      name: item.name,
+                      params
+                    })
+                  })
+                )
+              )
+            )
+        }
+      })
+    )
 
-    if (text.length > 0) {
-      events.push(LLMTextDelta.make({ text }))
-    }
-
-    for (const item of response.output) {
-      if (item.type === 'function_call') {
-        events.push(
-          LLMToolCall.make({
-            call: ToolCall.make({
-              id: item.call_id,
-              name: item.name,
-              params: yield* parseToolArguments(item.arguments)
-            })
-          })
-        )
-      }
-    }
-
-    const hasToolCall = events.some(event => event._tag === 'ToolCall')
-    events.push(LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
-
-    return events
+    return [
+      ...textEvents,
+      ...toolCallEvents,
+      LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' })
+    ]
   })
 
 const decodeOpenAiCodexResponse = (json: unknown) =>
@@ -377,13 +368,10 @@ const splitCompleteSseBlocks = (buffer: string) => {
 }
 
 const dataFromSseBlock = (block: string) => {
-  const lines: Array<string> = []
-
-  for (const line of block.split('\n')) {
-    if (line.startsWith('data:')) {
-      lines.push(line.slice(5).trimStart())
-    }
-  }
+  const lines = Arr.map(
+    Arr.filter(block.split('\n'), line => line.startsWith('data:')),
+    line => line.slice(5).trimStart()
+  )
 
   const data = lines.join('\n').trim()
 

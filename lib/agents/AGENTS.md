@@ -27,6 +27,7 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools
 - File: `tools/calculator-tool.ts`
 - Tool name: `calculate`
 - Supports `add`, `subtract`, `multiply`, `divide`
+- App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
 - Shared by text and Realtime voice smoke tests
 - Smoke-test only; no durable transcript or product permissions yet
 

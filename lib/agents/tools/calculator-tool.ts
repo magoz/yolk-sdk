@@ -1,7 +1,9 @@
-import { Effect, Layer } from 'effect'
+import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError, ToolExecutor } from '@yolk/agent-loop'
+import { ToolError } from '@yolk/agent-loop'
 import { ToolDef, ToolResult, type ToolCall } from '@yolk/protocol'
+import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
+import type { AgentToolContext } from './tool-context'
 
 const calculatorToolName = 'calculate'
 
@@ -35,14 +37,12 @@ const calculatorParameters = {
   required: ['operation', 'left', 'right']
 }
 
-export const calculatorTools: ReadonlyArray<ToolDef> = [
-  ToolDef.make({
-    name: calculatorToolName,
-    description:
-      'Perform basic arithmetic. Use this for addition, subtraction, multiplication, or division.',
-    parameters: calculatorParameters
-  })
-]
+const calculatorToolDef = ToolDef.make({
+  name: calculatorToolName,
+  description:
+    'Perform basic arithmetic. Use this for addition, subtraction, multiplication, or division.',
+  parameters: calculatorParameters
+})
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -104,7 +104,13 @@ const executeCalculator = (call: ToolCall) => {
   })
 }
 
-export const CalculatorToolExecutorLayer = Layer.succeed(
-  ToolExecutor,
-  ToolExecutor.of({ execute: executeCalculator })
-)
+export const calculatorToolRegistration: ToolRegistration<AgentToolContext> = {
+  def: calculatorToolDef,
+  access: 'read',
+  execute: ({ call }) => executeCalculator(call)
+}
+
+export const calculatorToolModule: ToolModule<AgentToolContext> = {
+  id: 'calculator',
+  tools: [calculatorToolRegistration]
+}

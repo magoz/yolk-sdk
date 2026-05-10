@@ -10,9 +10,10 @@ import {
 import { Config, Data, Effect, Layer, Redacted } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { makeOpenAiRealtimeSessionConfig } from '@/lib/agents/realtime/openai-realtime'
-import { calculatorTools } from '@/lib/agents/tools/calculator-tool'
+import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import type { ToolDef } from '@yolk/protocol'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,13 +41,13 @@ const safetyIdentifier = (userId: string) =>
 
 const isBlank = (value: string) => value.trim().length === 0
 
-const makeSessionConfigJson = () =>
+const makeSessionConfigJson = (tools: ReadonlyArray<ToolDef>) =>
   Effect.try({
     try: () =>
       JSON.stringify(
         makeOpenAiRealtimeSessionConfig({
           instructions: realtimeInstructions,
-          tools: calculatorTools
+          tools
         })
       ),
     catch: error =>
@@ -59,11 +60,12 @@ const makeSessionConfigJson = () =>
 const requestOpenAiRealtimeAnswer = (input: {
   readonly apiKey: Redacted.Redacted<string>
   readonly sdp: string
+  readonly tools: ReadonlyArray<ToolDef>
   readonly userId: string
 }) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
-    const sessionConfig = yield* makeSessionConfigJson()
+    const sessionConfig = yield* makeSessionConfigJson(input.tools)
     const formData = new FormData()
     formData.set('sdp', input.sdp)
     formData.set('session', sessionConfig)
@@ -125,7 +127,17 @@ const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const sdp = yield* readSdp
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-  const answer = yield* requestOpenAiRealtimeAnswer({ apiKey, sdp, userId: session.user.id })
+  const toolSet = yield* resolveAgentTools({
+    surface: 'voice',
+    route: '/agent/voice',
+    userId: session.user.id
+  })
+  const answer = yield* requestOpenAiRealtimeAnswer({
+    apiKey,
+    sdp,
+    tools: toolSet.tools,
+    userId: session.user.id
+  })
 
   return HttpServerResponse.text(answer, {
     contentType: 'application/sdp',

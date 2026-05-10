@@ -50,6 +50,9 @@ importers:
       '@yolk/protocol':
         specifier: workspace:*
         version: link:packages/protocol
+      '@yolk/tool-registry':
+        specifier: workspace:*
+        version: link:packages/tool-registry
       '@yolk/voice-runtime':
         specifier: workspace:*
         version: link:packages/voice-runtime
@@ -204,6 +207,18 @@ importers:
 
   packages/protocol:
     dependencies:
+      effect:
+        specifier: beta
+        version: 4.0.0-beta.64
+
+  packages/tool-registry:
+    dependencies:
+      '@yolk/agent-loop':
+        specifier: workspace:*
+        version: link:../agent-loop
+      '@yolk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       effect:
         specifier: beta
         version: 4.0.0-beta.64

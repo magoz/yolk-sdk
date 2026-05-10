@@ -1,0 +1,117 @@
+import { Array as Arr, Effect, Layer, Option } from 'effect'
+import * as Schema from 'effect/Schema'
+import { ToolError, ToolExecutor } from '@yolk/agent-loop'
+import type { ToolCall, ToolDef, ToolResult } from '@yolk/protocol'
+
+export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
+export type ToolAccess = typeof ToolAccess.Type
+
+export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError>()(
+  'ToolRegistryError',
+  {
+    message: Schema.String,
+    cause: Schema.Literals(['duplicate_tool'])
+  }
+) {}
+
+export type ToolExecutionInput<Context> = {
+  readonly call: ToolCall
+  readonly context: Context
+}
+
+export type ToolRegistration<Context> = {
+  readonly def: ToolDef
+  readonly access: ToolAccess
+  readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
+  readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+}
+
+export type ToolModule<Context> = {
+  readonly id: string
+  readonly tools: ReadonlyArray<ToolRegistration<Context>>
+}
+
+export type ToolMetadata = {
+  readonly moduleId: string
+  readonly name: string
+  readonly access: ToolAccess
+}
+
+type ResolvedRegistration<Context> = {
+  readonly moduleId: string
+  readonly tool: ToolRegistration<Context>
+}
+
+export type ResolvedToolSet = {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly metadata: ReadonlyArray<ToolMetadata>
+  readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
+}
+
+const enabled = <Context>(tool: ToolRegistration<Context>, context: Context) =>
+  tool.isEnabled === undefined ? Effect.succeed(true) : tool.isEnabled(context)
+
+const resolveModuleTools = <Context>(toolModule: ToolModule<Context>, context: Context) =>
+  Effect.forEach(toolModule.tools, tool =>
+    enabled(tool, context).pipe(
+      Effect.map(isToolEnabled =>
+        isToolEnabled ? Option.some({ moduleId: toolModule.id, tool }) : Option.none()
+      )
+    )
+  ).pipe(Effect.map(Arr.getSomes))
+
+const duplicateToolError = (name: string) =>
+  new ToolRegistryError({
+    cause: 'duplicate_tool',
+    message: `Duplicate tool registered: ${name}`
+  })
+
+const missingToolError = (name: string) =>
+  new ToolError({
+    tool: name,
+    message: `Tool is not configured: ${name}`,
+    cause: 'permission'
+  })
+
+const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
+  const names = Arr.map(resolved, item => item.tool.def.name)
+
+  return Arr.findFirst(names, (name, index) => names.indexOf(name) !== index)
+}
+
+export const resolveTools = <Context>(
+  modules: ReadonlyArray<ToolModule<Context>>,
+  context: Context
+): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
+  Effect.gen(function* () {
+    const resolvedByModule = yield* Effect.forEach(modules, toolModule =>
+      resolveModuleTools(toolModule, context)
+    )
+    const resolved = Arr.flatten(resolvedByModule)
+    const duplicateName = findDuplicateToolName(resolved)
+
+    if (Option.isSome(duplicateName)) {
+      return yield* Effect.fail(duplicateToolError(duplicateName.value))
+    }
+
+    const tools = Arr.map(resolved, item => item.tool.def)
+    const metadata = Arr.map(resolved, item => ({
+      moduleId: item.moduleId,
+      name: item.tool.def.name,
+      access: item.tool.access
+    }))
+
+    const execute = (call: ToolCall) =>
+      Option.match(
+        Arr.findFirst(resolved, item => item.tool.def.name === call.name),
+        {
+          onNone: () => Effect.fail(missingToolError(call.name)),
+          onSome: match => match.tool.execute({ call, context })
+        }
+      )
+
+    return { tools, metadata, execute }
+  })
+
+export const makeToolExecutorLayer = (toolSet: ResolvedToolSet) =>
+  Layer.succeed(ToolExecutor, ToolExecutor.of({ execute: toolSet.execute }))
