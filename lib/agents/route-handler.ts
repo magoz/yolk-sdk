@@ -38,6 +38,9 @@ const ndjsonHeaders = {
 
 const textEncoder = new TextEncoder()
 
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
 type AgentStreamError = AgentLoopError | RuntimeError
 
 const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
@@ -99,13 +102,15 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
   )
 
 const encodeNdjsonEvent = (event: AgentEvent) =>
-  Effect.try({
-    try: () => textEncoder.encode(`${JSON.stringify(event)}\n`),
-    catch: error =>
-      new AgentResponseEncodingError({
-        message: error instanceof Error ? error.message : String(error)
-      })
-  })
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event).pipe(
+    Effect.mapError(
+      error =>
+        new AgentResponseEncodingError({
+          message: unknownToMessage(error)
+        })
+    ),
+    Effect.map(line => textEncoder.encode(`${line}\n`))
+  )
 
 export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRouteConfig) =>
   Effect.gen(function* () {

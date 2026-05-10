@@ -8,6 +8,7 @@ import {
   HttpServerResponse
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer, Redacted } from 'effect'
+import * as Schema from 'effect/Schema'
 import { AppLayer } from '@/lib/layers'
 import { makeOpenAiRealtimeSessionConfig } from '@/lib/agents/realtime/openai-realtime'
 import { resolveAgentTools } from '@/lib/agents/tools/registry'
@@ -42,20 +43,20 @@ const safetyIdentifier = (userId: string) =>
 const isBlank = (value: string) => value.trim().length === 0
 
 const makeSessionConfigJson = (tools: ReadonlyArray<ToolDef>) =>
-  Effect.try({
-    try: () =>
-      JSON.stringify(
-        makeOpenAiRealtimeSessionConfig({
-          instructions: realtimeInstructions,
-          tools
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(
+    makeOpenAiRealtimeSessionConfig({
+      instructions: realtimeInstructions,
+      tools
+    })
+  ).pipe(
+    Effect.mapError(
+      error =>
+        new OpenAiRealtimeCallError({
+          message: 'Could not serialize Realtime session config',
+          cause: error
         })
-      ),
-    catch: error =>
-      new OpenAiRealtimeCallError({
-        message: 'Could not serialize Realtime session config',
-        cause: error
-      })
-  })
+    )
+  )
 
 const requestOpenAiRealtimeAnswer = (input: {
   readonly apiKey: Redacted.Redacted<string>

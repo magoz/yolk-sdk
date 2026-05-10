@@ -35,16 +35,31 @@ const decodeAgentEvent = (value: unknown) =>
     )
   )
 
-const parseAgentEventLine = (line: string) =>
-  Effect.gen(function* () {
-    const parsed = yield* Effect.try({
-      try: (): unknown => JSON.parse(line),
-      catch: error =>
+const encodeJsonString = (value: unknown, message: string) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.mapError(
+      error =>
         new AgentTransportError({
-          message: `Invalid NDJSON line: ${unknownToMessage(error)}`,
+          message: `${message}: ${unknownToMessage(error)}`,
           cause: error
         })
-    })
+    )
+  )
+
+const decodeJsonString = (raw: string, message: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+    Effect.mapError(
+      error =>
+        new AgentTransportError({
+          message: `${message}: ${unknownToMessage(error)}`,
+          cause: error
+        })
+    )
+  )
+
+const parseAgentEventLine = (line: string) =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeJsonString(line, 'Invalid NDJSON line')
 
     return yield* decodeAgentEvent(parsed)
   })
@@ -59,30 +74,40 @@ const responseErrorMessage = (response: Response) =>
       })
   }).pipe(Effect.map(text => (text.length > 0 ? text : response.statusText)))
 
-const makeRequestInit = (request: StreamAgentEventsRequest): RequestInit => {
-  const base = {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId: request.sessionId, content: request.content })
-  }
+const makeRequestInit = (request: StreamAgentEventsRequest) =>
+  encodeJsonString(
+    { sessionId: request.sessionId, content: request.content },
+    'Could not serialize agent request'
+  ).pipe(
+    Effect.map(body => {
+      const base = {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body
+      }
 
-  if (request.signal === undefined) {
-    return base
-  }
+      if (request.signal === undefined) {
+        return base
+      }
 
-  return { ...base, signal: request.signal }
-}
+      return { ...base, signal: request.signal }
+    })
+  )
 
 const fetchAgentResponse = (request: StreamAgentEventsRequest) => {
   const fetcher = request.fetch ?? fetch
 
-  return Effect.tryPromise({
-    try: () => fetcher(request.endpoint ?? defaultEndpoint, makeRequestInit(request)),
-    catch: error =>
-      new AgentTransportError({
-        message: `Agent request failed: ${unknownToMessage(error)}`,
-        cause: error
-      })
+  return Effect.gen(function* () {
+    const requestInit = yield* makeRequestInit(request)
+
+    return yield* Effect.tryPromise({
+      try: () => fetcher(request.endpoint ?? defaultEndpoint, requestInit),
+      catch: error =>
+        new AgentTransportError({
+          message: `Agent request failed: ${unknownToMessage(error)}`,
+          cause: error
+        })
+    })
   }).pipe(
     Effect.flatMap(response =>
       response.ok

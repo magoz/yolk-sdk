@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Option } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -42,11 +42,11 @@ const parseJwtPayload = (token: string): unknown | undefined => {
     return undefined
   }
 
-  try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString())
-  } catch {
-    return undefined
-  }
+  return Option.getOrUndefined(
+    Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(
+      Buffer.from(payload, 'base64url').toString()
+    )
+  )
 }
 
 const accountIdFromPayload = (payload: unknown): string | undefined => {

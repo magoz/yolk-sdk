@@ -31,22 +31,24 @@ const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
 const parseToolArguments = (raw: string) =>
-  Effect.try({
-    try: (): unknown => JSON.parse(raw),
-    catch: error =>
-      new VoiceToolBridgeError({
-        message: `Invalid tool arguments JSON: ${unknownToMessage(error)}`
-      })
-  })
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+    Effect.mapError(
+      error =>
+        new VoiceToolBridgeError({
+          message: `Invalid tool arguments JSON: ${unknownToMessage(error)}`
+        })
+    )
+  )
 
 const stringifyToolOutput = (value: unknown) =>
-  Effect.try({
-    try: () => JSON.stringify(value),
-    catch: error =>
-      new VoiceToolBridgeError({
-        message: `Could not serialize tool output: ${unknownToMessage(error)}`
-      })
-  })
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.mapError(
+      error =>
+        new VoiceToolBridgeError({
+          message: `Could not serialize tool output: ${unknownToMessage(error)}`
+        })
+    )
+  )
 
 const contentToSerializable = (content: Content): unknown =>
   typeof content === 'string' ? content : content
@@ -54,10 +56,11 @@ const contentToSerializable = (content: Content): unknown =>
 const makeVoiceToolExecutionResult = (toolCallId: string, output: string) =>
   VoiceToolExecutionResult.make({ toolCallId, output })
 
-const makeErrorOutput = (message: string) => JSON.stringify({ error: message })
-
 const makeToolErrorResult = (toolCallId: string, error: ToolError | VoiceToolBridgeError) =>
-  Effect.succeed(makeVoiceToolExecutionResult(toolCallId, makeErrorOutput(error.message)))
+  stringifyToolOutput({ error: error.message }).pipe(
+    Effect.catchTag('VoiceToolBridgeError', () => Effect.succeed('{"error":"Tool failed"}')),
+    Effect.map(output => makeVoiceToolExecutionResult(toolCallId, output))
+  )
 
 export const executeVoiceToolCall = (input: VoiceToolCallRequest) =>
   Effect.gen(function* () {
