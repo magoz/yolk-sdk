@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   BotIcon,
   BrainIcon,
+  ChevronDownIcon,
   CircleAlertIcon,
   LoaderCircleIcon,
   SparklesIcon,
@@ -14,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
-import type { AgentChatItem, LiveToolState } from './agent-chat-items'
+import type { AgentChatItem, ToolDuration, ToolRunState } from './agent-chat-items'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
 
@@ -83,55 +84,104 @@ function UtilityCard({
   )
 }
 
-function ToolCallCard({ call }: { readonly call: ToolCall }) {
-  return (
-    <div className={chatRowClass}>
-      <div className="flex gap-3">
-        <UtilityIcon role="tool" />
-        <div className="min-w-0 flex-1 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-3.5 py-3 text-amber-900 shadow-xs dark:text-amber-200">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="outline">tool call</Badge>
-            <span className="font-medium text-foreground">{call.name}</span>
-            <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
-          </div>
-          <div className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
-            {unknownPreview(call.params)}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
+const formatToolDuration = (duration: ToolDuration) => {
+  if (duration._tag === 'Unknown') {
+    return 'done'
+  }
+
+  if (duration.milliseconds < 1000) {
+    return `${duration.milliseconds}ms`
+  }
+
+  return `${(duration.milliseconds / 1000).toFixed(1)}s`
 }
 
-function LiveToolCard({ call, state }: { readonly call: ToolCall; readonly state: LiveToolState }) {
+const toolStateLabel = (state: ToolRunState) => {
+  switch (state._tag) {
+    case 'Running':
+      return 'running'
+    case 'Called':
+      return state.duration._tag === 'Known' ? formatToolDuration(state.duration) : 'called'
+    case 'Completed':
+      return formatToolDuration(state.duration)
+  }
+}
+
+function ToolRunCard({
+  id,
+  call,
+  state
+}: {
+  readonly id: string
+  readonly call: ToolCall
+  readonly state: ToolRunState
+}) {
+  const [expanded, setExpanded] = useState(false)
   const isRunning = state._tag === 'Running'
+  const detailsId = `${id}-details`
+  const handleToggle = useCallback(() => {
+    setExpanded(current => !current)
+  }, [])
 
   return (
     <div className={chatRowClass}>
       <div className="flex gap-3">
         <UtilityIcon role="tool" />
         <div
-          role={isRunning ? 'status' : undefined}
-          aria-live={isRunning ? 'polite' : undefined}
-          className="min-w-0 flex-1 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-3.5 py-3 text-amber-900 shadow-xs dark:text-amber-200"
+          className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-900 shadow-xs dark:text-amber-200"
         >
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="outline">{isRunning ? 'running tool' : 'tool result'}</Badge>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            onClick={handleToggle}
+            className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <Badge variant="outline">tool</Badge>
             {isRunning ? (
               <LoaderCircleIcon
-                className="size-3 animate-spin text-muted-foreground motion-reduce:animate-none"
+                className="size-3 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
                 aria-hidden
               />
             ) : null}
-            <span className="font-medium text-foreground">{call.name}</span>
-            <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
-          </div>
-          <div className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
-            {unknownPreview(call.params)}
-          </div>
-          {state._tag === 'Completed' ? (
-            <div className="mt-2 whitespace-pre-wrap break-words border-t border-amber-500/15 pt-2 text-xs leading-5">
-              {contentPreview(state.result.content)}
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{call.name}</span>
+            <span
+              role={isRunning ? 'status' : undefined}
+              aria-live={isRunning ? 'polite' : undefined}
+              className="shrink-0 tabular-nums text-muted-foreground"
+            >
+              {toolStateLabel(state)}
+            </span>
+            <ChevronDownIcon
+              className={cn(
+                'size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out',
+                expanded ? 'rotate-180' : 'rotate-0'
+              )}
+              aria-hidden
+            />
+          </button>
+          {expanded ? (
+            <div id={detailsId} className="border-t border-amber-500/15 px-3.5 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-medium text-foreground">{call.name}</span>
+                <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
+              </div>
+              <div className="mt-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+                Input
+              </div>
+              <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
+                {unknownPreview(call.params)}
+              </div>
+              {state._tag === 'Completed' ? (
+                <>
+                  <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+                    Output
+                  </div>
+                  <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5">
+                    {contentPreview(state.result.content)}
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -265,10 +315,8 @@ function AgentChatItemView({
       return <MessageCard content={item.content} role="assistant" />
     case 'Reasoning':
       return showReasoning ? <ReasoningCard text={item.text} /> : null
-    case 'ToolCall':
-      return showInlineTools ? <ToolCallCard call={item.call} /> : null
-    case 'LiveTool':
-      return showInlineTools ? <LiveToolCard call={item.call} state={item.state} /> : null
+    case 'ToolRun':
+      return showInlineTools ? <ToolRunCard id={item.id} call={item.call} state={item.state} /> : null
     case 'ToolResult':
       return showInlineTools ? (
         <ToolResultCard name={item.name} content={contentPreview(item.content)} />

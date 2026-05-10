@@ -4,12 +4,16 @@ import {
   AgentError,
   AgentStart,
   AssistantAgentMessage,
+  AssistantMessageEvent,
   LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
   ToolExecutionEnd,
+  ToolExecutionStart,
   ToolCall,
   ToolResult,
+  ToolResultEvent,
+  ToolResultMessage,
   UserMessage
 } from '@yolk/protocol'
 import { markAgentAborted, markAgentError, reduceAgentEvents, submitAgentUserMessage } from '../src'
@@ -18,39 +22,50 @@ describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
-    const message = AssistantAgentMessage.make({ content: 'ok', toolCalls: [] })
+    const message = AssistantAgentMessage.make({ content: 'ok', toolCalls: [call] })
+    const toolResultMessage = ToolResultMessage.make({ toolCallId: call.id, content: result.content })
 
     const state = reduceAgentEvents([
       AgentStart.make({}),
       LLMTextDelta.make({ text: 'o' }),
       LLMTextDelta.make({ text: 'k' }),
       LLMToolCall.make({ call }),
+      AssistantMessageEvent.make({ message }),
+      ToolExecutionStart.make({ call }),
       ToolExecutionEnd.make({ call, result }),
-      AgentEnd.make({ messages: [message], turns: 1, usage: { input: 0, output: 0 } })
+      ToolResultEvent.make({ result }),
+      AgentEnd.make({
+        messages: [message, toolResultMessage],
+        turns: 1,
+        usage: { input: 0, output: 0 }
+      })
     ])
 
     expect(state.status).toBe('done')
     expect(state.text).toBe('')
-    expect(state.activeToolCalls).toEqual([])
-    expect(state.completedToolCalls).toEqual([])
-    expect(state.toolResults).toEqual([result])
-    expect(state.messages).toEqual([message])
+    expect(state.liveMessages).toEqual([])
+    expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
+    expect(state.messages).toEqual([message, toolResultMessage])
     expect(state.error).toBeNull()
   })
 
-  it('keeps completed tool calls during active runs', () => {
+  it('keeps tool runs anchored in live messages during active runs', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
+    const message = AssistantAgentMessage.make({ content: '', toolCalls: [call] })
+    const resultMessage = ToolResultMessage.make({ toolCallId: call.id, content: result.content })
 
     const state = reduceAgentEvents([
       AgentStart.make({}),
       LLMToolCall.make({ call }),
-      ToolExecutionEnd.make({ call, result })
+      AssistantMessageEvent.make({ message }),
+      ToolExecutionStart.make({ call }),
+      ToolExecutionEnd.make({ call, result }),
+      ToolResultEvent.make({ result })
     ])
 
-    expect(state.activeToolCalls).toEqual([])
-    expect(state.completedToolCalls).toEqual([call])
-    expect(state.toolResults).toEqual([result])
+    expect(state.liveMessages).toEqual([message, resultMessage])
+    expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
   })
 
   it('stores in-band agent errors', () => {
@@ -61,8 +76,7 @@ describe('reduceAgentEvents', () => {
 
     expect(state).toMatchObject({
       status: 'error',
-      activeToolCalls: [],
-      completedToolCalls: [],
+      toolRuns: [],
       error: 'Provider failed'
     })
   })
@@ -72,8 +86,7 @@ describe('reduceAgentEvents', () => {
 
     expect(markAgentError(state)).toMatchObject({
       status: 'error',
-      activeToolCalls: [],
-      completedToolCalls: [],
+      toolRuns: [],
       error: 'Agent request failed'
     })
   })
@@ -85,10 +98,9 @@ describe('reduceAgentEvents', () => {
     expect(state).toMatchObject({
       status: 'running',
       messages: [message],
+      liveMessages: [],
       text: '',
-      activeToolCalls: [],
-      completedToolCalls: [],
-      toolResults: [],
+      toolRuns: [],
       reasoning: '',
       error: null
     })
@@ -125,8 +137,7 @@ describe('reduceAgentEvents', () => {
     expect(markAgentAborted(state)).toMatchObject({
       status: 'aborted',
       text: 'partial',
-      activeToolCalls: [],
-      completedToolCalls: [],
+      toolRuns: [],
       error: null
     })
   })

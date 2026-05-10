@@ -1,15 +1,25 @@
-import type { AgentMessage, Content, ToolCall, ToolResult } from '@yolk/protocol'
+import type { AgentToolRun } from '@yolk/client'
+import { ToolResult, type AgentMessage, type Content, type ToolCall } from '@yolk/protocol'
 
-export type LiveToolState =
-  | { readonly _tag: 'Running' }
-  | { readonly _tag: 'Completed'; readonly result: ToolResult }
+export type ToolDuration =
+  | { readonly _tag: 'Known'; readonly milliseconds: number }
+  | { readonly _tag: 'Unknown' }
+
+export type ToolRunState =
+  | { readonly _tag: 'Running'; readonly duration: ToolDuration }
+  | { readonly _tag: 'Called'; readonly duration: ToolDuration }
+  | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
 
 export type AgentChatItem =
   | { readonly _tag: 'UserMessage'; readonly id: string; readonly content: Content }
   | { readonly _tag: 'AssistantMessage'; readonly id: string; readonly content: Content }
   | { readonly _tag: 'Reasoning'; readonly id: string; readonly text: string }
-  | { readonly _tag: 'ToolCall'; readonly id: string; readonly call: ToolCall }
-  | { readonly _tag: 'LiveTool'; readonly id: string; readonly call: ToolCall; readonly state: LiveToolState }
+  | {
+      readonly _tag: 'ToolRun'
+      readonly id: string
+      readonly call: ToolCall
+      readonly state: ToolRunState
+    }
   | {
       readonly _tag: 'ToolResult'
       readonly id: string
@@ -27,24 +37,23 @@ export type BuildAgentChatItemsInput = {
   readonly userDraft: string
   readonly assistantDraft: string
   readonly reasoningDraft: string
-  readonly activeToolCalls: ReadonlyArray<ToolCall>
-  readonly completedToolCalls: ReadonlyArray<ToolCall>
-  readonly liveToolResults: ReadonlyArray<ToolResult>
+  readonly toolRuns: ReadonlyArray<AgentToolRun>
   readonly isRunning: boolean
   readonly error: string | null
 }
 
 const activeStatusLabel = ({
-  activeToolCalls,
+  toolRuns,
   assistantDraft,
   reasoningDraft
-}: Pick<BuildAgentChatItemsInput, 'activeToolCalls' | 'assistantDraft' | 'reasoningDraft'>) => {
-  const firstCall = activeToolCalls[0]
+}: Pick<BuildAgentChatItemsInput, 'toolRuns' | 'assistantDraft' | 'reasoningDraft'>) => {
+  const activeRuns = toolRuns.filter(run => run._tag !== 'Completed')
+  const firstRun = activeRuns[0]
 
-  if (firstCall !== undefined) {
-    return activeToolCalls.length === 1
-      ? `Running ${firstCall.name}`
-      : `Running ${activeToolCalls.length} tools`
+  if (firstRun !== undefined) {
+    return activeRuns.length === 1
+      ? `Running ${firstRun.call.name}`
+      : `Running ${activeRuns.length} tools`
   }
 
   if (assistantDraft.length > 0) {
@@ -58,8 +67,15 @@ const activeStatusLabel = ({
   return 'Thinking'
 }
 
-const collectToolNames = (messages: ReadonlyArray<AgentMessage>) => {
+const collectToolNames = (
+  messages: ReadonlyArray<AgentMessage>,
+  toolRuns: ReadonlyArray<AgentToolRun>
+) => {
   const names = new Map<string, string>()
+
+  for (const run of toolRuns) {
+    names.set(run.call.id, run.call.name)
+  }
 
   for (const message of messages) {
     if (message._tag === 'Assistant') {
@@ -72,20 +88,73 @@ const collectToolNames = (messages: ReadonlyArray<AgentMessage>) => {
   return names
 }
 
-const addToolCallNames = (names: Map<string, string>, calls: ReadonlyArray<ToolCall>) => {
-  for (const call of calls) {
-    names.set(call.id, call.name)
+const collectToolResultsById = (messages: ReadonlyArray<AgentMessage>) => {
+  const resultsById = new Map<string, ToolResult>()
+
+  for (const message of messages) {
+    if (message._tag === 'ToolResult') {
+      resultsById.set(
+        message.toolCallId,
+        ToolResult.make({
+          toolCallId: message.toolCallId,
+          content: message.content
+        })
+      )
+    }
   }
+
+  return resultsById
 }
 
-const collectToolCallsById = (calls: ReadonlyArray<ToolCall>) => {
-  const callsById = new Map<string, ToolCall>()
+const collectToolCallIds = (messages: ReadonlyArray<AgentMessage>) => {
+  const ids = new Set<string>()
 
-  for (const call of calls) {
-    callsById.set(call.id, call)
+  for (const message of messages) {
+    if (message._tag === 'Assistant') {
+      for (const call of message.toolCalls) {
+        ids.add(call.id)
+      }
+    }
   }
 
-  return callsById
+  return ids
+}
+
+const collectToolRunsById = (runs: ReadonlyArray<AgentToolRun>) => {
+  const runsById = new Map<string, AgentToolRun>()
+
+  for (const run of runs) {
+    runsById.set(run.call.id, run)
+  }
+
+  return runsById
+}
+
+const durationFromRun = (run: AgentToolRun | undefined): ToolDuration => {
+  if (run === undefined || run._tag !== 'Completed') {
+    return { _tag: 'Unknown' }
+  }
+
+  return { _tag: 'Known', milliseconds: Math.max(0, run.endedAtMs - run.startedAtMs) }
+}
+
+const toolRunStateFor = (
+  run: AgentToolRun | undefined,
+  result: ToolResult | undefined
+): ToolRunState => {
+  if (run?._tag === 'Running') {
+    return { _tag: 'Running', duration: { _tag: 'Unknown' } }
+  }
+
+  if (run?._tag === 'Completed') {
+    return { _tag: 'Completed', duration: durationFromRun(run), result: run.result }
+  }
+
+  if (result !== undefined) {
+    return { _tag: 'Completed', duration: { _tag: 'Unknown' }, result }
+  }
+
+  return { _tag: 'Called', duration: { _tag: 'Unknown' } }
 }
 
 export const buildAgentChatItems = ({
@@ -93,18 +162,15 @@ export const buildAgentChatItems = ({
   userDraft,
   assistantDraft,
   reasoningDraft,
-  activeToolCalls,
-  completedToolCalls,
-  liveToolResults,
+  toolRuns,
   isRunning,
   error
 }: BuildAgentChatItemsInput): ReadonlyArray<AgentChatItem> => {
-  const toolNames = collectToolNames(messages)
+  const toolNames = collectToolNames(messages, toolRuns)
+  const toolResultsById = collectToolResultsById(messages)
+  const toolCallIds = collectToolCallIds(messages)
+  const toolRunsById = collectToolRunsById(toolRuns)
   const items: Array<AgentChatItem> = []
-
-  addToolCallNames(toolNames, activeToolCalls)
-  addToolCallNames(toolNames, completedToolCalls)
-  const completedToolCallsById = collectToolCallsById(completedToolCalls)
 
   messages.forEach((message, index) => {
     switch (message._tag) {
@@ -127,10 +193,21 @@ export const buildAgentChatItems = ({
         })
 
         for (const call of message.toolCalls) {
-          items.push({ _tag: 'ToolCall', id: `message-${index}-tool-call-${call.id}`, call })
+          const result = toolResultsById.get(call.id)
+
+          items.push({
+            _tag: 'ToolRun',
+            id: `message-${index}-tool-run-${call.id}`,
+            call,
+            state: toolRunStateFor(toolRunsById.get(call.id), result)
+          })
         }
         return
       case 'ToolResult':
+        if (toolCallIds.has(message.toolCallId)) {
+          return
+        }
+
         items.push({
           _tag: 'ToolResult',
           id: `message-${index}-tool-result-${message.toolCallId}`,
@@ -154,43 +231,11 @@ export const buildAgentChatItems = ({
     items.push({ _tag: 'AssistantDraft', id: 'draft-assistant', text: assistantDraft })
   }
 
-  for (const call of activeToolCalls) {
-    items.push({
-      _tag: 'LiveTool',
-      id: `live-tool-${call.id}`,
-      call,
-      state: { _tag: 'Running' }
-    })
-  }
-
-  if (isRunning) {
-    for (const result of liveToolResults) {
-      const call = completedToolCallsById.get(result.toolCallId)
-
-      if (call === undefined) {
-        items.push({
-          _tag: 'ToolResult',
-          id: `live-tool-result-${result.toolCallId}`,
-          toolCallId: result.toolCallId,
-          name: toolNames.get(result.toolCallId) ?? result.toolCallId,
-          content: result.content
-        })
-      } else {
-        items.push({
-          _tag: 'LiveTool',
-          id: `live-tool-${call.id}`,
-          call,
-          state: { _tag: 'Completed', result }
-        })
-      }
-    }
-  }
-
   if (isRunning) {
     items.push({
       _tag: 'AssistantStatus',
       id: 'assistant-status',
-      label: activeStatusLabel({ activeToolCalls, assistantDraft, reasoningDraft })
+      label: activeStatusLabel({ toolRuns, assistantDraft, reasoningDraft })
     })
   }
 

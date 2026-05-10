@@ -28,9 +28,15 @@ describe('buildAgentChatItems', () => {
       userDraft: 'voice draft',
       assistantDraft: 'assistant draft',
       reasoningDraft: 'reasoning draft',
-      activeToolCalls: [],
-      completedToolCalls: [],
-      liveToolResults: [],
+      toolRuns: [
+        {
+          _tag: 'Completed',
+          call,
+          result: ToolResult.make({ toolCallId: call.id, content: 'URL: https://example.com' }),
+          startedAtMs: 1000,
+          endedAtMs: 1250
+        }
+      ],
       isRunning: false,
       error: 'boom'
     })
@@ -39,19 +45,21 @@ describe('buildAgentChatItems', () => {
       'UserMessage',
       'Reasoning',
       'AssistantMessage',
-      'ToolCall',
-      'ToolResult',
+      'ToolRun',
       'Reasoning',
       'UserDraft',
       'AssistantDraft',
       'Error'
     ])
     expect(items).toContainEqual({
-      _tag: 'ToolResult',
-      id: 'message-2-tool-result-call_1',
-      toolCallId: 'call_1',
-      name: 'web_fetch',
-      content: 'URL: https://example.com'
+      _tag: 'ToolRun',
+      id: 'message-1-tool-run-call_1',
+      call,
+      state: {
+        _tag: 'Completed',
+        duration: { _tag: 'Known', milliseconds: 250 },
+        result: ToolResult.make({ toolCallId: call.id, content: 'URL: https://example.com' })
+      }
     })
   })
 
@@ -61,9 +69,7 @@ describe('buildAgentChatItems', () => {
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      activeToolCalls: [],
-      completedToolCalls: [],
-      liveToolResults: [],
+      toolRuns: [],
       isRunning: false,
       error: null
     })
@@ -90,20 +96,19 @@ describe('buildAgentChatItems', () => {
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      activeToolCalls: [],
-      completedToolCalls: [],
-      liveToolResults: [],
+      toolRuns: [],
       isRunning: true,
       error: null
     })
     const toolItems = buildAgentChatItems({
-      messages: [UserMessage.make({ content: 'latest news?' })],
+      messages: [
+        UserMessage.make({ content: 'latest news?' }),
+        AssistantAgentMessage.make({ content: '', toolCalls: [call] })
+      ],
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      activeToolCalls: [call],
-      completedToolCalls: [],
-      liveToolResults: [],
+      toolRuns: [{ _tag: 'Running', call, startedAtMs: 1000 }],
       isRunning: true,
       error: null
     })
@@ -114,10 +119,10 @@ describe('buildAgentChatItems', () => {
       label: 'Thinking'
     })
     expect(toolItems.at(-2)).toEqual({
-      _tag: 'LiveTool',
-      id: 'live-tool-call_1',
+      _tag: 'ToolRun',
+      id: 'message-1-tool-run-call_1',
       call,
-      state: { _tag: 'Running' }
+      state: { _tag: 'Running', duration: { _tag: 'Unknown' } }
     })
     expect(toolItems.at(-1)).toEqual({
       _tag: 'AssistantStatus',
@@ -134,27 +139,63 @@ describe('buildAgentChatItems', () => {
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const items = buildAgentChatItems({
-      messages: [UserMessage.make({ content: 'summarize https://example.com' })],
+      messages: [
+        UserMessage.make({ content: 'summarize https://example.com' }),
+        AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
+        ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+      ],
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      activeToolCalls: [],
-      completedToolCalls: [call],
-      liveToolResults: [result],
+      toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1800 }],
       isRunning: true,
       error: null
     })
 
     expect(items.at(-2)).toEqual({
-      _tag: 'LiveTool',
-      id: 'live-tool-call_1',
+      _tag: 'ToolRun',
+      id: 'message-1-tool-run-call_1',
       call,
-      state: { _tag: 'Completed', result }
+      state: {
+        _tag: 'Completed',
+        duration: { _tag: 'Known', milliseconds: 800 },
+        result
+      }
     })
     expect(items.at(-1)).toEqual({
       _tag: 'AssistantStatus',
       id: 'assistant-status',
       label: 'Thinking'
     })
+  })
+
+  it('anchors tool rows before the next assistant draft', () => {
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_search',
+      params: { query: 'latest news' }
+    })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'Search result' })
+    const items = buildAgentChatItems({
+      messages: [
+        UserMessage.make({ content: 'latest news?' }),
+        AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
+        ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+      ],
+      userDraft: '',
+      assistantDraft: 'Here is what I found.',
+      reasoningDraft: '',
+      toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1300 }],
+      isRunning: true,
+      error: null
+    })
+
+    expect(items.map(item => item._tag)).toEqual([
+      'UserMessage',
+      'AssistantMessage',
+      'ToolRun',
+      'AssistantDraft',
+      'AssistantStatus'
+    ])
   })
 })

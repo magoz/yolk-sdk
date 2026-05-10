@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { isActiveToolRun } from '@yolk/client'
 import type { AgentEvent } from '@yolk/protocol'
 import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
@@ -142,33 +143,32 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const submitDisabled = isRunning || isVoiceMode
+  const activeToolRunCount = state.toolRuns.filter(isActiveToolRun).length
+  const completedToolRunCount = state.toolRuns.length - activeToolRunCount
   const liveActivityCount = getAgentChatLiveActivityCount({
     isTextRunning: isRunning,
-    activeToolCallCount: state.activeToolCalls.length,
+    activeToolCallCount: activeToolRunCount,
     isVoiceActive: isVoiceMode
   })
   const chatItems = useMemo(
     () =>
       buildAgentChatItems({
-        messages: state.messages,
+        messages: [...state.messages, ...state.liveMessages],
         userDraft: voiceUserDraft,
         assistantDraft: state.text,
         reasoningDraft: state.reasoning,
-        activeToolCalls: state.activeToolCalls,
-        completedToolCalls: state.completedToolCalls,
-        liveToolResults: state.toolResults,
+        toolRuns: state.toolRuns,
         isRunning,
         error: state.error
       }),
     [
       isRunning,
-      state.activeToolCalls,
-      state.completedToolCalls,
       state.error,
+      state.liveMessages,
       state.messages,
       state.reasoning,
       state.text,
-      state.toolResults,
+      state.toolRuns,
       voiceUserDraft
     ]
   )
@@ -235,8 +235,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               items={activityItems}
               textStatus={state.status}
               voiceStatus={voiceStatus}
-              activeToolCallCount={state.activeToolCalls.length}
-              toolResultCount={state.toolResults.length}
+              activeToolCallCount={activeToolRunCount}
+              toolResultCount={completedToolRunCount}
               error={state.error}
             />
           ) : null}

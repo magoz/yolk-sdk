@@ -66,6 +66,12 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 't3code',
     repo: 'https://github.com/pingdotgg/t3code.git',
     branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'ai',
+    repo: 'https://github.com/vercel/ai.git',
+    branch: 'main'
   }
 ]
 

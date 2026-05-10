@@ -68,7 +68,10 @@ app -> client -> protocol + Effect
 ## Client Transport
 
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
-- `AgentClientState.messages` stores stable protocol messages; `text`/`reasoning` are current streaming drafts.
+- `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant/tool turns during active runs.
+- `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
+- `AgentToolRun` is the single client tool lifecycle object: `Called` → `Running(startedAtMs)` → `Completed(result, startedAtMs, endedAtMs)`.
+- Keep tool timing/result on `AgentToolRun`; avoid separate arrays that must be rejoined by id.
 - `submitAgentUserMessage` appends user messages locally before transport starts.
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.

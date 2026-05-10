@@ -93,6 +93,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 | `AgentTranscript`       | Type     | `packages/client/src/state.ts`             | Non-empty client-owned protocol transcript          |
+| `AgentToolRun`          | Type     | `packages/client/src/state.ts`             | Client-side tool lifecycle with call/result/timing  |
 
 ## REFERENCE REPOS
 
@@ -102,9 +103,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `pi-mono`       | `.repos/pi`             | Pi monorepo; agent/product architecture reference                                               |
 | `opencode`      | `.repos/opencode`       | Opencode fork; Codex/OpenAI agent protocol/provider reference                                   |
 | `t3code`        | `.repos/t3code`         | Agent chat/product UI reference                                                                 |
+| `ai-sdk`        | `.repos/ai`             | Vercel AI SDK reference; UIMessage parts/tool lifecycle model                                   |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
-- `effect` version pinned to package.json; `pi`/`opencode`/`t3code` track branches.
+- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)

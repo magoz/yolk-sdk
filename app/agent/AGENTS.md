@@ -18,6 +18,9 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 
 - Prefer chat language: `AgentChatItem`, `buildAgentChatItems`; avoid “timeline”.
 - Stable messages come from protocol `AgentMessage[]`; streaming text/reasoning remain drafts until finalized.
+- `AgentClientState.liveMessages` anchors completed assistant/tool turns during an active run; render `messages + liveMessages + drafts`.
+- Tool rows derive from `AgentToolRun` (`Called`/`Running`/`Completed`) keyed by tool call id; timing lives in the run state.
+- Render tool calls at the assistant message position; never append live tool rows after the current assistant draft.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - User and assistant drafts are render items; keep projection pure and deterministic.
 - Tool result display names come from prior assistant tool calls; fall back to tool call id.
@@ -35,6 +38,7 @@ App-local chat UI over `@yolk/client`. Headless-ready first; move stable APIs to
 
 ## References
 
+- `.repos/ai` and `.repos/opencode` model tools as message parts; prefer that over detached tool arrays.
 - `.repos/t3code` is layout inspiration only; do not copy UI implementation.
 - `lib/agents/AGENTS.md` covers server/provider/runtime wiring.
 - `packages/AGENTS.md` covers reusable package boundaries.
