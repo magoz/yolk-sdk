@@ -1,6 +1,6 @@
 import { Context } from 'effect'
 import type { Stream } from 'effect'
-import type { AgentMessage, ToolDef } from '@yolk/protocol'
+import type { AgentMessage, AgentReasoningEffort, ToolDef } from '@yolk/protocol'
 import type { AgentLoopError } from '../error'
 import type { LLMEvent } from '../llm-event'
 
@@ -9,6 +9,7 @@ export type LLMRequest = {
   readonly tools: ReadonlyArray<ToolDef>
   readonly model: string
   readonly systemPrompt: string
+  readonly reasoningEffort?: AgentReasoningEffort
 }
 
 export class LLMProvider extends Context.Service<

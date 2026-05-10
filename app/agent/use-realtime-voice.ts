@@ -1,19 +1,28 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Option } from 'effect'
+import { Effect, Option } from 'effect'
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  type HttpClientError,
+  type HttpClientResponse
+} from 'effect/unstable/http'
+import * as Schema from 'effect/Schema'
 import {
   AgentEnd,
+  type AgentMessage,
   AssistantAgentMessage,
   LLMToolCall,
   LLMTextDelta,
   ToolCall,
   ToolExecutionEnd,
   ToolExecutionStart,
+  ToolResultMessage,
   ToolResult,
   UserMessage,
   type AgentEvent,
-  type AgentMessage,
   type Content
 } from '@yolk/protocol'
 import {
@@ -36,6 +45,13 @@ type ActiveVoiceSession = {
   readonly dataChannel: RTCDataChannel
   readonly mediaStream: MediaStream
 }
+
+type VoiceToolRequest = {
+  readonly realtimeCall: OpenAiRealtimeFunctionCall
+  readonly toolCall: ToolCall
+}
+
+type VoiceStartOutcome = { readonly _tag: 'Started' } | { readonly _tag: 'Stale' }
 
 type UseRealtimeVoiceInput = {
   readonly messages: ReadonlyArray<AgentMessage>
@@ -86,10 +102,83 @@ const toolCallFromRealtime = (call: OpenAiRealtimeFunctionCall) =>
     params: call.argumentsJson
   })
 
-const remoteErrorMessage = async (response: Response) => {
-  const body = await response.text()
-  return body.length > 0 ? body : `Request failed with ${response.status}`
+const unknownToMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const tryBrowserPromise = <A,>(evaluate: () => Promise<A>) =>
+  Effect.tryPromise({ try: evaluate, catch: error => error })
+
+const toBrowserHttpError =
+  (message: string) => (error: HttpClientError.HttpClientError) =>
+    new Error(`${message}: ${error.message}`)
+
+const encodeJsonString = (value: unknown, message: string) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.mapError(error => new Error(`${message}: ${unknownToMessage(error)}`))
+  )
+
+const responseErrorMessageEffect = (response: HttpClientResponse.HttpClientResponse) =>
+  response.text.pipe(
+    Effect.mapError(toBrowserHttpError('Could not read response body')),
+    Effect.map(body => (body.length > 0 ? body : `Request failed with ${response.status}`))
+  )
+
+const ensureOkResponse = (response: HttpClientResponse.HttpClientResponse) => {
+  if (response.status >= 200 && response.status < 300) {
+    return Effect.succeed(response)
+  }
+
+  return responseErrorMessageEffect(response).pipe(
+    Effect.flatMap(message => Effect.fail(new Error(message)))
+  )
 }
+
+const requestToolExecution = (call: OpenAiRealtimeFunctionCall) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const body = yield* encodeJsonString(
+      {
+        callId: call.callId,
+        name: call.name,
+        arguments: call.argumentsJson
+      },
+      'Could not serialize Realtime tool request'
+    )
+    const request = HttpClientRequest.post('/api/agent/realtime/tool').pipe(
+      HttpClientRequest.setHeaders({
+        accept: 'application/json',
+        'content-type': 'application/json'
+      }),
+      HttpClientRequest.bodyText(body, 'application/json')
+    )
+    const response = yield* client
+      .execute(request)
+      .pipe(Effect.mapError(toBrowserHttpError('Realtime tool request failed')))
+    const okResponse = yield* ensureOkResponse(response)
+
+    return yield* okResponse.json.pipe(
+      Effect.mapError(toBrowserHttpError('Could not parse Realtime tool response'))
+    )
+  })
+
+const requestRealtimeAnswerSdp = (sdp: string) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const request = HttpClientRequest.post('/api/agent/realtime/call').pipe(
+      HttpClientRequest.setHeaders({
+        accept: 'application/sdp',
+        'content-type': 'application/sdp'
+      }),
+      HttpClientRequest.bodyText(sdp, 'application/sdp')
+    )
+    const response = yield* client
+      .execute(request)
+      .pipe(Effect.mapError(toBrowserHttpError('Realtime call request failed')))
+    const okResponse = yield* ensureOkResponse(response)
+
+    return yield* okResponse.text.pipe(
+      Effect.mapError(toBrowserHttpError('Could not read Realtime SDP response'))
+    )
+  })
 
 const canUseVoice = () =>
   typeof navigator !== 'undefined' &&
@@ -106,9 +195,17 @@ const closeSessionResources = (
   mediaStream?.getTracks().forEach(track => track.stop())
 }
 
-const assistantEndEvent = (content: string) =>
+const assistantEndMessages = (content: string, toolMessages: ReadonlyArray<AgentMessage>) => {
+  if (content.trim().length === 0) {
+    return [...toolMessages]
+  }
+
+  return [...toolMessages, AssistantAgentMessage.make({ content, toolCalls: [] })]
+}
+
+const assistantEndEvent = (content: string, toolMessages: ReadonlyArray<AgentMessage>) =>
   AgentEnd.make({
-    messages: [AssistantAgentMessage.make({ content, toolCalls: [] })],
+    messages: assistantEndMessages(content, toolMessages),
     turns: 1,
     usage: { input: 0, output: 0 }
   })
@@ -124,6 +221,7 @@ export const useRealtimeVoice = ({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const activeSessionRef = useRef<ActiveVoiceSession | null>(null)
   const assistantDraftRef = useRef('')
+  const voiceCreatedMessagesRef = useRef<ReadonlyArray<AgentMessage>>([])
   const startAttemptIdRef = useRef(0)
   const isConnecting = status === 'connecting'
   const isLive = status === 'live'
@@ -142,6 +240,7 @@ export const useRealtimeVoice = ({
     )
     activeSessionRef.current = null
     assistantDraftRef.current = ''
+    voiceCreatedMessagesRef.current = []
     setUserDraft('')
 
     if (audioRef.current !== null) {
@@ -171,68 +270,65 @@ export const useRealtimeVoice = ({
   )
 
   const executeToolCall = useCallback(
-    async (call: OpenAiRealtimeFunctionCall, dataChannel: RTCDataChannel) => {
-      const toolCall = toolCallFromRealtime(call)
-      onAgentEvent(LLMToolCall.make({ call: toolCall }))
-      onAgentEvent(ToolExecutionStart.make({ call: toolCall }))
-
-      const response = await fetch('/api/agent/realtime/tool', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          callId: call.callId,
-          name: call.name,
-          arguments: call.argumentsJson
-        })
+    (request: VoiceToolRequest, dataChannel: RTCDataChannel) =>
+      Effect.gen(function* () {
+      const call = request.realtimeCall
+      const toolCall = request.toolCall
+      yield* Effect.sync(() => {
+        onAgentEvent(LLMToolCall.make({ call: toolCall }))
+        onAgentEvent(ToolExecutionStart.make({ call: toolCall }))
       })
 
-      if (!response.ok) {
-        throw new Error(await remoteErrorMessage(response))
-      }
-
-      const payload: unknown = await response.json()
+      const payload = yield* requestToolExecution(call)
       const decoded = decodeOpenAiRealtimeToolExecutionResponse(payload)
 
       if (Option.isNone(decoded)) {
-        throw new Error('Tool response did not include a Realtime event')
+        return yield* Effect.fail(new Error('Tool response did not include a Realtime event'))
       }
 
       const outputEvent = decoded.value.event
 
-      sendClientEvent(dataChannel, outputEvent)
+      yield* Effect.sync(() => sendClientEvent(dataChannel, outputEvent))
 
-      onAgentEvent(
-        ToolExecutionEnd.make({
-          call: toolCall,
-          result: ToolResult.make({
-            toolCallId: call.callId,
-            content: readOpenAiRealtimeToolOutput(outputEvent)
+      const result = ToolResult.make({
+        toolCallId: call.callId,
+        content: readOpenAiRealtimeToolOutput(outputEvent)
+      })
+
+      yield* Effect.sync(() => {
+        onAgentEvent(
+          ToolExecutionEnd.make({
+            call: toolCall,
+            result
           })
-        })
-      )
-    },
+        )
+      })
+
+      return ToolResultMessage.make({ toolCallId: result.toolCallId, content: result.content })
+    }),
     [onAgentEvent, sendClientEvent]
   )
 
   const commitAssistantTranscript = useCallback(
     (transcript: string | null) => {
       const content = transcript ?? assistantDraftRef.current
+      const toolMessages = voiceCreatedMessagesRef.current
 
-      if (content.trim().length === 0) {
+      if (content.trim().length === 0 && toolMessages.length === 0) {
         assistantDraftRef.current = ''
         return
       }
 
-      onAgentEvent(assistantEndEvent(content))
+      onAgentEvent(assistantEndEvent(content, toolMessages))
       assistantDraftRef.current = ''
+      voiceCreatedMessagesRef.current = []
     },
     [onAgentEvent]
   )
 
   const handleRealtimeMessage = useCallback(
-    async (message: MessageEvent, dataChannel: RTCDataChannel) => {
+    (message: MessageEvent, dataChannel: RTCDataChannel) =>
+      Effect.gen(function* () {
       if (typeof message.data !== 'string') {
         return
       }
@@ -241,35 +337,63 @@ export const useRealtimeVoice = ({
 
       switch (event._tag) {
         case 'InputAudioTranscriptionDelta':
-          setUserDraft(current => `${current}${event.delta}`)
+          yield* Effect.sync(() => setUserDraft(current => `${current}${event.delta}`))
           return
         case 'InputAudioTranscriptionCompleted':
-          setUserDraft('')
-          onUserMessage(UserMessage.make({ content: event.transcript }))
+          yield* Effect.sync(() => {
+            setUserDraft('')
+            onUserMessage(UserMessage.make({ content: event.transcript }))
+          })
           return
         case 'OutputAudioTranscriptDelta':
-          assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
-          onAgentEvent(LLMTextDelta.make({ text: event.delta }))
+          yield* Effect.sync(() => {
+            assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
+            onAgentEvent(LLMTextDelta.make({ text: event.delta }))
+          })
           return
         case 'OutputAudioTranscriptDone':
-          commitAssistantTranscript(event.transcript)
+          yield* Effect.sync(() => commitAssistantTranscript(event.transcript))
           return
-        case 'FunctionCalls':
-          await Promise.all(event.calls.map(call => executeToolCall(call, dataChannel)))
-          sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent())
+        case 'FunctionCalls': {
+          const requests = event.calls.map(call => ({
+            realtimeCall: call,
+            toolCall: toolCallFromRealtime(call)
+          }))
+          const resultMessages = yield* Effect.forEach(
+            requests,
+            request => executeToolCall(request, dataChannel)
+          )
+
+          if (requests.length > 0) {
+            yield* Effect.sync(() => {
+              voiceCreatedMessagesRef.current = [
+                ...voiceCreatedMessagesRef.current,
+                AssistantAgentMessage.make({
+                  content: '',
+                  toolCalls: requests.map(request => request.toolCall)
+                }),
+                ...resultMessages
+              ]
+            })
+          }
+
+          yield* Effect.sync(() => sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent()))
           return
+        }
         case 'Error':
-          setStatus('error')
-          onError(event.message)
+          yield* Effect.sync(() => {
+            setStatus('error')
+            onError(event.message)
+          })
           return
         case 'Ignored':
           return
       }
-    },
+    }),
     [commitAssistantTranscript, executeToolCall, onAgentEvent, onError, onUserMessage, sendClientEvent]
   )
 
-  const startSession = useCallback(async () => {
+  const startSession = useCallback(() => {
     if (isConnecting || isLive) {
       return
     }
@@ -286,118 +410,128 @@ export const useRealtimeVoice = ({
     setStatus('connecting')
     setUserDraft('')
     assistantDraftRef.current = ''
+    voiceCreatedMessagesRef.current = []
 
     const peerConnection = new RTCPeerConnection()
     const dataChannel = peerConnection.createDataChannel('oai-events')
-    let mediaStream: MediaStream | null = null
 
-    try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true
-        }
-      })
+    Effect.runFork(
+      Effect.gen(function* () {
+        const mediaStream = yield* tryBrowserPromise(() =>
+          navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true
+            }
+          })
+        )
 
-      if (startAttemptIdRef.current !== startAttemptId) {
-        closeSessionResources(peerConnection, dataChannel, mediaStream)
-        return
-      }
-
-      const audioTrack = mediaStream.getAudioTracks()[0]
-
-      if (audioTrack === undefined) {
-        throw new Error('No microphone track available')
-      }
-
-      activeSessionRef.current = { peerConnection, dataChannel, mediaStream }
-      peerConnection.addTrack(audioTrack, mediaStream)
-      peerConnection.addEventListener('track', event => {
-        const stream = event.streams[0]
-
-        if (
-          activeSessionRef.current?.peerConnection === peerConnection &&
-          stream !== undefined &&
-          audioRef.current !== null
-        ) {
-          audioRef.current.srcObject = stream
-        }
-      })
-      peerConnection.addEventListener('connectionstatechange', () => {
-        if (
-          activeSessionRef.current?.peerConnection === peerConnection &&
-          peerConnection.connectionState === 'failed'
-        ) {
-          closeActiveSession()
-          setStatus('error')
-          onError('Realtime connection failed')
-        }
-      })
-      dataChannel.addEventListener('open', () => {
-        if (activeSessionRef.current?.dataChannel === dataChannel) {
-          seedConversation(dataChannel)
-        }
-      })
-      dataChannel.addEventListener('message', message => {
-        if (activeSessionRef.current?.dataChannel !== dataChannel) {
-          return
+        if (startAttemptIdRef.current !== startAttemptId) {
+          closeSessionResources(peerConnection, dataChannel, mediaStream)
+          return { _tag: 'Stale' } satisfies VoiceStartOutcome
         }
 
-        void handleRealtimeMessage(message, dataChannel).catch(caught => {
+        const audioTrack = mediaStream.getAudioTracks()[0]
+
+        if (audioTrack === undefined) {
+          closeSessionResources(peerConnection, dataChannel, mediaStream)
+          return yield* Effect.fail(new Error('No microphone track available'))
+        }
+
+        activeSessionRef.current = { peerConnection, dataChannel, mediaStream }
+        peerConnection.addTrack(audioTrack, mediaStream)
+        peerConnection.addEventListener('track', event => {
+          const stream = event.streams[0]
+
+          if (
+            activeSessionRef.current?.peerConnection === peerConnection &&
+            stream !== undefined &&
+            audioRef.current !== null
+          ) {
+            audioRef.current.srcObject = stream
+          }
+        })
+        peerConnection.addEventListener('connectionstatechange', () => {
+          if (
+            activeSessionRef.current?.peerConnection === peerConnection &&
+            peerConnection.connectionState === 'failed'
+          ) {
+            closeActiveSession()
+            setStatus('error')
+            onError('Realtime connection failed')
+          }
+        })
+        dataChannel.addEventListener('open', () => {
+          if (activeSessionRef.current?.dataChannel === dataChannel) {
+            seedConversation(dataChannel)
+          }
+        })
+        dataChannel.addEventListener('message', message => {
           if (activeSessionRef.current?.dataChannel !== dataChannel) {
             return
           }
 
-          const messageText = caught instanceof Error ? caught.message : String(caught)
-          setStatus('error')
-          onError(messageText)
+          Effect.runFork(
+            handleRealtimeMessage(message, dataChannel).pipe(
+              Effect.matchEffect({
+                onFailure: error =>
+                  Effect.sync(() => {
+                    if (activeSessionRef.current?.dataChannel !== dataChannel) {
+                      return
+                    }
+
+                    setStatus('error')
+                    onError(unknownToMessage(error))
+                }),
+                onSuccess: () => Effect.void
+              }),
+              Effect.provide(FetchHttpClient.layer)
+            )
+          )
         })
-      })
 
-      const offer = await peerConnection.createOffer()
-      await peerConnection.setLocalDescription(offer)
+        const offer = yield* tryBrowserPromise(() => peerConnection.createOffer())
+        yield* tryBrowserPromise(() => peerConnection.setLocalDescription(offer))
 
-      if (offer.sdp === undefined) {
-        throw new Error('WebRTC offer SDP missing')
-      }
+        if (offer.sdp === undefined) {
+          return yield* Effect.fail(new Error('WebRTC offer SDP missing'))
+        }
 
-      const response = await fetch('/api/agent/realtime/call', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/sdp'
-        },
-        body: offer.sdp
-      })
+        const answerSdp = yield* requestRealtimeAnswerSdp(offer.sdp)
 
-      if (!response.ok) {
-        throw new Error(await remoteErrorMessage(response))
-      }
+        if (startAttemptIdRef.current !== startAttemptId) {
+          closeSessionResources(peerConnection, dataChannel, mediaStream)
+          return { _tag: 'Stale' } satisfies VoiceStartOutcome
+        }
 
-      const answerSdp = await response.text()
+        const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: answerSdp }
+        yield* tryBrowserPromise(() => peerConnection.setRemoteDescription(answer))
+        setStatus('live')
 
-      if (startAttemptIdRef.current !== startAttemptId) {
-        closeSessionResources(peerConnection, dataChannel, mediaStream)
-        return
-      }
+        return { _tag: 'Started' } satisfies VoiceStartOutcome
+      }).pipe(
+        Effect.matchEffect({
+          onFailure: error =>
+            Effect.sync(() => {
+              if (startAttemptIdRef.current !== startAttemptId) {
+                closeSessionResources(peerConnection, dataChannel, null)
+                return
+              }
 
-      const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: answerSdp }
-      await peerConnection.setRemoteDescription(answer)
-      setStatus('live')
-    } catch (caught) {
-      if (startAttemptIdRef.current !== startAttemptId) {
-        closeSessionResources(peerConnection, dataChannel, mediaStream)
-        return
-      }
+              if (activeSessionRef.current?.peerConnection === peerConnection) {
+                closeActiveSession()
+              } else {
+                closeSessionResources(peerConnection, dataChannel, null)
+              }
 
-      if (activeSessionRef.current?.peerConnection === peerConnection) {
-        closeActiveSession()
-      } else {
-        closeSessionResources(peerConnection, dataChannel, mediaStream)
-      }
-
-      setStatus('error')
-      onError(caught instanceof Error ? caught.message : String(caught))
-    }
+              setStatus('error')
+              onError(unknownToMessage(error))
+            }),
+          onSuccess: () => Effect.void
+        }),
+        Effect.provide(FetchHttpClient.layer)
+      )
+    )
   }, [
     closeActiveSession,
     handleRealtimeMessage,
@@ -419,7 +553,7 @@ export const useRealtimeVoice = ({
       return
     }
 
-    void startSession()
+    startSession()
   }, [isConnecting, isLive, startSession, stopSession])
 
   useEffect(

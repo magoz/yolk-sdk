@@ -8,7 +8,8 @@ export class UserMessage extends Schema.TaggedClass<UserMessage>()('User', {
 
 export class AssistantAgentMessage extends Schema.TaggedClass<AssistantAgentMessage>()('Assistant', {
   content: Content,
-  toolCalls: Schema.Array(ToolCall)
+  toolCalls: Schema.Array(ToolCall),
+  reasoning: Schema.optional(Schema.String)
 }) {}
 
 export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('ToolResult', {

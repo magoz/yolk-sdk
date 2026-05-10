@@ -6,16 +6,28 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { ToolCall, type AgentMessage, type Content, type ToolDef } from '@yolk/protocol'
+import {
+  ToolCall,
+  type AgentMessage,
+  type AgentReasoningEffort,
+  type Content,
+  type ToolDef
+} from '@yolk/protocol'
 import {
   LLMError,
   LLMDone,
   LLMProvider,
+  LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
   type LLMEvent,
   type LLMRequest
 } from '@yolk/agent-loop'
+import {
+  agentTextReasoningEffort,
+  agentTextReasoningSummary,
+  type AgentTextReasoningSummary
+} from '@/lib/agents/text-agent-config'
 import { OPENAI_CODEX_RESPONSES_URL } from '@/lib/services/openai-codex-oauth/live-layer'
 import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
 
@@ -59,8 +71,26 @@ type OpenAiCodexRequestBody = {
   readonly input: ReadonlyArray<OpenAiCodexInputItem>
   readonly store: false
   readonly stream: true
+  readonly reasoning: {
+    readonly effort: AgentReasoningEffort
+    readonly summary: AgentTextReasoningSummary
+  }
   readonly tools?: ReadonlyArray<OpenAiCodexTool>
 }
+
+class OpenAiCodexReasoningSummaryText extends Schema.Class<OpenAiCodexReasoningSummaryText>(
+  'OpenAiCodexReasoningSummaryText'
+)({
+  type: Schema.Literals(['summary_text']),
+  text: Schema.String
+}) {}
+
+class OpenAiCodexReasoningText extends Schema.Class<OpenAiCodexReasoningText>(
+  'OpenAiCodexReasoningText'
+)({
+  type: Schema.Literals(['reasoning_text']),
+  text: Schema.String
+}) {}
 
 class OpenAiCodexOutputText extends Schema.Class<OpenAiCodexOutputText>('OpenAiCodexOutputText')({
   type: Schema.Literals(['output_text']),
@@ -83,9 +113,18 @@ class OpenAiCodexFunctionCallOutput extends Schema.Class<OpenAiCodexFunctionCall
   arguments: Schema.String
 }) {}
 
+class OpenAiCodexReasoningOutput extends Schema.Class<OpenAiCodexReasoningOutput>(
+  'OpenAiCodexReasoningOutput'
+)({
+  type: Schema.Literals(['reasoning']),
+  summary: Schema.optional(Schema.Array(OpenAiCodexReasoningSummaryText)),
+  content: Schema.optional(Schema.Array(OpenAiCodexReasoningText))
+}) {}
+
 const OpenAiCodexOutputItem = Schema.Union([
   OpenAiCodexMessageOutput,
-  OpenAiCodexFunctionCallOutput
+  OpenAiCodexFunctionCallOutput,
+  OpenAiCodexReasoningOutput
 ])
 type OpenAiCodexOutputItem = typeof OpenAiCodexOutputItem.Type
 
@@ -205,7 +244,11 @@ export const toOpenAiCodexRequestBody = (
       instructions: request.systemPrompt,
       input,
       store: false,
-      stream: true
+      stream: true,
+      reasoning: {
+        effort: request.reasoningEffort ?? agentTextReasoningEffort,
+        summary: agentTextReasoningSummary
+      }
     }
 
     if (request.tools.length === 0) {
@@ -243,6 +286,7 @@ const textFromOutputItem = (item: OpenAiCodexOutputItem) => {
     case 'message':
       return Arr.map(item.content, content => content.text)
     case 'function_call':
+    case 'reasoning':
       return []
   }
 }
@@ -253,16 +297,43 @@ const textFromOutputItems = (items: ReadonlyArray<OpenAiCodexOutputItem>) => {
   return textParts.join('')
 }
 
+const reasoningFromOutputItem = (item: OpenAiCodexOutputItem) => {
+  switch (item.type) {
+    case 'reasoning':
+      return [
+        ...(item.summary ?? []).map(summary => summary.text),
+        ...(item.content ?? []).map(content => content.text)
+      ]
+    case 'message':
+    case 'function_call':
+      return []
+  }
+}
+
+const reasoningFromOutputItems = (items: ReadonlyArray<OpenAiCodexOutputItem>) => {
+  const reasoningParts = Arr.flatten(Arr.map(items, reasoningFromOutputItem))
+
+  return reasoningParts.join('')
+}
+
+type ToLlmEventsOptions = {
+  readonly allowEmptyStop: boolean
+}
+
 const toLlmEvents = (
-  response: OpenAiCodexResponse
+  response: OpenAiCodexResponse,
+  options: ToLlmEventsOptions
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const text = response.output_text ?? textFromOutputItems(response.output)
+    const reasoning = reasoningFromOutputItems(response.output)
+    const reasoningEvents = reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
     const textEvents = text.length > 0 ? [LLMTextDelta.make({ text })] : []
     const toolCallEvents = Arr.getSomes(
       yield* Effect.forEach(response.output, item => {
         switch (item.type) {
           case 'message':
+          case 'reasoning':
             return Effect.succeed(Option.none())
           case 'function_call':
             return parseToolArguments(item.arguments).pipe(
@@ -282,7 +353,18 @@ const toLlmEvents = (
       })
     )
 
+    if (textEvents.length === 0 && toolCallEvents.length === 0 && !options.allowEmptyStop) {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'invalid_response',
+          message: 'OpenAI Codex response did not include text or tool calls',
+          retryable: false
+        })
+      )
+    }
+
     return [
+      ...reasoningEvents,
       ...textEvents,
       ...toolCallEvents,
       LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' })
@@ -308,13 +390,14 @@ const parseOpenAiCodexJsonResponse = (
     const json = yield* decodeJsonString(raw, 'Could not parse OpenAI Codex response JSON')
     const parsed = yield* decodeOpenAiCodexResponse(json)
 
-    return yield* toLlmEvents(parsed)
+    return yield* toLlmEvents(parsed, { allowEmptyStop: false })
   })
 
 type OpenAiCodexBodyFormat = 'undecided' | 'sse' | 'json'
 
 type OpenAiCodexSseState = {
   readonly hasTextDelta: boolean
+  readonly hasReasoningDelta: boolean
   readonly hasDone: boolean
 }
 
@@ -331,6 +414,7 @@ type OpenAiCodexBodyState = {
 
 const initialSseState: OpenAiCodexSseState = {
   hasTextDelta: false,
+  hasReasoningDelta: false,
   hasDone: false
 }
 
@@ -387,17 +471,27 @@ const parseOpenAiCodexSseJson = (data: string) =>
 
 const finalResponseToEvents = (
   response: unknown,
-  hasTextDelta: boolean
+  state: OpenAiCodexSseState
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const parsedFinal = yield* decodeOpenAiCodexResponse(response)
-    const finalEvents = yield* toLlmEvents(parsedFinal)
+    const finalEvents = yield* toLlmEvents(parsedFinal, { allowEmptyStop: state.hasTextDelta })
 
-    if (!hasTextDelta) {
+    if (!state.hasTextDelta && !state.hasReasoningDelta) {
       return finalEvents
     }
 
-    return finalEvents.filter(event => event._tag !== 'TextDelta')
+    return finalEvents.filter(event => {
+      if (state.hasTextDelta && event._tag === 'TextDelta') {
+        return false
+      }
+
+      if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
+        return false
+      }
+
+      return true
+    })
   })
 
 const processSseData = (
@@ -418,12 +512,28 @@ const processSseData = (
       }
     }
 
+    if (
+      (parsed.type === 'response.reasoning_summary_text.delta' ||
+        parsed.type === 'response.reasoning_text.delta') &&
+      typeof parsed.delta === 'string'
+    ) {
+      return {
+        state: { ...state, hasReasoningDelta: true },
+        events: [LLMReasoningDelta.make({ text: parsed.delta })]
+      }
+    }
+
     if (parsed.type === 'response.completed') {
-      const events = yield* finalResponseToEvents(parsed.response, state.hasTextDelta)
+      const events = yield* finalResponseToEvents(parsed.response, state)
       const emittedText = events.some(event => event._tag === 'TextDelta')
+      const emittedReasoning = events.some(event => event._tag === 'ReasoningDelta')
 
       return {
-        state: { hasTextDelta: state.hasTextDelta || emittedText, hasDone: true },
+        state: {
+          hasTextDelta: state.hasTextDelta || emittedText,
+          hasReasoningDelta: state.hasReasoningDelta || emittedReasoning,
+          hasDone: true
+        },
         events
       }
     }

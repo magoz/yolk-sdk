@@ -6,9 +6,14 @@ import {
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer } from 'effect'
 import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
-import type { ToolDef } from '@yolk/protocol'
+import type { AgentReasoningEffort, ToolDef } from '@yolk/protocol'
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
+import {
+  agentTextModel,
+  agentTextReasoningEffort,
+  defaultAgentSystemPrompt
+} from '@/lib/agents/text-agent-config'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
@@ -23,11 +28,9 @@ class AgentRouteError extends Data.TaggedError('AgentRouteError')<{
   cause?: unknown
 }> {}
 
-const defaultSystemPrompt = 'You are Yolk assistant. Be concise and practical.'
-const agentModel = 'gpt-5.4'
-
 type AgentRouteRuntimeConfig = {
   readonly model: string
+  readonly reasoningEffort: AgentReasoningEffort
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
 }
@@ -39,8 +42,9 @@ const getAgentRouteConfig = () =>
     const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
 
     return {
-      model: agentModel,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultSystemPrompt
+      model: agentTextModel,
+      reasoningEffort: agentTextReasoningEffort,
+      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultAgentSystemPrompt
     }
   })
 

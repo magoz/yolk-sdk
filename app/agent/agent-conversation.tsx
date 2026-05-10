@@ -1,22 +1,16 @@
-import type { AgentMessage } from '@yolk/protocol'
+import { Fragment } from 'react'
+import type { AgentMessage, ToolCall } from '@yolk/protocol'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { contentPreview } from './agent-format'
+import { contentPreview, unknownPreview } from './agent-format'
 
-const messagePreview = (message: AgentMessage) => {
+const messageContentPreview = (message: AgentMessage) => {
   switch (message._tag) {
     case 'User':
     case 'ToolResult':
       return contentPreview(message.content)
-    case 'Assistant': {
-      const content = contentPreview(message.content)
-
-      if (content.length > 0) {
-        return content
-      }
-
-      const toolNames = message.toolCalls.map(call => call.name).join(', ')
-      return toolNames.length > 0 ? `Tool call: ${toolNames}` : ''
-    }
+    case 'Assistant':
+      return contentPreview(message.content)
   }
 }
 
@@ -31,19 +25,90 @@ const messageCardClass = (message: AgentMessage) => {
   }
 }
 
+const collectToolNames = (messages: ReadonlyArray<AgentMessage>) => {
+  const names = new Map<string, string>()
+
+  for (const message of messages) {
+    if (message._tag === 'Assistant') {
+      for (const call of message.toolCalls) {
+        names.set(call.id, call.name)
+      }
+    }
+  }
+
+  return names
+}
+
+function ToolCallCard({ call }: { readonly call: ToolCall }) {
+  return (
+    <Card
+      size="sm"
+      className="max-w-[85%] border-amber-500/20 bg-amber-500/5 text-amber-800 shadow-none dark:text-amber-300"
+    >
+      <CardContent className="space-y-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">tool call</Badge>
+          <span className="font-medium text-foreground">{call.name}</span>
+          <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
+        </div>
+        <div className="whitespace-pre-wrap break-words leading-5">{unknownPreview(call.params)}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ToolResultCard({ name, content }: { readonly name: string; readonly content: string }) {
+  return (
+    <Card
+      size="sm"
+      className="max-w-[85%] border-emerald-500/20 bg-emerald-500/5 text-emerald-800 shadow-none dark:text-emerald-300"
+    >
+      <CardContent className="space-y-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary">tool result</Badge>
+          <span className="font-medium text-foreground">{name}</span>
+        </div>
+        <div className="whitespace-pre-wrap break-words leading-5">{content}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReasoningCard({ text }: { readonly text: string }) {
+  return (
+    <Card size="sm" className="max-w-[85%] border-sky-500/20 bg-sky-500/5 text-sky-900 shadow-none dark:text-sky-200">
+      <CardContent className="space-y-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">reasoning</Badge>
+          <span className="font-medium text-foreground">Summary</span>
+        </div>
+        <div className="whitespace-pre-wrap break-words leading-5">{text}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
 type AgentConversationProps = {
   readonly messages: ReadonlyArray<AgentMessage>
   readonly voiceUserDraft: string
   readonly assistantDraft: string
+  readonly reasoningDraft: string
   readonly error: string | null
+  readonly showInlineTools: boolean
+  readonly showReasoning: boolean
 }
 
 export function AgentConversation({
   messages,
   voiceUserDraft,
   assistantDraft,
-  error
+  reasoningDraft,
+  error,
+  showInlineTools,
+  showReasoning
 }: AgentConversationProps) {
+  const toolNames = collectToolNames(messages)
+
   return (
     <div className="flex-1 space-y-4 overflow-y-auto p-5">
       {messages.length === 0 ? (
@@ -59,14 +124,34 @@ export function AgentConversation({
       ) : null}
 
       {messages.map((message, index) => {
-        const preview = messagePreview(message)
+        const preview = messageContentPreview(message)
+        const reasoning = message._tag === 'Assistant' ? (message.reasoning ?? '') : ''
 
-        return preview.length > 0 ? (
-          <Card size="sm" key={`${message._tag}-${index}`} className={messageCardClass(message)}>
-            <CardContent className="whitespace-pre-wrap leading-6">{preview}</CardContent>
-          </Card>
-        ) : null
+        return (
+          <Fragment key={`${message._tag}-${index}`}>
+            {showReasoning && reasoning.length > 0 ? <ReasoningCard text={reasoning} /> : null}
+
+            {preview.length > 0 && message._tag !== 'ToolResult' ? (
+              <Card size="sm" className={messageCardClass(message)}>
+                <CardContent className="whitespace-pre-wrap leading-6">{preview}</CardContent>
+              </Card>
+            ) : null}
+
+            {showInlineTools && message._tag === 'Assistant'
+              ? message.toolCalls.map(call => <ToolCallCard key={call.id} call={call} />)
+              : null}
+
+            {showInlineTools && message._tag === 'ToolResult' ? (
+              <ToolResultCard
+                name={toolNames.get(message.toolCallId) ?? message.toolCallId}
+                content={contentPreview(message.content)}
+              />
+            ) : null}
+          </Fragment>
+        )
       })}
+
+      {showReasoning && reasoningDraft.length > 0 ? <ReasoningCard text={reasoningDraft} /> : null}
 
       {voiceUserDraft.length > 0 ? (
         <Card size="sm" className="ml-auto max-w-[85%] bg-primary/80 text-primary-foreground">

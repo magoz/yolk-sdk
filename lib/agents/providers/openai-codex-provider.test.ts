@@ -179,7 +179,8 @@ describe('OpenAiCodexProviderLayer', () => {
         instructions: 'Be brief.',
         input: [{ role: 'user', content: 'hello' }],
         store: false,
-        stream: true
+        stream: true,
+        reasoning: { effort: 'low', summary: 'auto' }
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done'])
     })
@@ -236,6 +237,60 @@ describe('OpenAiCodexProviderLayer', () => {
     })
   )
 
+  it.effect('passes custom reasoning effort to OpenAI Codex', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
+      )
+
+      yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      expect(readCapturedBody(requests)).toMatchObject({
+        reasoning: { effort: 'high', summary: 'auto' }
+      })
+    })
+  )
+
+  it.effect('rejects empty OpenAI Codex responses', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(makeHttpClientLayer({ output_text: '', output: [] }, requests))
+
+      const result = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          message: 'OpenAI Codex response did not include text or tool calls'
+        }
+      })
+    })
+  )
+
   it.effect('parses OpenAI Codex SSE even when content type is not event-stream', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
@@ -273,6 +328,48 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))).toEqual([
         'oauth ',
         'smoke ok',
+        'Done'
+      ])
+    })
+  )
+
+  it.effect('parses OpenAI Codex reasoning summary deltas', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
+          [
+            'event: response.reasoning_summary_text.delta',
+            'data: {"type":"response.reasoning_summary_text.delta","delta":"think","item_id":"rs_1","summary_index":0}',
+            '',
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"ok","item_id":"msg_1"}',
+            '',
+            'event: response.completed',
+            'data: {"type":"response.completed","response":{"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"think"}]},{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}',
+            ''
+          ].join('\n'),
+          requests
+        )
+      )
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'TextDelta', 'Done'])
+      expect(events.map(event => (event._tag === 'ReasoningDelta' ? event.text : event._tag))).toEqual([
+        'think',
+        'TextDelta',
         'Done'
       ])
     })

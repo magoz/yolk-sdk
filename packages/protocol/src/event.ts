@@ -48,6 +48,13 @@ export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('LLMTextDel
   text: Schema.String
 }) {}
 
+export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()(
+  'LLMReasoningDelta',
+  {
+    text: Schema.String
+  }
+) {}
+
 export class LLMToolCall extends Schema.TaggedClass<LLMToolCall>()('LLMToolCall', {
   call: ToolCall
 }) {}
@@ -84,6 +91,7 @@ export const AgentEvent = Schema.Union([
   TurnEnd,
   LLMStreamStart,
   LLMTextDelta,
+  LLMReasoningDelta,
   LLMToolCall,
   LLMStreamEnd,
   AssistantMessageEvent,

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { Effect, Stream } from 'effect'
 import { UserMessage, type AgentEvent, type AgentMessage } from '@yolk/protocol'
 import {
   applyAgentEvent,
@@ -14,6 +15,7 @@ import {
   type AgentTranscript
 } from '@yolk/client'
 import { Badge } from '@/components/ui/badge'
+import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import {
   AgentActivityPanel,
   activityItemFromAgentEvent,
@@ -30,6 +32,9 @@ type AgentPlaygroundProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
 }
+
+const hasMessageReasoning = (message: AgentMessage) =>
+  message._tag === 'Assistant' && message.reasoning !== undefined && message.reasoning.length > 0
 
 type AgentUiAction =
   | { readonly _tag: 'Submit'; readonly message: UserMessage }
@@ -62,6 +67,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [state, dispatch] = useReducer(reducer, initialAgentClientState)
   const [input, setInput] = useState('')
   const [activityVisible, setActivityVisible] = useState(false)
+  const [showInlineTools, setShowInlineTools] = useState(true)
+  const [showReasoning, setShowReasoning] = useState(true)
+  const [reasoningEffort, setReasoningEffort] = useState(agentTextReasoningEffort)
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const abortControllerRef = useRef<AbortController | null>(null)
   const nextActivityIdRef = useRef(0)
@@ -103,40 +111,58 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     dispatch({ _tag: 'AppendMessage', message })
   }, [])
 
-  const voice = useRealtimeVoice({
+  const {
+    audioRef,
+    status: voiceStatus,
+    userDraft: voiceUserDraft,
+    isConnecting: isVoiceConnecting,
+    isLive: isVoiceLive,
+    toggleSession: toggleVoice
+  } = useRealtimeVoice({
     messages: state.messages,
     onAgentEvent: handleAgentEvent,
     onUserMessage: handleUserMessage,
     onError: handleAgentError
   })
-  const isVoiceMode = voice.isConnecting || voice.isLive
+  const isVoiceMode = isVoiceConnecting || isVoiceLive
   const inputDisabled = isRunning || isVoiceMode
+  const hasReasoningSummary = state.reasoning.length > 0 || state.messages.some(hasMessageReasoning)
   const liveActivityCount =
-    (isRunning ? 1 : 0) + state.activeToolCalls.length + (voice.isConnecting || voice.isLive ? 1 : 0)
+    (isRunning ? 1 : 0) + state.activeToolCalls.length + (isVoiceConnecting || isVoiceLive ? 1 : 0)
 
   const runAgent = useCallback(
-    async (messages: AgentTranscript) => {
+    (messages: AgentTranscript) => {
       const controller = new AbortController()
       abortControllerRef.current = controller
-
-      try {
-        for await (const event of streamAgentEvents({ sessionId, messages, signal: controller.signal })) {
-          handleAgentEvent(event)
-        }
-      } catch (caught) {
-        if (controller.signal.aborted || isAbortError(caught)) {
-          handleAgentAbort()
-          return
-        }
-
-        handleAgentError(errorMessage(caught))
-      } finally {
+      const clearController = Effect.sync(() => {
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null
         }
-      }
+      })
+
+      Effect.runFork(
+        Stream.fromAsyncIterable(
+          streamAgentEvents({ sessionId, messages, reasoningEffort, signal: controller.signal }),
+          error => error
+        ).pipe(
+          Stream.runForEach(event => Effect.sync(() => handleAgentEvent(event))),
+          Effect.matchEffect({
+            onFailure: caught =>
+              Effect.sync(() => {
+                if (controller.signal.aborted || isAbortError(caught)) {
+                  handleAgentAbort()
+                  return
+                }
+
+                handleAgentError(errorMessage(caught))
+              }),
+            onSuccess: () => Effect.void
+          }),
+          Effect.ensuring(clearController)
+        )
+      )
     },
-    [handleAgentAbort, handleAgentError, handleAgentEvent, sessionId]
+    [handleAgentAbort, handleAgentError, handleAgentEvent, reasoningEffort, sessionId]
   )
 
   const handleSubmit = useCallback(() => {
@@ -167,13 +193,21 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     setActivityVisible(current => !current)
   }, [])
 
+  const handleInlineToolsChange = useCallback((checked: boolean) => {
+    setShowInlineTools(checked)
+  }, [])
+
+  const handleReasoningChange = useCallback((checked: boolean) => {
+    setShowReasoning(checked)
+  }, [])
+
   useEffect(() => () => {
     abortControllerRef.current?.abort()
   }, [])
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem)] p-4 md:p-8">
-      <audio ref={voice.audioRef} autoPlay className="sr-only" />
+      <audio ref={audioRef} autoPlay className="sr-only" />
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl gap-6 lg:grid-cols-[0.82fr_1.18fr]">
         <section className="flex flex-col justify-between rounded-3xl border border-foreground/10 bg-background/80 p-6 shadow-sm backdrop-blur md:p-8">
           <div className="space-y-5">
@@ -193,7 +227,10 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             sessionId={sessionId}
             openAiCodexConnected={openAiCodexConnected}
             textStatus={state.status}
-            voiceStatus={voice.status}
+            voiceStatus={voiceStatus}
+            reasoningEffort={reasoningEffort}
+            reasoningEffortDisabled={isRunning}
+            onReasoningEffortChange={setReasoningEffort}
           />
         </section>
 
@@ -202,17 +239,22 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             activityVisible={activityVisible}
             activityCount={activityItems.length}
             liveActivityCount={liveActivityCount}
+            showInlineTools={showInlineTools}
+            showReasoning={showReasoning}
+            hasReasoningSummary={hasReasoningSummary}
             isRunning={isRunning}
-            isVoiceConnecting={voice.isConnecting}
-            isVoiceLive={voice.isLive}
+            isVoiceConnecting={isVoiceConnecting}
+            isVoiceLive={isVoiceLive}
             onToggleActivity={handleActivityToggle}
+            onShowInlineToolsChange={handleInlineToolsChange}
+            onShowReasoningChange={handleReasoningChange}
           />
 
           {activityVisible ? (
             <AgentActivityPanel
               items={activityItems}
               textStatus={state.status}
-              voiceStatus={voice.status}
+              voiceStatus={voiceStatus}
               activeToolCallCount={state.activeToolCalls.length}
               toolResultCount={state.toolResults.length}
               error={state.error}
@@ -221,9 +263,12 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
 
           <AgentConversation
             messages={state.messages}
-            voiceUserDraft={voice.userDraft}
+            voiceUserDraft={voiceUserDraft}
             assistantDraft={state.text}
+            reasoningDraft={state.reasoning}
             error={state.error}
+            showInlineTools={showInlineTools}
+            showReasoning={showReasoning}
           />
 
           <AgentComposer
@@ -231,12 +276,12 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             inputDisabled={inputDisabled}
             isRunning={isRunning}
             isVoiceMode={isVoiceMode}
-            isVoiceConnecting={voice.isConnecting}
-            isVoiceLive={voice.isLive}
+            isVoiceConnecting={isVoiceConnecting}
+            isVoiceLive={isVoiceLive}
             onInputChange={handleInputChange}
             onSubmit={handleSubmit}
             onStop={handleStop}
-            onToggleVoice={voice.toggleSession}
+            onToggleVoice={toggleVoice}
           />
         </section>
       </div>

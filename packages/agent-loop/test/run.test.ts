@@ -48,6 +48,39 @@ describe('run', () => {
       expect(assistant).toMatchObject({ message: { content: 'ok' } })
     }))
 
+  it.effect('emits reasoning deltas and stores assistant reasoning', () =>
+    Effect.gen(function* () {
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(FauxProvider.layer(Reply.reasoningText('thinking', 'ok')), TestToolExecutor.layer({}))
+            .pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMReasoningDelta',
+        'LLMTextDelta',
+        'LLMTextDelta',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'TurnEnd',
+        'AgentEnd'
+      ])
+      expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
+        message: { content: 'ok', reasoning: 'thinking' }
+      })
+    }))
+
   it.effect('emits LLM deltas before provider completes', () =>
     Effect.gen(function* () {
       const streamingProvider = Layer.succeed(

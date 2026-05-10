@@ -1,7 +1,13 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
 import { ToolCall } from '@yolk/protocol'
 import { FauxExhaustedError } from '../error'
-import { LLMDone, LLMTextDelta, LLMToolCall, type LLMEvent } from '../llm-event'
+import {
+  LLMDone,
+  LLMReasoningDelta,
+  LLMTextDelta,
+  LLMToolCall,
+  type LLMEvent
+} from '../llm-event'
 import { LLMProvider, type LLMRequest } from '../services/llm-provider'
 
 export type FauxResponse = {
@@ -11,6 +17,13 @@ export type FauxResponse = {
 export const Reply = {
   text: (text: string): FauxResponse => ({
     events: [
+      ...text.split('').map(character => LLMTextDelta.make({ text: character })),
+      LLMDone.make({ stopReason: 'stop' })
+    ]
+  }),
+  reasoningText: (reasoning: string, text: string): FauxResponse => ({
+    events: [
+      LLMReasoningDelta.make({ text: reasoning }),
       ...text.split('').map(character => LLMTextDelta.make({ text: character })),
       LLMDone.make({ stopReason: 'stop' })
     ]

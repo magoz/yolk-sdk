@@ -4,6 +4,7 @@ import {
   AgentError,
   AgentStart,
   AssistantAgentMessage,
+  LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
   ToolExecutionEnd,
@@ -69,8 +70,34 @@ describe('reduceAgentEvents', () => {
       text: '',
       activeToolCalls: [],
       toolResults: [],
+      reasoning: '',
       error: null
     })
+  })
+
+  it('stores reasoning while streaming and moves final reasoning into messages', () => {
+    const message = AssistantAgentMessage.make({
+      content: 'ok',
+      toolCalls: [],
+      reasoning: 'thinking'
+    })
+
+    const streaming = reduceAgentEvents([
+      AgentStart.make({}),
+      LLMReasoningDelta.make({ text: 'think' }),
+      LLMReasoningDelta.make({ text: 'ing' })
+    ])
+
+    expect(streaming.reasoning).toBe('thinking')
+
+    const done = reduceAgentEvents([
+      AgentStart.make({}),
+      LLMReasoningDelta.make({ text: 'thinking' }),
+      AgentEnd.make({ messages: [message], turns: 1, usage: { input: 0, output: 0 } })
+    ])
+
+    expect(done.reasoning).toBe('')
+    expect(done.messages).toEqual([message])
   })
 
   it('marks client state as aborted', () => {

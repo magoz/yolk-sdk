@@ -6,6 +6,7 @@ export type AgentClientState = {
   readonly status: AgentRunStatus
   readonly messages: ReadonlyArray<AgentMessage>
   readonly text: string
+  readonly reasoning: string
   readonly activeToolCalls: ReadonlyArray<ToolCall>
   readonly toolResults: ReadonlyArray<ToolResult>
   readonly error: string | null
@@ -17,6 +18,7 @@ export const initialAgentClientState: AgentClientState = {
   status: 'idle',
   messages: [],
   text: '',
+  reasoning: '',
   activeToolCalls: [],
   toolResults: [],
   error: null
@@ -41,11 +43,21 @@ export const applyAgentEvent = (
 ): AgentClientState => {
   switch (event._tag) {
     case 'AgentStart':
-      return { ...state, status: 'running', text: '', activeToolCalls: [], toolResults: [], error: null }
+      return {
+        ...state,
+        status: 'running',
+        text: '',
+        reasoning: '',
+        activeToolCalls: [],
+        toolResults: [],
+        error: null
+      }
     case 'AgentError':
       return markAgentError(state, event.message)
     case 'LLMTextDelta':
       return { ...state, text: `${state.text}${event.text}` }
+    case 'LLMReasoningDelta':
+      return { ...state, reasoning: `${state.reasoning}${event.text}` }
     case 'LLMToolCall':
       return { ...state, activeToolCalls: [...state.activeToolCalls, event.call] }
     case 'ToolExecutionEnd':
@@ -60,6 +72,7 @@ export const applyAgentEvent = (
         status: 'done',
         messages: [...state.messages, ...event.messages],
         text: '',
+        reasoning: '',
         activeToolCalls: []
       }
     case 'AssistantMessage':
@@ -81,6 +94,7 @@ export const submitAgentUserMessage = (
   status: 'running',
   messages: appendAgentMessage(state.messages, message),
   text: '',
+  reasoning: '',
   activeToolCalls: [],
   toolResults: [],
   error: null

@@ -52,6 +52,7 @@ export const activityItemFromAgentEvent = (
     case 'AgentError':
       return { title: 'Agent error', detail: event.message, tone: 'error' }
     case 'AssistantMessage':
+    case 'LLMReasoningDelta':
     case 'LLMStreamEnd':
     case 'LLMTextDelta':
     case 'ToolResult':

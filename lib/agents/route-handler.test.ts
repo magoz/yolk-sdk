@@ -199,7 +199,11 @@ describe('makeAgentPostResponse', () => {
       ] satisfies readonly [AgentMessage, ...Array<AgentMessage>]
 
       const firstResponse = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', messages: firstMessages }),
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: firstMessages,
+          reasoningEffort: 'medium'
+        }),
         config
       ).pipe(Effect.provide(layer))
       yield* Effect.promise(() => firstResponse.text())
@@ -214,6 +218,7 @@ describe('makeAgentPostResponse', () => {
         ['hello'],
         ['hello', 'ok', 'again']
       ])
+      expect(requests[0]).toMatchObject({ reasoningEffort: 'medium' })
     }))
 
   it.effect('executes calculator tool calls', () =>

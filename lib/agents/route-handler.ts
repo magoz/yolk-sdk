@@ -3,8 +3,10 @@ import * as Schema from 'effect/Schema'
 import {
   AgentError as AgentErrorEvent,
   AgentMessage,
+  AgentReasoningEffort,
   type AgentErrorCode,
   type AgentEvent,
+  type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
 } from '@yolk/protocol'
 import { run, type AgentLoopError } from '@yolk/agent-loop'
@@ -20,12 +22,14 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({
   sessionId: NonEmptyTrimmedString,
-  messages: Schema.NonEmptyArray(AgentMessage)
+  messages: Schema.NonEmptyArray(AgentMessage),
+  reasoningEffort: Schema.optional(AgentReasoningEffort)
 }) {}
 
 export type AgentRouteConfig = {
   readonly model: string
   readonly systemPrompt: string
+  readonly reasoningEffort?: AgentReasoningEffortType
   readonly tools: ReadonlyArray<ToolDef>
 }
 
@@ -111,6 +115,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       messages: input.messages,
       systemPrompt: config.systemPrompt,
       tools: config.tools,
+      reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
       model: config.model
     }).pipe(recoverAgentStreamErrors, Stream.mapEffect(encodeNdjsonEvent), Stream.toReadableStreamEffect())
 

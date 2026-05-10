@@ -4,6 +4,7 @@ import {
   AgentStart,
   AssistantMessageEvent,
   LLMToolCall as AgentLLMToolCall,
+  LLMReasoningDelta as AgentLLMReasoningDelta,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta as AgentLLMTextDelta,
@@ -12,6 +13,7 @@ import {
   ToolResultEvent,
   ToolResultMessage,
   type ToolCall,
+  type AgentReasoningEffort,
   type ToolResult,
   TurnEnd,
   TurnStart,
@@ -34,6 +36,7 @@ export type RunConfig = {
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
   readonly model: string
+  readonly reasoningEffort?: AgentReasoningEffort
 }
 
 const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEvent> => {
@@ -43,6 +46,9 @@ const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEve
     switch (event._tag) {
       case 'TextDelta':
         events.push(AgentLLMTextDelta.make({ text: event.text }))
+        break
+      case 'ReasoningDelta':
+        events.push(AgentLLMReasoningDelta.make({ text: event.text }))
         break
       case 'ToolCall':
         events.push(AgentLLMToolCall.make({ call: event.call }))
@@ -115,6 +121,7 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
               messages: transformedMessages,
               tools: input.config.tools,
               model: input.config.model,
+              reasoningEffort: input.config.reasoningEffort,
               systemPrompt: input.config.systemPrompt
             })
             .pipe(
