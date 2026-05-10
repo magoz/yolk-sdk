@@ -145,7 +145,7 @@ Config.string('URL').pipe(Effect.mapError(...)) // ERROR in v4
 For optional environment variables:
 
 ```typescript
-const optional = yield * Config.option(Config.string('OPTIONAL_VAR'))
+const optional = yield* Config.option(Config.string('OPTIONAL_VAR'))
 // Returns Option<string>
 const value = optional._tag === 'Some' ? optional.value : undefined
 ```
@@ -243,5 +243,5 @@ Effect.runPromise(program.pipe(Effect.provide(Auth.layer)))
 - [ ] Add `Effect.withSpan()` to all methods
 - [ ] Add `Effect.annotateCurrentSpan()` for relevant attributes
 - [ ] Add `Effect.tapError()` for error logging
-- [ ] Add to `lib/layers.ts` AppLayer
+- [ ] Add to `lib/layers.ts` AppLayer if app code needs service directly
 - [ ] Return `as const` from service make effect for type inference

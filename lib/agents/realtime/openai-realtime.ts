@@ -16,6 +16,10 @@ export type OpenAiRealtimeSessionConfig = {
   readonly output_modalities: ReadonlyArray<'audio'>
   readonly audio: {
     readonly input: {
+      readonly transcription: {
+        readonly model: 'gpt-realtime-whisper'
+        readonly language: 'en'
+      }
       readonly turn_detection: {
         readonly type: 'semantic_vad'
       }
@@ -63,6 +67,10 @@ export const makeOpenAiRealtimeSessionConfig = ({
   output_modalities: ['audio'],
   audio: {
     input: {
+      transcription: {
+        model: 'gpt-realtime-whisper',
+        language: 'en'
+      },
       turn_detection: {
         type: 'semantic_vad'
       }

@@ -32,6 +32,7 @@ Dependency rule:
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol
@@ -47,17 +48,18 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-## Text agent smoke test
+## Agent smoke test
 
 Current agent mode is intentionally minimal:
 
-- text-only
+- text + mic voice mode in `/agent`
 - calculator tool enabled for tool-call smoke tests
 - no durable persistence
+- browser sends full protocol transcript each turn
 - streaming NDJSON token events
 - in-band `AgentError` events for stream failures
 - stop/cancel aborts active response streams
-- each `/api/agent` request runs one stateless exchange from the submitted prompt
+- `/api/agent` runs stateless text exchanges from submitted messages
 
 Provider/model are hardcoded for now:
 
@@ -76,16 +78,17 @@ Connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device 
 
 Future: provider selection will become configurable again. The API-key OpenAI provider remains as tested scaffold, but `/api/agent` is Codex-only for now.
 
-## Voice agent smoke test
+## Voice mode smoke test
 
-`/agent/voice` uses GPT-Realtime-2 over WebRTC:
+The mic button in `/agent` uses GPT-Realtime-2 over WebRTC:
 
 - browser: mic, model audio, Realtime data channel
 - server: SDP exchange, `OPENAI_API_KEY`, tool execution
 - shared tool boundary: `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`
+- completed speech transcripts append to the shared chat transcript
 - calculator tool enabled for voice-to-action smoke tests
 
-Set `OPENAI_API_KEY`, sign in, open `/agent/voice`, start voice, and ask `what is 19 times 23?`.
+Set `OPENAI_API_KEY`, sign in, open `/agent`, tap the mic, and ask `what is 19 times 23?`.
 
 Then:
 

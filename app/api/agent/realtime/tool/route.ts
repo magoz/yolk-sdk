@@ -20,7 +20,7 @@ const handler = Effect.gen(function* () {
   const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
   const toolSet = yield* resolveAgentTools({
     surface: 'voice',
-    route: '/agent/voice',
+    route: '/agent',
     userId: session.user.id
   })
   const result = yield* executeVoiceToolCall(input).pipe(

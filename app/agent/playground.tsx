@@ -3,7 +3,7 @@
 import type { FormEvent } from 'react'
 import { UserMessage, type AgentEvent, type AgentMessage, type Content } from '@yolk/protocol'
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { LoaderCircleIcon, SendIcon, SquareIcon } from 'lucide-react'
+import { LoaderCircleIcon, MicIcon, PhoneOffIcon, SendIcon, SquareIcon } from 'lucide-react'
 import {
   applyAgentEvent,
   appendAgentMessage,
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
+import { useRealtimeVoice, type VoiceStatus } from './use-realtime-voice'
 
 type AgentPlaygroundProps = {
   readonly sessionId: string
@@ -27,6 +28,7 @@ type AgentPlaygroundProps = {
 
 type AgentUiAction =
   | { readonly _tag: 'Submit'; readonly message: UserMessage }
+  | { readonly _tag: 'AppendMessage'; readonly message: AgentMessage }
   | { readonly _tag: 'Event'; readonly event: AgentEvent }
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
@@ -35,6 +37,8 @@ const reducer = (state: typeof initialAgentClientState, action: AgentUiAction) =
   switch (action._tag) {
     case 'Submit':
       return submitAgentUserMessage(state, action.message)
+    case 'AppendMessage':
+      return { ...state, messages: appendAgentMessage(state.messages, action.message), error: null }
     case 'Event':
       return applyAgentEvent(state, action.event)
     case 'Error':
@@ -83,6 +87,18 @@ const messageCardClass = (message: AgentMessage) => {
   }
 }
 
+const voiceStatusVariant = (status: VoiceStatus) => {
+  switch (status) {
+    case 'live':
+      return 'secondary'
+    case 'error':
+      return 'destructive'
+    case 'connecting':
+    case 'idle':
+      return 'outline'
+  }
+}
+
 const statusVariant = (status: typeof initialAgentClientState.status) => {
   switch (status) {
     case 'done':
@@ -101,6 +117,14 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [input, setInput] = useState('')
   const abortControllerRef = useRef<AbortController | null>(null)
   const isRunning = state.status === 'running'
+  const voice = useRealtimeVoice({
+    messages: state.messages,
+    onAgentEvent: event => dispatch({ _tag: 'Event', event }),
+    onUserMessage: message => dispatch({ _tag: 'AppendMessage', message }),
+    onError: message => dispatch({ _tag: 'Error', message })
+  })
+  const isVoiceMode = voice.isConnecting || voice.isLive
+  const inputDisabled = isRunning || isVoiceMode
 
   useEffect(() => () => {
     abortControllerRef.current?.abort()
@@ -132,7 +156,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     event.preventDefault()
     const content = input.trim()
 
-    if (content.length === 0 || isRunning || abortControllerRef.current !== null) {
+    if (content.length === 0 || inputDisabled || abortControllerRef.current !== null) {
       return
     }
 
@@ -150,6 +174,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem)] p-4 md:p-8">
+      <audio ref={voice.audioRef} autoPlay className="sr-only" />
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl gap-6 lg:grid-cols-[0.82fr_1.18fr]">
         <section className="flex flex-col justify-between rounded-3xl border border-foreground/10 bg-background/80 p-6 shadow-sm backdrop-blur md:p-8">
           <div className="space-y-5">
@@ -159,8 +184,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             <div className="space-y-3">
               <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">Yolk agent</h1>
               <p className="max-w-md text-sm leading-6 text-muted-foreground md:text-base">
-                Minimal server-run text agent using the reusable protocol, loop, runtime, and
-                client packages. No durable persistence yet; calculator tool calls are enabled.
+                Unified text and voice agent using one client-owned transcript. No durable
+                persistence yet; calculator tool calls are enabled.
               </p>
             </div>
           </div>
@@ -176,6 +201,10 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 <span>Status</span>
                 <Badge variant={statusVariant(state.status)}>{state.status}</Badge>
               </div>
+              <div className="flex items-center justify-between border-t border-foreground/10 pt-3">
+                <span>Voice</span>
+                <Badge variant={voiceStatusVariant(voice.status)}>{voice.status}</Badge>
+              </div>
             </div>
           </div>
         </section>
@@ -184,9 +213,13 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
           <div className="flex items-center justify-between border-b border-foreground/10 px-5 py-4">
             <div>
               <p className="text-sm font-medium">Conversation</p>
-              <p className="text-xs text-muted-foreground">NDJSON events from /api/agent</p>
+              <p className="text-xs text-muted-foreground">Type, or tap the mic to talk.</p>
             </div>
-            {isRunning ? <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" /> : null}
+            {isRunning || voice.isConnecting ? (
+              <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />
+            ) : voice.isLive ? (
+              <MicIcon className="size-4 text-primary" />
+            ) : null}
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
@@ -211,6 +244,12 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 </Card>
               ) : null
             })}
+
+            {voice.userDraft.length > 0 ? (
+              <Card size="sm" className="ml-auto max-w-[85%] bg-primary/80 text-primary-foreground">
+                <CardContent className="whitespace-pre-wrap leading-6">{voice.userDraft}</CardContent>
+              </Card>
+            ) : null}
 
             {state.text.length > 0 ? (
               <Card size="sm" className="max-w-[85%]">
@@ -250,18 +289,36 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               <Textarea
                 value={input}
                 onChange={event => setInput(event.target.value)}
-                placeholder="Ask the agent..."
+                placeholder={isVoiceMode ? 'Voice mode is active...' : 'Ask the agent...'}
                 className="min-h-12 resize-none"
-                disabled={isRunning}
+                disabled={inputDisabled}
                 aria-label="Agent prompt"
               />
+              <Button
+                type="button"
+                size="icon-lg"
+                variant={isVoiceMode ? 'destructive' : 'outline'}
+                onClick={voice.toggleSession}
+                disabled={isRunning}
+                aria-pressed={isVoiceMode}
+                className="size-11"
+              >
+                {voice.isConnecting ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : voice.isLive ? (
+                  <PhoneOffIcon />
+                ) : (
+                  <MicIcon />
+                )}
+                <span className="sr-only">{isVoiceMode ? 'Stop voice mode' : 'Start voice mode'}</span>
+              </Button>
               {isRunning ? (
                 <Button type="button" size="icon-lg" variant="destructive" onClick={handleStop}>
                   <SquareIcon />
                   <span className="sr-only">Stop</span>
                 </Button>
               ) : (
-                <Button type="submit" size="icon-lg" disabled={input.trim().length === 0}>
+                <Button type="submit" size="icon-lg" disabled={input.trim().length === 0 || inputDisabled}>
                   <SendIcon />
                   <span className="sr-only">Send</span>
                 </Button>

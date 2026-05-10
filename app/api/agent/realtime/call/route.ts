@@ -130,7 +130,7 @@ const handler = Effect.gen(function* () {
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const toolSet = yield* resolveAgentTools({
     surface: 'voice',
-    route: '/agent/voice',
+    route: '/agent',
     userId: session.user.id
   })
   const answer = yield* requestOpenAiRealtimeAnswer({

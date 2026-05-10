@@ -8,7 +8,7 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveAgentTools({
         surface: 'voice',
-        route: '/agent/voice',
+        route: '/agent',
         userId: 'user_1'
       })
       const config = makeOpenAiRealtimeSessionConfig({
@@ -23,7 +23,10 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
         tool_choice: 'auto',
         reasoning: { effort: 'low' },
         audio: {
-          input: { turn_detection: { type: 'semantic_vad' } },
+          input: {
+            transcription: { model: 'gpt-realtime-whisper', language: 'en' },
+            turn_detection: { type: 'semantic_vad' }
+          },
           output: { voice: 'marin' }
         }
       })

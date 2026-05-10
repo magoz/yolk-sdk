@@ -4,10 +4,11 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- Text `/agent` UI and `/api/agent` route
-- Realtime voice `/agent/voice` UI and `/api/agent/realtime/*` routes
+- Unified `/agent` UI with text input and mic voice mode
+- Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
 - Calculator tool wired for tool-call smoke tests
 - No durable transcript: text client sends full protocol transcript each turn
+- Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls `agent-loop` directly; `agent-runtime` is reserved for durable session lifecycle
 - `StatelessSessionStoreLayer` remains no-op scaffolding for future runtime persistence
@@ -39,18 +40,24 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools
 
 - Production encode/decode uses `Schema.UnknownFromJsonString` + Effect mapping.
 - Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages.
+- Browser-only Realtime hook may use raw JSON for data-channel/fetch payloads.
 - Direct JSON helpers are fine in tests.
 
 ## Realtime Voice
 
-- UI: `app/agent/voice/voice-playground.tsx`
+- UI: mic mode in `app/agent/playground.tsx`; `/agent/voice` redirects to `/agent`
+- Hook: `app/agent/use-realtime-voice.ts`
 - SDP route: `app/api/agent/realtime/call/route.ts`
 - Tool route: `app/api/agent/realtime/tool/route.ts`
 - Adapter helpers: `realtime/openai-realtime.ts`, `realtime/tool-bridge.ts`
 - Model: `gpt-realtime-2`; voice: `marin`; reasoning effort: `low`
+- Input transcription: `gpt-realtime-whisper`; completed user transcripts append to shared messages
+- Event names: user transcripts `conversation.item.input_audio_transcription.*`; assistant transcript `response.output_audio_transcript.*`; tool calls in `response.done`
 - Uses `OPENAI_API_KEY`, not Codex OAuth
 - OpenRouter is not supported for Realtime voice: no `gpt-realtime-2`/Realtime endpoints there
+- Voice tool context route is `/agent`; `/agent/voice` is legacy redirect only
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
+- Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
 - `@yolk/voice-runtime` owns provider-neutral tool execution bridge
 - OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 

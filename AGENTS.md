@@ -7,6 +7,7 @@ Next.js 16 App Router app with Effect-TS services, Drizzle ORM (PostgreSQL/Neon)
 - **Use `pnpm` exclusively** - not npm or yarn
 - **Run `pnpm tsc` before finishing** - ensure types pass
 - **Run `pnpm lint` to check for errors** - fix any issues
+- **Run `pnpm packages:check` when touching `packages/*`** - verify package types
 - **Run `pnpm test:run` to verify tests pass** - fix failures before committing
 
 ### Effect-TS Rules (Enforced by ESLint)
@@ -41,7 +42,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client |
 | Text agent         | app/lib   | `/agent` + `/api/agent`; client-owned transcript + Codex OAuth + `gpt-5.4` |
-| Voice agent        | app/lib   | `/agent/voice` + Realtime WebRTC routes; `gpt-realtime-2` |
+| Voice agent        | app/lib   | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` |
 | Dummy tool calling | app/lib   | `calculate` calculator tool; smoke-test only         |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
 
