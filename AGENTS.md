@@ -84,7 +84,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `TelemetryLayer`        | Layer    | `lib/services/telemetry/live-layer.ts`     | OpenTelemetry + Sentry span/log processing          |
 | `reportError`           | Function | `lib/services/telemetry/report-error.ts`   | Log error + Sentry capture (boundaries only)        |
 | `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
-| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Injects selected LLM provider into runtime          |
+| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Injects provider into text runtime with no tools    |
+| `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`     | Injects provider + app tool executor into text runtime |
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 

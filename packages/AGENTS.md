@@ -33,6 +33,7 @@ app -> client -> protocol
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
+- Realtime voice/WebRTC stays in app layer for now; packages only share `ToolDef`/`ToolCall`/`ToolResult` + `ToolExecutor`.
 
 ## Client Transport
 
