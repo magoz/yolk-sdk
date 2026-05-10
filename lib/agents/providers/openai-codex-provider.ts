@@ -97,6 +97,30 @@ class OpenAiCodexResponse extends Schema.Class<OpenAiCodexResponse>('OpenAiCodex
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
+const encodeJsonString = (value: unknown, message: string) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'provider_error',
+          message: `${message}: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
+const decodeJsonString = (raw: string, message: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `${message}: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
 const unsupportedContentError = (contentType: string) =>
   new LLMError({
     cause: 'provider_error',
@@ -119,15 +143,7 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
       }).pipe(Effect.map(textParts => textParts.join('\n')))
 
 const serializeToolArguments = (params: unknown) =>
-  Effect.try({
-    try: () => JSON.stringify(params),
-    catch: error =>
-      new LLMError({
-        cause: 'provider_error',
-        message: `Could not serialize OpenAI Codex tool arguments: ${unknownToMessage(error)}`,
-        retryable: false
-      })
-  })
+  encodeJsonString(params, 'Could not serialize OpenAI Codex tool arguments')
 
 const toolCallToCodexInput = (
   call: ToolCall
@@ -220,15 +236,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
 const parseToolArguments = (raw: string) =>
-  Effect.try({
-    try: (): unknown => JSON.parse(raw),
-    catch: error =>
-      new LLMError({
-        cause: 'invalid_response',
-        message: `Invalid OpenAI Codex tool arguments JSON: ${unknownToMessage(error)}`,
-        retryable: false
-      })
-  })
+  decodeJsonString(raw, 'Invalid OpenAI Codex tool arguments JSON')
 
 const textFromOutputItem = (item: OpenAiCodexOutputItem) => {
   switch (item.type) {
@@ -297,15 +305,7 @@ const parseOpenAiCodexJsonResponse = (
   raw: string
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const json = yield* Effect.try({
-      try: (): unknown => JSON.parse(raw),
-      catch: error =>
-        new LLMError({
-          cause: 'invalid_response',
-          message: `Could not parse OpenAI Codex response JSON: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    })
+    const json = yield* decodeJsonString(raw, 'Could not parse OpenAI Codex response JSON')
     const parsed = yield* decodeOpenAiCodexResponse(json)
 
     return yield* toLlmEvents(parsed)
@@ -383,15 +383,7 @@ const dataFromSseBlock = (block: string) => {
 }
 
 const parseOpenAiCodexSseJson = (data: string) =>
-  Effect.try({
-    try: (): unknown => JSON.parse(data),
-    catch: error =>
-      new LLMError({
-        cause: 'invalid_response',
-        message: `Could not parse OpenAI Codex stream event JSON: ${unknownToMessage(error)}`,
-        retryable: false
-      })
-  })
+  decodeJsonString(data, 'Could not parse OpenAI Codex stream event JSON')
 
 const finalResponseToEvents = (
   response: unknown,
@@ -583,15 +575,7 @@ const sendOpenAiCodexRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toOpenAiCodexRequestBody(request)
-    const serializedBody = yield* Effect.try({
-      try: () => JSON.stringify(body),
-      catch: error =>
-        new LLMError({
-          cause: 'provider_error',
-          message: `Could not serialize OpenAI Codex request: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    })
+    const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI Codex request')
 
     const headers: Record<string, string> = {
       accept: 'application/json',

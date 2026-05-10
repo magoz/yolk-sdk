@@ -131,6 +131,30 @@ const OpenAiConfigLayer = Layer.effect(
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
+const encodeJsonString = (value: unknown, message: string) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'provider_error',
+          message: `${message}: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
+const decodeJsonString = (raw: string, message: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `${message}: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
 const unsupportedContentError = (contentType: string) =>
   new LLMError({
     cause: 'provider_error',
@@ -176,15 +200,7 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
       )
 
 const serializeToolArguments = (params: unknown) =>
-  Effect.try({
-    try: () => JSON.stringify(params),
-    catch: error =>
-      new LLMError({
-        cause: 'provider_error',
-        message: `Could not serialize OpenAI tool arguments: ${unknownToMessage(error)}`,
-        retryable: false
-      })
-  })
+  encodeJsonString(params, 'Could not serialize OpenAI tool arguments')
 
 const toolCallToOpenAiToolCall = (call: ToolCall): Effect.Effect<OpenAiToolCall, LLMError> =>
   Effect.gen(function* () {
@@ -276,15 +292,7 @@ const responseStatusToCause = (status: number): LLMError['cause'] => {
 const isRetryableStatus = (status: number) => status === 429 || status >= 500
 
 const parseToolArguments = (raw: string) =>
-  Effect.try({
-    try: (): unknown => JSON.parse(raw),
-    catch: error =>
-      new LLMError({
-        cause: 'invalid_response',
-        message: `Invalid OpenAI tool arguments JSON: ${unknownToMessage(error)}`,
-        retryable: false
-      })
-  })
+  decodeJsonString(raw, 'Invalid OpenAI tool arguments JSON')
 
 const toLlmEvents = (
   message: OpenAiMessageResponse
@@ -342,15 +350,7 @@ const sendOpenAiRequest = (
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toOpenAiRequestBody(request)
-    const serializedBody = yield* Effect.try({
-      try: () => JSON.stringify(body),
-      catch: error =>
-        new LLMError({
-          cause: 'provider_error',
-          message: `Could not serialize OpenAI request: ${unknownToMessage(error)}`,
-          retryable: false
-        })
-    })
+    const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI request')
 
     const httpRequest = HttpClientRequest.post('https://api.openai.com/v1/chat/completions').pipe(
       HttpClientRequest.setHeaders({
