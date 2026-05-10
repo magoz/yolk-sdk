@@ -7,7 +7,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text-only `/agent` UI and `/api/agent` route
 - No tools: `NoToolExecutorLayer` rejects accidental tool execution
 - No durable transcript: `StatelessSessionStoreLayer` loads empty, save is no-op
-- Route returns NDJSON batch response, not browser token streaming
+- Route streams NDJSON token events to browser, including in-band `AgentError` failures
 
 ## Current Provider
 

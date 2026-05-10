@@ -50,6 +50,8 @@ Current agent mode is intentionally minimal:
 - text-only
 - no tools
 - no durable persistence
+- streaming NDJSON token events
+- in-band `AgentError` events for stream failures
 - each `/api/agent` request runs one turn from the submitted prompt
 
 Provider/model are hardcoded for now:

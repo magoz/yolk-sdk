@@ -2,7 +2,25 @@ import * as Schema from 'effect/Schema'
 import { AssistantAgentMessage, AgentMessage } from './message'
 import { ToolCall, ToolResult } from './tool'
 
+export const AgentErrorCode = Schema.Literals([
+  'provider_error',
+  'rate_limit',
+  'context_overflow',
+  'invalid_response',
+  'tool_error',
+  'aborted',
+  'session_not_found',
+  'unknown'
+])
+export type AgentErrorCode = typeof AgentErrorCode.Type
+
 export class AgentStart extends Schema.TaggedClass<AgentStart>()('AgentStart', {}) {}
+
+export class AgentError extends Schema.TaggedClass<AgentError>()('AgentError', {
+  code: AgentErrorCode,
+  message: Schema.String,
+  retryable: Schema.Boolean
+}) {}
 
 export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {
   messages: Schema.Array(AgentMessage),
@@ -60,6 +78,7 @@ export class ToolResultEvent extends Schema.TaggedClass<ToolResultEvent>()('Tool
 
 export const AgentEvent = Schema.Union([
   AgentStart,
+  AgentError,
   AgentEnd,
   TurnStart,
   TurnEnd,

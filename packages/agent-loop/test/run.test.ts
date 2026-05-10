@@ -1,9 +1,11 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk/protocol'
 import {
   ContextTransformer,
   FauxProvider,
+  LLMProvider,
+  LLMTextDelta,
   LoopConfig,
   Reply,
   TestToolExecutor,
@@ -44,6 +46,45 @@ describe('run', () => {
 
       const assistant = events.find(event => event._tag === 'AssistantMessage')
       expect(assistant).toMatchObject({ message: { content: 'ok' } })
+    }))
+
+  it.effect('emits LLM deltas before provider completes', () =>
+    Effect.gen(function* () {
+      const streamingProvider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () =>
+            Stream.make(LLMTextDelta.make({ text: 'o' })).pipe(Stream.concat(Stream.never))
+        })
+      )
+      const eventsOption = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(streamingProvider, TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(BaseLayer)
+          )
+        ),
+        Effect.timeoutOption('1 second')
+      )
+
+      if (Option.isNone(eventsOption)) {
+        expect.fail('Expected LLM delta before provider completion')
+      }
+
+      const events = Array.from(eventsOption.value)
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMTextDelta'
+      ])
+      expect(events[3]).toMatchObject({ text: 'o' })
     }))
 
   it.effect('executes tools and continues until stop', () =>

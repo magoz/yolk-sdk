@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { AgentStart, LLMTextDelta } from '@yolk/protocol'
+import { AgentError, AgentStart, LLMTextDelta } from '@yolk/protocol'
 import { collectAgentEvents } from '../src'
 
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
@@ -44,5 +44,20 @@ describe('collectAgentEvents', () => {
         fetch: fetcher
       })
     ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+  })
+
+  it('decodes in-band agent errors', async () => {
+    const responseEvents = [
+      AgentError.make({ code: 'provider_error', message: 'Provider failed', retryable: true })
+    ]
+    const fetcher: typeof fetch = () => Promise.resolve(new Response(encodeEvents(responseEvents)))
+
+    const events = await collectAgentEvents({
+      sessionId: 'session_1',
+      content: 'hello',
+      fetch: fetcher
+    })
+
+    expect(events).toEqual(responseEvents)
   })
 })

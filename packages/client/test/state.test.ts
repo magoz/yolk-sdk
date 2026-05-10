@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEnd,
+  AgentError,
   AgentStart,
   AssistantAgentMessage,
   LLMTextDelta,
@@ -31,11 +32,29 @@ describe('reduceAgentEvents', () => {
     expect(state.activeToolCalls).toEqual([])
     expect(state.toolResults).toEqual([result])
     expect(state.messages).toEqual([message])
+    expect(state.error).toBeNull()
+  })
+
+  it('stores in-band agent errors', () => {
+    const state = reduceAgentEvents([
+      AgentStart.make({}),
+      AgentError.make({ code: 'provider_error', message: 'Provider failed', retryable: true })
+    ])
+
+    expect(state).toMatchObject({
+      status: 'error',
+      activeToolCalls: [],
+      error: 'Provider failed'
+    })
   })
 
   it('marks client state as errored', () => {
     const state = reduceAgentEvents([AgentStart.make({})])
 
-    expect(markAgentError(state)).toMatchObject({ status: 'error', activeToolCalls: [] })
+    expect(markAgentError(state)).toMatchObject({
+      status: 'error',
+      activeToolCalls: [],
+      error: 'Agent request failed'
+    })
   })
 })

@@ -11,6 +11,8 @@ import {
   ToolExecutionStart,
   ToolResultEvent,
   ToolResultMessage,
+  type ToolCall,
+  type ToolResult,
   TurnEnd,
   TurnStart,
   type AgentEvent,
@@ -18,10 +20,10 @@ import {
   type ToolDef
 } from '@yolk/protocol'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator'
-import { AbortError, type AgentLoopError } from './error'
+import { AbortError, type AgentLoopError, type ToolError } from './error'
 import type { LLMEvent } from './llm-event'
 import { ContextTransformer } from './services/context-transformer'
-import { LLMProvider } from './services/llm-provider'
+import { LLMProvider, type LLMRequest } from './services/llm-provider'
 import { LoopConfig } from './services/loop-config'
 import { ToolExecutor } from './services/tool-executor'
 
@@ -53,6 +55,136 @@ const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEve
   return events
 }
 
+const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => toLlmEvents([event])
+
+type TurnStreamInput = {
+  readonly config: RunConfig
+  readonly contextTransformer: {
+    readonly transform: (messages: ReadonlyArray<AgentMessage>) => Effect.Effect<ReadonlyArray<AgentMessage>>
+  }
+  readonly loopConfig: { readonly maxTurns: number }
+  readonly provider: {
+    readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, AgentLoopError>
+  }
+  readonly executor: {
+    readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
+  }
+  readonly currentMessages: ReadonlyArray<AgentMessage>
+  readonly createdMessages: Array<AgentMessage>
+  readonly turn: number
+}
+
+const makeToolExecutionStream = (
+  executor: TurnStreamInput['executor'],
+  call: ToolCall,
+  createdMessages: Array<AgentMessage>,
+  toolResultMessages: Array<AgentMessage>
+): Stream.Stream<AgentEvent, AgentLoopError> =>
+  Stream.make(ToolExecutionStart.make({ call })).pipe(
+    Stream.concat(
+      Stream.fromEffect(
+        executor.execute(call).pipe(
+          Effect.map(result => {
+            const toolResultMessage = ToolResultMessage.make({
+              toolCallId: result.toolCallId,
+              content: result.content
+            })
+
+            createdMessages.push(toolResultMessage)
+            toolResultMessages.push(toolResultMessage)
+
+            return [ToolExecutionEnd.make({ call, result }), ToolResultEvent.make({ result })]
+          })
+        )
+      ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
+    )
+  )
+
+const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
+  Stream.suspend(() => {
+    if (input.turn > input.loopConfig.maxTurns) {
+      return Stream.fail(new AbortError({ reason: 'max_turns' }))
+    }
+
+    const llmEvents: Array<LLMEvent> = []
+    const llmStream = Stream.unwrap(
+      input.contextTransformer.transform(input.currentMessages).pipe(
+        Effect.map(transformedMessages =>
+          input.provider
+            .stream({
+              messages: transformedMessages,
+              tools: input.config.tools,
+              model: input.config.model,
+              systemPrompt: input.config.systemPrompt
+            })
+            .pipe(
+              Stream.tap(event =>
+                Effect.sync(() => {
+                  llmEvents.push(event)
+                })
+              ),
+              Stream.flatMap(event => Stream.fromIterable(toLlmEvent(event)))
+            )
+        )
+      )
+    )
+
+    const afterLlmStream = Stream.suspend(() => {
+      const toolCalls = collectToolCalls(llmEvents)
+      const assistantMessage = accumulateAssistantMessage(llmEvents)
+      const turnEndEvents: Array<AgentEvent> = [
+        LLMStreamEnd.make({ turn: input.turn }),
+        AssistantMessageEvent.make({ message: assistantMessage })
+      ]
+
+      input.createdMessages.push(assistantMessage)
+
+      if (toolCalls.length === 0) {
+        return Stream.fromIterable([
+          ...turnEndEvents,
+          TurnEnd.make({ turn: input.turn, reason: 'stop' }),
+          AgentEnd.make({
+            messages: [...input.createdMessages],
+            turns: input.turn,
+            usage: { input: 0, output: 0 }
+          })
+        ])
+      }
+
+      const toolResultMessages: Array<AgentMessage> = []
+      const toolExecutionStream = Stream.fromIterable(toolCalls).pipe(
+        Stream.flatMap(call =>
+          makeToolExecutionStream(input.executor, call, input.createdMessages, toolResultMessages)
+        )
+      )
+      const nextTurnStream = Stream.suspend(() =>
+        Stream.make(TurnEnd.make({ turn: input.turn, reason: 'tool_use' })).pipe(
+          Stream.concat(
+            makeTurnStream({
+              ...input,
+              currentMessages: [
+                ...input.currentMessages,
+                assistantMessage,
+                ...toolResultMessages
+              ],
+              turn: input.turn + 1
+            })
+          )
+        )
+      )
+
+      return Stream.fromIterable(turnEndEvents).pipe(
+        Stream.concat(toolExecutionStream),
+        Stream.concat(nextTurnStream)
+      )
+    })
+
+    return Stream.fromIterable([
+      TurnStart.make({ turn: input.turn }),
+      LLMStreamStart.make({ turn: input.turn })
+    ]).pipe(Stream.concat(llmStream), Stream.concat(afterLlmStream))
+  })
+
 export const run = (
   config: RunConfig
 ): Stream.Stream<
@@ -66,75 +198,21 @@ export const run = (
       const loopConfig = yield* LoopConfig
       const provider = yield* LLMProvider
       const executor = yield* ToolExecutor
-      const events: Array<AgentEvent> = [AgentStart.make({})]
       const createdMessages: Array<AgentMessage> = []
-      let currentMessages: ReadonlyArray<AgentMessage> = config.messages
-      let turn = 1
-      let shouldContinue = true
 
-      while (shouldContinue) {
-        if (turn > loopConfig.maxTurns) {
-          return yield* Effect.fail(new AbortError({ reason: 'max_turns' }))
-        }
-
-        events.push(TurnStart.make({ turn }), LLMStreamStart.make({ turn }))
-        const transformedMessages = yield* contextTransformer.transform(currentMessages)
-
-        const llmEvents = yield* provider
-          .stream({
-            messages: transformedMessages,
-            tools: config.tools,
-            model: config.model,
-            systemPrompt: config.systemPrompt
+      return Stream.make(AgentStart.make({})).pipe(
+        Stream.concat(
+          makeTurnStream({
+            config,
+            contextTransformer,
+            loopConfig,
+            provider,
+            executor,
+            currentMessages: config.messages,
+            createdMessages,
+            turn: 1
           })
-          .pipe(Stream.runCollect)
-
-        const toolCalls = collectToolCalls(llmEvents)
-        const assistantMessage = accumulateAssistantMessage(llmEvents)
-
-        events.push(
-          ...toLlmEvents(llmEvents),
-          LLMStreamEnd.make({ turn }),
-          AssistantMessageEvent.make({ message: assistantMessage })
         )
-        createdMessages.push(assistantMessage)
-
-        if (toolCalls.length === 0) {
-          events.push(TurnEnd.make({ turn, reason: 'stop' }))
-          shouldContinue = false
-        } else {
-          const toolResultMessages: Array<AgentMessage> = []
-
-          for (const call of toolCalls) {
-            events.push(ToolExecutionStart.make({ call }))
-            const result = yield* executor.execute(call)
-            const toolResultMessage = ToolResultMessage.make({
-              toolCallId: result.toolCallId,
-              content: result.content
-            })
-
-            events.push(
-              ToolExecutionEnd.make({ call, result }),
-              ToolResultEvent.make({ result })
-            )
-            createdMessages.push(toolResultMessage)
-            toolResultMessages.push(toolResultMessage)
-          }
-
-          events.push(TurnEnd.make({ turn, reason: 'tool_use' }))
-          currentMessages = [...currentMessages, assistantMessage, ...toolResultMessages]
-          turn += 1
-        }
-      }
-
-      events.push(
-        AgentEnd.make({
-          messages: createdMessages,
-          turns: turn,
-          usage: { input: 0, output: 0 }
-        })
       )
-
-      return Stream.fromIterable(events)
     })
   )

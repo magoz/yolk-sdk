@@ -1,4 +1,4 @@
-import { Effect, Stream } from 'effect'
+import { Effect, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk/protocol'
 import { LLMProvider } from '@yolk/agent-loop'
@@ -38,6 +38,25 @@ const makeRawFetch = (responseBody: string, requests: Array<CapturedRequest>): t
         status: 200,
         headers: { 'content-type': 'text/plain' }
       })
+    )
+  }
+
+const makeOpenSseFetch = (responseChunk: string, requests: Array<CapturedRequest>): typeof fetch =>
+  (input, init) => {
+    requests.push({ input, init })
+
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: controller => {
+            controller.enqueue(new TextEncoder().encode(responseChunk))
+          }
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/plain' }
+        }
+      )
     )
   }
 
@@ -191,5 +210,42 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(
         events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))
       ).toEqual(['oauth ', 'smoke ok', 'Done'])
+    }))
+
+  it.effect('emits OpenAI Codex SSE deltas before completion', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiCodexProviderLayer({
+        token,
+        fetch: makeOpenSseFetch(
+          [
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
+            '',
+            ''
+          ].join('\n'),
+          requests
+        )
+      })
+
+      const eventsOption = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.take(1), Stream.runCollect)
+      }).pipe(Effect.provide(layer), Effect.timeoutOption('1 second'))
+
+      if (Option.isNone(eventsOption)) {
+        expect.fail('Expected OpenAI Codex delta before completion')
+      }
+
+      const events = Array.from(eventsOption.value)
+      expect(events).toHaveLength(1)
+      expect(events[0]).toMatchObject({ _tag: 'TextDelta', text: 'oauth ' })
     }))
 })

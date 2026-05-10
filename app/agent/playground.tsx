@@ -55,6 +55,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [lastPrompt, setLastPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
   const isRunning = state.status === 'running'
+  const displayedError = error ?? state.error
 
   const runAgent = async (content: string) => {
     try {
@@ -155,9 +156,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               </div>
             ) : null}
 
-            {error !== null ? (
+            {displayedError !== null ? (
               <Card size="sm" className="border-destructive/20 bg-destructive/5 text-destructive">
-                <CardContent>{error}</CardContent>
+                <CardContent>{displayedError}</CardContent>
               </Card>
             ) : null}
           </div>

@@ -8,6 +8,7 @@ export type AgentClientState = {
   readonly text: string
   readonly activeToolCalls: ReadonlyArray<ToolCall>
   readonly toolResults: ReadonlyArray<ToolResult>
+  readonly error: string | null
 }
 
 export const initialAgentClientState: AgentClientState = {
@@ -15,7 +16,8 @@ export const initialAgentClientState: AgentClientState = {
   messages: [],
   text: '',
   activeToolCalls: [],
-  toolResults: []
+  toolResults: [],
+  error: null
 }
 
 export const applyAgentEvent = (
@@ -24,7 +26,9 @@ export const applyAgentEvent = (
 ): AgentClientState => {
   switch (event._tag) {
     case 'AgentStart':
-      return { ...state, status: 'running', text: '', activeToolCalls: [], toolResults: [] }
+      return { ...state, status: 'running', text: '', activeToolCalls: [], toolResults: [], error: null }
+    case 'AgentError':
+      return markAgentError(state, event.message)
     case 'LLMTextDelta':
       return { ...state, text: `${state.text}${event.text}` }
     case 'LLMToolCall':
@@ -48,10 +52,14 @@ export const applyAgentEvent = (
   }
 }
 
-export const markAgentError = (state: AgentClientState): AgentClientState => ({
+export const markAgentError = (
+  state: AgentClientState,
+  message = 'Agent request failed'
+): AgentClientState => ({
   ...state,
   status: 'error',
-  activeToolCalls: []
+  activeToolCalls: [],
+  error: message
 })
 
 export const reduceAgentEvents = (events: ReadonlyArray<AgentEvent>) =>
