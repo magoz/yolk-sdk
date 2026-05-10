@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentEvent } from '@yolk/protocol'
+import { AgentEvent, AssistantAgentMessage, UserMessage, type AgentMessage } from '@yolk/protocol'
 import {
   ContextTransformer,
   FauxProvider,
@@ -89,7 +89,10 @@ describe('makeAgentPostResponse', () => {
   it.effect('returns ndjson agent events for a text-only turn', () =>
     Effect.gen(function* () {
       const response = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'hello' })]
+        }),
         config
       ).pipe(Effect.provide(makeLayer()))
       const body = yield* Effect.promise(() => response.text())
@@ -113,7 +116,10 @@ describe('makeAgentPostResponse', () => {
   it.effect('returns a readable response before the agent stream completes', () =>
     Effect.gen(function* () {
       const responseOption = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'hello' })]
+        }),
         config
       ).pipe(Effect.provide(makeNeverCompletingLayer()), Effect.timeoutOption('1 second'))
 
@@ -146,7 +152,10 @@ describe('makeAgentPostResponse', () => {
   it.effect('encodes stream failures as in-band agent errors', () =>
     Effect.gen(function* () {
       const response = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'hello' })]
+        }),
         config
       ).pipe(Effect.provide(makeFailingLayer()))
       const body = yield* Effect.promise(() => response.text())
@@ -166,7 +175,7 @@ describe('makeAgentPostResponse', () => {
       })
     }))
 
-  it.effect('does not carry transcript across turns', () =>
+  it.effect('uses the client-provided transcript', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
       const layer = Layer.mergeAll(
@@ -179,22 +188,31 @@ describe('makeAgentPostResponse', () => {
         TestToolExecutor.layer({}),
         StatelessSessionStoreLayer
       )
+      const firstMessages = [UserMessage.make({ content: 'hello' })] satisfies readonly [
+        AgentMessage,
+        ...Array<AgentMessage>
+      ]
+      const secondMessages = [
+        ...firstMessages,
+        AssistantAgentMessage.make({ content: 'ok', toolCalls: [] }),
+        UserMessage.make({ content: 'again' })
+      ] satisfies readonly [AgentMessage, ...Array<AgentMessage>]
 
       const firstResponse = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'hello' }),
+        AgentRouteRequest.make({ sessionId: 'session_1', messages: firstMessages }),
         config
       ).pipe(Effect.provide(layer))
       yield* Effect.promise(() => firstResponse.text())
 
       const secondResponse = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'again' }),
+        AgentRouteRequest.make({ sessionId: 'session_1', messages: secondMessages }),
         config
       ).pipe(Effect.provide(layer))
       yield* Effect.promise(() => secondResponse.text())
 
       expect(requests.map(request => request.messages.map(message => message.content))).toEqual([
         ['hello'],
-        ['again']
+        ['hello', 'ok', 'again']
       ])
     }))
 
@@ -224,7 +242,10 @@ describe('makeAgentPostResponse', () => {
         StatelessSessionStoreLayer
       )
       const response = yield* makeAgentPostResponse(
-        AgentRouteRequest.make({ sessionId: 'session_1', content: 'what is 2 + 2?' }),
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'what is 2 + 2?' })]
+        }),
         { ...config, tools: toolSet.tools }
       ).pipe(Effect.provide(layer))
       const body = yield* Effect.promise(() => response.text())
@@ -259,11 +280,11 @@ describe('makeAgentPostResponse', () => {
       expect(toolResultContents).toEqual(['4'])
     }))
 
-  it.effect('rejects blank content at request boundary', () =>
+  it.effect('rejects empty transcripts at request boundary', () =>
     Effect.gen(function* () {
       const result = yield* Schema.decodeUnknownEffect(AgentRouteRequest)({
         sessionId: 'session_1',
-        content: ' '
+        messages: []
       }).pipe(Effect.result)
 
       expect(result).toMatchObject({

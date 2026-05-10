@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, ToolCall, ToolResult } from '@yolk/protocol'
+import type { AgentEvent, AgentMessage, ToolCall, ToolResult, UserMessage } from '@yolk/protocol'
 
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 
@@ -11,6 +11,8 @@ export type AgentClientState = {
   readonly error: string | null
 }
 
+export type AgentTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
+
 export const initialAgentClientState: AgentClientState = {
   status: 'idle',
   messages: [],
@@ -18,6 +20,19 @@ export const initialAgentClientState: AgentClientState = {
   activeToolCalls: [],
   toolResults: [],
   error: null
+}
+
+export const appendAgentMessage = (
+  messages: ReadonlyArray<AgentMessage>,
+  message: AgentMessage
+): AgentTranscript => {
+  const first = messages[0]
+
+  if (first === undefined) {
+    return [message]
+  }
+
+  return [first, ...messages.slice(1), message]
 }
 
 export const applyAgentEvent = (
@@ -40,7 +55,13 @@ export const applyAgentEvent = (
         toolResults: [...state.toolResults, event.result]
       }
     case 'AgentEnd':
-      return { ...state, status: 'done', messages: [...state.messages, ...event.messages] }
+      return {
+        ...state,
+        status: 'done',
+        messages: [...state.messages, ...event.messages],
+        text: '',
+        activeToolCalls: []
+      }
     case 'AssistantMessage':
     case 'LLMStreamEnd':
     case 'LLMStreamStart':
@@ -51,6 +72,19 @@ export const applyAgentEvent = (
       return state
   }
 }
+
+export const submitAgentUserMessage = (
+  state: AgentClientState,
+  message: UserMessage
+): AgentClientState => ({
+  ...state,
+  status: 'running',
+  messages: appendAgentMessage(state.messages, message),
+  text: '',
+  activeToolCalls: [],
+  toolResults: [],
+  error: null
+})
 
 export const markAgentError = (
   state: AgentClientState,
@@ -69,5 +103,7 @@ export const markAgentAborted = (state: AgentClientState): AgentClientState => (
   error: null
 })
 
-export const reduceAgentEvents = (events: ReadonlyArray<AgentEvent>) =>
-  events.reduce(applyAgentEvent, initialAgentClientState)
+export const reduceAgentEvents = (
+  events: ReadonlyArray<AgentEvent>,
+  initialState: AgentClientState = initialAgentClientState
+) => events.reduce(applyAgentEvent, initialState)

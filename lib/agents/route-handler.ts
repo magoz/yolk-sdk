@@ -2,13 +2,12 @@ import { Effect, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentError as AgentErrorEvent,
-  UserMessage,
+  AgentMessage,
   type AgentErrorCode,
-  type AgentEvent
+  type AgentEvent,
+  type ToolDef
 } from '@yolk/protocol'
-import { runRuntime, type RuntimeError } from '@yolk/agent-runtime'
-import type { AgentLoopError } from '@yolk/agent-loop'
-import type { ToolDef } from '@yolk/protocol'
+import { run, type AgentLoopError } from '@yolk/agent-loop'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
@@ -21,7 +20,7 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({
   sessionId: NonEmptyTrimmedString,
-  content: NonEmptyTrimmedString
+  messages: Schema.NonEmptyArray(AgentMessage)
 }) {}
 
 export type AgentRouteConfig = {
@@ -41,7 +40,7 @@ const textEncoder = new TextEncoder()
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
-type AgentStreamError = AgentLoopError | RuntimeError
+type AgentStreamError = AgentLoopError
 
 const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
   switch (error._tag) {
@@ -51,8 +50,6 @@ const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
       return 'tool_error'
     case 'AbortError':
       return 'aborted'
-    case 'SessionNotFoundError':
-      return 'session_not_found'
     case 'FauxExhaustedError':
       return 'provider_error'
   }
@@ -66,8 +63,6 @@ const toAgentErrorMessage = (error: AgentStreamError) => {
       return error.message
     case 'AbortError':
       return `Agent aborted: ${error.reason}`
-    case 'SessionNotFoundError':
-      return `Session not found: ${error.sessionId}`
   }
 }
 
@@ -77,7 +72,6 @@ const isAgentErrorRetryable = (error: AgentStreamError) => {
       return error.retryable
     case 'ToolError':
     case 'AbortError':
-    case 'SessionNotFoundError':
     case 'FauxExhaustedError':
       return false
   }
@@ -96,7 +90,6 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
       LLMError: error => Stream.make(toAgentErrorEvent(error)),
       ToolError: error => Stream.make(toAgentErrorEvent(error)),
       AbortError: error => Stream.make(toAgentErrorEvent(error)),
-      SessionNotFoundError: error => Stream.make(toAgentErrorEvent(error)),
       FauxExhaustedError: error => Stream.make(toAgentErrorEvent(error))
     })
   )
@@ -114,10 +107,8 @@ const encodeNdjsonEvent = (event: AgentEvent) =>
 
 export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRouteConfig) =>
   Effect.gen(function* () {
-    const body = yield* runRuntime<void>({
-      sessionId: input.sessionId,
-      input: UserMessage.make({ content: input.content }),
-      context: undefined,
+    const body = yield* run({
+      messages: input.messages,
       systemPrompt: config.systemPrompt,
       tools: config.tools,
       model: config.model

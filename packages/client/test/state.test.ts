@@ -8,9 +8,10 @@ import {
   LLMToolCall,
   ToolExecutionEnd,
   ToolCall,
-  ToolResult
+  ToolResult,
+  UserMessage
 } from '@yolk/protocol'
-import { markAgentAborted, markAgentError, reduceAgentEvents } from '../src'
+import { markAgentAborted, markAgentError, reduceAgentEvents, submitAgentUserMessage } from '../src'
 
 describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
@@ -28,7 +29,7 @@ describe('reduceAgentEvents', () => {
     ])
 
     expect(state.status).toBe('done')
-    expect(state.text).toBe('ok')
+    expect(state.text).toBe('')
     expect(state.activeToolCalls).toEqual([])
     expect(state.toolResults).toEqual([result])
     expect(state.messages).toEqual([message])
@@ -55,6 +56,20 @@ describe('reduceAgentEvents', () => {
       status: 'error',
       activeToolCalls: [],
       error: 'Agent request failed'
+    })
+  })
+
+  it('adds submitted user messages to the transcript', () => {
+    const message = UserMessage.make({ content: 'hello' })
+    const state = submitAgentUserMessage(reduceAgentEvents([]), message)
+
+    expect(state).toMatchObject({
+      status: 'running',
+      messages: [message],
+      text: '',
+      activeToolCalls: [],
+      toolResults: [],
+      error: null
     })
   })
 

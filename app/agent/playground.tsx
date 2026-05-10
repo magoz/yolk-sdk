@@ -1,15 +1,18 @@
 'use client'
 
 import type { FormEvent } from 'react'
-import type { AgentEvent, Content } from '@yolk/protocol'
+import { UserMessage, type AgentEvent, type AgentMessage, type Content } from '@yolk/protocol'
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { LoaderCircleIcon, SendIcon, SquareIcon } from 'lucide-react'
 import {
   applyAgentEvent,
+  appendAgentMessage,
   initialAgentClientState,
   markAgentAborted,
   markAgentError,
-  streamAgentEvents
+  streamAgentEvents,
+  submitAgentUserMessage,
+  type AgentTranscript
 } from '@yolk/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,16 +26,19 @@ type AgentPlaygroundProps = {
 }
 
 type AgentUiAction =
+  | { readonly _tag: 'Submit'; readonly message: UserMessage }
   | { readonly _tag: 'Event'; readonly event: AgentEvent }
-  | { readonly _tag: 'Error' }
+  | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
 const reducer = (state: typeof initialAgentClientState, action: AgentUiAction) => {
   switch (action._tag) {
+    case 'Submit':
+      return submitAgentUserMessage(state, action.message)
     case 'Event':
       return applyAgentEvent(state, action.event)
     case 'Error':
-      return markAgentError(state)
+      return markAgentError(state, action.message)
     case 'Abort':
       return markAgentAborted(state)
   }
@@ -44,7 +50,38 @@ const errorMessage = (error: unknown) =>
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
 const contentPreview = (content: Content) =>
-  typeof content === 'string' ? content : content.map(part => part._tag).join(', ')
+  typeof content === 'string'
+    ? content
+    : content.map(part => (part._tag === 'Text' ? part.text : part._tag)).join(', ')
+
+const messagePreview = (message: AgentMessage) => {
+  switch (message._tag) {
+    case 'User':
+    case 'ToolResult':
+      return contentPreview(message.content)
+    case 'Assistant': {
+      const content = contentPreview(message.content)
+
+      if (content.length > 0) {
+        return content
+      }
+
+      const toolNames = message.toolCalls.map(call => call.name).join(', ')
+      return toolNames.length > 0 ? `Tool call: ${toolNames}` : ''
+    }
+  }
+}
+
+const messageCardClass = (message: AgentMessage) => {
+  switch (message._tag) {
+    case 'User':
+      return 'ml-auto max-w-[85%] bg-primary text-primary-foreground'
+    case 'Assistant':
+      return 'max-w-[85%]'
+    case 'ToolResult':
+      return 'max-w-[85%] border-dashed bg-muted/40 text-muted-foreground shadow-none'
+  }
+}
 
 const statusVariant = (status: typeof initialAgentClientState.status) => {
   switch (status) {
@@ -62,33 +99,28 @@ const statusVariant = (status: typeof initialAgentClientState.status) => {
 export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
   const [state, dispatch] = useReducer(reducer, initialAgentClientState)
   const [input, setInput] = useState('')
-  const [lastPrompt, setLastPrompt] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const isRunning = state.status === 'running'
-  const displayedError = error ?? state.error
 
   useEffect(() => () => {
     abortControllerRef.current?.abort()
   }, [])
 
-  const runAgent = async (content: string) => {
+  const runAgent = async (messages: AgentTranscript) => {
     const controller = new AbortController()
     abortControllerRef.current = controller
 
     try {
-      for await (const event of streamAgentEvents({ sessionId, content, signal: controller.signal })) {
+      for await (const event of streamAgentEvents({ sessionId, messages, signal: controller.signal })) {
         dispatch({ _tag: 'Event', event })
       }
     } catch (caught) {
       if (controller.signal.aborted || isAbortError(caught)) {
         dispatch({ _tag: 'Abort' })
-        setError(null)
         return
       }
 
-      dispatch({ _tag: 'Error' })
-      setError(errorMessage(caught))
+      dispatch({ _tag: 'Error', message: errorMessage(caught) })
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
@@ -104,10 +136,12 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
       return
     }
 
+    const message = UserMessage.make({ content })
+    const messages = appendAgentMessage(state.messages, message)
+
     setInput('')
-    setLastPrompt(content)
-    setError(null)
-    void runAgent(content)
+    dispatch({ _tag: 'Submit', message })
+    void runAgent(messages)
   }
 
   const handleStop = () => {
@@ -156,21 +190,27 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            {lastPrompt.length > 0 ? (
-              <Card size="sm" className="ml-auto max-w-[85%] bg-primary text-primary-foreground">
-                <CardContent>{lastPrompt}</CardContent>
-              </Card>
-            ) : (
+            {state.messages.length === 0 ? (
               <Card size="sm" className="border-dashed bg-transparent shadow-none">
                 <CardHeader>
                   <CardTitle>Ask anything</CardTitle>
                   <CardDescription>
-                    This first slice is one-shot text with a calculator tool. Ask something like
-                    “what is 19 * 23?” to test tool calling.
+                    Client-owned transcript with a calculator tool. Ask something like “what is
+                    19 * 23?” to test tool calling.
                   </CardDescription>
                 </CardHeader>
               </Card>
-            )}
+            ) : null}
+
+            {state.messages.map((message, index) => {
+              const preview = messagePreview(message)
+
+              return preview.length > 0 ? (
+                <Card size="sm" key={`${message._tag}-${index}`} className={messageCardClass(message)}>
+                  <CardContent className="whitespace-pre-wrap leading-6">{preview}</CardContent>
+                </Card>
+              ) : null
+            })}
 
             {state.text.length > 0 ? (
               <Card size="sm" className="max-w-[85%]">
@@ -178,7 +218,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               </Card>
             ) : null}
 
-            {state.activeToolCalls.length > 0 ? (
+            {isRunning && state.activeToolCalls.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {state.activeToolCalls.map(call => (
                   <Badge key={call.id} variant="outline">
@@ -188,7 +228,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               </div>
             ) : null}
 
-            {state.toolResults.length > 0 ? (
+            {isRunning && state.toolResults.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {state.toolResults.map(result => (
                   <Badge key={result.toolCallId} variant="secondary">
@@ -198,9 +238,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
               </div>
             ) : null}
 
-            {displayedError !== null ? (
+            {state.error !== null ? (
               <Card size="sm" className="border-destructive/20 bg-destructive/5 text-destructive">
-                <CardContent>{displayedError}</CardContent>
+                <CardContent>{state.error}</CardContent>
               </Card>
             ) : null}
           </div>

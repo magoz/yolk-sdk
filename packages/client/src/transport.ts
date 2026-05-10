@@ -2,6 +2,7 @@ import { Effect, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AgentEvent } from '@yolk/protocol'
 import type { AgentEvent as AgentEventType } from '@yolk/protocol'
+import type { AgentTranscript } from './state'
 
 export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportError>()(
   'AgentTransportError',
@@ -14,7 +15,7 @@ export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportE
 export type StreamAgentEventsRequest = {
   readonly endpoint?: string
   readonly sessionId: string
-  readonly content: string
+  readonly messages: AgentTranscript
   readonly signal?: AbortSignal
   readonly fetch?: typeof fetch
 }
@@ -76,7 +77,7 @@ const responseErrorMessage = (response: Response) =>
 
 const makeRequestInit = (request: StreamAgentEventsRequest) =>
   encodeJsonString(
-    { sessionId: request.sessionId, content: request.content },
+    { sessionId: request.sessionId, messages: request.messages },
     'Could not serialize agent request'
   ).pipe(
     Effect.map(body => {

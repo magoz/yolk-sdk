@@ -1,13 +1,14 @@
 import { describe, expect, it } from '@effect/vitest'
-import { AgentError, AgentStart, LLMTextDelta } from '@yolk/protocol'
-import { collectAgentEvents, streamAgentEvents } from '../src'
+import { AgentError, AgentStart, LLMTextDelta, UserMessage } from '@yolk/protocol'
+import { appendAgentMessage, collectAgentEvents, streamAgentEvents } from '../src'
 
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
   events.map(event => JSON.stringify(event)).join('\n')
 
 describe('collectAgentEvents', () => {
-  it('posts a user message and decodes ndjson events', async () => {
+  it('posts a transcript and decodes ndjson events', async () => {
     const responseEvents = [AgentStart.make({}), LLMTextDelta.make({ text: 'ok' })]
+    const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
     const requests: Array<{ readonly input: RequestInfo | URL; readonly init?: RequestInit }> = []
     const fetcher: typeof fetch = (input, init) => {
       requests.push({ input, init })
@@ -17,7 +18,7 @@ describe('collectAgentEvents', () => {
     const events = await collectAgentEvents({
       endpoint: '/api/agent',
       sessionId: 'session_1',
-      content: 'hello',
+      messages,
       fetch: fetcher
     })
 
@@ -27,7 +28,7 @@ describe('collectAgentEvents', () => {
         init: {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: 'session_1', content: 'hello' })
+          body: JSON.stringify({ sessionId: 'session_1', messages })
         }
       }
     ])
@@ -40,7 +41,7 @@ describe('collectAgentEvents', () => {
     await expect(
       collectAgentEvents({
         sessionId: 'session_1',
-        content: 'hello',
+        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
         fetch: fetcher
       })
     ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
@@ -54,7 +55,7 @@ describe('collectAgentEvents', () => {
 
     const events = await collectAgentEvents({
       sessionId: 'session_1',
-      content: 'hello',
+      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
       fetch: fetcher
     })
 
@@ -76,7 +77,11 @@ describe('collectAgentEvents', () => {
           })
         )
       )
-    const events = streamAgentEvents({ sessionId: 'session_1', content: 'hello', fetch: fetcher })
+    const events = streamAgentEvents({
+      sessionId: 'session_1',
+      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+      fetch: fetcher
+    })
     const firstEvent = await events.next()
 
     expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
