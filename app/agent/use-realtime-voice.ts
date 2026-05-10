@@ -331,40 +331,40 @@ export const useRealtimeVoice = ({
   const executeToolCall = useCallback(
     (request: VoiceToolRequest, dataChannel: RTCDataChannel) =>
       Effect.gen(function* () {
-      const call = request.realtimeCall
-      const toolCall = request.toolCall
-      yield* Effect.sync(() => {
-        emitAgentEvent(LLMToolCall.make({ call: toolCall }))
-        emitAgentEvent(ToolExecutionStart.make({ call: toolCall }))
-      })
+        const call = request.realtimeCall
+        const toolCall = request.toolCall
+        yield* Effect.sync(() => {
+          emitAgentEvent(LLMToolCall.make({ call: toolCall }))
+          emitAgentEvent(ToolExecutionStart.make({ call: toolCall }))
+        })
 
-      const payload = yield* requestToolExecution(call)
-      const decoded = decodeOpenAiRealtimeToolExecutionResponse(payload)
+        const payload = yield* requestToolExecution(call)
+        const decoded = decodeOpenAiRealtimeToolExecutionResponse(payload)
 
-      if (Option.isNone(decoded)) {
-        return yield* Effect.fail(new Error('Tool response did not include a Realtime event'))
-      }
+        if (Option.isNone(decoded)) {
+          return yield* Effect.fail(new Error('Tool response did not include a Realtime event'))
+        }
 
-      const outputEvent = decoded.value.event
+        const outputEvent = decoded.value.event
 
-      yield* Effect.sync(() => sendClientEvent(dataChannel, outputEvent))
+        yield* Effect.sync(() => sendClientEvent(dataChannel, outputEvent))
 
-      const result = ToolResult.make({
-        toolCallId: call.callId,
-        content: readOpenAiRealtimeToolOutput(outputEvent)
-      })
+        const result = ToolResult.make({
+          toolCallId: call.callId,
+          content: readOpenAiRealtimeToolOutput(outputEvent)
+        })
 
-      yield* Effect.sync(() => {
-        emitAgentEvent(
-          ToolExecutionEnd.make({
-            call: toolCall,
-            result
-          })
-        )
-      })
+        yield* Effect.sync(() => {
+          emitAgentEvent(
+            ToolExecutionEnd.make({
+              call: toolCall,
+              result
+            })
+          )
+        })
 
-      return ToolResultMessage.make({ toolCallId: result.toolCallId, content: result.content })
-    }),
+        return ToolResultMessage.make({ toolCallId: result.toolCallId, content: result.content })
+      }),
     [emitAgentEvent, sendClientEvent]
   )
 
@@ -388,93 +388,92 @@ export const useRealtimeVoice = ({
   const handleRealtimeMessage = useCallback(
     (message: MessageEvent, dataChannel: RTCDataChannel) =>
       Effect.gen(function* () {
-      if (typeof message.data !== 'string') {
-        return
-      }
-
-      const event = decodeOpenAiRealtimeServerEvent(message.data)
-
-      switch (event._tag) {
-        case 'InputAudioTranscriptionDelta':
-          yield* Effect.sync(() => {
-            inputTranscriptPendingRef.current = true
-            userDraftRef.current = `${userDraftRef.current}${event.delta}`
-            setUserDraft(userDraftRef.current)
-          })
-          return
-        case 'InputAudioTranscriptionCompleted':
-          yield* Effect.sync(() => {
-            inputTranscriptPendingRef.current = false
-            userDraftRef.current = ''
-            onDebug({
-              _tag: 'InputTranscript',
-              itemId: event.itemId,
-              transcript: event.transcript
-            })
-            setUserDraft('')
-            onUserMessage(UserMessage.make({ content: event.transcript }))
-            flushBufferedAgentEvents()
-          })
-          return
-        case 'OutputAudioTranscriptDelta':
-          yield* Effect.sync(() => {
-            assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
-            emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
-          })
-          return
-        case 'OutputAudioTranscriptDone':
-          yield* Effect.sync(() => {
-            onDebug({
-              _tag: 'OutputTranscript',
-              itemId: event.itemId,
-              responseId: event.responseId,
-              transcript: event.transcript ?? assistantDraftRef.current
-            })
-            commitAssistantTranscript(event.transcript)
-          })
-          return
-        case 'SessionConfigured':
-          yield* Effect.sync(() => onDebug(event))
-          return
-        case 'ResponseDone':
-          yield* Effect.sync(() => onDebug(event))
-          return
-        case 'FunctionCalls': {
-          const requests = event.calls.map(call => ({
-            realtimeCall: call,
-            toolCall: toolCallFromRealtime(call)
-          }))
-          const resultMessages = yield* Effect.forEach(
-            requests,
-            request => executeToolCall(request, dataChannel)
-          )
-
-          if (requests.length > 0) {
-            yield* Effect.sync(() => {
-              voiceCreatedMessagesRef.current = [
-                ...voiceCreatedMessagesRef.current,
-                AssistantAgentMessage.make({
-                  content: '',
-                  toolCalls: requests.map(request => request.toolCall)
-                }),
-                ...resultMessages
-              ]
-            })
-          }
-
-          yield* Effect.sync(() => sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent()))
+        if (typeof message.data !== 'string') {
           return
         }
-        case 'Error':
-          yield* Effect.sync(() => {
-            setStatus('error')
-            onError(event.message)
-          })
-          return
-        case 'Ignored':
-          return
-      }
-    }),
+
+        const event = decodeOpenAiRealtimeServerEvent(message.data)
+
+        switch (event._tag) {
+          case 'InputAudioTranscriptionDelta':
+            yield* Effect.sync(() => {
+              inputTranscriptPendingRef.current = true
+              userDraftRef.current = `${userDraftRef.current}${event.delta}`
+              setUserDraft(userDraftRef.current)
+            })
+            return
+          case 'InputAudioTranscriptionCompleted':
+            yield* Effect.sync(() => {
+              inputTranscriptPendingRef.current = false
+              userDraftRef.current = ''
+              onDebug({
+                _tag: 'InputTranscript',
+                itemId: event.itemId,
+                transcript: event.transcript
+              })
+              setUserDraft('')
+              onUserMessage(UserMessage.make({ content: event.transcript }))
+              flushBufferedAgentEvents()
+            })
+            return
+          case 'OutputAudioTranscriptDelta':
+            yield* Effect.sync(() => {
+              assistantDraftRef.current = `${assistantDraftRef.current}${event.delta}`
+              emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
+            })
+            return
+          case 'OutputAudioTranscriptDone':
+            yield* Effect.sync(() => {
+              onDebug({
+                _tag: 'OutputTranscript',
+                itemId: event.itemId,
+                responseId: event.responseId,
+                transcript: event.transcript ?? assistantDraftRef.current
+              })
+              commitAssistantTranscript(event.transcript)
+            })
+            return
+          case 'SessionConfigured':
+            yield* Effect.sync(() => onDebug(event))
+            return
+          case 'ResponseDone':
+            yield* Effect.sync(() => onDebug(event))
+            return
+          case 'FunctionCalls': {
+            const requests = event.calls.map(call => ({
+              realtimeCall: call,
+              toolCall: toolCallFromRealtime(call)
+            }))
+            const resultMessages = yield* Effect.forEach(requests, request =>
+              executeToolCall(request, dataChannel)
+            )
+
+            if (requests.length > 0) {
+              yield* Effect.sync(() => {
+                voiceCreatedMessagesRef.current = [
+                  ...voiceCreatedMessagesRef.current,
+                  AssistantAgentMessage.make({
+                    content: '',
+                    toolCalls: requests.map(request => request.toolCall)
+                  }),
+                  ...resultMessages
+                ]
+              })
+            }
+
+            yield* Effect.sync(() => sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent()))
+            return
+          }
+          case 'Error':
+            yield* Effect.sync(() => {
+              setStatus('error')
+              onError(event.message)
+            })
+            return
+          case 'Ignored':
+            return
+        }
+      }),
     [
       commitAssistantTranscript,
       emitAgentEvent,
