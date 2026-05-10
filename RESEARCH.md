@@ -6,37 +6,37 @@ Core package boundaries decided. Product-layer details still open.
 
 ### Decisions summary
 
-| Layer | Decision |
-|---|---|
-| Protocol | `packages/protocol/` shared schemas, events, wire types. No domain. |
-| Agent loop | `packages/agent-loop/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
-| Agent runtime | `packages/agent-runtime/` reusable session/runtime shell over agent-loop. Generic over opaque `Ctx`. |
-| Client | `packages/client/` browser protocol SDK + event reducer. Does not run agent-loop by default. |
-| App layer | Project-specific Next.js/Worker layer: auth, users, teams, integrations, OAuth, billing, UI. |
-| Knowledge store | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors). |
-| Knowledge write | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2). |
-| Knowledge read | Agentic search — RAG as index, agent reads full files for comprehension. No auto-RAG. |
-| Embeddings | Workers AI `bge-base-en-v1.5` (768d). DIY chunking + embedding pipeline. |
-| Chunking | Recursive (paragraph → sentence → token). ~300 tokens, 15% overlap. |
-| DO-to-DO | `getAgentByName()` → typed RPC. Agent DO ↔ Knowledge DO. |
-| DO → external | `fetch()` to Next.js API with service token. |
-| Auth | JWT in WS query params → verify in `onConnect()`. Service token for DO → API. |
-| Search | Hybrid: FTS5 (text, local) + Vectorize (semantic, ~50ms). |
-| Always-on context | `/.context/org.md` + `/.context/people/{userId}.md` auto-injected. |
+| Layer             | Decision                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------- |
+| Protocol          | `packages/protocol/` shared schemas, events, wire types. No domain.                                  |
+| Agent loop        | `packages/agent-loop/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
+| Agent runtime     | `packages/agent-runtime/` reusable session/runtime shell over agent-loop. Generic over opaque `Ctx`. |
+| Client            | `packages/client/` browser protocol SDK + event reducer. Does not run agent-loop by default.         |
+| App layer         | Project-specific Next.js/Worker layer: auth, users, teams, integrations, OAuth, billing, UI.         |
+| Knowledge store   | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors).          |
+| Knowledge write   | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2).                              |
+| Knowledge read    | Agentic search — RAG as index, agent reads full files for comprehension. No auto-RAG.                |
+| Embeddings        | Workers AI `bge-base-en-v1.5` (768d). DIY chunking + embedding pipeline.                             |
+| Chunking          | Recursive (paragraph → sentence → token). ~300 tokens, 15% overlap.                                  |
+| DO-to-DO          | `getAgentByName()` → typed RPC. Agent DO ↔ Knowledge DO.                                             |
+| DO → external     | `fetch()` to Next.js API with service token.                                                         |
+| Auth              | JWT in WS query params → verify in `onConnect()`. Service token for DO → API.                        |
+| Search            | Hybrid: FTS5 (text, local) + Vectorize (semantic, ~50ms).                                            |
+| Always-on context | `/.context/org.md` + `/.context/people/{userId}.md` auto-injected.                                   |
 
 ### Rejected (and why)
 
-| Rejected | Why |
-|---|---|
-| Pi SDK as runtime | Useful reference, but runtime/agent-loop should be ours and reusable |
-| Think (`@cloudflare/think`) | Too opinionated — use lower-level `Agent` class |
-| Workspace (`@cloudflare/shell`) | Preview/experimental — DIY on GA primitives |
-| Cloudflare Artifacts | Replaced by R2 + DO SQLite |
-| Supermemory | Proprietary engine, can't self-host |
-| QMD | Needs GGUF models, doesn't run on Workers |
-| AI Search | 4MB file limit, 5 metadata fields, beta |
-| Auto-RAG | Agent decides when to search |
-| pgvector | Latency from DO, connection management friction |
+| Rejected                        | Why                                                                  |
+| ------------------------------- | -------------------------------------------------------------------- |
+| Pi SDK as runtime               | Useful reference, but runtime/agent-loop should be ours and reusable |
+| Think (`@cloudflare/think`)     | Too opinionated — use lower-level `Agent` class                      |
+| Workspace (`@cloudflare/shell`) | Preview/experimental — DIY on GA primitives                          |
+| Cloudflare Artifacts            | Replaced by R2 + DO SQLite                                           |
+| Supermemory                     | Proprietary engine, can't self-host                                  |
+| QMD                             | Needs GGUF models, doesn't run on Workers                            |
+| AI Search                       | 4MB file limit, 5 metadata fields, beta                              |
+| Auto-RAG                        | Agent decides when to search                                         |
+| pgvector                        | Latency from DO, connection management friction                      |
 
 ### Decided but not in detailed sections
 
@@ -52,6 +52,7 @@ Researched OpenAI Agents SDK, LangChain/LangGraph, Vercel AI SDK, MCP, AG-UI, Au
 Decision: name the low-level package `@yolk/agent-loop`.
 
 Why:
+
 - OpenAI and LangChain use **agent loop** for the model/tool iteration we implement.
 - LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk/agent-runtime`.
 - LangChain and Pydantic use **harness** for more opinionated, batteries-included layers with built-in tools, prompts, context engineering, subagents, or capability libraries. Our package intentionally excludes those.
@@ -59,13 +60,13 @@ Why:
 
 Naming map:
 
-| Industry term | Yolk package | Notes |
-|---|---|---|
-| Protocol | `@yolk/protocol` | Wire/event/schema contract. |
-| Agent loop | `@yolk/agent-loop` | Stateless LLM/tool loop. |
-| Agent runtime | `@yolk/agent-runtime` | Sessions, persistence, adapters, resumable runs. |
-| Client SDK | `@yolk/client` | Browser protocol + reducer. |
-| Harness | Reserved | Future opinionated batteries-included package, if needed. |
+| Industry term | Yolk package          | Notes                                                     |
+| ------------- | --------------------- | --------------------------------------------------------- |
+| Protocol      | `@yolk/protocol`      | Wire/event/schema contract.                               |
+| Agent loop    | `@yolk/agent-loop`    | Stateless LLM/tool loop.                                  |
+| Agent runtime | `@yolk/agent-runtime` | Sessions, persistence, adapters, resumable runs.          |
+| Client SDK    | `@yolk/client`        | Browser protocol + reducer.                               |
+| Harness       | Reserved              | Future opinionated batteries-included package, if needed. |
 
 ### Not yet discussed
 
@@ -87,12 +88,12 @@ Yolk is the platform that makes this real for companies that aren't Block.
 
 ### Block's Four Components → Yolk Equivalents
 
-| Block concept | Yolk equivalent |
-|---|---|
+| Block concept                                  | Yolk equivalent                                                              |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
 | **Capabilities** (atomic financial primitives) | Integrations: Gmail, Calendar, Notion, Todoist, LinkedIn, Telegram, R2, etc. |
-| **World model** (company + customer) | Knowledge store — R2 files + DO SQLite + Vectorize, app-defined scope |
-| **Intelligence layer** (composes capabilities) | Yolk agent runtime + agent-loop with access to context/tools |
-| **Interfaces** (delivery surfaces) | Web app, scheduled agents, notifications |
+| **World model** (company + customer)           | Knowledge store — R2 files + DO SQLite + Vectorize, app-defined scope        |
+| **Intelligence layer** (composes capabilities) | Yolk agent runtime + agent-loop with access to context/tools                 |
+| **Interfaces** (delivery surfaces)             | Web app, scheduled agents, notifications                                     |
 
 ### Three Roles (from Block)
 
@@ -144,21 +145,22 @@ pi-mono/
 
 ### Pi vs OpenCode Comparison
 
-| Aspect | OpenCode | Pi |
-|---|---|---|
-| MCP | Built-in, central to VLTRA | None by design — skills + CLI tools |
-| Web UI | Built-in web server (iframe) | No built-in server; web-ui package runs Agent in-browser |
-| Extensibility | Plugins (JS modules, auth hooks) | Extensions (TypeScript, full lifecycle events) |
-| SDK | HTTP server + API | Rich Node.js SDK (`createAgentSession`) |
-| RPC | JSON over HTTP | JSON over stdin/stdout |
-| Sessions | Flat list | Tree-structured (branching, forking) |
-| Skills | SKILL.md | SKILL.md (same convention) |
-| Context | AGENTS.md | AGENTS.md (same convention) |
-| Providers | Anthropic/OpenAI via plugins | 15+ built-in, custom via extensions |
+| Aspect        | OpenCode                         | Pi                                                       |
+| ------------- | -------------------------------- | -------------------------------------------------------- |
+| MCP           | Built-in, central to VLTRA       | None by design — skills + CLI tools                      |
+| Web UI        | Built-in web server (iframe)     | No built-in server; web-ui package runs Agent in-browser |
+| Extensibility | Plugins (JS modules, auth hooks) | Extensions (TypeScript, full lifecycle events)           |
+| SDK           | HTTP server + API                | Rich Node.js SDK (`createAgentSession`)                  |
+| RPC           | JSON over HTTP                   | JSON over stdin/stdout                                   |
+| Sessions      | Flat list                        | Tree-structured (branching, forking)                     |
+| Skills        | SKILL.md                         | SKILL.md (same convention)                               |
+| Context       | AGENTS.md                        | AGENTS.md (same convention)                              |
+| Providers     | Anthropic/OpenAI via plugins     | 15+ built-in, custom via extensions                      |
 
 ### Pi Has No HTTP/WebSocket Server
 
 Pi's three modes:
+
 1. **Interactive** — TUI
 2. **Print/JSON** — one-shot
 3. **RPC** — JSONL over stdin/stdout (designed for `spawn()` with piped stdio)
@@ -193,19 +195,24 @@ Pi's power comes from filesystem tools (`read`, `write`, `edit`, `bash`). Runnin
 ### Pi SDK Key APIs
 
 ```typescript
-import { createAgentSession, SessionManager, AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent'
+import {
+  createAgentSession,
+  SessionManager,
+  AuthStorage,
+  ModelRegistry
+} from '@mariozechner/pi-coding-agent'
 
 // Create session
 const { session } = await createAgentSession({
   cwd: '/workspace',
-  sessionManager: SessionManager.create('/workspace'),  // persists to disk
+  sessionManager: SessionManager.create('/workspace'), // persists to disk
   customTools: [myTool1, myTool2],
   authStorage,
-  modelRegistry,
+  modelRegistry
 })
 
 // Subscribe to events
-session.subscribe((event) => {
+session.subscribe(event => {
   // event.type: 'agent_start' | 'agent_end' | 'turn_start' | 'turn_end'
   //           | 'message_start' | 'message_update' | 'message_end'
   //           | 'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end'
@@ -222,6 +229,7 @@ session.followUp('After you finish, also do X')
 ```
 
 **Custom tools:**
+
 ```typescript
 import { defineTool } from '@mariozechner/pi-coding-agent'
 import { Type } from 'typebox'
@@ -231,12 +239,12 @@ const myTool = defineTool({
   label: 'My Tool',
   description: 'Does something',
   parameters: Type.Object({
-    input: Type.String({ description: 'Input value' }),
+    input: Type.String({ description: 'Input value' })
   }),
   execute: async (_toolCallId, params) => ({
     content: [{ type: 'text', text: `Result: ${params.input}` }],
-    details: {},
-  }),
+    details: {}
+  })
 })
 ```
 
@@ -253,7 +261,7 @@ const myTool = defineTool({
 pi.on('before_agent_start', async (event, ctx) => {
   return {
     message: { customType: 'context', content: relevantDocs, display: false },
-    systemPrompt: event.systemPrompt + '\nAdditional instructions...',
+    systemPrompt: event.systemPrompt + '\nAdditional instructions...'
   }
 })
 
@@ -382,6 +390,7 @@ DELETE /repos/:name
 ### Semantic Search (Future)
 
 Git doesn't do semantic search. Options for later:
+
 - **v1**: Pi has `grep` + `read`. For small knowledge bases, enough.
 - **v2**: Cloudflare Vectorize (native to Cloudflare) or pgvector in existing Postgres.
 - Pi extension adds a `knowledge_search` custom tool backed by embedding index.
@@ -439,48 +448,48 @@ Git doesn't do semantic search. Options for later:
 
 ### What Carries Over from VLTRA
 
-| Component | Status |
-|---|---|
-| Auth (better-auth + OTP) | As-is |
-| Teams / members / invitations | As-is |
-| Integration OAuth (Google, Notion, Figma, LinkedIn, Telegram, Todoist) | As-is |
-| Encryption service (AES-256-GCM) | As-is |
-| QStash scheduling (recurring + one-time) | As-is |
-| Activity / Telegram notifications | As-is |
-| Effect-TS service architecture | As-is |
-| Drizzle ORM + Postgres (Neon) | As-is (minus git-related tables) |
-| Vercel Sandbox service | Adapted (Pi instead of OpenCode) |
-| UI components (Base UI + Tailwind) | App chrome reused; session UI rebuilt |
-| Settings (key-value) | As-is |
+| Component                                                              | Status                                |
+| ---------------------------------------------------------------------- | ------------------------------------- |
+| Auth (better-auth + OTP)                                               | As-is                                 |
+| Teams / members / invitations                                          | As-is                                 |
+| Integration OAuth (Google, Notion, Figma, LinkedIn, Telegram, Todoist) | As-is                                 |
+| Encryption service (AES-256-GCM)                                       | As-is                                 |
+| QStash scheduling (recurring + one-time)                               | As-is                                 |
+| Activity / Telegram notifications                                      | As-is                                 |
+| Effect-TS service architecture                                         | As-is                                 |
+| Drizzle ORM + Postgres (Neon)                                          | As-is (minus git-related tables)      |
+| Vercel Sandbox service                                                 | Adapted (Pi instead of OpenCode)      |
+| UI components (Base UI + Tailwind)                                     | App chrome reused; session UI rebuilt |
+| Settings (key-value)                                                   | As-is                                 |
 
 ### What's Eliminated
 
-| VLTRA component | Status |
-|---|---|
-| vltra-cli (Effect CLI for sandbox execution) | Gone |
-| OpenCode server management + health checks | Gone — Pi SDK is in-process |
-| Auth plugins (vltra-auth.mjs, vltra-codex-auth.mjs) | Gone — `AuthStorage.setRuntimeApiKey()` |
-| MCP gateway (JSON-RPC transport) | Gone — Pi custom tools call server API directly |
-| iframe URL construction | Gone — WebSocket event stream |
-| PRD loop orchestration | Gone — no PRDs |
-| PRD state machine (draft → creating → generating → loop) | Gone |
-| PRD webhooks (md_ready, json_ready, loop.*) | Gone |
-| GitHub service (repo creation, PRs, branches) | Gone — Artifacts REST API |
-| opencode.json config generation | Gone — Pi configured via SDK |
-| vltra-cli build step | Gone — Pi extensions are just TypeScript |
-| Branch management | Gone |
-| PR creation/merge | Gone |
-| `repoOwner`/`repoName` on project table | Replaced with `artifactsRepoId`/`artifactsRemote` |
+| VLTRA component                                          | Status                                            |
+| -------------------------------------------------------- | ------------------------------------------------- |
+| vltra-cli (Effect CLI for sandbox execution)             | Gone                                              |
+| OpenCode server management + health checks               | Gone — Pi SDK is in-process                       |
+| Auth plugins (vltra-auth.mjs, vltra-codex-auth.mjs)      | Gone — `AuthStorage.setRuntimeApiKey()`           |
+| MCP gateway (JSON-RPC transport)                         | Gone — Pi custom tools call server API directly   |
+| iframe URL construction                                  | Gone — WebSocket event stream                     |
+| PRD loop orchestration                                   | Gone — no PRDs                                    |
+| PRD state machine (draft → creating → generating → loop) | Gone                                              |
+| PRD webhooks (md_ready, json_ready, loop.\*)             | Gone                                              |
+| GitHub service (repo creation, PRs, branches)            | Gone — Artifacts REST API                         |
+| opencode.json config generation                          | Gone — Pi configured via SDK                      |
+| vltra-cli build step                                     | Gone — Pi extensions are just TypeScript          |
+| Branch management                                        | Gone                                              |
+| PR creation/merge                                        | Gone                                              |
+| `repoOwner`/`repoName` on project table                  | Replaced with `artifactsRepoId`/`artifactsRemote` |
 
 ### What's New
 
-| Component | Description |
-|---|---|
-| Cloudflare Artifacts service (Effect) | REST API client: create/fork/delete repos, manage tokens |
-| Pi sandbox server | Thin HTTP/WS server in sandbox using Pi SDK |
-| Pi extensions (auto-sync, auth, context) | TypeScript modules for Artifacts sync, API key injection, RAG |
-| Knowledge browser UI | React UI to browse/edit files from Artifacts |
-| Session UI (React) | Custom React components consuming Pi event stream via WebSocket |
+| Component                                | Description                                                     |
+| ---------------------------------------- | --------------------------------------------------------------- |
+| Cloudflare Artifacts service (Effect)    | REST API client: create/fork/delete repos, manage tokens        |
+| Pi sandbox server                        | Thin HTTP/WS server in sandbox using Pi SDK                     |
+| Pi extensions (auto-sync, auth, context) | TypeScript modules for Artifacts sync, API key injection, RAG   |
+| Knowledge browser UI                     | React UI to browse/edit files from Artifacts                    |
+| Session UI (React)                       | Custom React components consuming Pi event stream via WebSocket |
 
 ---
 
@@ -508,6 +517,7 @@ Git doesn't do semantic search. Options for later:
 Built with [mini-lit](https://github.com/badlogic/mini-lit) (Lit web components) + Tailwind CSS v4.
 
 **Key components:**
+
 - `ChatPanel` — top-level: wraps AgentInterface + ArtifactsPanel
 - `AgentInterface` — chat UI: message list, input, streaming, model selector
 - `MessageList` — renders message history
@@ -518,10 +528,12 @@ Built with [mini-lit](https://github.com/badlogic/mini-lit) (Lit web components)
 - `SessionListDialog` — session history browser
 
 **Storage layer:**
+
 - `IndexedDBStorageBackend` — browser persistence
 - `SettingsStore`, `ProviderKeysStore`, `SessionsStore`, `CustomProvidersStore`
 
 **Key exports:**
+
 - `ChatPanel`, `AgentInterface` — UI components
 - `AppStorage`, `setAppStorage` — storage setup
 - `registerToolRenderer`, `registerMessageRenderer` — custom rendering
@@ -535,21 +547,21 @@ Built with [mini-lit](https://github.com/badlogic/mini-lit) (Lit web components)
 
 ## Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js (App Router) |
-| Language | TypeScript |
-| Service layer | Effect-TS |
-| Database | Postgres (Neon) + Drizzle ORM |
-| Auth | better-auth + OTP email |
-| Knowledge store | Cloudflare Artifacts (Git-compatible) |
-| Agent runtime | Pi SDK (`@mariozechner/pi-coding-agent`) in Vercel Sandbox |
-| Agent ↔ browser | WebSocket / SSE (Effect-based) |
-| Scheduling | QStash (Upstash) |
-| Styling | Tailwind CSS v4 |
-| UI primitives | Base UI (`@base-ui/react`) |
-| Semantic search | Cloudflare Vectorize or pgvector (future) |
-| Package manager | pnpm |
+| Layer           | Technology                                                 |
+| --------------- | ---------------------------------------------------------- |
+| Framework       | Next.js (App Router)                                       |
+| Language        | TypeScript                                                 |
+| Service layer   | Effect-TS                                                  |
+| Database        | Postgres (Neon) + Drizzle ORM                              |
+| Auth            | better-auth + OTP email                                    |
+| Knowledge store | Cloudflare Artifacts (Git-compatible)                      |
+| Agent runtime   | Pi SDK (`@mariozechner/pi-coding-agent`) in Vercel Sandbox |
+| Agent ↔ browser | WebSocket / SSE (Effect-based)                             |
+| Scheduling      | QStash (Upstash)                                           |
+| Styling         | Tailwind CSS v4                                            |
+| UI primitives   | Base UI (`@base-ui/react`)                                 |
+| Semantic search | Cloudflare Vectorize or pgvector (future)                  |
+| Package manager | pnpm                                                       |
 
 ---
 
@@ -562,6 +574,7 @@ Built with [mini-lit](https://github.com/badlogic/mini-lit) (Lit web components)
 Git-compatible versioned file storage. Managed, durable, REST API + Git protocol.
 
 **Pros:**
+
 - Just files, no schema
 - Git semantics (versioning, history, branching, forking)
 - Durable (replicated across data centers)
@@ -571,6 +584,7 @@ Git-compatible versioned file storage. Managed, durable, REST API + Git protocol
 - Git notes for agent metadata
 
 **Cons:**
+
 - **Repo is all-or-nothing** — clone everything, even if agent needs 3 files
 - **Concurrent writes** — multiple agents writing to same repo = merge conflicts
 - **No semantic search** — need separate embedding index (Cloudflare Vectorize or pgvector)
@@ -581,6 +595,7 @@ Git-compatible versioned file storage. Managed, durable, REST API + Git protocol
 **Best for:** Projects where Git semantics (versioning, branching, diffing) are important. Less ideal as a "world model" for an org.
 
 **Links:**
+
 - [Cloudflare Artifacts docs](https://developers.cloudflare.com/artifacts/)
 - [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/)
 - [Best practices](https://developers.cloudflare.com/artifacts/concepts/best-practices/)
@@ -594,6 +609,7 @@ Git-compatible versioned file storage. Managed, durable, REST API + Git protocol
 Hosted memory/context engine. Not just storage — extracts facts, builds profiles, handles contradictions, auto-forgets expired info. #1 on LongMemEval, LoCoMo, ConvoMem benchmarks.
 
 **Core API:**
+
 ```
 POST /v3/documents          → add content (text, URL, file)
 POST /v3/search             → hybrid search (RAG + memory)
@@ -602,6 +618,7 @@ POST /v3/documents/upload   → upload files (PDF, images, video, code)
 ```
 
 **Key features:**
+
 - **Memory engine** — extracts facts from content, tracks updates, resolves contradictions, auto-forgets expired info
 - **User profiles** — auto-maintained static facts + dynamic context per user. One API call, ~50ms.
 - **Hybrid search** — RAG + memory in single query. Knowledge base + personalized context together.
@@ -614,6 +631,7 @@ POST /v3/documents/upload   → upload files (PDF, images, video, code)
 **SMFS (Supermemory Filesystem):**
 
 The killer feature for Yolk. Mounts Supermemory as a filesystem in the sandbox:
+
 ```
 Vercel Sandbox
 └── /workspace/              ← SMFS mount
@@ -627,6 +645,7 @@ Pi's native file tools work without custom tools. No sync layer needed.
 Also available as a bash tool wrapper for serverless (`@supermemory/bash`).
 
 **User profiles solve "the system knows the user":**
+
 ```typescript
 const { profile } = await client.profile({ containerTag: 'user-alice' })
 // profile.static  → ["Head of Product", "Prefers async"]
@@ -636,6 +655,7 @@ const { profile } = await client.profile({ containerTag: 'user-alice' })
 Inject into Pi system prompt. Agent knows who it's talking to. Gets smarter over time.
 
 **Container tag structure for orgs:**
+
 ```
 containerTag: "org-acme"              ← org-wide knowledge
 containerTag: "org-acme.project-q3"   ← project-scoped
@@ -644,14 +664,15 @@ containerTag: "org-acme.user-alice"   ← Alice's context
 
 **Complementary with VLTRA integrations (not replacement):**
 
-| Supermemory (remember) | Yolk integrations (act) |
-|---|---|
-| Gmail → indexes into memory | Gmail → draft, send |
-| Notion → syncs into memory | Notion → create page, update |
-| Drive → syncs into memory | Calendar → CRUD events |
-| Web → crawls into memory | Telegram → send messages |
+| Supermemory (remember)      | Yolk integrations (act)      |
+| --------------------------- | ---------------------------- |
+| Gmail → indexes into memory | Gmail → draft, send          |
+| Notion → syncs into memory  | Notion → create page, update |
+| Drive → syncs into memory   | Calendar → CRUD events       |
+| Web → crawls into memory    | Telegram → send messages     |
 
 **Pricing:**
+
 - Free: 1M tokens/mo, 10K searches
 - Pro: $19/mo, 3M tokens, 100K searches
 - Scale: $399/mo, 80M tokens, 20M searches
@@ -659,6 +680,7 @@ containerTag: "org-acme.user-alice"   ← Alice's context
 - Overage: $0.01/1K tokens, $0.10/1K queries
 
 **Concerns:**
+
 - SMFS maturity — new, need to verify Vercel Sandbox compatibility
 - Vendor lock-in — all knowledge in hosted service
 - Pricing at scale — model usage for multi-agent orgs
@@ -666,6 +688,7 @@ containerTag: "org-acme.user-alice"   ← Alice's context
 - Latency — SMFS operations go through API vs local filesystem
 
 **SDK:**
+
 ```typescript
 import Supermemory from 'supermemory'
 const client = new Supermemory()
@@ -673,14 +696,14 @@ const client = new Supermemory()
 // Store
 await client.add({
   content: 'Market analysis shows 30% growth in Q3',
-  containerTag: 'org-acme.project-q3',
+  containerTag: 'org-acme.project-q3'
 })
 
 // Search
 const results = await client.search.memories({
   q: 'Q3 market trends',
   containerTag: 'org-acme',
-  searchMode: 'hybrid',
+  searchMode: 'hybrid'
 })
 
 // Profile
@@ -690,6 +713,7 @@ const { profile } = await client.profile({ containerTag: 'org-acme.user-alice' }
 **Framework integrations:** Vercel AI SDK, LangChain, LangGraph, OpenAI Agents SDK, Mastra, n8n
 
 **Links:**
+
 - [supermemory.ai](https://supermemory.ai)
 - [Docs](https://docs.supermemory.ai)
 - [GitHub](https://github.com/supermemoryai/supermemory)
@@ -711,23 +735,23 @@ Announced April 15, 2026. Next-gen Agents SDK from Cloudflare. An opinionated ba
 
 **What it provides (all built-in):**
 
-| Feature | Details |
-|---|---|
-| Agent runtime | Agentic loop: streamText → tool calls → iterate → persist |
-| Streaming | WebSocket, token-by-token to any client |
-| React client | `useAgentChat()` — drop-in chat UI hook |
-| Sessions | Tree-structured messages, forking, compaction, FTS5 search |
-| Persistent memory | Context blocks — structured system prompt sections the model reads/updates, survives hibernation |
-| Durable filesystem | Workspace (SQLite + R2) — read, write, edit, search, grep, diff via `@cloudflare/shell` |
-| Zero idle cost | Durable Objects hibernate — $0 when agent isn't active |
-| Crash recovery | Fibers — checkpointing, automatic keepalive, recovery |
-| Sub-agents | Facets — isolated child agents with own SQLite + typed RPC |
-| Code execution | Dynamic Workers — sandboxed V8 isolates, ms startup, capability-based security |
-| npm at runtime | `@cloudflare/worker-bundler` — LLM writes `import { z } from "zod"` and it works |
-| Browser | Headless Chrome via Browser Run |
-| Full sandbox | Cloudflare Sandbox — git, compilers, test runners (Tier 4) |
-| Self-authored extensions | Agent writes its own TypeScript tools at runtime |
-| Scheduling | DO Alarms + Fibers for proactive agents |
+| Feature                  | Details                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| Agent runtime            | Agentic loop: streamText → tool calls → iterate → persist                                        |
+| Streaming                | WebSocket, token-by-token to any client                                                          |
+| React client             | `useAgentChat()` — drop-in chat UI hook                                                          |
+| Sessions                 | Tree-structured messages, forking, compaction, FTS5 search                                       |
+| Persistent memory        | Context blocks — structured system prompt sections the model reads/updates, survives hibernation |
+| Durable filesystem       | Workspace (SQLite + R2) — read, write, edit, search, grep, diff via `@cloudflare/shell`          |
+| Zero idle cost           | Durable Objects hibernate — $0 when agent isn't active                                           |
+| Crash recovery           | Fibers — checkpointing, automatic keepalive, recovery                                            |
+| Sub-agents               | Facets — isolated child agents with own SQLite + typed RPC                                       |
+| Code execution           | Dynamic Workers — sandboxed V8 isolates, ms startup, capability-based security                   |
+| npm at runtime           | `@cloudflare/worker-bundler` — LLM writes `import { z } from "zod"` and it works                 |
+| Browser                  | Headless Chrome via Browser Run                                                                  |
+| Full sandbox             | Cloudflare Sandbox — git, compilers, test runners (Tier 4)                                       |
+| Self-authored extensions | Agent writes its own TypeScript tools at runtime                                                 |
+| Scheduling               | DO Alarms + Fibers for proactive agents                                                          |
 
 **The execution ladder (agent escalates as needed):**
 
@@ -742,13 +766,14 @@ Tier 4: + Sandbox       — full OS (git, npm test, cargo build). Cloudflare San
 Key: "Agent should be useful at Tier 0 alone. Each tier is additive."
 
 **Minimal example:**
+
 ```typescript
-import { Think } from "@cloudflare/think"
-import { createWorkersAI } from "workers-ai-provider"
+import { Think } from '@cloudflare/think'
+import { createWorkersAI } from 'workers-ai-provider'
 
 export class MyAgent extends Think<Env> {
   getModel() {
-    return createWorkersAI({ binding: this.env.AI })("@cf/moonshotai/kimi-k2.5")
+    return createWorkersAI({ binding: this.env.AI })('@cf/moonshotai/kimi-k2.5')
   }
 }
 ```
@@ -756,12 +781,14 @@ export class MyAgent extends Think<Env> {
 That gives you: streaming, persistence, abort/cancel, error handling, resumable streams, workspace filesystem.
 
 **React client:**
+
 ```typescript
-const agent = useAgent({ agent: "MyAgent" })
+const agent = useAgent({ agent: 'MyAgent' })
 const { messages, sendMessage, status } = useAgentChat({ agent })
 ```
 
 **Persistent memory (context blocks):**
+
 ```typescript
 configureSession(session: Session) {
   return session
@@ -779,38 +806,37 @@ configureSession(session: Session) {
 Model sees context blocks in system prompt, can update them via `set_context` tool. Persists across hibernation. Non-destructive compaction for long conversations.
 
 **Sub-agents:**
+
 ```typescript
-const researcher = await this.subAgent(ResearchAgent, "research")
-const reviewer = await this.subAgent(ReviewAgent, "review")
-const [research, review] = await Promise.all([
-  researcher.search(task),
-  reviewer.analyze(task)
-])
+const researcher = await this.subAgent(ResearchAgent, 'research')
+const reviewer = await this.subAgent(ReviewAgent, 'review')
+const [research, review] = await Promise.all([researcher.search(task), reviewer.analyze(task)])
 ```
 
 Each child gets own SQLite, conversation tree, memory, tools, model.
 
 **Why this could replace Pi + Vercel Sandbox:**
 
-| Aspect | Pi + Vercel Sandbox | Cloudflare Think |
-|---|---|---|
-| Agent runtime | Pi SDK in sandbox process | Think on Durable Objects |
-| Cost when idle | Sandbox costs (even paused) | Zero (hibernated) |
-| Persistence | Must manage (sandbox FS, ephemeral) | Built-in (SQLite + R2, durable) |
-| Streaming to browser | Must build WebSocket bridge | Built-in WebSocket |
-| Sessions | Must manage persistence | Built-in tree-structured + FTS5 |
-| Memory | Must build | Context blocks built-in |
-| Crash recovery | Must handle | Fibers + checkpointing |
-| Sub-agents | Must build | Facets built-in |
-| Workspace/Files | Sandbox FS (lost on destroy) | Durable FS (survives restarts) |
-| React client | Must build | `useAgentChat()` built-in |
-| Search | Must build | FTS5 built-in |
-| Extensions | Pi extensions (TS in sandbox) | Self-authored (Dynamic Workers) |
-| Scheduling | QStash (external) | DO Alarms (built-in) |
+| Aspect               | Pi + Vercel Sandbox                 | Cloudflare Think                |
+| -------------------- | ----------------------------------- | ------------------------------- |
+| Agent runtime        | Pi SDK in sandbox process           | Think on Durable Objects        |
+| Cost when idle       | Sandbox costs (even paused)         | Zero (hibernated)               |
+| Persistence          | Must manage (sandbox FS, ephemeral) | Built-in (SQLite + R2, durable) |
+| Streaming to browser | Must build WebSocket bridge         | Built-in WebSocket              |
+| Sessions             | Must manage persistence             | Built-in tree-structured + FTS5 |
+| Memory               | Must build                          | Context blocks built-in         |
+| Crash recovery       | Must handle                         | Fibers + checkpointing          |
+| Sub-agents           | Must build                          | Facets built-in                 |
+| Workspace/Files      | Sandbox FS (lost on destroy)        | Durable FS (survives restarts)  |
+| React client         | Must build                          | `useAgentChat()` built-in       |
+| Search               | Must build                          | FTS5 built-in                   |
+| Extensions           | Pi extensions (TS in sandbox)       | Self-authored (Dynamic Workers) |
+| Scheduling           | QStash (external)                   | DO Alarms (built-in)            |
 
 **The Workspace IS the knowledge store.** Tier 0 gives you a durable virtual filesystem backed by SQLite + R2. Files survive restarts, hibernation, deploys. Read, write, edit, search, grep, diff — all built in via `@cloudflare/shell`. No separate knowledge store needed.
 
 **What you'd give up vs Pi:**
+
 - Pi's 15+ provider support (Think uses AI Gateway or BYOM)
 - Pi's extension ecosystem / packages
 - Pi's AGENTS.md / skills conventions
@@ -819,6 +845,7 @@ Each child gets own SQLite, conversation tree, memory, tools, model.
 - Effect-TS on the server? (Think is Cloudflare Workers, not Next.js — though your control plane could still be Next.js + Effect)
 
 **What you'd gain:**
+
 - Zero idle cost (huge at scale — Block's "one agent per customer")
 - Built-in everything (streaming, sessions, memory, filesystem, search, scheduling)
 - Durable by default (crash recovery, hibernation, persistent state)
@@ -828,6 +855,7 @@ Each child gets own SQLite, conversation tree, memory, tools, model.
 - The execution ladder (escalate from workspace to full sandbox as needed)
 
 **Architecture with Think:**
+
 ```
 ┌────────────────────────────┐
 │ Next.js (Effect-TS)        │  ← control plane (auth, teams, integrations, OAuth)
@@ -849,6 +877,7 @@ Each child gets own SQLite, conversation tree, memory, tools, model.
 ```
 
 **Concerns:**
+
 - Project Think is "preview" / experimental — APIs may change
 - Cloudflare lock-in (deeper than Vercel)
 - Think vs Pi: Think is younger, less proven, no community yet
@@ -856,12 +885,14 @@ Each child gets own SQLite, conversation tree, memory, tools, model.
 - Need to verify: can Think agents call external APIs (your Next.js server) for integration tools?
 
 **Pricing:**
+
 - Durable Objects: $0.15/million requests, $0.001/GB-hour storage
 - Workers AI: pay-per-token or free tier
 - R2: $0.015/GB-month
 - Zero when hibernated
 
 **Links:**
+
 - [Blog post](https://blog.cloudflare.com/project-think/)
 - [Docs](https://github.com/cloudflare/agents/blob/main/docs/think/index.md)
 - [Example](https://github.com/cloudflare/agents/tree/main/examples/assistant)
@@ -882,6 +913,7 @@ Local-first search engine by Tobi Lütke. BM25 + vector + LLM re-ranking, all on
 **What it doesn't do:** Storage, persistence, memory extraction, user profiles, connectors. It's a search layer, not a knowledge store.
 
 **Why not a fit:**
+
 - Doesn't solve persistence (where files live)
 - GGUF models need ~2GB download per sandbox spawn
 - Index must be rebuilt each sandbox spawn (not persistent)
@@ -891,6 +923,7 @@ Local-first search engine by Tobi Lütke. BM25 + vector + LLM re-ranking, all on
 **Could complement other storage** as a local search accelerator, but adds complexity without solving the core problem.
 
 **Links:**
+
 - [GitHub](https://github.com/tobi/qmd)
 - SDK: `@tobilu/qmd` — `createStore()` for Node.js embedding
 
@@ -903,6 +936,7 @@ Local-first search engine by Tobi Lütke. BM25 + vector + LLM re-ranking, all on
 ### The Insight
 
 Pi is a great harness. Think is great infrastructure. But:
+
 - Pi's extension system exists because Pi is a general-purpose tool for anyone. Yolk is our product — we control the agent behavior directly. Extensions are indirection we don't need.
 - Think's `Think` class is an opinionated loop using Vercel AI SDK. We don't need their opinions — we have our own.
 - Both add abstraction layers between us and the agent behavior.
@@ -922,16 +956,16 @@ Take the best patterns from Pi and OpenCode. Skip the parts designed for extensi
 
 ### What we take from Pi (patterns, not code)
 
-| Pi pattern | Our implementation |
-|---|---|
-| Context injection before each LLM call | Function call in our loop — no event system needed |
-| Tool interception (before/after execution) | Wrap the execute step directly |
-| File mutation queue (per-file serialization) | Effect Semaphore (~50 lines) |
-| Adaptive system prompt (based on active tools) | Template that varies by tool configuration |
-| Mutable tool_call inputs (chained transforms) | Pipeline of transforms before execution |
-| Streaming events to client | Effect Stream over WebSocket |
-| AGENTS.md convention | Load from workspace as context |
-| Skills (on-demand context) | Inject relevant context when task matches |
+| Pi pattern                                     | Our implementation                                 |
+| ---------------------------------------------- | -------------------------------------------------- |
+| Context injection before each LLM call         | Function call in our loop — no event system needed |
+| Tool interception (before/after execution)     | Wrap the execute step directly                     |
+| File mutation queue (per-file serialization)   | Effect Semaphore (~50 lines)                       |
+| Adaptive system prompt (based on active tools) | Template that varies by tool configuration         |
+| Mutable tool_call inputs (chained transforms)  | Pipeline of transforms before execution            |
+| Streaming events to client                     | Effect Stream over WebSocket                       |
+| AGENTS.md convention                           | Load from workspace as context                     |
+| Skills (on-demand context)                     | Inject relevant context when task matches          |
 
 ### What we DON'T need from Pi
 
@@ -980,8 +1014,7 @@ const executeTools = (calls: ToolCall[]) =>
 
 // Streaming — LLM tokens as Effect Stream
 const streamLLM = (context: Context) =>
-  Stream.fromAsyncIterable(provider.stream(context))
-    .pipe(Stream.tap(event => broadcast(event)))
+  Stream.fromAsyncIterable(provider.stream(context)).pipe(Stream.tap(event => broadcast(event)))
 
 // Service layer — swap providers, tools, storage via layers
 class AgentLoop extends Effect.Service<AgentLoop>()('AgentLoop', {
@@ -1006,15 +1039,14 @@ export class YolkAgent extends Agent<Env> {
 
   async onMessage(connection, message) {
     const result = await Effect.runPromise(
-      agentLoop(message, this.tools, this.systemPrompt).pipe(
-        Effect.provide(this.layers)
-      )
+      agentLoop(message, this.tools, this.systemPrompt).pipe(Effect.provide(this.layers))
     )
   }
 }
 ```
 
 **What Cloudflare gives us (infrastructure):**
+
 - Durable Objects — per-agent actor, SQLite, hibernation, zero-idle-cost
 - Workspace (`@cloudflare/shell`) — durable filesystem for knowledge
 - WebSocket — built into DO, streaming to browser
@@ -1023,6 +1055,7 @@ export class YolkAgent extends Agent<Env> {
 - R2 — object storage for large files
 
 **What we build (harness):**
+
 - Agent loop (Effect-TS)
 - Context assembly (system prompt + knowledge + user profile + history)
 - Tool execution (with interception, per-file serialization)
@@ -1074,18 +1107,18 @@ export class YolkAgent extends Agent<Env> {
 
 ### v1 scope for the harness
 
-| Component | Effort | Priority |
-|---|---|---|
-| Basic loop (stream → tools → loop) | 1 week | Must have |
-| Context injection seam | Trivial | Must have |
-| Tool interception (before/after) | Trivial | Must have |
-| LLM streaming over WebSocket | 1 week | Must have |
-| Flat session persistence (DO SQLite) | 1 week | Must have |
-| Integration tools (Gmail, Calendar, Notion) | Port from VLTRA | Must have |
-| File mutation queue | ~50 lines | Nice to have |
-| Adaptive system prompt | Medium | Nice to have |
-| Tree sessions | Harder | v2 |
-| Compaction | Harder | v2 |
+| Component                                   | Effort          | Priority     |
+| ------------------------------------------- | --------------- | ------------ |
+| Basic loop (stream → tools → loop)          | 1 week          | Must have    |
+| Context injection seam                      | Trivial         | Must have    |
+| Tool interception (before/after)            | Trivial         | Must have    |
+| LLM streaming over WebSocket                | 1 week          | Must have    |
+| Flat session persistence (DO SQLite)        | 1 week          | Must have    |
+| Integration tools (Gmail, Calendar, Notion) | Port from VLTRA | Must have    |
+| File mutation queue                         | ~50 lines       | Nice to have |
+| Adaptive system prompt                      | Medium          | Nice to have |
+| Tree sessions                               | Harder          | v2           |
+| Compaction                                  | Harder          | v2           |
 
 **Estimated total: 3-4 weeks** for a working agent with streaming, tools, and persistence.
 
@@ -1135,19 +1168,20 @@ export class YolkAgent extends Agent<Env> {
 
 ### Under the hood
 
-| Layer | Technology |
-|---|---|
-| Compute | Cloudflare Workers |
-| Database | PostgreSQL via Cloudflare Hyperdrive |
-| Vectors | Cloudflare AI (embeddings) |
-| Cache | Cloudflare KV |
-| Async | Cloudflare Workflows (`IngestContentWorkflow`) |
-| Auth | better-auth |
-| ORM | Drizzle |
+| Layer    | Technology                                     |
+| -------- | ---------------------------------------------- |
+| Compute  | Cloudflare Workers                             |
+| Database | PostgreSQL via Cloudflare Hyperdrive           |
+| Vectors  | Cloudflare AI (embeddings)                     |
+| Cache    | Cloudflare KV                                  |
+| Async    | Cloudflare Workflows (`IngestContentWorkflow`) |
+| Auth     | better-auth                                    |
+| ORM      | Drizzle                                        |
 
 ### The "intelligence" is LLM prompt engineering
 
 Not custom ML. The pipeline:
+
 - Extract facts from text → structured output LLM call
 - Compare new fact vs existing → embedding similarity + LLM judgment
 - Detect contradictions → LLM with temporal reasoning
@@ -1156,14 +1190,14 @@ Not custom ML. The pipeline:
 
 ### Build cost for equivalent
 
-| Component | Effort |
-|---|---|
-| Memory extraction (LLM fact extraction) | 1-2 weeks |
+| Component                                | Effort    |
+| ---------------------------------------- | --------- |
+| Memory extraction (LLM fact extraction)  | 1-2 weeks |
 | Relationship discovery (updates/extends) | 1-2 weeks |
-| Contradiction resolution + forgetting | 1 week |
-| User profiles (auto-maintained) | 1 week |
-| Hybrid search (embeddings + keyword) | 1-2 weeks |
-| Content extraction (PDF, images, etc.) | 2-4 weeks |
+| Contradiction resolution + forgetting    | 1 week    |
+| User profiles (auto-maintained)          | 1 week    |
+| Hybrid search (embeddings + keyword)     | 1-2 weeks |
+| Content extraction (PDF, images, etc.)   | 2-4 weeks |
 
 **Total: ~2-3 months.** But for v1, the Workspace filesystem + basic search may be enough. Memory intelligence can be added later.
 
@@ -1318,6 +1352,7 @@ status(path)                 → document processing state
 ### Human access
 
 React UI talks to Knowledge DO through Next.js proxy. Humans get:
+
 - File browser (tree view of knowledge)
 - Markdown editor (read/write same files agent uses)
 - Search (same hybrid search)
@@ -1365,6 +1400,7 @@ Humans and agents use the **exact same knowledge store, same API, same files.**
 ### Scaling beyond 1GB SQLite (future)
 
 If an org outgrows 1GB of chunks + FTS:
+
 1. **Shard by project** — one Knowledge DO per project. Cross-project search via fan-out.
 2. **Evict old chunks** — keep recent in SQLite, older only in Vectorize metadata.
 3. **Compress chunk text** — repetitive text compresses well.
@@ -1416,25 +1452,25 @@ Up to 10 KiB metadata per vector. Up to 10 metadata indexes per index. Operators
 
 ### Limits
 
-| Limit | Value |
-|---|---|
-| Indexes per account | 50,000 (paid) / 100 (free) |
-| Max dimensions | 1536 |
-| Max vectors per index | 10,000,000 |
-| Metadata per vector | 10 KiB |
-| Metadata indexes per index | 10 |
-| topK (with metadata) | 50 |
-| topK (without) | 100 |
-| Upsert batch | 1,000 (Workers) / 5,000 (HTTP) |
+| Limit                      | Value                          |
+| -------------------------- | ------------------------------ |
+| Indexes per account        | 50,000 (paid) / 100 (free)     |
+| Max dimensions             | 1536                           |
+| Max vectors per index      | 10,000,000                     |
+| Metadata per vector        | 10 KiB                         |
+| Metadata indexes per index | 10                             |
+| topK (with metadata)       | 50                             |
+| topK (without)             | 100                            |
+| Upsert batch               | 1,000 (Workers) / 5,000 (HTTP) |
 
 ### Pricing (absurdly cheap)
 
-| Scenario | Vectors | Queries/mo | Cost |
-|---|---|---|---|
-| Experiment | 5K × 384d | 10K | included in free |
-| Production | 50K × 768d | 200K | $1.94/mo |
-| Large | 250K × 768d | 500K | $5.86/mo |
-| XL | 500K × 1536d | 1M | $23.42/mo |
+| Scenario   | Vectors      | Queries/mo | Cost             |
+| ---------- | ------------ | ---------- | ---------------- |
+| Experiment | 5K × 384d    | 10K        | included in free |
+| Production | 50K × 768d   | 200K       | $1.94/mo         |
+| Large      | 250K × 768d  | 500K       | $5.86/mo         |
+| XL         | 500K × 1536d | 1M         | $23.42/mo        |
 
 No egress fees. No charge for idle indexes. Billing = (queried dimensions × $0.01/M) + (stored dimensions × $0.05/100M).
 
@@ -1444,16 +1480,17 @@ Vectorize stores float arrays. Any embedding model works — just match index di
 
 **Workers AI (free tier):**
 
-| Model | Dimensions | Notes |
-|---|---|---|
-| `bge-base-en-v1.5` (BAAI) | 768 | English, solid general-purpose. Default for v1. |
-| `bge-large-en-v1.5` (BAAI) | 1024 | Better quality, more compute |
-| `bge-small-en-v1.5` (BAAI) | 384 | Fastest, lower quality |
-| `bge-m3` (BAAI) | 1024 | Multilingual, multi-granularity |
-| `embeddinggemma-300m` (Google) | — | 100+ languages |
-| `qwen3-embedding-0.6b` (Qwen) | — | Latest Qwen |
+| Model                          | Dimensions | Notes                                           |
+| ------------------------------ | ---------- | ----------------------------------------------- |
+| `bge-base-en-v1.5` (BAAI)      | 768        | English, solid general-purpose. Default for v1. |
+| `bge-large-en-v1.5` (BAAI)     | 1024       | Better quality, more compute                    |
+| `bge-small-en-v1.5` (BAAI)     | 384        | Fastest, lower quality                          |
+| `bge-m3` (BAAI)                | 1024       | Multilingual, multi-granularity                 |
+| `embeddinggemma-300m` (Google) | —          | 100+ languages                                  |
+| `qwen3-embedding-0.6b` (Qwen)  | —          | Latest Qwen                                     |
 
 **External (call their API, store vectors in Vectorize):**
+
 - OpenAI `text-embedding-3-small` (1536d, $0.02/M tokens)
 - OpenAI `text-embedding-3-large` (3072d, higher quality)
 - Cohere `embed-english-v3.0` (1024d)
@@ -1463,6 +1500,7 @@ Vectorize stores float arrays. Any embedding model works — just match index di
 AI Search is managed RAG-as-a-service. Handles chunking, embedding, vector storage, BM25, hybrid search, reranking, PDF conversion — the entire pipeline.
 
 **Why rejected:**
+
 - **4 MB file limit** — too restrictive for real documents (contracts, slide decks, scanned PDFs routinely 10-30MB)
 - **5 custom metadata fields max** — tight for per-org knowledge with multiple dimensions
 - **Beta** — pricing TBD, APIs could change
@@ -1597,16 +1635,16 @@ Agent: "What's our pricing strategy?"
 
 1. knowledge_search("Q3 pricing strategy")
    → chunks from /research/q3-pricing.md, /decisions/2026-04-pricing.md
-   
+
 2. knowledge_read("/decisions/2026-04-pricing.md")
    → full decision document, complete context
-   
+
 3. knowledge_search("Q2 pricing decision")
    → refined search based on what it learned
-   
+
 4. knowledge_read("/decisions/2026-01-pricing.md")
    → now has Q2 + Q3, can compare
-   
+
 5. Synthesizes across everything → informed response
 ```
 
@@ -1623,6 +1661,7 @@ Because chunks are discovery pointers — not the final answer — chunking does
 For v1, the primary agent does its own research via tools (search, read, search more, read more, synthesize). Works within the normal agent loop.
 
 Sub-agents (Cloudflare Agent SDK facets) become useful in v2 when:
+
 - Research pollutes the primary context window
 - Parallel research while agent continues conversation
 - Long research tasks (10+ tool calls)
@@ -1658,13 +1697,13 @@ Sub-agents (Cloudflare Agent SDK facets) become useful in v2 when:
 // Agent DO calling Next.js API for integration tools
 class YolkAgent extends Agent<Env> {
   async sendEmail(to: string, subject: string, body: string) {
-    const response = await fetch("https://yolk-api.vercel.app/api/gmail/send", {
-      method: "POST",
+    const response = await fetch('https://yolk-api.vercel.app/api/gmail/send', {
+      method: 'POST',
       headers: {
-        "Authorization": `Bearer ${this.serviceToken}`,
-        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.serviceToken}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ to, subject, body, userId: this.userId }),
+      body: JSON.stringify({ to, subject, body, userId: this.userId })
     })
     return response.json()
   }
@@ -1676,29 +1715,29 @@ class YolkAgent extends Agent<Env> {
 DOs call other DOs via **stubs** — typed, async, serializable. No `@callable()` needed (that's for WebSocket clients only).
 
 ```typescript
-import { getAgentByName } from "agents"
+import { getAgentByName } from 'agents'
 
 // Agent DO calling Knowledge DO
 class YolkAgent extends Agent<Env> {
   async searchKnowledge(query: string) {
     const knowledge = await getAgentByName(this.env.KNOWLEDGE, `org-${this.orgId}`)
-    return knowledge.search(query)  // direct RPC call
+    return knowledge.search(query) // direct RPC call
   }
 
   async readFile(path: string) {
     const knowledge = await getAgentByName(this.env.KNOWLEDGE, `org-${this.orgId}`)
-    return knowledge.read(path)  // direct RPC call
+    return knowledge.read(path) // direct RPC call
   }
 }
 ```
 
 **Two RPC patterns:**
 
-| Pattern | Transport | When |
-|---|---|---|
-| DO-to-DO RPC | Internal Cloudflare network | Agent → Knowledge, Agent → Agent |
-| `@callable()` decorator | WebSocket | Browser → Agent |
-| `fetch()` | HTTP | DO → external API (Next.js) |
+| Pattern                 | Transport                   | When                             |
+| ----------------------- | --------------------------- | -------------------------------- |
+| DO-to-DO RPC            | Internal Cloudflare network | Agent → Knowledge, Agent → Agent |
+| `@callable()` decorator | WebSocket                   | Browser → Agent                  |
+| `fetch()`               | HTTP                        | DO → external API (Next.js)      |
 
 ---
 
@@ -1710,15 +1749,16 @@ class YolkAgent extends Agent<Env> {
 
 The `Agent` base class from `agents` provides:
 
-| Hook | When |
-|---|---|
-| `onStart(props?)` | Instance wakes up (before any connections) |
-| `onConnect(connection, ctx)` | WebSocket connection established |
-| `onMessage(connection, message)` | Message received (string or ArrayBuffer) |
-| `onClose(connection, code, reason, wasClean)` | Connection closed |
-| `onError(connection, error)` | WebSocket error |
+| Hook                                          | When                                       |
+| --------------------------------------------- | ------------------------------------------ |
+| `onStart(props?)`                             | Instance wakes up (before any connections) |
+| `onConnect(connection, ctx)`                  | WebSocket connection established           |
+| `onMessage(connection, message)`              | Message received (string or ArrayBuffer)   |
+| `onClose(connection, code, reason, wasClean)` | Connection closed                          |
+| `onError(connection, error)`                  | WebSocket error                            |
 
 **Key features:**
+
 - `this.broadcast(message, exclude?)` — send to all connections
 - `connection.setState(state)` / `connection.state` — per-connection state
 - `this.getConnections(tag?)` — iterate connections, filter by tag
@@ -1729,7 +1769,7 @@ The `Agent` base class from `agents` provides:
 **`@callable()` decorator** for typed RPC over WebSocket:
 
 ```typescript
-import { Agent, callable, StreamingResponse } from "agents"
+import { Agent, callable, StreamingResponse } from 'agents'
 
 class YolkAgent extends Agent<Env> {
   @callable()
@@ -1749,33 +1789,33 @@ class YolkAgent extends Agent<Env> {
 
 ### Client-side SDK
 
-| Client | Use case |
-|---|---|
-| `useAgent()` | React hook — auto-reconnect, state sync, typed stubs |
-| `AgentClient` | Vanilla JS — any environment |
-| `agentFetch()` | HTTP — one-off requests, no WebSocket |
+| Client         | Use case                                             |
+| -------------- | ---------------------------------------------------- |
+| `useAgent()`   | React hook — auto-reconnect, state sync, typed stubs |
+| `AgentClient`  | Vanilla JS — any environment                         |
+| `agentFetch()` | HTTP — one-off requests, no WebSocket                |
 
 ```typescript
 // React
-import { useAgent } from "agents/react"
-import type { YolkAgent } from "./server"
+import { useAgent } from 'agents/react'
+import type { YolkAgent } from './server'
 
 function Chat() {
   const agent = useAgent<YolkAgent>({
-    agent: "YolkAgent",
+    agent: 'YolkAgent',
     name: `session-${sessionId}`,
     query: async () => ({ token: await getAuthToken() }),
-    onStateUpdate: (state) => updateUI(state),
+    onStateUpdate: state => updateUI(state)
   })
 
   // Typed RPC
   const result = await agent.stub.prompt("What's our pricing strategy?")
 
   // Streaming RPC
-  await agent.call("streamPrompt", ["Analyze Q3"], {
+  await agent.call('streamPrompt', ['Analyze Q3'], {
     stream: {
-      onChunk: (token) => appendToOutput(token),
-      onDone: () => markComplete(),
+      onChunk: token => appendToOutput(token),
+      onDone: () => markComplete()
     }
   })
 }
@@ -1816,10 +1856,10 @@ WebSocket upgrade requests **cannot send custom headers**. No `Authorization: Be
 
 ### Token types
 
-| Token | Who creates it | Who verifies it | Purpose |
-|---|---|---|---|
-| User JWT | Next.js (better-auth) | Agent DO | Browser → DO auth |
-| Service token | Shared secret or minted JWT | Next.js API | DO → Next.js API auth |
+| Token         | Who creates it              | Who verifies it | Purpose               |
+| ------------- | --------------------------- | --------------- | --------------------- |
+| User JWT      | Next.js (better-auth)       | Agent DO        | Browser → DO auth     |
+| Service token | Shared secret or minted JWT | Next.js API     | DO → Next.js API auth |
 
 ### Security best practices (from Cloudflare docs)
 
@@ -1849,11 +1889,11 @@ Split at natural boundaries, then subdivide if too long:
 
 ### Config for v1
 
-| Parameter | Value |
-|---|---|
-| Chunk size | ~300 tokens |
-| Overlap | 15% (~45 tokens) |
-| Boundary | Paragraph → sentence → token |
+| Parameter  | Value                        |
+| ---------- | ---------------------------- |
+| Chunk size | ~300 tokens                  |
+| Overlap    | 15% (~45 tokens)             |
+| Boundary   | Paragraph → sentence → token |
 
 ### Implementation
 
@@ -1861,9 +1901,9 @@ Split at natural boundaries, then subdivide if too long:
 
 ```typescript
 const splitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 1200,      // ~300 tokens
-  chunkOverlap: 180,    // ~15%
-  separators: ["\n\n", "\n", ". ", " "],
+  chunkSize: 1200, // ~300 tokens
+  chunkOverlap: 180, // ~15%
+  separators: ['\n\n', '\n', '. ', ' ']
 })
 const chunks = await splitter.splitText(content)
 ```
@@ -1878,9 +1918,9 @@ Because chunks are discovery pointers (not final answers), chunking quality is l
 
 ### Official Cloudflare packages (in Effect monorepo)
 
-| Package | Purpose |
-|---|---|
-| `@effect/sql-d1` | SQL client for Cloudflare D1 |
+| Package                 | Purpose                                      |
+| ----------------------- | -------------------------------------------- |
+| `@effect/sql-d1`        | SQL client for Cloudflare D1                 |
 | `@effect/sql-sqlite-do` | SQL client for Durable Object SQLite storage |
 
 ### Past breaking issue — fixed
@@ -1894,32 +1934,32 @@ Because chunks are discovery pointers (not final answers), chunking quality is l
 
 ### Production apps using Effect + Cloudflare Workers
 
-| Project | Usage |
-|---|---|
-| [crosshatch/liminal](https://github.com/crosshatch/liminal) | Full `effect-workerd` abstraction: D1, R2, DO state, AI, Images, DurableObject namespaces |
-| [livestorejs/livestore](https://github.com/livestorejs/livestore) | Effect RPC over DurableObjects, WebSocket transport, DO sync |
-| [RhysSullivan/executor](https://github.com/RhysSullivan/executor) | `Effect.runPromise` inside DurableObject `rpc()`, OpenTelemetry tracing |
-| [dmmulroy/effect-cloudflare](https://github.com/dmmulroy/effect-cloudflare) | Community library wrapping KV, R2 in typed Effect services |
+| Project                                                                     | Usage                                                                                     |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [crosshatch/liminal](https://github.com/crosshatch/liminal)                 | Full `effect-workerd` abstraction: D1, R2, DO state, AI, Images, DurableObject namespaces |
+| [livestorejs/livestore](https://github.com/livestorejs/livestore)           | Effect RPC over DurableObjects, WebSocket transport, DO sync                              |
+| [RhysSullivan/executor](https://github.com/RhysSullivan/executor)           | `Effect.runPromise` inside DurableObject `rpc()`, OpenTelemetry tracing                   |
+| [dmmulroy/effect-cloudflare](https://github.com/dmmulroy/effect-cloudflare) | Community library wrapping KV, R2 in typed Effect services                                |
 
 ### Known current issues (minor)
 
-| Issue | Severity | Workaround |
-|---|---|---|
-| [#5398](https://github.com/Effect-TS/effect/issues/5398): `Logger.pretty` drops first arg in Workers | Low | Use `Logger.structured` or default logger |
-| [#6006](https://github.com/Effect-TS/effect/issues/6006): `@effect/sql-sqlite-do` `withTransaction` uses SQL `BEGIN/COMMIT` which DO SQLite forbids | Medium | Use `state.storage.transaction()` directly |
+| Issue                                                                                                                                               | Severity | Workaround                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------ |
+| [#5398](https://github.com/Effect-TS/effect/issues/5398): `Logger.pretty` drops first arg in Workers                                                | Low      | Use `Logger.structured` or default logger  |
+| [#6006](https://github.com/Effect-TS/effect/issues/6006): `@effect/sql-sqlite-do` `withTransaction` uses SQL `BEGIN/COMMIT` which DO SQLite forbids | Medium   | Use `state.storage.transaction()` directly |
 
 ### What works
 
-| Category | Status |
-|---|---|
-| Core Effect (`Effect`, `Stream`, `Layer`, `Schema`, etc.) | ✅ |
-| `Effect.gen`, `Effect.runPromise`, fibers, concurrency | ✅ |
-| `@effect/sql-d1` (D1 database) | ✅ |
-| `@effect/sql-sqlite-do` (DO SQLite) | ⚠️ Works except `withTransaction` |
-| `@effect/rpc` (JSON serialization) | ✅ |
-| `@effect/rpc` (msgPack serialization) | ✅ (fixed Apr 2026) |
-| `Logger.pretty` | ⚠️ Cosmetic bug |
-| Node.js-only APIs (`fs`, `child_process`) | ❌ Use platform-agnostic APIs |
+| Category                                                  | Status                            |
+| --------------------------------------------------------- | --------------------------------- |
+| Core Effect (`Effect`, `Stream`, `Layer`, `Schema`, etc.) | ✅                                |
+| `Effect.gen`, `Effect.runPromise`, fibers, concurrency    | ✅                                |
+| `@effect/sql-d1` (D1 database)                            | ✅                                |
+| `@effect/sql-sqlite-do` (DO SQLite)                       | ⚠️ Works except `withTransaction` |
+| `@effect/rpc` (JSON serialization)                        | ✅                                |
+| `@effect/rpc` (msgPack serialization)                     | ✅ (fixed Apr 2026)               |
+| `Logger.pretty`                                           | ⚠️ Cosmetic bug                   |
+| Node.js-only APIs (`fs`, `child_process`)                 | ❌ Use platform-agnostic APIs     |
 
 ### Implication for Yolk
 

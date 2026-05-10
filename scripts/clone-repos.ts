@@ -102,7 +102,7 @@ const exec = (cmd: string, cwd?: string) =>
       const { execSync } = await import('node:child_process')
       return execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf-8' })
     },
-    catch: (error) =>
+    catch: error =>
       new CommandError({
         command: cmd,
         details: error instanceof Error ? error.message : String(error),
@@ -171,12 +171,8 @@ const cloneRepo = (spec: RepoSpec) =>
       }
 
       case 'branch': {
-        yield* Effect.sync(() =>
-          console.log(`  Cloning ${spec.name} @ branch ${spec.branch}...`)
-        )
-        yield* exec(
-          `git clone --depth 1 --branch "${spec.branch}" "${spec.repo}" "${dest}"`
-        )
+        yield* Effect.sync(() => console.log(`  Cloning ${spec.name} @ branch ${spec.branch}...`))
+        yield* exec(`git clone --depth 1 --branch "${spec.branch}" "${spec.repo}" "${dest}"`)
         yield* Effect.sync(() => console.log(`  ✓ ${spec.name} @ ${spec.branch}`))
         break
       }
@@ -219,7 +215,7 @@ const formatError = (error: CommandError | DependencyNotFoundError): string => {
 
 await Effect.runPromise(
   program.pipe(
-    Effect.catch((error) =>
+    Effect.catch(error =>
       Effect.sync(() => {
         console.error(formatError(error))
         process.exitCode = 1

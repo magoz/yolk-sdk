@@ -1,13 +1,7 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
 import { ToolCall } from '@yolk/protocol'
 import { FauxExhaustedError } from '../error'
-import {
-  LLMDone,
-  LLMReasoningDelta,
-  LLMTextDelta,
-  LLMToolCall,
-  type LLMEvent
-} from '../llm-event'
+import { LLMDone, LLMReasoningDelta, LLMTextDelta, LLMToolCall, type LLMEvent } from '../llm-event'
 import { LLMProvider, type LLMRequest } from '../services/llm-provider'
 
 export type FauxResponse = {
@@ -28,7 +22,11 @@ export const Reply = {
       LLMDone.make({ stopReason: 'stop' })
     ]
   }),
-  toolCall: (input: { readonly id: string; readonly name: string; readonly params: unknown }): FauxResponse => ({
+  toolCall: (input: {
+    readonly id: string
+    readonly name: string
+    readonly params: unknown
+  }): FauxResponse => ({
     events: [
       LLMToolCall.make({
         call: ToolCall.make({ id: input.id, name: input.name, params: input.params })

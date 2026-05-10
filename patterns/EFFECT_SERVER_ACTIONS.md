@@ -49,7 +49,10 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { updatePost } from './update-post'
 
-export const updatePostAction = async (input: { readonly postId: string; readonly title: string }) => {
+export const updatePostAction = async (input: {
+  readonly postId: string
+  readonly title: string
+}) => {
   await cookies()
 
   return await NextEffect.runPromise(

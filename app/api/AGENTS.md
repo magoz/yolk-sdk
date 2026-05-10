@@ -4,12 +4,12 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 ## Routes
 
-| Route | Role |
-| --- | --- |
-| `auth/[...all]/route.ts` | better-auth Next handler |
-| `agent/route.ts` | Text agent NDJSON stream |
+| Route                          | Role                         |
+| ------------------------------ | ---------------------------- |
+| `auth/[...all]/route.ts`       | better-auth Next handler     |
+| `agent/route.ts`               | Text agent NDJSON stream     |
 | `agent/realtime/call/route.ts` | OpenAI Realtime SDP exchange |
-| `agent/realtime/tool/route.ts` | Voice tool execution bridge |
+| `agent/realtime/tool/route.ts` | Voice tool execution bridge  |
 
 ## Effect Route Pattern
 

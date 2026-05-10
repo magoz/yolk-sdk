@@ -1,5 +1,5 @@
 packages:
-  - "packages/*"
+  - 'packages/*'
 allowBuilds:
   '@sentry/cli': true
   core-js: true

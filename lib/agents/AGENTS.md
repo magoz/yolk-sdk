@@ -21,8 +21,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 Hardcoded in `app/api/agent/route.ts`:
 
-| Env | Values | Notes |
-| --- | --- | --- |
+| Env                   | Values | Notes             |
+| --------------------- | ------ | ----------------- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
 Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex text provider is text-only; image/audio user input is rejected.

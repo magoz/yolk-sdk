@@ -231,11 +231,11 @@ Span names use `domain.entity.action` format. Server actions prefix with `action
 
 Custom attributes per span:
 
-| Span              | Attributes                                  |
-| ----------------- | ------------------------------------------- |
-| `action.post.*`   | `post.id`, `user.id`, `user.email`          |
-| `Auth.*`          | (none — session data is the result)         |
-| `Email.sendEmail` | `email.to`, `email.subject`, `email.id`     |
+| Span              | Attributes                              |
+| ----------------- | --------------------------------------- |
+| `action.post.*`   | `post.id`, `user.id`, `user.email`      |
+| `Auth.*`          | (none — session data is the result)     |
+| `Email.sendEmail` | `email.to`, `email.subject`, `email.id` |
 
 ## Axiom Dashboards
 

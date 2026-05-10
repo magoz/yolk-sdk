@@ -26,8 +26,9 @@ describe('run', () => {
       }).pipe(
         Stream.runCollect,
         Effect.provide(
-          Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), TestToolExecutor.layer({}))
-            .pipe(Layer.provideMerge(BaseLayer))
+          Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(BaseLayer)
+          )
         )
       )
 
@@ -46,7 +47,8 @@ describe('run', () => {
 
       const assistant = events.find(event => event._tag === 'AssistantMessage')
       expect(assistant).toMatchObject({ message: { content: 'ok' } })
-    }))
+    })
+  )
 
   it.effect('emits reasoning deltas and stores assistant reasoning', () =>
     Effect.gen(function* () {
@@ -58,8 +60,10 @@ describe('run', () => {
       }).pipe(
         Stream.runCollect,
         Effect.provide(
-          Layer.mergeAll(FauxProvider.layer(Reply.reasoningText('thinking', 'ok')), TestToolExecutor.layer({}))
-            .pipe(Layer.provideMerge(BaseLayer))
+          Layer.mergeAll(
+            FauxProvider.layer(Reply.reasoningText('thinking', 'ok')),
+            TestToolExecutor.layer({})
+          ).pipe(Layer.provideMerge(BaseLayer))
         )
       )
 
@@ -79,7 +83,8 @@ describe('run', () => {
       expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
         message: { content: 'ok', reasoning: 'thinking' }
       })
-    }))
+    })
+  )
 
   it.effect('emits LLM deltas before provider completes', () =>
     Effect.gen(function* () {
@@ -118,7 +123,8 @@ describe('run', () => {
         'LLMTextDelta'
       ])
       expect(events[3]).toMatchObject({ text: 'o' })
-    }))
+    })
+  )
 
   it.effect('executes tools and continues until stop', () =>
     Effect.gen(function* () {
@@ -173,7 +179,8 @@ describe('run', () => {
 
       const agentEnd = events.find(event => event._tag === 'AgentEnd')
       expect(agentEnd).toMatchObject({ turns: 2 })
-    }))
+    })
+  )
 
   it.effect('fails when faux responses are exhausted', () =>
     Effect.gen(function* () {
@@ -194,7 +201,8 @@ describe('run', () => {
       )
 
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'FauxExhaustedError' } })
-    }))
+    })
+  )
 
   it.effect('fails when max turns is reached', () =>
     Effect.gen(function* () {
@@ -222,7 +230,8 @@ describe('run', () => {
       )
 
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'AbortError' } })
-    }))
+    })
+  )
 
   it.effect('transforms context before LLM requests', () =>
     Effect.gen(function* () {
@@ -256,11 +265,10 @@ describe('run', () => {
       )
 
       const events = Array.from(eventsChunk)
-      expect(requests).toMatchObject([
-        { messages: [{ content: 'context' }, { content: 'hello' }] }
-      ])
+      expect(requests).toMatchObject([{ messages: [{ content: 'context' }, { content: 'hello' }] }])
       expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
         message: { content: 'ok' }
       })
-    }))
+    })
+  )
 })

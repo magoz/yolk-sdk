@@ -12,12 +12,20 @@ import { buildAgentChatItems } from './agent-chat-items'
 
 describe('buildAgentChatMessages', () => {
   it('projects protocol transcript into ordered message parts', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://example.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://example.com' }
+    })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+        AssistantAgentMessage.make({
+          content: 'Fetching.',
+          reasoning: 'Need source.',
+          toolCalls: [call]
+        }),
         ToolResultMessage.make({ toolCallId: call.id, content: result.content })
       ],
       userDraft: '',
@@ -35,12 +43,20 @@ describe('buildAgentChatMessages', () => {
   })
 
   it('converts chat parts back to protocol transcript', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://example.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://example.com' }
+    })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+        AssistantAgentMessage.make({
+          content: 'Fetching.',
+          reasoning: 'Need source.',
+          toolCalls: [call]
+        }),
         ToolResultMessage.make({ toolCallId: call.id, content: result.content })
       ],
       userDraft: '',
@@ -52,7 +68,11 @@ describe('buildAgentChatMessages', () => {
 
     expect(toAgentMessages(messages)).toEqual([
       UserMessage.make({ content: 'summarize https://example.com' }),
-      AssistantAgentMessage.make({ content: 'Fetching.', reasoning: 'Need source.', toolCalls: [call] }),
+      AssistantAgentMessage.make({
+        content: 'Fetching.',
+        reasoning: 'Need source.',
+        toolCalls: [call]
+      }),
       ToolResultMessage.make({ toolCallId: call.id, content: result.content })
     ])
   })
@@ -89,7 +109,11 @@ describe('buildAgentChatItems', () => {
       ],
       error: 'boom'
     })
-    const items = buildAgentChatItems({ messages, isRunning: false, activeToolLabel: Option.none() })
+    const items = buildAgentChatItems({
+      messages,
+      isRunning: false,
+      activeToolLabel: Option.none()
+    })
 
     expect(items.map(item => item._tag)).toEqual([
       'UserMessage',
@@ -122,7 +146,11 @@ describe('buildAgentChatItems', () => {
       toolRuns: [],
       error: null
     })
-    const items = buildAgentChatItems({ messages, isRunning: false, activeToolLabel: Option.none() })
+    const items = buildAgentChatItems({
+      messages,
+      isRunning: false,
+      activeToolLabel: Option.none()
+    })
 
     expect(items).toEqual([
       {

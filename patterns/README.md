@@ -15,8 +15,8 @@ Architecture and convention patterns for this codebase.
 
 ## Data Flow
 
-| Pattern                                              | Purpose                                                              |
-| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| Pattern                                              | Purpose                                                     |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
 | [DATA_ACCESS_PATTERNS.md](./DATA_ACCESS_PATTERNS.md) | RSC for reads, server actions for mutations, S3 signed URLs |
 
 ## URL State

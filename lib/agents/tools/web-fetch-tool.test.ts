@@ -60,7 +60,8 @@ describe('web_fetch tool', () => {
       expect(result.content).toContain('# Hello & goodbye')
       expect(result.content).toContain('docs (https://example.com/docs)')
       expect(result.content).not.toContain('ignored')
-    }))
+    })
+  )
 
   it.effect('follows safe redirects manually', () =>
     Effect.gen(function* () {
@@ -80,7 +81,8 @@ describe('web_fetch tool', () => {
       expect(requested).toEqual(['https://example.com/start', 'https://example.com/final'])
       expect(result.content).toContain('URL: https://example.com/final')
       expect(result.content).toContain('done')
-    }))
+    })
+  )
 
   it.effect('blocks private hosts before requesting', () =>
     Effect.gen(function* () {
@@ -99,14 +101,24 @@ describe('web_fetch tool', () => {
         failure: { _tag: 'ToolError', cause: 'permission' }
       })
       expect(requested).toEqual([])
-    }))
+    })
+  )
 
   it.effect('enables web_fetch for text and voice agents', () =>
     Effect.gen(function* () {
-      const textTools = yield* resolveAgentTools({ surface: 'text', route: '/agent', userId: 'user_1' })
-      const voiceTools = yield* resolveAgentTools({ surface: 'voice', route: '/agent', userId: 'user_1' })
+      const textTools = yield* resolveAgentTools({
+        surface: 'text',
+        route: '/agent',
+        userId: 'user_1'
+      })
+      const voiceTools = yield* resolveAgentTools({
+        surface: 'voice',
+        route: '/agent',
+        userId: 'user_1'
+      })
 
       expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
       expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
-    }))
+    })
+  )
 })

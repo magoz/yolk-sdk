@@ -38,13 +38,17 @@ const handler = Effect.gen(function* () {
     reportError(new RouteError({ message: 'Invalid request body', cause: error }), {
       operation: 'api.example.post',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }))
+    )
   ),
   Effect.catchTag('SchemaError', error =>
     reportError(new RouteError({ message: 'Invalid request body', cause: error }), {
       operation: 'api.example.post',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }))
+    )
   ),
   Effect.catch(error =>
     reportError(new RouteError({ message: 'Request failed', cause: error }), {

@@ -95,10 +95,7 @@ export const appendAgentMessage = (
   return [first, ...messages.slice(1), message]
 }
 
-export const applyAgentEvent = (
-  state: AgentClientState,
-  event: AgentEvent
-): AgentClientState => {
+export const applyAgentEvent = (state: AgentClientState, event: AgentEvent): AgentClientState => {
   switch (event._tag) {
     case 'AgentStart':
       return {
@@ -157,7 +154,10 @@ export const applyAgentEvent = (
         ...state,
         liveMessages: [
           ...state.liveMessages,
-          ToolResultMessage.make({ toolCallId: event.result.toolCallId, content: event.result.content })
+          ToolResultMessage.make({
+            toolCallId: event.result.toolCallId,
+            content: event.result.content
+          })
         ]
       }
     case 'AgentEnd':

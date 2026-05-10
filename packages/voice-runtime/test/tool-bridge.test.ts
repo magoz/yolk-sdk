@@ -24,7 +24,8 @@ describe('executeVoiceToolCall', () => {
         toolCallId: 'call_1',
         output: JSON.stringify({ result: 'hello' })
       })
-    }))
+    })
+  )
 
   it.effect('returns invalid argument JSON as tool output', () =>
     Effect.gen(function* () {
@@ -38,7 +39,8 @@ describe('executeVoiceToolCall', () => {
 
       expect(response.toolCallId).toBe('call_1')
       expect(response.output).toContain('Invalid tool arguments JSON')
-    }))
+    })
+  )
 
   it.effect('returns tool errors as JSON output', () =>
     Effect.gen(function* () {
@@ -52,7 +54,8 @@ describe('executeVoiceToolCall', () => {
 
       expect(response.toolCallId).toBe('call_1')
       expect(response.output).toContain('No canned result for tool: missing')
-    }))
+    })
+  )
 
   it.effect('truncates large voice tool results', () =>
     Effect.gen(function* () {
@@ -67,5 +70,6 @@ describe('executeVoiceToolCall', () => {
       expect(response.toolCallId).toBe('call_1')
       expect(response.output).toContain('[truncated for voice; summarize from available excerpt]')
       expect(response.output.length).toBeLessThan(6200)
-    }))
+    })
+  )
 })

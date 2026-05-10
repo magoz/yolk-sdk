@@ -31,7 +31,9 @@ export type BrowserHttpResponse = {
 }
 
 export type BrowserToolDependencies = {
-  readonly lookupHostAddresses: (hostname: string) => Effect.Effect<ReadonlyArray<string>, ToolError>
+  readonly lookupHostAddresses: (
+    hostname: string
+  ) => Effect.Effect<ReadonlyArray<string>, ToolError>
   readonly request: (url: URL, timeoutMs: number) => Effect.Effect<BrowserHttpResponse, ToolError>
 }
 
@@ -78,7 +80,9 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
 
 const decodeWebFetchParams = (params: unknown) =>
   Schema.decodeUnknownEffect(WebFetchParams)(params).pipe(
-    Effect.mapError(error => makeToolError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation'))
+    Effect.mapError(error =>
+      makeToolError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation')
+    )
   )
 
 const normalizeFormat = (format: WebFetchFormat | undefined): WebFetchFormat => format ?? 'markdown'
@@ -87,7 +91,9 @@ const resolveTimeoutMs = (timeoutSeconds: number | undefined) => {
   const timeout = timeoutSeconds ?? defaultTimeoutSeconds
 
   if (!Number.isFinite(timeout) || timeout <= 0) {
-    return Effect.fail(makeToolError('timeoutSeconds must be a positive finite number', 'validation'))
+    return Effect.fail(
+      makeToolError('timeoutSeconds must be a positive finite number', 'validation')
+    )
   }
 
   return Effect.succeed(Math.min(timeout, maxTimeoutSeconds) * 1000)
@@ -111,8 +117,7 @@ const parsePublicHttpUrl = (rawUrl: string) => {
   return Effect.succeed(url)
 }
 
-const normalizeHostname = (hostname: string) =>
-  hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')
+const normalizeHostname = (hostname: string) => hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')
 
 const isLocalHostname = (hostname: string) =>
   hostname === 'localhost' ||
@@ -123,7 +128,8 @@ const isLocalHostname = (hostname: string) =>
 const parseIpv4Parts = (address: string) => {
   const parts = address.split('.').map(part => Number.parseInt(part, 10))
 
-  return parts.length === 4 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+  return parts.length === 4 &&
+    parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
     ? parts
     : []
 }
@@ -183,14 +189,18 @@ const ensurePublicUrl = (deps: BrowserToolDependencies, url: URL) => {
 
   if (isIP(hostname) !== 0) {
     return isBlockedAddress(hostname)
-      ? Effect.fail(makeToolError('URL host resolves to a private or reserved address', 'permission'))
+      ? Effect.fail(
+          makeToolError('URL host resolves to a private or reserved address', 'permission')
+        )
       : Effect.void
   }
 
   return deps.lookupHostAddresses(hostname).pipe(
     Effect.flatMap(addresses => {
       if (addresses.length === 0 || addresses.some(isBlockedAddress)) {
-        return Effect.fail(makeToolError('URL host resolves to a private or reserved address', 'permission'))
+        return Effect.fail(
+          makeToolError('URL host resolves to a private or reserved address', 'permission')
+        )
       }
 
       return Effect.void
@@ -220,7 +230,9 @@ const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       HttpClientRequest.setHeaders(requestHeaders)
     )
     const response = yield* http.execute(request).pipe(
-      Effect.mapError(error => makeToolError(`Request failed: ${unknownToMessage(error)}`, 'execution')),
+      Effect.mapError(error =>
+        makeToolError(`Request failed: ${unknownToMessage(error)}`, 'execution')
+      ),
       Effect.timeoutOrElse({
         duration: timeoutMs,
         orElse: () => Effect.fail(makeToolError('Request timed out', 'timeout'))
@@ -231,7 +243,9 @@ const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       status: response.status,
       headers: response.headers,
       body: response.arrayBuffer.pipe(
-        Effect.mapError(error => makeToolError(`Could not read response body: ${unknownToMessage(error)}`, 'execution'))
+        Effect.mapError(error =>
+          makeToolError(`Could not read response body: ${unknownToMessage(error)}`, 'execution')
+        )
       )
     }
   }).pipe(
@@ -277,7 +291,9 @@ const fetchWithRedirects = (
 
     const location = headerValue(response.headers, 'location')
     if (location === undefined || location.length === 0) {
-      return yield* Effect.fail(makeToolError(`Redirect ${response.status} missing Location header`, 'execution'))
+      return yield* Effect.fail(
+        makeToolError(`Redirect ${response.status} missing Location header`, 'execution')
+      )
     }
 
     const nextUrl = yield* resolveRedirectUrl(url, location)
@@ -373,8 +389,10 @@ const htmlToMarkdown = (html: string) =>
   normalizeWhitespace(
     decodeHtmlEntities(
       stripIgnoredHtml(html)
-        .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level, text) =>
-          `\n\n${'#'.repeat(Number.parseInt(level, 10))} ${inlineMarkdown(text)}\n\n`
+        .replace(
+          /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+          (_match, level, text) =>
+            `\n\n${'#'.repeat(Number.parseInt(level, 10))} ${inlineMarkdown(text)}\n\n`
         )
         .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, text) => {
           const label = inlineMarkdown(text)
@@ -382,12 +400,19 @@ const htmlToMarkdown = (html: string) =>
         })
         .replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_match, text) => `\n- ${inlineMarkdown(text)}`)
         .replace(/<br\s*\/?\s*>/gi, '\n')
-        .replace(/<\/(p|div|section|article|header|footer|main|aside|ul|ol|blockquote|pre|tr)>/gi, '\n\n')
+        .replace(
+          /<\/(p|div|section|article|header|footer|main|aside|ul|ol|blockquote|pre|tr)>/gi,
+          '\n\n'
+        )
         .replace(/<[^>]*>/g, ' ')
     )
   )
 
-const renderContent = (content: string, contentType: string | undefined, format: WebFetchFormat) => {
+const renderContent = (
+  content: string,
+  contentType: string | undefined,
+  format: WebFetchFormat
+) => {
   const isHtml = contentTypeMime(contentType).includes('html')
 
   if (format === 'html' || !isHtml) {
@@ -413,12 +438,20 @@ const formatToolOutput = (input: {
     input.content
   ].join('\n')
 
-export const fetchWebPage = (params: WebFetchParams, deps: BrowserToolDependencies = liveBrowserToolDependencies) =>
+export const fetchWebPage = (
+  params: WebFetchParams,
+  deps: BrowserToolDependencies = liveBrowserToolDependencies
+) =>
   Effect.gen(function* () {
     const url = yield* parsePublicHttpUrl(params.url)
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
     const format = normalizeFormat(params.format)
-    const { url: finalUrl, response } = yield* fetchWithRedirects(deps, url, timeoutMs, maxRedirects)
+    const { url: finalUrl, response } = yield* fetchWithRedirects(
+      deps,
+      url,
+      timeoutMs,
+      maxRedirects
+    )
     yield* ensureSuccessfulStatus(response.status)
     yield* ensureContentLength(response.headers)
 

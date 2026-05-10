@@ -117,7 +117,11 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       tools: config.tools,
       reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
       model: config.model
-    }).pipe(recoverAgentStreamErrors, Stream.mapEffect(encodeNdjsonEvent), Stream.toReadableStreamEffect())
+    }).pipe(
+      recoverAgentStreamErrors,
+      Stream.mapEffect(encodeNdjsonEvent),
+      Stream.toReadableStreamEffect()
+    )
 
     return new Response(body, { status: 200, headers: ndjsonHeaders })
   }).pipe(Effect.withSpan('AgentRoute.post'))

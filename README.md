@@ -4,17 +4,17 @@ Reusable agent stack. Domain-free below the app layer.
 
 ## Stack
 
-| Category | Technology |
-| --- | --- |
-| App | Next.js 16 App Router |
-| Language | TypeScript 5 |
-| Effects | Effect-TS |
-| Database | PostgreSQL via Drizzle ORM + @effect/sql |
-| Auth | better-auth email OTP |
-| Email | Resend |
-| Styling | Tailwind CSS 4 |
-| Telemetry | Sentry + OpenTelemetry + PostHog |
-| Tests | Vitest + Playwright |
+| Category  | Technology                               |
+| --------- | ---------------------------------------- |
+| App       | Next.js 16 App Router                    |
+| Language  | TypeScript 5                             |
+| Effects   | Effect-TS                                |
+| Database  | PostgreSQL via Drizzle ORM + @effect/sql |
+| Auth      | better-auth email OTP                    |
+| Email     | Resend                                   |
+| Styling   | Tailwind CSS 4                           |
+| Telemetry | Sentry + OpenTelemetry + PostHog         |
+| Tests     | Vitest + Playwright                      |
 
 ## Packages
 

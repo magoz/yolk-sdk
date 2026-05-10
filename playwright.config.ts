@@ -8,10 +8,14 @@ const requiredEnv = [
   'NEXT_PUBLIC_SENTRY_DSN'
 ]
 
-const missingEnv = requiredEnv.filter(key => process.env[key] === undefined || process.env[key] === '')
+const missingEnv = requiredEnv.filter(
+  key => process.env[key] === undefined || process.env[key] === ''
+)
 
 if (missingEnv.length > 0) {
-  throw new Error(`Missing E2E env vars: ${missingEnv.join(', ')}. Create .env.test or export them.`)
+  throw new Error(
+    `Missing E2E env vars: ${missingEnv.join(', ')}. Create .env.test or export them.`
+  )
 }
 
 const getE2ePort = () => {

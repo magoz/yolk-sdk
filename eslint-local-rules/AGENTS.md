@@ -4,11 +4,11 @@ Small project-local ESLint plugin enforcing Effect/type-safety conventions from 
 
 ## Files
 
-| File | Role |
-| --- | --- |
-| `index.js` | Exports `localRulesPlugin` + `recommended` config |
-| `no-*.js` | Individual AST rules |
-| `package.json` | ESM marker only; not a pnpm workspace package |
+| File           | Role                                              |
+| -------------- | ------------------------------------------------- |
+| `index.js`     | Exports `localRulesPlugin` + `recommended` config |
+| `no-*.js`      | Individual AST rules                              |
+| `package.json` | ESM marker only; not a pnpm workspace package     |
 
 ## Rule Conventions
 

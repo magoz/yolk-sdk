@@ -66,7 +66,9 @@ const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => toLlmEvents([
 type TurnStreamInput = {
   readonly config: RunConfig
   readonly contextTransformer: {
-    readonly transform: (messages: ReadonlyArray<AgentMessage>) => Effect.Effect<ReadonlyArray<AgentMessage>>
+    readonly transform: (
+      messages: ReadonlyArray<AgentMessage>
+    ) => Effect.Effect<ReadonlyArray<AgentMessage>>
   }
   readonly loopConfig: { readonly maxTurns: number }
   readonly provider: {
@@ -169,11 +171,7 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
           Stream.concat(
             makeTurnStream({
               ...input,
-              currentMessages: [
-                ...input.currentMessages,
-                assistantMessage,
-                ...toolResultMessages
-              ],
+              currentMessages: [...input.currentMessages, assistantMessage, ...toolResultMessages],
               turn: input.turn + 1
             })
           )

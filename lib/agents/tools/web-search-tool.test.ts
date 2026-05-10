@@ -42,11 +42,14 @@ describe('web_search tool', () => {
         expect(parsed).toBe('plain results')
       })
       yield* Effect.gen(function* () {
-        const parsed = yield* parseMcpWebSearchResponse(`event: message\ndata: ${mcpResult('sse results')}\n\n`)
+        const parsed = yield* parseMcpWebSearchResponse(
+          `event: message\ndata: ${mcpResult('sse results')}\n\n`
+        )
 
         expect(parsed).toBe('sse results')
       })
-    }))
+    })
+  )
 
   it('selects override before stable query split', () => {
     expect(selectWebSearchProvider('anything', 'exa')).toBe('exa')
@@ -57,7 +60,9 @@ describe('web_search tool', () => {
 
   it.effect('calls Exa MCP for selected Exa searches', () =>
     Effect.gen(function* () {
-      const { deps, requested } = makeDependencies(() => Effect.succeed(mcpResult('Search result with source.')))
+      const { deps, requested } = makeDependencies(() =>
+        Effect.succeed(mcpResult('Search result with source.'))
+      )
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -76,7 +81,8 @@ describe('web_search tool', () => {
       })
       expect(result.content).toContain('Provider: exa')
       expect(result.content).toContain('Search result with source.')
-    }))
+    })
+  )
 
   it.effect('falls back to alternate provider without override', () =>
     Effect.gen(function* () {
@@ -103,14 +109,24 @@ describe('web_search tool', () => {
       expect(requested.map(request => request.provider)).toEqual(['exa', 'parallel'])
       expect(result.content).toContain('Provider: parallel')
       expect(result.content).toContain('Fallback result.')
-    }))
+    })
+  )
 
   it.effect('enables web_search for text and voice agents', () =>
     Effect.gen(function* () {
-      const textTools = yield* resolveAgentTools({ surface: 'text', route: '/agent', userId: 'user_1' })
-      const voiceTools = yield* resolveAgentTools({ surface: 'voice', route: '/agent', userId: 'user_1' })
+      const textTools = yield* resolveAgentTools({
+        surface: 'text',
+        route: '/agent',
+        userId: 'user_1'
+      })
+      const voiceTools = yield* resolveAgentTools({
+        surface: 'voice',
+        route: '/agent',
+        userId: 'user_1'
+      })
 
       expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
       expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
-    }))
+    })
+  )
 })

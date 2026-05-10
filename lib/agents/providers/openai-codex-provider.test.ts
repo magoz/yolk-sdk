@@ -259,7 +259,9 @@ describe('OpenAiCodexProviderLayer', () => {
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'what is magoz.com about?' })],
-            tools: [ToolDef.make({ name: 'web_search', description: 'Search web.', parameters: {} })],
+            tools: [
+              ToolDef.make({ name: 'web_search', description: 'Search web.', parameters: {} })
+            ],
             model: 'gpt-5.4',
             systemPrompt: 'Use tools.'
           })
@@ -303,7 +305,9 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('rejects empty OpenAI Codex responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const layer = makeProviderLayer(makeHttpClientLayer({ output_text: '', output: [] }, requests))
+      const layer = makeProviderLayer(
+        makeHttpClientLayer({ output_text: '', output: [] }, requests)
+      )
 
       const result = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
@@ -404,11 +408,9 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'TextDelta', 'Done'])
-      expect(events.map(event => (event._tag === 'ReasoningDelta' ? event.text : event._tag))).toEqual([
-        'think',
-        'TextDelta',
-        'Done'
-      ])
+      expect(
+        events.map(event => (event._tag === 'ReasoningDelta' ? event.text : event._tag))
+      ).toEqual(['think', 'TextDelta', 'Done'])
     })
   )
 

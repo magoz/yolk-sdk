@@ -70,9 +70,12 @@ export class AssistantMessageEvent extends Schema.TaggedClass<AssistantMessageEv
   }
 ) {}
 
-export class ToolExecutionStart extends Schema.TaggedClass<ToolExecutionStart>()('ToolExecutionStart', {
-  call: ToolCall
-}) {}
+export class ToolExecutionStart extends Schema.TaggedClass<ToolExecutionStart>()(
+  'ToolExecutionStart',
+  {
+    call: ToolCall
+  }
+) {}
 
 export class ToolExecutionEnd extends Schema.TaggedClass<ToolExecutionEnd>()('ToolExecutionEnd', {
   call: ToolCall,

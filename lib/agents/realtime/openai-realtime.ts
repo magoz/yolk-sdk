@@ -79,30 +79,32 @@ export type OpenAiRealtimeSessionConfigInput = {
 export const openAiRealtimeModel = 'gpt-realtime-2'
 export const defaultOpenAiRealtimeVoice: OpenAiRealtimeVoice = 'marin'
 export const defaultOpenAiRealtimeReasoningEffort: OpenAiRealtimeReasoningEffort = 'low'
-export const defaultOpenAiRealtimeTranscriptionModel: OpenAiRealtimeTranscriptionModel = 'gpt-realtime-whisper'
+export const defaultOpenAiRealtimeTranscriptionModel: OpenAiRealtimeTranscriptionModel =
+  'gpt-realtime-whisper'
 export const openAiRealtimeTranscriptionPrompt = 'Transcribe English speech. Preserve exact words.'
-export const openAiRealtimeTranscriptionModelOptions: ReadonlyArray<OpenAiRealtimeTranscriptionModelOption> = [
-  {
-    model: 'gpt-realtime-whisper',
-    label: 'realtime whisper',
-    description: 'Lowest latency streaming transcription.'
-  },
-  {
-    model: 'gpt-4o-transcribe',
-    label: '4o transcribe',
-    description: 'Higher accuracy English transcription with prompt steering.'
-  },
-  {
-    model: 'gpt-4o-mini-transcribe',
-    label: '4o mini',
-    description: 'Lower cost transcription.'
-  },
-  {
-    model: 'gpt-4o-mini-transcribe-2025-12-15',
-    label: '4o mini 2025-12-15',
-    description: 'Latest dated mini transcription snapshot.'
-  }
-]
+export const openAiRealtimeTranscriptionModelOptions: ReadonlyArray<OpenAiRealtimeTranscriptionModelOption> =
+  [
+    {
+      model: 'gpt-realtime-whisper',
+      label: 'realtime whisper',
+      description: 'Lowest latency streaming transcription.'
+    },
+    {
+      model: 'gpt-4o-transcribe',
+      label: '4o transcribe',
+      description: 'Higher accuracy English transcription with prompt steering.'
+    },
+    {
+      model: 'gpt-4o-mini-transcribe',
+      label: '4o mini',
+      description: 'Lower cost transcription.'
+    },
+    {
+      model: 'gpt-4o-mini-transcribe-2025-12-15',
+      label: '4o mini 2025-12-15',
+      description: 'Latest dated mini transcription snapshot.'
+    }
+  ]
 
 const makeOpenAiRealtimeInputTranscription = (
   model: OpenAiRealtimeTranscriptionModel

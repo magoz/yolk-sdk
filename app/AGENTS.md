@@ -4,13 +4,13 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Structure
 
-| Area | Role |
-| --- | --- |
-| `page.tsx` | Public home page |
-| `(auth)/` | Login, OTP, logout, auth error UI |
-| `agent/` | Text + voice agent playground UI |
-| `api/` | HTTP boundaries; see `app/api/AGENTS.md` |
-| `globals.css` | Tailwind 4 globals/theme |
+| Area          | Role                                     |
+| ------------- | ---------------------------------------- |
+| `page.tsx`    | Public home page                         |
+| `(auth)/`     | Login, OTP, logout, auth error UI        |
+| `agent/`      | Text + voice agent playground UI         |
+| `api/`        | HTTP boundaries; see `app/api/AGENTS.md` |
+| `globals.css` | Tailwind 4 globals/theme                 |
 
 ## Page Rules
 

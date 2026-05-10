@@ -50,14 +50,22 @@ export type VoiceDebugEvent =
       readonly transcriptionModel: string | null
       readonly transcriptionLanguage: string | null
     }
-  | { readonly _tag: 'InputTranscript'; readonly itemId: string | null; readonly transcript: string }
+  | {
+      readonly _tag: 'InputTranscript'
+      readonly itemId: string | null
+      readonly transcript: string
+    }
   | {
       readonly _tag: 'OutputTranscript'
       readonly itemId: string | null
       readonly responseId: string | null
       readonly transcript: string
     }
-  | { readonly _tag: 'ResponseDone'; readonly responseId: string | null; readonly status: string | null }
+  | {
+      readonly _tag: 'ResponseDone'
+      readonly responseId: string | null
+      readonly status: string | null
+    }
 
 type ActiveVoiceSession = {
   readonly peerConnection: RTCPeerConnection
@@ -123,14 +131,14 @@ const toolCallFromRealtime = (call: OpenAiRealtimeFunctionCall) =>
     params: call.argumentsJson
   })
 
-const unknownToMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
-const tryBrowserPromise = <A,>(evaluate: () => Promise<A>) =>
+const tryBrowserPromise = <A>(evaluate: () => Promise<A>) =>
   Effect.tryPromise({ try: evaluate, catch: error => error })
 
-const toBrowserHttpError =
-  (message: string) => (error: HttpClientError.HttpClientError) =>
-    new Error(`${message}: ${error.message}`)
+const toBrowserHttpError = (message: string) => (error: HttpClientError.HttpClientError) =>
+  new Error(`${message}: ${error.message}`)
 
 const encodeJsonString = (value: unknown, message: string) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
@@ -286,13 +294,16 @@ export const useRealtimeVoice = ({
     }
   }, [])
 
-  const sendClientEvent = useCallback((dataChannel: RTCDataChannel, event: OpenAiRealtimeClientEvent) => {
-    if (dataChannel.readyState !== 'open') {
-      throw new Error('Realtime data channel is not open')
-    }
+  const sendClientEvent = useCallback(
+    (dataChannel: RTCDataChannel, event: OpenAiRealtimeClientEvent) => {
+      if (dataChannel.readyState !== 'open') {
+        throw new Error('Realtime data channel is not open')
+      }
 
-    dataChannel.send(encodeClientEvent(event))
-  }, [])
+      dataChannel.send(encodeClientEvent(event))
+    },
+    []
+  )
 
   const emitAgentEvent = useCallback(
     (event: AgentEvent) => {
@@ -461,7 +472,9 @@ export const useRealtimeVoice = ({
               })
             }
 
-            yield* Effect.sync(() => sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent()))
+            yield* Effect.sync(() =>
+              sendClientEvent(dataChannel, makeOpenAiRealtimeResponseCreateEvent())
+            )
             return
           }
           case 'Error':
@@ -579,7 +592,7 @@ export const useRealtimeVoice = ({
 
                     setStatus('error')
                     onError(unknownToMessage(error))
-                }),
+                  }),
                 onSuccess: () => Effect.void
               }),
               Effect.provide(FetchHttpClient.layer)

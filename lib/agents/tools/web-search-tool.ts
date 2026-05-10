@@ -97,7 +97,8 @@ const webSearchParameters = {
     },
     contextMaxCharacters: {
       type: 'number',
-      description: 'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
+      description:
+        'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
     }
   },
   required: ['query']
@@ -125,7 +126,9 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
 
 const decodeWebSearchParams = (params: unknown) =>
   Schema.decodeUnknownEffect(WebSearchParams)(params).pipe(
-    Effect.mapError(error => makeToolError(`Invalid web search arguments: ${unknownToMessage(error)}`, 'validation'))
+    Effect.mapError(error =>
+      makeToolError(`Invalid web search arguments: ${unknownToMessage(error)}`, 'validation')
+    )
   )
 
 const normalizePositiveInteger = (input: {
@@ -181,8 +184,10 @@ const providerOverride = (): WebSearchProvider | undefined => {
 const queryChecksum = (query: string) =>
   Array.from(query).reduce((sum, character) => sum + (character.codePointAt(0) ?? 0), 0)
 
-export const selectWebSearchProvider = (query: string, override: WebSearchProvider | undefined = providerOverride()) =>
-  override ?? (queryChecksum(query) % 2 === 0 ? 'exa' : 'parallel')
+export const selectWebSearchProvider = (
+  query: string,
+  override: WebSearchProvider | undefined = providerOverride()
+) => override ?? (queryChecksum(query) % 2 === 0 ? 'exa' : 'parallel')
 
 const alternateProvider = (provider: WebSearchProvider): WebSearchProvider =>
   provider === 'exa' ? 'parallel' : 'exa'
@@ -250,12 +255,16 @@ const requestMcpWebSearch = (input: McpWebSearchRequest) =>
           arguments: input.arguments
         }
       }),
-      Effect.mapError(error => makeToolError(`Could not encode search request: ${unknownToMessage(error)}`, 'execution'))
+      Effect.mapError(error =>
+        makeToolError(`Could not encode search request: ${unknownToMessage(error)}`, 'execution')
+      )
     )
     const response = yield* HttpClient.filterStatusOk(http)
       .execute(request)
       .pipe(
-        Effect.mapError(error => makeToolError(`Search request failed: ${unknownToMessage(error)}`, 'execution')),
+        Effect.mapError(error =>
+          makeToolError(`Search request failed: ${unknownToMessage(error)}`, 'execution')
+        ),
         Effect.timeoutOrElse({
           duration: input.timeoutMs,
           orElse: () => Effect.fail(makeToolError('Search request timed out', 'timeout'))
@@ -263,7 +272,9 @@ const requestMcpWebSearch = (input: McpWebSearchRequest) =>
       )
 
     return yield* response.text.pipe(
-      Effect.mapError(error => makeToolError(`Could not read search response: ${unknownToMessage(error)}`, 'execution'))
+      Effect.mapError(error =>
+        makeToolError(`Could not read search response: ${unknownToMessage(error)}`, 'execution')
+      )
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
@@ -279,7 +290,9 @@ const parseMcpPayload = (payload: string) =>
     }
 
     const data = yield* decodeMcpResult(trimmed).pipe(
-      Effect.mapError(error => makeToolError(`Invalid search response: ${unknownToMessage(error)}`, 'execution'))
+      Effect.mapError(error =>
+        makeToolError(`Invalid search response: ${unknownToMessage(error)}`, 'execution')
+      )
     )
 
     return data.result.content.find(item => item.text.trim().length > 0)?.text
@@ -319,7 +332,8 @@ const callSearchProvider = (
     }
   })
 
-const shouldFallback = (error: ToolError) => error.cause === 'execution' || error.cause === 'timeout'
+const shouldFallback = (error: ToolError) =>
+  error.cause === 'execution' || error.cause === 'timeout'
 
 const runSearchWithFallback = (
   deps: WebSearchDependencies,
@@ -339,10 +353,12 @@ const formatToolOutput = (input: {
   readonly provider: WebSearchProvider
   readonly query: string
   readonly output: string
-}) =>
-  [`Provider: ${input.provider}`, `Query: ${input.query}`, '', input.output].join('\n')
+}) => [`Provider: ${input.provider}`, `Query: ${input.query}`, '', input.output].join('\n')
 
-export const searchWeb = (params: WebSearchParams, deps: WebSearchDependencies = liveWebSearchDependencies) =>
+export const searchWeb = (
+  params: WebSearchParams,
+  deps: WebSearchDependencies = liveWebSearchDependencies
+) =>
   Effect.gen(function* () {
     const normalized = yield* normalizeWebSearchParams(params)
     const override = providerOverride()

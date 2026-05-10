@@ -154,7 +154,7 @@ For optional environment variables:
 ```typescript
 import { Option } from 'effect'
 
-const optional = yield* Config.option(Config.string('OPTIONAL_VAR'))
+const optional = yield * Config.option(Config.string('OPTIONAL_VAR'))
 const value = Option.getOrUndefined(optional)
 ```
 

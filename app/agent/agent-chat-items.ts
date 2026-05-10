@@ -63,7 +63,11 @@ const activeStatusLabel = ({
 }
 
 const durationFromToolState = (state: ChatToolState): ToolDuration => {
-  if (state._tag !== 'Completed' || state.startedAtMs === undefined || state.endedAtMs === undefined) {
+  if (
+    state._tag !== 'Completed' ||
+    state.startedAtMs === undefined ||
+    state.endedAtMs === undefined
+  ) {
     return { _tag: 'Unknown' }
   }
 
@@ -97,9 +101,17 @@ const textItemFromPart = (
   if (part.state === 'streaming') {
     switch (message.role) {
       case 'user':
-        return Option.some({ _tag: 'UserDraft', id: part.id, text: draftTextFromContent(part.content) })
+        return Option.some({
+          _tag: 'UserDraft',
+          id: part.id,
+          text: draftTextFromContent(part.content)
+        })
       case 'assistant':
-        return Option.some({ _tag: 'AssistantDraft', id: part.id, text: draftTextFromContent(part.content) })
+        return Option.some({
+          _tag: 'AssistantDraft',
+          id: part.id,
+          text: draftTextFromContent(part.content)
+        })
       case 'system':
         return Option.none()
     }

@@ -43,13 +43,17 @@ const handler = Effect.gen(function* () {
     reportError(new RealtimeToolRouteError({ message: 'Invalid tool request', cause: error }), {
       operation: 'agent.realtime.tool',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid tool request' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid tool request' }, { status: 400 }))
+    )
   ),
   Effect.catchTag('SchemaError', error =>
     reportError(new RealtimeToolRouteError({ message: 'Invalid tool request', cause: error }), {
       operation: 'agent.realtime.tool',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid tool request' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid tool request' }, { status: 400 }))
+    )
   ),
   Effect.catch(error =>
     reportError(new RealtimeToolRouteError({ message: 'Realtime tool failed', cause: error }), {

@@ -179,7 +179,9 @@ const contentPartToUserPart = (
 }
 
 const contentToUserContent = (content: Content): Effect.Effect<OpenAiUserContent, LLMError> =>
-  typeof content === 'string' ? Effect.succeed(content) : Effect.forEach(content, contentPartToUserPart)
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, contentPartToUserPart)
 
 const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
   switch (part._tag) {

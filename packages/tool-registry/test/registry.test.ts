@@ -32,7 +32,9 @@ const gatedTool: ToolRegistration<TestContext> = {
   execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'gated' }))
 }
 
-const makeModule = (tools: ReadonlyArray<ToolRegistration<TestContext>>): ToolModule<TestContext> => ({
+const makeModule = (
+  tools: ReadonlyArray<ToolRegistration<TestContext>>
+): ToolModule<TestContext> => ({
   id: 'test',
   tools
 })
@@ -44,7 +46,8 @@ describe('resolveTools', () => {
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual(['echo'])
       expect(toolSet.metadata).toEqual([{ moduleId: 'test', name: 'echo', access: 'read' }])
-    }))
+    })
+  )
 
   it.effect('filters disabled tools', () =>
     Effect.gen(function* () {
@@ -52,7 +55,8 @@ describe('resolveTools', () => {
 
       expect(toolSet.tools).toEqual([])
       expect(toolSet.metadata).toEqual([])
-    }))
+    })
+  )
 
   it.effect('executes resolved tools through ToolExecutor layer', () =>
     Effect.gen(function* () {
@@ -66,7 +70,8 @@ describe('resolveTools', () => {
       )
 
       expect(executor).toMatchObject({ toolCallId: 'call_1', content: 'echo' })
-    }))
+    })
+  )
 
   it.effect('rejects duplicate tool names', () =>
     Effect.gen(function* () {
@@ -78,5 +83,6 @@ describe('resolveTools', () => {
         _tag: 'Failure',
         failure: { _tag: 'ToolRegistryError', cause: 'duplicate_tool' }
       })
-    }))
+    })
+  )
 })

@@ -39,81 +39,81 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 
 ## CAPABILITIES
 
-| Capability         | Service   | Details                                              |
-| ------------------ | --------- | ---------------------------------------------------- |
-| Authentication     | Auth      | Sign up, sign in, sign out, sessions, OTP email flow |
-| Database           | Db        | PostgreSQL via Effect PgDrizzle; Auth adapter uses Neon HTTP |
-| Email sending      | Email     | Transactional email via Resend                       |
-| Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
-| UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
-| Agent stack        | packages  | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client |
-| Text agent         | app/lib   | `/agent` + `/api/agent`; parts-native chat UI → protocol transcript + Codex OAuth + `gpt-5.4` |
-| Voice agent        | app/lib   | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
-| Web tools          | app/lib   | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search |
-| OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
+| Capability         | Service          | Details                                                                                                                 |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Authentication     | Auth             | Sign up, sign in, sign out, sessions, OTP email flow                                                                    |
+| Database           | Db               | PostgreSQL via Effect PgDrizzle; Auth adapter uses Neon HTTP                                                            |
+| Email sending      | Email            | Transactional email via Resend                                                                                          |
+| Observability      | Telemetry        | OpenTelemetry spans + Sentry error tracking                                                                             |
+| UI components      | shadcn/ui        | Base UI primitives (not Radix), see `components/ui/`                                                                    |
+| Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client                                                |
+| Text agent         | app/lib          | `/agent` + `/api/agent`; parts-native chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                           |
+| Voice agent        | app/lib          | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
+| Web tools          | app/lib          | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
+| OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
 
 ## WHERE TO LOOK
 
-| Task                 | Location                             | Notes                                        |
-| -------------------- | ------------------------------------ | -------------------------------------------- |
-| Add app page/UI      | `app/`                               | See `app/AGENTS.md` + EFFECT_PAGES           |
-| Add server action    | `lib/core/[domain]/*-action.ts`      | One action per file, see `lib/core/AGENTS.md` |
-| Add domain function  | `lib/core/[domain]/*.ts`             | Pure Effect functions, see EFFECT_DOMAIN_FUNCTIONS |
-| Add new service      | `lib/services/[name]/`               | Follow `lib/services/AGENTS.md` pattern      |
-| Add dynamic page     | `app/*/page.tsx`                     | See EFFECT_PAGES for Suspense pattern        |
-| Add API route        | `app/api/[route]/route.ts`           | HTTP boundaries only; see `app/api/AGENTS.md` |
-| Add UI component     | `components/ui/`                     | Uses Base UI, not Radix                      |
-| Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs |
-| Add E2E tests        | `e2e/`                               | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md` |
-| Database schema      | `lib/services/db/schema.ts`          | Drizzle ORM                                  |
-| Auth flow            | `app/(auth)/`                        | better-auth + OTP email                      |
-| Service dependencies | `lib/layers.ts`                      | AppLayer merges all services                 |
-| Error types          | `lib/core/errors/index.ts`           | Shared domain errors                         |
-| URL state (filters)  | `app/*/search-params.ts`             | nuqs/server imports only, see NUQS pattern   |
-| Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md` | Prettier, kebab-case, file naming            |
-| Agent providers      | `lib/agents/AGENTS.md`               | Runtime layer, provider modes, Codex quirks  |
-| Agent chat UI        | `app/agent/AGENTS.md`                | Headless chat hook/items, composer, console chrome |
-| Add agent tool       | `lib/agents/tools/`                  | App `ToolModule`s; scope via `resolveAgentTools` |
-| Agent auth actions   | `lib/core/agent/*-action.ts`         | OpenAI Codex connect/disconnect actions      |
-| Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
-| Local lint rule      | `eslint-local-rules/`                | See `eslint-local-rules/AGENTS.md`           |
-| Agent loop design    | `AGENT_LOOP.md`                      | Stateless loop details and decisions         |
+| Task                 | Location                                       | Notes                                                        |
+| -------------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| Add app page/UI      | `app/`                                         | See `app/AGENTS.md` + EFFECT_PAGES                           |
+| Add server action    | `lib/core/[domain]/*-action.ts`                | One action per file, see `lib/core/AGENTS.md`                |
+| Add domain function  | `lib/core/[domain]/*.ts`                       | Pure Effect functions, see EFFECT_DOMAIN_FUNCTIONS           |
+| Add new service      | `lib/services/[name]/`                         | Follow `lib/services/AGENTS.md` pattern                      |
+| Add dynamic page     | `app/*/page.tsx`                               | See EFFECT_PAGES for Suspense pattern                        |
+| Add API route        | `app/api/[route]/route.ts`                     | HTTP boundaries only; see `app/api/AGENTS.md`                |
+| Add UI component     | `components/ui/`                               | Uses Base UI, not Radix                                      |
+| Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs            |
+| Add E2E tests        | `e2e/`                                         | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md` |
+| Database schema      | `lib/services/db/schema.ts`                    | Drizzle ORM                                                  |
+| Auth flow            | `app/(auth)/`                                  | better-auth + OTP email                                      |
+| Service dependencies | `lib/layers.ts`                                | AppLayer merges all services                                 |
+| Error types          | `lib/core/errors/index.ts`                     | Shared domain errors                                         |
+| URL state (filters)  | `app/*/search-params.ts`                       | nuqs/server imports only, see NUQS pattern                   |
+| Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md`           | Prettier, kebab-case, file naming                            |
+| Agent providers      | `lib/agents/AGENTS.md`                         | Runtime layer, provider modes, Codex quirks                  |
+| Agent chat UI        | `app/agent/AGENTS.md`                          | Headless chat hook/items, composer, console chrome           |
+| Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; scope via `resolveAgentTools`             |
+| Agent auth actions   | `lib/core/agent/*-action.ts`                   | OpenAI Codex connect/disconnect actions                      |
+| Reusable agent stack | `packages/AGENTS.md`                           | Package boundaries and naming                                |
+| Local lint rule      | `eslint-local-rules/`                          | See `eslint-local-rules/AGENTS.md`                           |
+| Agent loop design    | `AGENT_LOOP.md`                                | Stateless loop details and decisions                         |
 
 ## CODE MAP
 
-| Symbol                  | Type     | Location                                   | Role                                                |
-| ----------------------- | -------- | ------------------------------------------ | --------------------------------------------------- |
-| `AppLayer`              | Layer    | `lib/layers.ts`                            | Merged service layer for Effect pipelines           |
-| `NextEffect.runPromise` | Function | `lib/next-effect/index.ts`                 | Handles redirects + notFound outside Effect context |
-| `NextEffect.redirect`   | Function | `lib/next-effect/index.ts`                 | Redirect intent (use inside Effect pipelines)       |
-| `NextEffect.notFound`   | Function | `lib/next-effect/index.ts`                 | NotFound intent (use inside Effect pipelines)       |
-| `NextEffect.isNavigationError` | Function | `lib/next-effect/index.ts`          | Re-fail redirect/notFound inside catch-all handlers  |
-| `Auth`                  | Service  | `lib/services/auth/live-layer.ts`          | Authentication (sign in/up/out, sessions)           |
-| `Db`                    | Service  | `lib/services/db/live-layer.ts`            | Database (returns Drizzle client)                   |
-| `Email`                 | Service  | `lib/services/email/live-layer.ts`         | Resend email sending                                |
-| `OpenAiCodexOAuth`      | Service  | `lib/services/openai-codex-oauth/live-layer.ts` | Codex OAuth device flow + refresh              |
-| `TelemetryLayer`        | Layer    | `lib/services/telemetry/live-layer.ts`     | OpenTelemetry + Sentry span/log processing          |
-| `reportError`           | Function | `lib/services/telemetry/report-error.ts`   | Log error + Sentry capture (boundaries only)        |
-| `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
-| `makeAgentRuntimeLayer` | Function | `lib/agents/runtime-layer.ts`              | Provides provider + default loop deps with no tools  |
-| `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`     | Provides provider + app tool executor for agent routes |
-| `resolveAgentTools`     | Function | `lib/agents/tools/registry.ts`            | Resolves app-scoped text/voice toolsets             |
-| `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
-| `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
-| `AgentTranscript`       | Type     | `packages/client/src/state.ts`             | Non-empty client-owned protocol transcript          |
-| `AgentToolRun`          | Type     | `packages/client/src/state.ts`             | Client-side tool lifecycle with call/result/timing  |
-| `AgentChatMessage`      | Type     | `app/agent/agent-chat-messages.ts`         | App-local chat parts source of truth                |
-| `toAgentMessages`       | Function | `app/agent/agent-chat-messages.ts`         | Converts chat parts to protocol transcript          |
+| Symbol                           | Type     | Location                                        | Role                                                   |
+| -------------------------------- | -------- | ----------------------------------------------- | ------------------------------------------------------ |
+| `AppLayer`                       | Layer    | `lib/layers.ts`                                 | Merged service layer for Effect pipelines              |
+| `NextEffect.runPromise`          | Function | `lib/next-effect/index.ts`                      | Handles redirects + notFound outside Effect context    |
+| `NextEffect.redirect`            | Function | `lib/next-effect/index.ts`                      | Redirect intent (use inside Effect pipelines)          |
+| `NextEffect.notFound`            | Function | `lib/next-effect/index.ts`                      | NotFound intent (use inside Effect pipelines)          |
+| `NextEffect.isNavigationError`   | Function | `lib/next-effect/index.ts`                      | Re-fail redirect/notFound inside catch-all handlers    |
+| `Auth`                           | Service  | `lib/services/auth/live-layer.ts`               | Authentication (sign in/up/out, sessions)              |
+| `Db`                             | Service  | `lib/services/db/live-layer.ts`                 | Database (returns Drizzle client)                      |
+| `Email`                          | Service  | `lib/services/email/live-layer.ts`              | Resend email sending                                   |
+| `OpenAiCodexOAuth`               | Service  | `lib/services/openai-codex-oauth/live-layer.ts` | Codex OAuth device flow + refresh                      |
+| `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`          | OpenTelemetry + Sentry span/log processing             |
+| `reportError`                    | Function | `lib/services/telemetry/report-error.ts`        | Log error + Sentry capture (boundaries only)           |
+| `reportWarning`                  | Function | `lib/services/telemetry/report-warning.ts`      | Log warning + Sentry warning (degraded paths)          |
+| `makeAgentRuntimeLayer`          | Function | `lib/agents/runtime-layer.ts`                   | Provides provider + default loop deps with no tools    |
+| `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`                   | Provides provider + app tool executor for agent routes |
+| `resolveAgentTools`              | Function | `lib/agents/tools/registry.ts`                  | Resolves app-scoped text/voice toolsets                |
+| `run`                            | Function | `packages/agent-loop/src/run.ts`                | Stateless LLM/tool loop                                |
+| `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`     | Session load/save orchestration over agent loop        |
+| `AgentTranscript`                | Type     | `packages/client/src/state.ts`                  | Non-empty client-owned protocol transcript             |
+| `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side tool lifecycle with call/result/timing     |
+| `AgentChatMessage`               | Type     | `app/agent/agent-chat-messages.ts`              | App-local chat parts source of truth                   |
+| `toAgentMessages`                | Function | `app/agent/agent-chat-messages.ts`              | Converts chat parts to protocol transcript             |
 
 ## REFERENCE REPOS
 
-| Repo            | Location                | Notes                                                                                          |
-| --------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
-| `effect-smol`   | `.repos/effect`         | Effect v4 source/docs; source for current Effect API shifts                                     |
-| `pi-mono`       | `.repos/pi`             | Pi monorepo; agent/product architecture reference                                               |
-| `opencode`      | `.repos/opencode`       | Opencode fork; Codex/OpenAI agent protocol/provider reference                                   |
-| `t3code`        | `.repos/t3code`         | Agent chat/product UI reference                                                                 |
-| `ai-sdk`        | `.repos/ai`             | Vercel AI SDK reference; UIMessage parts/tool lifecycle model                                   |
+| Repo          | Location          | Notes                                                         |
+| ------------- | ----------------- | ------------------------------------------------------------- |
+| `effect-smol` | `.repos/effect`   | Effect v4 source/docs; source for current Effect API shifts   |
+| `pi-mono`     | `.repos/pi`       | Pi monorepo; agent/product architecture reference             |
+| `opencode`    | `.repos/opencode` | Opencode fork; Codex/OpenAI agent protocol/provider reference |
+| `t3code`      | `.repos/t3code`   | Agent chat/product UI reference                               |
+| `ai-sdk`      | `.repos/ai`       | Vercel AI SDK reference; UIMessage parts/tool lifecycle model |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
 - `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai` track branches.
@@ -121,36 +121,36 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
-| Pattern                                             | Correct Approach                                                                         |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| API routes for CRUD operations                      | Server actions (`lib/core/[domain]/*-action.ts`)                                         |
-| Streaming files through server                      | Signed direct uploads (R2/S3); add file service first                                    |
-| Raw `process.env` in Effect app/service code         | `yield* Config.*`; direct env only in documented sync boundaries                         |
-| `router.push()` for logout                          | `window.location.href = '/'` (layout cache issue)                                        |
-| Barrel files (`index.ts` re-exports)                | Import from `live-layer.ts` directly                                                     |
-| `Effect.runPromise()` in pages                      | `NextEffect.runPromise()` (handles redirects)                                            |
-| Catch-all swallowing `NextEffect.redirect/notFound` | Re-fail `NextEffect.isNavigationError(error)` before reporting                            |
-| Layer `dependencies` option                         | `Layer.provide()` externally                                                             |
-| Multiple services per directory                     | One service per directory                                                                |
-| Multiple actions per file                           | One action per file ending in `-action.ts`                                               |
-| `useState` for shareable UI state                   | nuqs URL state (`app/*/search-params.ts`)                                                |
-| Import `parseAs*` from `nuqs`                       | Import from `nuqs/server` in search-params.ts                                            |
-| Direct data fetch in page component                 | Suspense + Content pattern (see EFFECT_PAGES)                                            |
-| Ad hoc nested async components                      | Use EFFECT_PAGES Shell + independent streaming sections pattern                          |
-| Static protected/session-gated pages                | Add `export const dynamic = 'force-dynamic'` or use dynamic APIs like `cookies()`         |
-| `matchEffect` for error handling                    | `catchTag` chains + `Effect.catch` catch-all                                             |
-| `Config.string('X').pipe(Effect.mapError(...))`     | Yield Config directly, map errors on whole block                                         |
-| `ServiceMap.Service<Self>()(id, { make })`          | `Context.Service<Self>()(id, { make })` — `ServiceMap` renamed to `Context` in Effect v4 |
-| `Logger.pretty`                                     | `Logger.layer([Logger.consolePretty()])` — `Logger.pretty` removed in v4                 |
-| `@effect/platform-node` for Db service              | `PgDrizzle.make()` from `drizzle-orm/effect-postgres` — handles connection internally    |
-| `drizzle(client, { schema })` in Db service         | `PgDrizzle.make({ relations })`; Auth intentionally uses Neon HTTP better-auth adapter   |
-| `Schema.TaggedError`                                | `Schema.TaggedErrorClass` — renamed in v4. Or use `Data.TaggedError` for simpler errors  |
-| `Either.isRight(r)` / `r.right`                     | `Result.isSuccess(r)` / `r.success` — `Either` renamed to `Result` in v4                 |
-| `Effect.catchAll(handler)`                          | `Effect.catch(handler)` — v4 rename                                                      |
-| `FiberRef.unsafeMake` / `FiberRef.get`              | `Context.Reference` + `References.*` — `FiberRef` removed in v4                          |
-| `dotenv.config({ path: '.env.local' })` in a module | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`            |
-| Raw `fetch` in Effect services/providers            | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer     |
-| Raw `JSON.parse/stringify` in production Effect code | `Schema.UnknownFromJsonString` + Effect encode/decode; direct JSON is fine in tests       |
+| Pattern                                              | Correct Approach                                                                              |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| API routes for CRUD operations                       | Server actions (`lib/core/[domain]/*-action.ts`)                                              |
+| Streaming files through server                       | Signed direct uploads (R2/S3); add file service first                                         |
+| Raw `process.env` in Effect app/service code         | `yield* Config.*`; direct env only in documented sync boundaries                              |
+| `router.push()` for logout                           | `window.location.href = '/'` (layout cache issue)                                             |
+| Barrel files (`index.ts` re-exports)                 | Import from `live-layer.ts` directly                                                          |
+| `Effect.runPromise()` in pages                       | `NextEffect.runPromise()` (handles redirects)                                                 |
+| Catch-all swallowing `NextEffect.redirect/notFound`  | Re-fail `NextEffect.isNavigationError(error)` before reporting                                |
+| Layer `dependencies` option                          | `Layer.provide()` externally                                                                  |
+| Multiple services per directory                      | One service per directory                                                                     |
+| Multiple actions per file                            | One action per file ending in `-action.ts`                                                    |
+| `useState` for shareable UI state                    | nuqs URL state (`app/*/search-params.ts`)                                                     |
+| Import `parseAs*` from `nuqs`                        | Import from `nuqs/server` in search-params.ts                                                 |
+| Direct data fetch in page component                  | Suspense + Content pattern (see EFFECT_PAGES)                                                 |
+| Ad hoc nested async components                       | Use EFFECT_PAGES Shell + independent streaming sections pattern                               |
+| Static protected/session-gated pages                 | Add `export const dynamic = 'force-dynamic'` or use dynamic APIs like `cookies()`             |
+| `matchEffect` for error handling                     | `catchTag` chains + `Effect.catch` catch-all                                                  |
+| `Config.string('X').pipe(Effect.mapError(...))`      | Yield Config directly, map errors on whole block                                              |
+| `ServiceMap.Service<Self>()(id, { make })`           | `Context.Service<Self>()(id, { make })` — `ServiceMap` renamed to `Context` in Effect v4      |
+| `Logger.pretty`                                      | `Logger.layer([Logger.consolePretty()])` — `Logger.pretty` removed in v4                      |
+| `@effect/platform-node` for Db service               | `PgDrizzle.make()` from `drizzle-orm/effect-postgres` — handles connection internally         |
+| `drizzle(client, { schema })` in Db service          | `PgDrizzle.make({ relations })`; Auth intentionally uses Neon HTTP better-auth adapter        |
+| `Schema.TaggedError`                                 | `Schema.TaggedErrorClass` — renamed in v4. Or use `Data.TaggedError` for simpler errors       |
+| `Either.isRight(r)` / `r.right`                      | `Result.isSuccess(r)` / `r.success` — `Either` renamed to `Result` in v4                      |
+| `Effect.catchAll(handler)`                           | `Effect.catch(handler)` — v4 rename                                                           |
+| `FiberRef.unsafeMake` / `FiberRef.get`               | `Context.Reference` + `References.*` — `FiberRef` removed in v4                               |
+| `dotenv.config({ path: '.env.local' })` in a module  | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`                 |
+| Raw `fetch` in Effect services/providers             | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer         |
+| Raw `JSON.parse/stringify` in production Effect code | `Schema.UnknownFromJsonString` + Effect encode/decode; direct JSON is fine in tests           |
 | Fake/display-only reasoning                          | Only show provider-supplied reasoning summaries (`LLMReasoningDelta` / `Assistant.reasoning`) |
 
 ## NOTES

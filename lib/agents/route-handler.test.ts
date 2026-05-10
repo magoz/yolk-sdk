@@ -1,7 +1,13 @@
 import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentEvent, AssistantAgentMessage, ToolDef, UserMessage, type AgentMessage } from '@yolk/protocol'
+import {
+  AgentEvent,
+  AssistantAgentMessage,
+  ToolDef,
+  UserMessage,
+  type AgentMessage
+} from '@yolk/protocol'
 import {
   ContextTransformer,
   FauxProvider,
@@ -109,7 +115,8 @@ describe('makeAgentPostResponse', () => {
         'TurnEnd',
         'AgentEnd'
       ])
-    }))
+    })
+  )
 
   it.effect('returns a readable response before the agent stream completes', () =>
     Effect.gen(function* () {
@@ -145,7 +152,8 @@ describe('makeAgentPostResponse', () => {
       const event = yield* decodeEvent(parseJson(firstLine))
 
       expect(event._tag).toBe('AgentStart')
-    }))
+    })
+  )
 
   it.effect('encodes stream failures as in-band agent errors', () =>
     Effect.gen(function* () {
@@ -171,7 +179,8 @@ describe('makeAgentPostResponse', () => {
         message: 'Provider failed',
         retryable: true
       })
-    }))
+    })
+  )
 
   it.effect('uses the client-provided transcript', () =>
     Effect.gen(function* () {
@@ -217,7 +226,8 @@ describe('makeAgentPostResponse', () => {
         ['hello', 'ok', 'again']
       ])
       expect(requests[0]).toMatchObject({ reasoningEffort: 'medium' })
-    }))
+    })
+  )
 
   it.effect('executes configured tool calls', () =>
     Effect.gen(function* () {
@@ -281,7 +291,8 @@ describe('makeAgentPostResponse', () => {
         ['echo']
       ])
       expect(toolResultContents).toEqual(['pong'])
-    }))
+    })
+  )
 
   it.effect('rejects empty transcripts at request boundary', () =>
     Effect.gen(function* () {
@@ -294,5 +305,6 @@ describe('makeAgentPostResponse', () => {
         _tag: 'Failure',
         failure: { _tag: 'SchemaError' }
       })
-    }))
+    })
+  )
 })

@@ -37,7 +37,8 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
         }
       })
       expect(config.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
-    }))
+    })
+  )
 
   it('uses the selected prompted transcription model', () => {
     const config = makeOpenAiRealtimeSessionConfig({

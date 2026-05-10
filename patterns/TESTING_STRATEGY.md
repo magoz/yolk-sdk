@@ -210,11 +210,11 @@ layer(testLayer)('post operations', it => {
 
 ### When to Use Real vs Mock Services
 
-| Service  | Unit Tests | Integration Tests | E2E Tests |
-| -------- | ---------- | ----------------- | --------- |
-| Auth     | Mock       | Mock              | Real      |
-| Db       | Mock       | Real (container)  | Real      |
-| Email    | Mock       | Mock              | Mock      |
+| Service | Unit Tests | Integration Tests | E2E Tests |
+| ------- | ---------- | ----------------- | --------- |
+| Auth    | Mock       | Mock              | Real      |
+| Db      | Mock       | Real (container)  | Real      |
+| Email   | Mock       | Mock              | Mock      |
 
 **Rule:** Mock external services (email, integrations) in automated tests. Use real Db only in integration/E2E tests with test isolation.
 

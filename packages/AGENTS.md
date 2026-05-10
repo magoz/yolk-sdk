@@ -4,14 +4,14 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 
 ## Packages
 
-| Package | Role | Depends on |
-| --- | --- | --- |
-| `@yolk/protocol` | Shared schemas, messages, tools, events | Effect |
-| `@yolk/agent-loop` | Stateless LLM ⇄ tool turn loop | `@yolk/protocol`, Effect |
-| `@yolk/agent-runtime` | Session load/save orchestration over agent-loop | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/tool-registry` | Scoped tool modules + executor layer | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/client` | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect |
+| Package               | Role                                                    | Depends on                                   |
+| --------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `@yolk/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
+| `@yolk/agent-loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/protocol`, Effect                     |
+| `@yolk/agent-runtime` | Session load/save orchestration over agent-loop         | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
 
 ## Dependency Rule
 

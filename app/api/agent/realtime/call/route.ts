@@ -191,14 +191,18 @@ const handler = Effect.gen(function* () {
     reportError(new RealtimeCallRouteError({ message: 'Invalid SDP request', cause: error }), {
       operation: 'agent.realtime.call',
       status: 400
-    }).pipe(Effect.andThen(HttpServerResponse.json({ error: 'Invalid SDP request' }, { status: 400 })))
+    }).pipe(
+      Effect.andThen(HttpServerResponse.json({ error: 'Invalid SDP request' }, { status: 400 }))
+    )
   ),
   Effect.catchTag('RealtimeCallRouteError', error =>
     HttpServerResponse.json({ error: error.message }, { status: 400 })
   ),
   Effect.catchTag('OpenAiRealtimeCallError', error =>
     reportError(error, { operation: 'agent.realtime.call', status: 502 }).pipe(
-      Effect.andThen(HttpServerResponse.json({ error: 'OpenAI Realtime call failed' }, { status: 502 }))
+      Effect.andThen(
+        HttpServerResponse.json({ error: 'OpenAI Realtime call failed' }, { status: 502 })
+      )
     )
   ),
   Effect.catch(error =>

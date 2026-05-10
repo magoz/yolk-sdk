@@ -30,7 +30,6 @@ import {
   CardContent,
   CardFooter
 } from '@/components/ui/card'
-
 ;<Card>
   <CardHeader>
     <CardTitle>Title</CardTitle>
@@ -55,7 +54,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-
 ;<Dialog>
   <DialogTrigger asChild>
     <Button>Open</Button>
@@ -82,7 +80,6 @@ import {
   SelectContent,
   SelectItem
 } from '@/components/ui/select'
-
 ;<Select>
   <SelectTrigger className="w-[180px]">
     <SelectValue placeholder="Theme" />
@@ -98,7 +95,6 @@ import {
 
 ```tsx
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-
 ;<Tabs defaultValue="account">
   <TabsList>
     <TabsTrigger value="account">Account</TabsTrigger>
@@ -131,7 +127,6 @@ import {
   CommandGroup,
   CommandItem
 } from '@/components/ui/command'
-
 ;<Command>
   <CommandInput placeholder="Search..." />
   <CommandList>
@@ -156,7 +151,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton
 } from '@/components/ui/sidebar'
-
 ;<Sidebar>
   <SidebarContent>
     <SidebarGroup>
@@ -187,7 +181,6 @@ import {
   TableHead,
   TableCell
 } from '@/components/ui/table'
-
 ;<Table>
   <TableHeader>
     <TableRow>

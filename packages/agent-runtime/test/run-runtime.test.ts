@@ -47,5 +47,6 @@ describe('runRuntime', () => {
       expect(saved).toHaveLength(1)
       expect(saved[0]?.id).toBe('session_1')
       expect(saved[0]?.messages.map(message => message.content)).toEqual(['old', 'new', 'ok'])
-    }))
+    })
+  )
 })

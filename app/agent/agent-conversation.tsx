@@ -127,9 +127,7 @@ function ToolRunCard({
     <div className={chatRowClass}>
       <div className="flex gap-3">
         <UtilityIcon role="tool" />
-        <div
-          className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-900 shadow-xs dark:text-amber-200"
-        >
+        <div className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-900 shadow-xs dark:text-amber-200">
           <button
             type="button"
             aria-expanded={expanded}
@@ -316,7 +314,9 @@ function AgentChatItemView({
     case 'Reasoning':
       return showReasoning ? <ReasoningCard text={item.text} /> : null
     case 'ToolRun':
-      return showInlineTools ? <ToolRunCard id={item.id} call={item.call} state={item.state} /> : null
+      return showInlineTools ? (
+        <ToolRunCard id={item.id} call={item.call} state={item.state} />
+      ) : null
     case 'ToolResult':
       return showInlineTools ? (
         <ToolResultCard name={item.name} content={contentPreview(item.content)} />

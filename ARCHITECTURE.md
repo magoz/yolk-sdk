@@ -31,13 +31,13 @@ No users, teams, orgs, projects, billing, or product-specific permissions below 
 
 ## Terminology
 
-| Term | Meaning |
-| --- | --- |
-| Protocol | Shared schemas/events/wire contract. |
-| Agent loop | Stateless LLM/tool iteration. |
-| Agent runtime | Server-side session/run lifecycle around the loop. |
-| Client | UI-side event consumer for web or extension surfaces. |
-| Harness | Not a current package; reserve for future batteries-included agent kit if needed. |
+| Term          | Meaning                                                                           |
+| ------------- | --------------------------------------------------------------------------------- |
+| Protocol      | Shared schemas/events/wire contract.                                              |
+| Agent loop    | Stateless LLM/tool iteration.                                                     |
+| Agent runtime | Server-side session/run lifecycle around the loop.                                |
+| Client        | UI-side event consumer for web or extension surfaces.                             |
+| Harness       | Not a current package; reserve for future batteries-included agent kit if needed. |
 
 ---
 
@@ -46,6 +46,7 @@ No users, teams, orgs, projects, billing, or product-specific permissions below 
 Shared contract.
 
 Owns:
+
 - `AgentMessage`
 - `ContentPart`
 - `ToolCall`
@@ -56,6 +57,7 @@ Owns:
 - session/run identifiers
 
 Does not own:
+
 - persistence
 - transport implementation
 - domain metadata
@@ -81,6 +83,7 @@ const run = (config: {
 ```
 
 Owns:
+
 - LLM <> tool turn loop
 - provider interface
 - tool executor interface
@@ -92,6 +95,7 @@ Owns:
 - faux provider test layer
 
 Does not own:
+
 - sessions
 - persistence
 - WebSocket/SSE
@@ -123,6 +127,7 @@ type RuntimeRequest<Ctx> = {
 `Ctx` is opaque. Runtime passes it to adapters but never interprets it.
 
 Owns:
+
 - session load/save orchestration
 - transcript reducer
 - resumable runs
@@ -135,6 +140,7 @@ Owns:
 - platform adapters (Cloudflare DO, Node later)
 
 Does not own:
+
 - meaning of `Ctx`
 - user/team/org/project concepts
 - domain permissions
@@ -151,7 +157,7 @@ createAgentRuntime<Ctx>({
   toolResolver,
   contextProvider,
   permissionPolicy,
-  compactionStrategy,
+  compactionStrategy
 })
 ```
 
@@ -180,6 +186,7 @@ The runtime can provide defaults: no compaction, no extra context, no extra tool
 Browser/client protocol SDK.
 
 Owns:
+
 - connect to runtime transport
 - send user messages
 - receive `AgentEvent`s
@@ -190,6 +197,7 @@ Owns:
 - optional React hooks package later
 
 Does not own:
+
 - agent-loop execution in normal production
 - LLM providers
 - server persistence
@@ -205,6 +213,7 @@ Default assumption: browser uses shared protocol and talks to runtime. It does n
 Project-specific product layer.
 
 Owns:
+
 - auth
 - users
 - teams
@@ -268,10 +277,10 @@ App route / Worker / DO
 
 Short version:
 
-| Layer | Responsibility |
-|---|---|
-| Protocol | Shared language |
-| Agent loop | Loop mechanism |
+| Layer         | Responsibility                |
+| ------------- | ----------------------------- |
+| Protocol      | Shared language               |
+| Agent loop    | Loop mechanism                |
 | Agent runtime | Generic session orchestration |
-| Client | Browser transport + state |
-| App | Domain policy |
+| Client        | Browser transport + state     |
+| App           | Domain policy                 |

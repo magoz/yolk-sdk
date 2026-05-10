@@ -37,7 +37,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [showInlineTools, setShowInlineTools] = useState(true)
   const [showReasoning, setShowReasoning] = useState(true)
   const [reasoningEffort, setReasoningEffort] = useState(agentTextReasoningEffort)
-  const [transcriptionModel, setTranscriptionModel] = useState(defaultOpenAiRealtimeTranscriptionModel)
+  const [transcriptionModel, setTranscriptionModel] = useState(
+    defaultOpenAiRealtimeTranscriptionModel
+  )
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const nextActivityIdRef = useRef(0)
 
@@ -147,7 +149,10 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const submitDisabled = isRunning || isVoiceMode
-  const activeToolParts = useMemo(() => getActiveChatToolParts(state.chatMessages), [state.chatMessages])
+  const activeToolParts = useMemo(
+    () => getActiveChatToolParts(state.chatMessages),
+    [state.chatMessages]
+  )
   const completedToolParts = useMemo(
     () => getCompletedChatToolParts(state.chatMessages),
     [state.chatMessages]

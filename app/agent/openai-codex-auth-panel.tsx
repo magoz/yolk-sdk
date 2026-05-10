@@ -118,7 +118,9 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
             Connect OpenAI Codex OAuth for Plus/Pro/Max subscription access.
           </p>
         </div>
-        <Badge variant={connected ? 'secondary' : 'outline'}>{connected ? 'connected' : 'optional'}</Badge>
+        <Badge variant={connected ? 'secondary' : 'outline'}>
+          {connected ? 'connected' : 'optional'}
+        </Badge>
       </div>
 
       {deviceFlow === null ? (
@@ -152,7 +154,9 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => window.open(deviceFlow.verificationUrl, '_blank', 'noopener,noreferrer')}
+              onClick={() =>
+                window.open(deviceFlow.verificationUrl, '_blank', 'noopener,noreferrer')
+              }
             >
               Reopen
             </Button>

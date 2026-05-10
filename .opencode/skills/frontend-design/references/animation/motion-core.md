@@ -61,7 +61,6 @@ const variants = {
 
 ```tsx
 import { AnimatePresence } from 'motion/react'
-
 ;<AnimatePresence>
   {isVisible && (
     <motion.div

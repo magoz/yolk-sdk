@@ -9,6 +9,7 @@ Do not use this as product architecture. Product/package architecture lives in `
 Apply the init template to the current `yolk` repo, app at root, then add reusable package skeletons.
 
 Inputs:
+
 - Repo: `/Users/magoz/dev/repos/yolk`
 - Template: `https://github.com/magoz/init`
 - Branch: `v4`
@@ -72,12 +73,14 @@ Set root `package.json` name to `yolk`.
 Keep whatever is needed for the Yolk app layer.
 
 Likely keep:
+
 - DB — app/auth/domain persistence
 - Auth — app login/session
 - Email — auth flows or notifications, if template needs it
 - Telemetry — useful if already integrated cleanly
 
 Likely remove/defer:
+
 - S3 — use R2 later
 - Telegram — optional
 - Activity — remove if Telegram removed
@@ -115,7 +118,7 @@ Workspace config:
 
 ```yaml
 packages:
-  - "packages/*"
+  - 'packages/*'
 ```
 
 ### 6. Package dependency graph
@@ -161,6 +164,7 @@ If full check fails due template/env setup, at minimum verify package typecheck/
 ### 9. Docs update
 
 After setup, update docs if actual paths differ:
+
 - `ARCHITECTURE.md`
 - `AGENT_LOOP.md`
 - `RESEARCH.md`

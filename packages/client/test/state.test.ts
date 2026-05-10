@@ -23,7 +23,10 @@ describe('reduceAgentEvents', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
     const message = AssistantAgentMessage.make({ content: 'ok', toolCalls: [call] })
-    const toolResultMessage = ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+    const toolResultMessage = ToolResultMessage.make({
+      toolCallId: call.id,
+      content: result.content
+    })
 
     const state = reduceAgentEvents([
       AgentStart.make({}),

@@ -217,7 +217,10 @@ export class OpenAiRealtimeError extends Schema.TaggedClass<OpenAiRealtimeError>
   message: Schema.String
 }) {}
 
-export class OpenAiRealtimeIgnored extends Schema.TaggedClass<OpenAiRealtimeIgnored>()('Ignored', {}) {}
+export class OpenAiRealtimeIgnored extends Schema.TaggedClass<OpenAiRealtimeIgnored>()(
+  'Ignored',
+  {}
+) {}
 
 export const OpenAiRealtimeServerEvent = Schema.Union([
   OpenAiRealtimeInputAudioTranscriptionDelta,
@@ -252,10 +255,7 @@ export const makeOpenAiRealtimeConversationItemCreateEvent = (
   item: typeof OpenAiRealtimeConversationItem.Type
 ) => OpenAiRealtimeConversationItemCreateEvent.make({ type: 'conversation.item.create', item })
 
-export const makeOpenAiRealtimeFunctionCallOutputEvent = (
-  callId: string,
-  output: string
-) =>
+export const makeOpenAiRealtimeFunctionCallOutputEvent = (callId: string, output: string) =>
   makeOpenAiRealtimeConversationItemCreateEvent(
     OpenAiRealtimeFunctionCallOutputItem.make({
       type: 'function_call_output',
@@ -267,12 +267,11 @@ export const makeOpenAiRealtimeFunctionCallOutputEvent = (
 export const makeOpenAiRealtimeResponseCreateEvent = () =>
   OpenAiRealtimeResponseCreateEvent.make({ type: 'response.create' })
 
-export const decodeOpenAiRealtimeToolExecutionResponse =
-  Schema.decodeUnknownOption(OpenAiRealtimeToolExecutionResponse)
+export const decodeOpenAiRealtimeToolExecutionResponse = Schema.decodeUnknownOption(
+  OpenAiRealtimeToolExecutionResponse
+)
 
-export const readOpenAiRealtimeToolOutput = (
-  event: OpenAiRealtimeConversationItemCreateEvent
-) => {
+export const readOpenAiRealtimeToolOutput = (event: OpenAiRealtimeConversationItemCreateEvent) => {
   const item = event.item
 
   return item.type === 'function_call_output' ? item.output : 'Tool output sent'
@@ -341,9 +340,9 @@ export const decodeOpenAiRealtimeServerEvent = (raw: string): OpenAiRealtimeServ
     })
   }
 
-  const inputCompleted = Schema.decodeUnknownOption(OpenAiRealtimeInputAudioTranscriptionCompletedEvent)(
-    value.value
-  )
+  const inputCompleted = Schema.decodeUnknownOption(
+    OpenAiRealtimeInputAudioTranscriptionCompletedEvent
+  )(value.value)
 
   if (Option.isSome(inputCompleted)) {
     return OpenAiRealtimeInputAudioTranscriptionCompleted.make({

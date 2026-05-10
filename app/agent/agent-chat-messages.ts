@@ -24,9 +24,24 @@ export type ChatToolState =
     }
 
 export type AgentChatPart =
-  | { readonly _tag: 'Text'; readonly id: string; readonly content: Content; readonly state: ChatPartState }
-  | { readonly _tag: 'Reasoning'; readonly id: string; readonly text: string; readonly state: ChatPartState }
-  | { readonly _tag: 'ToolCall'; readonly id: string; readonly call: ToolCall; readonly state: ChatToolState }
+  | {
+      readonly _tag: 'Text'
+      readonly id: string
+      readonly content: Content
+      readonly state: ChatPartState
+    }
+  | {
+      readonly _tag: 'Reasoning'
+      readonly id: string
+      readonly text: string
+      readonly state: ChatPartState
+    }
+  | {
+      readonly _tag: 'ToolCall'
+      readonly id: string
+      readonly call: ToolCall
+      readonly state: ChatToolState
+    }
   | {
       readonly _tag: 'ToolResult'
       readonly id: string
@@ -209,8 +224,7 @@ const assistantChatMessage = (
 
 const hasStreamingPart = (message: AgentChatMessage) =>
   message.parts.some(
-    part =>
-      (part._tag === 'Text' || part._tag === 'Reasoning') && part.state === 'streaming'
+    part => (part._tag === 'Text' || part._tag === 'Reasoning') && part.state === 'streaming'
   )
 
 const hasToolCall = (message: AgentChatMessage, callId: string) =>
@@ -308,16 +322,15 @@ const appendAssistantReasoningDelta = (
   )
 }
 
-const mergeToolState = (
-  existing: ChatToolState,
-  next: ChatToolState
-): ChatToolState => {
+const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolState => {
   if (next._tag === 'Completed') {
     return {
       ...next,
       startedAtMs:
         next.startedAtMs ??
-        (existing._tag === 'Running' || existing._tag === 'Completed' ? existing.startedAtMs : undefined),
+        (existing._tag === 'Running' || existing._tag === 'Completed'
+          ? existing.startedAtMs
+          : undefined),
       endedAtMs: next.endedAtMs ?? (existing._tag === 'Completed' ? existing.endedAtMs : undefined)
     }
   }
@@ -359,7 +372,9 @@ const upsertToolCallPart = (
   })
 }
 
-const finalizeAssistantParts = (parts: ReadonlyArray<AgentChatPart>): ReadonlyArray<AgentChatPart> =>
+const finalizeAssistantParts = (
+  parts: ReadonlyArray<AgentChatPart>
+): ReadonlyArray<AgentChatPart> =>
   parts.map(part => {
     switch (part._tag) {
       case 'Text':
@@ -397,9 +412,7 @@ const partsFromAssistantMessage = (
     toolResultsById: new Map(),
     toolRunsById: new Map()
   }).map(part =>
-    part._tag === 'ToolCall'
-      ? { ...part, state: states.get(part.call.id) ?? part.state }
-      : part
+    part._tag === 'ToolCall' ? { ...part, state: states.get(part.call.id) ?? part.state } : part
   )
 }
 
@@ -486,7 +499,9 @@ const finalizeStreamingParts = (
   messages: ReadonlyArray<AgentChatMessage>
 ): ReadonlyArray<AgentChatMessage> =>
   messages.map(message =>
-    message.role === 'assistant' ? { ...message, parts: finalizeAssistantParts(message.parts) } : message
+    message.role === 'assistant'
+      ? { ...message, parts: finalizeAssistantParts(message.parts) }
+      : message
   )
 
 const appendRunMessagesIfEmpty = (
@@ -652,7 +667,12 @@ export const buildAgentChatMessages = ({
     const parts: Array<AgentChatPart> = []
 
     if (reasoningDraft.length > 0) {
-      parts.push({ _tag: 'Reasoning', id: 'draft-reasoning', text: reasoningDraft, state: 'streaming' })
+      parts.push({
+        _tag: 'Reasoning',
+        id: 'draft-reasoning',
+        text: reasoningDraft,
+        state: 'streaming'
+      })
     }
 
     if (assistantDraft.length > 0) {

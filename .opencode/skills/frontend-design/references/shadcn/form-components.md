@@ -117,7 +117,6 @@ import { Spinner } from "@/components/ui/spinner"
 
 ```tsx
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
-
 ;<KbdGroup>
   <Kbd>Cmd</Kbd>
   <Kbd>K</Kbd>
@@ -128,7 +127,6 @@ import { Kbd, KbdGroup } from '@/components/ui/kbd'
 
 ```tsx
 import { ButtonGroup } from '@/components/ui/button-group'
-
 ;<ButtonGroup>
   <Button>Archive</Button>
   <Button>Report</Button>
@@ -166,7 +164,6 @@ import { Item, ItemContent, ItemMedia, ItemTitle, ItemDescription, ItemActions }
 
 ```tsx
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription, EmptyActions } from '@/components/ui/empty'
-
 ;<Empty>
   <EmptyIcon>
     <InboxIcon />

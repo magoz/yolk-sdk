@@ -39,9 +39,8 @@ const toTransportError = (message: string, cause: unknown) =>
     cause
   })
 
-const toHttpClientTransportError =
-  (message: string) => (error: HttpClientError.HttpClientError) =>
-    toTransportError(`${message}: ${error.message}`, error)
+const toHttpClientTransportError = (message: string) => (error: HttpClientError.HttpClientError) =>
+  toTransportError(`${message}: ${error.message}`, error)
 
 const decodeAgentEvent = (value: unknown) =>
   Schema.decodeUnknownEffect(AgentEvent)(value).pipe(
@@ -165,8 +164,7 @@ const abortSignalEffect = (signal: AbortSignal) =>
 const applyAbortSignal = <A, E, R>(
   stream: Stream.Stream<A, E, R>,
   signal: AbortSignal | undefined
-) =>
-  signal === undefined ? stream : stream.pipe(Stream.interruptWhen(abortSignalEffect(signal)))
+) => (signal === undefined ? stream : stream.pipe(Stream.interruptWhen(abortSignalEffect(signal))))
 
 export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
   applyAbortSignal(

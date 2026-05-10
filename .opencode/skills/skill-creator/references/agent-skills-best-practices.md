@@ -1094,7 +1094,7 @@ Without the server prefix, the agent may fail to locate the tool, especially whe
 
 Don't assume packages are available:
 
-````markdown
+`````markdown
 **Bad example: Assumes installation**:
 "Use the pdf library to process the file."
 
@@ -1108,7 +1108,9 @@ from pypdf import PdfReader
 reader = PdfReader("file.pdf")
 ```"
 ````
-````
+`````
+
+```
 
 ## Technical notes
 
@@ -1164,3 +1166,4 @@ Before sharing a Skill, verify:
 
 - See [agent-skills-spec.md](agent-skills-spec.md) for complete format specification
 - See [agent-skills-blog.md](agent-skills-blog.md) for design philosophy and examples
+```

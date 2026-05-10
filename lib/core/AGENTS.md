@@ -4,11 +4,11 @@ Domain actions and pure Effect functions. App routes/pages call here; services r
 
 ## Structure
 
-| Path | Role |
-| --- | --- |
-| `agent/*-action.ts` | OpenAI Codex connect/disconnect server actions |
-| `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers |
-| `errors/index.ts` | Shared domain errors |
+| Path                         | Role                                           |
+| ---------------------------- | ---------------------------------------------- |
+| `agent/*-action.ts`          | OpenAI Codex connect/disconnect server actions |
+| `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
+| `errors/index.ts`            | Shared domain errors                           |
 
 ## Server Actions
 

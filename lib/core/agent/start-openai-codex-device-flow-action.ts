@@ -18,33 +18,34 @@ type StartOpenAiCodexDeviceFlowResult =
     }
   | { readonly _tag: 'Error'; readonly message: string }
 
-export const startOpenAiCodexDeviceFlowAction = async (): Promise<StartOpenAiCodexDeviceFlowResult> => {
-  await cookies()
+export const startOpenAiCodexDeviceFlowAction =
+  async (): Promise<StartOpenAiCodexDeviceFlowResult> => {
+    await cookies()
 
-  return await NextEffect.runPromise(
-    Effect.gen(function* () {
-      const session = yield* getSession()
-      const oauth = yield* OpenAiCodexOAuth
+    return await NextEffect.runPromise(
+      Effect.gen(function* () {
+        const session = yield* getSession()
+        const oauth = yield* OpenAiCodexOAuth
 
-      yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
+        yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
 
-      const deviceFlow = yield* oauth.startDeviceFlow()
+        const deviceFlow = yield* oauth.startDeviceFlow()
 
-      return { _tag: 'Success' as const, ...deviceFlow }
-    }).pipe(
-      Effect.withSpan('action.agent.openAiCodex.startDeviceFlow'),
-      Effect.provide(AppLayer),
-      Effect.scoped,
-      Effect.tapError(error =>
-        reportError(error, { operation: 'action.agent.openAiCodex.startDeviceFlow' })
-      ),
-      Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
-      Effect.catch(() =>
-        Effect.succeed({
-          _tag: 'Error' as const,
-          message: 'Could not start OpenAI Codex connection'
-        })
+        return { _tag: 'Success' as const, ...deviceFlow }
+      }).pipe(
+        Effect.withSpan('action.agent.openAiCodex.startDeviceFlow'),
+        Effect.provide(AppLayer),
+        Effect.scoped,
+        Effect.tapError(error =>
+          reportError(error, { operation: 'action.agent.openAiCodex.startDeviceFlow' })
+        ),
+        Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
+        Effect.catch(() =>
+          Effect.succeed({
+            _tag: 'Error' as const,
+            message: 'Could not start OpenAI Codex connection'
+          })
+        )
       )
     )
-  )
-}
+  }

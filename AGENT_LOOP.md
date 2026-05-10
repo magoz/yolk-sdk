@@ -30,18 +30,18 @@ Hard boundary: no users, teams, orgs, projects, billing, OAuth, knowledge store,
 
 ### Agent loop vs agent runtime
 
-| Concern | Agent loop | Agent runtime |
-|---|---|---|
-| LLM <> tool loop | Yes | Calls agent loop |
-| Event taxonomy | Emits | Streams/reduces/persists |
-| Provider interface | Defines | Provides/configures |
-| Tool executor interface | Defines | Wraps with permissions |
-| Sessions | No | Yes, generic |
-| Persistence | No | Via `SessionStore` |
-| Transport | No | WS/SSE/RPC adapters |
-| Compaction | No policy | Strategy interface |
-| Context injection | Interface only | Adapter orchestration |
-| Domain concepts | Never | Opaque `Ctx` only |
+| Concern                 | Agent loop     | Agent runtime            |
+| ----------------------- | -------------- | ------------------------ |
+| LLM <> tool loop        | Yes            | Calls agent loop         |
+| Event taxonomy          | Emits          | Streams/reduces/persists |
+| Provider interface      | Defines        | Provides/configures      |
+| Tool executor interface | Defines        | Wraps with permissions   |
+| Sessions                | No             | Yes, generic             |
+| Persistence             | No             | Via `SessionStore`       |
+| Transport               | No             | WS/SSE/RPC adapters      |
+| Compaction              | No policy      | Strategy interface       |
+| Context injection       | Interface only | Adapter orchestration    |
+| Domain concepts         | Never          | Opaque `Ctx` only        |
 
 ---
 
@@ -54,6 +54,7 @@ Two reference implementations studied in depth.
 Minimal terminal coding agent by Mario Zechner. Plain TypeScript, Vitest, event-driven.
 
 **Patterns we take:**
+
 - `AgentMessage` vs `LLMMessage` separation — agent messages include non-LLM types (notifications, compaction summaries). `convertToLlm()` bridges the gap.
 - Faux provider with scripted response queues — deterministic, offline, no HTTP.
 - In-memory variants for all stateful components (`SessionManager.inMemory()`, `AuthStorage.inMemory()`).
@@ -61,6 +62,7 @@ Minimal terminal coding agent by Mario Zechner. Plain TypeScript, Vitest, event-
 - Tool interception points (before/after/block).
 
 **Patterns we skip:**
+
 - Extension system (25+ hooks, plugin loading, hot-reload) — we own the code.
 - TypeBox for schemas — Effect Schema instead.
 - TUI, RPC mode, session tree — not agent-loop concerns.
@@ -70,6 +72,7 @@ Minimal terminal coding agent by Mario Zechner. Plain TypeScript, Vitest, event-
 Open-source coding agent. Effect v4 throughout. Bun runtime.
 
 **Patterns we take:**
+
 - `Context.Service` + `Layer` for all services with `defaultLayer` export.
 - `BusEvent.define()` with Effect `Schema` for typed events.
 - `Runner` state machine pattern (`SynchronizedRef`, `Deferred`, `Fiber`) for concurrent work coordination.
@@ -79,6 +82,7 @@ Open-source coding agent. Effect v4 throughout. Bun runtime.
 - `Data.TaggedError` for all error types. No try/catch.
 
 **Patterns we skip:**
+
 - `InstanceState` / `InstanceRef` / AsyncLocalStorage dual context — agent-loop is single-run. Consumer (runtime/DO) handles multi-tenancy.
 - `AppRuntime` / `ManagedRuntime` — agent-loop is a library, not an app. Consumer provides the runtime.
 - AI SDK interop / Zod bridging — agent-loop defines its own provider interface.
@@ -103,16 +107,16 @@ const runTurn = (msgs: AgentMessage[]): Stream<AgentEvent, AgentLoopError, Requi
     Stream.concat(streamLLM(msgs)),
     Stream.concat(
       Stream.fromEffect(collectToolCalls).pipe(
-        Stream.flatMap((calls) =>
+        Stream.flatMap(calls =>
           calls.length === 0
-            ? Stream.make(AgentEvent.TurnEnd("stop"))
+            ? Stream.make(AgentEvent.TurnEnd('stop'))
             : pipe(
                 executeTools(calls),
-                Stream.concat(Stream.suspend(() => runTurn([...msgs, ...results]))),
+                Stream.concat(Stream.suspend(() => runTurn([...msgs, ...results])))
               )
-        ),
+        )
       )
-    ),
+    )
   )
 ```
 
@@ -126,9 +130,9 @@ Problem: No backpressure. Multiple consumers must subscribe before fiber starts 
 
 ```typescript
 const run = (
-  msgs: AgentMessage[],
+  msgs: AgentMessage[]
 ): Stream<AgentEvent, AgentLoopError, LLMProvider | ToolExecutor> =>
-  Stream.asyncScoped((emit) =>
+  Stream.asyncScoped(emit =>
     Effect.gen(function* () {
       const provider = yield* LLMProvider
       const executor = yield* ToolExecutor
@@ -141,46 +145,46 @@ const run = (
 
         // Stream LLM response, emit tokens as they arrive, accumulate
         const response = yield* provider.stream(toLLM(current)).pipe(
-          Stream.tap((e) => emit.single(toAgentEvent(e))),
-          Stream.runFold(Accumulator.empty, Accumulator.add),
+          Stream.tap(e => emit.single(toAgentEvent(e))),
+          Stream.runFold(Accumulator.empty, Accumulator.add)
         )
 
         if (response.toolCalls.length === 0) {
-          yield* emit.single(AgentEvent.TurnEnd("stop"))
+          yield* emit.single(AgentEvent.TurnEnd('stop'))
           break
         }
 
         // Parallel tool execution with per-tool events
         const results = yield* Effect.forEach(
           response.toolCalls,
-          (tc) =>
+          tc =>
             pipe(
               emit.single(AgentEvent.ToolStart(tc)),
               Effect.andThen(() => executor.execute(tc)),
-              Effect.tap((r) => emit.single(AgentEvent.ToolEnd(tc, r))),
+              Effect.tap(r => emit.single(AgentEvent.ToolEnd(tc, r)))
             ),
-          { concurrency: "unbounded" },
+          { concurrency: 'unbounded' }
         )
 
         current = [...current, response.message, ...results]
-        yield* emit.single(AgentEvent.TurnEnd("tool_use"))
+        yield* emit.single(AgentEvent.TurnEnd('tool_use'))
       }
 
       yield* emit.single(AgentEvent.AgentEnd())
-    }),
+    })
   )
 ```
 
 **Why Hybrid wins:**
 
-| Property | Hybrid delivers |
-|---|---|
-| Readability | Plain `while(true)` in `Effect.gen`. Anyone who's read Pi's loop recognizes the shape. |
-| Composability | Consumer gets `Stream<AgentEvent>`. `Stream.tap`, `Stream.takeUntil`, `Stream.runCollect`. |
-| Cancellation | Interrupt consuming fiber -> interrupts `asyncScoped` producer -> interrupts in-flight LLM/tools. Free via structured concurrency. |
-| Backpressure | `Stream.asyncScoped` respects consumer pace. Slow WebSocket? Producer waits. |
-| Scoped cleanup | `asyncScoped` ties producer to `Scope`. Stream ends or interrupts -> finalizers run. |
-| Testing | Stream is just data: `Stream.runCollect` -> assert on events. |
+| Property       | Hybrid delivers                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Readability    | Plain `while(true)` in `Effect.gen`. Anyone who's read Pi's loop recognizes the shape.                                             |
+| Composability  | Consumer gets `Stream<AgentEvent>`. `Stream.tap`, `Stream.takeUntil`, `Stream.runCollect`.                                         |
+| Cancellation   | Interrupt consuming fiber -> interrupts `asyncScoped` producer -> interrupts in-flight LLM/tools. Free via structured concurrency. |
+| Backpressure   | `Stream.asyncScoped` respects consumer pace. Slow WebSocket? Producer waits.                                                       |
+| Scoped cleanup | `asyncScoped` ties producer to `Scope`. Stream ends or interrupts -> finalizers run.                                               |
+| Testing        | Stream is just data: `Stream.runCollect` -> assert on events.                                                                      |
 
 **The one concern:** `Stream.asyncScoped` uses an internal queue. Producer buffering if faster than consumer. Non-issue for agent loops — LLM tokens are slow, tool results are bursty but bounded.
 
@@ -189,17 +193,17 @@ const run = (
 ```typescript
 // Pipe to WebSocket (DO)
 run(msgs).pipe(
-  Stream.tap((e) => ws.send(JSON.stringify(e))),
-  Stream.runDrain,
+  Stream.tap(e => ws.send(JSON.stringify(e))),
+  Stream.runDrain
 )
 
 // Collect for testing
-const events = yield* run(msgs).pipe(Stream.runCollect)
+const events = yield * run(msgs).pipe(Stream.runCollect)
 
 // Cancel after first turn
 run(msgs).pipe(
-  Stream.takeUntil((e) => e._tag === "TurnEnd"),
-  Stream.runCollect,
+  Stream.takeUntil(e => e._tag === 'TurnEnd'),
+  Stream.runCollect
 )
 ```
 
@@ -217,25 +221,26 @@ Pi's loop stores and forwards `AgentMessage[]` without inspecting roles beyond `
 
 ```typescript
 const ContentPart = Schema.Union(
-  Schema.TaggedStruct("Text", { text: Schema.String }),
-  Schema.TaggedStruct("Image", { data: Schema.String, mimeType: Schema.String }),
-  Schema.TaggedStruct("Audio", { data: Schema.String, format: AudioFormat }),
+  Schema.TaggedStruct('Text', { text: Schema.String }),
+  Schema.TaggedStruct('Image', { data: Schema.String, mimeType: Schema.String }),
+  Schema.TaggedStruct('Audio', { data: Schema.String, format: AudioFormat })
 )
 
-type AudioFormat = "pcm16" | "wav" | "mp3" | "opus"
+type AudioFormat = 'pcm16' | 'wav' | 'mp3' | 'opus'
 
 const Content = Schema.Union(Schema.String, Schema.Array(ContentPart))
 
 const AgentMessage = Schema.Union(
-  Schema.TaggedStruct("User", { content: Content }),
-  Schema.TaggedStruct("Assistant", { content: Content, toolCalls: Schema.Array(ToolCall) }),
-  Schema.TaggedStruct("ToolResult", { toolCallId: Schema.String, content: Content }),
+  Schema.TaggedStruct('User', { content: Content }),
+  Schema.TaggedStruct('Assistant', { content: Content, toolCalls: Schema.Array(ToolCall) }),
+  Schema.TaggedStruct('ToolResult', { toolCallId: Schema.String, content: Content })
 )
 ```
 
 Three message types, multimodal content from day one. `Content` is either a plain string (shorthand for text-only) or an array of `ContentPart` (text, image, audio mixed). Voice support requires no message model changes later.
 
 No `Notification`, `CompactionSummary`, `ContextInjection` — those are consumer concerns:
+
 - Compaction summaries → consumer wraps as `User` messages before calling `run()`
 - Context injections → happen in `ContextTransformer.transform()`, which prepends real `User` messages
 - Notifications → UI-level, never enter the agent loop
@@ -262,7 +267,7 @@ interface ToolDef<Params, R> {
   readonly description: string
   readonly parameters: Schema.Schema<Params>
   readonly execute: (params: Params) => Effect<ToolResult, ToolError, R>
-  readonly timeout?: Duration  // agent loop wraps with Effect.timeout if provided
+  readonly timeout?: Duration // agent loop wraps with Effect.timeout if provided
 }
 ```
 
@@ -275,33 +280,33 @@ interface ToolDef<Params, R> {
 
 ```typescript
 // Service interface
-class ToolExecutor extends Context.Service<ToolExecutor>()("@yolk/agent-loop/ToolExecutor") {
+class ToolExecutor extends Context.Service<ToolExecutor>()('@yolk/agent-loop/ToolExecutor') {
   readonly execute: (call: ToolCall) => Effect<ToolResult, ToolError>
 }
 
 // Default layer — just runs the tool
 const DefaultLayer = Layer.succeed(ToolExecutor, {
-  execute: (call) =>
+  execute: call =>
     pipe(
       resolveAndValidate(call),
-      Effect.flatMap((tool) => tool.execute(call.params)),
-    ),
+      Effect.flatMap(tool => tool.execute(call.params))
+    )
 })
 
 // Permission-checking layer — wraps default
 const PermissionLayer = Layer.effect(
   ToolExecutor,
   Effect.gen(function* () {
-    const inner = yield* ToolExecutor  // get the layer below
+    const inner = yield* ToolExecutor // get the layer below
     const permissions = yield* Permissions
     return ToolExecutor.of({
-      execute: (call) =>
+      execute: call =>
         pipe(
           permissions.check(call),
-          Effect.flatMap(() => inner.execute(call)),
-        ),
+          Effect.flatMap(() => inner.execute(call))
+        )
     })
-  }),
+  })
 )
 
 // Logging layer — wraps whatever is below
@@ -310,14 +315,14 @@ const LoggingLayer = Layer.effect(
   Effect.gen(function* () {
     const inner = yield* ToolExecutor
     return ToolExecutor.of({
-      execute: (call) =>
+      execute: call =>
         pipe(
           Effect.log(`tool:start ${call.name}`),
           Effect.flatMap(() => inner.execute(call)),
-          Effect.tap(() => Effect.log(`tool:end ${call.name}`)),
-        ),
+          Effect.tap(() => Effect.log(`tool:end ${call.name}`))
+        )
     })
-  }),
+  })
 )
 ```
 
@@ -330,15 +335,15 @@ Consumer composes layers: `LoggingLayer.pipe(Layer.provide(PermissionLayer), Lay
 Pi pattern: serialize writes to the same file. In Effect, a `Semaphore` per path:
 
 ```typescript
-const fileLocks = yield* Ref.make(new Map<string, Semaphore>())
+const fileLocks = yield * Ref.make(new Map<string, Semaphore>())
 
 const withFileLock = (path: string, effect: Effect<A, E, R>) =>
   pipe(
     Ref.get(fileLocks),
-    Effect.flatMap((locks) => {
-      const lock = locks.get(path) ?? (yield* Semaphore.make(1))
+    Effect.flatMap(locks => {
+      const lock = locks.get(path) ?? yield * Semaphore.make(1)
       // ... update map, acquire lock, run effect
-    }),
+    })
   )
 ```
 
@@ -351,12 +356,13 @@ const withFileLock = (path: string, effect: Effect<A, E, R>) =>
 Minimal interface. Harness doesn't know about Anthropic, OpenAI, etc. Consumer provides the layer.
 
 ```typescript
-class LLMProvider extends Context.Service<LLMProvider>()("@yolk/agent-loop/LLMProvider") {
+class LLMProvider extends Context.Service<LLMProvider>()('@yolk/agent-loop/LLMProvider') {
   readonly stream: (request: LLMRequest) => Stream<LLMEvent, LLMError>
 }
 ```
 
 `LLMRequest`:
+
 ```typescript
 interface LLMRequest {
   readonly messages: ReadonlyArray<LLMMessage>
@@ -368,22 +374,23 @@ interface LLMRequest {
 ```
 
 `LLMEvent` (discriminated union, multimodal):
+
 ```typescript
 type LLMEvent =
   // Text
-  | { readonly _tag: "TextDelta"; readonly text: string }
-  | { readonly _tag: "ThinkingDelta"; readonly text: string }
+  | { readonly _tag: 'TextDelta'; readonly text: string }
+  | { readonly _tag: 'ThinkingDelta'; readonly text: string }
   // Audio
-  | { readonly _tag: "AudioDelta"; readonly data: string }          // base64 audio chunk
-  | { readonly _tag: "AudioDone" }
-  | { readonly _tag: "OutputTranscript"; readonly text: string }    // transcript of model's audio
+  | { readonly _tag: 'AudioDelta'; readonly data: string } // base64 audio chunk
+  | { readonly _tag: 'AudioDone' }
+  | { readonly _tag: 'OutputTranscript'; readonly text: string } // transcript of model's audio
   // Tool calls
-  | { readonly _tag: "ToolCallStart"; readonly id: string; readonly name: string }
-  | { readonly _tag: "ToolCallDelta"; readonly id: string; readonly args: string }
-  | { readonly _tag: "ToolCallEnd"; readonly id: string }
+  | { readonly _tag: 'ToolCallStart'; readonly id: string; readonly name: string }
+  | { readonly _tag: 'ToolCallDelta'; readonly id: string; readonly args: string }
+  | { readonly _tag: 'ToolCallEnd'; readonly id: string }
   // Meta
-  | { readonly _tag: "Usage"; readonly input: number; readonly output: number }
-  | { readonly _tag: "Done"; readonly stopReason: StopReason }
+  | { readonly _tag: 'Usage'; readonly input: number; readonly output: number }
+  | { readonly _tag: 'Done'; readonly stopReason: StopReason }
 ```
 
 Audio events are emitted by providers that support audio output (OpenAI audio completions, future Anthropic audio). Text-only providers never emit `AudioDelta`/`AudioDone`. The agent loop passes them through — it doesn't interpret audio data.
@@ -411,13 +418,13 @@ const FauxProvider = {
         yield* Queue.offerAll(queue, responses)
 
         return LLMProvider.of({
-          stream: (_request) =>
+          stream: _request =>
             Stream.fromEffect(Queue.take(queue)).pipe(
-              Stream.flatMap((response) => response.toStream()),
-            ),
+              Stream.flatMap(response => response.toStream())
+            )
         })
-      }),
-    ),
+      })
+    )
 }
 ```
 
@@ -452,22 +459,25 @@ const Reply = {
 **Test usage:**
 
 ```typescript
-const events = yield* run(msgs).pipe(
-  Stream.runCollect,
-  Effect.provide(
-    FauxProvider.layer(
-      Reply.text("Let me check that."),
-      Reply.toolCall("bash", { command: "ls" }),
-      Reply.text("Done. Found 3 files."),
+const events =
+  yield *
+  run(msgs).pipe(
+    Stream.runCollect,
+    Effect.provide(
+      FauxProvider.layer(
+        Reply.text('Let me check that.'),
+        Reply.toolCall('bash', { command: 'ls' }),
+        Reply.text('Done. Found 3 files.')
+      )
     ),
-  ),
-  Effect.provide(ToolExecutor.test),  // tools that return canned results
-)
+    Effect.provide(ToolExecutor.test) // tools that return canned results
+  )
 
-expect(events).toContainEqual(AgentEvent.TurnEnd({ reason: "stop" }))
+expect(events).toContainEqual(AgentEvent.TurnEnd({ reason: 'stop' }))
 ```
 
 **Properties:**
+
 - Deterministic. No network. No timing. No flake.
 - Queue wraps around (like Pi) or errors on exhaustion — TBD.
 - Supports `FauxResponseFactory` for dynamic responses based on request content.
@@ -484,13 +494,15 @@ Pi injects context via `before_agent_start` and `context` hooks. OpenCode has va
 Harness: `ContextTransformer` service. Consumer provides the layer. Harness calls it before each LLM request.
 
 ```typescript
-class ContextTransformer extends Context.Service<ContextTransformer>()("@yolk/agent-loop/ContextTransformer") {
+class ContextTransformer extends Context.Service<ContextTransformer>()(
+  '@yolk/agent-loop/ContextTransformer'
+) {
   readonly transform: (messages: ReadonlyArray<AgentMessage>) => Effect<ReadonlyArray<AgentMessage>>
 }
 
 // Default: identity
 const DefaultLayer = Layer.succeed(ContextTransformer, {
-  transform: (msgs) => Effect.succeed(msgs),
+  transform: msgs => Effect.succeed(msgs)
 })
 ```
 
@@ -499,11 +511,11 @@ Consumer composes transformers:
 ```typescript
 // Inject org knowledge before each LLM call
 const KnowledgeLayer = Layer.succeed(ContextTransformer, {
-  transform: (msgs) =>
+  transform: msgs =>
     Effect.gen(function* () {
       const knowledge = yield* loadOrgContext()
       return [AgentMessage.User({ content: knowledge }), ...msgs]
-    }),
+    })
 })
 ```
 
@@ -520,11 +532,13 @@ Studied both Pi (compaction outside loop, `AgentSession` orchestrates) and OpenC
 Pi's architecture validates this: the agent loop (`agent-loop.ts`) has zero compaction awareness. `AgentSession` — a layer above — handles detection, summarization, and retry.
 
 The agent loop:
+
 1. Surfaces `LLMError({ cause: "context_overflow" })` in the stream error channel
 2. Emits `UsageReport` events with real token counts after each LLM step
 3. Done
 
 The consumer:
+
 1. Watches `UsageReport` to proactively compact before overflow (Pi uses threshold: `contextTokens > contextWindow - reserveTokens`)
 2. Catches `context_overflow` as last resort
 3. Runs their own compaction (separate LLM call, structured summary, domain-specific strategy)
@@ -541,6 +555,7 @@ No `CompactionStrategy` service. No retry logic in the loop. Clean boundary.
 Harness is stateless. It takes messages, produces events. Consumer decides how to persist.
 
 The agent loop DOES emit enough events to reconstruct the final message list:
+
 - `AgentEvent.AssistantMessage` contains the full accumulated assistant message.
 - `AgentEvent.ToolResult` contains each tool result.
 - Consumer appends these to their stored messages.
@@ -556,24 +571,24 @@ No `SessionStorage` service in the agent loop. No opinion on JSONL vs SQLite vs 
 All errors as `Data.TaggedError`. Exhaustive. No `unknown` unless immediately re-tagged.
 
 ```typescript
-class LLMError extends Data.TaggedError("LLMError")<{
-  readonly cause: "provider_error" | "rate_limit" | "context_overflow" | "invalid_response"
+class LLMError extends Data.TaggedError('LLMError')<{
+  readonly cause: 'provider_error' | 'rate_limit' | 'context_overflow' | 'invalid_response'
   readonly message: string
   readonly retryable: boolean
 }> {}
 
-class ToolError extends Data.TaggedError("ToolError")<{
+class ToolError extends Data.TaggedError('ToolError')<{
   readonly tool: string
   readonly message: string
-  readonly cause: "validation" | "execution" | "timeout" | "permission"
+  readonly cause: 'validation' | 'execution' | 'timeout' | 'permission'
 }> {}
 
-class AbortError extends Data.TaggedError("AbortError")<{
-  readonly reason: "user" | "system" | "max_turns"
+class AbortError extends Data.TaggedError('AbortError')<{
+  readonly reason: 'user' | 'system' | 'max_turns'
 }> {}
 
-class SchemaError extends Data.TaggedError("SchemaError")<{
-  readonly context: "message" | "tool_params" | "llm_response"
+class SchemaError extends Data.TaggedError('SchemaError')<{
+  readonly context: 'message' | 'tool_params' | 'llm_response'
   readonly message: string
 }> {}
 
@@ -594,7 +609,7 @@ Discriminated union. Effect Schema for serialization (WebSocket, logging, replay
 type AgentEvent =
   // Lifecycle
   | AgentStart
-  | AgentEnd                    // carries final messages, turn count, usage
+  | AgentEnd // carries final messages, turn count, usage
   | TurnStart
   | TurnEnd
   // LLM streaming — text
@@ -606,29 +621,30 @@ type AgentEvent =
   | LLMToolCallEnd
   | LLMStreamEnd
   // LLM streaming — audio
-  | LLMAudioDelta              // audio chunk from provider
+  | LLMAudioDelta // audio chunk from provider
   | LLMAudioDone
-  | LLMOutputTranscript        // text transcript of model's audio output
+  | LLMOutputTranscript // text transcript of model's audio output
   // Tool execution
   | ToolExecutionStart
-  | ToolExecutionUpdate        // progress from long-running tools
+  | ToolExecutionUpdate // progress from long-running tools
   | ToolExecutionEnd
   // Persistence helpers
-  | AssistantMessage           // full accumulated message (for persistence)
-  | ToolResult                 // full tool result (for persistence)
-  | UsageReport                // token counts
+  | AssistantMessage // full accumulated message (for persistence)
+  | ToolResult // full tool result (for persistence)
+  | UsageReport // token counts
   // Realtime session (v1.1, only emitted by RealtimeSession)
   | SessionCreated
   | SessionClosed
-  | UserSpeechStarted          // VAD detected speech
+  | UserSpeechStarted // VAD detected speech
   | UserSpeechStopped
-  | InputTranscript            // STT transcript of user's audio
-  | ResponseInterrupted        // user interrupted model mid-speech
+  | InputTranscript // STT transcript of user's audio
+  | ResponseInterrupted // user interrupted model mid-speech
 ```
 
 Text mode emits lifecycle + text + tool + persistence events. Audio completions add `LLMAudioDelta`/`LLMAudioDone`/`LLMOutputTranscript`. Realtime session adds session lifecycle + speech events. Consumer handles what they need — text-only consumers ignore audio events.
 
 Sequence per turn (text mode):
+
 ```
 TurnStart
   -> LLMStreamStart
@@ -642,6 +658,7 @@ TurnEnd
 ```
 
 Sequence per turn (audio completions):
+
 ```
 TurnStart
   -> LLMStreamStart
@@ -665,31 +682,28 @@ Wrapped by `AgentStart` / `AgentEnd` for the full run.
 
 No hook registry. No event system for extensibility. Effect's Layer system IS the extension system.
 
-| Extension point | Service | Default |
-|---|---|---|
-| Swap LLM provider | `LLMProvider` | None (consumer must provide) |
-| Intercept tool execution | `ToolExecutor` | Direct execution |
-| Transform context before LLM | `ContextTransformer` | Identity |
-| Control max turns | `LoopConfig` | `{ maxTurns: 500 }` |
-| Custom accumulator | `ResponseAccumulator` | Default token accumulation |
-| Speech-to-text | `STTProvider` | None (optional, chained voice only) |
-| Text-to-speech | `TTSProvider` | None (optional, chained voice only) |
-| Native realtime | `RealtimeProvider` | None (optional, v1.1) |
+| Extension point              | Service               | Default                             |
+| ---------------------------- | --------------------- | ----------------------------------- |
+| Swap LLM provider            | `LLMProvider`         | None (consumer must provide)        |
+| Intercept tool execution     | `ToolExecutor`        | Direct execution                    |
+| Transform context before LLM | `ContextTransformer`  | Identity                            |
+| Control max turns            | `LoopConfig`          | `{ maxTurns: 500 }`                 |
+| Custom accumulator           | `ResponseAccumulator` | Default token accumulation          |
+| Speech-to-text               | `STTProvider`         | None (optional, chained voice only) |
+| Text-to-speech               | `TTSProvider`         | None (optional, chained voice only) |
+| Native realtime              | `RealtimeProvider`    | None (optional, v1.1)               |
 
 Consumer composes:
 
 ```typescript
 const myLayers = pipe(
-  AnthropicProvider.layer({ model: "claude-sonnet-4-20250514" }),
+  AnthropicProvider.layer({ model: 'claude-sonnet-4-20250514' }),
   Layer.provideMerge(PermissionCheckingExecutor.layer),
   Layer.provideMerge(KnowledgeInjectionTransformer.layer),
-  Layer.provideMerge(LoopConfig.layer({ maxTurns: 10 })),
+  Layer.provideMerge(LoopConfig.layer({ maxTurns: 10 }))
 )
 
-const events = yield* run(messages).pipe(
-  Stream.runCollect,
-  Effect.provide(myLayers),
-)
+const events = yield * run(messages).pipe(Stream.runCollect, Effect.provide(myLayers))
 ```
 
 ---
@@ -700,16 +714,17 @@ const events = yield* run(messages).pipe(
 
 The agent loop has no hook registry or event-based extension system. Effect's Layer system handles all current interception needs. However, the loop preserves explicit seams where hooks would attach if ever needed:
 
-| Loop call site | Current layer | Future hook |
-|---|---|---|
-| `yield* executor.execute(call)` | `ToolExecutor` | `beforeToolCall` / `afterToolCall` |
-| `yield* transformer.transform(msgs)` | `ContextTransformer` | `beforeLLMCall` |
-| `yield* emit.single(AgentEvent.AssistantMessage(...))` | Consumer reads stream | `afterLLMResponse` |
-| `yield* provider.stream(request)` | `LLMProvider` | `beforeLLMStream` / `afterLLMStream` |
+| Loop call site                                         | Current layer         | Future hook                          |
+| ------------------------------------------------------ | --------------------- | ------------------------------------ |
+| `yield* executor.execute(call)`                        | `ToolExecutor`        | `beforeToolCall` / `afterToolCall`   |
+| `yield* transformer.transform(msgs)`                   | `ContextTransformer`  | `beforeLLMCall`                      |
+| `yield* emit.single(AgentEvent.AssistantMessage(...))` | Consumer reads stream | `afterLLMResponse`                   |
+| `yield* provider.stream(request)`                      | `LLMProvider`         | `beforeLLMStream` / `afterLLMStream` |
 
 **Invariant: the loop must always call through these services, never bypass them.** These are the hook attachment points. If a future `Hooks` convenience service is added, it wraps these existing layers — no loop changes needed.
 
 A `Hooks` service would look like:
+
 ```typescript
 // Future (not implemented)
 Hooks.layer({
@@ -732,12 +747,13 @@ Consumer interrupts the fiber running `Stream.runDrain`. Effect structured concu
 
 ```typescript
 // Consumer
-const fiber = yield* run(msgs).pipe(Stream.runDrain, Effect.fork)
+const fiber = yield * run(msgs).pipe(Stream.runDrain, Effect.fork)
 // ... user cancels via WebSocket
-yield* Fiber.interrupt(fiber)
+yield * Fiber.interrupt(fiber)
 ```
 
 What happens on interrupt:
+
 - **In-flight LLM stream** — provider's `Stream` gets interrupted. Provider layer's responsibility to close the HTTP connection cleanly.
 - **In-flight tool execution** — `Effect.forEach` with `concurrency: "unbounded"` interrupts all child fibers. Each tool's `Effect` gets interrupted. Tool layer's responsibility to clean up (kill subprocesses, etc.).
 - **Between turns** — interruption at next `yield*` point. Clean.
@@ -779,11 +795,11 @@ Mic → STTProvider.transcribe() → text → run() → LLMTextDelta → TTSProv
 `STTProvider` and `TTSProvider` are optional service interfaces. Consumer provides layers (ElevenLabs, OpenAI TTS, Deepgram, etc.).
 
 ```typescript
-class STTProvider extends Context.Service<STTProvider>()("@yolk/agent-loop/STTProvider") {
+class STTProvider extends Context.Service<STTProvider>()('@yolk/agent-loop/STTProvider') {
   readonly transcribe: (audio: Stream<Uint8Array>) => Stream<TranscriptEvent>
 }
 
-class TTSProvider extends Context.Service<TTSProvider>()("@yolk/agent-loop/TTSProvider") {
+class TTSProvider extends Context.Service<TTSProvider>()('@yolk/agent-loop/TTSProvider') {
   readonly synthesize: (text: Stream<string>) => Stream<Uint8Array>
 }
 ```
@@ -815,7 +831,9 @@ interface RealtimeSession {
 Shares with text mode: `ToolExecutor`, `ToolDef`, `AgentEvent` taxonomy, error types. The agent loop handles tool execution inside the session — when the realtime provider emits a tool call, the loop executes it and feeds the result back.
 
 ```typescript
-class RealtimeProvider extends Context.Service<RealtimeProvider>()("@yolk/agent-loop/RealtimeProvider") {
+class RealtimeProvider extends Context.Service<RealtimeProvider>()(
+  '@yolk/agent-loop/RealtimeProvider'
+) {
   readonly connect: (config: RealtimeConfig) => Effect<RealtimeConnection>
 }
 
@@ -830,6 +848,7 @@ interface RealtimeConnection {
 ```
 
 **Phasing:**
+
 - v1: Multimodal content model + audio events + STT/TTS interfaces. Audio completions work through existing `run()`. Chained voice works via consumer piping.
 - v1.1: `session()` API + `RealtimeProvider` interface for native realtime.
 
@@ -842,6 +861,7 @@ interface RealtimeConnection {
 **Status: Decided.**
 
 "Portable" means:
+
 - No Cloudflare dependencies (no DO, no R2, no Workers-specific APIs)
 - No Node.js-specific APIs (no `fs`, no `child_process`)
 - No Bun-specific APIs
@@ -906,17 +926,19 @@ Unbounded. Non-issue.
 **Status: Decided.**
 
 Pi's low-level `agentLoop()` carries new messages in the `agent_end` event:
+
 ```typescript
-await emit({ type: "agent_end", messages: newMessages })
+await emit({ type: 'agent_end', messages: newMessages })
 ```
+
 Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — agent-loop is stateless).
 
 Our `AgentEnd` event carries the accumulated messages from this run. Consumer can also reconstruct from per-turn `AssistantMessage` + `ToolResult` events. Both paths available, `AgentEnd` is the convenience path.
 
 ```typescript
 type AgentEnd = {
-  readonly _tag: "AgentEnd"
-  readonly messages: ReadonlyArray<AgentMessage>  // messages created during this run
+  readonly _tag: 'AgentEnd'
+  readonly messages: ReadonlyArray<AgentMessage> // messages created during this run
   readonly turns: number
   readonly usage: { input: number; output: number }
 }
@@ -947,9 +969,10 @@ Our agent loop enforces a hard limit via `LoopConfig.maxTurns` (default 500). Wh
 500 is generous enough to never hit during normal use. Defense against runaway loops on headless DOs where no human is watching. Token burn is the real risk — 500 LLM calls at $0.01-0.10/call = $5-50 wasted.
 
 Consumer overrides:
+
 ```typescript
-LoopConfig.layer({ maxTurns: 50 })       // tight for simple agents
-LoopConfig.layer({ maxTurns: Infinity })  // opt out (not recommended for headless)
+LoopConfig.layer({ maxTurns: 50 }) // tight for simple agents
+LoopConfig.layer({ maxTurns: Infinity }) // opt out (not recommended for headless)
 ```
 
 Consumer can also `Stream.takeUntil` for softer per-run control without changing the global default.

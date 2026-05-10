@@ -327,7 +327,8 @@ const toLlmEvents = (
   Effect.gen(function* () {
     const text = response.output_text ?? textFromOutputItems(response.output)
     const reasoning = reasoningFromOutputItems(response.output)
-    const reasoningEvents = reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
+    const reasoningEvents =
+      reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
     const textEvents = text.length > 0 ? [LLMTextDelta.make({ text })] : []
     const toolCallEvents = Arr.getSomes(
       yield* Effect.forEach(response.output, item => {
