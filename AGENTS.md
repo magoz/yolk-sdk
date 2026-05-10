@@ -86,6 +86,18 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
 | `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 
+## REFERENCE REPOS
+
+| Repo            | Location                | Notes                                                                                          |
+| --------------- | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `effect-smol`   | `.repos/effect`         | Effect v4 source/docs; source for current Effect API shifts                                     |
+| `pi-mono`       | `.repos/pi`             | Pi monorepo; agent/product architecture reference                                               |
+| `opencode`      | `.repos/opencode`       | Opencode fork; Codex/OpenAI agent protocol/provider reference                                   |
+
+- Repos are squashed git subtrees; reference only, not app code.
+- Update all with `pnpm repos:update`.
+- Keep `.repos/**` out of app typecheck/lint/test scope.
+
 ## ANTI-PATTERNS (THIS PROJECT)
 
 | Pattern                                             | Correct Approach                                                                         |
