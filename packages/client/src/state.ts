@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentMessage, ToolCall, ToolResult } from '@yolk/protocol'
 
-export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error'
+export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 
 export type AgentClientState = {
   readonly status: AgentRunStatus
@@ -60,6 +60,13 @@ export const markAgentError = (
   status: 'error',
   activeToolCalls: [],
   error: message
+})
+
+export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
+  ...state,
+  status: 'aborted',
+  activeToolCalls: [],
+  error: null
 })
 
 export const reduceAgentEvents = (events: ReadonlyArray<AgentEvent>) =>

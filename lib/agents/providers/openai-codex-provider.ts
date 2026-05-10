@@ -475,6 +475,7 @@ async function* readOpenAiCodexBody(
   let buffer = ''
   let format: OpenAiCodexBodyFormat = 'undecided'
   let state = initialSseState
+  let completed = false
 
   const emitSseBlock = async (block: string) => {
     const step = await Effect.runPromise(processSseBlock(state, block))
@@ -487,6 +488,7 @@ async function* readOpenAiCodexBody(
       const chunk = await reader.read()
 
       if (chunk.done) {
+        completed = true
         break
       }
 
@@ -510,6 +512,10 @@ async function* readOpenAiCodexBody(
       }
     }
   } finally {
+    if (!completed) {
+      await reader.cancel().catch(() => undefined)
+    }
+
     reader.releaseLock()
   }
 

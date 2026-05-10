@@ -2,11 +2,12 @@
 
 import type { FormEvent } from 'react'
 import type { AgentEvent } from '@yolk/protocol'
-import { useReducer, useState } from 'react'
-import { LoaderCircleIcon, SendIcon } from 'lucide-react'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import { LoaderCircleIcon, SendIcon, SquareIcon } from 'lucide-react'
 import {
   applyAgentEvent,
   initialAgentClientState,
+  markAgentAborted,
   markAgentError,
   streamAgentEvents
 } from '@yolk/client'
@@ -24,6 +25,7 @@ type AgentPlaygroundProps = {
 type AgentUiAction =
   | { readonly _tag: 'Event'; readonly event: AgentEvent }
   | { readonly _tag: 'Error' }
+  | { readonly _tag: 'Abort' }
 
 const reducer = (state: typeof initialAgentClientState, action: AgentUiAction) => {
   switch (action._tag) {
@@ -31,11 +33,15 @@ const reducer = (state: typeof initialAgentClientState, action: AgentUiAction) =
       return applyAgentEvent(state, action.event)
     case 'Error':
       return markAgentError(state)
+    case 'Abort':
+      return markAgentAborted(state)
   }
 }
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Agent request failed'
+
+const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
 const statusVariant = (status: typeof initialAgentClientState.status) => {
   switch (status) {
@@ -43,6 +49,7 @@ const statusVariant = (status: typeof initialAgentClientState.status) => {
       return 'secondary'
     case 'error':
       return 'destructive'
+    case 'aborted':
     case 'idle':
     case 'running':
       return 'outline'
@@ -54,17 +61,35 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [input, setInput] = useState('')
   const [lastPrompt, setLastPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const isRunning = state.status === 'running'
   const displayedError = error ?? state.error
 
+  useEffect(() => () => {
+    abortControllerRef.current?.abort()
+  }, [])
+
   const runAgent = async (content: string) => {
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     try {
-      for await (const event of streamAgentEvents({ sessionId, content })) {
+      for await (const event of streamAgentEvents({ sessionId, content, signal: controller.signal })) {
         dispatch({ _tag: 'Event', event })
       }
     } catch (caught) {
+      if (controller.signal.aborted || isAbortError(caught)) {
+        dispatch({ _tag: 'Abort' })
+        setError(null)
+        return
+      }
+
       dispatch({ _tag: 'Error' })
       setError(errorMessage(caught))
+    } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null
+      }
     }
   }
 
@@ -72,7 +97,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     event.preventDefault()
     const content = input.trim()
 
-    if (content.length === 0 || isRunning) {
+    if (content.length === 0 || isRunning || abortControllerRef.current !== null) {
       return
     }
 
@@ -80,6 +105,10 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     setLastPrompt(content)
     setError(null)
     void runAgent(content)
+  }
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort()
   }
 
   return (
@@ -173,10 +202,17 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 disabled={isRunning}
                 aria-label="Agent prompt"
               />
-              <Button type="submit" size="icon-lg" disabled={isRunning || input.trim().length === 0}>
-                {isRunning ? <LoaderCircleIcon className="animate-spin" /> : <SendIcon />}
-                <span className="sr-only">Send</span>
-              </Button>
+              {isRunning ? (
+                <Button type="button" size="icon-lg" variant="destructive" onClick={handleStop}>
+                  <SquareIcon />
+                  <span className="sr-only">Stop</span>
+                </Button>
+              ) : (
+                <Button type="submit" size="icon-lg" disabled={input.trim().length === 0}>
+                  <SendIcon />
+                  <span className="sr-only">Send</span>
+                </Button>
+              )}
             </div>
           </form>
         </section>

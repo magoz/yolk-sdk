@@ -60,6 +60,32 @@ const makeOpenSseFetch = (responseChunk: string, requests: Array<CapturedRequest
     )
   }
 
+const makeCancelableOpenSseFetch = (input: {
+  readonly responseChunk: string
+  readonly requests: Array<CapturedRequest>
+  readonly onCancel: () => void
+}): typeof fetch =>
+  (requestInput, init) => {
+    input.requests.push({ input: requestInput, init })
+
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: controller => {
+            controller.enqueue(new TextEncoder().encode(input.responseChunk))
+          },
+          cancel: () => {
+            input.onCancel()
+          }
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/plain' }
+        }
+      )
+    )
+  }
+
 const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   const body = requests[0]?.init?.body
   expect(typeof body).toBe('string')
@@ -247,5 +273,42 @@ describe('OpenAiCodexProviderLayer', () => {
       const events = Array.from(eventsOption.value)
       expect(events).toHaveLength(1)
       expect(events[0]).toMatchObject({ _tag: 'TextDelta', text: 'oauth ' })
+    }))
+
+  it.effect('cancels OpenAI Codex response body when stream stops early', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      let cancelled = false
+      const layer = makeOpenAiCodexProviderLayer({
+        token,
+        fetch: makeCancelableOpenSseFetch({
+          responseChunk: [
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"oauth ","item_id":"msg_1"}',
+            '',
+            ''
+          ].join('\n'),
+          requests,
+          onCancel: () => {
+            cancelled = true
+          }
+        })
+      })
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.take(1), Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events).toHaveLength(1)
+      expect(cancelled).toBe(true)
     }))
 })

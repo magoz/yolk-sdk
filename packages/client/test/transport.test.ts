@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { AgentError, AgentStart, LLMTextDelta } from '@yolk/protocol'
-import { collectAgentEvents } from '../src'
+import { collectAgentEvents, streamAgentEvents } from '../src'
 
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
   events.map(event => JSON.stringify(event)).join('\n')
@@ -59,5 +59,30 @@ describe('collectAgentEvents', () => {
     })
 
     expect(events).toEqual(responseEvents)
+  })
+
+  it('cancels the response body when event consumption stops', async () => {
+    let cancelled = false
+    const fetcher: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start: controller => {
+              controller.enqueue(new TextEncoder().encode(`${JSON.stringify(AgentStart.make({}))}\n`))
+            },
+            cancel: () => {
+              cancelled = true
+            }
+          })
+        )
+      )
+    const events = streamAgentEvents({ sessionId: 'session_1', content: 'hello', fetch: fetcher })
+    const firstEvent = await events.next()
+
+    expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
+
+    await events.return()
+
+    expect(cancelled).toBe(true)
   })
 })

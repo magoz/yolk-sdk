@@ -97,12 +97,14 @@ export async function* streamAgentEvents(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let completed = false
 
   try {
     while (true) {
       const chunk = await reader.read()
 
       if (chunk.done) {
+        completed = true
         break
       }
 
@@ -118,6 +120,10 @@ export async function* streamAgentEvents(
       }
     }
   } finally {
+    if (!completed) {
+      await reader.cancel().catch(() => undefined)
+    }
+
     reader.releaseLock()
   }
 

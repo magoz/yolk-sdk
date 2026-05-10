@@ -10,7 +10,7 @@ import {
   ToolCall,
   ToolResult
 } from '@yolk/protocol'
-import { markAgentError, reduceAgentEvents } from '../src'
+import { markAgentAborted, markAgentError, reduceAgentEvents } from '../src'
 
 describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
@@ -55,6 +55,17 @@ describe('reduceAgentEvents', () => {
       status: 'error',
       activeToolCalls: [],
       error: 'Agent request failed'
+    })
+  })
+
+  it('marks client state as aborted', () => {
+    const state = reduceAgentEvents([AgentStart.make({}), LLMTextDelta.make({ text: 'partial' })])
+
+    expect(markAgentAborted(state)).toMatchObject({
+      status: 'aborted',
+      text: 'partial',
+      activeToolCalls: [],
+      error: null
     })
   })
 })
