@@ -7,7 +7,7 @@ Reusable agent stack. Domain-free below the app layer.
 ```
 packages/
   protocol/       shared schemas, events, wire types
-  harness/        pure LLM <> tool loop
+  agent-loop/     pure LLM <> tool loop
   agent-runtime/  reusable session/runtime shell
   client/         browser/client SDK
 app/              Yolk product layer at repo root
@@ -16,18 +16,28 @@ app/              Yolk product layer at repo root
 ## Dependency rule
 
 ```txt
-app ───────────────▶ agent-runtime ─▶ harness ─▶ protocol
+app ───────────────▶ agent-runtime ─▶ agent-loop ─▶ protocol
  │                         ▲
  └──────────────▶ client ──┘
 ```
 
 - `protocol` imports nothing from Yolk packages.
-- `harness` depends only on `protocol` + Effect.
-- `agent-runtime` depends on `harness` + `protocol`.
+- `agent-loop` depends only on `protocol` + Effect.
+- `agent-runtime` depends on `agent-loop` + `protocol`.
 - `client` depends on `protocol` only by default.
 - `app` owns all product/domain assumptions.
 
 No users, teams, orgs, projects, billing, or product-specific permissions below `app`.
+
+## Terminology
+
+| Term | Meaning |
+| --- | --- |
+| Protocol | Shared schemas/events/wire contract. |
+| Agent loop | Stateless LLM/tool iteration. |
+| Agent runtime | Server-side session/run lifecycle around the loop. |
+| Client | UI-side event consumer for web or extension surfaces. |
+| Harness | Not a current package; reserve for future batteries-included agent kit if needed. |
 
 ---
 
@@ -55,7 +65,7 @@ Keep it boring. Stable schemas beat clever abstractions.
 
 ---
 
-## `@yolk/harness`
+## `@yolk/agent-loop`
 
 Pure loop mechanics.
 
@@ -67,7 +77,7 @@ const run = (config: {
   systemPrompt: string
   tools: ReadonlyArray<ToolDef>
   model: string
-}): Stream<AgentEvent, HarnessError, LLMProvider | ToolExecutor | ContextTransformer | LoopConfig>
+}): Stream<AgentEvent, AgentLoopError, LLMProvider | ToolExecutor | ContextTransformer | LoopConfig>
 ```
 
 Owns:
@@ -92,13 +102,13 @@ Does not own:
 - knowledge stores
 - integration credentials
 
-Rule: if it needs durable state or project context, it is not harness.
+Rule: if it needs durable state or project context, it is not agent-loop.
 
 ---
 
 ## `@yolk/agent-runtime`
 
-Reusable orchestration shell around the harness.
+Reusable orchestration shell around the agent loop.
 
 Generic over project context:
 
@@ -180,13 +190,13 @@ Owns:
 - optional React hooks package later
 
 Does not own:
-- harness execution in normal production
+- agent-loop execution in normal production
 - LLM providers
 - server persistence
 - auth semantics
 - domain state
 
-Default assumption: browser uses shared protocol and talks to runtime. It does not run the harness loop.
+Default assumption: browser uses shared protocol and talks to runtime. It does not run the agent loop.
 
 ---
 
@@ -238,11 +248,11 @@ App route / Worker / DO
 @yolk/agent-runtime
   loads session
   gets context/tools via adapters
-  runs harness
+  runs agent loop
   saves transcript + usage
   streams events
     ↓
-@yolk/harness
+@yolk/agent-loop
   loops LLM <> tools
 ```
 
@@ -251,7 +261,7 @@ App route / Worker / DO
 ## Why this split
 
 - Reusable across projects.
-- Harness remains small and testable.
+- Agent loop remains small and testable.
 - Runtime solves common session/transport/persistence problems once.
 - Product assumptions stay out of shared packages.
 - Browser and server share protocol without sharing execution concerns.
@@ -261,7 +271,7 @@ Short version:
 | Layer | Responsibility |
 |---|---|
 | Protocol | Shared language |
-| Harness | Loop mechanism |
+| Agent loop | Loop mechanism |
 | Agent runtime | Generic session orchestration |
 | Client | Browser transport + state |
 | App | Domain policy |

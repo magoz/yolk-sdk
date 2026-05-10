@@ -215,10 +215,8 @@ layer(testLayer)('post operations', it => {
 | Auth     | Mock       | Mock              | Real      |
 | Db       | Mock       | Real (container)  | Real      |
 | Email    | Mock       | Mock              | Mock      |
-| S3       | Mock       | Real (localstack) | Real      |
-| Telegram | Mock       | Mock              | Mock      |
 
-**Rule:** Mock external services (email, Telegram) in all automated tests. Use real Db/S3 only in integration tests with testcontainers.
+**Rule:** Mock external services (email, integrations) in automated tests. Use real Db only in integration/E2E tests with test isolation.
 
 ## Test Commands
 

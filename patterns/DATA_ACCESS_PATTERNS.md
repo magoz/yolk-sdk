@@ -12,7 +12,7 @@ Need to mutate data (create, update, delete)?
   └─> Use Server Actions
 
 Need to handle file uploads/downloads?
-  └─> Use S3 signed URLs via Server Actions
+  └─> Use signed direct uploads (R2/S3) via Server Actions; no file service exists yet
 
 Need parallelization of multiple independent requests?
   └─> Consider API routes (rare)
@@ -223,7 +223,9 @@ Effect.tap(() => Effect.sync(() => revalidatePath('/posts')))
 Effect.map(post => ({ _tag: 'Success' as const, post }))
 ```
 
-## Pattern 3: S3 Signed URLs for File Operations
+## Pattern 3: Signed URLs for File Operations
+
+> Planned pattern. Current codebase has no file storage service. Add an R2/S3 service before copying examples.
 
 Use Server Actions to generate signed URLs, then upload/download directly from the client.
 

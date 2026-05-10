@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/harness",
+  "name": "@yolk/agent-loop",
   "version": "0.0.0",
   "private": true,
   "type": "module",

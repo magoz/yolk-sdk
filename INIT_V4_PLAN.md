@@ -18,7 +18,7 @@ Inputs:
 
 - Preserve existing docs:
   - `ARCHITECTURE.md`
-  - `HARNESS.md`
+  - `AGENT_LOOP.md`
   - `COMPARISON.md`
   - `RESEARCH.md`
   - `INIT_V4_PLAN.md`
@@ -95,7 +95,7 @@ packages/
     package.json
     tsconfig.json
     src/index.ts
-  harness/
+  agent-loop/
     package.json
     tsconfig.json
     src/index.ts
@@ -124,8 +124,8 @@ Enforce:
 
 ```txt
 @yolk/protocol
-@yolk/harness       -> @yolk/protocol, effect
-@yolk/agent-runtime -> @yolk/protocol, @yolk/harness, effect
+@yolk/agent-loop    -> @yolk/protocol, effect
+@yolk/agent-runtime -> @yolk/protocol, @yolk/agent-loop, effect
 @yolk/client        -> @yolk/protocol
 root app            -> any package
 ```
@@ -162,7 +162,7 @@ If full check fails due template/env setup, at minimum verify package typecheck/
 
 After setup, update docs if actual paths differ:
 - `ARCHITECTURE.md`
-- `HARNESS.md`
+- `AGENT_LOOP.md`
 - `RESEARCH.md`
 
 ## First implementation after setup
@@ -170,9 +170,9 @@ After setup, update docs if actual paths differ:
 Do not start with runtime. Build smallest vertical slice:
 
 1. `@yolk/protocol` message/event schemas
-2. `@yolk/harness` text-only loop
+2. `@yolk/agent-loop` text-only loop
 3. faux provider
-4. one passing harness test
+4. one passing agent-loop test
 5. runtime skeleton after loop works
 
 ## Done criteria

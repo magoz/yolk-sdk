@@ -8,4 +8,4 @@ export class ToolExecutor extends Context.Service<
   {
     readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
   }
->()('@yolk/harness/ToolExecutor') {}
+>()('@yolk/agent-loop/ToolExecutor') {}

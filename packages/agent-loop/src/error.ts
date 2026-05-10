@@ -23,4 +23,4 @@ export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortErro
   reason: Schema.Literals(['user', 'system', 'max_turns'])
 }) {}
 
-export type HarnessError = LLMError | FauxExhaustedError | ToolError | AbortError
+export type AgentLoopError = LLMError | FauxExhaustedError | ToolError | AbortError

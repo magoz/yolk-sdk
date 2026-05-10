@@ -7,10 +7,10 @@ import {
   LoopConfig,
   Reply,
   TestToolExecutor
-} from '@yolk/harness'
+} from '@yolk/agent-loop'
 import { runRuntime, SessionStore, type SessionSnapshot } from '../src'
 
-const HarnessLayer = Layer.mergeAll(
+const AgentLoopLayer = Layer.mergeAll(
   ContextTransformer.identity,
   LoopConfig.defaultLayer,
   FauxProvider.layer(Reply.text('ok')),
@@ -18,7 +18,7 @@ const HarnessLayer = Layer.mergeAll(
 )
 
 describe('runRuntime', () => {
-  it.effect('loads session, runs harness, and saves transcript', () =>
+  it.effect('loads session, runs agent loop, and saves transcript', () =>
     Effect.gen(function* () {
       const saved: Array<SessionSnapshot> = []
       const session = {
@@ -41,7 +41,7 @@ describe('runRuntime', () => {
         systemPrompt: 'Be brief.',
         tools: [],
         model: 'faux'
-      }).pipe(Stream.runCollect, Effect.provide(Layer.mergeAll(HarnessLayer, StoreLayer)))
+      }).pipe(Stream.runCollect, Effect.provide(Layer.mergeAll(AgentLoopLayer, StoreLayer)))
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
       expect(saved).toHaveLength(1)

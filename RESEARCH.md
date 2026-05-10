@@ -9,9 +9,9 @@ Core package boundaries decided. Product-layer details still open.
 | Layer | Decision |
 |---|---|
 | Protocol | `packages/protocol/` shared schemas, events, wire types. No domain. |
-| Harness | `packages/harness/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
-| Agent runtime | `packages/agent-runtime/` reusable session/runtime shell over harness. Generic over opaque `Ctx`. |
-| Client | `packages/client/` browser protocol SDK + event reducer. Does not run harness by default. |
+| Agent loop | `packages/agent-loop/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
+| Agent runtime | `packages/agent-runtime/` reusable session/runtime shell over agent-loop. Generic over opaque `Ctx`. |
+| Client | `packages/client/` browser protocol SDK + event reducer. Does not run agent-loop by default. |
 | App layer | Project-specific Next.js/Worker layer: auth, users, teams, integrations, OAuth, billing, UI. |
 | Knowledge store | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors). |
 | Knowledge write | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2). |
@@ -28,7 +28,7 @@ Core package boundaries decided. Product-layer details still open.
 
 | Rejected | Why |
 |---|---|
-| Pi SDK as runtime | Useful reference, but runtime/harness should be ours and reusable |
+| Pi SDK as runtime | Useful reference, but runtime/agent-loop should be ours and reusable |
 | Think (`@cloudflare/think`) | Too opinionated — use lower-level `Agent` class |
 | Workspace (`@cloudflare/shell`) | Preview/experimental — DIY on GA primitives |
 | Cloudflare Artifacts | Replaced by R2 + DO SQLite |
@@ -40,10 +40,32 @@ Core package boundaries decided. Product-layer details still open.
 
 ### Decided but not in detailed sections
 
-- **Reusable package split** — `protocol`, `harness`, `agent-runtime`, `client`, app. See `ARCHITECTURE.md`.
+- **Reusable package split** — `protocol`, `agent-loop`, `agent-runtime`, `client`, app. See `ARCHITECTURE.md`.
 - **No domain below app** — no users, teams, orgs, projects, billing, OAuth, or product permissions below the project-specific app layer.
 - **Harness stays pure** — generic loop only. No sessions, persistence, transport, or compaction policy.
 - **Runtime is generic** — session orchestration over opaque `Ctx`; project adapters decide what `Ctx` means.
+
+### Terminology decision: `agent-loop`, not `harness`
+
+Researched OpenAI Agents SDK, LangChain/LangGraph, Vercel AI SDK, MCP, AG-UI, AutoGen, Semantic Kernel, Pydantic AI, CrewAI, and Google ADK.
+
+Decision: name the low-level package `@yolk/agent-loop`.
+
+Why:
+- OpenAI and LangChain use **agent loop** for the model/tool iteration we implement.
+- LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk/agent-runtime`.
+- LangChain and Pydantic use **harness** for more opinionated, batteries-included layers with built-in tools, prompts, context engineering, subagents, or capability libraries. Our package intentionally excludes those.
+- MCP and AG-UI are protocol names for agent↔tools/data and agent↔UI boundaries. They validate keeping `@yolk/protocol` separate, but do not name the loop package.
+
+Naming map:
+
+| Industry term | Yolk package | Notes |
+|---|---|---|
+| Protocol | `@yolk/protocol` | Wire/event/schema contract. |
+| Agent loop | `@yolk/agent-loop` | Stateless LLM/tool loop. |
+| Agent runtime | `@yolk/agent-runtime` | Sessions, persistence, adapters, resumable runs. |
+| Client SDK | `@yolk/client` | Browser protocol + reducer. |
+| Harness | Reserved | Future opinionated batteries-included package, if needed. |
 
 ### Not yet discussed
 
@@ -69,7 +91,7 @@ Yolk is the platform that makes this real for companies that aren't Block.
 |---|---|
 | **Capabilities** (atomic financial primitives) | Integrations: Gmail, Calendar, Notion, Todoist, LinkedIn, Telegram, R2, etc. |
 | **World model** (company + customer) | Knowledge store — R2 files + DO SQLite + Vectorize, app-defined scope |
-| **Intelligence layer** (composes capabilities) | Yolk agent runtime + harness with access to context/tools |
+| **Intelligence layer** (composes capabilities) | Yolk agent runtime + agent-loop with access to context/tools |
 | **Interfaces** (delivery surfaces) | Web app, scheduled agents, notifications |
 
 ### Three Roles (from Block)
@@ -82,7 +104,7 @@ Yolk is the platform that makes this real for companies that aren't Block.
 
 ## Reference Runtime: Pi
 
-Historical research. Current decision: learn from Pi's separation and loop, but build Yolk's own `protocol` / `harness` / `agent-runtime` packages. Do not use Pi SDK as the runtime.
+Historical research. Current decision: learn from Pi's separation and loop, but build Yolk's own `protocol` / `agent-loop` / `agent-runtime` packages. Do not use Pi SDK as the runtime.
 
 [pi.dev](https://pi.dev) — minimal terminal coding agent harness by Mario Zechner (Earendil Inc.).
 

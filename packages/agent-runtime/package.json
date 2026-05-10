@@ -16,7 +16,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@yolk/harness": "workspace:*",
+    "@yolk/agent-loop": "workspace:*",
     "@yolk/protocol": "workspace:*",
     "effect": "beta"
   }

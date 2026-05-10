@@ -7,7 +7,7 @@ export default function Page() {
         <p className="text-muted-foreground text-sm font-medium uppercase tracking-wide">Yolk</p>
         <h1 className="text-4xl font-semibold tracking-tight">Reusable agent stack</h1>
         <p className="text-muted-foreground text-lg">
-          Next.js app shell with domain-free protocol, harness, runtime, and client packages.
+          Next.js app shell with domain-free protocol, agent-loop, runtime, and client packages.
         </p>
       </div>
 

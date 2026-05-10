@@ -133,11 +133,11 @@ reportError(error, {
 
 ### Infrastructure services: structured log only
 
-Infrastructure services (S3, email, Telegram) use `Effect.logError` — structured log, but **no Sentry**. The boundary decides severity.
+Infrastructure services (email, file storage, integrations) use `Effect.logError` — structured log, but **no Sentry**. The boundary decides severity.
 
 ```typescript
 // Infrastructure: log only (callers own Sentry decision)
-Effect.tapError(error => Effect.logError('S3 upload failed', { error, key }))
+Effect.tapError(error => Effect.logError('Email send failed', { error, to }))
 ```
 
 This prevents double-reporting: if the error propagates to a boundary that also calls `reportError`, Sentry would get two events for one failure. Infrastructure logs for debugging context; boundaries report for alerting.
@@ -227,9 +227,7 @@ Span names use `domain.entity.action` format. Server actions prefix with `action
 | `action.post.delete`         | Server action   |
 | `Auth.signIn`                | Service method  |
 | `Auth.getSessionFromCookies` | Service method  |
-| `S3.saveFile`                | Service method  |
 | `Email.sendEmail`            | Service method  |
-| `Telegram.send`              | Service method  |
 
 Custom attributes per span:
 
@@ -237,9 +235,7 @@ Custom attributes per span:
 | ----------------- | ------------------------------------------- |
 | `action.post.*`   | `post.id`, `user.id`, `user.email`          |
 | `Auth.*`          | (none — session data is the result)         |
-| `S3.*`            | `s3.bucket`, `s3.key`, `s3.size`            |
 | `Email.sendEmail` | `email.to`, `email.subject`, `email.id`     |
-| `Telegram.send`   | `telegram.messageLength`, `telegram.chatId` |
 
 ## Axiom Dashboards
 

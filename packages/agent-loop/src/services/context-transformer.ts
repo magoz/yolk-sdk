@@ -8,7 +8,7 @@ export class ContextTransformer extends Context.Service<
       messages: ReadonlyArray<AgentMessage>
     ) => Effect.Effect<ReadonlyArray<AgentMessage>>
   }
->()('@yolk/harness/ContextTransformer') {
+>()('@yolk/agent-loop/ContextTransformer') {
   static identity = Layer.succeed(
     this,
     this.of({

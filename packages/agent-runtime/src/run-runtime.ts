@@ -2,12 +2,12 @@ import { Effect, Stream } from 'effect'
 import type { AgentEvent, AgentMessage, ToolDef } from '@yolk/protocol'
 import {
   run,
+  type AgentLoopError,
   type ContextTransformer,
-  type HarnessError,
   type LLMProvider,
   type LoopConfig,
   type ToolExecutor
-} from '@yolk/harness'
+} from '@yolk/agent-loop'
 import { SessionStore } from './session-store'
 import type { RuntimeError } from './error'
 
@@ -26,7 +26,7 @@ export const runRuntime = <Ctx>(
   request: RuntimeRequest<Ctx>
 ): Stream.Stream<
   AgentEvent,
-  RuntimeError | HarnessError,
+  RuntimeError | AgentLoopError,
   ContextTransformer | LLMProvider | LoopConfig | SessionStore | ToolExecutor
 > =>
   Stream.unwrap(

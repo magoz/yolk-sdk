@@ -1,8 +1,10 @@
-# Harness — Design Document
+# Agent Loop — Design Document
 
 ## What it is
 
-Generic, portable agent loop. `packages/harness/`. Orchestrates LLM <> tool cycles. Pure Effect. No Cloudflare, no Yolk domain logic. Don't publish until second consumer exists.
+Generic, portable agent loop. `packages/agent-loop/`. Orchestrates LLM <> tool cycles. Pure Effect. No Cloudflare, no Yolk domain logic. Don't publish until second consumer exists.
+
+Terminology note: planning used “harness” as shorthand. Package name is `@yolk/agent-loop` because industry usage increasingly reserves “harness” for opinionated, batteries-included agent layers.
 
 **Conceptual signature:**
 
@@ -11,7 +13,7 @@ const run = (config: {
   messages: ReadonlyArray<AgentMessage>
   systemPrompt: string
   tools: ReadonlyArray<ToolDef>
-}): Stream<AgentEvent, HarnessError, LLMProvider | ToolExecutor | ContextTransformer | LoopConfig>
+}): Stream<AgentEvent, AgentLoopError, LLMProvider | ToolExecutor | ContextTransformer | LoopConfig>
 ```
 
 Config in, event stream out. Consumer owns session persistence, transport (WebSocket, stdio, etc.), and UI. System prompt is a plain field — static for the duration of a run. Dynamic per-turn instructions go through `ContextTransformer`.
@@ -19,18 +21,18 @@ Config in, event stream out. Consumer owns session persistence, transport (WebSo
 This package is one layer in the reusable stack. See `ARCHITECTURE.md`.
 
 ```txt
-protocol → harness → agent-runtime → app
+protocol → agent-loop → agent-runtime → app
 ```
 
-The harness is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent-runtime/` or the app layer.
+The agent loop is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent-runtime/` or the app layer.
 
 Hard boundary: no users, teams, orgs, projects, billing, OAuth, knowledge store, or product-specific permissions in this package.
 
-### Harness vs agent runtime
+### Agent loop vs agent runtime
 
-| Concern | Harness | Agent runtime |
+| Concern | Agent loop | Agent runtime |
 |---|---|---|
-| LLM <> tool loop | Yes | Calls harness |
+| LLM <> tool loop | Yes | Calls agent loop |
 | Event taxonomy | Emits | Streams/reduces/persists |
 | Provider interface | Defines | Provides/configures |
 | Tool executor interface | Defines | Wraps with permissions |
@@ -61,7 +63,7 @@ Minimal terminal coding agent by Mario Zechner. Plain TypeScript, Vitest, event-
 **Patterns we skip:**
 - Extension system (25+ hooks, plugin loading, hot-reload) — we own the code.
 - TypeBox for schemas — Effect Schema instead.
-- TUI, RPC mode, session tree — not harness concerns.
+- TUI, RPC mode, session tree — not agent-loop concerns.
 
 ### OpenCode (`~/dev/docs/opencode`)
 
@@ -77,10 +79,10 @@ Open-source coding agent. Effect v4 throughout. Bun runtime.
 - `Data.TaggedError` for all error types. No try/catch.
 
 **Patterns we skip:**
-- `InstanceState` / `InstanceRef` / AsyncLocalStorage dual context — harness is single-instance. Consumer (DO) handles multi-tenancy.
-- `AppRuntime` / `ManagedRuntime` — harness is a library, not an app. Consumer provides the runtime.
-- AI SDK interop / Zod bridging — harness defines its own provider interface.
-- SQLite / Drizzle — harness is stateless. Consumer owns persistence.
+- `InstanceState` / `InstanceRef` / AsyncLocalStorage dual context — agent-loop is single-run. Consumer (runtime/DO) handles multi-tenancy.
+- `AppRuntime` / `ManagedRuntime` — agent-loop is a library, not an app. Consumer provides the runtime.
+- AI SDK interop / Zod bridging — agent-loop defines its own provider interface.
+- SQLite / Drizzle — agent-loop is stateless. Consumer owns persistence.
 
 ---
 
@@ -95,7 +97,7 @@ Three options evaluated:
 **A) Pure Stream composition** — Agent loop as recursive `Stream.unfoldEffect`.
 
 ```typescript
-const runTurn = (msgs: AgentMessage[]): Stream<AgentEvent, HarnessError, Requirements> =>
+const runTurn = (msgs: AgentMessage[]): Stream<AgentEvent, AgentLoopError, Requirements> =>
   pipe(
     Stream.make(AgentEvent.TurnStart()),
     Stream.concat(streamLLM(msgs)),
@@ -125,7 +127,7 @@ Problem: No backpressure. Multiple consumers must subscribe before fiber starts 
 ```typescript
 const run = (
   msgs: AgentMessage[],
-): Stream<AgentEvent, HarnessError, LLMProvider | ToolExecutor> =>
+): Stream<AgentEvent, AgentLoopError, LLMProvider | ToolExecutor> =>
   Stream.asyncScoped((emit) =>
     Effect.gen(function* () {
       const provider = yield* LLMProvider
@@ -186,16 +188,16 @@ const run = (
 
 ```typescript
 // Pipe to WebSocket (DO)
-harness.run(msgs).pipe(
+run(msgs).pipe(
   Stream.tap((e) => ws.send(JSON.stringify(e))),
   Stream.runDrain,
 )
 
 // Collect for testing
-const events = yield* harness.run(msgs).pipe(Stream.runCollect)
+const events = yield* run(msgs).pipe(Stream.runCollect)
 
 // Cancel after first turn
-harness.run(msgs).pipe(
+run(msgs).pipe(
   Stream.takeUntil((e) => e._tag === "TurnEnd"),
   Stream.runCollect,
 )
@@ -236,11 +238,11 @@ Three message types, multimodal content from day one. `Content` is either a plai
 No `Notification`, `CompactionSummary`, `ContextInjection` — those are consumer concerns:
 - Compaction summaries → consumer wraps as `User` messages before calling `run()`
 - Context injections → happen in `ContextTransformer.transform()`, which prepends real `User` messages
-- Notifications → UI-level, never enter the harness
+- Notifications → UI-level, never enter the agent loop
 
-`toLLMMessages` is harness-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion). Provider layer decides how to encode audio parts for the specific API (base64 for audio completions, PCM16 chunks for realtime).
+`toLLMMessages` is agent-loop-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion). Provider layer decides how to encode audio parts for the specific API (base64 for audio completions, PCM16 chunks for realtime).
 
-Consumer's domain types (e.g., `KnowledgeResult`, `IntegrationEvent`) live in their session storage and UI layer. They convert to `AgentMessage` at the boundary before entering the harness.
+Consumer's domain types (e.g., `KnowledgeResult`, `IntegrationEvent`) live in their session storage and UI layer. They convert to `AgentMessage` at the boundary before entering the agent loop.
 
 ---
 
@@ -252,7 +254,7 @@ Tools execute in parallel by default (`concurrency: "unbounded"`). Interception 
 
 #### Tool definition
 
-Four required fields, one optional. Studied Pi (TypeBox schemas, `parallel` flag, `label`) and OpenCode (Effect Schema, `id`, confirmation metadata). The harness only needs fields that affect loop behavior. Display labels, confirmation, concurrency hints → consumer layers.
+Four required fields, one optional. Studied Pi (TypeBox schemas, `parallel` flag, `label`) and OpenCode (Effect Schema, `id`, confirmation metadata). The agent loop only needs fields that affect loop behavior. Display labels, confirmation, concurrency hints → consumer layers.
 
 ```typescript
 interface ToolDef<Params, R> {
@@ -260,12 +262,12 @@ interface ToolDef<Params, R> {
   readonly description: string
   readonly parameters: Schema.Schema<Params>
   readonly execute: (params: Params) => Effect<ToolResult, ToolError, R>
-  readonly timeout?: Duration  // harness wraps with Effect.timeout if provided
+  readonly timeout?: Duration  // agent loop wraps with Effect.timeout if provided
 }
 ```
 
 - `name` + `description` + `parameters` → sent to LLM as tool definitions
-- `execute` → called by harness
+- `execute` → called by agent loop
 - `timeout` → defense against runaway tools blocking the loop. Harness owns the execution fiber.
 - Everything else (labels, confirmation, concurrency hints) → consumer layers
 
@@ -273,7 +275,7 @@ interface ToolDef<Params, R> {
 
 ```typescript
 // Service interface
-class ToolExecutor extends Context.Service<ToolExecutor>()("@harness/ToolExecutor") {
+class ToolExecutor extends Context.Service<ToolExecutor>()("@yolk/agent-loop/ToolExecutor") {
   readonly execute: (call: ToolCall) => Effect<ToolResult, ToolError>
 }
 
@@ -349,7 +351,7 @@ const withFileLock = (path: string, effect: Effect<A, E, R>) =>
 Minimal interface. Harness doesn't know about Anthropic, OpenAI, etc. Consumer provides the layer.
 
 ```typescript
-class LLMProvider extends Context.Service<LLMProvider>()("@harness/LLMProvider") {
+class LLMProvider extends Context.Service<LLMProvider>()("@yolk/agent-loop/LLMProvider") {
   readonly stream: (request: LLMRequest) => Stream<LLMEvent, LLMError>
 }
 ```
@@ -384,9 +386,9 @@ type LLMEvent =
   | { readonly _tag: "Done"; readonly stopReason: StopReason }
 ```
 
-Audio events are emitted by providers that support audio output (OpenAI audio completions, future Anthropic audio). Text-only providers never emit `AudioDelta`/`AudioDone`. The harness passes them through — it doesn't interpret audio data.
+Audio events are emitted by providers that support audio output (OpenAI audio completions, future Anthropic audio). Text-only providers never emit `AudioDelta`/`AudioDone`. The agent loop passes them through — it doesn't interpret audio data.
 
-The harness accumulates `LLMEvent`s into a complete response (assistant message + tool calls) via `Accumulator.add`. Provider implementations live outside the harness package.
+The agent loop accumulates `LLMEvent`s into a complete response (assistant message + tool calls) via `Accumulator.add`. Provider implementations live outside the agent-loop package.
 
 ---
 
@@ -450,7 +452,7 @@ const Reply = {
 **Test usage:**
 
 ```typescript
-const events = yield* harness.run(msgs).pipe(
+const events = yield* run(msgs).pipe(
   Stream.runCollect,
   Effect.provide(
     FauxProvider.layer(
@@ -482,7 +484,7 @@ Pi injects context via `before_agent_start` and `context` hooks. OpenCode has va
 Harness: `ContextTransformer` service. Consumer provides the layer. Harness calls it before each LLM request.
 
 ```typescript
-class ContextTransformer extends Context.Service<ContextTransformer>()("@harness/ContextTransformer") {
+class ContextTransformer extends Context.Service<ContextTransformer>()("@yolk/agent-loop/ContextTransformer") {
   readonly transform: (messages: ReadonlyArray<AgentMessage>) => Effect<ReadonlyArray<AgentMessage>>
 }
 
@@ -511,13 +513,13 @@ Multiple transformers compose via layer wrapping (same pattern as ToolExecutor i
 
 ### 7. Compaction: consumer concern
 
-**Status: Decided. Not in the harness.**
+**Status: Decided. Not in the agent loop.**
 
 Studied both Pi (compaction outside loop, `AgentSession` orchestrates) and OpenCode (compaction inside loop as first-class task). Key finding: **compaction requires an LLM call** — it's "summarize old messages," not "drop old messages." That makes it inherently opinionated (what to keep, how to summarize, which model to use). That opinion belongs in the consumer.
 
 Pi's architecture validates this: the agent loop (`agent-loop.ts`) has zero compaction awareness. `AgentSession` — a layer above — handles detection, summarization, and retry.
 
-The harness:
+The agent loop:
 1. Surfaces `LLMError({ cause: "context_overflow" })` in the stream error channel
 2. Emits `UsageReport` events with real token counts after each LLM step
 3. Done
@@ -538,12 +540,12 @@ No `CompactionStrategy` service. No retry logic in the loop. Clean boundary.
 
 Harness is stateless. It takes messages, produces events. Consumer decides how to persist.
 
-The harness DOES emit enough events to reconstruct the final message list:
+The agent loop DOES emit enough events to reconstruct the final message list:
 - `AgentEvent.AssistantMessage` contains the full accumulated assistant message.
 - `AgentEvent.ToolResult` contains each tool result.
 - Consumer appends these to their stored messages.
 
-No `SessionStorage` service in the harness. No opinion on JSONL vs SQLite vs in-memory.
+No `SessionStorage` service in the agent loop. No opinion on JSONL vs SQLite vs in-memory.
 
 ---
 
@@ -575,10 +577,10 @@ class SchemaError extends Data.TaggedError("SchemaError")<{
   readonly message: string
 }> {}
 
-type HarnessError = LLMError | ToolError | AbortError | SchemaError
+type AgentLoopError = LLMError | ToolError | AbortError | SchemaError
 ```
 
-The stream type is `Stream<AgentEvent, HarnessError, Requirements>`. Consumer handles errors via `Stream.catchTag` or `Effect.catchTag` on the drain.
+The stream type is `Stream<AgentEvent, AgentLoopError, Requirements>`. Consumer handles errors via `Stream.catchTag` or `Effect.catchTag` on the drain.
 
 ---
 
@@ -684,7 +686,7 @@ const myLayers = pipe(
   Layer.provideMerge(LoopConfig.layer({ maxTurns: 10 })),
 )
 
-const events = yield* harness.run(messages).pipe(
+const events = yield* run(messages).pipe(
   Stream.runCollect,
   Effect.provide(myLayers),
 )
@@ -696,7 +698,7 @@ const events = yield* harness.run(messages).pipe(
 
 **Status: Decided. Not implemented. Architecture supports future addition.**
 
-The harness has no hook registry or event-based extension system. Effect's Layer system handles all current interception needs. However, the loop preserves explicit seams where hooks would attach if ever needed:
+The agent loop has no hook registry or event-based extension system. Effect's Layer system handles all current interception needs. However, the loop preserves explicit seams where hooks would attach if ever needed:
 
 | Loop call site | Current layer | Future hook |
 |---|---|---|
@@ -730,7 +732,7 @@ Consumer interrupts the fiber running `Stream.runDrain`. Effect structured concu
 
 ```typescript
 // Consumer
-const fiber = yield* harness.run(msgs).pipe(Stream.runDrain, Effect.fork)
+const fiber = yield* run(msgs).pipe(Stream.runDrain, Effect.fork)
 // ... user cancels via WebSocket
 yield* Fiber.interrupt(fiber)
 ```
@@ -741,7 +743,7 @@ What happens on interrupt:
 - **Between turns** — interruption at next `yield*` point. Clean.
 - **Partial events** — consumer may receive `TurnStart` without `TurnEnd`. Consumer handles incomplete sequences regardless of abort mechanism.
 
-No explicit `abort()` handle. No `Deferred` signal. `run()` returns a `Stream`, period. Pi and OpenCode have explicit abort (`session.abort()`, `Runner.cancel()`) because their loops are long-lived fibers managed by a session layer. Our harness is stateless — each `run()` is a fresh stream, consumer owns the fiber.
+No explicit `abort()` handle. No `Deferred` signal. `run()` returns a `Stream`, period. Pi and OpenCode have explicit abort (`session.abort()`, `Runner.cancel()`) because their loops are long-lived fibers managed by a session layer. Our agent loop is stateless — each `run()` is a fresh stream, consumer owns the fiber.
 
 For graceful stops (finish current turn but don't start another), consumer uses `Stream.takeUntil((e) => e._tag === "TurnEnd")`.
 
@@ -753,7 +755,7 @@ For graceful stops (finish current turn but don't start another), consumer uses 
 
 Researched OpenAI Realtime API (GA, WebSocket/WebRTC, native speech-to-speech), OpenAI audio completions (same API as text, audio content parts), Google Gemini Live (WebSocket, bidirectional), Anthropic (no audio support), ElevenLabs (separate TTS/STT). Neither Pi nor OpenCode has any audio support.
 
-Voice is first-class in the harness design. Three architectures supported, sharing the same core:
+Voice is first-class in the agent-loop design. Three architectures supported, sharing the same core:
 
 **Architecture 1: Audio completions (same `LLMProvider`, multimodal content)**
 
@@ -761,45 +763,45 @@ No separate voice provider. The existing `LLMProvider.stream()` handles audio �
 
 ```
 User speaks → STT → AgentMessage.User({ content: [Audio({ data, format: "pcm16" })] })
-  → harness.run() → LLMAudioDelta events → consumer plays audio
+  → run() → LLMAudioDelta events → consumer plays audio
 ```
 
 Works through the existing `run()` API unchanged. The multimodal `ContentPart` union (Text | Image | Audio) makes this transparent.
 
 **Architecture 2: Chained (STT → LLM → TTS)**
 
-Works with any LLM including Claude (no native audio). The harness runs text mode as normal. Consumer wraps with STT/TTS at the boundaries.
+Works with any LLM including Claude (no native audio). The agent loop runs text mode as normal. Consumer wraps with STT/TTS at the boundaries.
 
 ```
-Mic → STTProvider.transcribe() → text → harness.run() → LLMTextDelta → TTSProvider.synthesize() → Speaker
+Mic → STTProvider.transcribe() → text → run() → LLMTextDelta → TTSProvider.synthesize() → Speaker
 ```
 
 `STTProvider` and `TTSProvider` are optional service interfaces. Consumer provides layers (ElevenLabs, OpenAI TTS, Deepgram, etc.).
 
 ```typescript
-class STTProvider extends Context.Service<STTProvider>()("@harness/STTProvider") {
+class STTProvider extends Context.Service<STTProvider>()("@yolk/agent-loop/STTProvider") {
   readonly transcribe: (audio: Stream<Uint8Array>) => Stream<TranscriptEvent>
 }
 
-class TTSProvider extends Context.Service<TTSProvider>()("@harness/TTSProvider") {
+class TTSProvider extends Context.Service<TTSProvider>()("@yolk/agent-loop/TTSProvider") {
   readonly synthesize: (text: Stream<string>) => Stream<Uint8Array>
 }
 ```
 
-Higher latency (~1-2s) than native realtime. More control over each component. Works today with zero harness changes beyond the interfaces.
+Higher latency (~1-2s) than native realtime. More control over each component. Works today with zero agent-loop changes beyond the interfaces.
 
 **Architecture 3: Native realtime (v1.1)**
 
 For sub-second full-duplex voice. OpenAI Realtime API, Gemini Live. Fundamentally different protocol — persistent bidirectional WebSocket, LLM server drives the conversation.
 
-Cannot fit into `run()` (which is one-shot, harness-driven). Separate API:
+Cannot fit into `run()` (which is one-shot, agent-loop-driven). Separate API:
 
 ```typescript
 const session: (config: {
   systemPrompt: string
   tools: ReadonlyArray<ToolDef>
   voice: VoiceConfig
-}) => Effect<RealtimeSession, HarnessError, RealtimeProvider | ToolExecutor>
+}) => Effect<RealtimeSession, AgentLoopError, RealtimeProvider | ToolExecutor>
 
 interface RealtimeSession {
   readonly events: Stream<AgentEvent>
@@ -810,10 +812,10 @@ interface RealtimeSession {
 }
 ```
 
-Shares with text mode: `ToolExecutor`, `ToolDef`, `AgentEvent` taxonomy, error types. The harness handles tool execution inside the session — when the realtime provider emits a tool call, the harness executes it and feeds the result back.
+Shares with text mode: `ToolExecutor`, `ToolDef`, `AgentEvent` taxonomy, error types. The agent loop handles tool execution inside the session — when the realtime provider emits a tool call, the loop executes it and feeds the result back.
 
 ```typescript
-class RealtimeProvider extends Context.Service<RealtimeProvider>()("@harness/RealtimeProvider") {
+class RealtimeProvider extends Context.Service<RealtimeProvider>()("@yolk/agent-loop/RealtimeProvider") {
   readonly connect: (config: RealtimeConfig) => Effect<RealtimeConnection>
 }
 
@@ -846,14 +848,14 @@ interface RealtimeConnection {
 - Only `effect` core packages (`effect`, `@effect/schema`, `@effect/platform` if needed)
 - Must run in: Node.js, Bun, Cloudflare Workers (V8 isolates), browser (stretch goal)
 
-Consumer packages (outside harness) bridge to platform-specific APIs via layers.
+Consumer packages (outside agent-loop) bridge to platform-specific APIs via layers.
 
 ---
 
-## Harness Package Structure (Planned)
+## Agent Loop Package Structure (Planned)
 
 ```
-packages/harness/
+packages/agent-loop/
   src/
     index.ts                  # Public API re-exports
     run.ts                    # Text mode agent loop (Stream.asyncScoped + Effect.gen)
@@ -861,7 +863,7 @@ packages/harness/
     content.ts                # ContentPart schema (Text | Image | Audio)
     message.ts                # AgentMessage schema (User | Assistant | ToolResult)
     event.ts                  # AgentEvent schema (full discriminated union)
-    error.ts                  # HarnessError types (Data.TaggedError)
+    error.ts                  # AgentLoopError types (Data.TaggedError)
     tool.ts                   # ToolDef, ToolCall, ToolResult types
     accumulator.ts            # LLMEvent -> accumulated response
     services/
@@ -907,7 +909,7 @@ Pi's low-level `agentLoop()` carries new messages in the `agent_end` event:
 ```typescript
 await emit({ type: "agent_end", messages: newMessages })
 ```
-Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — harness is stateless).
+Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — agent-loop is stateless).
 
 Our `AgentEnd` event carries the accumulated messages from this run. Consumer can also reconstruct from per-turn `AssistantMessage` + `ToolResult` events. Both paths available, `AgentEnd` is the convenience path.
 
@@ -940,7 +942,7 @@ Our faux provider errors on exhaustion. `Queue.take` on an empty queue produces 
 
 Pi has no limit (hook-based `shouldStopAfterTurn`, no default). OpenCode has a soft limit (prompt injection telling the model to stop, default `Infinity`). Neither has a real safety net.
 
-Our harness enforces a hard limit via `LoopConfig.maxTurns` (default 500). When hit, emits `AbortError({ reason: "max_turns" })` in the stream error channel. Not advisory — the loop stops.
+Our agent loop enforces a hard limit via `LoopConfig.maxTurns` (default 500). When hit, emits `AbortError({ reason: "max_turns" })` in the stream error channel. Not advisory — the loop stops.
 
 500 is generous enough to never hit during normal use. Defense against runaway loops on headless DOs where no human is watching. Token burn is the real risk — 500 LLM calls at $0.01-0.10/call = $5-50 wasted.
 
@@ -951,4 +953,3 @@ LoopConfig.layer({ maxTurns: Infinity })  // opt out (not recommended for headle
 ```
 
 Consumer can also `Stream.takeUntil` for softer per-run control without changing the global default.
-

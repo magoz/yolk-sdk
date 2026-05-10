@@ -18,14 +18,14 @@ import {
   type ToolDef
 } from '@yolk/protocol'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator'
-import { AbortError, type HarnessError } from './error'
+import { AbortError, type AgentLoopError } from './error'
 import type { LLMEvent } from './llm-event'
 import { ContextTransformer } from './services/context-transformer'
 import { LLMProvider } from './services/llm-provider'
 import { LoopConfig } from './services/loop-config'
 import { ToolExecutor } from './services/tool-executor'
 
-export type HarnessRunId = string
+export type AgentLoopRunId = string
 
 export type RunConfig = {
   readonly messages: ReadonlyArray<AgentMessage>
@@ -57,7 +57,7 @@ export const run = (
   config: RunConfig
 ): Stream.Stream<
   AgentEvent,
-  HarnessError,
+  AgentLoopError,
   ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 > =>
   Stream.unwrap(

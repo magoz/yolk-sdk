@@ -183,18 +183,18 @@ Services are composed in `lib/layers.ts`:
 import { Layer, Logger } from 'effect'
 import { Auth } from './services/auth/live-layer'
 import { Db } from './services/db/live-layer'
+import { TelemetryLayer } from './services/telemetry/live-layer'
 
 // Combined app layer — each .layer is fully self-contained
 export const AppLayer = Layer.mergeAll(
   Auth.layer,
   Db.layer,
-  S3.layer,
   Logger.layer([Logger.consolePretty()]),
-  Telegram.layer,
-  Activity.layer,
   TelemetryLayer
 )
 ```
+
+`Auth.layer` provides `Email.layer` internally for OTP delivery. Add standalone services to `AppLayer` only when app code needs them directly.
 
 **Note:** `Logger.consolePretty()` is required for `Effect.logError` / `Effect.logWarning` to produce output. Without it, logs are silent.
 

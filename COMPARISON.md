@@ -1,4 +1,4 @@
-# Harness Comparison — Yolk vs Pi vs OpenCode vs Flue
+# Agent Loop Comparison — Yolk vs Pi vs OpenCode vs Flue
 
 Four agent harnesses. Different layers, different trade-offs.
 
@@ -376,9 +376,9 @@ Flue's core contribution is not model orchestration. It is packaging autonomous 
 - Child task sessions: isolated context, shared sandbox, recursive deletion.
 - DO SQLite session store: simple default for Cloudflare persistence.
 
-**Do not copy into Yolk harness:**
+**Do not copy into Yolk agent loop:**
 - Framework build system. Yolk needs a library core; app/runtime packaging belongs above it.
-- Session persistence in the harness. Keep persistence consumer-owned.
+- Session persistence in the agent loop. Keep persistence consumer-owned.
 - Built-in compaction in the loop. It is opinionated and model-calling.
 - Provider registry coupling. Keep provider interface minimal and layer-provided.
 - Text-only public prompt API. Yolk needs multimodal from day one.

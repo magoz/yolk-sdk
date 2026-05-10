@@ -5,7 +5,7 @@ export type LoopConfigShape = {
 }
 
 export class LoopConfig extends Context.Service<LoopConfig, LoopConfigShape>()(
-  '@yolk/harness/LoopConfig'
+  '@yolk/agent-loop/LoopConfig'
 ) {
   static layer = (config: LoopConfigShape) => Layer.succeed(this, config)
   static defaultLayer = this.layer({ maxTurns: 500 })

@@ -157,11 +157,20 @@ importers:
         specifier: ^4.0.17
         version: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(terser@5.47.1)(yaml@2.8.4)
 
+  packages/agent-loop:
+    dependencies:
+      '@yolk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      effect:
+        specifier: beta
+        version: 4.0.0-beta.64
+
   packages/agent-runtime:
     dependencies:
-      '@yolk/harness':
+      '@yolk/agent-loop':
         specifier: workspace:*
-        version: link:../harness
+        version: link:../agent-loop
       '@yolk/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -174,15 +183,6 @@ importers:
       '@yolk/protocol':
         specifier: workspace:*
         version: link:../protocol
-
-  packages/harness:
-    dependencies:
-      '@yolk/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      effect:
-        specifier: beta
-        version: 4.0.0-beta.64
 
   packages/protocol:
     dependencies:

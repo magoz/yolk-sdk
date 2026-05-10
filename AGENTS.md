@@ -39,6 +39,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email     | Transactional email via Resend                       |
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
+| Agent stack        | packages  | Domain-free protocol, agent-loop, runtime, client    |
 
 ## WHERE TO LOOK
 
@@ -58,6 +59,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Error types          | `lib/core/errors/index.ts`           | Shared domain errors                         |
 | URL state (filters)  | `app/*/search-params.ts`             | nuqs/server imports only, see NUQS pattern   |
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md` | Prettier, kebab-case, file naming            |
+| Reusable agent stack | `packages/AGENTS.md`                 | Package boundaries and naming                |
+| Agent loop design    | `AGENT_LOOP.md`                      | Stateless loop details and decisions         |
 
 ## CODE MAP
 
@@ -73,13 +76,15 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `TelemetryLayer`        | Layer    | `lib/services/telemetry/live-layer.ts`     | OpenTelemetry + Sentry span/log processing          |
 | `reportError`           | Function | `lib/services/telemetry/report-error.ts`   | Log error + Sentry capture (boundaries only)        |
 | `reportWarning`         | Function | `lib/services/telemetry/report-warning.ts` | Log warning + Sentry warning (degraded paths)       |
+| `run`                   | Function | `packages/agent-loop/src/run.ts`           | Stateless LLM/tool loop                            |
+| `runRuntime`            | Function | `packages/agent-runtime/src/run-runtime.ts` | Session load/save orchestration over agent loop     |
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
 | Pattern                                             | Correct Approach                                                                         |
 | --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | API routes for CRUD operations                      | Server actions (`lib/core/[domain]/*-action.ts`)                                         |
-| Streaming files through server                      | S3 signed URLs (client uploads directly to S3)                                           |
+| Streaming files through server                      | Signed direct uploads (R2/S3); add file service first                                    |
 | `process.env.X` with throws                         | `yield* Config.string('X')`                                                              |
 | `router.push()` for logout                          | `window.location.href = '/'` (layout cache issue)                                        |
 | Barrel files (`index.ts` re-exports)                | Import from `live-layer.ts` directly                                                     |
@@ -119,5 +124,6 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 
 - `patterns/README.md` - Architecture and convention patterns index
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
+- `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `components/ui/AGENTS.md` - UI component install sources and customizations
 - `e2e/AGENTS.md` - E2E test patterns, locator priority, streaming guards, auth cookies

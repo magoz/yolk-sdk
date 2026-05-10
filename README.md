@@ -21,7 +21,7 @@ Reusable agent stack. Domain-free below the app layer.
 ```txt
 packages/
   protocol/       shared schemas, events, wire types
-  harness/        pure LLM <> tool loop
+  agent-loop/     pure LLM <> tool loop
   agent-runtime/  reusable session/runtime shell
   client/         browser/client SDK
 ```
@@ -29,7 +29,7 @@ packages/
 Dependency rule:
 
 ```txt
-app -> agent-runtime -> harness -> protocol
+app -> agent-runtime -> agent-loop -> protocol
 app -> client -> protocol
 ```
 
@@ -50,4 +50,4 @@ pnpm check
 pnpm test:run
 ```
 
-See `ARCHITECTURE.md` and `HARNESS.md` for package design.
+See `ARCHITECTURE.md` and `AGENT_LOOP.md` for package design.
