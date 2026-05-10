@@ -41,6 +41,12 @@ app -> client -> protocol
 - Client should work for Next UI and Chrome extension by consuming protocol events from a server endpoint.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
 
+## Reasoning
+
+- `AgentReasoningEffort` is protocol-only request config; app chooses values, packages pass through.
+- `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
+- `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
+
 ## Tool Registry
 
 - Host apps define `ToolModule<Context>` and `ToolRegistration<Context>`.
@@ -60,12 +66,14 @@ app -> client -> protocol
 ## Client Transport
 
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
-- `AgentClientState.messages` stores stable protocol messages; `text` is the current streaming assistant draft.
+- `AgentClientState.messages` stores stable protocol messages; `text`/`reasoning` are current streaming drafts.
 - `submitAgentUserMessage` appends user messages locally before transport starts.
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
 - `collectAgentEventsEffect` = Effect-native collection helper.
 - Requests send a non-empty client-owned `AgentTranscript` (`messages`), not just the latest prompt.
-- `StreamAgentEventsRequest.signal` passes `AbortSignal` through to fetch/body reads.
+- Optional `reasoningEffort` is forwarded to the server; provider support is app-owned.
+- `StreamAgentEventsRequest.signal` interrupts Effect `HttpClient` request/body reads.
+- Mock client HTTP with `HttpClient` layers, not fetch-style helpers.
 - Keep parsing/schema errors typed as `AgentTransportError`.
 - Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.

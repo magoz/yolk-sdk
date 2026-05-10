@@ -9,7 +9,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Calculator tool wired for tool-call smoke tests
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
-- Text route request: `{ sessionId, messages }`, where `messages` is non-empty `AgentMessage[]`
+- Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls `agent-loop` directly; `agent-runtime` is reserved for durable session lifecycle
 - `StatelessSessionStoreLayer` remains no-op scaffolding for future runtime persistence
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
@@ -26,6 +26,12 @@ Hardcoded in `app/api/agent/route.ts`:
 
 Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary.
 
+Reasoning:
+
+- Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
+- Codex request sets `reasoning.summary = 'auto'`; summaries are optional provider output.
+- Show reasoning only from `LLMReasoningDelta` / `Assistant.reasoning`; never synthesize or label missing reasoning as available.
+
 ## Current Tools
 
 - File: `tools/calculator-tool.ts`
@@ -40,7 +46,7 @@ Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools
 
 - Production encode/decode uses `Schema.UnknownFromJsonString` + Effect mapping.
 - Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages.
-- Browser-only Realtime hook may use raw JSON for data-channel/fetch payloads.
+- Browser-only Realtime hook may use raw JSON for data-channel payloads; HTTP uses Effect `HttpClient`.
 - Direct JSON helpers are fine in tests.
 
 ## Realtime Voice
@@ -87,6 +93,7 @@ Codex backend quirks:
 - Send `originator: opencode`
 - Send `ChatGPT-Account-Id` when token has account id
 - Response may be SSE even with `content-type: text/plain`; detect by raw `event:`/`data:` body
+- Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
 
 ## Tests
 

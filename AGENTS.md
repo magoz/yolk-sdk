@@ -41,7 +41,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry | OpenTelemetry spans + Sentry error tracking          |
 | UI components      | shadcn/ui | Base UI primitives (not Radix), see `components/ui/` |
 | Agent stack        | packages  | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client |
-| Text agent         | app/lib   | `/agent` + `/api/agent`; client-owned transcript + Codex OAuth + `gpt-5.4` |
+| Text agent         | app/lib   | `/agent` + `/api/agent`; client-owned transcript + Codex OAuth + `gpt-5.4` + reasoning summaries |
 | Voice agent        | app/lib   | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` |
 | Dummy tool calling | app/lib   | `calculate` calculator tool; smoke-test only         |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh |
@@ -137,6 +137,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `dotenv.config({ path: '.env.local' })` in a module | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`            |
 | Raw `fetch` in Effect services/providers            | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer     |
 | Raw `JSON.parse/stringify` in production Effect code | `Schema.UnknownFromJsonString` + Effect encode/decode; direct JSON is fine in tests       |
+| Fake/display-only reasoning                          | Only show provider-supplied reasoning summaries (`LLMReasoningDelta` / `Assistant.reasoning`) |
 
 ## NOTES
 
