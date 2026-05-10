@@ -1,0 +1,44 @@
+import { Context, Effect, Layer, Ref } from 'effect'
+import type { AgentMessage } from '@yolk/protocol'
+import { SessionNotFoundError } from './error'
+
+export type SessionSnapshot = {
+  readonly id: string
+  readonly messages: ReadonlyArray<AgentMessage>
+}
+
+export class SessionStore extends Context.Service<
+  SessionStore,
+  {
+    readonly load: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFoundError>
+    readonly save: (snapshot: SessionSnapshot) => Effect.Effect<void>
+  }
+>()('@yolk/agent-runtime/SessionStore') {}
+
+export const makeInMemorySessionStoreLayer = (initial: ReadonlyArray<SessionSnapshot> = []) =>
+  Layer.effect(
+    SessionStore,
+    Effect.gen(function* () {
+      const snapshots = yield* Ref.make(new Map(initial.map(snapshot => [snapshot.id, snapshot])))
+
+      return SessionStore.of({
+        load: sessionId =>
+          Effect.gen(function* () {
+            const current = yield* Ref.get(snapshots)
+            const snapshot = current.get(sessionId)
+
+            if (snapshot === undefined) {
+              return yield* Effect.fail(new SessionNotFoundError({ sessionId }))
+            }
+
+            return snapshot
+          }),
+        save: snapshot =>
+          Ref.update(snapshots, current => {
+            const next = new Map(current)
+            next.set(snapshot.id, snapshot)
+            return next
+          })
+      })
+    })
+  )

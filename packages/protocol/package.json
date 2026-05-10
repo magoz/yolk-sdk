@@ -14,5 +14,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "effect": "beta"
   }
 }

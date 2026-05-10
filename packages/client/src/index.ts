@@ -1,3 +1,1 @@
-import type { MessageId } from '@yolk/protocol'
-
-export type ClientMessageId = MessageId
+export * from './state'
