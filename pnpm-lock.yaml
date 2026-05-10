@@ -38,6 +38,15 @@ importers:
       '@sentry/opentelemetry':
         specifier: ^10.34.0
         version: 10.34.0(@opentelemetry/api@1.9.0)(@opentelemetry/context-async-hooks@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/core@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.39.0)
+      '@yolk/agent-loop':
+        specifier: workspace:*
+        version: link:packages/agent-loop
+      '@yolk/agent-runtime':
+        specifier: workspace:*
+        version: link:packages/agent-runtime
+      '@yolk/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
       better-auth:
         specifier: ^1.4.14
         version: 1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.64))(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.64)(pg@8.20.0)(zod@3.25.76))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(terser@5.47.1)(yaml@2.8.4))
