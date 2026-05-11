@@ -72,6 +72,24 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 'ai',
     repo: 'https://github.com/vercel/ai.git',
     branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'kody',
+    repo: 'https://github.com/kentcdodds/kody.git',
+    branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'flue',
+    repo: 'https://github.com/withastro/flue.git',
+    branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'mcp-sdk',
+    repo: 'https://github.com/modelcontextprotocol/typescript-sdk.git',
+    branch: 'main'
   }
 ]
 

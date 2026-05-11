@@ -115,9 +115,12 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `opencode`    | `.repos/opencode` | Opencode fork; Codex/OpenAI agent protocol/provider reference |
 | `t3code`      | `.repos/t3code`   | Agent chat/product UI reference                               |
 | `ai-sdk`      | `.repos/ai`       | Vercel AI SDK reference; UIMessage parts/tool lifecycle model |
+| `kody`        | `.repos/kody`     | MCP/tool orchestration inspiration                            |
+| `flue`        | `.repos/flue`     | MCP/server-tool integration inspiration                       |
+| `mcp-sdk`     | `.repos/mcp-sdk`  | Model Context Protocol TypeScript SDK/protocol reference      |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
-- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai` track branches.
+- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai`/`kody`/`flue`/`mcp-sdk` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)

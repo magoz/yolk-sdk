@@ -12,6 +12,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
+| `@yolk/mcp`           | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
 
 ## Dependency Rule
 
@@ -21,6 +22,7 @@ app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol + Effect
+app -> mcp -> protocol + Effect
 ```
 
 ## Naming
@@ -64,6 +66,14 @@ app -> client -> protocol + Effect
 - `access: read | write | destructive` is metadata for policy/approvals; enforcement is host-owned.
 - Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Do not import auth, storage, provider SDKs, or product tool catalogs here.
+
+## MCP
+
+- `@yolk/mcp` is a domain-free host-executed MCP client; app decides config, auth, and policy.
+- Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
+- Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
+- Local stdio is policy-gated, receives explicit env only, and discards stderr to avoid secret leaks.
+- Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
 
 ## Voice Runtime
 

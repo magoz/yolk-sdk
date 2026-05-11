@@ -1,9 +1,20 @@
+import { Effect } from 'effect'
 import { resolveTools } from '@yolk/tool-registry'
 import type { AgentToolContext } from './tool-context'
 import { webFetchToolModule } from './web-fetch-tool'
 import { webSearchToolModule } from './web-search-tool'
+import { makeMcpToolModule } from './mcp-tool-module'
 
-const agentToolModules = [webFetchToolModule, webSearchToolModule]
+const staticAgentToolModules = [webFetchToolModule, webSearchToolModule]
 
 export const resolveAgentTools = (context: AgentToolContext) =>
-  resolveTools(agentToolModules, context)
+  Effect.gen(function* () {
+    const mcpToolModule = yield* makeMcpToolModule()
+
+    return yield* resolveTools(
+      mcpToolModule.tools.length === 0
+        ? staticAgentToolModules
+        : [...staticAgentToolModules, mcpToolModule],
+      context
+    )
+  })

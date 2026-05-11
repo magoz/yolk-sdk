@@ -47,6 +47,9 @@ importers:
       '@yolk/client':
         specifier: workspace:*
         version: link:packages/client
+      '@yolk/mcp':
+        specifier: workspace:*
+        version: link:packages/mcp
       '@yolk/protocol':
         specifier: workspace:*
         version: link:packages/protocol
@@ -203,6 +206,15 @@ importers:
         version: link:../protocol
       effect:
         specifier: beta
+        version: 4.0.0-beta.64
+
+  packages/mcp:
+    dependencies:
+      '@yolk/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      effect:
+        specifier: 4.0.0-beta.64
         version: 4.0.0-beta.64
 
   packages/protocol:

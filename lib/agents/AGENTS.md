@@ -7,7 +7,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Unified `/agent` UI with text+image input and mic voice mode
 - `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
-- Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search
+- Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + optional configured MCP tools
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
@@ -37,7 +37,9 @@ Reasoning:
 
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
+- `tools/mcp-tool-module.ts`: configured MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - Both app tools are enabled for text and voice surfaces
+- Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
@@ -45,6 +47,22 @@ Reasoning:
 - App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No durable transcript or product permissions yet
+
+Configured MCP env:
+
+| Env                           | Values | Notes                                                     |
+| ----------------------------- | ------ | --------------------------------------------------------- |
+| `YOLK_MCP_SERVERS`            | JSON   | `[{ name,type:'remote',url,headers?,enabled? }]` or local |
+| `YOLK_MCP_LOCAL_ENABLED`      | bool   | Enables local stdio MCP; default false                    |
+| `YOLK_MCP_DEV_HTTP_LOCALHOST` | bool   | Allows `http://localhost` remote MCP; default false       |
+
+MCP security:
+
+- Remote URLs require `https:` unless localhost dev flag is set.
+- Local config shape: `{ name, type:'local', command: string[], environment?, enabled? }`.
+- Local commands are spawned directly, not through shell strings.
+- Local servers receive only explicit `environment` plus `NODE_ENV: production`.
+- Invalid config or unavailable servers log warning and omit those tools.
 
 ## JSON Boundaries
 
