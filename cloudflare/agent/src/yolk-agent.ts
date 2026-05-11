@@ -5,13 +5,19 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import {
   ContextTransformer,
+  type AgentLoopError,
   LLMDone,
   LLMProvider,
   LLMTextDelta,
   LoopConfig,
   ToolExecutor
 } from '@yolk/agent-loop'
-import { runRuntime, SessionStore } from '@yolk/agent-runtime'
+import {
+  runRuntime,
+  runtimeErrorToAgentError,
+  SessionStore,
+  type RuntimeError
+} from '@yolk/agent-runtime'
 import {
   AgentError,
   contentText,
@@ -33,9 +39,6 @@ const runtimeConfig = {
   model: 'faux-cloudflare'
 }
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const messageText = (message: string | ArrayBuffer) =>
   typeof message === 'string'
     ? Effect.succeed(message)
@@ -46,6 +49,17 @@ const encodeEvent = (event: AgentEventType) =>
 
 const sendEvent = (socket: Cloudflare.DurableWebSocket, event: AgentEventType) =>
   encodeEvent(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
+
+const cloudflareRuntimeErrorToAgentError = (
+  error: AgentLoopError | RuntimeError | Schema.SchemaError
+) =>
+  Schema.isSchemaError(error)
+    ? AgentError.make({
+        code: 'unknown',
+        message: error.message,
+        retryable: false
+      })
+    : runtimeErrorToAgentError(error)
 
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
@@ -150,16 +164,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           ).pipe(
             Stream.runForEach(event => sendEvent(socket, event)),
             Effect.provide(makeRuntimeLayer(attachment.sessionId)),
-            Effect.catch(error =>
-              sendEvent(
-                socket,
-                AgentError.make({
-                  code: 'unknown',
-                  message: unknownToMessage(error),
-                  retryable: false
-                })
-              )
-            )
+            Effect.catch(error => sendEvent(socket, cloudflareRuntimeErrorToAgentError(error)))
           )
         }),
         webSocketClose: Effect.fnUntraced(function* (

@@ -1,7 +1,14 @@
 import * as Schema from 'effect/Schema'
+import { AgentError, type AgentErrorCode } from '@yolk/protocol'
 
 export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
-  cause: Schema.Literals(['provider_error', 'rate_limit', 'context_overflow', 'invalid_response']),
+  cause: Schema.Literals([
+    'validation_error',
+    'provider_error',
+    'rate_limit',
+    'context_overflow',
+    'invalid_response'
+  ]),
   message: Schema.String,
   retryable: Schema.Boolean
 }) {}
@@ -16,7 +23,16 @@ export class FauxExhaustedError extends Schema.TaggedErrorClass<FauxExhaustedErr
 export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError', {
   tool: Schema.String,
   message: Schema.String,
-  cause: Schema.Literals(['validation', 'execution', 'timeout', 'permission'])
+  cause: Schema.Literals([
+    'validation',
+    'invalid_input',
+    'execution',
+    'timeout',
+    'permission',
+    'denied',
+    'not_found',
+    'unavailable'
+  ])
 }) {}
 
 export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortError', {
@@ -24,3 +40,49 @@ export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortErro
 }) {}
 
 export type AgentLoopError = LLMError | FauxExhaustedError | ToolError | AbortError
+
+const toolErrorCode = (error: ToolError): AgentErrorCode => {
+  switch (error.cause) {
+    case 'validation':
+    case 'invalid_input':
+      return 'validation_error'
+    case 'timeout':
+      return 'tool_timeout'
+    case 'permission':
+    case 'denied':
+      return 'tool_denied'
+    case 'execution':
+    case 'not_found':
+    case 'unavailable':
+      return 'tool_error'
+  }
+}
+
+export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError => {
+  switch (error._tag) {
+    case 'LLMError':
+      return AgentError.make({
+        code: error.cause,
+        message: error.message,
+        retryable: error.retryable
+      })
+    case 'ToolError':
+      return AgentError.make({
+        code: toolErrorCode(error),
+        message: error.message,
+        retryable: error.cause === 'timeout'
+      })
+    case 'AbortError':
+      return AgentError.make({
+        code: 'aborted',
+        message: `Agent run aborted: ${error.reason}`,
+        retryable: error.reason === 'system'
+      })
+    case 'FauxExhaustedError':
+      return AgentError.make({
+        code: 'provider_error',
+        message: error.message,
+        retryable: false
+      })
+  }
+}

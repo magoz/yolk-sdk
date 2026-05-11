@@ -50,7 +50,7 @@ export type RunConfig = {
 
 const unsupportedInputError = (message: string) =>
   new LLMError({
-    cause: 'provider_error',
+    cause: 'validation_error',
     message,
     retryable: false
   })

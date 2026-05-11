@@ -1,4 +1,10 @@
-export { SessionNotFoundError } from './error.ts'
+export {
+  runtimeErrorToAgentError,
+  SessionConflictError,
+  SessionLoadError,
+  SessionNotFoundError,
+  SessionSaveError
+} from './error.ts'
 export type { RuntimeError } from './error.ts'
 export { runRuntime } from './run-runtime.ts'
 export type {

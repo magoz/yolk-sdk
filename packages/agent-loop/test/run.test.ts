@@ -277,6 +277,7 @@ describe('run', () => {
         _tag: 'Failure',
         failure: {
           _tag: 'LLMError',
+          cause: 'validation_error',
           message: 'Image input is not supported by this model',
           retryable: false
         }
@@ -305,7 +306,11 @@ describe('run', () => {
 
       expect(result).toMatchObject({
         _tag: 'Failure',
-        failure: { _tag: 'LLMError', message: 'Tools are not supported by this model' }
+        failure: {
+          _tag: 'LLMError',
+          cause: 'validation_error',
+          message: 'Tools are not supported by this model'
+        }
       })
     })
   )

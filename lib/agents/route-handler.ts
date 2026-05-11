@@ -1,17 +1,15 @@
 import { Effect, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
-  AgentError as AgentErrorEvent,
   AgentMessage,
   AgentReasoningEffort,
-  type AgentErrorCode,
   type AgentEvent,
   type AgentModelCapabilities,
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
 } from '@yolk/protocol'
 import type { AgentLoopError } from '@yolk/agent-loop'
-import { runRuntime, type RuntimeError } from '@yolk/agent-runtime'
+import { runRuntime, runtimeErrorToAgentError, type RuntimeError } from '@yolk/agent-runtime'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
@@ -49,52 +47,8 @@ const unknownToMessage = (error: unknown) =>
 
 type AgentStreamError = AgentLoopError | RuntimeError
 
-const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
-  switch (error._tag) {
-    case 'LLMError':
-      return error.cause
-    case 'ToolError':
-      return 'tool_error'
-    case 'AbortError':
-      return 'aborted'
-    case 'FauxExhaustedError':
-      return 'provider_error'
-    case 'SessionNotFoundError':
-      return 'session_not_found'
-  }
-}
-
-const toAgentErrorMessage = (error: AgentStreamError) => {
-  switch (error._tag) {
-    case 'LLMError':
-    case 'ToolError':
-    case 'FauxExhaustedError':
-      return error.message
-    case 'AbortError':
-      return `Agent aborted: ${error.reason}`
-    case 'SessionNotFoundError':
-      return `Session not found: ${error.sessionId}`
-  }
-}
-
-const isAgentErrorRetryable = (error: AgentStreamError) => {
-  switch (error._tag) {
-    case 'LLMError':
-      return error.retryable
-    case 'ToolError':
-    case 'AbortError':
-    case 'FauxExhaustedError':
-    case 'SessionNotFoundError':
-      return false
-  }
-}
-
 const toAgentErrorEvent = (error: AgentStreamError): AgentEvent =>
-  AgentErrorEvent.make({
-    code: toAgentErrorCode(error),
-    message: toAgentErrorMessage(error),
-    retryable: isAgentErrorRetryable(error)
-  })
+  runtimeErrorToAgentError(error)
 
 const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStreamError, R>) =>
   stream.pipe(
@@ -103,7 +57,10 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
       ToolError: error => Stream.make(toAgentErrorEvent(error)),
       AbortError: error => Stream.make(toAgentErrorEvent(error)),
       FauxExhaustedError: error => Stream.make(toAgentErrorEvent(error)),
-      SessionNotFoundError: error => Stream.make(toAgentErrorEvent(error))
+      SessionNotFoundError: error => Stream.make(toAgentErrorEvent(error)),
+      SessionLoadError: error => Stream.make(toAgentErrorEvent(error)),
+      SessionSaveError: error => Stream.make(toAgentErrorEvent(error)),
+      SessionConflictError: error => Stream.make(toAgentErrorEvent(error))
     })
   )
 

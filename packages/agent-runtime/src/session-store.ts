@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref } from 'effect'
 import type { AgentMessage } from '@yolk/protocol'
 import { SessionNotFoundError } from './error.ts'
+import type { SessionLoadError, SessionSaveError } from './error.ts'
 
 export type SessionSnapshot = {
   readonly id: string
@@ -10,8 +11,10 @@ export type SessionSnapshot = {
 export class SessionStore extends Context.Service<
   SessionStore,
   {
-    readonly load: (sessionId: string) => Effect.Effect<SessionSnapshot, SessionNotFoundError>
-    readonly save: (snapshot: SessionSnapshot) => Effect.Effect<void>
+    readonly load: (
+      sessionId: string
+    ) => Effect.Effect<SessionSnapshot, SessionNotFoundError | SessionLoadError>
+    readonly save: (snapshot: SessionSnapshot) => Effect.Effect<void, SessionSaveError>
   }
 >()('@yolk/agent-runtime/SessionStore') {}
 

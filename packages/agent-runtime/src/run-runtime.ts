@@ -86,7 +86,7 @@ const runAndCollectMessages = (
 
 const saveAfterSuccess = (
   stream: Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>,
-  save: Effect.Effect<void>
+  save: Effect.Effect<void, RuntimeError>
 ) => stream.pipe(Stream.concat(Stream.fromEffect(save).pipe(Stream.flatMap(() => Stream.empty))))
 
 const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: RuntimeConfig) => {

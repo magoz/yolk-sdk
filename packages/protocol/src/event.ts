@@ -4,13 +4,18 @@ import { ToolCall, ToolResult } from './tool.ts'
 import { AgentUsage } from './usage.ts'
 
 export const AgentErrorCode = Schema.Literals([
+  'validation_error',
   'provider_error',
   'rate_limit',
   'context_overflow',
   'invalid_response',
   'tool_error',
+  'tool_denied',
+  'tool_timeout',
+  'store_error',
   'aborted',
   'session_not_found',
+  'conflict',
   'unknown'
 ])
 export type AgentErrorCode = typeof AgentErrorCode.Type

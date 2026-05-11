@@ -4,7 +4,13 @@ export {
   collectText,
   collectToolCalls
 } from './accumulator.ts'
-export { AbortError, FauxExhaustedError, LLMError, ToolError } from './error.ts'
+export {
+  AbortError,
+  agentLoopErrorToAgentError,
+  FauxExhaustedError,
+  LLMError,
+  ToolError
+} from './error.ts'
 export type { AgentLoopError } from './error.ts'
 export {
   LLMDone,

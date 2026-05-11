@@ -70,7 +70,7 @@ const missingToolError = (name: string) =>
   new ToolError({
     tool: name,
     message: `Tool is not configured: ${name}`,
-    cause: 'permission'
+    cause: 'not_found'
   })
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {

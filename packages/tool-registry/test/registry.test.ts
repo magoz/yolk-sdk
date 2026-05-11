@@ -73,6 +73,24 @@ describe('resolveTools', () => {
     })
   )
 
+  it.effect('fails unknown tool execution as not found', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools([makeModule([makeTool('echo')])], { enabled: true })
+      const result = yield* Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* ToolExecutor
+          return yield* service.execute({ id: 'call_1', name: 'missing', params: {} })
+        }),
+        makeToolExecutorLayer(toolSet)
+      ).pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ToolError', cause: 'not_found' }
+      })
+    })
+  )
+
   it.effect('rejects duplicate tool names', () =>
     Effect.gen(function* () {
       const result = yield* resolveTools([makeModule([makeTool('echo'), makeTool('echo')])], {
