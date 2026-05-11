@@ -33,6 +33,7 @@
 ## Design rules
 
 - Keep protocol data JSON-serializable unless a type is explicitly app-local.
+- Keep `AgentErrorCode` small and stable; packages map richer local errors to these wire codes.
 - Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.

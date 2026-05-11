@@ -8,7 +8,7 @@
 - Load previous session transcript from `SessionStore` for durable input mode.
 - Persist updated session state after successful loop completion when requested/required.
 - Thread runtime config through to `@yolk/agent-loop` (`model`, `systemPrompt`, `tools`, `reasoningEffort`, `capabilities`).
-- Expose runtime errors separately from loop/provider errors.
+- Expose runtime errors separately from loop/provider errors and map them to protocol `AgentError` at adapter boundaries.
 
 ## Boundaries
 
@@ -47,6 +47,7 @@
 
 - Treat session ids as opaque strings.
 - Keep loop behavior in `@yolk/agent-loop`; runtime only coordinates lifecycle.
+- Map runtime/store errors to protocol `AgentError` via `runtimeErrorToAgentError`; do not duplicate mapping in adapters.
 - Persist protocol transcript/state, not app render models.
 - Do not encode HTTP, NDJSON, SSE, WebSockets, auth, provider choice, or tool policy here.
 - Keep resume/fanout adapters outside this package until generic enough.
@@ -58,4 +59,4 @@
 - Cover transcript mode with and without persistence.
 - Cover input mode load + append + save behavior.
 - Cover config pass-through for reasoning/capabilities.
-- Add store failure tests when store error model expands beyond `SessionNotFoundError`.
+- Cover store/runtime error mapping when adding new runtime errors.

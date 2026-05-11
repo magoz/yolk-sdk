@@ -108,8 +108,8 @@ const makePersistentTranscriptRuntimeStream = (
 
       return saveAfterSuccess(
         stream,
-        Effect.sync(() => [...request.messages, ...createdMessages]).pipe(
-          Effect.flatMap(messages => store.save({ id: request.sessionId, messages }))
+        Effect.suspend(() =>
+          store.save({ id: request.sessionId, messages: [...request.messages, ...createdMessages] })
         )
       )
     })
@@ -126,10 +126,8 @@ const makeInputRuntimeStream = (request: InputRuntimeRequest, config: RuntimeCon
 
       return saveAfterSuccess(
         runAndCollectMessages(config, messages, createdMessages),
-        Effect.sync(() => [...messages, ...createdMessages]).pipe(
-          Effect.flatMap(updatedMessages =>
-            store.save({ id: snapshot.id, messages: updatedMessages })
-          )
+        Effect.suspend(() =>
+          store.save({ id: snapshot.id, messages: [...messages, ...createdMessages] })
         )
       )
     })

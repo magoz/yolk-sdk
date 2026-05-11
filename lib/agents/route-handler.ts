@@ -47,8 +47,7 @@ const unknownToMessage = (error: unknown) =>
 
 type AgentStreamError = AgentLoopError | RuntimeError
 
-const toAgentErrorEvent = (error: AgentStreamError): AgentEvent =>
-  runtimeErrorToAgentError(error)
+const toAgentErrorEvent = (error: AgentStreamError): AgentEvent => runtimeErrorToAgentError(error)
 
 const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStreamError, R>) =>
   stream.pipe(

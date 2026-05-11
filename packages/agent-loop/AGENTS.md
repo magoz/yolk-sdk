@@ -36,11 +36,12 @@
 - Keep provider quirks in app/provider adapters, not loop core.
 - Preserve tool call ids and ordering semantics across call/result events.
 - Retry retryable provider errors in-loop; never retry context overflow blindly.
+- Map loop errors to protocol `AgentError` via `agentLoopErrorToAgentError`; keep richer causes local.
 - Keep compaction strategy outside loop; `ContextTransformer` returns compacted messages + lifecycle events.
 - Keep test helpers out of the root export.
 
 ## Tests
 
 - Use `@effect/vitest` patterns already present in `test/`.
-- Cover provider event ordering, tool execution, errors, capability rejection, and accumulator behavior.
+- Cover provider event ordering, tool execution, error mapping, capability rejection, and accumulator behavior.
 - Tests may import `../src/testing` locally; external package tests use `@yolk/agent-loop/testing`.

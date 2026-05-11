@@ -24,13 +24,13 @@ describe('runtimeErrorToAgentError', () => {
   })
 
   it('maps session identity and conflict errors', () => {
-    expect(runtimeErrorToAgentError(new SessionNotFoundError({ sessionId: 'session_1' }))).toMatchObject(
-      {
-        code: 'session_not_found',
-        message: 'Session not found: session_1',
-        retryable: false
-      }
-    )
+    expect(
+      runtimeErrorToAgentError(new SessionNotFoundError({ sessionId: 'session_1' }))
+    ).toMatchObject({
+      code: 'session_not_found',
+      message: 'Session not found: session_1',
+      retryable: false
+    })
 
     expect(
       runtimeErrorToAgentError(

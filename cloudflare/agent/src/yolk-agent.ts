@@ -40,9 +40,7 @@ const runtimeConfig = {
 }
 
 const messageText = (message: string | ArrayBuffer) =>
-  typeof message === 'string'
-    ? Effect.succeed(message)
-    : Effect.sync(() => new TextDecoder().decode(message))
+  typeof message === 'string' ? message : new TextDecoder().decode(message)
 
 const encodeEvent = (event: AgentEventType) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event)
@@ -152,7 +150,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             return
           }
 
-          const input = yield* messageText(message)
+          const input = messageText(message)
 
           yield* runRuntime(
             {
