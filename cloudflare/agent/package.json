@@ -1,0 +1,27 @@
+{
+  "name": "@yolk/cloudflare-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "dev": "alchemy dev",
+    "logs": "alchemy logs",
+    "tail": "alchemy tail"
+  },
+  "dependencies": {
+    "@yolk/agent-loop": "workspace:^",
+    "@yolk/agent-runtime": "workspace:^",
+    "@yolk/protocol": "workspace:^",
+    "alchemy": "2.0.0-beta.36",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@cloudflare/workers-types": "^4.20250805.0",
+    "typescript": "catalog:"
+  }
+}

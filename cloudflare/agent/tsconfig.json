@@ -1,0 +1,14 @@
+{
+  "extends": "../../packages/tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ESNext", "WebWorker"],
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rootDir": ".",
+    "target": "ESNext",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["alchemy.run.ts", "src/**/*.ts"]
+}

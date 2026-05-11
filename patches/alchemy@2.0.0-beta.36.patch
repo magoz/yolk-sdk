@@ -1,0 +1,30 @@
+diff --git a/src/Cloudflare/Workers/Worker.ts b/src/Cloudflare/Workers/Worker.ts
+index 3659f1f5eeb088455ff98d1d52ec1fe9e1eeb3ee..643294fcdcb9714db2c667cd984734b1937a3cbd 100644
+--- a/src/Cloudflare/Workers/Worker.ts
++++ b/src/Cloudflare/Workers/Worker.ts
+@@ -1,5 +1,4 @@
+ import type * as cf from "@cloudflare/workers-types";
+-import cloudflareVite from "@distilled.cloud/cloudflare-vite-plugin";
+ import * as workers from "@distilled.cloud/cloudflare/workers";
+ import * as zones from "@distilled.cloud/cloudflare/zones";
+ import * as Context from "effect/Context";
+@@ -1422,6 +1421,10 @@ export const LiveWorkerProvider = () =>
+         const compatibility = getCompatibility(props);
+ 
+         yield* Effect.promise(async () => {
++          const cloudflareVitePlugin = "@distilled.cloud/cloudflare-vite-plugin";
++          const { default: cloudflareVite } = await import(
++            /* @vite-ignore */ cloudflareVitePlugin
++          );
+           const vite = await loadVite(props.vite?.rootDir);
+           const builder = await vite.createBuilder(
+             {
+@@ -2386,6 +2389,7 @@ async function loadVite(
+   } catch {
+     // Fallback: try to import vite from the global node_modules (works for non-linked installs)
+     // The fallback is a bare specifier and works as-is.
+-    return await import("vite");
++    const viteSpecifier = "vite";
++    return await import(/* @vite-ignore */ viteSpecifier);
+   }
+ }

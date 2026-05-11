@@ -48,6 +48,9 @@ yarn-error.log*
 # reference repos (run `pnpm clone-repos` to fetch)
 .repos/
 
+# alchemy local state/logs
+.alchemy/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -1,8 +1,10 @@
 packages:
   - 'packages/*'
+  - 'cloudflare/*'
 catalog:
   '@effect/language-service': ^0.77.0
   '@effect/opentelemetry': 4.0.0-beta.59
+  '@effect/platform-bun': 4.0.0-beta.65
   '@effect/platform-node': 4.0.0-beta.65
   '@effect/sql-pg': 4.0.0-beta.59
   '@effect/vitest': 4.0.0-beta.65
@@ -18,3 +20,6 @@ allowBuilds:
   protobufjs: true
   sharp: true
   unrs-resolver: true
+  workerd: true
+patchedDependencies:
+  alchemy@2.0.0-beta.36: patches/alchemy@2.0.0-beta.36.patch
