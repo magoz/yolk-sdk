@@ -1,156 +1,242 @@
 import { readFile } from 'node:fs/promises'
+import { Clock, Config, Data, Deferred, Effect, Option, Ref } from 'effect'
+import * as Schema from 'effect/Schema'
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import * as Socket from 'effect/unstable/socket/Socket'
 
 const statePath = '.alchemy/state/YolkAgentWorker/dev_magoz/Api.json'
 const timeoutMs = 10_000
 
-type SmokeEvent = {
-  readonly _tag: string
-  readonly text?: string
-  readonly message?: string
-}
+class SmokeConfigError extends Data.TaggedError('SmokeConfigError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null
+class SmokeHttpError extends Data.TaggedError('SmokeHttpError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
-const optionalString = (value: unknown) => (typeof value === 'string' ? value : undefined)
+class SmokeProtocolError extends Data.TaggedError('SmokeProtocolError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
-const requireString = (value: unknown, label: string) => {
-  if (typeof value === 'string' && value.length > 0) {
-    return value
-  }
+const AlchemyStateSchema = Schema.Struct({
+  attr: Schema.Struct({
+    url: Schema.String
+  })
+})
 
-  throw new Error(`Missing ${label}`)
-}
+const SmokeEventSchema = Schema.Struct({
+  _tag: Schema.String,
+  text: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.Unknown)
+})
 
-const readDeployedUrl = async () => {
-  const configuredUrl = optionalString(process.env.CLOUDFLARE_AGENT_URL)
+type SmokeEvent = Schema.Schema.Type<typeof SmokeEventSchema>
 
-  if (configuredUrl !== undefined) {
-    return configuredUrl
-  }
+const decodeAlchemyState = Schema.decodeUnknownEffect(Schema.fromJsonString(AlchemyStateSchema))
+const decodeSmokeEventJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SmokeEventSchema))
 
-  const raw = await readFile(statePath, 'utf8')
-  const parsed: unknown = JSON.parse(raw)
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
-  if (!isRecord(parsed) || !isRecord(parsed.attr)) {
-    throw new Error(`Missing attr.url in ${statePath}`)
-  }
+const eventMessage = (event: SmokeEvent) =>
+  typeof event.message === 'string' ? event.message : 'AgentError'
 
-  return requireString(parsed.attr.url, 'attr.url')
-}
-
-const websocketUrl = (url: string, sessionId: string) => {
-  const parsed = new URL(url)
-  parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
-  parsed.pathname = `/connect/${sessionId}`
-  return parsed.toString()
-}
-
-const decodeSmokeEvent = (data: MessageEvent['data']): SmokeEvent => {
-  if (typeof data !== 'string') {
-    return { _tag: 'UnknownBinary' }
-  }
-
-  const parsed: unknown = JSON.parse(data)
-
-  if (!isRecord(parsed)) {
-    return { _tag: 'UnknownJson' }
-  }
-
-  return {
-    _tag: requireString(parsed._tag, '_tag'),
-    text: optionalString(parsed.text),
-    message: optionalString(parsed.message)
-  }
-}
-
-const smokeWebSocket = (url: string) =>
-  new Promise<ReadonlyArray<SmokeEvent>>((resolve, reject) => {
-    const sessionId = `smoke-${Date.now()}`
-    const input = `hello ${sessionId}`
-    const expectedText = `faux-cloudflare: ${input}`
-    const events: Array<SmokeEvent> = []
-    let collectedText = ''
-    let settled = false
-    const socket = new WebSocket(websocketUrl(url, sessionId))
-    const timeout = setTimeout(() => {
-      if (!settled) {
-        settled = true
-        socket.close()
-        reject(new Error(`Timed out waiting for AgentEnd; collected=${collectedText}`))
-      }
-    }, timeoutMs)
-
-    const settle = (result: Error | ReadonlyArray<SmokeEvent>) => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      clearTimeout(timeout)
-      socket.close()
-
-      if (result instanceof Error) {
-        reject(result)
-      } else {
-        resolve(result)
-      }
-    }
-
-    socket.addEventListener('open', () => {
-      socket.send(input)
+const readStateFile = Effect.tryPromise({
+  try: () => readFile(statePath, 'utf8'),
+  catch: error =>
+    new SmokeConfigError({
+      message: `Could not read ${statePath}`,
+      cause: error
     })
+})
 
-    socket.addEventListener('error', () => {
-      settle(new Error('WebSocket error'))
-    })
+const readDeployedUrl = Effect.gen(function* () {
+  const configuredUrl = yield* Config.option(Config.string('CLOUDFLARE_AGENT_URL'))
 
-    socket.addEventListener('message', event => {
-      try {
-        const decoded = decodeSmokeEvent(event.data)
-        events.push(decoded)
+  if (Option.isSome(configuredUrl)) {
+    return configuredUrl.value
+  }
 
-        if (decoded._tag === 'LLMTextDelta' && decoded.text !== undefined) {
-          collectedText = `${collectedText}${decoded.text}`
-        }
+  const raw = yield* readStateFile
+  const state = yield* decodeAlchemyState(raw).pipe(
+    Effect.mapError(
+      error =>
+        new SmokeConfigError({
+          message: `Missing attr.url in ${statePath}: ${unknownToMessage(error)}`,
+          cause: error
+        })
+    )
+  )
 
-        if (decoded._tag === 'AgentError') {
-          settle(new Error(decoded.message ?? 'AgentError'))
-          return
-        }
+  return state.attr.url
+}).pipe(
+  Effect.mapError(
+    error =>
+      new SmokeConfigError({
+        message: `Could not read Cloudflare agent URL: ${unknownToMessage(error)}`,
+        cause: error
+      })
+  )
+)
 
-        if (decoded._tag === 'AgentEnd') {
-          if (collectedText !== expectedText) {
-            settle(new Error(`Unexpected text: ${collectedText}`))
-            return
-          }
-
-          settle(events)
-        }
-      } catch (error) {
-        settle(error instanceof Error ? error : new Error(String(error)))
-      }
-    })
+const websocketUrl = (
+  url: string,
+  sessionId: string
+): Effect.Effect<string, SmokeConfigError> =>
+  Effect.try({
+    try: () => {
+      const parsed = new URL(url)
+      parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
+      parsed.pathname = `/connect/${sessionId}`
+      return parsed.toString()
+    },
+    catch: error =>
+      new SmokeConfigError({
+        message: `Invalid Cloudflare agent URL: ${url}`,
+        cause: error
+      })
   })
 
-const main = async () => {
-  const url = await readDeployedUrl()
-  const health = await fetch(`${url}/health`)
-
-  if (!health.ok) {
-    throw new Error(`Health failed: ${health.status}`)
+const decodeSmokeEvent = (data: MessageEvent['data']) => {
+  if (typeof data !== 'string') {
+    return Effect.succeed<SmokeEvent>({ _tag: 'UnknownBinary' })
   }
 
-  const body = await health.text()
+  return decodeSmokeEventJson(data).pipe(
+    Effect.catch(error =>
+      Effect.fail(
+        new SmokeProtocolError({
+          message: `Could not decode smoke event: ${unknownToMessage(error)}`,
+          cause: error
+        })
+      )
+    )
+  )
+}
 
-  if (body !== 'ok') {
-    throw new Error(`Unexpected health body: ${body}`)
-  }
+const smokeWebSocket = (url: string): Effect.Effect<ReadonlyArray<SmokeEvent>, SmokeConfigError | SmokeProtocolError> =>
+  Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis
+    const sessionId = `smoke-${now}`
+    const input = `hello ${sessionId}`
+    const expectedText = `faux-cloudflare: ${input}`
+    const wsUrl = yield* websocketUrl(url, sessionId)
 
-  const events = await smokeWebSocket(url)
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const socket = yield* Socket.makeWebSocket(wsUrl, { closeCodeIsError: code => code !== 1000 })
+        const write = yield* socket.writer
+        const eventsRef = yield* Ref.make<ReadonlyArray<SmokeEvent>>([])
+        const collectedTextRef = yield* Ref.make('')
+        const done = yield* Deferred.make<ReadonlyArray<SmokeEvent>, SmokeProtocolError>()
+
+        const failDone = (message: string, cause?: unknown) =>
+          Deferred.fail(done, new SmokeProtocolError({ message, cause }))
+
+        const handleMessage = (data: string) =>
+          Effect.gen(function* () {
+            const decoded = yield* decodeSmokeEvent(data)
+            const events = yield* Ref.updateAndGet(eventsRef, existing => [...existing, decoded])
+
+            if (decoded._tag === 'LLMTextDelta' && decoded.text !== undefined) {
+              yield* Ref.update(collectedTextRef, text => `${text}${decoded.text}`)
+            }
+
+            if (decoded._tag === 'AgentError') {
+              yield* failDone(eventMessage(decoded))
+              yield* write(new Socket.CloseEvent(1000))
+              return
+            }
+
+            if (decoded._tag === 'AgentEnd') {
+              const collectedText = yield* Ref.get(collectedTextRef)
+
+              if (collectedText !== expectedText) {
+                yield* failDone(`Unexpected text: ${collectedText}`)
+                yield* write(new Socket.CloseEvent(1000))
+                return
+              }
+
+              yield* Deferred.succeed(done, events)
+              yield* write(new Socket.CloseEvent(1000))
+            }
+          })
+
+        const runSocket = socket
+          .runString(handleMessage, { onOpen: Effect.ignore(write(input)) })
+          .pipe(
+            Effect.flatMap(() => Deferred.await(done)),
+            Effect.mapError(
+              error =>
+                new SmokeProtocolError({
+                  message: `WebSocket failed before AgentEnd: ${unknownToMessage(error)}`,
+                  cause: error
+                })
+            )
+          )
+
+        return yield* Effect.raceFirst(Deferred.await(done), runSocket).pipe(
+          Effect.timeoutOrElse({
+            duration: timeoutMs,
+            orElse: () =>
+              Effect.gen(function* () {
+                const collectedText = yield* Ref.get(collectedTextRef)
+                return yield* Effect.fail(
+                  new SmokeProtocolError({
+                    message: `Timed out waiting for AgentEnd; collected=${collectedText}`
+                  })
+                )
+              })
+          })
+        )
+      })
+    ).pipe(Effect.provide(Socket.layerWebSocketConstructorGlobal))
+  })
+
+const checkHealth = (url: string): Effect.Effect<void, SmokeHttpError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const request = HttpClientRequest.get(`${url}/health`)
+    const response = yield* client.execute(request).pipe(
+      Effect.mapError(
+        error =>
+          new SmokeHttpError({
+            message: `Health request failed: ${unknownToMessage(error)}`,
+            cause: error
+          })
+      )
+    )
+
+    if (response.status < 200 || response.status >= 300) {
+      return yield* Effect.fail(new SmokeHttpError({ message: `Health failed: ${response.status}` }))
+    }
+
+    const body = yield* response.text.pipe(
+      Effect.mapError(
+        error =>
+          new SmokeHttpError({
+            message: `Could not read health response: ${unknownToMessage(error)}`,
+            cause: error
+          })
+      )
+    )
+
+    if (body !== 'ok') {
+      return yield* Effect.fail(new SmokeHttpError({ message: `Unexpected health body: ${body}` }))
+    }
+  })
+
+const main = Effect.gen(function* () {
+  const url = yield* readDeployedUrl
+  yield* checkHealth(url)
+  const events = yield* smokeWebSocket(url)
 
   console.log(`ok ${url}`)
   console.log(`events ${events.map(event => event._tag).join(' ')}`)
-}
+}).pipe(Effect.provide(FetchHttpClient.layer))
 
-await main()
+await Effect.runPromise(main)

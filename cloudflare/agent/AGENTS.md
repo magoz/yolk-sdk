@@ -77,6 +77,13 @@ Do not build these here yet unless explicitly requested:
 - Persist protocol transcripts only.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.
 
+## Smoke Script
+
+- `scripts/smoke.ts` is an Effect boundary: use `Config`, `HttpClient`, `Schema.fromJsonString`, tagged errors, and `Effect.runPromise` only at the top level.
+- Use `effect/unstable/socket/Socket` for WebSocket smoke checks; do not hand-roll `new WebSocket(...)` callback state.
+- Prefer `Clock.currentTimeMillis`, `Deferred`, and `Ref` over `Date.now()` and mutable async callback state.
+- `CLOUDFLARE_AGENT_URL` overrides deployed URL; otherwise decode `.alchemy/state/.../Api.json` with Schema.
+
 ## Checks
 
 - Run `pnpm cloudflare:check` after touching this app.
