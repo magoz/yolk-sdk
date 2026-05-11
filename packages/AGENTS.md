@@ -164,10 +164,40 @@ mcp-server -> mcp-client + protocol + Effect
 
 ## Package Publishing TODOs
 
-- Move publishable package exports from `src` to `dist` before npm publishing.
-- Add `peerDependencies` for host-owned runtime singletons like `effect`.
-- Add Changesets with fixed group for `@yolk/*` package versioning/release notes.
-- Add package metadata: license, repository directory, engines, publishConfig.
-- Add `publint` or equivalent package export validation.
-- Add package READMEs before public npm release.
-- Curate explicit public exports instead of broad root `export *`.
+Use this order when preparing the first public alpha/canary release:
+
+1. **Freeze public surface**
+   - Keep root exports explicit; do not add broad `export *` barrels.
+   - Review every exported symbol as public API.
+   - Move test-only helpers behind explicit `./testing` subpaths.
+
+2. **Declare package metadata**
+   - Add package `description`, `license`, `repository.directory`, `engines`, and keywords.
+   - Add `files` entries for publishable artifacts only.
+   - Add package READMEs with install/import examples.
+
+3. **Model host-owned dependencies**
+   - Add peer deps for runtime singletons and host frameworks: `effect`, `react`, and platform/runtime deps where relevant.
+   - Keep dev deps pinned via catalogs for local package tests/builds.
+   - Keep internal `@yolk/*` deps as `workspace:^`.
+
+4. **Add dist build**
+   - Add `tsdown` per package once publishing is imminent.
+   - Emit ESM + `.d.ts` into `dist`.
+   - Switch package `exports` from `src/index.ts` to `dist` outputs.
+   - Keep local dev source exports only if using an Effect-style `publishConfig.exports` override.
+
+5. **Add release tooling**
+   - Add Changesets with a fixed/lockstep group for all public `@yolk/*` packages.
+   - Set `updateInternalDependencies: "patch"`.
+   - Add root scripts for package build, package validation, versioning, and publish dry-run.
+
+6. **Validate package artifacts**
+   - Add `publint` or equivalent export/package checks.
+   - Run `pnpm packages:check`, `pnpm tsc`, `pnpm lint`, and `pnpm test:run`.
+   - Run a local `pnpm pack`/install smoke test in a separate fixture app.
+
+7. **Publish alpha/canary**
+   - Remove `private: true` only after artifact validation passes.
+   - Publish with provenance if available.
+   - Treat the first alpha as API feedback, not stability commitment.
