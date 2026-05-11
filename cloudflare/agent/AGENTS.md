@@ -73,6 +73,7 @@ Do not build these here yet unless explicitly requested:
 - Use faux provider until Cloudflare DO + persistence path is proven.
 - Prefer typed protocol events over app-local render models.
 - Persist protocol transcripts only.
+- Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.
 
 ## Checks
 
