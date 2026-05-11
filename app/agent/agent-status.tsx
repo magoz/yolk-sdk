@@ -1,5 +1,5 @@
 import type { AgentRunStatus } from '@yolk/client'
-import type { AgentReasoningEffort } from '@yolk/protocol'
+import type { AgentReasoningEffort, AgentUsage } from '@yolk/protocol'
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import {
 } from '@/lib/agents/realtime/openai-realtime'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
+import { AgentUsagePanel } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
 export const voiceStatusVariant = (status: VoiceStatus) => {
@@ -48,6 +49,8 @@ type AgentStatusPanelProps = {
   readonly openAiCodexConnected: boolean
   readonly textStatus: AgentRunStatus
   readonly voiceStatus: VoiceStatus
+  readonly usage: AgentUsage
+  readonly hasUsage: boolean
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
@@ -124,6 +127,8 @@ export function AgentStatusPanel({
   openAiCodexConnected,
   textStatus,
   voiceStatus,
+  usage,
+  hasUsage,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
@@ -150,6 +155,9 @@ export function AgentStatusPanel({
         </StatusRow>
         <StatusRow label="Summary">
           <Badge variant="outline">{agentTextReasoningSummary}</Badge>
+        </StatusRow>
+        <StatusRow label="Usage">
+          <AgentUsagePanel usage={usage} hasUsage={hasUsage} />
         </StatusRow>
         <StatusRow label="Inputs">
           <div className="flex flex-wrap justify-end gap-1.5">

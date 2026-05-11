@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Option } from 'effect'
-import { UserMessage, type AgentEvent } from '@yolk/protocol'
+import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk/protocol'
 import {
   buildAgentChatItems,
   getActiveChatToolParts,
@@ -127,6 +127,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [transcriptionModel, setTranscriptionModel] = useState(
     defaultOpenAiRealtimeTranscriptionModel
   )
+  const [usage, setUsage] = useState(zeroAgentUsage)
+  const [hasUsage, setHasUsage] = useState(false)
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const nextActivityIdRef = useRef(0)
 
@@ -138,6 +140,37 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
 
   const recordAgentEvent = useCallback(
     (event: AgentEvent) => {
+      switch (event._tag) {
+        case 'AgentStart':
+          setUsage(zeroAgentUsage)
+          setHasUsage(false)
+          break
+        case 'UsageUpdate':
+          setUsage(current => addAgentUsage(current, event.usage))
+          setHasUsage(true)
+          break
+        case 'AgentEnd':
+          setUsage(event.usage)
+          setHasUsage(true)
+          break
+        case 'AgentError':
+        case 'AgentRetry':
+        case 'AssistantMessage':
+        case 'CompactionEnd':
+        case 'CompactionStart':
+        case 'LLMReasoningDelta':
+        case 'LLMStreamEnd':
+        case 'LLMStreamStart':
+        case 'LLMTextDelta':
+        case 'LLMToolCall':
+        case 'ToolExecutionEnd':
+        case 'ToolExecutionStart':
+        case 'ToolResult':
+        case 'TurnEnd':
+        case 'TurnStart':
+          break
+      }
+
       const item = activityItemFromAgentEvent(event)
 
       if (item !== null) {
@@ -449,6 +482,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             liveActivityCount={liveActivityCount}
             textStatus={state.status}
             voiceStatus={voiceStatus}
+            usage={usage}
+            hasUsage={hasUsage}
             isRunning={isRunning}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
@@ -497,6 +532,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         openAiCodexConnected={openAiCodexConnected}
         textStatus={state.status}
         voiceStatus={voiceStatus}
+        usage={usage}
+        hasUsage={hasUsage}
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isRunning}
         transcriptionModel={transcriptionModel}

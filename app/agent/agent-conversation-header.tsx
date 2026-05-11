@@ -8,10 +8,12 @@ import {
   SlidersHorizontalIcon
 } from 'lucide-react'
 import type { AgentRunStatus } from '@yolk/client'
+import type { AgentUsage } from '@yolk/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { activityPanelId } from './agent-activity-model'
 import { textStatusVariant, voiceStatusVariant } from './agent-status'
+import { AgentUsageBadge } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
 type AgentConversationHeaderProps = {
@@ -20,6 +22,8 @@ type AgentConversationHeaderProps = {
   readonly liveActivityCount: number
   readonly textStatus: AgentRunStatus
   readonly voiceStatus: VoiceStatus
+  readonly usage: AgentUsage
+  readonly hasUsage: boolean
   readonly isRunning: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
@@ -33,6 +37,8 @@ export function AgentConversationHeader({
   liveActivityCount,
   textStatus,
   voiceStatus,
+  usage,
+  hasUsage,
   isRunning,
   isVoiceConnecting,
   isVoiceLive,
@@ -47,6 +53,7 @@ export function AgentConversationHeader({
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
+        <AgentUsageBadge usage={usage} hasUsage={hasUsage} />
         <Badge variant={textStatusVariant(textStatus)} className="hidden sm:inline-flex">
           {textStatus}
         </Badge>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, type MouseEvent } from 'react'
 import { XIcon } from 'lucide-react'
 import type { AgentRunStatus } from '@yolk/client'
-import type { AgentReasoningEffort } from '@yolk/protocol'
+import type { AgentReasoningEffort, AgentUsage } from '@yolk/protocol'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -35,6 +35,8 @@ type AgentConsoleDialogProps = {
   readonly openAiCodexConnected: boolean
   readonly textStatus: AgentRunStatus
   readonly voiceStatus: VoiceStatus
+  readonly usage: AgentUsage
+  readonly hasUsage: boolean
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
@@ -54,6 +56,8 @@ export function AgentConsoleDialog({
   openAiCodexConnected,
   textStatus,
   voiceStatus,
+  usage,
+  hasUsage,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
@@ -137,6 +141,8 @@ export function AgentConsoleDialog({
           openAiCodexConnected={openAiCodexConnected}
           textStatus={textStatus}
           voiceStatus={voiceStatus}
+          usage={usage}
+          hasUsage={hasUsage}
           reasoningEffort={reasoningEffort}
           reasoningEffortDisabled={reasoningEffortDisabled}
           transcriptionModel={transcriptionModel}

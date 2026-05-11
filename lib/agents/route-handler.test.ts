@@ -4,6 +4,8 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEvent,
   AssistantAgentMessage,
+  AgentContentCapabilities,
+  AgentModelCapabilities,
   ToolDef,
   UserMessage,
   type AgentMessage
@@ -13,7 +15,9 @@ import {
   LLMError,
   LLMProvider,
   LLMTextDelta,
-  LoopConfig
+  LoopConfig,
+  ToolError,
+  ToolExecutor
 } from '@yolk/agent-loop'
 import type { LLMRequest } from '@yolk/agent-loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
@@ -86,6 +90,39 @@ const makeFailingLayer = () =>
     TestToolExecutor.layer({}),
     StatelessSessionStoreLayer
   )
+
+const makeFailingToolLayer = () =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    LoopConfig.defaultLayer,
+    FauxProvider.layer(
+      Reply.toolCall({
+        id: 'call_1',
+        name: 'slow_tool',
+        params: {}
+      })
+    ),
+    Layer.succeed(
+      ToolExecutor,
+      ToolExecutor.of({
+        execute: call =>
+          Effect.fail(
+            new ToolError({
+              tool: call.name,
+              message: 'Tool timed out',
+              cause: 'timeout'
+            })
+          )
+      })
+    ),
+    StatelessSessionStoreLayer
+  )
+
+const noToolReasoningCapabilities = AgentModelCapabilities.make({
+  input: AgentContentCapabilities.make({ text: true, image: false, audio: false }),
+  tools: false,
+  reasoning: false
+})
 
 describe('makeAgentPostResponse', () => {
   it.effect('returns ndjson agent events for a text-only turn', () =>
@@ -175,6 +212,69 @@ describe('makeAgentPostResponse', () => {
       expect(events[4]).toMatchObject({
         code: 'provider_error',
         message: 'Provider failed',
+        retryable: true
+      })
+    })
+  )
+
+  it.effect('encodes capability failures as validation errors', () =>
+    Effect.gen(function* () {
+      const response = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'use a tool' })]
+        }),
+        {
+          ...config,
+          tools: [ToolDef.make({ name: 'echo', description: 'Echo.', parameters: {} })],
+          capabilities: noToolReasoningCapabilities
+        }
+      ).pipe(Effect.provide(makeLayer()))
+      const body = yield* Effect.promise(() => response.text())
+      const events = yield* decodeEvents(body)
+
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'AgentError'
+      ])
+      expect(events[3]).toMatchObject({
+        code: 'validation_error',
+        message: 'Tools are not supported by this model',
+        retryable: false
+      })
+    })
+  )
+
+  it.effect('encodes tool failures as canonical tool errors', () =>
+    Effect.gen(function* () {
+      const response = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'run slow tool' })]
+        }),
+        {
+          ...config,
+          tools: [ToolDef.make({ name: 'slow_tool', description: 'Slow.', parameters: {} })]
+        }
+      ).pipe(Effect.provide(makeFailingToolLayer()))
+      const body = yield* Effect.promise(() => response.text())
+      const events = yield* decodeEvents(body)
+
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'LLMToolCall',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'ToolExecutionStart',
+        'AgentError'
+      ])
+      expect(events[7]).toMatchObject({
+        code: 'tool_timeout',
+        message: 'Tool timed out',
         retryable: true
       })
     })

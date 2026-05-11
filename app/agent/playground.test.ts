@@ -1,5 +1,11 @@
 import { describe, expect, it } from '@effect/vitest'
-import { ImagePart, TextPart } from '@yolk/protocol'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ImagePart, TextPart } from '@yolk/protocol'
+import {
+  formatTokenCount,
+  formatUsageDetail,
+  formatUsageSummary,
+  totalAgentUsageTokens
+} from './agent-usage-meter'
 import { contentFromInput, type ImageAttachment } from './image-attachment-content'
 
 const imageAttachment: ImageAttachment = {
@@ -17,6 +23,11 @@ const secondImageAttachment: ImageAttachment = {
   previewUrl: 'data:image/png;base64,def',
   data: 'def'
 }
+
+const usage = AgentUsage.make({
+  input: AgentInputUsage.make({ total: 1_200, cacheRead: 300 }),
+  output: AgentOutputUsage.make({ total: 450, reasoning: 50 })
+})
 
 describe('agent playground', () => {
   it('builds text-only submit content', () => {
@@ -42,5 +53,18 @@ describe('agent playground', () => {
       ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
       ImagePart.make({ data: 'def', mimeType: 'image/png' })
     ])
+  })
+
+  it('formats token counts compactly', () => {
+    expect(formatTokenCount(999)).toBe('999')
+    expect(formatTokenCount(1_200)).toBe('1.2k')
+    expect(formatTokenCount(12_300)).toBe('12k')
+    expect(formatTokenCount(1_250_000)).toBe('1.3m')
+  })
+
+  it('formats usage totals and details', () => {
+    expect(totalAgentUsageTokens(usage)).toBe(1_650)
+    expect(formatUsageSummary(usage)).toBe('1.7k tokens')
+    expect(formatUsageDetail(usage)).toBe('in 1.2k · out 450 · reasoning 50 · cached 300')
   })
 })

@@ -5,19 +5,13 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import {
   ContextTransformer,
-  type AgentLoopError,
   LLMDone,
   LLMProvider,
   LLMTextDelta,
   LoopConfig,
   ToolExecutor
 } from '@yolk/agent-loop'
-import {
-  runRuntime,
-  runtimeErrorToAgentError,
-  SessionStore,
-  type RuntimeError
-} from '@yolk/agent-runtime'
+import { runRuntime, SessionStore } from '@yolk/agent-runtime'
 import {
   AgentError,
   contentText,
@@ -25,6 +19,7 @@ import {
   type AgentEvent as AgentEventType,
   type AgentMessage
 } from '@yolk/protocol'
+import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 
 type SocketAttachment = {
   readonly sessionId: string
@@ -47,17 +42,6 @@ const encodeEvent = (event: AgentEventType) =>
 
 const sendEvent = (socket: Cloudflare.DurableWebSocket, event: AgentEventType) =>
   encodeEvent(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
-
-const cloudflareRuntimeErrorToAgentError = (
-  error: AgentLoopError | RuntimeError | Schema.SchemaError
-) =>
-  Schema.isSchemaError(error)
-    ? AgentError.make({
-        code: 'unknown',
-        message: error.message,
-        retryable: false
-      })
-    : runtimeErrorToAgentError(error)
 
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
