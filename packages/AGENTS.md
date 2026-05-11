@@ -131,6 +131,7 @@ mcp-server -> mcp + protocol + Effect
 - Root `packageManager` pins pnpm for reproducible installs.
 - Package tsconfigs extend `packages/tsconfig.base.json`; keep package-local configs to `outDir`, `rootDir`, and include/exclude overrides.
 - Keep package dependencies explicit in each package manifest even when versions come from catalogs.
+- Internal `@yolk/*` dependencies use `workspace:^`; pnpm links locally and publishes semver ranges later.
 
 ## Package Publishing TODOs
 

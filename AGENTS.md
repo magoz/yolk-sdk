@@ -121,7 +121,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `clanka`      | `.repos/clanka`   | Effect-native agent/tools; Codex auth, MCP, semantic search   |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
-- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai`/`kody`/`flue`/`mcp-sdk`/`clanka` track branches.
+- Effect-family package versions are pinned via `pnpm-workspace.yaml` catalog; `pi`/`opencode`/`t3code`/`ai`/`kody`/`flue`/`mcp-sdk`/`clanka` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)
