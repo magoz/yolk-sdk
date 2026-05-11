@@ -7,7 +7,6 @@ import {
 import { Config, Data, Effect, Layer } from 'effect'
 import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
 import {
-  textImageModelCapabilities,
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
@@ -16,6 +15,7 @@ import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import {
   agentTextModel,
+  agentTextCapabilities,
   agentTextReasoningEffort,
   defaultAgentSystemPrompt
 } from '@/lib/agents/text-agent-config'
@@ -89,7 +89,7 @@ const handler = Effect.gen(function* () {
   })
   const response = yield* makeAgentResponseWithProvider(
     input,
-    { ...baseConfig, tools: toolSet.tools, capabilities: textImageModelCapabilities },
+    { ...baseConfig, tools: toolSet.tools, capabilities: agentTextCapabilities },
     toolSet,
     session.user.id
   )

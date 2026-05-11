@@ -37,6 +37,7 @@ type AgentComposerProps = {
   readonly isVoiceMode: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
+  readonly imageInputSupported: boolean
   readonly imageAttachments: ReadonlyArray<AgentComposerImageAttachment>
   readonly onInputChange: (value: string) => void
   readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
@@ -53,6 +54,7 @@ export function AgentComposer({
   isVoiceMode,
   isVoiceConnecting,
   isVoiceLive,
+  imageInputSupported,
   imageAttachments,
   onInputChange,
   onImageAttachmentsChange,
@@ -64,7 +66,7 @@ export function AgentComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragDepth, setDragDepth] = useState(0)
-  const dropDisabled = isRunning || isVoiceMode
+  const dropDisabled = isRunning || isVoiceMode || !imageInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
   const hasAttachments = imageAttachments.length > 0
 
@@ -150,7 +152,9 @@ export function AgentComposer({
     ? 'Voice mode active'
     : isRunning
       ? 'Streaming response'
-      : 'Enter to send · Shift Enter newline'
+      : imageInputSupported
+        ? 'Enter to send · Shift Enter newline · paste images'
+        : 'Enter to send · Shift Enter newline'
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -250,6 +254,7 @@ export function AgentComposer({
               variant="outline"
               onClick={handleAttachClick}
               disabled={dropDisabled}
+              title={imageInputSupported ? 'Attach image' : 'Current model does not support images'}
               className="size-10 rounded-full"
             >
               <ImageIcon />

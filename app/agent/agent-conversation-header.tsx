@@ -43,7 +43,7 @@ export function AgentConversationHeader({
     <div className="flex items-center justify-between gap-3 border-b border-foreground/10 bg-background/60 px-4 py-3 backdrop-blur sm:px-5">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">Yolk agent</p>
-        <p className="truncate text-xs text-muted-foreground">Text + voice console</p>
+        <p className="truncate text-xs text-muted-foreground">Text, image + voice console</p>
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">

@@ -1,6 +1,6 @@
 # E2E Tests
 
-Playwright tests with Effect-based setup/teardown. Uses `.env.test` with a separate test database. No mocking — tests run against real app services.
+Playwright tests with Effect-based setup/teardown. Uses `.env.test` with a separate test database. Prefer real app services; route-stub nondeterministic external streams only when asserting UI/request encoding.
 
 ## Playwright Best Practices
 
@@ -130,6 +130,7 @@ e2e/
     setup.ts                      — Effect setup helper
   ui/
     login.spec.ts                 — Public smoke tests
+    agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
 ```
 
 ## Env Isolation

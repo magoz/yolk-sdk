@@ -13,7 +13,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
-- `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/status badges.
+- `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/capability/status badges.
 - `agent-activity-model.ts` maps events to activity rows; `agent-activity.tsx` renders them.
 
 ## Chat Model
@@ -33,6 +33,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 
 - Textarea stays focused and enabled; submit is disabled while text run or voice mode is active.
 - Image attach supports picker, drag/drop, and clipboard paste; max 4 images; downscale/compress before protocol conversion.
+- Gate image attach/drop/paste from `agentTextCapabilities.input.image`; console exposes text/image/audio + tools support.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
 - Show provider reasoning only (`LLMReasoningDelta` / `Assistant.reasoning`); never invent reasoning.

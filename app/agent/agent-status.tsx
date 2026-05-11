@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   agentTextModel,
+  agentTextCapabilities,
   agentTextReasoningEffortOptions,
   agentTextReasoningSummary
 } from '@/lib/agents/text-agent-config'
@@ -149,6 +150,22 @@ export function AgentStatusPanel({
         </StatusRow>
         <StatusRow label="Summary">
           <Badge variant="outline">{agentTextReasoningSummary}</Badge>
+        </StatusRow>
+        <StatusRow label="Inputs">
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <Badge variant={agentTextCapabilities.input.text ? 'secondary' : 'outline'}>text</Badge>
+            <Badge variant={agentTextCapabilities.input.image ? 'secondary' : 'outline'}>
+              image
+            </Badge>
+            <Badge variant={agentTextCapabilities.input.audio ? 'secondary' : 'outline'}>
+              audio
+            </Badge>
+          </div>
+        </StatusRow>
+        <StatusRow label="Tools">
+          <Badge variant={agentTextCapabilities.tools ? 'secondary' : 'outline'}>
+            {agentTextCapabilities.tools ? 'enabled' : 'disabled'}
+          </Badge>
         </StatusRow>
         <StatusRow label="Voice model">
           <Badge variant="outline">{openAiRealtimeModel}</Badge>

@@ -25,7 +25,7 @@ Hardcoded in `app/api/agent/route.ts`:
 | --------------------- | ------ | ----------------- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex provider accepts text+image user input; audio is rejected by capabilities.
+Provider is Codex OAuth, model is `gpt-5.4`. Text model/reasoning/capabilities live in `text-agent-config.ts`; UI and route import `agentTextCapabilities` from there. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex provider accepts text+image user input; audio is rejected by capabilities.
 
 Reasoning:
 

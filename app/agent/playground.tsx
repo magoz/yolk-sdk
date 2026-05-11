@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Option } from 'effect'
 import { UserMessage, type AgentEvent } from '@yolk/protocol'
-import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
+import { agentTextCapabilities, agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
 import {
@@ -243,6 +243,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
+  const imageInputSupported = agentTextCapabilities.input.image
   const submitDisabled = isRunning || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
@@ -479,6 +480,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
+            imageInputSupported={imageInputSupported}
             imageAttachments={imageAttachments}
             onInputChange={handleInputChange}
             onImageAttachmentsChange={handleImageAttachmentsChange}
