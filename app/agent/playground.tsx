@@ -31,9 +31,17 @@ type AgentPlaygroundProps = {
   readonly openAiCodexConnected: boolean
 }
 
-const maxImageAttachmentBytes = 5 * 1024 * 1024
+const maxImageAttachments = 4
+const maxSourceImageBytes = 15 * 1024 * 1024
+const maxEncodedImageBytes = 5 * 1024 * 1024
+const maxImageEdgePixels = 1600
 
-const readFileAsDataUrl = (file: File) =>
+const imageOutputType = (mimeType: string) =>
+  mimeType === 'image/png' ? 'image/png' : 'image/jpeg'
+
+const imageAttachmentId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`
+
+const blobToDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.addEventListener('load', () => {
@@ -45,8 +53,49 @@ const readFileAsDataUrl = (file: File) =>
       reject(new Error('Could not read image'))
     })
     reader.addEventListener('error', () => reject(new Error('Could not read image')))
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(blob)
   })
+
+const canvasBlob = (canvas: HTMLCanvasElement, mimeType: string) =>
+  new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      blob => {
+        if (blob === null) {
+          reject(new Error('Could not compress image'))
+          return
+        }
+
+        resolve(blob)
+      },
+      mimeType,
+      0.86
+    )
+  })
+
+const compressedImageBlob = async (file: File) => {
+  if (file.type === 'image/gif') {
+    return file
+  }
+
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, maxImageEdgePixels / Math.max(bitmap.width, bitmap.height))
+  const width = Math.max(1, Math.round(bitmap.width * scale))
+  const height = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+
+  if (context === null) {
+    bitmap.close()
+    throw new Error('Could not prepare image')
+  }
+
+  context.drawImage(bitmap, 0, 0, width, height)
+  bitmap.close()
+
+  return canvasBlob(canvas, imageOutputType(file.type))
+}
 
 const base64FromDataUrl = (dataUrl: string) => {
   const separatorIndex = dataUrl.indexOf(',')
@@ -54,9 +103,22 @@ const base64FromDataUrl = (dataUrl: string) => {
   return separatorIndex === -1 ? '' : dataUrl.slice(separatorIndex + 1)
 }
 
+const attachmentFromFile = async (file: File): Promise<ImageAttachment> => {
+  const blob = await compressedImageBlob(file)
+  const previewUrl = await blobToDataUrl(blob)
+
+  return {
+    id: imageAttachmentId(file),
+    name: file.name,
+    mimeType: blob.type.length > 0 ? blob.type : file.type,
+    previewUrl,
+    data: base64FromDataUrl(previewUrl)
+  }
+}
+
 export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
-  const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null)
+  const [imageAttachments, setImageAttachments] = useState<ReadonlyArray<ImageAttachment>>([])
   const [activityVisible, setActivityVisible] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [showInlineTools, setShowInlineTools] = useState(true)
@@ -238,60 +300,101 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   )
 
   const handleSubmit = useCallback(() => {
-    const content = contentFromInput(input, imageAttachment)
+    const content = contentFromInput(input, imageAttachments)
 
     if (submitDisabled || !canSubmitContent(content)) {
       return
     }
 
     recordActivity({
-      title: imageAttachment === null ? 'Prompt submitted' : 'Image prompt submitted',
-      detail: imageAttachment === null ? input.trim() : imageAttachment.name,
+      title: imageAttachments.length === 0 ? 'Prompt submitted' : 'Image prompt submitted',
+      detail:
+        imageAttachments.length === 0
+          ? input.trim()
+          : `${imageAttachments.length} image${imageAttachments.length === 1 ? '' : 's'}`,
       tone: 'neutral'
     })
     const result = submitMessage(UserMessage.make({ content }))
 
     if (result._tag === 'Submitted') {
       setInput('')
-      setImageAttachment(null)
+      setImageAttachments([])
     }
-  }, [canSubmitContent, imageAttachment, input, recordActivity, submitDisabled, submitMessage])
+  }, [canSubmitContent, imageAttachments, input, recordActivity, submitDisabled, submitMessage])
 
-  const handleImageAttachmentChange = useCallback(
-    (file: File | null) => {
-      if (file === null) {
+  const handleImageAttachmentsChange = useCallback(
+    (files: ReadonlyArray<File>) => {
+      if (files.length === 0) {
         return
       }
 
-      if (!file.type.startsWith('image/')) {
-        recordActivity({ title: 'Image rejected', detail: 'Unsupported file type.', tone: 'error' })
-        return
-      }
-
-      if (file.size > maxImageAttachmentBytes) {
-        recordActivity({
-          title: 'Image rejected',
-          detail: 'Image must be 5MB or smaller.',
-          tone: 'error'
-        })
-        return
-      }
-
-      readFileAsDataUrl(file)
-        .then(previewUrl => {
-          const data = base64FromDataUrl(previewUrl)
-
-          if (data.length === 0) {
+      const availableSlots = maxImageAttachments - imageAttachments.length
+      const acceptedFiles = files
+        .filter(file => {
+          if (!file.type.startsWith('image/')) {
             recordActivity({
               title: 'Image rejected',
-              detail: 'Could not decode image.',
+              detail: `${file.name}: unsupported file type.`,
               tone: 'error'
             })
+            return false
+          }
+
+          if (file.size > maxSourceImageBytes) {
+            recordActivity({
+              title: 'Image rejected',
+              detail: `${file.name}: image must be 15MB or smaller.`,
+              tone: 'error'
+            })
+            return false
+          }
+
+          return true
+        })
+        .slice(0, Math.max(0, availableSlots))
+
+      if (acceptedFiles.length < files.length && availableSlots <= files.length) {
+        recordActivity({
+          title: 'Image limit reached',
+          detail: `Attach up to ${maxImageAttachments} images.`,
+          tone: 'error'
+        })
+      }
+
+      Promise.all(acceptedFiles.map(attachmentFromFile))
+        .then(attachments => {
+          const readyAttachments = attachments.filter(attachment => {
+            if (attachment.data.length === 0) {
+              recordActivity({
+                title: 'Image rejected',
+                detail: `${attachment.name}: could not decode image.`,
+                tone: 'error'
+              })
+              return false
+            }
+
+            if (attachment.data.length > maxEncodedImageBytes) {
+              recordActivity({
+                title: 'Image rejected',
+                detail: `${attachment.name}: compressed image is still too large.`,
+                tone: 'error'
+              })
+              return false
+            }
+
+            return true
+          })
+
+          if (readyAttachments.length === 0) {
             return
           }
 
-          setImageAttachment({ name: file.name, mimeType: file.type, previewUrl, data })
-          recordActivity({ title: 'Image attached', detail: file.name, tone: 'neutral' })
+          setImageAttachments(current => [...current, ...readyAttachments])
+          recordActivity({
+            title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
+            detail: readyAttachments.map(attachment => attachment.name).join(', '),
+            tone: 'neutral'
+          })
         })
         .catch(() => {
           recordActivity({
@@ -301,11 +404,13 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
           })
         })
     },
-    [recordActivity]
+    [imageAttachments.length, recordActivity]
   )
 
-  const handleRemoveImageAttachment = useCallback(() => {
-    setImageAttachment(null)
+  const handleRemoveImageAttachment = useCallback((index: number) => {
+    setImageAttachments(current =>
+      current.filter((_, attachmentIndex) => attachmentIndex !== index)
+    )
   }, [])
 
   const handleInputChange = useCallback((value: string) => {
@@ -374,9 +479,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
-            imageAttachment={imageAttachment}
+            imageAttachments={imageAttachments}
             onInputChange={handleInputChange}
-            onImageAttachmentChange={handleImageAttachmentChange}
+            onImageAttachmentsChange={handleImageAttachmentsChange}
             onRemoveImageAttachment={handleRemoveImageAttachment}
             onSubmit={handleSubmit}
             onStop={stop}

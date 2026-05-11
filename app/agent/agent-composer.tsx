@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type DragEvent,
   type FormEvent,
   type KeyboardEvent
@@ -36,10 +37,10 @@ type AgentComposerProps = {
   readonly isVoiceMode: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
-  readonly imageAttachment: AgentComposerImageAttachment | null
+  readonly imageAttachments: ReadonlyArray<AgentComposerImageAttachment>
   readonly onInputChange: (value: string) => void
-  readonly onImageAttachmentChange: (file: File | null) => void
-  readonly onRemoveImageAttachment: () => void
+  readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
+  readonly onRemoveImageAttachment: (index: number) => void
   readonly onSubmit: () => void
   readonly onStop: () => void
   readonly onToggleVoice: () => void
@@ -52,9 +53,9 @@ export function AgentComposer({
   isVoiceMode,
   isVoiceConnecting,
   isVoiceLive,
-  imageAttachment,
+  imageAttachments,
   onInputChange,
-  onImageAttachmentChange,
+  onImageAttachmentsChange,
   onRemoveImageAttachment,
   onSubmit,
   onStop,
@@ -65,6 +66,7 @@ export function AgentComposer({
   const [dragDepth, setDragDepth] = useState(0)
   const dropDisabled = isRunning || isVoiceMode
   const isDropActive = dragDepth > 0 && !dropDisabled
+  const hasAttachments = imageAttachments.length > 0
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -87,8 +89,25 @@ export function AgentComposer({
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    onImageAttachmentChange(event.target.files?.[0] ?? null)
+    onImageAttachmentsChange(Array.from(event.target.files ?? []))
     event.target.value = ''
+  }
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (dropDisabled) {
+      return
+    }
+
+    const imageFiles = Array.from(event.clipboardData.files).filter(file =>
+      file.type.startsWith('image/')
+    )
+
+    if (imageFiles.length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    onImageAttachmentsChange(imageFiles)
   }
 
   const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
@@ -124,7 +143,7 @@ export function AgentComposer({
       return
     }
 
-    onImageAttachmentChange(event.dataTransfer.files[0] ?? null)
+    onImageAttachmentsChange(Array.from(event.dataTransfer.files))
   }
 
   const hint = isVoiceMode
@@ -160,37 +179,45 @@ export function AgentComposer({
           ref={fileInputRef}
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
           onChange={handleFileChange}
           className="sr-only"
           tabIndex={-1}
           aria-hidden
         />
-        {imageAttachment !== null ? (
-          <div className="px-2 pt-2">
-            <div className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-foreground/10 bg-muted/50 p-1.5 pr-2 text-xs text-muted-foreground">
-              <Image
-                src={imageAttachment.previewUrl}
-                alt="Attached image preview"
-                width={48}
-                height={48}
-                unoptimized
-                className="size-12 rounded-xl object-cover"
-              />
-              <div className="min-w-0">
-                <div className="truncate font-medium text-foreground">{imageAttachment.name}</div>
-                <div className="truncate">{imageAttachment.mimeType}</div>
-              </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                onClick={onRemoveImageAttachment}
-                className="ml-1 rounded-full"
+        {hasAttachments ? (
+          <div className="flex flex-wrap gap-2 px-2 pt-2">
+            {imageAttachments.map((imageAttachment, index) => (
+              <div
+                key={`${imageAttachment.name}-${index}`}
+                className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-foreground/10 bg-muted/50 p-1.5 pr-2 text-xs text-muted-foreground"
               >
-                <XIcon />
-                <span className="sr-only">Remove image</span>
-              </Button>
-            </div>
+                <Image
+                  src={imageAttachment.previewUrl}
+                  alt="Attached image preview"
+                  width={48}
+                  height={48}
+                  unoptimized
+                  className="size-12 rounded-xl object-cover"
+                />
+                <div className="min-w-0">
+                  <div className="max-w-36 truncate font-medium text-foreground">
+                    {imageAttachment.name}
+                  </div>
+                  <div className="truncate">{imageAttachment.mimeType}</div>
+                </div>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={() => onRemoveImageAttachment(index)}
+                  className="ml-1 rounded-full"
+                >
+                  <XIcon />
+                  <span className="sr-only">Remove image {imageAttachment.name}</span>
+                </Button>
+              </div>
+            ))}
           </div>
         ) : null}
         <Textarea
@@ -198,6 +225,7 @@ export function AgentComposer({
           value={input}
           onChange={event => onInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={isVoiceMode ? 'Voice mode is active...' : 'Ask the agent...'}
           className="max-h-48 min-h-20 resize-none border-0 bg-transparent px-3 py-3 text-base shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-sm"
           aria-label="Agent prompt"
@@ -262,7 +290,7 @@ export function AgentComposer({
               <Button
                 type="submit"
                 size="icon-lg"
-                disabled={(input.trim().length === 0 && imageAttachment === null) || submitDisabled}
+                disabled={(input.trim().length === 0 && !hasAttachments) || submitDisabled}
                 className="size-10 rounded-full"
               >
                 <ArrowUpIcon />
