@@ -5,6 +5,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 ## Rules
 
 - Use Alchemy for Cloudflare resources and bindings.
+- Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Use faux provider until Cloudflare DO + persistence path is proven.

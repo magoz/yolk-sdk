@@ -39,6 +39,10 @@ Expected response: `ok`.
 
 This repo patches `alchemy@2.0.0-beta.36` so Cloudflare Vite-only imports are lazy. Without it, non-Vite Workers still pull `vite -> lightningcss` into Alchemy's stack bundle and fail on Lightning CSS's dev-only `../pkg` fallback.
 
+## Import style
+
+Use explicit `.ts` extensions for relative TypeScript imports. This matches Alchemy's source and examples, and lets deploy-time stack evaluation load TypeScript source through Node-compatible ESM paths.
+
 ## Cloudflare env
 
 Alchemy deploy/dev needs Cloudflare credentials:

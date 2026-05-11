@@ -137,7 +137,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `@yolk/agent-loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
 - Keep test helpers behind explicit `./testing` subpath exports; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
-- Package-internal relative imports use explicit `.ts` extensions. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
+- Package-internal relative imports use explicit `.ts` extensions, matching Alchemy's source style. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
 
 ## Workspace Setup
