@@ -110,6 +110,12 @@ Codex backend quirks:
 - Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
 - Tool calls may arrive before completion as `response.output_item.done` with `item.type = 'function_call'`; parse immediately and tolerate empty final `response.completed`
 
+Image TODOs:
+
+- Validate image count, MIME, base64 size, and total request size at `/api/agent` before provider call.
+- Keep Codex image mapping covered by provider tests whenever Responses payload shape changes.
+- If adding provider switching, derive image support from selected provider capabilities, not from UI assumptions.
+
 ## Tests
 
 - Provider tests: `providers/*-provider.test.ts`

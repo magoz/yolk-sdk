@@ -42,6 +42,13 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 
+## Image TODOs
+
+- Add server/route image payload limits; never trust client compression.
+- Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode image support in UI.
+- Consider richer image failure UI: per-file reason, retry, and remove failed attachments without clearing valid ones.
+- Add full-suite E2E coverage when image flow becomes less route-stubbed.
+
 ## References
 
 - `.repos/ai` and `.repos/opencode` model tools as message parts; prefer that over detached tool arrays.
