@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { activityPanelId } from './agent-activity-model'
 import { textStatusVariant, voiceStatusVariant } from './agent-status'
-import { AgentUsageBadge } from './agent-usage-meter'
+import { AgentUsageBadge, type AgentCompactionState } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
 type AgentConversationHeaderProps = {
@@ -24,6 +24,8 @@ type AgentConversationHeaderProps = {
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
+  readonly contextTokens: number | null
+  readonly compaction: AgentCompactionState
   readonly isRunning: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
@@ -39,6 +41,8 @@ export function AgentConversationHeader({
   voiceStatus,
   usage,
   hasUsage,
+  contextTokens,
+  compaction,
   isRunning,
   isVoiceConnecting,
   isVoiceLive,
@@ -53,7 +57,12 @@ export function AgentConversationHeader({
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
-        <AgentUsageBadge usage={usage} hasUsage={hasUsage} />
+        <AgentUsageBadge
+          usage={usage}
+          hasUsage={hasUsage}
+          contextTokens={contextTokens}
+          compaction={compaction}
+        />
         <Badge variant={textStatusVariant(textStatus)} className="hidden sm:inline-flex">
           {textStatus}
         </Badge>

@@ -16,7 +16,7 @@ import {
 } from '@/lib/agents/realtime/openai-realtime'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
-import { AgentUsagePanel } from './agent-usage-meter'
+import { AgentUsagePanel, type AgentCompactionState } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
 export const voiceStatusVariant = (status: VoiceStatus) => {
@@ -51,6 +51,8 @@ type AgentStatusPanelProps = {
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
+  readonly contextTokens: number | null
+  readonly compaction: AgentCompactionState
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
@@ -129,6 +131,8 @@ export function AgentStatusPanel({
   voiceStatus,
   usage,
   hasUsage,
+  contextTokens,
+  compaction,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
@@ -157,7 +161,12 @@ export function AgentStatusPanel({
           <Badge variant="outline">{agentTextReasoningSummary}</Badge>
         </StatusRow>
         <StatusRow label="Usage">
-          <AgentUsagePanel usage={usage} hasUsage={hasUsage} />
+          <AgentUsagePanel
+            usage={usage}
+            hasUsage={hasUsage}
+            contextTokens={contextTokens}
+            compaction={compaction}
+          />
         </StatusRow>
         <StatusRow label="Inputs">
           <div className="flex flex-wrap justify-end gap-1.5">

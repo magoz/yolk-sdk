@@ -139,7 +139,9 @@ export const getValidOpenAiCodexToken = (userId: string) =>
     const oauth = yield* OpenAiCodexOAuth
     const token = yield* getOpenAiCodexToken(userId)
 
-    if (!oauth.needsRefresh(token)) {
+    const needsRefresh = yield* oauth.needsRefresh(token)
+
+    if (!needsRefresh) {
       return token
     }
 

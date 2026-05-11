@@ -83,10 +83,7 @@ const readDeployedUrl = Effect.gen(function* () {
   )
 )
 
-const websocketUrl = (
-  url: string,
-  sessionId: string
-): Effect.Effect<string, SmokeConfigError> =>
+const websocketUrl = (url: string, sessionId: string): Effect.Effect<string, SmokeConfigError> =>
   Effect.try({
     try: () => {
       const parsed = new URL(url)
@@ -118,7 +115,9 @@ const decodeSmokeEvent = (data: MessageEvent['data']) => {
   )
 }
 
-const smokeWebSocket = (url: string): Effect.Effect<ReadonlyArray<SmokeEvent>, SmokeConfigError | SmokeProtocolError> =>
+const smokeWebSocket = (
+  url: string
+): Effect.Effect<ReadonlyArray<SmokeEvent>, SmokeConfigError | SmokeProtocolError> =>
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const sessionId = `smoke-${now}`
@@ -128,7 +127,9 @@ const smokeWebSocket = (url: string): Effect.Effect<ReadonlyArray<SmokeEvent>, S
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const socket = yield* Socket.makeWebSocket(wsUrl, { closeCodeIsError: code => code !== 1000 })
+        const socket = yield* Socket.makeWebSocket(wsUrl, {
+          closeCodeIsError: code => code !== 1000
+        })
         const write = yield* socket.writer
         const eventsRef = yield* Ref.make<ReadonlyArray<SmokeEvent>>([])
         const collectedTextRef = yield* Ref.make('')
@@ -212,7 +213,9 @@ const checkHealth = (url: string): Effect.Effect<void, SmokeHttpError, HttpClien
     )
 
     if (response.status < 200 || response.status >= 300) {
-      return yield* Effect.fail(new SmokeHttpError({ message: `Health failed: ${response.status}` }))
+      return yield* Effect.fail(
+        new SmokeHttpError({ message: `Health failed: ${response.status}` })
+      )
     }
 
     const body = yield* response.text.pipe(

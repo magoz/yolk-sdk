@@ -24,6 +24,7 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
+import type { AgentCompactionState } from './agent-usage-meter'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
 type AgentPlaygroundProps = {
@@ -129,6 +130,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   )
   const [usage, setUsage] = useState(zeroAgentUsage)
   const [hasUsage, setHasUsage] = useState(false)
+  const [contextTokens, setContextTokens] = useState<number | null>(null)
+  const [compaction, setCompaction] = useState<AgentCompactionState>({ _tag: 'Idle' })
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const nextActivityIdRef = useRef(0)
 
@@ -144,20 +147,33 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         case 'AgentStart':
           setUsage(zeroAgentUsage)
           setHasUsage(false)
+          setContextTokens(null)
+          setCompaction({ _tag: 'Idle' })
           break
         case 'UsageUpdate':
           setUsage(current => addAgentUsage(current, event.usage))
+          setContextTokens(event.usage.input.total)
           setHasUsage(true)
           break
         case 'AgentEnd':
           setUsage(event.usage)
           setHasUsage(true)
           break
+        case 'CompactionStart':
+          setCompaction({ _tag: 'Compacting', strategy: event.strategy })
+          break
+        case 'CompactionEnd':
+          setCompaction({
+            _tag: 'Compacted',
+            strategy: event.strategy,
+            beforeTokens: event.beforeTokens,
+            afterTokens: event.afterTokens
+          })
+          setContextTokens(event.afterTokens ?? null)
+          break
         case 'AgentError':
         case 'AgentRetry':
         case 'AssistantMessage':
-        case 'CompactionEnd':
-        case 'CompactionStart':
         case 'LLMReasoningDelta':
         case 'LLMStreamEnd':
         case 'LLMStreamStart':
@@ -484,6 +500,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             voiceStatus={voiceStatus}
             usage={usage}
             hasUsage={hasUsage}
+            contextTokens={contextTokens}
+            compaction={compaction}
             isRunning={isRunning}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
@@ -534,6 +552,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         voiceStatus={voiceStatus}
         usage={usage}
         hasUsage={hasUsage}
+        contextTokens={contextTokens}
+        compaction={compaction}
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isRunning}
         transcriptionModel={transcriptionModel}

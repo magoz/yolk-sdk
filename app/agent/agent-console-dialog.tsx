@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { VoiceStatus } from './use-realtime-voice'
 import { AgentStatusPanel } from './agent-status'
+import type { AgentCompactionState } from './agent-usage-meter'
 
 type ConsoleSwitchProps = {
   readonly label: string
@@ -37,6 +38,8 @@ type AgentConsoleDialogProps = {
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
   readonly hasUsage: boolean
+  readonly contextTokens: number | null
+  readonly compaction: AgentCompactionState
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
@@ -58,6 +61,8 @@ export function AgentConsoleDialog({
   voiceStatus,
   usage,
   hasUsage,
+  contextTokens,
+  compaction,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
@@ -143,6 +148,8 @@ export function AgentConsoleDialog({
           voiceStatus={voiceStatus}
           usage={usage}
           hasUsage={hasUsage}
+          contextTokens={contextTokens}
+          compaction={compaction}
           reasoningEffort={reasoningEffort}
           reasoningEffortDisabled={reasoningEffortDisabled}
           transcriptionModel={transcriptionModel}

@@ -12,7 +12,7 @@ import {
   estimateAgentMessagesTokens
 } from './context-transformer'
 
-const longText = 'context '.repeat(3_000)
+const longText = 'context '.repeat(6_000)
 
 const user = (content: string) => UserMessage.make({ content })
 const assistant = (content: string) => AssistantAgentMessage.make({ content, toolCalls: [] })

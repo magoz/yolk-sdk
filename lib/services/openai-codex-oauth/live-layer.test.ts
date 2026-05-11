@@ -1,4 +1,5 @@
 import { Effect, Layer } from 'effect'
+import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -138,7 +139,8 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('exchanges device token with form request', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
-      const before = Date.now()
+      const before = 1_000_000
+      yield* TestClock.setTime(before)
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer(
           [

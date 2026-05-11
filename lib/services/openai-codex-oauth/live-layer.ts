@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option } from 'effect'
+import { Clock, Context, Effect, Layer, Option } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -84,7 +84,8 @@ const extractAccountIdFromTokens = (tokens: OpenAiCodexTokenResponse): string | 
 
 const toOAuthToken = (
   tokens: OpenAiCodexTokenResponse,
-  currentAccountId: string | undefined
+  currentAccountId: string | undefined,
+  nowMs: number
 ): OpenAiCodexOAuthToken => {
   const accountId = extractAccountIdFromTokens(tokens) ?? currentAccountId
   const expiresIn = tokens.expires_in ?? 3600
@@ -92,7 +93,7 @@ const toOAuthToken = (
     type: 'oauth',
     refresh: tokens.refresh_token,
     access: tokens.access_token,
-    expires: Date.now() + expiresIn * 1000
+    expires: nowMs + expiresIn * 1000
   }
 
   if (accountId === undefined) {
@@ -274,8 +275,9 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           'token exchange'
         )
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token exchange')
+        const nowMs = yield* Clock.currentTimeMillis
 
-        return toOAuthToken(tokens, undefined)
+        return toOAuthToken(tokens, undefined, nowMs)
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.exchangeDeviceToken'))
 
     const refreshToken = (refreshTokenValue: string, currentAccountId: string | undefined) =>
@@ -290,12 +292,16 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           'token refresh'
         )
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token refresh')
+        const nowMs = yield* Clock.currentTimeMillis
 
-        return toOAuthToken(tokens, currentAccountId)
+        return toOAuthToken(tokens, currentAccountId, nowMs)
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.refreshToken'))
 
     const needsRefresh = (token: OpenAiCodexOAuthToken) =>
-      !token.access || token.expires < Date.now() + OPENAI_CODEX_REFRESH_BUFFER_MS
+      Effect.gen(function* () {
+        const nowMs = yield* Clock.currentTimeMillis
+        return !token.access || token.expires < nowMs + OPENAI_CODEX_REFRESH_BUFFER_MS
+      })
 
     return {
       startDeviceFlow,

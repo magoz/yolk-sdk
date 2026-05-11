@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@effect/vitest'
 import { AgentInputUsage, AgentOutputUsage, AgentUsage, ImagePart, TextPart } from '@yolk/protocol'
+import { agentTextContextBudget, contextBudgetStatus } from '@/lib/agents/context-budget'
 import {
+  formatContextPercent,
   formatTokenCount,
   formatUsageDetail,
   formatUsageSummary,
@@ -66,5 +68,18 @@ describe('agent playground', () => {
     expect(totalAgentUsageTokens(usage)).toBe(1_650)
     expect(formatUsageSummary(usage)).toBe('1.7k tokens')
     expect(formatUsageDetail(usage)).toBe('in 1.2k · out 450 · reasoning 50 · cached 300')
+  })
+
+  it('formats context budget progress', () => {
+    expect(
+      formatContextPercent(agentTextContextBudget.warningInputTokens, agentTextContextBudget)
+    ).toBe('80%')
+    expect(contextBudgetStatus(1, agentTextContextBudget)).toBe('normal')
+    expect(
+      contextBudgetStatus(agentTextContextBudget.warningInputTokens, agentTextContextBudget)
+    ).toBe('warning')
+    expect(
+      contextBudgetStatus(agentTextContextBudget.compactionInputTokens, agentTextContextBudget)
+    ).toBe('compact')
   })
 })

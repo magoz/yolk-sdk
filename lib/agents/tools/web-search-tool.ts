@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent-loop'
@@ -48,6 +48,12 @@ export type McpWebSearchRequest = {
 
 export type WebSearchDependencies = {
   readonly request: (input: McpWebSearchRequest) => Effect.Effect<string, ToolError>
+}
+
+type WebSearchConfig = {
+  readonly providerOverride: WebSearchProvider | undefined
+  readonly exaApiKey: string | undefined
+  readonly parallelApiKey: string | undefined
 }
 
 const McpToolCallRequest = Schema.Struct({
@@ -175,34 +181,53 @@ const normalizeWebSearchParams = (params: WebSearchParams) =>
     }
   })
 
-const providerOverride = (): WebSearchProvider | undefined => {
-  const provider = process.env.YOLK_WEBSEARCH_PROVIDER
+const optionString = (option: Option.Option<string>) =>
+  Option.isSome(option) && option.value.length > 0 ? option.value : undefined
 
-  return provider === 'exa' || provider === 'parallel' ? provider : undefined
-}
+const providerOverrideFromString = (provider: string | undefined): WebSearchProvider | undefined =>
+  provider === 'exa' || provider === 'parallel' ? provider : undefined
+
+const loadWebSearchConfig: Effect.Effect<WebSearchConfig, ToolError> = Effect.gen(function* () {
+  const providerOption = yield* Config.option(Config.string('YOLK_WEBSEARCH_PROVIDER'))
+  const exaApiKeyOption = yield* Config.option(Config.string('EXA_API_KEY'))
+  const parallelApiKeyOption = yield* Config.option(Config.string('PARALLEL_API_KEY'))
+  const provider = optionString(providerOption)
+  const exaApiKey = optionString(exaApiKeyOption)
+  const parallelApiKey = optionString(parallelApiKeyOption)
+
+  return {
+    providerOverride: providerOverrideFromString(provider),
+    exaApiKey,
+    parallelApiKey
+  }
+}).pipe(
+  Effect.mapError(error =>
+    makeToolError(`Invalid web search environment: ${unknownToMessage(error)}`, 'validation')
+  )
+)
 
 const queryChecksum = (query: string) =>
   Array.from(query).reduce((sum, character) => sum + (character.codePointAt(0) ?? 0), 0)
 
 export const selectWebSearchProvider = (
   query: string,
-  override: WebSearchProvider | undefined = providerOverride()
+  override: WebSearchProvider | undefined = undefined
 ) => override ?? (queryChecksum(query) % 2 === 0 ? 'exa' : 'parallel')
 
 const alternateProvider = (provider: WebSearchProvider): WebSearchProvider =>
   provider === 'exa' ? 'parallel' : 'exa'
 
-const exaUrl = () =>
-  process.env.EXA_API_KEY === undefined
+const exaUrl = (config: WebSearchConfig) =>
+  config.exaApiKey === undefined
     ? 'https://mcp.exa.ai/mcp'
-    : `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
+    : `https://mcp.exa.ai/mcp?exaApiKey=${encodeURIComponent(config.exaApiKey)}`
 
-const parallelHeaders = () => {
+const parallelHeaders = (config: WebSearchConfig) => {
   const headers = { 'user-agent': 'YolkAgent/0.1 (+https://yolk.ai)' }
 
-  return process.env.PARALLEL_API_KEY === undefined
+  return config.parallelApiKey === undefined
     ? headers
-    : { ...headers, authorization: `Bearer ${process.env.PARALLEL_API_KEY}` }
+    : { ...headers, authorization: `Bearer ${config.parallelApiKey}` }
 }
 
 const exaArguments = (params: NormalizedWebSearchParams) => ({
@@ -220,7 +245,8 @@ const parallelArguments = (params: NormalizedWebSearchParams) => ({
 
 const mcpRequestForProvider = (
   provider: WebSearchProvider,
-  params: NormalizedWebSearchParams
+  params: NormalizedWebSearchParams,
+  config: WebSearchConfig
 ): McpWebSearchRequest =>
   provider === 'parallel'
     ? {
@@ -228,12 +254,12 @@ const mcpRequestForProvider = (
         url: 'https://search.parallel.ai/mcp',
         tool: 'web_search',
         arguments: parallelArguments(params),
-        headers: parallelHeaders(),
+        headers: parallelHeaders(config),
         timeoutMs: searchTimeoutMs
       }
     : {
         provider,
-        url: exaUrl(),
+        url: exaUrl(config),
         tool: 'web_search_exa',
         arguments: exaArguments(params),
         headers: {},
@@ -320,10 +346,11 @@ export const parseMcpWebSearchResponse = (body: string) =>
 const callSearchProvider = (
   deps: WebSearchDependencies,
   provider: WebSearchProvider,
-  params: NormalizedWebSearchParams
+  params: NormalizedWebSearchParams,
+  config: WebSearchConfig
 ) =>
   Effect.gen(function* () {
-    const response = yield* deps.request(mcpRequestForProvider(provider, params))
+    const response = yield* deps.request(mcpRequestForProvider(provider, params, config))
     const output = yield* parseMcpWebSearchResponse(response)
 
     return {
@@ -339,12 +366,13 @@ const runSearchWithFallback = (
   deps: WebSearchDependencies,
   provider: WebSearchProvider,
   params: NormalizedWebSearchParams,
-  override: WebSearchProvider | undefined
+  override: WebSearchProvider | undefined,
+  config: WebSearchConfig
 ) =>
-  callSearchProvider(deps, provider, params).pipe(
+  callSearchProvider(deps, provider, params, config).pipe(
     Effect.catchTag('ToolError', error =>
       override === undefined && shouldFallback(error)
-        ? callSearchProvider(deps, alternateProvider(provider), params)
+        ? callSearchProvider(deps, alternateProvider(provider), params, config)
         : Effect.fail(error)
     )
   )
@@ -361,9 +389,10 @@ export const searchWeb = (
 ) =>
   Effect.gen(function* () {
     const normalized = yield* normalizeWebSearchParams(params)
-    const override = providerOverride()
+    const config = yield* loadWebSearchConfig
+    const override = config.providerOverride
     const provider = selectWebSearchProvider(normalized.query, override)
-    const result = yield* runSearchWithFallback(deps, provider, normalized, override)
+    const result = yield* runSearchWithFallback(deps, provider, normalized, override, config)
 
     return formatToolOutput({
       provider: result.provider,

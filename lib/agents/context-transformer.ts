@@ -9,10 +9,10 @@ import {
   type Content
 } from '@yolk/protocol'
 import { ContextTransformer, type ContextTransformResult } from '@yolk/agent-loop'
+import { agentTextContextBudget } from './context-budget'
 
 export const contextCompactionStrategy = 'window-summary-v1'
 
-const compactionTokenThreshold = 24_000
 const exactTailMessageCount = 16
 const messageOverheadTokens = 6
 const mediaPartApproxTokens = 512
@@ -110,7 +110,7 @@ export const compactAgentMessages = (
 ): ContextTransformResult => {
   const beforeTokens = estimateAgentMessagesTokens(messages)
 
-  if (messages.length <= 2 || beforeTokens <= compactionTokenThreshold) {
+  if (messages.length <= 2 || beforeTokens < agentTextContextBudget.compactionInputTokens) {
     return { messages, events: [] }
   }
 
