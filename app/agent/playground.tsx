@@ -3,6 +3,13 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Option } from 'effect'
 import { UserMessage, type AgentEvent } from '@yolk/protocol'
+import {
+  buildAgentChatItems,
+  getActiveChatToolParts,
+  getAgentChatLiveActivityCount,
+  getCompletedChatToolParts,
+  useAgentChat
+} from '@yolk/react'
 import { agentTextCapabilities, agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
@@ -11,19 +18,12 @@ import {
   maxActivityItems,
   type AgentActivityItem
 } from './agent-activity-model'
-import {
-  getActiveChatToolParts,
-  getAgentChatLiveActivityCount,
-  getCompletedChatToolParts
-} from './agent-chat-core'
 import { AgentComposer } from './agent-composer'
 import { contentFromInput, type ImageAttachment } from './image-attachment-content'
 import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
-import { buildAgentChatItems } from './agent-chat-items'
 import { truncate } from './agent-format'
-import { useAgentChat } from './use-agent-chat'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
 type AgentPlaygroundProps = {

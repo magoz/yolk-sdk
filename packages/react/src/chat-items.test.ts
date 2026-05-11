@@ -7,8 +7,8 @@ import {
   ToolResultMessage,
   UserMessage
 } from '@yolk/protocol'
-import { buildAgentChatMessages, toAgentMessages } from './agent-chat-messages'
-import { buildAgentChatItems } from './agent-chat-items'
+import { buildAgentChatItems } from './chat-items'
+import { buildAgentChatMessages, toAgentMessages } from './chat-messages'
 
 describe('buildAgentChatMessages', () => {
   it('projects protocol transcript into ordered message parts', () => {

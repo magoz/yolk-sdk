@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { ImagePart, TextPart } from '@yolk/protocol'
-import { toAgentMessages, type AgentChatMessage } from './agent-chat-messages'
+import { toAgentMessages, type AgentChatMessage } from './chat-messages'
 
 describe('agent chat messages', () => {
   it('preserves multipart user content for protocol replay', () => {

@@ -17,7 +17,7 @@ import {
   hasAgentChatReasoningSummary,
   initialAgentChatState,
   reduceAgentChatState
-} from './agent-chat-core'
+} from './chat-core'
 
 describe('agent chat core', () => {
   it('submits user messages through the headless reducer', () => {

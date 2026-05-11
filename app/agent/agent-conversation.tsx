@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
-import type { AgentChatItem, ToolDuration, ToolRunState } from './agent-chat-items'
+import type { AgentChatItem, ToolDuration, ToolRunState } from '@yolk/react'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
 
