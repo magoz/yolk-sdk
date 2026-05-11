@@ -52,7 +52,12 @@ export type RuntimeRequest =
   | PersistentTranscriptRuntimeRequest
   | InputRuntimeRequest
 
-type RuntimeRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
+type RuntimeRequirements =
+  | ContextTransformer
+  | LLMProvider
+  | LoopConfig
+  | SessionStore
+  | ToolExecutor
 type RuntimeErrorUnion = RuntimeError | AgentLoopError
 
 const extractNewMessages = (event: AgentEvent) => (event._tag === 'AgentEnd' ? event.messages : [])
@@ -130,18 +135,10 @@ const makeInputRuntimeStream = (request: InputRuntimeRequest, config: RuntimeCon
     })
   )
 
-export function runRuntime(
-  request: TranscriptRuntimeRequest,
-  config: RuntimeConfig
-): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>
-export function runRuntime(
-  request: PersistentTranscriptRuntimeRequest | InputRuntimeRequest,
-  config: RuntimeConfig
-): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements | SessionStore>
-export function runRuntime(
+export const runRuntime = (
   request: RuntimeRequest,
   config: RuntimeConfig
-): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements | SessionStore> {
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements> => {
   switch (request._tag) {
     case 'Transcript':
       if (request.persist === true) {

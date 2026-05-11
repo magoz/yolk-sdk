@@ -10,7 +10,8 @@ import {
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
 } from '@yolk/protocol'
-import { run, type AgentLoopError } from '@yolk/agent-loop'
+import type { AgentLoopError } from '@yolk/agent-loop'
+import { runRuntime, type RuntimeError } from '@yolk/agent-runtime'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',
@@ -46,7 +47,7 @@ const textEncoder = new TextEncoder()
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
-type AgentStreamError = AgentLoopError
+type AgentStreamError = AgentLoopError | RuntimeError
 
 const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
   switch (error._tag) {
@@ -58,6 +59,8 @@ const toAgentErrorCode = (error: AgentStreamError): AgentErrorCode => {
       return 'aborted'
     case 'FauxExhaustedError':
       return 'provider_error'
+    case 'SessionNotFoundError':
+      return 'session_not_found'
   }
 }
 
@@ -69,6 +72,8 @@ const toAgentErrorMessage = (error: AgentStreamError) => {
       return error.message
     case 'AbortError':
       return `Agent aborted: ${error.reason}`
+    case 'SessionNotFoundError':
+      return `Session not found: ${error.sessionId}`
   }
 }
 
@@ -79,6 +84,7 @@ const isAgentErrorRetryable = (error: AgentStreamError) => {
     case 'ToolError':
     case 'AbortError':
     case 'FauxExhaustedError':
+    case 'SessionNotFoundError':
       return false
   }
 }
@@ -96,7 +102,8 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
       LLMError: error => Stream.make(toAgentErrorEvent(error)),
       ToolError: error => Stream.make(toAgentErrorEvent(error)),
       AbortError: error => Stream.make(toAgentErrorEvent(error)),
-      FauxExhaustedError: error => Stream.make(toAgentErrorEvent(error))
+      FauxExhaustedError: error => Stream.make(toAgentErrorEvent(error)),
+      SessionNotFoundError: error => Stream.make(toAgentErrorEvent(error))
     })
   )
 
@@ -113,14 +120,21 @@ const encodeNdjsonEvent = (event: AgentEvent) =>
 
 export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRouteConfig) =>
   Effect.gen(function* () {
-    const body = yield* run({
-      messages: input.messages,
-      systemPrompt: config.systemPrompt,
-      tools: config.tools,
-      reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
-      capabilities: config.capabilities,
-      model: config.model
-    }).pipe(
+    const body = yield* runRuntime(
+      {
+        _tag: 'Transcript',
+        sessionId: input.sessionId,
+        messages: input.messages,
+        persist: false
+      },
+      {
+        systemPrompt: config.systemPrompt,
+        tools: config.tools,
+        reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
+        capabilities: config.capabilities,
+        model: config.model
+      }
+    ).pipe(
       recoverAgentStreamErrors,
       Stream.mapEffect(encodeNdjsonEvent),
       Stream.toReadableStreamEffect()

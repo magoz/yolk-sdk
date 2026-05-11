@@ -52,7 +52,7 @@ mcp-server -> mcp-client + protocol + Effect
 ## Reasoning
 
 - `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
-- `agent-runtime` threads `reasoningEffort` and `capabilities`; text `/api/agent` still calls agent-loop through app route helpers.
+- `agent-runtime` threads `reasoningEffort` and `capabilities`; text `/api/agent` uses transcript mode with app-owned HTTP/auth/tool/provider wiring.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
 
