@@ -8,6 +8,7 @@ Next.js 16 App Router app with Effect-TS services, Drizzle ORM (PostgreSQL/Neon)
 - **Run `pnpm tsc` before finishing** - ensure types pass
 - **Run `pnpm lint` to check for errors** - fix any issues
 - **Run `pnpm packages:check` when touching `packages/*`** - verify package types
+- **Run `pnpm cloudflare:check` when touching `cloudflare/*`** - verify Cloudflare app types
 - **Run `pnpm test:run` to verify tests pass** - fix failures before committing
 
 ### Effect-TS Rules (Enforced by ESLint)
@@ -51,6 +52,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Voice agent        | app/lib          | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | app/lib          | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
+| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object smoke deploy running `@yolk/agent-runtime` with faux provider               |
 
 ## WHERE TO LOOK
 
@@ -76,6 +78,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; scope via `resolveAgentTools`             |
 | Agent auth actions   | `lib/core/agent/*-action.ts`                   | OpenAI Codex connect/disconnect actions                      |
 | Reusable agent stack | `packages/AGENTS.md`                           | Package boundaries and naming                                |
+| Cloudflare agent app | `cloudflare/agent/AGENTS.md`                   | Alchemy Worker/DO deployment and Cloudflare-specific adapter |
 | Local lint rule      | `eslint-local-rules/`                          | See `eslint-local-rules/AGENTS.md`                           |
 | Agent loop design    | `AGENT_LOOP.md`                                | Stateless loop details and decisions                         |
 
@@ -107,6 +110,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`           | Converts chat parts to protocol transcript             |
 | `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`             | Resolves configured MCP server tools                   |
 | `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`             | Creates tool-only MCP JSON-RPC server                  |
+| `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                   | Cloudflare Worker exposing `/health` + WebSocket route |
+| `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`            | Durable Object running agent runtime + DO persistence  |
 
 ## REFERENCE REPOS
 
@@ -173,6 +178,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **Root Vitest may discover package tests** - `pnpm test:run` then also runs package tests; update scripts/docs together if this changes
 - **`packages/harness/` is stale/empty** - not a real workspace package unless a `package.json` is added
 - **`CLAUDE.md` is a pointer** - `AGENTS.md` is the canonical project knowledge base
+- **Alchemy source style uses `.ts` relative imports** - keep explicit extensions for source-exported packages and Cloudflare app code
 
 ## SUBDIRECTORY DOCS
 
@@ -184,6 +190,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
+- `cloudflare/agent/AGENTS.md` - Cloudflare Worker/Durable Object agent app
 - `components/ui/AGENTS.md` - UI component install sources and customizations
 - `e2e/AGENTS.md` - E2E test patterns, locator priority, streaming guards, auth cookies
 - `eslint-local-rules/AGENTS.md` - Custom ESLint rule conventions
