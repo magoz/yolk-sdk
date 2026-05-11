@@ -25,7 +25,7 @@ Hardcoded in `app/api/agent/route.ts`:
 | --------------------- | ------ | ----------------- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex text provider is text-only; image/audio user input is rejected.
+Provider is Codex OAuth, model is `gpt-5.4`. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex provider accepts text+image user input; audio is rejected by capabilities.
 
 Reasoning:
 
@@ -105,6 +105,7 @@ Codex backend quirks:
 - Do not send `max_output_tokens`
 - Send `originator: opencode`
 - Send `ChatGPT-Account-Id` when token has account id
+- User `ImagePart` maps to Responses content `{ type: 'input_image', image_url: 'data:<mime>;base64,<data>' }`
 - Response may be SSE even with `content-type: text/plain`; detect by raw `event:`/`data:` body
 - Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
 - Tool calls may arrive before completion as `response.output_item.done` with `item.type = 'function_call'`; parse immediately and tolerate empty final `response.completed`

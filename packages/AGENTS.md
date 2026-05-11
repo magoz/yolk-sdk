@@ -49,6 +49,13 @@ app -> client -> protocol + Effect
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
 
+## Content + Capabilities
+
+- `Content = string | ContentPart[]`; parts currently `Text`, `Image`, `Audio`.
+- Use protocol helpers (`contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`) instead of app-local duplication.
+- `AgentModelCapabilities` is protocol-only; app/provider config chooses text-only vs text+image and agent-loop rejects unsupported input before provider calls.
+- Provider adapters map protocol content to provider-specific request parts; packages must not import provider SDKs.
+
 ## Tool Registry
 
 - Host apps define `ToolModule<Context>` and `ToolRegistration<Context>`.

@@ -30,7 +30,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Agent UI
 
-- `/agent` is the unified text + mic page; `/agent/voice` is legacy redirect only.
+- `/agent` is the unified text+image + mic page; `/agent/voice` is legacy redirect only.
 - See `app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.
 

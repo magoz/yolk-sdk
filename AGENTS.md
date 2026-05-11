@@ -47,7 +47,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry        | OpenTelemetry spans + Sentry error tracking                                                                             |
 | UI components      | shadcn/ui        | Base UI primitives (not Radix), see `components/ui/`                                                                    |
 | Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client                                                |
-| Text agent         | app/lib          | `/agent` + `/api/agent`; parts-native chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                           |
+| Text agent         | app/lib          | `/agent` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                             |
 | Voice agent        | app/lib          | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | app/lib          | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
