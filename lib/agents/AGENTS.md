@@ -4,7 +4,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- Unified `/agent` UI with text input and mic voice mode
+- Unified `/agent` UI with text+image input and mic voice mode
 - `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
 - Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search

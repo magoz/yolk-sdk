@@ -8,7 +8,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | ------------- | ---------------------------------------- |
 | `page.tsx`    | Public home page                         |
 | `(auth)/`     | Login, OTP, logout, auth error UI        |
-| `agent/`      | Text + voice agent playground UI         |
+| `agent/`      | Text+image + voice agent playground UI   |
 | `api/`        | HTTP boundaries; see `app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
 

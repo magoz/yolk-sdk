@@ -10,8 +10,8 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - `agent-chat-messages.ts` owns `AgentChatMessage`/`AgentChatPart`, AgentEvent → parts reduction, and `toAgentMessages()` protocol replay.
 - `agent-chat-items.ts` projects `AgentChatMessage[]` to `AgentChatItem[]`; test every new item/status in `agent-chat-items.test.ts`.
 - `agent-conversation.tsx` renders `AgentChatItem[]`; no transport or protocol mutation.
-- `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone, preview/remove.
-- `image-attachment-content.ts` maps composer text+image state to protocol `Content`; test it without importing full playground.
+- `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
+- `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
 - `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/status badges.
 - `agent-activity-model.ts` maps events to activity rows; `agent-activity.tsx` renders them.
@@ -32,7 +32,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 ## UX Rules
 
 - Textarea stays focused and enabled; submit is disabled while text run or voice mode is active.
-- Image attach supports picker + drag/drop; validate MIME/size before protocol conversion.
+- Image attach supports picker, drag/drop, and clipboard paste; max 4 images; downscale/compress before protocol conversion.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
 - Show provider reasoning only (`LLMReasoningDelta` / `Assistant.reasoning`); never invent reasoning.
