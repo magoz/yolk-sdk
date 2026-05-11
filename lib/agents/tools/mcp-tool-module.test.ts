@@ -1,5 +1,6 @@
 import { ConfigProvider, Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk/protocol'
 import { join } from 'node:path'
 import { resolveAgentTools } from './registry'
 
@@ -41,6 +42,25 @@ describe('MCP tool module', () => {
 
         expect(textTools.tools.map(tool => tool.name)).toContain('local_echo')
         expect(voiceTools.tools.map(tool => tool.name)).not.toContain('local_echo')
+      })
+    )
+  )
+
+  it.effect('executes configured MCP tools through the registry', () =>
+    withMcpConfig(
+      Effect.gen(function* () {
+        const textTools = yield* resolveAgentTools({
+          surface: 'text',
+          route: '/agent',
+          userId: 'user_1'
+        })
+
+        const result = yield* textTools.execute(
+          ToolCall.make({ id: 'call_1', name: 'local_echo', params: { text: 'hello' } })
+        )
+
+        expect(result.toolCallId).toBe('call_1')
+        expect(result.content).toBe('local result')
       })
     )
   )
