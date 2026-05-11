@@ -53,7 +53,7 @@ Users configure MCP servers for the text agent. When a configured MCP server con
 
 When this PRD is complete, the following will be true:
 
-- [x] A domain-free `@yolk/mcp` package exists.
+- [x] A domain-free `@yolk/mcp-client` package exists.
 - [x] Remote MCP over HTTP POST works for `initialize`, `tools/list`, and `tools/call`.
 - [x] Remote SSE responses are parsed for JSON-RPC messages.
 - [x] Local stdio MCP works with spawned command processes.
@@ -261,9 +261,9 @@ tools/call
 
 ## Documentation Requirements
 
-- [ ] `packages/AGENTS.md` documents `@yolk/mcp` boundaries.
+- [ ] `packages/AGENTS.md` documents `@yolk/mcp-client` boundaries.
 - [ ] `lib/agents/AGENTS.md` documents MCP config and security defaults.
-- [ ] Root `AGENTS.md` adds `@yolk/mcp` to capabilities/code map if needed.
+- [ ] Root `AGENTS.md` adds `@yolk/mcp-client` to capabilities/code map if needed.
 - [x] Package README or AGENTS note links `.repos/mcp-sdk` protocol reference.
 
 ---
