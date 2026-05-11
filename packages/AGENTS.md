@@ -133,11 +133,18 @@ mcp-server -> mcp + protocol + Effect
 - Keep package dependencies explicit in each package manifest even when versions come from catalogs.
 - Internal `@yolk/*` dependencies use `workspace:^`; pnpm links locally and publishes semver ranges later.
 
+## Versioning Plan
+
+- Before publishing, use Changesets fixed/lockstep versioning for all `@yolk/*` packages, mirroring Effect's `fixed` group model.
+- Bump all public `@yolk/*` package versions together, even when only one package changed.
+- Keep `updateInternalDependencies: "patch"` so internal dependency ranges stay compatible after releases.
+- Prefer compatibility simplicity over per-package version precision; protocol/runtime/client packages are tightly coupled.
+
 ## Package Publishing TODOs
 
 - Move publishable package exports from `src` to `dist` before npm publishing.
 - Add `peerDependencies` for host-owned runtime singletons like `effect`.
-- Add Changesets for package versioning/release notes.
+- Add Changesets with fixed group for `@yolk/*` package versioning/release notes.
 - Add package metadata: license, repository directory, engines, publishConfig.
 - Add `publint` or equivalent package export validation.
 - Add package READMEs before public npm release.
