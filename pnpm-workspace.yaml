@@ -1,5 +1,14 @@
 packages:
   - 'packages/*'
+catalog:
+  '@effect/language-service': ^0.77.0
+  '@effect/opentelemetry': 4.0.0-beta.59
+  '@effect/platform-node': 4.0.0-beta.65
+  '@effect/sql-pg': 4.0.0-beta.59
+  '@effect/vitest': 4.0.0-beta.65
+  effect: 4.0.0-beta.65
+  typescript: ^5.9.3
+  vitest: ^4.0.17
 allowBuilds:
   '@sentry/cli': true
   core-js: true

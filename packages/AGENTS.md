@@ -124,3 +124,22 @@ mcp-server -> mcp + protocol + Effect
 - Prefer a future `./testing` subpath for additional test helpers; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
+
+## Workspace Setup
+
+- Shared dependency pins live in `pnpm-workspace.yaml` catalogs; use `catalog:` for Effect-family packages, TypeScript, and Vitest.
+- Root `packageManager` pins pnpm for reproducible installs.
+- Package tsconfigs extend `packages/tsconfig.base.json`; keep package-local configs to `outDir`, `rootDir`, and include/exclude overrides.
+- Keep package dependencies explicit in each package manifest even when versions come from catalogs.
+
+## Package Publishing TODOs
+
+- Move publishable package exports from `src` to `dist` before npm publishing.
+- Add `peerDependencies` for host-owned runtime singletons like `effect`.
+- Change internal package deps from `workspace:*` to `workspace:^` before publishing.
+- Move test helpers to explicit testing subpath exports.
+- Add Changesets for package versioning/release notes.
+- Add package metadata: license, repository directory, engines, publishConfig.
+- Add `publint` or equivalent package export validation.
+- Add package READMEs before public npm release.
+- Curate explicit public exports instead of broad root `export *`.

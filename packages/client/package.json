@@ -17,6 +17,6 @@
   },
   "dependencies": {
     "@yolk/protocol": "workspace:*",
-    "effect": "beta"
+    "effect": "catalog:"
   }
 }

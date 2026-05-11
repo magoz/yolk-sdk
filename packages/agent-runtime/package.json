@@ -18,6 +18,6 @@
   "dependencies": {
     "@yolk/agent-loop": "workspace:*",
     "@yolk/protocol": "workspace:*",
-    "effect": "beta"
+    "effect": "catalog:"
   }
 }

@@ -18,6 +18,6 @@
   "dependencies": {
     "@yolk/mcp": "workspace:*",
     "@yolk/protocol": "workspace:*",
-    "effect": "4.0.0-beta.64"
+    "effect": "catalog:"
   }
 }

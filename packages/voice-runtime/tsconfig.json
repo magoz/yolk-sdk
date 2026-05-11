@@ -1,19 +1,8 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "declaration": true,
-    "declarationMap": true,
     "outDir": "dist",
-    "rootDir": "src",
-    "noEmit": false,
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "resolveJsonModule": true
+    "rootDir": "src"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules"]

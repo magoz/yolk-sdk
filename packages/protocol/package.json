@@ -16,6 +16,6 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "effect": "beta"
+    "effect": "catalog:"
   }
 }
