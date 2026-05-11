@@ -46,7 +46,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email            | Transactional email via Resend                                                                                          |
 | Observability      | Telemetry        | OpenTelemetry spans + Sentry error tracking                                                                             |
 | UI components      | shadcn/ui        | Base UI primitives (not Radix), see `components/ui/`                                                                    |
-| Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, voice-runtime, client                                                |
+| Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks                |
 | Text agent         | app/lib          | `/agent` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                             |
 | Voice agent        | app/lib          | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | app/lib          | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
@@ -103,8 +103,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`     | Session load/save orchestration over agent loop        |
 | `AgentTranscript`                | Type     | `packages/client/src/state.ts`                  | Non-empty client-owned protocol transcript             |
 | `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side tool lifecycle with call/result/timing     |
-| `AgentChatMessage`               | Type     | `app/agent/agent-chat-messages.ts`              | App-local chat parts source of truth                   |
-| `toAgentMessages`                | Function | `app/agent/agent-chat-messages.ts`              | Converts chat parts to protocol transcript             |
+| `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`           | Headless React chat parts source of truth              |
+| `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`           | Converts chat parts to protocol transcript             |
+| `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`             | Resolves configured MCP server tools                   |
+| `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`             | Creates tool-only MCP JSON-RPC server                  |
 
 ## REFERENCE REPOS
 
