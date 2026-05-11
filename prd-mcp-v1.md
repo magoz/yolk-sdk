@@ -61,8 +61,8 @@ When this PRD is complete, the following will be true:
 - [ ] MCP tool results convert to `ToolResult` text content.
 - [ ] MCP tools plug into `@yolk/tool-registry` through app adapter code.
 - [ ] Local MCP is denied unless explicitly enabled.
-- [ ] Tests cover remote, local, conversion, errors, and disabled-local policy.
-- [ ] Docs capture config shape, security limits, and non-goals.
+- [x] Tests cover remote, local, conversion, errors, and disabled-local policy.
+- [x] Docs capture config shape, security limits, and non-goals.
 
 ---
 
@@ -101,6 +101,14 @@ When this PRD is complete, the following will be true:
 - [ ] Client calls tools via `tools/call`.
 - [ ] JSON and SSE remote responses are supported.
 - [ ] HTTP errors, JSON-RPC errors, malformed responses, and timeouts are typed failures.
+
+### Feature: MCP Server Package
+
+- [x] Tool-only `@yolk/mcp-server` package exists.
+- [x] Server handles `initialize`, `tools/list`, and `tools/call`.
+- [x] Server supports newline JSON-RPC for stdio fixtures.
+- [x] Server supports HTTP POST via `handleHttpRequest`.
+- [x] Tests cover unknown methods, unknown tools, invalid params, tool failures, and non-POST requests.
 
 ### Feature: Local stdio MCP
 
@@ -256,7 +264,7 @@ tools/call
 - [ ] `packages/AGENTS.md` documents `@yolk/mcp` boundaries.
 - [ ] `lib/agents/AGENTS.md` documents MCP config and security defaults.
 - [ ] Root `AGENTS.md` adds `@yolk/mcp` to capabilities/code map if needed.
-- [ ] Package README or AGENTS note links `.repos/mcp-sdk` protocol reference.
+- [x] Package README or AGENTS note links `.repos/mcp-sdk` protocol reference.
 
 ---
 

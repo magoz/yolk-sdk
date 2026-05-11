@@ -13,7 +13,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
 | `@yolk/mcp`           | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
-| `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio runner      | `@yolk/protocol`, `@yolk/mcp`, Effect        |
+| `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/protocol`, `@yolk/mcp`, Effect        |
 
 ## Dependency Rule
 
@@ -75,6 +75,7 @@ mcp-server -> mcp + protocol + Effect
 - `@yolk/mcp-server` is a reusable tool-only MCP server; keep it generic for reuse across projects.
 - Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
 - MCP server v1 supports `initialize`, `tools/list`, and `tools/call`; no resources, prompts, OAuth, or app auth.
+- MCP server exposes both newline JSON-RPC (`handleLine`/stdio) and HTTP POST (`handleHttpRequest`) entrypoints.
 - Remote MCP depends on `HttpClient`; package tests inject a fake client, app adapters provide `FetchHttpClient.layer`.
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`.
@@ -83,7 +84,7 @@ mcp-server -> mcp + protocol + Effect
 - Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
 - Prefer local/remote-specific helper APIs in tests (`listLocalMcpServerTools`, `callLocalMcpServerTool`, `listRemoteMcpServerTools`, `callRemoteMcpServerTool`) when the config kind is known; use union helpers at app boundaries.
 - Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE and tiny checked-in stdio fixture servers for local process behavior.
-- Cover protocol/transport error paths: malformed JSON-RPC, JSON-RPC error responses, non-2xx remote responses, local stdio early exit, and policy rejection.
+- Cover protocol/transport error paths: malformed JSON-RPC, JSON-RPC error responses, non-2xx remote responses, local stdio early exit, policy rejection, unknown methods/tools, invalid params, and tool failures.
 - Use Playwright for MCP only when browser-visible `/agent` behavior is under test; avoid it for protocol/client transport coverage.
 
 ## Voice Runtime

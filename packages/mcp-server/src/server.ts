@@ -114,7 +114,32 @@ export type McpServerTool<R = never> = {
 
 export type McpToolServer<R = never> = {
   readonly handleLine: (line: string) => Effect.Effect<Option.Option<string>, McpServerError, R>
+  readonly handleJson: (body: string) => Effect.Effect<string, McpServerError, R>
+  readonly handleHttpRequest: (request: Request) => Effect.Effect<Response, never, R>
 }
+
+const jsonResponse = (body: string, init?: ResponseInit) =>
+  new Response(body, {
+    ...init,
+    headers: {
+      'content-type': 'application/json',
+      ...(init?.headers ?? {})
+    }
+  })
+
+const methodNotAllowedBody = () =>
+  encodeJson(errorResponse(null, -32_600, 'Method not allowed')).pipe(
+    Effect.orElseSucceed(
+      () => '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Method not allowed"}}'
+    )
+  )
+
+const badRequestBody = (message: string) =>
+  encodeJson(errorResponse(null, -32_600, message)).pipe(
+    Effect.orElseSucceed(
+      () => '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Bad request"}}'
+    )
+  )
 
 export const makeMcpToolServer = <R>(input: {
   readonly name: string
@@ -193,5 +218,34 @@ export const makeMcpToolServer = <R>(input: {
       return Option.some(encoded)
     })
 
-  return { handleLine }
+  const handleJson = (body: string) =>
+    Effect.gen(function* () {
+      const response = yield* handleLine(body)
+      if (Option.isNone(response)) {
+        return yield* encodeJson(errorResponse(null, -32_600, 'Notifications have no response'))
+      }
+
+      return response.value
+    })
+
+  const handleHttpRequest = (request: Request) =>
+    Effect.gen(function* () {
+      if (request.method !== 'POST') {
+        const body = yield* methodNotAllowedBody()
+        return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
+      }
+
+      const body = yield* Effect.promise(() => request.text()).pipe(
+        Effect.mapError(error => unknownToMessage(error)),
+        Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
+      )
+
+      const responseBody = yield* handleJson(body).pipe(
+        Effect.catch(error => badRequestBody(unknownToMessage(error)))
+      )
+
+      return jsonResponse(responseBody)
+    })
+
+  return { handleLine, handleJson, handleHttpRequest }
 }
