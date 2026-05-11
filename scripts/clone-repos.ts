@@ -90,6 +90,12 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 'mcp-sdk',
     repo: 'https://github.com/modelcontextprotocol/typescript-sdk.git',
     branch: 'main'
+  },
+  {
+    mode: 'branch',
+    name: 'clanka',
+    repo: 'https://github.com/Effectful-Tech/clanka.git',
+    branch: 'master'
   }
 ]
 

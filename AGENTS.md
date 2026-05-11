@@ -118,9 +118,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `kody`        | `.repos/kody`     | MCP/tool orchestration inspiration                            |
 | `flue`        | `.repos/flue`     | MCP/server-tool integration inspiration                       |
 | `mcp-sdk`     | `.repos/mcp-sdk`  | Model Context Protocol TypeScript SDK/protocol reference      |
+| `clanka`      | `.repos/clanka`   | Effect-native agent/tools; Codex auth, MCP, semantic search   |
 
 - Repos are shallow clones, gitignored. Run `pnpm clone-repos` to fetch.
-- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai`/`kody`/`flue`/`mcp-sdk` track branches.
+- `effect` version pinned to package.json; `pi`/`opencode`/`t3code`/`ai`/`kody`/`flue`/`mcp-sdk`/`clanka` track branches.
 - Keep `.repos/**` out of app typecheck/lint/test scope.
 
 ## ANTI-PATTERNS (THIS PROJECT)
