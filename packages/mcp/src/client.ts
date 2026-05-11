@@ -1,8 +1,8 @@
-import { Effect, Option } from 'effect'
+import { Effect, Option, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
+import { NodeServices } from '@effect/platform-node'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
-import { spawn } from 'node:child_process'
-import { createInterface } from 'node:readline'
+import { ChildProcess } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk/protocol'
 import type { McpClientInfo, McpSecurityPolicy, McpServerConfig } from './config'
 import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config'
@@ -81,7 +81,11 @@ const validateRemoteUrl = (
       return url.toString()
     }
 
-    if (policy.allowDevHttpLocalhost && url.protocol === 'http:' && url.hostname === 'localhost') {
+    if (
+      policy.allowDevHttpLocalhost &&
+      url.protocol === 'http:' &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+    ) {
       return url.toString()
     }
 
@@ -129,6 +133,28 @@ const unwrapResponse = (server: string, response: JsonRpcResponse) =>
   'error' in response
     ? Effect.fail(jsonRpcErrorToMcpError(server, response.error))
     : Effect.succeed(response.result)
+
+const encodeJsonRpcMessage = (server: string, message: JsonRpcRequest | JsonRpcNotification) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(message).pipe(
+    Effect.mapError(
+      error =>
+        new McpError({
+          server,
+          message: `Could not encode MCP JSON-RPC message: ${unknownToMessage(error)}`,
+          cause: 'validation'
+        })
+    )
+  )
+
+const mapUnknownToMcpError =
+  (server: string, message: string, cause: McpError['cause']) => (error: unknown) =>
+    error instanceof McpError
+      ? error
+      : new McpError({
+          server,
+          message: `${message}: ${unknownToMessage(error)}`,
+          cause
+        })
 
 const requestRemote = (
   config: Extract<McpServerConfig, { type: 'remote' }>,
@@ -234,9 +260,64 @@ const requestRemoteSession = (
     return yield* requestRemote(config, request, options)
   })
 
-type PendingRequest = {
-  readonly resolve: (response: JsonRpcResponse) => void
-  readonly reject: (error: McpError) => void
+type EncodedLocalMessage = {
+  readonly message: JsonRpcRequest | JsonRpcNotification
+  readonly line: string
+}
+
+const requestLocalEncoded = (
+  config: Extract<McpServerConfig, { type: 'local' }>,
+  messages: ReadonlyArray<EncodedLocalMessage>,
+  expectedResponses: number,
+  options?: McpClientOptions
+) => {
+  const policy = securityPolicy(options)
+  if (!policy.allowLocalServers) {
+    return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
+  }
+
+  const command = config.command[0]
+  if (command === undefined) {
+    return fail(config.name, 'Local MCP command must not be empty', 'validation')
+  }
+
+  return Effect.gen(function* () {
+    const stdin = Stream.fromIterable(messages.map(message => `${message.line}\n`)).pipe(
+      Stream.encodeText
+    )
+    const child = yield* ChildProcess.make(command, config.command.slice(1), {
+      env: { NODE_ENV: 'production', ...(config.environment ?? {}) },
+      extendEnv: false,
+      stdin: { stream: stdin, endOnDone: true },
+      stderr: 'ignore'
+    })
+    const lines = yield* child.stdout.pipe(
+      Stream.decodeText,
+      Stream.splitLines,
+      Stream.filter(line => line.length > 0),
+      Stream.take(expectedResponses),
+      Stream.runCollect
+    )
+    const responses = yield* Effect.forEach(lines, line =>
+      decodeJsonRpcResponseFromJson(config.name, line).pipe(
+        Effect.mapError(mapUnknownToMcpError(config.name, 'Invalid local MCP response', 'protocol'))
+      )
+    )
+
+    if (responses.length < expectedResponses) {
+      return yield* fail(config.name, 'Local MCP did not return expected response', 'protocol')
+    }
+
+    return responses
+  }).pipe(
+    Effect.scoped,
+    Effect.timeoutOrElse({
+      duration: timeoutMs(options),
+      orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
+    }),
+    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport')),
+    Effect.provide(NodeServices.layer)
+  )
 }
 
 const requestLocal = (
@@ -245,103 +326,15 @@ const requestLocal = (
   expectedResponses: number,
   options?: McpClientOptions
 ) =>
-  Effect.callback<JsonRpcResponse[], McpError>(resume => {
-    const policy = securityPolicy(options)
-    if (!policy.allowLocalServers) {
-      resume(fail(config.name, 'Local MCP servers are disabled by policy', 'security'))
-      return Effect.void
-    }
-
-    const command = config.command[0]
-    if (command === undefined) {
-      resume(fail(config.name, 'Local MCP command must not be empty', 'validation'))
-      return Effect.void
-    }
-    const args = config.command.slice(1)
-    const child = spawn(command, args, {
-      env: { NODE_ENV: 'production', ...(config.environment ?? {}) },
-      stdio: 'pipe'
-    })
-    const pending = new Map<string | number, PendingRequest>()
-    const responses: JsonRpcResponse[] = []
-    const timeout = setTimeout(() => {
-      closeChild(child)
-      resume(fail(config.name, 'Local MCP request timed out', 'timeout'))
-    }, timeoutMs(options))
-
-    const finish = () => {
-      if (responses.length >= expectedResponses) {
-        clearTimeout(timeout)
-        closeChild(child)
-        resume(Effect.succeed(responses))
-      }
-    }
-
-    child.on('error', error => {
-      clearTimeout(timeout)
-      resume(fail(config.name, `Local MCP process failed: ${unknownToMessage(error)}`, 'transport'))
-    })
-
-    child.stderr.on('data', () => {
-      // Intentionally discard stderr; it can contain secrets from local servers.
-    })
-
-    const lines = createInterface({ input: child.stdout })
-    lines.on('line', line => {
-      Effect.runPromise(decodeJsonRpcResponseFromJson(config.name, line)).then(
-        response => {
-          const requestId = response.id
-          if (requestId !== null) {
-            const match = pending.get(requestId)
-            if (match !== undefined) {
-              pending.delete(requestId)
-              match.resolve(response)
-            }
-          }
-        },
-        error => {
-          clearTimeout(timeout)
-          closeChild(child)
-          resume(
-            fail(config.name, `Invalid local MCP response: ${unknownToMessage(error)}`, 'protocol')
-          )
-        }
+  Effect.gen(function* () {
+    const messages = yield* Effect.forEach(requests, request =>
+      encodeJsonRpcMessage(config.name, request).pipe(
+        Effect.map(line => ({ message: request, line }))
       )
-    })
+    )
 
-    const send = (request: JsonRpcRequest) =>
-      new Promise<JsonRpcResponse>((resolve, reject) => {
-        pending.set(request.id, { resolve, reject })
-        child.stdin.write(`${JSON.stringify(request)}\n`)
-      })
-
-    const run = async () => {
-      for (const request of requests) {
-        if ('id' in request) {
-          responses.push(await send(request))
-          finish()
-        } else {
-          child.stdin.write(`${JSON.stringify(request)}\n`)
-        }
-      }
-    }
-
-    run().catch(error => {
-      clearTimeout(timeout)
-      closeChild(child)
-      resume(fail(config.name, `Local MCP write failed: ${unknownToMessage(error)}`, 'transport'))
-    })
-
-    return Effect.sync(() => {
-      clearTimeout(timeout)
-      closeChild(child)
-    })
+    return yield* requestLocalEncoded(config, messages, expectedResponses, options)
   })
-
-const closeChild = (child: ReturnType<typeof spawn>) => {
-  child.stdin?.end()
-  child.kill('SIGTERM')
-}
 
 const initializeRequest = (options?: McpClientOptions) =>
   makeJsonRpcRequest({

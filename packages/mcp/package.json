@@ -16,6 +16,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@effect/platform-node": "4.0.0-beta.64",
     "@yolk/protocol": "workspace:*",
     "effect": "4.0.0-beta.64"
   }

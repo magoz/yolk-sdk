@@ -59,9 +59,11 @@ Configured MCP env:
 MCP security:
 
 - Remote URLs require `https:` unless localhost dev flag is set.
+- Localhost dev flag permits `localhost`, `127.0.0.1`, and `[::1]` loopback URLs.
 - Local config shape: `{ name, type:'local', command: string[], environment?, enabled? }`.
 - Local commands are spawned directly, not through shell strings.
-- Local servers receive only explicit `environment` plus `NODE_ENV: production`.
+- Local MCP runs through Effect v4 `ChildProcess`/`Stream` APIs from `@yolk/mcp`.
+- Local servers receive only explicit `environment` plus `NODE_ENV: production`; inherited env is disabled.
 - Invalid config or unavailable servers log warning and omit those tools.
 
 ## JSON Boundaries
