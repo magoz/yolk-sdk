@@ -156,6 +156,11 @@ const mapUnknownToMcpError =
           cause
         })
 
+const findDuplicateToolName = (tools: ReadonlyArray<McpResolvedTool>) => {
+  const names = tools.map(tool => tool.def.name)
+  return Option.fromNullishOr(names.find((name, index) => names.indexOf(name) !== index))
+}
+
 const requestRemote = (
   config: McpRemoteServerConfig,
   request: JsonRpcRequest,
@@ -352,6 +357,9 @@ const callToolRequest = (input: { readonly toolName: string; readonly params: un
     params: { name: input.toolName, arguments: input.params }
   })
 
+const responseById = (responses: ReadonlyArray<JsonRpcResponse>, id: string | number) =>
+  Option.fromNullishOr(responses.find(response => response.id === id))
+
 const requestLocalSession = (
   config: McpLocalServerConfig,
   request: JsonRpcRequest,
@@ -364,10 +372,10 @@ const requestLocalSession = (
     options
   ).pipe(
     Effect.flatMap(responses => {
-      const response = responses[1]
-      return response === undefined
+      const response = responseById(responses, request.id)
+      return Option.isNone(response)
         ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
-        : unwrapResponse(config.name, response)
+        : unwrapResponse(config.name, response.value)
     })
   )
 
@@ -505,5 +513,13 @@ export const callMcpServerTool = (
 export const listMcpTools = (configs: ReadonlyArray<McpServerConfig>, options?: McpClientOptions) =>
   Effect.flatMap(
     Effect.forEach(configs, config => listMcpServerTools(config, options)),
-    tools => Effect.succeed(tools.flat())
+    tools => {
+      const resolved = tools.flat()
+      const duplicate = findDuplicateToolName(resolved)
+      if (Option.isSome(duplicate)) {
+        return fail('mcp', `Duplicate MCP tool name: ${duplicate.value}`, 'validation')
+      }
+
+      return Effect.succeed(resolved)
+    }
   )

@@ -53,14 +53,14 @@ Users configure MCP servers for the text agent. When a configured MCP server con
 
 When this PRD is complete, the following will be true:
 
-- [ ] A domain-free `@yolk/mcp` package exists.
-- [ ] Remote MCP over HTTP POST works for `initialize`, `tools/list`, and `tools/call`.
-- [ ] Remote SSE responses are parsed for JSON-RPC messages.
-- [ ] Local stdio MCP works with spawned command processes.
-- [ ] MCP tool definitions convert to `@yolk/protocol` `ToolDef`.
-- [ ] MCP tool results convert to `ToolResult` text content.
-- [ ] MCP tools plug into `@yolk/tool-registry` through app adapter code.
-- [ ] Local MCP is denied unless explicitly enabled.
+- [x] A domain-free `@yolk/mcp` package exists.
+- [x] Remote MCP over HTTP POST works for `initialize`, `tools/list`, and `tools/call`.
+- [x] Remote SSE responses are parsed for JSON-RPC messages.
+- [x] Local stdio MCP works with spawned command processes.
+- [x] MCP tool definitions convert to `@yolk/protocol` `ToolDef`.
+- [x] MCP tool results convert to `ToolResult` text content.
+- [x] MCP tools plug into `@yolk/tool-registry` through app adapter code.
+- [x] Local MCP is denied unless explicitly enabled.
 - [x] Tests cover remote, local, conversion, errors, and disabled-local policy.
 - [x] Docs capture config shape, security limits, and non-goals.
 
@@ -88,19 +88,19 @@ When this PRD is complete, the following will be true:
 
 ### Feature: MCP Config
 
-- [ ] Config supports remote servers: `{ name, type: 'remote', url, headers?, enabled? }`.
-- [ ] Config supports local servers: `{ name, type: 'local', command, environment?, enabled? }`.
-- [ ] Local servers require explicit app-level enablement.
-- [ ] Server and tool names are sanitized deterministically.
+- [x] Config supports remote servers: `{ name, type: 'remote', url, headers?, enabled? }`.
+- [x] Config supports local servers: `{ name, type: 'local', command, environment?, enabled? }`.
+- [x] Local servers require explicit app-level enablement.
+- [x] Server and tool names are sanitized deterministically.
 
 ### Feature: Remote MCP
 
-- [ ] Client sends valid JSON-RPC 2.0 `initialize`.
-- [ ] Client sends `notifications/initialized` after initialization.
-- [ ] Client lists tools via `tools/list`.
-- [ ] Client calls tools via `tools/call`.
-- [ ] JSON and SSE remote responses are supported.
-- [ ] HTTP errors, JSON-RPC errors, malformed responses, and timeouts are typed failures.
+- [x] Client sends valid JSON-RPC 2.0 `initialize`.
+- [x] Client sends `notifications/initialized` after initialization.
+- [x] Client lists tools via `tools/list`.
+- [x] Client calls tools via `tools/call`.
+- [x] JSON and SSE remote responses are supported.
+- [x] HTTP errors, JSON-RPC errors, malformed responses, and timeouts are typed failures.
 
 ### Feature: MCP Server Package
 
@@ -112,18 +112,18 @@ When this PRD is complete, the following will be true:
 
 ### Feature: Local stdio MCP
 
-- [ ] Client spawns configured command with explicit environment only.
-- [ ] Client communicates via newline-delimited JSON-RPC over stdio.
-- [ ] Concurrent request IDs route to the correct pending call.
-- [ ] Process stderr is captured without leaking secrets.
-- [ ] Process is closed/killed on scope finalizer or startup failure.
+- [x] Client spawns configured command with explicit environment only.
+- [x] Client communicates via newline-delimited JSON-RPC over stdio.
+- [x] Concurrent request IDs route to the correct pending call.
+- [x] Process stderr is ignored to avoid leaking secrets.
+- [x] Process is scoped and closed/killed on finalizer or startup failure.
 
 ### Feature: Tool Registry Adapter
 
-- [ ] MCP tools are exposed as normal `ToolRegistration<AgentToolContext>` values.
-- [ ] Duplicate generated tool names fail deterministically.
-- [ ] Tool access defaults to `read` unless app config marks otherwise.
-- [ ] Text route can include MCP tools alongside existing tools.
+- [x] MCP tools are exposed as normal `ToolRegistration<AgentToolContext>` values.
+- [x] Duplicate generated tool names fail deterministically.
+- [x] Tool access defaults to `read` unless app config marks otherwise.
+- [x] Text route can include MCP tools alongside existing tools.
 
 ---
 

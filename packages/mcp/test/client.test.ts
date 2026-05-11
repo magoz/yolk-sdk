@@ -1,4 +1,5 @@
-import { Effect, Layer, type Result } from 'effect'
+import { Duration, Effect, Fiber, Layer, type Result } from 'effect'
+import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
@@ -6,6 +7,7 @@ import {
   callLocalMcpServerTool,
   callMcpServerTool,
   listLocalMcpServerTools,
+  listMcpTools,
   listMcpServerTools
 } from '../src'
 import type { McpError, McpServerConfig } from '../src'
@@ -17,7 +19,22 @@ const tsxCliPath = process.cwd().endsWith(join('packages', 'mcp'))
   ? join(process.cwd(), '../../node_modules/tsx/dist/cli.mjs')
   : join(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
 
-type ResponseMode = 'json' | 'sse' | 'invalid-json' | 'json-rpc-error' | 'status-error'
+const outOfOrderStdioScript = `
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'local', version: '0' } } }) + '\\n');
+});
+`
+
+type ResponseMode =
+  | 'json'
+  | 'sse'
+  | 'invalid-json'
+  | 'json-rpc-error'
+  | 'status-error'
+  | 'timeout'
+  | 'duplicate-tools'
 
 const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
@@ -43,6 +60,10 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
     HttpClient.HttpClient,
     HttpClient.make(request =>
       Effect.gen(function* () {
+        if (mode === 'timeout') {
+          yield* Effect.sleep(Duration.millis(100))
+        }
+
         const method = requestMethod(request)
 
         if (mode === 'status-error') {
@@ -76,9 +97,27 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
               }
             : method === 'tools/list'
               ? {
-                  tools: [
-                    { name: 'search', description: 'Search', inputSchema: { type: 'object' } }
-                  ]
+                  tools:
+                    mode === 'duplicate-tools'
+                      ? [
+                          {
+                            name: 'search.one',
+                            description: 'Search one',
+                            inputSchema: { type: 'object' }
+                          },
+                          {
+                            name: 'search/one',
+                            description: 'Search duplicate',
+                            inputSchema: { type: 'object' }
+                          }
+                        ]
+                      : [
+                          {
+                            name: 'search',
+                            description: 'Search',
+                            inputSchema: { type: 'object' }
+                          }
+                        ]
                 }
               : { content: [{ type: 'text', text: 'remote result' }] }
 
@@ -186,6 +225,33 @@ describe('MCP client', () => {
     })
   )
 
+  it.effect('maps remote timeouts to timeout errors', () =>
+    Effect.gen(function* () {
+      const fiber = yield* listMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        {
+          securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false },
+          timeoutMs: 10
+        }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('timeout')), Effect.result, Effect.forkChild)
+      yield* TestClock.adjust(Duration.millis(100))
+      const result = yield* Fiber.join(fiber)
+
+      expectMcpFailureCause(result, 'timeout')
+    })
+  )
+
+  it.effect('rejects duplicate generated tool names', () =>
+    Effect.gen(function* () {
+      const result = yield* listMcpTools(
+        [{ name: 'remote', type: 'remote', url: 'https://example.com/mcp' }],
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('duplicate-tools')), Effect.result)
+
+      expectMcpFailureCause(result, 'validation')
+    })
+  )
+
   it.effect('lists and calls local stdio tools when enabled', () =>
     Effect.gen(function* () {
       const config: McpServerConfig = {
@@ -217,6 +283,17 @@ describe('MCP client', () => {
       ).pipe(Effect.result)
 
       expectMcpFailureCause(result, 'protocol')
+    })
+  )
+
+  it.effect('routes local stdio responses by request id', () =>
+    Effect.gen(function* () {
+      const tools = yield* listLocalMcpServerTools(
+        { name: 'local', type: 'local', command: [process.execPath, '-e', outOfOrderStdioScript] },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      )
+
+      expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
     })
   )
 })

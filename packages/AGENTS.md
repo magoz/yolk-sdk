@@ -80,8 +80,10 @@ mcp-server -> mcp + protocol + Effect
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
+- Local stdio responses are matched by JSON-RPC id; do not assume response order.
 - JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code.
 - Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
+- `listMcpTools` rejects duplicate generated tool names after server/tool sanitization.
 - Prefer local/remote-specific helper APIs in tests (`listLocalMcpServerTools`, `callLocalMcpServerTool`, `listRemoteMcpServerTools`, `callRemoteMcpServerTool`) when the config kind is known; use union helpers at app boundaries.
 - Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE and tiny checked-in stdio fixture servers for local process behavior.
 - Cover protocol/transport error paths: malformed JSON-RPC, JSON-RPC error responses, non-2xx remote responses, local stdio early exit, policy rejection, unknown methods/tools, invalid params, and tool failures.
