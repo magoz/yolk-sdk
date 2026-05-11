@@ -120,8 +120,8 @@ mcp-server -> mcp + protocol + Effect
 
 ## Test Helpers
 
-- `@yolk/agent-loop` root export currently includes `testing/faux-provider` and `testing/test-tool-executor` for local tests.
-- Prefer a future `./testing` subpath for additional test helpers; do not grow the production root API casually.
+- `@yolk/agent-loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
+- Keep test helpers behind explicit `./testing` subpath exports; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
 
@@ -136,7 +136,6 @@ mcp-server -> mcp + protocol + Effect
 
 - Move publishable package exports from `src` to `dist` before npm publishing.
 - Add `peerDependencies` for host-owned runtime singletons like `effect`.
-- Move test helpers to explicit testing subpath exports.
 - Add Changesets for package versioning/release notes.
 - Add package metadata: license, repository directory, engines, publishConfig.
 - Add `publint` or equivalent package export validation.

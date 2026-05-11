@@ -10,15 +10,13 @@ import {
 } from '@yolk/protocol'
 import {
   ContextTransformer,
-  FauxProvider,
   LLMError,
   LLMProvider,
   LLMTextDelta,
-  LoopConfig,
-  Reply,
-  TestToolExecutor
+  LoopConfig
 } from '@yolk/agent-loop'
 import type { LLMRequest } from '@yolk/agent-loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
 import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
 

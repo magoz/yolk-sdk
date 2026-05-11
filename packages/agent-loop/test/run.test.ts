@@ -9,15 +9,13 @@ import {
 } from '@yolk/protocol'
 import {
   ContextTransformer,
-  FauxProvider,
   LLMProvider,
   LLMTextDelta,
   LoopConfig,
-  Reply,
-  TestToolExecutor,
   run,
   type LLMRequest
 } from '../src'
+import { FauxProvider, Reply, TestToolExecutor } from '../src/testing'
 
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 

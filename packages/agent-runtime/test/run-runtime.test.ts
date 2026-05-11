@@ -1,13 +1,8 @@
 import { Effect, Layer, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk/protocol'
-import {
-  ContextTransformer,
-  FauxProvider,
-  LoopConfig,
-  Reply,
-  TestToolExecutor
-} from '@yolk/agent-loop'
+import { ContextTransformer, LoopConfig } from '@yolk/agent-loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
 import { runRuntime, SessionStore, type SessionSnapshot } from '../src'
 
 const AgentLoopLayer = Layer.mergeAll(
