@@ -170,10 +170,14 @@ export const applyAgentEvent = (state: AgentClientState, event: AgentEvent): Age
         reasoning: '',
         toolRuns: completedToolRuns(state.toolRuns)
       }
+    case 'AgentRetry':
+    case 'CompactionEnd':
+    case 'CompactionStart':
     case 'LLMStreamEnd':
     case 'LLMStreamStart':
     case 'TurnEnd':
     case 'TurnStart':
+    case 'UsageUpdate':
       return state
   }
 }

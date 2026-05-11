@@ -7,6 +7,7 @@ import {
   AssistantAgentMessage,
   LLMTextDelta,
   UserMessage,
+  zeroAgentUsage,
   type AgentEvent
 } from '@yolk/protocol'
 import {
@@ -82,7 +83,7 @@ const agentEnd = (content: string) =>
   AgentEnd.make({
     messages: [AssistantAgentMessage.make({ content, toolCalls: [] })],
     turns: 1,
-    usage: { input: 1, output: 1 }
+    usage: zeroAgentUsage
   })
 
 describe('useAgentChat', () => {

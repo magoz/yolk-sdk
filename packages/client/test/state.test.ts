@@ -14,7 +14,8 @@ import {
   ToolResult,
   ToolResultEvent,
   ToolResultMessage,
-  UserMessage
+  UserMessage,
+  zeroAgentUsage
 } from '@yolk/protocol'
 import { markAgentAborted, markAgentError, reduceAgentEvents, submitAgentUserMessage } from '../src'
 
@@ -40,7 +41,7 @@ describe('reduceAgentEvents', () => {
       AgentEnd.make({
         messages: [message, toolResultMessage],
         turns: 1,
-        usage: { input: 0, output: 0 }
+        usage: zeroAgentUsage
       })
     ])
 
@@ -127,7 +128,7 @@ describe('reduceAgentEvents', () => {
     const done = reduceAgentEvents([
       AgentStart.make({}),
       LLMReasoningDelta.make({ text: 'thinking' }),
-      AgentEnd.make({ messages: [message], turns: 1, usage: { input: 0, output: 0 } })
+      AgentEnd.make({ messages: [message], turns: 1, usage: zeroAgentUsage })
     ])
 
     expect(done.reasoning).toBe('')

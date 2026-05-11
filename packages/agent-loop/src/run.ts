@@ -1,8 +1,11 @@
 import { Effect, Stream } from 'effect'
 import {
   AgentEnd,
+  AgentRetry,
   AgentStart,
   AssistantMessageEvent,
+  UsageUpdate,
+  addAgentUsage,
   contentParts,
   LLMToolCall as AgentLLMToolCall,
   LLMReasoningDelta as AgentLLMReasoningDelta,
@@ -18,15 +21,18 @@ import {
   type ToolResult,
   TurnEnd,
   TurnStart,
+  zeroAgentUsage,
   type AgentEvent,
+  type AgentErrorCode,
   type AgentMessage,
+  type AgentUsage,
   type AgentModelCapabilities,
   type ToolDef
 } from '@yolk/protocol'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import { AbortError, LLMError, type AgentLoopError, type ToolError } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
-import { ContextTransformer } from './services/context-transformer.ts'
+import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
 import { LoopConfig } from './services/loop-config.ts'
 import { ToolExecutor } from './services/tool-executor.ts'
@@ -104,6 +110,9 @@ const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEve
       case 'ToolCall':
         events.push(AgentLLMToolCall.make({ call: event.call }))
         break
+      case 'Usage':
+        events.push(UsageUpdate.make({ usage: event.usage }))
+        break
       case 'Done':
         break
     }
@@ -114,14 +123,31 @@ const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEve
 
 const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => toLlmEvents([event])
 
+const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEvent => {
+  switch (event._tag) {
+    case 'TextDelta':
+    case 'ReasoningDelta':
+    case 'Done':
+    case 'ToolCall':
+    case 'Usage':
+      return true
+    default:
+      return false
+  }
+}
+
 type TurnStreamInput = {
   readonly config: RunConfig
   readonly contextTransformer: {
     readonly transform: (
       messages: ReadonlyArray<AgentMessage>
-    ) => Effect.Effect<ReadonlyArray<AgentMessage>>
+    ) => Effect.Effect<ContextTransformResult>
   }
-  readonly loopConfig: { readonly maxTurns: number }
+  readonly loopConfig: {
+    readonly maxTurns: number
+    readonly maxRetries: number
+    readonly retryBaseDelayMs: number
+  }
   readonly provider: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, AgentLoopError>
   }
@@ -130,7 +156,68 @@ type TurnStreamInput = {
   }
   readonly currentMessages: ReadonlyArray<AgentMessage>
   readonly createdMessages: Array<AgentMessage>
+  readonly usage: { current: AgentUsage }
   readonly turn: number
+}
+
+const retryDelayMs = (baseDelayMs: number, attempt: number) =>
+  Math.max(0, Math.floor(baseDelayMs * 2 ** Math.max(0, attempt - 1)))
+
+const retryReason = (error: LLMError): AgentErrorCode => error.cause
+
+const retrySleep = (delayMs: number) =>
+  delayMs === 0 ? Effect.void : Effect.sleep(`${delayMs} millis`)
+
+const failAgentLoopError = (
+  error: AgentLoopError
+): Stream.Stream<LLMEvent | AgentRetry, AgentLoopError> => Stream.fail(error)
+
+const sleepStream = (delayMs: number): Stream.Stream<LLMEvent | AgentRetry, AgentLoopError> =>
+  Stream.fromEffect(retrySleep(delayMs)).pipe(Stream.flatMap(() => Stream.empty))
+
+const withProviderRetries = (
+  stream: Stream.Stream<LLMEvent, AgentLoopError>,
+  loopConfig: TurnStreamInput['loopConfig'],
+  makeStream: () => Stream.Stream<LLMEvent, AgentLoopError>,
+  attempt: number
+): Stream.Stream<LLMEvent | AgentRetry, AgentLoopError> => {
+  let emittedProviderEvent = false
+
+  return stream.pipe(
+    Stream.tap(() =>
+      Effect.sync(() => {
+        emittedProviderEvent = true
+      })
+    ),
+    Stream.catchTags({
+      LLMError: error => {
+        if (
+          emittedProviderEvent ||
+          !error.retryable ||
+          error.cause === 'context_overflow' ||
+          attempt > loopConfig.maxRetries
+        ) {
+          return failAgentLoopError(error)
+        }
+
+        const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt)
+        return Stream.make(
+          AgentRetry.make({
+            attempt,
+            reason: retryReason(error),
+            delayMs,
+            message: error.message
+          })
+        ).pipe(
+          Stream.concat(sleepStream(delayMs)),
+          Stream.concat(withProviderRetries(makeStream(), loopConfig, makeStream, attempt + 1))
+        )
+      },
+      AbortError: failAgentLoopError,
+      FauxExhaustedError: failAgentLoopError,
+      ToolError: failAgentLoopError
+    })
+  )
 }
 
 const makeToolExecutionStream = (
@@ -168,25 +255,39 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
     const llmEvents: Array<LLMEvent> = []
     const llmStream = Stream.unwrap(
       input.contextTransformer.transform(input.currentMessages).pipe(
-        Effect.tap(transformedMessages => validateCapabilities(input.config, transformedMessages)),
-        Effect.map(transformedMessages =>
-          input.provider
-            .stream({
-              messages: transformedMessages,
+        Effect.tap(result => validateCapabilities(input.config, result.messages)),
+        Effect.map(result => {
+          const makeStream = () =>
+            input.provider.stream({
+              messages: result.messages,
               tools: input.config.tools,
               model: input.config.model,
               reasoningEffort: input.config.reasoningEffort,
               systemPrompt: input.config.systemPrompt
             })
+
+          return Stream.fromIterable(result.events)
+            .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
             .pipe(
               Stream.tap(event =>
                 Effect.sync(() => {
-                  llmEvents.push(event)
+                  if (isLlmEvent(event) && event._tag === 'Usage') {
+                    input.usage.current = addAgentUsage(input.usage.current, event.usage)
+                  }
+                  if (isLlmEvent(event)) {
+                    llmEvents.push(event)
+                  }
                 })
               ),
-              Stream.flatMap(event => Stream.fromIterable(toLlmEvent(event)))
+              Stream.flatMap(event =>
+                event._tag === 'AgentRetry'
+                  ? Stream.make(event)
+                  : isLlmEvent(event)
+                    ? Stream.fromIterable(toLlmEvent(event))
+                    : Stream.make(event)
+              )
             )
-        )
+        })
       )
     )
 
@@ -207,7 +308,7 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
           AgentEnd.make({
             messages: [...input.createdMessages],
             turns: input.turn,
-            usage: { input: 0, output: 0 }
+            usage: input.usage.current
           })
         ])
       }
@@ -224,6 +325,7 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
             makeTurnStream({
               ...input,
               currentMessages: [...input.currentMessages, assistantMessage, ...toolResultMessages],
+              usage: input.usage,
               turn: input.turn + 1
             })
           )
@@ -256,6 +358,7 @@ export const run = (
       const provider = yield* LLMProvider
       const executor = yield* ToolExecutor
       const createdMessages: Array<AgentMessage> = []
+      const usage = { current: zeroAgentUsage }
 
       return Stream.make(AgentStart.make({})).pipe(
         Stream.concat(
@@ -267,6 +370,7 @@ export const run = (
             executor,
             currentMessages: config.messages,
             createdMessages,
+            usage,
             turn: 1
           })
         )

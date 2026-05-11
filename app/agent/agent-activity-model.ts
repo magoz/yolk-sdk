@@ -47,11 +47,26 @@ export const activityItemFromAgentEvent = (
       }
     case 'AgentError':
       return { title: 'Agent error', detail: event.message, tone: 'error' }
+    case 'AgentRetry':
+      return {
+        title: `Retrying model call (${event.attempt})`,
+        detail: `${event.reason} · ${event.delayMs}ms`,
+        tone: 'active'
+      }
+    case 'CompactionStart':
+      return { title: 'Compacting context', detail: event.strategy, tone: 'active' }
+    case 'CompactionEnd':
+      return {
+        title: 'Context compacted',
+        detail: event.strategy,
+        tone: 'success'
+      }
     case 'AssistantMessage':
     case 'LLMReasoningDelta':
     case 'LLMStreamEnd':
     case 'LLMTextDelta':
     case 'ToolResult':
+    case 'UsageUpdate':
       return null
   }
 }

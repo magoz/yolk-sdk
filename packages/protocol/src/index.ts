@@ -23,8 +23,11 @@ export {
   AgentError,
   AgentErrorCode,
   AgentEvent,
+  AgentRetry,
   AgentStart,
   AssistantMessageEvent,
+  CompactionEnd,
+  CompactionStart,
   LLMReasoningDelta,
   LLMStreamEnd,
   LLMStreamStart,
@@ -34,10 +37,18 @@ export {
   ToolExecutionStart,
   ToolResultEvent,
   TurnEnd,
-  TurnStart
+  TurnStart,
+  UsageUpdate
 } from './event.ts'
 export { AgentMessage, AssistantAgentMessage, ToolResultMessage, UserMessage } from './message.ts'
 export { AgentReasoningEffort } from './reasoning.ts'
 export { ToolCall, ToolDef, ToolResult } from './tool.ts'
+export {
+  addAgentUsage,
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
+  zeroAgentUsage
+} from './usage.ts'
 
 export type MessageId = string

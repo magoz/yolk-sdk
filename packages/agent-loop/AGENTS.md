@@ -7,6 +7,7 @@
 - Orchestrate model calls through `LLMProvider`.
 - Execute requested tools through `ToolExecutor`.
 - Accumulate assistant text/reasoning/tool-call state.
+- Accumulate provider-normalized usage and emit retry lifecycle events.
 - Enforce model input/tool capability constraints.
 - Expose test helpers through `@yolk/agent-loop/testing` only.
 
@@ -34,6 +35,8 @@
 - Reject unsupported content/tools before provider calls.
 - Keep provider quirks in app/provider adapters, not loop core.
 - Preserve tool call ids and ordering semantics across call/result events.
+- Retry retryable provider errors in-loop; never retry context overflow blindly.
+- Keep compaction strategy outside loop; `ContextTransformer` returns compacted messages + lifecycle events.
 - Keep test helpers out of the root export.
 
 ## Tests

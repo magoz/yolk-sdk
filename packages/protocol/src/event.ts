@@ -1,6 +1,7 @@
 import * as Schema from 'effect/Schema'
 import { AssistantAgentMessage, AgentMessage } from './message.ts'
 import { ToolCall, ToolResult } from './tool.ts'
+import { AgentUsage } from './usage.ts'
 
 export const AgentErrorCode = Schema.Literals([
   'provider_error',
@@ -25,10 +26,28 @@ export class AgentError extends Schema.TaggedClass<AgentError>()('AgentError', {
 export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {
   messages: Schema.Array(AgentMessage),
   turns: Schema.Number,
-  usage: Schema.Struct({
-    input: Schema.Number,
-    output: Schema.Number
-  })
+  usage: AgentUsage
+}) {}
+
+export class UsageUpdate extends Schema.TaggedClass<UsageUpdate>()('UsageUpdate', {
+  usage: AgentUsage
+}) {}
+
+export class AgentRetry extends Schema.TaggedClass<AgentRetry>()('AgentRetry', {
+  attempt: Schema.Number,
+  reason: AgentErrorCode,
+  delayMs: Schema.Number,
+  message: Schema.String
+}) {}
+
+export class CompactionStart extends Schema.TaggedClass<CompactionStart>()('CompactionStart', {
+  strategy: Schema.String
+}) {}
+
+export class CompactionEnd extends Schema.TaggedClass<CompactionEnd>()('CompactionEnd', {
+  strategy: Schema.String,
+  beforeTokens: Schema.optional(Schema.Number),
+  afterTokens: Schema.optional(Schema.Number)
 }) {}
 
 export class TurnStart extends Schema.TaggedClass<TurnStart>()('TurnStart', {
@@ -90,6 +109,10 @@ export const AgentEvent = Schema.Union([
   AgentStart,
   AgentError,
   AgentEnd,
+  UsageUpdate,
+  AgentRetry,
+  CompactionStart,
+  CompactionEnd,
   TurnStart,
   TurnEnd,
   LLMStreamStart,

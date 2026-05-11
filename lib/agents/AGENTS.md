@@ -14,8 +14,10 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text route calls `agent-runtime` transcript mode with `persist: false`; durable session lifecycle is deferred
 - `StatelessSessionStoreLayer` remains no-op scaffolding for future runtime persistence
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
+- Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
 - Browser/client cancellation aborts active response body readers
 - Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
+- Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 
 ## Current Provider
 

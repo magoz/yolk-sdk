@@ -8,7 +8,12 @@ const tinyPng = Buffer.from(
 
 const agentResponse = [
   JSON.stringify({ _tag: 'AgentStart' }),
-  JSON.stringify({ _tag: 'AgentEnd', messages: [], turns: 1, usage: { input: 0, output: 0 } })
+  JSON.stringify({
+    _tag: 'AgentEnd',
+    messages: [],
+    turns: 1,
+    usage: { input: { total: 0 }, output: { total: 0 } }
+  })
 ].join('\n')
 
 test('uploads image prompt and shows provider capabilities', async ({ authedPage }) => {

@@ -70,6 +70,9 @@ export const reduceAgentChatState = (
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)
           }
         case 'AssistantMessage':
+        case 'AgentRetry':
+        case 'CompactionEnd':
+        case 'CompactionStart':
         case 'LLMReasoningDelta':
         case 'LLMStreamEnd':
         case 'LLMStreamStart':
@@ -80,6 +83,7 @@ export const reduceAgentChatState = (
         case 'ToolResult':
         case 'TurnEnd':
         case 'TurnStart':
+        case 'UsageUpdate':
           return {
             ...state,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)

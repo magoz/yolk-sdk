@@ -137,6 +137,47 @@ describe('OpenAiProviderLayer', () => {
     })
   )
 
+  it.effect('maps OpenAI usage to canonical usage events', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeHttpClientLayer(
+          {
+            choices: [{ message: { content: 'ok' } }],
+            usage: {
+              prompt_tokens: 12,
+              completion_tokens: 5,
+              prompt_tokens_details: { cached_tokens: 4 },
+              completion_tokens_details: { reasoning_tokens: 2 }
+            }
+          },
+          requests
+        )
+      )
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-test',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual(['TextDelta', 'Done', 'Usage'])
+      expect(events[2]).toMatchObject({
+        usage: {
+          input: { total: 12, uncached: 8, cacheRead: 4 },
+          output: { total: 5, text: 3, reasoning: 2 }
+        }
+      })
+    })
+  )
+
   it.effect('maps non-OK OpenAI responses to LLM errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

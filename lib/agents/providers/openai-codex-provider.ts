@@ -7,6 +7,9 @@ import {
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
 import {
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
   ToolCall,
   contentParts,
   type AgentMessage,
@@ -22,6 +25,7 @@ import {
   LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
+  LLMUsage,
   type LLMEvent,
   type LLMRequest
 } from '@yolk/agent-loop'
@@ -143,6 +147,27 @@ class OpenAiCodexReasoningOutput extends Schema.Class<OpenAiCodexReasoningOutput
   content: Schema.optional(Schema.Array(OpenAiCodexReasoningText))
 }) {}
 
+class OpenAiCodexInputTokensDetails extends Schema.Class<OpenAiCodexInputTokensDetails>(
+  'OpenAiCodexInputTokensDetails'
+)({
+  cached_tokens: Schema.optional(Schema.Number)
+}) {}
+
+class OpenAiCodexOutputTokensDetails extends Schema.Class<OpenAiCodexOutputTokensDetails>(
+  'OpenAiCodexOutputTokensDetails'
+)({
+  reasoning_tokens: Schema.optional(Schema.Number)
+}) {}
+
+class OpenAiCodexUsageResponse extends Schema.Class<OpenAiCodexUsageResponse>(
+  'OpenAiCodexUsageResponse'
+)({
+  input_tokens: Schema.Number,
+  output_tokens: Schema.Number,
+  input_tokens_details: Schema.optional(OpenAiCodexInputTokensDetails),
+  output_tokens_details: Schema.optional(OpenAiCodexOutputTokensDetails)
+}) {}
+
 const OpenAiCodexOutputItem = Schema.Union([
   OpenAiCodexMessageOutput,
   OpenAiCodexFunctionCallOutput,
@@ -152,7 +177,8 @@ type OpenAiCodexOutputItem = typeof OpenAiCodexOutputItem.Type
 
 class OpenAiCodexResponse extends Schema.Class<OpenAiCodexResponse>('OpenAiCodexResponse')({
   output_text: Schema.optional(Schema.String),
-  output: Schema.Array(OpenAiCodexOutputItem)
+  output: Schema.Array(OpenAiCodexOutputItem),
+  usage: Schema.optional(OpenAiCodexUsageResponse)
 }) {}
 
 const unknownToMessage = (error: unknown) =>
@@ -375,6 +401,20 @@ const reasoningFromOutputItems = (items: ReadonlyArray<OpenAiCodexOutputItem>) =
   return reasoningParts.join('')
 }
 
+const toAgentUsage = (usage: OpenAiCodexUsageResponse) =>
+  AgentUsage.make({
+    input: AgentInputUsage.make({
+      total: usage.input_tokens,
+      uncached: usage.input_tokens - (usage.input_tokens_details?.cached_tokens ?? 0),
+      cacheRead: usage.input_tokens_details?.cached_tokens
+    }),
+    output: AgentOutputUsage.make({
+      total: usage.output_tokens,
+      reasoning: usage.output_tokens_details?.reasoning_tokens,
+      text: usage.output_tokens - (usage.output_tokens_details?.reasoning_tokens ?? 0)
+    })
+  })
+
 type ToLlmEventsOptions = {
   readonly allowEmptyStop: boolean
 }
@@ -423,12 +463,18 @@ const toLlmEvents = (
       )
     }
 
-    return [
+    const events: Array<LLMEvent> = [
       ...reasoningEvents,
       ...textEvents,
       ...toolCallEvents,
       LLMDone.make({ stopReason: toolCallEvents.length > 0 ? 'tool_use' : 'stop' })
     ]
+
+    if (response.usage !== undefined) {
+      events.push(LLMUsage.make({ usage: toAgentUsage(response.usage) }))
+    }
+
+    return events
   })
 
 const decodeOpenAiCodexResponse = (json: unknown) =>

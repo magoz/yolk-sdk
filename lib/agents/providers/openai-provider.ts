@@ -9,6 +9,9 @@ import {
 import * as Schema from 'effect/Schema'
 import {
   ToolCall,
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
   type AgentMessage,
   type Content,
   type ContentPart,
@@ -20,6 +23,7 @@ import {
   LLMProvider,
   LLMTextDelta,
   LLMToolCall,
+  LLMUsage,
   type LLMEvent,
   type LLMRequest
 } from '@yolk/agent-loop'
@@ -101,10 +105,30 @@ class OpenAiChoiceResponse extends Schema.Class<OpenAiChoiceResponse>('OpenAiCho
   message: OpenAiMessageResponse
 }) {}
 
+class OpenAiPromptTokensDetails extends Schema.Class<OpenAiPromptTokensDetails>(
+  'OpenAiPromptTokensDetails'
+)({
+  cached_tokens: Schema.optional(Schema.Number)
+}) {}
+
+class OpenAiCompletionTokensDetails extends Schema.Class<OpenAiCompletionTokensDetails>(
+  'OpenAiCompletionTokensDetails'
+)({
+  reasoning_tokens: Schema.optional(Schema.Number)
+}) {}
+
+class OpenAiUsageResponse extends Schema.Class<OpenAiUsageResponse>('OpenAiUsageResponse')({
+  prompt_tokens: Schema.Number,
+  completion_tokens: Schema.Number,
+  prompt_tokens_details: Schema.optional(OpenAiPromptTokensDetails),
+  completion_tokens_details: Schema.optional(OpenAiCompletionTokensDetails)
+}) {}
+
 class OpenAiChatCompletionResponse extends Schema.Class<OpenAiChatCompletionResponse>(
   'OpenAiChatCompletionResponse'
 )({
-  choices: Schema.Array(OpenAiChoiceResponse)
+  choices: Schema.Array(OpenAiChoiceResponse),
+  usage: Schema.optional(OpenAiUsageResponse)
 }) {}
 
 class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiConfigShape>()(
@@ -323,6 +347,20 @@ const toLlmEvents = (
     return [...textEvents, LLMDone.make({ stopReason: 'stop' })]
   })
 
+const toAgentUsage = (usage: OpenAiUsageResponse) =>
+  AgentUsage.make({
+    input: AgentInputUsage.make({
+      total: usage.prompt_tokens,
+      uncached: usage.prompt_tokens - (usage.prompt_tokens_details?.cached_tokens ?? 0),
+      cacheRead: usage.prompt_tokens_details?.cached_tokens
+    }),
+    output: AgentOutputUsage.make({
+      total: usage.completion_tokens,
+      reasoning: usage.completion_tokens_details?.reasoning_tokens,
+      text: usage.completion_tokens - (usage.completion_tokens_details?.reasoning_tokens ?? 0)
+    })
+  })
+
 const toHttpClientLlmError =
   (message: string, retryable: boolean) => (error: HttpClientError.HttpClientError) =>
     new LLMError({
@@ -410,7 +448,13 @@ const sendOpenAiRequest = (
       )
     }
 
-    return yield* toLlmEvents(choice.message)
+    const events = yield* toLlmEvents(choice.message)
+
+    if (parsed.usage === undefined) {
+      return events
+    }
+
+    return [...events, LLMUsage.make({ usage: toAgentUsage(parsed.usage) })]
   }).pipe(Effect.withSpan('OpenAiProvider.stream'))
 
 export const makeOpenAiProviderLayer = (config: OpenAiConfigShape) =>

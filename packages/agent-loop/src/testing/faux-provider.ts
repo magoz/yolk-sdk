@@ -1,11 +1,12 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
-import { ToolCall } from '@yolk/protocol'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk/protocol'
 import { FauxExhaustedError } from '../error.ts'
 import {
   LLMDone,
   LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
+  LLMUsage,
   type LLMEvent
 } from '../llm-event.ts'
 import { LLMProvider, type LLMRequest } from '../services/llm-provider.ts'
@@ -38,6 +39,17 @@ export const Reply = {
         call: ToolCall.make({ id: input.id, name: input.name, params: input.params })
       }),
       LLMDone.make({ stopReason: 'tool_use' })
+    ]
+  }),
+  usage: (input: { readonly input: number; readonly output: number }): FauxResponse => ({
+    events: [
+      LLMUsage.make({
+        usage: AgentUsage.make({
+          input: AgentInputUsage.make({ total: input.input }),
+          output: AgentOutputUsage.make({ total: input.output })
+        })
+      }),
+      LLMDone.make({ stopReason: 'stop' })
     ]
   })
 }

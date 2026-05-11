@@ -14,7 +14,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
 - `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/capability/status badges.
-- `agent-activity-model.ts` maps events to activity rows; `agent-activity.tsx` renders them.
+- `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
 
 ## Chat Model
 

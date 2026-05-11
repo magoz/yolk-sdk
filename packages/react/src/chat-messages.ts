@@ -604,10 +604,14 @@ export const applyAgentEventToChatMessages = (
       return markChatError(messages, event.message)
     case 'AgentEnd':
       return appendRunMessagesIfEmpty(finalizeStreamingParts(messages), event.messages)
+    case 'AgentRetry':
+    case 'CompactionEnd':
+    case 'CompactionStart':
     case 'LLMStreamEnd':
     case 'LLMStreamStart':
     case 'TurnEnd':
     case 'TurnStart':
+    case 'UsageUpdate':
       return messages
   }
 }

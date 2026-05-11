@@ -8,6 +8,7 @@
 - Define `AgentEvent` stream events emitted by loops/providers.
 - Define tool metadata, calls, results, and errors.
 - Define model capability and reasoning request types.
+- Define canonical usage, retry, and compaction lifecycle events.
 - Provide content helpers for text and multimodal parts.
 
 ## Boundaries
@@ -27,6 +28,7 @@
 | `content`    | Text/image/audio content helpers        |
 | `capability` | Model input/tool capability flags       |
 | `reasoning`  | Provider-supplied reasoning config/data |
+| `usage`      | Provider-neutral token usage helpers    |
 
 ## Design rules
 
@@ -34,6 +36,7 @@
 - Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.
+- Provider adapters normalize usage; protocol stays provider-neutral.
 
 ## Tests
 

@@ -2,6 +2,8 @@ import { Effect, Layer, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
+  CompactionEnd,
+  CompactionStart,
   AgentModelCapabilities,
   ImagePart,
   ToolDef,
@@ -9,6 +11,7 @@ import {
 } from '@yolk/protocol'
 import {
   ContextTransformer,
+  LLMError,
   LLMProvider,
   LLMTextDelta,
   LoopConfig,
@@ -232,7 +235,10 @@ describe('run', () => {
             TestToolExecutor.layer({ repeat: 'again' })
           ).pipe(
             Layer.provideMerge(
-              Layer.mergeAll(ContextTransformer.identity, LoopConfig.layer({ maxTurns: 1 }))
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({ maxTurns: 1, maxRetries: 2, retryBaseDelayMs: 1000 })
+              )
             )
           )
         ),
@@ -326,7 +332,10 @@ describe('run', () => {
                   ContextTransformer,
                   ContextTransformer.of({
                     transform: messages =>
-                      Effect.succeed([UserMessage.make({ content: 'context' }), ...messages])
+                      Effect.succeed({
+                        messages: [UserMessage.make({ content: 'context' }), ...messages],
+                        events: []
+                      })
                   })
                 )
               )
@@ -337,6 +346,140 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(requests).toMatchObject([{ messages: [{ content: 'context' }, { content: 'hello' }] }])
+      expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
+        message: { content: 'ok' }
+      })
+    })
+  )
+
+  it.effect('emits context transform lifecycle events', () =>
+    Effect.gen(function* () {
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                LoopConfig.defaultLayer,
+                Layer.succeed(
+                  ContextTransformer,
+                  ContextTransformer.of({
+                    transform: messages =>
+                      Effect.succeed({
+                        messages,
+                        events: [
+                          CompactionStart.make({ strategy: 'test' }),
+                          CompactionEnd.make({
+                            strategy: 'test',
+                            beforeTokens: 100,
+                            afterTokens: 50
+                          })
+                        ]
+                      })
+                  })
+                )
+              )
+            )
+          )
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'CompactionStart',
+        'CompactionEnd',
+        'LLMTextDelta',
+        'LLMTextDelta',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'TurnEnd',
+        'AgentEnd'
+      ])
+    })
+  )
+
+  it.effect('emits usage updates and final usage totals', () =>
+    Effect.gen(function* () {
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layer(Reply.usage({ input: 10, output: 3 })),
+            TestToolExecutor.layer({})
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toContain('UsageUpdate')
+      expect(events.find(event => event._tag === 'AgentEnd')).toMatchObject({
+        usage: { input: { total: 10 }, output: { total: 3 } }
+      })
+    })
+  )
+
+  it.effect('retries retryable provider errors before failing the turn', () =>
+    Effect.gen(function* () {
+      let calls = 0
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => {
+            calls++
+            if (calls === 1) {
+              return Stream.fail(
+                new LLMError({
+                  cause: 'rate_limit',
+                  message: 'slow down',
+                  retryable: true
+                })
+              )
+            }
+
+            return Stream.fromIterable(Reply.text('ok').events)
+          }
+        })
+      )
+
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({ maxTurns: 500, maxRetries: 1, retryBaseDelayMs: 0 })
+              )
+            )
+          )
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(calls).toBe(2)
+      expect(events.find(event => event._tag === 'AgentRetry')).toMatchObject({
+        attempt: 1,
+        reason: 'rate_limit',
+        delayMs: 0
+      })
       expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
         message: { content: 'ok' }
       })

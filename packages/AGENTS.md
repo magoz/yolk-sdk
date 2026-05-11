@@ -53,6 +53,8 @@ mcp-server -> mcp-client + protocol + Effect
 
 - `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
 - `agent-runtime` threads `reasoningEffort` and `capabilities`; text `/api/agent` uses transcript mode with app-owned HTTP/auth/tool/provider wiring.
+- `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
+- Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
 

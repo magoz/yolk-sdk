@@ -23,6 +23,7 @@ import {
   ToolResultMessage,
   ToolResult,
   UserMessage,
+  zeroAgentUsage,
   type AgentEvent
 } from '@yolk/protocol'
 import {
@@ -240,7 +241,7 @@ const assistantEndEvent = (content: string, toolMessages: ReadonlyArray<AgentMes
   AgentEnd.make({
     messages: assistantEndMessages(content, toolMessages),
     turns: 1,
-    usage: { input: 0, output: 0 }
+    usage: zeroAgentUsage
   })
 
 export const useRealtimeVoice = ({
