@@ -71,6 +71,7 @@ app -> mcp -> protocol + Effect
 
 - `@yolk/mcp` is a domain-free host-executed MCP client; app decides config, auth, and policy.
 - Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
+- Remote MCP depends on `HttpClient`; package tests inject a fake client, app adapters provide `FetchHttpClient.layer`.
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.

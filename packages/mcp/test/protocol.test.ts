@@ -1,4 +1,5 @@
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
+import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   callMcpServerTool,
@@ -7,6 +8,13 @@ import {
   sanitizeMcpName,
   toolCallResultToToolResult
 } from '../src'
+
+const unusedHttpClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(request =>
+    Effect.succeed(HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 })))
+  )
+)
 
 describe('MCP protocol helpers', () => {
   it('sanitizes server and tool names for protocol tool defs', () => {
@@ -51,7 +59,7 @@ describe('MCP protocol helpers', () => {
         toolCallId: 'call_1',
         params: {},
         options: { securityPolicy: defaultMcpSecurityPolicy }
-      }).pipe(Effect.result)
+      }).pipe(Effect.result, Effect.provide(unusedHttpClientLayer))
 
       expect(result._tag).toBe('Failure')
       if (result._tag === 'Failure') {

@@ -1,0 +1,47 @@
+import { ConfigProvider, Effect } from 'effect'
+import { describe, expect, it } from '@effect/vitest'
+import { join } from 'node:path'
+import { resolveAgentTools } from './registry'
+
+const stdioFixturePath = join(process.cwd(), 'packages/mcp/test/fixtures/stdio-server.mjs')
+
+const withMcpConfig = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.provide(
+    effect,
+    ConfigProvider.layer(
+      ConfigProvider.fromEnv({
+        env: {
+          YOLK_MCP_LOCAL_ENABLED: 'true',
+          YOLK_MCP_SERVERS: JSON.stringify([
+            {
+              name: 'local',
+              type: 'local',
+              command: [process.execPath, stdioFixturePath]
+            }
+          ])
+        }
+      })
+    )
+  )
+
+describe('MCP tool module', () => {
+  it.effect('adds configured MCP tools to text agents only', () =>
+    withMcpConfig(
+      Effect.gen(function* () {
+        const textTools = yield* resolveAgentTools({
+          surface: 'text',
+          route: '/agent',
+          userId: 'user_1'
+        })
+        const voiceTools = yield* resolveAgentTools({
+          surface: 'voice',
+          route: '/agent',
+          userId: 'user_1'
+        })
+
+        expect(textTools.tools.map(tool => tool.name)).toContain('local_echo')
+        expect(voiceTools.tools.map(tool => tool.name)).not.toContain('local_echo')
+      })
+    )
+  )
+})

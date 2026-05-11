@@ -1,7 +1,7 @@
 import { Effect, Option, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { NodeServices } from '@effect/platform-node'
-import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk/protocol'
 import type { McpClientInfo, McpSecurityPolicy, McpServerConfig } from './config'
@@ -29,6 +29,9 @@ type McpClientOptions = {
   readonly securityPolicy?: McpSecurityPolicy
   readonly timeoutMs?: number
 }
+
+type RemoteMcpServerConfig = Extract<McpServerConfig, { type: 'remote' }>
+type LocalMcpServerConfig = Extract<McpServerConfig, { type: 'local' }>
 
 export type McpResolvedTool = {
   readonly serverName: string
@@ -62,10 +65,7 @@ const securityPolicy = (options?: McpClientOptions) =>
 const fail = (server: string, message: string, cause: McpError['cause']) =>
   Effect.fail(new McpError({ server, message, cause }))
 
-const validateRemoteUrl = (
-  config: Extract<McpServerConfig, { type: 'remote' }>,
-  policy: McpSecurityPolicy
-) =>
+const validateRemoteUrl = (config: RemoteMcpServerConfig, policy: McpSecurityPolicy) =>
   Effect.gen(function* () {
     const url = yield* Effect.try({
       try: () => new URL(config.url),
@@ -92,10 +92,7 @@ const validateRemoteUrl = (
     return yield* fail(config.name, 'Remote MCP requires https: URL', 'security')
   })
 
-const validateLocal = (
-  config: Extract<McpServerConfig, { type: 'local' }>,
-  policy: McpSecurityPolicy
-) =>
+const validateLocal = (config: LocalMcpServerConfig, policy: McpSecurityPolicy) =>
   Effect.gen(function* () {
     if (!policy.allowLocalServers) {
       return yield* fail(config.name, 'Local MCP servers are disabled by policy', 'security')
@@ -157,7 +154,7 @@ const mapUnknownToMcpError =
         })
 
 const requestRemote = (
-  config: Extract<McpServerConfig, { type: 'remote' }>,
+  config: RemoteMcpServerConfig,
   request: JsonRpcRequest,
   options?: McpClientOptions
 ) =>
@@ -207,10 +204,10 @@ const requestRemote = (
     const decoded = yield* parseSseJsonRpcResponse(config.name, text)
 
     return yield* unwrapResponse(config.name, decoded)
-  }).pipe(Effect.provide(FetchHttpClient.layer))
+  })
 
 const notifyRemote = (
-  config: Extract<McpServerConfig, { type: 'remote' }>,
+  config: RemoteMcpServerConfig,
   notification: JsonRpcNotification,
   options?: McpClientOptions
 ) =>
@@ -247,10 +244,10 @@ const notifyRemote = (
           orElse: () => fail(config.name, 'MCP notification timed out', 'timeout')
         })
       )
-  }).pipe(Effect.provide(FetchHttpClient.layer))
+  })
 
 const requestRemoteSession = (
-  config: Extract<McpServerConfig, { type: 'remote' }>,
+  config: RemoteMcpServerConfig,
   request: JsonRpcRequest,
   options?: McpClientOptions
 ) =>
@@ -266,7 +263,7 @@ type EncodedLocalMessage = {
 }
 
 const requestLocalEncoded = (
-  config: Extract<McpServerConfig, { type: 'local' }>,
+  config: LocalMcpServerConfig,
   messages: ReadonlyArray<EncodedLocalMessage>,
   expectedResponses: number,
   options?: McpClientOptions
@@ -321,7 +318,7 @@ const requestLocalEncoded = (
 }
 
 const requestLocal = (
-  config: Extract<McpServerConfig, { type: 'local' }>,
+  config: LocalMcpServerConfig,
   requests: ReadonlyArray<JsonRpcRequest | JsonRpcNotification>,
   expectedResponses: number,
   options?: McpClientOptions
@@ -409,13 +406,17 @@ export const listMcpServerTools = (config: McpServerConfig, options?: McpClientO
     }))
   })
 
-export const callMcpServerTool = (input: {
+type CallMcpServerToolInput = {
   readonly config: McpServerConfig
   readonly mcpToolName: string
   readonly toolCallId: string
   readonly params: unknown
   readonly options?: McpClientOptions
-}): Effect.Effect<ToolResult, McpError> =>
+}
+
+export const callMcpServerTool = (
+  input: CallMcpServerToolInput
+): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const result = yield* requestServer(
       input.config,

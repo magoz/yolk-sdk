@@ -50,6 +50,8 @@ Reasoning:
 
 Configured MCP env:
 
+Temporary dev/bootstrap source until persisted MCP connections are added (similar ownership boundary as Codex OAuth):
+
 | Env                           | Values | Notes                                                     |
 | ----------------------------- | ------ | --------------------------------------------------------- |
 | `YOLK_MCP_SERVERS`            | JSON   | `[{ name,type:'remote',url,headers?,enabled? }]` or local |
