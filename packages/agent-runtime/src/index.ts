@@ -1,6 +1,6 @@
-export { SessionNotFoundError } from './error'
-export type { RuntimeError } from './error'
-export { runRuntime } from './run-runtime'
+export { SessionNotFoundError } from './error.ts'
+export type { RuntimeError } from './error.ts'
+export { runRuntime } from './run-runtime.ts'
 export type {
   InputRuntimeRequest,
   PersistentTranscriptRuntimeRequest,
@@ -8,8 +8,8 @@ export type {
   RuntimeRequest,
   RuntimeTranscript,
   TranscriptRuntimeRequest
-} from './run-runtime'
-export { makeInMemorySessionStoreLayer, SessionStore } from './session-store'
-export type { SessionSnapshot } from './session-store'
+} from './run-runtime.ts'
+export { makeInMemorySessionStoreLayer, SessionStore } from './session-store.ts'
+export type { SessionSnapshot } from './session-store.ts'
 
 export type RuntimeSessionId = string

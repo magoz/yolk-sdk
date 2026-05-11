@@ -1,5 +1,5 @@
 import { AssistantAgentMessage } from '@yolk/protocol'
-import type { LLMEvent } from './llm-event'
+import type { LLMEvent } from './llm-event.ts'
 
 export const collectText = (events: ReadonlyArray<LLMEvent>) =>
   events.reduce((text, event) => (event._tag === 'TextDelta' ? `${text}${event.text}` : text), '')

@@ -1,7 +1,7 @@
 import { Effect, Layer } from 'effect'
 import { ToolResult } from '@yolk/protocol'
-import { ToolError } from '../error'
-import { ToolExecutor } from '../services/tool-executor'
+import { ToolError } from '../error.ts'
+import { ToolExecutor } from '../services/tool-executor.ts'
 
 export const TestToolExecutor = {
   layer: (resultsByName: Readonly<Record<string, string>>) =>

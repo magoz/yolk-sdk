@@ -1,7 +1,7 @@
 import { Context } from 'effect'
 import type { Effect } from 'effect'
 import type { ToolCall, ToolResult } from '@yolk/protocol'
-import type { ToolError } from '../error'
+import type { ToolError } from '../error.ts'
 
 export class ToolExecutor extends Context.Service<
   ToolExecutor,

@@ -14,8 +14,8 @@ import {
   type LoopConfig,
   type ToolExecutor
 } from '@yolk/agent-loop'
-import { SessionStore } from './session-store'
-import type { RuntimeError } from './error'
+import { SessionStore } from './session-store.ts'
+import type { RuntimeError } from './error.ts'
 
 export type RuntimeTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
 

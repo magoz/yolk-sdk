@@ -1,3 +1,3 @@
-export { FauxProvider, Reply } from './faux-provider'
-export type { FauxResponse } from './faux-provider'
-export { TestToolExecutor } from './test-tool-executor'
+export { FauxProvider, Reply } from './faux-provider.ts'
+export type { FauxResponse } from './faux-provider.ts'
+export { TestToolExecutor } from './test-tool-executor.ts'

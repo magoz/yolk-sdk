@@ -1,8 +1,8 @@
 import { Context } from 'effect'
 import type { Stream } from 'effect'
 import type { AgentMessage, AgentReasoningEffort, ToolDef } from '@yolk/protocol'
-import type { AgentLoopError } from '../error'
-import type { LLMEvent } from '../llm-event'
+import type { AgentLoopError } from '../error.ts'
+import type { LLMEvent } from '../llm-event.ts'
 
 export type LLMRequest = {
   readonly messages: ReadonlyArray<AgentMessage>

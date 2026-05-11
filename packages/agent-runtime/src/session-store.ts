@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Ref } from 'effect'
 import type { AgentMessage } from '@yolk/protocol'
-import { SessionNotFoundError } from './error'
+import { SessionNotFoundError } from './error.ts'
 
 export type SessionSnapshot = {
   readonly id: string

@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { Content } from './content'
+import { Content } from './content.ts'
 
 export class ToolCall extends Schema.Class<ToolCall>('ToolCall')({
   id: Schema.String,

@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
-import { Content } from './content'
-import { ToolCall } from './tool'
+import { Content } from './content.ts'
+import { ToolCall } from './tool.ts'
 
 export class UserMessage extends Schema.TaggedClass<UserMessage>()('User', {
   content: Content

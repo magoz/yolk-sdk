@@ -3,7 +3,7 @@ export {
   AgentModelCapabilities,
   textImageModelCapabilities,
   textOnlyModelCapabilities
-} from './capability'
+} from './capability.ts'
 export {
   appendTextToContent,
   AudioPart,
@@ -17,7 +17,7 @@ export {
   ImagePart,
   isContentEmpty,
   TextPart
-} from './content'
+} from './content.ts'
 export {
   AgentEnd,
   AgentError,
@@ -35,9 +35,9 @@ export {
   ToolResultEvent,
   TurnEnd,
   TurnStart
-} from './event'
-export { AgentMessage, AssistantAgentMessage, ToolResultMessage, UserMessage } from './message'
-export { AgentReasoningEffort } from './reasoning'
-export { ToolCall, ToolDef, ToolResult } from './tool'
+} from './event.ts'
+export { AgentMessage, AssistantAgentMessage, ToolResultMessage, UserMessage } from './message.ts'
+export { AgentReasoningEffort } from './reasoning.ts'
+export { ToolCall, ToolDef, ToolResult } from './tool.ts'
 
 export type MessageId = string

@@ -21,6 +21,24 @@ pnpm cloudflare-agent:destroy
 pnpm cloudflare:check
 ```
 
+## Current dev deployment
+
+```txt
+https://yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst.expenses.workers.dev
+```
+
+Health check:
+
+```sh
+curl https://yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst.expenses.workers.dev/health
+```
+
+Expected response: `ok`.
+
+## Alchemy patch
+
+This repo patches `alchemy@2.0.0-beta.36` so Cloudflare Vite-only imports are lazy. Without it, non-Vite Workers still pull `vite -> lightningcss` into Alchemy's stack bundle and fail on Lightning CSS's dev-only `../pkg` fallback.
+
 ## Cloudflare env
 
 Alchemy deploy/dev needs Cloudflare credentials:

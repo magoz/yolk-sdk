@@ -23,13 +23,13 @@ import {
   type AgentModelCapabilities,
   type ToolDef
 } from '@yolk/protocol'
-import { accumulateAssistantMessage, collectToolCalls } from './accumulator'
-import { AbortError, LLMError, type AgentLoopError, type ToolError } from './error'
-import type { LLMEvent } from './llm-event'
-import { ContextTransformer } from './services/context-transformer'
-import { LLMProvider, type LLMRequest } from './services/llm-provider'
-import { LoopConfig } from './services/loop-config'
-import { ToolExecutor } from './services/tool-executor'
+import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
+import { AbortError, LLMError, type AgentLoopError, type ToolError } from './error.ts'
+import type { LLMEvent } from './llm-event.ts'
+import { ContextTransformer } from './services/context-transformer.ts'
+import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
+import { LoopConfig } from './services/loop-config.ts'
+import { ToolExecutor } from './services/tool-executor.ts'
 
 export type AgentLoopRunId = string
 

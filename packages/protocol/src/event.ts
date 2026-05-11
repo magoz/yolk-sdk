@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
-import { AssistantAgentMessage, AgentMessage } from './message'
-import { ToolCall, ToolResult } from './tool'
+import { AssistantAgentMessage, AgentMessage } from './message.ts'
+import { ToolCall, ToolResult } from './tool.ts'
 
 export const AgentErrorCode = Schema.Literals([
   'provider_error',

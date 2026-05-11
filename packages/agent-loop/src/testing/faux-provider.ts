@@ -1,8 +1,14 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
 import { ToolCall } from '@yolk/protocol'
-import { FauxExhaustedError } from '../error'
-import { LLMDone, LLMReasoningDelta, LLMTextDelta, LLMToolCall, type LLMEvent } from '../llm-event'
-import { LLMProvider, type LLMRequest } from '../services/llm-provider'
+import { FauxExhaustedError } from '../error.ts'
+import {
+  LLMDone,
+  LLMReasoningDelta,
+  LLMTextDelta,
+  LLMToolCall,
+  type LLMEvent
+} from '../llm-event.ts'
+import { LLMProvider, type LLMRequest } from '../services/llm-provider.ts'
 
 export type FauxResponse = {
   readonly events: ReadonlyArray<LLMEvent>

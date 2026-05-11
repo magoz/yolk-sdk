@@ -1,7 +1,7 @@
 import * as Alchemy from 'alchemy'
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Effect from 'effect/Effect'
-import Api from './src/api.ts'
+import ApiLive, { Api } from './src/api.ts'
 
 export default Alchemy.Stack(
   'YolkAgentWorker',
@@ -15,5 +15,5 @@ export default Alchemy.Stack(
     return {
       url: api.url.as<string>()
     }
-  })
+  }).pipe(Effect.provide(ApiLive))
 )
