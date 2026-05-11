@@ -6,8 +6,8 @@ import { callMcpServerTool, listMcpServerTools } from '../src'
 import type { McpServerConfig } from '../src'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
-  ? join(process.cwd(), 'test/fixtures/stdio-server.mjs')
-  : join(process.cwd(), 'packages/mcp/test/fixtures/stdio-server.mjs')
+  ? join(process.cwd(), 'test/fixtures/fake-stdio-mcp-server.mjs')
+  : join(process.cwd(), 'packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs')
 
 type ResponseMode = 'json' | 'sse'
 
@@ -30,7 +30,7 @@ const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
   return 'notifications/initialized'
 }
 
-const makeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.HttpClient> => {
+const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.HttpClient> => {
   return Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make(request =>
@@ -85,7 +85,7 @@ describe('MCP client', () => {
       const options = { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
 
       const tools = yield* listMcpServerTools(config, options).pipe(
-        Effect.provide(makeRemoteMcpLayer('json'))
+        Effect.provide(makeFakeRemoteMcpLayer('json'))
       )
       expect(tools.map(tool => tool.def.name)).toEqual(['remote_search'])
 
@@ -95,7 +95,7 @@ describe('MCP client', () => {
         toolCallId: 'call_1',
         params: { query: 'effect' },
         options
-      }).pipe(Effect.provide(makeRemoteMcpLayer('json')))
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')))
 
       expect(result.content).toBe('remote result')
     })
@@ -106,7 +106,7 @@ describe('MCP client', () => {
       const tools = yield* listMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
-      ).pipe(Effect.provide(makeRemoteMcpLayer('sse')))
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('sse')))
 
       expect(tools.map(tool => tool.def.name)).toEqual(['remote_search'])
     })
@@ -122,7 +122,7 @@ describe('MCP client', () => {
       const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
 
       const tools = yield* listMcpServerTools(config, options).pipe(
-        Effect.provide(makeRemoteMcpLayer('json'))
+        Effect.provide(makeFakeRemoteMcpLayer('json'))
       )
       expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
 
@@ -132,7 +132,7 @@ describe('MCP client', () => {
         toolCallId: 'call_1',
         params: { text: 'hello' },
         options
-      }).pipe(Effect.provide(makeRemoteMcpLayer('json')))
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')))
       expect(result.content).toBe('local result')
     })
   )

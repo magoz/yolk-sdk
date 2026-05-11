@@ -3,7 +3,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
 import { resolveAgentTools } from './registry'
 
-const stdioFixturePath = join(process.cwd(), 'packages/mcp/test/fixtures/stdio-server.mjs')
+const stdioFixturePath = join(process.cwd(), 'packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs')
 
 const withMcpConfig = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.provide(

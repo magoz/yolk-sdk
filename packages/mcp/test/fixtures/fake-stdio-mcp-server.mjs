@@ -1,3 +1,5 @@
+// Test-only fake MCP server. Exercises the real stdio transport without
+// requiring external binaries, shell scripts, network ports, or credentials.
 import readline from 'node:readline'
 
 const lines = readline.createInterface({ input: process.stdin })

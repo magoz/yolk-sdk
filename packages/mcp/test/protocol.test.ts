@@ -9,7 +9,9 @@ import {
   toolCallResultToToolResult
 } from '../src'
 
-const unusedHttpClientLayer = Layer.succeed(
+// Public MCP client helpers accept remote/local union configs, so tests that stop at
+// local policy validation still provide an inert HttpClient requirement.
+const unusedRemoteMcpLayer = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make(request =>
     Effect.succeed(HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 })))
@@ -59,7 +61,7 @@ describe('MCP protocol helpers', () => {
         toolCallId: 'call_1',
         params: {},
         options: { securityPolicy: defaultMcpSecurityPolicy }
-      }).pipe(Effect.result, Effect.provide(unusedHttpClientLayer))
+      }).pipe(Effect.result, Effect.provide(unusedRemoteMcpLayer))
 
       expect(result._tag).toBe('Failure')
       if (result._tag === 'Failure') {

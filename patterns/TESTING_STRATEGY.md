@@ -161,6 +161,19 @@ test('user can login with OTP', async ({ page }) => {
 
 **Run:** `pnpm test:e2e`
 
+### Protocol and Transport Tests
+
+**When:** Testing client protocols, stream parsing, subprocess/stdio, or HTTP transport adapters.
+
+**Pattern:** Stay below Playwright. Use Effect layers for dependency injection and tiny deterministic fixtures for external processes.
+
+- Mock HTTP with `HttpClient` layers, not global fetch or real ports.
+- Use checked-in fixture servers for subprocess protocols when real stdio behavior matters.
+- Keep fixtures minimal and test-only; raw JSON is acceptable inside fixtures that simulate external systems.
+- Use Playwright only when asserting browser-visible UI behavior.
+
+**Example:** MCP client tests use fake `HttpClient` layers for remote JSON/SSE and `packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs` for local stdio.
+
 ## Mock Strategy for Effect Services
 
 ### Factory Pattern for Mocks

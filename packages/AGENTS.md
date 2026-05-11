@@ -77,6 +77,8 @@ app -> mcp -> protocol + Effect
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
 - JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code.
 - Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
+- Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE and tiny checked-in stdio fixture servers for local process behavior.
+- Use Playwright for MCP only when browser-visible `/agent` behavior is under test; avoid it for protocol/client transport coverage.
 
 ## Voice Runtime
 
