@@ -17,11 +17,14 @@ const runtimeConfig: RuntimeConfig = {
   model: 'faux'
 }
 
-const makeAgentLoopLayer = (requests: Array<LLMRequest> = []) =>
+const makeAgentLoopLayer = (
+  requests: Array<LLMRequest> = [],
+  responses: Parameters<typeof FauxProvider.layerWithRequests>[0]['responses'] = [Reply.text('ok')]
+) =>
   Layer.mergeAll(
     ContextTransformer.identity,
     LoopConfig.defaultLayer,
-    FauxProvider.layerWithRequests({ responses: [Reply.text('ok')], requests }),
+    FauxProvider.layerWithRequests({ responses, requests }),
     TestToolExecutor.layer({})
   )
 
@@ -39,40 +42,18 @@ describe('runRuntime', () => {
   it.effect('runs transcript mode without loading or saving session state by default', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
-      let loadCount = 0
-      let saveCount = 0
-      const StoreLayer = Layer.succeed(
-        SessionStore,
-        SessionStore.of({
-          load: sessionId =>
-            Effect.sync(() => {
-              loadCount += 1
-              return { id: sessionId, messages: [] }
-            }),
-          save: () =>
-            Effect.sync(() => {
-              saveCount += 1
-            })
-        })
-      )
       const messages: RuntimeTranscript = [UserMessage.make({ content: 'client owned transcript' })]
 
       const eventsChunk = yield* runRuntime(
         {
           _tag: 'Transcript',
           sessionId: 'session_1',
-          messages,
-          context: {}
+          messages
         },
         runtimeConfig
-      ).pipe(
-        Stream.runCollect,
-        Effect.provide(Layer.mergeAll(makeAgentLoopLayer(requests), StoreLayer))
-      )
+      ).pipe(Stream.runCollect, Effect.provide(makeAgentLoopLayer(requests)))
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
-      expect(loadCount).toBe(0)
-      expect(saveCount).toBe(0)
       expect(getFirstRequest(requests).messages).toEqual(messages)
     })
   )
@@ -94,7 +75,6 @@ describe('runRuntime', () => {
           _tag: 'Transcript',
           sessionId: 'session_1',
           messages,
-          context: {},
           persist: true
         },
         runtimeConfig
@@ -131,8 +111,7 @@ describe('runRuntime', () => {
         {
           _tag: 'Input',
           sessionId: session.id,
-          input: UserMessage.make({ content: 'new' }),
-          context: {}
+          input: UserMessage.make({ content: 'new' })
         },
         runtimeConfig
       ).pipe(Stream.runCollect, Effect.provide(Layer.mergeAll(makeAgentLoopLayer(), StoreLayer)))
@@ -166,8 +145,7 @@ describe('runRuntime', () => {
         {
           _tag: 'Transcript',
           sessionId: 'session_1',
-          messages: [UserMessage.make({ content: 'reason about this' })],
-          context: {}
+          messages: [UserMessage.make({ content: 'reason about this' })]
         },
         {
           ...runtimeConfig,
@@ -180,6 +158,36 @@ describe('runRuntime', () => {
       )
 
       expect(getFirstRequest(requests).reasoningEffort).toBe('medium')
+    })
+  )
+
+  it.effect('does not persist when the loop fails before completion', () =>
+    Effect.gen(function* () {
+      const saved: Array<SessionSnapshot> = []
+      const StoreLayer = Layer.succeed(
+        SessionStore,
+        SessionStore.of({
+          load: sessionId =>
+            Effect.succeed({ id: sessionId, messages: [UserMessage.make({ content: 'old' })] }),
+          save: snapshot => Effect.sync(() => saved.push(snapshot))
+        })
+      )
+
+      const exit = yield* runRuntime(
+        {
+          _tag: 'Input',
+          sessionId: 'session_1',
+          input: UserMessage.make({ content: 'new' })
+        },
+        runtimeConfig
+      ).pipe(
+        Stream.runCollect,
+        Effect.provide(Layer.mergeAll(makeAgentLoopLayer([], []), StoreLayer)),
+        Effect.exit
+      )
+
+      expect(exit._tag).toBe('Failure')
+      expect(saved).toEqual([])
     })
   )
 })
