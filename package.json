@@ -16,6 +16,7 @@
     "cloudflare-agent:dev": "pnpm --filter @yolk/cloudflare-agent run dev",
     "cloudflare-agent:deploy": "pnpm --filter @yolk/cloudflare-agent run deploy",
     "cloudflare-agent:destroy": "pnpm --filter @yolk/cloudflare-agent run destroy",
+    "cloudflare-agent:smoke": "pnpm --filter @yolk/cloudflare-agent run smoke",
     "clone-repos": "node --experimental-strip-types scripts/clone-repos.ts",
     "knip": "node --env-file .env.local node_modules/knip/bin/knip.js",
     "prettier:check": "pnpm prettier . --check",

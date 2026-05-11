@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "dev": "alchemy dev",
     "logs": "alchemy logs",
+    "smoke": "tsx scripts/smoke.ts",
     "tail": "alchemy tail"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
     "@cloudflare/workers-types": "^4.20250805.0",
+    "tsx": "^4.21.0",
     "typescript": "catalog:"
   }
 }

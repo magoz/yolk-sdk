@@ -6,6 +6,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 
 - This app is a proving adapter, not the main product surface yet.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
+- `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
 - Current goal: prove `@yolk/*` packages run inside Cloudflare Durable Objects with typed protocol events and durable transcript storage.
 - Do not expand into full product infrastructure until package APIs are stable.
 
@@ -44,6 +45,7 @@ Do not build these here yet unless explicitly requested:
 - Compaction hook shape.
 - Protocol event completeness and stability.
 - Client transport abstraction for WebSocket/SSE.
+- Later enhancement: once Cloudflare needs real UI integration, consider a shared `@yolk/client` transport interface for NDJSON/SSE/WebSocket; defer until backend needs are concrete.
 - Tests for event ordering, persistence, retries, failures.
 - Package docs and public API cleanup.
 

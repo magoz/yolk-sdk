@@ -18,6 +18,7 @@ Alchemy state is local under `.alchemy/state` for now.
 pnpm cloudflare-agent:dev
 pnpm cloudflare-agent:deploy
 pnpm cloudflare-agent:destroy
+pnpm cloudflare-agent:smoke
 pnpm cloudflare:check
 ```
 
@@ -34,6 +35,14 @@ curl https://yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst.expenses.workers.dev
 ```
 
 Expected response: `ok`.
+
+Full smoke:
+
+```sh
+pnpm cloudflare-agent:smoke
+```
+
+The smoke command reads `.alchemy/state/YolkAgentWorker/dev_magoz/Api.json` unless `CLOUDFLARE_AGENT_URL` is set.
 
 ## Alchemy patch
 
