@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolCall, contentText, type ToolDef, type ToolResult } from '@yolk/protocol'
-import { latestMcpProtocolVersion } from '@yolk/mcp'
+import { latestMcpProtocolVersion } from '@yolk/mcp-client'
 import { McpServerError } from './errors'
 
 type JsonRpcRequest = {

@@ -485,7 +485,9 @@ const applyToolResult = (
   messages: ReadonlyArray<AgentChatMessage>,
   result: ToolResult
 ): ReadonlyArray<AgentChatMessage> => {
-  const existingIndex = findLastMessageIndex(messages, message => hasToolCall(message, result.toolCallId))
+  const existingIndex = findLastMessageIndex(messages, message =>
+    hasToolCall(message, result.toolCallId)
+  )
 
   if (existingIndex === -1) {
     return appendOrphanToolResult(messages, result)

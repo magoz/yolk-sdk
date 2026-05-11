@@ -12,9 +12,9 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
-| `@yolk/react`         | Headless React hooks over client state/transport         | `@yolk/client`, `@yolk/protocol`, Effect     |
-| `@yolk/mcp`           | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
-| `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/protocol`, `@yolk/mcp`, Effect        |
+| `@yolk/react`         | Headless React hooks over client state/transport        | `@yolk/client`, `@yolk/protocol`, Effect     |
+| `@yolk/mcp-client`    | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
+| `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/protocol`, `@yolk/mcp-client`, Effect |
 
 ## Dependency Rule
 
@@ -25,8 +25,8 @@ app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol + Effect
 app -> react -> client -> protocol + Effect
-app -> mcp -> protocol + Effect
-mcp-server -> mcp + protocol + Effect
+app -> mcp-client -> protocol + Effect
+mcp-server -> mcp-client + protocol + Effect
 ```
 
 ## Naming
@@ -74,7 +74,7 @@ mcp-server -> mcp + protocol + Effect
 
 ## MCP
 
-- `@yolk/mcp` is a domain-free host-executed MCP client; app decides config, auth, and policy.
+- `@yolk/mcp-client` is a domain-free host-executed MCP client; app decides config, auth, and policy.
 - `@yolk/mcp-server` is a reusable tool-only MCP server; keep it generic for reuse across projects.
 - Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
 - MCP server v1 supports `initialize`, `tools/list`, and `tools/call`; no resources, prompts, OAuth, or app auth.
@@ -153,6 +153,14 @@ mcp-server -> mcp + protocol + Effect
 - Bump all public `@yolk/*` package versions together, even when only one package changed.
 - Keep `updateInternalDependencies: "patch"` so internal dependency ranges stay compatible after releases.
 - Prefer compatibility simplicity over per-package version precision; protocol/runtime/client packages are tightly coupled.
+
+## Dist Build Plan
+
+- Keep TypeScript source exports while packages are private and APIs are still moving quickly.
+- Before the first public npm release, curate explicit public exports and remove accidental root `export *` surface.
+- During release prep, add `tsdown`, emit `dist`, switch package exports to `dist`, add `files`, `publishConfig`, `publint`, READMEs, and peer deps.
+- Publish an alpha/canary only after validating install/import behavior from a separate fixture app.
+- Add Turbo only if package/app build times, CI orchestration, or affected-only builds become painful; use pnpm recursive scripts until then.
 
 ## Package Publishing TODOs
 

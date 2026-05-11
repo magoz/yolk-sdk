@@ -12,10 +12,10 @@ import {
 } from '../src'
 import type { McpError, McpServerConfig } from '../src'
 
-const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
+const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp-client'))
   ? join(process.cwd(), '../mcp-server/test/fixtures/fake-stdio-mcp-server.ts')
   : join(process.cwd(), 'packages/mcp-server/test/fixtures/fake-stdio-mcp-server.ts')
-const tsxCliPath = process.cwd().endsWith(join('packages', 'mcp'))
+const tsxCliPath = process.cwd().endsWith(join('packages', 'mcp-client'))
   ? join(process.cwd(), '../../node_modules/tsx/dist/cli.mjs')
   : join(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
 

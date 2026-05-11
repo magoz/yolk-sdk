@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { Effect, Stream } from 'effect'
-import { streamAgentEvents, type AgentTranscript, type StreamAgentEventsRequest } from '@yolk/client'
+import {
+  streamAgentEvents,
+  type AgentTranscript,
+  type StreamAgentEventsRequest
+} from '@yolk/client'
 import {
   UserMessage,
   isContentEmpty,
@@ -72,14 +76,11 @@ export function useAgentChat({
   onError,
   onAbort
 }: UseAgentChatOptions) {
-  const [state, dispatch] = useReducer(
-    reduceAgentChatState,
-    initialMessages ?? [],
-    messages =>
-      messages.reduce(
-        (current, message) => reduceAgentChatState(current, { _tag: 'AppendMessage', message }),
-        initialAgentChatState
-      )
+  const [state, dispatch] = useReducer(reduceAgentChatState, initialMessages ?? [], messages =>
+    messages.reduce(
+      (current, message) => reduceAgentChatState(current, { _tag: 'AppendMessage', message }),
+      initialAgentChatState
+    )
   )
   const abortControllerRef = useRef<AbortController | null>(null)
   const isRunning = state.status === 'running'
@@ -111,7 +112,8 @@ export function useAgentChat({
 
   const makeTransportRequest = useCallback(
     (messages: AgentTranscript, signal: AbortSignal): AgentChatTransportRequest => {
-      const base = endpoint === undefined ? { sessionId, messages } : { endpoint, sessionId, messages }
+      const base =
+        endpoint === undefined ? { sessionId, messages } : { endpoint, sessionId, messages }
 
       return reasoningEffort === undefined
         ? { ...base, signal }

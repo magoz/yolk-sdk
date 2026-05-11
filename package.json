@@ -39,7 +39,7 @@
     "@yolk/agent-loop": "workspace:^",
     "@yolk/agent-runtime": "workspace:^",
     "@yolk/client": "workspace:^",
-    "@yolk/mcp": "workspace:^",
+    "@yolk/mcp-client": "workspace:^",
     "@yolk/protocol": "workspace:^",
     "@yolk/react": "workspace:^",
     "@yolk/tool-registry": "workspace:^",

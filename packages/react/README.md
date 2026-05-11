@@ -50,3 +50,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 - Use `@yolk/client` for framework-agnostic transport/state, including CLI clients.
 - Use `@yolk/react` for React apps that need headless chat state.
 - Keep host-specific UI, auth, providers, and tools in the app.
+
+## Tests
+
+Hook tests cover custom transport submission, streamed event application, ignored empty submits, and abort handling. Chat model tests cover protocol replay, tool anchoring, timing preservation, and render item projection.

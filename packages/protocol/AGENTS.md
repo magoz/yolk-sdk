@@ -1,0 +1,42 @@
+# Agent Protocol
+
+`@yolk/protocol` is the shared domain-free wire model for agent messages, events, tools, content, reasoning, and capabilities. It is the bottom package in the reusable stack.
+
+## Role
+
+- Define serializable `AgentMessage` input/output shapes.
+- Define `AgentEvent` stream events emitted by loops/providers.
+- Define tool metadata, calls, results, and errors.
+- Define model capability and reasoning request types.
+- Provide content helpers for text and multimodal parts.
+
+## Boundaries
+
+- No provider SDKs, app auth, storage, React, HTTP, or runtime orchestration.
+- No product/domain concepts: users, teams, projects, billing, permissions.
+- No transport assumptions; types must work over HTTP, SSE, NDJSON, WebRTC adapters, or tests.
+- Keep schemas and helpers generic enough for app, client, loop, MCP, and voice packages.
+
+## Public model
+
+| Export area  | Purpose                                 |
+| ------------ | --------------------------------------- |
+| `message`    | Agent transcript messages and ids       |
+| `event`      | Streamed loop/provider events           |
+| `tool`       | Tool definitions, calls, results        |
+| `content`    | Text/image/audio content helpers        |
+| `capability` | Model input/tool capability flags       |
+| `reasoning`  | Provider-supplied reasoning config/data |
+
+## Design rules
+
+- Keep protocol data JSON-serializable unless a type is explicitly app-local.
+- Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
+- Provider reasoning is summary text only; never model hidden chain-of-thought.
+- Adding a protocol variant requires package and app tests for every consumer boundary.
+
+## Tests
+
+- Place semantic behavior tests beside protocol helpers.
+- Cover malformed/empty/multimodal content normalization.
+- Avoid provider-specific fixtures.

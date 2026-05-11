@@ -1,6 +1,6 @@
 import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { McpSecurityPolicy, McpServerConfig } from '@yolk/mcp'
+import type { McpSecurityPolicy, McpServerConfig } from '@yolk/mcp-client'
 
 const McpRemoteServerConfigSchema = Schema.Struct({
   name: Schema.String,

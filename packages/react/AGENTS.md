@@ -19,15 +19,15 @@
 
 ## Public model
 
-| Export | Purpose |
-| --- | --- |
-| `useAgentChat` | Headless chat hook over streamed `AgentEvent`s |
-| `AgentChatState` | Render-ready state: status, error, chat messages |
-| `AgentChatMessage` | Role-grouped render message |
-| `AgentChatPart` | Text, reasoning, tool call/result, error parts |
-| `toAgentMessages` | Render model → protocol transcript |
-| `buildAgentChatItems` | Flat render-item projection for simple UIs |
-| selectors | Reasoning/tool/activity helpers |
+| Export                | Purpose                                          |
+| --------------------- | ------------------------------------------------ |
+| `useAgentChat`        | Headless chat hook over streamed `AgentEvent`s   |
+| `AgentChatState`      | Render-ready state: status, error, chat messages |
+| `AgentChatMessage`    | Role-grouped render message                      |
+| `AgentChatPart`       | Text, reasoning, tool call/result, error parts   |
+| `toAgentMessages`     | Render model → protocol transcript               |
+| `buildAgentChatItems` | Flat render-item projection for simple UIs       |
+| selectors             | Reasoning/tool/activity helpers                  |
 
 ## Hook contract
 
@@ -47,6 +47,13 @@
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
 - Transport can be injected; default is `streamAgentEvents` from `@yolk/client`.
+
+## Tests
+
+- Keep hook lifecycle tests in `src/use-agent-chat.test.ts`.
+- Cover injected transport requests, streamed events, blank submit guards, and abort cleanup.
+- Keep render model tests next to their modules: `chat-core.test.ts`, `chat-messages.test.ts`, `chat-items.test.ts`.
+- Test package behavior here, not through the example app.
 
 ## App example
 
