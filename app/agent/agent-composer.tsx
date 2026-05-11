@@ -1,9 +1,33 @@
 'use client'
 
-import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
-import { ArrowUpIcon, LoaderCircleIcon, MicIcon, PhoneOffIcon, SquareIcon } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+  type KeyboardEvent
+} from 'react'
+import Image from 'next/image'
+import {
+  ArrowUpIcon,
+  ImageIcon,
+  LoaderCircleIcon,
+  MicIcon,
+  PhoneOffIcon,
+  SquareIcon,
+  XIcon
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
+
+export type AgentComposerImageAttachment = {
+  readonly name: string
+  readonly mimeType: string
+  readonly previewUrl: string
+}
 
 type AgentComposerProps = {
   readonly input: string
@@ -12,7 +36,10 @@ type AgentComposerProps = {
   readonly isVoiceMode: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
+  readonly imageAttachment: AgentComposerImageAttachment | null
   readonly onInputChange: (value: string) => void
+  readonly onImageAttachmentChange: (file: File | null) => void
+  readonly onRemoveImageAttachment: () => void
   readonly onSubmit: () => void
   readonly onStop: () => void
   readonly onToggleVoice: () => void
@@ -25,12 +52,19 @@ export function AgentComposer({
   isVoiceMode,
   isVoiceConnecting,
   isVoiceLive,
+  imageAttachment,
   onInputChange,
+  onImageAttachmentChange,
+  onRemoveImageAttachment,
   onSubmit,
   onStop,
   onToggleVoice
 }: AgentComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [dragDepth, setDragDepth] = useState(0)
+  const dropDisabled = isRunning || isVoiceMode
+  const isDropActive = dragDepth > 0 && !dropDisabled
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -48,6 +82,51 @@ export function AgentComposer({
     }
   }
 
+  const handleAttachClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    onImageAttachmentChange(event.target.files?.[0] ?? null)
+    event.target.value = ''
+  }
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+
+    if (dropDisabled) {
+      return
+    }
+
+    setDragDepth(current => current + 1)
+  }
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = dropDisabled ? 'none' : 'copy'
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+
+    if (dropDisabled) {
+      return
+    }
+
+    setDragDepth(current => Math.max(0, current - 1))
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setDragDepth(0)
+
+    if (dropDisabled) {
+      return
+    }
+
+    onImageAttachmentChange(event.dataTransfer.files[0] ?? null)
+  }
+
   const hint = isVoiceMode
     ? 'Voice mode active'
     : isRunning
@@ -60,7 +139,60 @@ export function AgentComposer({
 
   return (
     <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2 sm:px-6">
-      <div className="mx-auto w-full max-w-3xl rounded-[1.5rem] border border-foreground/10 bg-card/95 p-2 shadow-lg shadow-foreground/5 transition-colors duration-200 focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10">
+      <div
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={cn(
+          'relative mx-auto w-full max-w-3xl rounded-[1.5rem] border bg-card/95 p-2 shadow-lg shadow-foreground/5 transition-[border-color,box-shadow,background-color] duration-150 ease-out focus-within:border-ring/50 focus-within:ring-2 focus-within:ring-ring/10',
+          isDropActive
+            ? 'border-primary/50 bg-primary/5 ring-2 ring-primary/15'
+            : 'border-foreground/10'
+        )}
+      >
+        {isDropActive ? (
+          <div className="pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-[1.15rem] border border-dashed border-primary/60 bg-background/80 text-sm font-medium text-primary backdrop-blur-sm">
+            Drop image to attach
+          </div>
+        ) : null}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={handleFileChange}
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden
+        />
+        {imageAttachment !== null ? (
+          <div className="px-2 pt-2">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-foreground/10 bg-muted/50 p-1.5 pr-2 text-xs text-muted-foreground">
+              <Image
+                src={imageAttachment.previewUrl}
+                alt="Attached image preview"
+                width={48}
+                height={48}
+                unoptimized
+                className="size-12 rounded-xl object-cover"
+              />
+              <div className="min-w-0">
+                <div className="truncate font-medium text-foreground">{imageAttachment.name}</div>
+                <div className="truncate">{imageAttachment.mimeType}</div>
+              </div>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                onClick={onRemoveImageAttachment}
+                className="ml-1 rounded-full"
+              >
+                <XIcon />
+                <span className="sr-only">Remove image</span>
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <Textarea
           ref={textareaRef}
           value={input}
@@ -84,6 +216,17 @@ export function AgentComposer({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="icon-lg"
+              variant="outline"
+              onClick={handleAttachClick}
+              disabled={dropDisabled}
+              className="size-10 rounded-full"
+            >
+              <ImageIcon />
+              <span className="sr-only">Attach image</span>
+            </Button>
             <Button
               type="button"
               size="icon-lg"
@@ -119,7 +262,7 @@ export function AgentComposer({
               <Button
                 type="submit"
                 size="icon-lg"
-                disabled={input.trim().length === 0 || submitDisabled}
+                disabled={(input.trim().length === 0 && imageAttachment === null) || submitDisabled}
                 className="size-10 rounded-full"
               >
                 <ArrowUpIcon />

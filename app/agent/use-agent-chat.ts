@@ -5,8 +5,10 @@ import { Effect, Stream } from 'effect'
 import { streamAgentEvents, type AgentTranscript } from '@yolk/client'
 import {
   UserMessage,
+  isContentEmpty,
   type AgentEvent,
   type AgentMessage,
+  type Content,
   type AgentReasoningEffort
 } from '@yolk/protocol'
 import {
@@ -37,7 +39,7 @@ export type UseAgentChatOptions = {
 export type AgentChatSubmitResult =
   | {
       readonly _tag: 'Submitted'
-      readonly content: string
+      readonly content: Content
       readonly message: UserMessage
       readonly messages: AgentTranscript
     }
@@ -147,6 +149,28 @@ export function useAgentChat({
     [isRunning]
   )
 
+  const canSubmitContent = useCallback(
+    (content: Content) =>
+      !isContentEmpty(content) && !isRunning && abortControllerRef.current === null,
+    [isRunning]
+  )
+
+  const submitMessage = useCallback(
+    (message: UserMessage): AgentChatSubmitResult => {
+      if (!canSubmitContent(message.content)) {
+        return { _tag: 'Ignored' }
+      }
+
+      const messages = appendTranscriptMessage(toAgentMessages(state.chatMessages), message)
+
+      dispatch({ _tag: 'Submit', message })
+      runAgent(messages)
+
+      return { _tag: 'Submitted', content: message.content, message, messages }
+    },
+    [canSubmitContent, runAgent, state.chatMessages]
+  )
+
   const submitText = useCallback(
     (value: string): AgentChatSubmitResult => {
       const content = value.trim()
@@ -155,15 +179,9 @@ export function useAgentChat({
         return { _tag: 'Ignored' }
       }
 
-      const message = UserMessage.make({ content })
-      const messages = appendTranscriptMessage(toAgentMessages(state.chatMessages), message)
-
-      dispatch({ _tag: 'Submit', message })
-      runAgent(messages)
-
-      return { _tag: 'Submitted', content, message, messages }
+      return submitMessage(UserMessage.make({ content }))
     },
-    [canSubmitText, runAgent, state.chatMessages]
+    [canSubmitText, submitMessage]
   )
 
   const stop = useCallback(() => {
@@ -185,6 +203,8 @@ export function useAgentChat({
     isRunning,
     hasReasoningSummary: hasAgentChatReasoningSummary(state),
     canSubmitText,
+    canSubmitContent,
+    submitMessage,
     submitText,
     stop,
     applyEvent,

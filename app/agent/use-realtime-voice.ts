@@ -12,6 +12,7 @@ import {
 import * as Schema from 'effect/Schema'
 import {
   AgentEnd,
+  contentPreview,
   type AgentMessage,
   AssistantAgentMessage,
   LLMToolCall,
@@ -22,8 +23,7 @@ import {
   ToolResultMessage,
   ToolResult,
   UserMessage,
-  type AgentEvent,
-  type Content
+  type AgentEvent
 } from '@yolk/protocol'
 import {
   decodeOpenAiRealtimeServerEvent,
@@ -99,19 +99,14 @@ const encodeClientEvent = (event: OpenAiRealtimeClientEvent) => {
   return encoded
 }
 
-const contentToText = (content: Content) =>
-  typeof content === 'string'
-    ? content
-    : content.map(part => (part._tag === 'Text' ? part.text : part._tag)).join(', ')
-
 const toRealtimeConversationMessage = (
   message: AgentMessage
 ): OpenAiRealtimeConversationMessageItem | null => {
   switch (message._tag) {
     case 'User':
-      return makeOpenAiRealtimeUserMessageItem(contentToText(message.content))
+      return makeOpenAiRealtimeUserMessageItem(contentPreview(message.content))
     case 'Assistant': {
-      const text = contentToText(message.content)
+      const text = contentPreview(message.content)
 
       if (text.length === 0) {
         return null

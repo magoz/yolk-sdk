@@ -6,6 +6,7 @@ import {
   AgentReasoningEffort,
   type AgentErrorCode,
   type AgentEvent,
+  type AgentModelCapabilities,
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
 } from '@yolk/protocol'
@@ -31,6 +32,7 @@ export type AgentRouteConfig = {
   readonly systemPrompt: string
   readonly reasoningEffort?: AgentReasoningEffortType
   readonly tools: ReadonlyArray<ToolDef>
+  readonly capabilities?: AgentModelCapabilities
 }
 
 const ndjsonHeaders = {
@@ -116,6 +118,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       systemPrompt: config.systemPrompt,
       tools: config.tools,
       reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
+      capabilities: config.capabilities,
       model: config.model
     }).pipe(
       recoverAgentStreamErrors,

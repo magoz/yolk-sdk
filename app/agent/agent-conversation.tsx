@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Image from 'next/image'
 import {
   BotIcon,
   BrainIcon,
@@ -10,7 +11,7 @@ import {
   SparklesIcon,
   WrenchIcon
 } from 'lucide-react'
-import type { Content, ToolCall } from '@yolk/protocol'
+import { contentParts, type Content, type ContentPart, type ToolCall } from '@yolk/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
@@ -211,9 +212,10 @@ function MessageCard({
   readonly content: Content
   readonly role: 'user' | 'assistant'
 }) {
-  const preview = contentPreview(content)
+  const parts = contentParts(content)
+  const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
 
-  if (preview.length === 0) {
+  if (!hasVisibleContent) {
     return null
   }
 
@@ -222,7 +224,7 @@ function MessageCard({
       <div className={chatRowClass}>
         <div className="flex justify-end">
           <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs">
-            {preview}
+            <MessageContentParts parts={parts} role="user" />
           </div>
         </div>
       </div>
@@ -237,9 +239,53 @@ function MessageCard({
           Assistant
         </div>
         <div className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
-          {preview}
+          <MessageContentParts parts={parts} role="assistant" />
         </div>
       </div>
+    </div>
+  )
+}
+
+function MessageContentParts({
+  parts,
+  role
+}: {
+  readonly parts: ReadonlyArray<ContentPart>
+  readonly role: 'user' | 'assistant'
+}) {
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) => {
+        switch (part._tag) {
+          case 'Text':
+            return part.text.length > 0 ? (
+              <div key={`text-${index}`} className="whitespace-pre-wrap break-words">
+                {part.text}
+              </div>
+            ) : null
+          case 'Image':
+            return (
+              <Image
+                key={`image-${index}`}
+                src={`data:${part.mimeType};base64,${part.data}`}
+                alt={role === 'user' ? 'Uploaded image' : 'Generated image'}
+                width={640}
+                height={360}
+                unoptimized
+                className="max-h-80 rounded-xl border border-foreground/10 object-contain shadow-xs"
+              />
+            )
+          case 'Audio':
+            return (
+              <div
+                key={`audio-${index}`}
+                className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
+              >
+                Audio attachment
+              </div>
+            )
+        }
+      })}
     </div>
   )
 }

@@ -1,6 +1,12 @@
 import { Effect, Layer, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, UserMessage } from '@yolk/protocol'
+import {
+  AgentContentCapabilities,
+  AgentModelCapabilities,
+  ImagePart,
+  ToolDef,
+  UserMessage
+} from '@yolk/protocol'
 import {
   ContextTransformer,
   FauxProvider,
@@ -14,6 +20,12 @@ import {
 } from '../src'
 
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
+
+const noToolReasoningCapabilities = AgentModelCapabilities.make({
+  input: AgentContentCapabilities.make({ text: true, image: false, audio: false }),
+  tools: false,
+  reasoning: false
+})
 
 describe('run', () => {
   it.effect('emits a text-only event sequence', () =>
@@ -230,6 +242,67 @@ describe('run', () => {
       )
 
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'AbortError' } })
+    })
+  )
+
+  it.effect('fails before provider call when input exceeds model capabilities', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const result = yield* run({
+        messages: [
+          UserMessage.make({
+            content: [ImagePart.make({ data: 'abc', mimeType: 'image/png' })]
+          })
+        ],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux',
+        capabilities: noToolReasoningCapabilities
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({ responses: [Reply.text('ok')], requests }),
+            TestToolExecutor.layer({})
+          ).pipe(Layer.provideMerge(BaseLayer))
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          message: 'Image input is not supported by this model',
+          retryable: false
+        }
+      })
+      expect(requests).toEqual([])
+    })
+  )
+
+  it.effect('fails before provider call when tools are unsupported', () =>
+    Effect.gen(function* () {
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })],
+        model: 'faux',
+        capabilities: noToolReasoningCapabilities
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(FauxProvider.layer(Reply.text('ok')), TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(BaseLayer)
+          )
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'LLMError', message: 'Tools are not supported by this model' }
+      })
     })
   )
 

@@ -6,7 +6,7 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, UserMessage } from '@yolk/protocol'
+import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk/protocol'
 import { LLMProvider } from '@yolk/agent-loop'
 import { OPENAI_CODEX_RESPONSES_URL } from '@/lib/services/openai-codex-oauth/live-layer'
 import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
@@ -233,6 +233,46 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(events.map(event => event._tag)).toEqual(['ToolCall', 'Done'])
       expect(events[0]).toMatchObject({
         call: { id: 'call_1', name: 'weather', params: { city: 'Paris' } }
+      })
+    })
+  )
+
+  it.effect('maps image user content to OpenAI Codex responses input', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
+      )
+
+      yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [
+              UserMessage.make({
+                content: [
+                  TextPart.make({ text: 'Describe this image' }),
+                  ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+                ]
+              })
+            ],
+            tools: [],
+            model: 'gpt-5.5',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      expect(readCapturedBody(requests)).toMatchObject({
+        input: [
+          {
+            role: 'user',
+            content: [
+              { type: 'input_text', text: 'Describe this image' },
+              { type: 'input_image', image_url: 'data:image/png;base64,abc' }
+            ]
+          }
+        ]
       })
     })
   )

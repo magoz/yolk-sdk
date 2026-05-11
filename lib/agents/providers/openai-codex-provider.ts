@@ -8,9 +8,11 @@ import {
 import * as Schema from 'effect/Schema'
 import {
   ToolCall,
+  contentParts,
   type AgentMessage,
   type AgentReasoningEffort,
   type Content,
+  type ContentPart,
   type ToolDef
 } from '@yolk/protocol'
 import {
@@ -37,8 +39,28 @@ type OpenAiCodexConfigShape = {
 
 type OpenAiCodexMessageInput = {
   readonly role: 'user' | 'assistant'
-  readonly content: string
+  readonly content: string | ReadonlyArray<OpenAiCodexInputContentPart>
 }
+
+type OpenAiCodexInputTextPart = {
+  readonly type: 'input_text'
+  readonly text: string
+}
+
+type OpenAiCodexInputImagePart = {
+  readonly type: 'input_image'
+  readonly image_url: string
+}
+
+type OpenAiCodexOutputTextPart = {
+  readonly type: 'output_text'
+  readonly text: string
+}
+
+type OpenAiCodexInputContentPart =
+  | OpenAiCodexInputTextPart
+  | OpenAiCodexInputImagePart
+  | OpenAiCodexOutputTextPart
 
 type OpenAiCodexFunctionCallInput = {
   readonly type: 'function_call'
@@ -167,19 +189,56 @@ const unsupportedContentError = (contentType: string) =>
     retryable: false
   })
 
+const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
+  switch (part._tag) {
+    case 'Text':
+      return Effect.succeed(part.text)
+    case 'Image':
+      return Effect.fail(unsupportedContentError(`${owner} image`))
+    case 'Audio':
+      return Effect.fail(unsupportedContentError(`${owner} audio`))
+  }
+}
+
 const contentToText = (content: Content, owner: string): Effect.Effect<string, LLMError> =>
   typeof content === 'string'
     ? Effect.succeed(content)
-    : Effect.forEach(content, part => {
-        switch (part._tag) {
-          case 'Text':
-            return Effect.succeed(part.text)
-          case 'Image':
-            return Effect.fail(unsupportedContentError(`${owner} image`))
-          case 'Audio':
-            return Effect.fail(unsupportedContentError(`${owner} audio`))
-        }
-      }).pipe(Effect.map(textParts => textParts.join('\n')))
+    : Effect.forEach(content, part => contentPartToText(part, owner)).pipe(
+        Effect.map(textParts => textParts.join('\n'))
+      )
+
+const userPartToCodexInputPart = (
+  part: ContentPart
+): Effect.Effect<OpenAiCodexInputTextPart | OpenAiCodexInputImagePart, LLMError> => {
+  switch (part._tag) {
+    case 'Text':
+      return Effect.succeed({ type: 'input_text', text: part.text })
+    case 'Image':
+      return Effect.succeed({
+        type: 'input_image',
+        image_url: `data:${part.mimeType};base64,${part.data}`
+      })
+    case 'Audio':
+      return Effect.fail(unsupportedContentError('User audio'))
+  }
+}
+
+const contentToUserInput = (
+  content: Content
+): Effect.Effect<OpenAiCodexMessageInput['content'], LLMError> => {
+  if (typeof content === 'string') {
+    return Effect.succeed(content)
+  }
+
+  const parts = contentParts(content)
+  const onlyPart = parts[0]
+
+  if (onlyPart !== undefined && parts.length === 1 && onlyPart._tag === 'Text') {
+    return Effect.succeed(onlyPart.text)
+  }
+
+  return Effect.forEach(parts, userPartToCodexInputPart)
+}
 
 const serializeToolArguments = (params: unknown) =>
   encodeJsonString(params, 'Could not serialize OpenAI Codex tool arguments')
@@ -202,7 +261,7 @@ const messageToCodexInput = (
   Effect.gen(function* () {
     switch (message._tag) {
       case 'User':
-        return [{ role: 'user', content: yield* contentToText(message.content, 'User') }]
+        return [{ role: 'user', content: yield* contentToUserInput(message.content) }]
       case 'Assistant': {
         const content = yield* contentToText(message.content, 'Assistant')
         const toolCallInputs = yield* Effect.forEach(message.toolCalls, toolCallToCodexInput)

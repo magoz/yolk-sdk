@@ -3,6 +3,7 @@ import {
   AgentEnd,
   AgentStart,
   AssistantMessageEvent,
+  contentParts,
   LLMToolCall as AgentLLMToolCall,
   LLMReasoningDelta as AgentLLMReasoningDelta,
   LLMStreamEnd,
@@ -19,10 +20,11 @@ import {
   TurnStart,
   type AgentEvent,
   type AgentMessage,
+  type AgentModelCapabilities,
   type ToolDef
 } from '@yolk/protocol'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator'
-import { AbortError, type AgentLoopError, type ToolError } from './error'
+import { AbortError, LLMError, type AgentLoopError, type ToolError } from './error'
 import type { LLMEvent } from './llm-event'
 import { ContextTransformer } from './services/context-transformer'
 import { LLMProvider, type LLMRequest } from './services/llm-provider'
@@ -37,6 +39,55 @@ export type RunConfig = {
   readonly tools: ReadonlyArray<ToolDef>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
+  readonly capabilities?: AgentModelCapabilities
+}
+
+const unsupportedInputError = (message: string) =>
+  new LLMError({
+    cause: 'provider_error',
+    message,
+    retryable: false
+  })
+
+const validateContent = (message: AgentMessage, capabilities: AgentModelCapabilities) =>
+  Effect.forEach(contentParts(message.content), part => {
+    switch (part._tag) {
+      case 'Text':
+        return capabilities.input.text
+          ? Effect.void
+          : Effect.fail(unsupportedInputError('Text input is not supported by this model'))
+      case 'Image':
+        return capabilities.input.image
+          ? Effect.void
+          : Effect.fail(unsupportedInputError('Image input is not supported by this model'))
+      case 'Audio':
+        return capabilities.input.audio
+          ? Effect.void
+          : Effect.fail(unsupportedInputError('Audio input is not supported by this model'))
+    }
+  })
+
+const validateCapabilities = (
+  config: RunConfig,
+  messages: ReadonlyArray<AgentMessage>
+): Effect.Effect<void, LLMError> => {
+  const capabilities = config.capabilities
+
+  if (capabilities === undefined) {
+    return Effect.void
+  }
+
+  if (!capabilities.tools && config.tools.length > 0) {
+    return Effect.fail(unsupportedInputError('Tools are not supported by this model'))
+  }
+
+  if (!capabilities.reasoning && config.reasoningEffort !== undefined) {
+    return Effect.fail(unsupportedInputError('Reasoning effort is not supported by this model'))
+  }
+
+  return Effect.forEach(messages, message => validateContent(message, capabilities)).pipe(
+    Effect.asVoid
+  )
 }
 
 const toLlmEvents = (llmEvents: ReadonlyArray<LLMEvent>): ReadonlyArray<AgentEvent> => {
@@ -117,6 +168,7 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
     const llmEvents: Array<LLMEvent> = []
     const llmStream = Stream.unwrap(
       input.contextTransformer.transform(input.currentMessages).pipe(
+        Effect.tap(transformedMessages => validateCapabilities(input.config, transformedMessages)),
         Effect.map(transformedMessages =>
           input.provider
             .stream({

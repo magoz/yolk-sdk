@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { Option } from 'effect'
-import type { AgentEvent } from '@yolk/protocol'
+import { UserMessage, type AgentEvent } from '@yolk/protocol'
 import { agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
@@ -17,6 +17,7 @@ import {
   getCompletedChatToolParts
 } from './agent-chat-core'
 import { AgentComposer } from './agent-composer'
+import { contentFromInput, type ImageAttachment } from './image-attachment-content'
 import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
@@ -30,8 +31,32 @@ type AgentPlaygroundProps = {
   readonly openAiCodexConnected: boolean
 }
 
+const maxImageAttachmentBytes = 5 * 1024 * 1024
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error('Could not read image'))
+    })
+    reader.addEventListener('error', () => reject(new Error('Could not read image')))
+    reader.readAsDataURL(file)
+  })
+
+const base64FromDataUrl = (dataUrl: string) => {
+  const separatorIndex = dataUrl.indexOf(',')
+
+  return separatorIndex === -1 ? '' : dataUrl.slice(separatorIndex + 1)
+}
+
 export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
+  const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null)
   const [activityVisible, setActivityVisible] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [showInlineTools, setShowInlineTools] = useState(true)
@@ -129,8 +154,16 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     onError: recordAgentError,
     onAbort: recordAgentAbort
   })
-  const { state, isRunning, canSubmitText, submitText, stop, applyEvent, appendMessage, fail } =
-    agentChat
+  const {
+    state,
+    isRunning,
+    canSubmitContent,
+    submitMessage,
+    stop,
+    applyEvent,
+    appendMessage,
+    fail
+  } = agentChat
 
   const {
     audioRef,
@@ -205,19 +238,75 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   )
 
   const handleSubmit = useCallback(() => {
-    const content = input.trim()
+    const content = contentFromInput(input, imageAttachment)
 
-    if (submitDisabled || !canSubmitText(content)) {
+    if (submitDisabled || !canSubmitContent(content)) {
       return
     }
 
-    recordActivity({ title: 'Prompt submitted', detail: content, tone: 'neutral' })
-    const result = submitText(input)
+    recordActivity({
+      title: imageAttachment === null ? 'Prompt submitted' : 'Image prompt submitted',
+      detail: imageAttachment === null ? input.trim() : imageAttachment.name,
+      tone: 'neutral'
+    })
+    const result = submitMessage(UserMessage.make({ content }))
 
     if (result._tag === 'Submitted') {
       setInput('')
+      setImageAttachment(null)
     }
-  }, [canSubmitText, input, recordActivity, submitDisabled, submitText])
+  }, [canSubmitContent, imageAttachment, input, recordActivity, submitDisabled, submitMessage])
+
+  const handleImageAttachmentChange = useCallback(
+    (file: File | null) => {
+      if (file === null) {
+        return
+      }
+
+      if (!file.type.startsWith('image/')) {
+        recordActivity({ title: 'Image rejected', detail: 'Unsupported file type.', tone: 'error' })
+        return
+      }
+
+      if (file.size > maxImageAttachmentBytes) {
+        recordActivity({
+          title: 'Image rejected',
+          detail: 'Image must be 5MB or smaller.',
+          tone: 'error'
+        })
+        return
+      }
+
+      readFileAsDataUrl(file)
+        .then(previewUrl => {
+          const data = base64FromDataUrl(previewUrl)
+
+          if (data.length === 0) {
+            recordActivity({
+              title: 'Image rejected',
+              detail: 'Could not decode image.',
+              tone: 'error'
+            })
+            return
+          }
+
+          setImageAttachment({ name: file.name, mimeType: file.type, previewUrl, data })
+          recordActivity({ title: 'Image attached', detail: file.name, tone: 'neutral' })
+        })
+        .catch(() => {
+          recordActivity({
+            title: 'Image rejected',
+            detail: 'Could not read image.',
+            tone: 'error'
+          })
+        })
+    },
+    [recordActivity]
+  )
+
+  const handleRemoveImageAttachment = useCallback(() => {
+    setImageAttachment(null)
+  }, [])
 
   const handleInputChange = useCallback((value: string) => {
     setInput(value)
@@ -285,7 +374,10 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
+            imageAttachment={imageAttachment}
             onInputChange={handleInputChange}
+            onImageAttachmentChange={handleImageAttachmentChange}
+            onRemoveImageAttachment={handleRemoveImageAttachment}
             onSubmit={handleSubmit}
             onStop={stop}
             onToggleVoice={toggleVoice}

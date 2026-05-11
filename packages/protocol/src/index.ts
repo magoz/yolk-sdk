@@ -1,3 +1,4 @@
+export * from './capability'
 export * from './content'
 export * from './event'
 export * from './message'

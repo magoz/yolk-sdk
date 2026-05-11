@@ -5,6 +5,10 @@ import {
   ToolResult,
   ToolResultMessage,
   UserMessage,
+  appendTextToContent,
+  contentParts,
+  contentText,
+  isContentEmpty,
   type AgentEvent,
   type AgentMessage,
   type Content,
@@ -275,7 +279,7 @@ const appendAssistantTextDelta = (
           ...message,
           parts: message.parts.map(part =>
             part._tag === 'Text' && part.state === 'streaming'
-              ? { ...part, content: `${contentToTranscriptText(part.content)}${delta}` }
+              ? { ...part, content: appendTextToContent(part.content, delta) }
               : part
           )
         }
@@ -698,16 +702,25 @@ export const buildAgentChatMessages = ({
   return chatMessages
 }
 
-const contentToTranscriptText = (content: Content) =>
-  typeof content === 'string'
-    ? content
-    : content.map(part => (part._tag === 'Text' ? part.text : part._tag)).join(', ')
-
 const collectTextContent = (parts: ReadonlyArray<AgentChatPart>) =>
   parts
     .filter(part => part._tag === 'Text')
-    .map(part => contentToTranscriptText(part.content))
+    .map(part => contentText(part.content))
     .join('')
+
+const collectContent = (parts: ReadonlyArray<AgentChatPart>): Content => {
+  const contentPartsList = parts
+    .filter(part => part._tag === 'Text')
+    .flatMap(part => contentParts(part.content))
+
+  const onlyPart = contentPartsList[0]
+
+  if (onlyPart !== undefined && contentPartsList.length === 1 && onlyPart._tag === 'Text') {
+    return onlyPart.text
+  }
+
+  return contentPartsList
+}
 
 const collectReasoning = (parts: ReadonlyArray<AgentChatPart>) =>
   parts
@@ -760,9 +773,9 @@ const protocolMessagesFromChatMessage = (
 ): ReadonlyArray<AgentMessage> => {
   switch (message.role) {
     case 'user': {
-      const content = collectTextContent(message.parts)
+      const content = collectContent(message.parts)
 
-      return content.length > 0 ? [UserMessage.make({ content })] : []
+      return isContentEmpty(content) ? [] : [UserMessage.make({ content })]
     }
     case 'assistant':
       return [

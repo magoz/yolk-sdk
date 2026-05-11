@@ -1,5 +1,5 @@
 import { Array as Arr, Option } from 'effect'
-import type { ToolResult, Content, ToolCall } from '@yolk/protocol'
+import { contentText, type ToolResult, type Content, type ToolCall } from '@yolk/protocol'
 import type { AgentChatMessage, ChatToolState } from './agent-chat-messages'
 
 export type ToolDuration =
@@ -86,14 +86,6 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   return { _tag: 'Called', duration: { _tag: 'Unknown' } }
 }
 
-const draftTextFromContent = (content: Content) =>
-  typeof content === 'string'
-    ? content
-    : content
-        .filter(part => part._tag === 'Text')
-        .map(part => part.text)
-        .join('')
-
 const textItemFromPart = (
   message: AgentChatMessage,
   part: Extract<AgentChatMessage['parts'][number], { readonly _tag: 'Text' }>
@@ -104,13 +96,13 @@ const textItemFromPart = (
         return Option.some({
           _tag: 'UserDraft',
           id: part.id,
-          text: draftTextFromContent(part.content)
+          text: contentText(part.content)
         })
       case 'assistant':
         return Option.some({
           _tag: 'AssistantDraft',
           id: part.id,
-          text: draftTextFromContent(part.content)
+          text: contentText(part.content)
         })
       case 'system':
         return Option.none()

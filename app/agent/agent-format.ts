@@ -1,9 +1,4 @@
-import type { Content } from '@yolk/protocol'
-
-export const contentPreview = (content: Content) =>
-  typeof content === 'string'
-    ? content
-    : content.map(part => (part._tag === 'Text' ? part.text : part._tag)).join(', ')
+export { contentPreview } from '@yolk/protocol'
 
 export const truncate = (value: string) =>
   value.length > 240 ? `${value.slice(0, 237)}...` : value

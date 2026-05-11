@@ -6,7 +6,12 @@ import {
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer } from 'effect'
 import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
-import type { AgentReasoningEffort, ToolDef } from '@yolk/protocol'
+import {
+  textImageModelCapabilities,
+  type AgentModelCapabilities,
+  type AgentReasoningEffort,
+  type ToolDef
+} from '@yolk/protocol'
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import {
@@ -33,6 +38,7 @@ type AgentRouteRuntimeConfig = {
   readonly reasoningEffort: AgentReasoningEffort
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
+  readonly capabilities: AgentModelCapabilities
 }
 
 const RouteLayer = AppLayer
@@ -83,7 +89,7 @@ const handler = Effect.gen(function* () {
   })
   const response = yield* makeAgentResponseWithProvider(
     input,
-    { ...baseConfig, tools: toolSet.tools },
+    { ...baseConfig, tools: toolSet.tools, capabilities: textImageModelCapabilities },
     toolSet,
     session.user.id
   )
