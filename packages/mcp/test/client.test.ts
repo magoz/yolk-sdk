@@ -11,8 +11,11 @@ import {
 import type { McpError, McpServerConfig } from '../src'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
-  ? join(process.cwd(), 'test/fixtures/fake-stdio-mcp-server.mjs')
-  : join(process.cwd(), 'packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs')
+  ? join(process.cwd(), '../mcp-server/test/fixtures/fake-stdio-mcp-server.ts')
+  : join(process.cwd(), 'packages/mcp-server/test/fixtures/fake-stdio-mcp-server.ts')
+const tsxCliPath = process.cwd().endsWith(join('packages', 'mcp'))
+  ? join(process.cwd(), '../../node_modules/tsx/dist/cli.mjs')
+  : join(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
 
 type ResponseMode = 'json' | 'sse' | 'invalid-json' | 'json-rpc-error' | 'status-error'
 
@@ -188,7 +191,7 @@ describe('MCP client', () => {
       const config: McpServerConfig = {
         name: 'local',
         type: 'local',
-        command: [process.execPath, stdioFixturePath]
+        command: [process.execPath, tsxCliPath, stdioFixturePath]
       }
       const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
 

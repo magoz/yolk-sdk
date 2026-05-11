@@ -13,6 +13,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
 | `@yolk/mcp`           | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
+| `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio runner      | `@yolk/protocol`, `@yolk/mcp`, Effect        |
 
 ## Dependency Rule
 
@@ -23,6 +24,7 @@ app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol + Effect
 app -> mcp -> protocol + Effect
+mcp-server -> mcp + protocol + Effect
 ```
 
 ## Naming
@@ -70,7 +72,9 @@ app -> mcp -> protocol + Effect
 ## MCP
 
 - `@yolk/mcp` is a domain-free host-executed MCP client; app decides config, auth, and policy.
+- `@yolk/mcp-server` is a reusable tool-only MCP server; keep it generic for reuse across projects.
 - Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
+- MCP server v1 supports `initialize`, `tools/list`, and `tools/call`; no resources, prompts, OAuth, or app auth.
 - Remote MCP depends on `HttpClient`; package tests inject a fake client, app adapters provide `FetchHttpClient.layer`.
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`.

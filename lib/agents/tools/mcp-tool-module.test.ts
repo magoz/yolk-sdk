@@ -4,7 +4,11 @@ import { ToolCall } from '@yolk/protocol'
 import { join } from 'node:path'
 import { resolveAgentTools } from './registry'
 
-const stdioFixturePath = join(process.cwd(), 'packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs')
+const stdioFixturePath = join(
+  process.cwd(),
+  'packages/mcp-server/test/fixtures/fake-stdio-mcp-server.ts'
+)
+const tsxCliPath = join(process.cwd(), 'node_modules/tsx/dist/cli.mjs')
 
 const withMcpConfig = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.provide(
@@ -17,7 +21,7 @@ const withMcpConfig = <A, E>(effect: Effect.Effect<A, E>) =>
             {
               name: 'local',
               type: 'local',
-              command: [process.execPath, stdioFixturePath]
+              command: [process.execPath, tsxCliPath, stdioFixturePath]
             }
           ])
         }
