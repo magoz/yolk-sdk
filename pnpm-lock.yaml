@@ -80,6 +80,9 @@ importers:
       '@yolk/protocol':
         specifier: workspace:^
         version: link:packages/protocol
+      '@yolk/react':
+        specifier: workspace:^
+        version: link:packages/react
       '@yolk/tool-registry':
         specifier: workspace:^
         version: link:packages/tool-registry
@@ -267,6 +270,21 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
+
+  packages/react:
+    dependencies:
+      '@yolk/client':
+        specifier: workspace:^
+        version: link:../client
+      '@yolk/protocol':
+        specifier: workspace:^
+        version: link:../protocol
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+      react:
+        specifier: '>=19'
+        version: 19.2.3
 
   packages/tool-registry:
     dependencies:

@@ -12,6 +12,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
+| `@yolk/react`         | Headless React hooks over client state/transport         | `@yolk/client`, `@yolk/protocol`, Effect     |
 | `@yolk/mcp`           | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
 | `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/protocol`, `@yolk/mcp`, Effect        |
 
@@ -23,6 +24,7 @@ app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol + Effect
+app -> react -> client -> protocol + Effect
 app -> mcp -> protocol + Effect
 mcp-server -> mcp + protocol + Effect
 ```
@@ -43,6 +45,7 @@ mcp-server -> mcp + protocol + Effect
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Client transport should work for Next UI and Chrome extension by consuming protocol events from a server endpoint; app UI may own richer parts state.
+- React package owns headless hooks only: no components, styling, auth chrome, or provider-specific UI.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
 - `packages/harness/` is stale/empty and not a real workspace package unless a `package.json` is added.
 
@@ -117,6 +120,17 @@ mcp-server -> mcp + protocol + Effect
 - Mock client HTTP with `HttpClient` layers, not fetch-style helpers.
 - Keep parsing/schema errors typed as `AgentTransportError`.
 - Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.
+
+## React
+
+- `@yolk/react` is the headless React layer for app builders.
+- It wraps `@yolk/client` transport and exposes render-ready chat state.
+- `chatMessages` is the primary UI model; `messages` is derived protocol replay for transport/debugging.
+- `AgentChatPart` covers text, reasoning, tool call/result, and error parts; no DOM assumptions.
+- `buildAgentChatItems` is a convenience flat projection, not a required UI structure.
+- Keep actual components, styling, auth panels, provider controls, and app chrome outside this package.
+- Default transport is injectable; host apps can point at any compatible agent endpoint.
+- App local chat files may re-export this package to keep example tests close to the UI.
 
 ## Test Helpers
 
