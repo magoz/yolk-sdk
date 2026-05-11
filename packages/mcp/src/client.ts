@@ -1,10 +1,16 @@
-import { Effect, Option, Stream } from 'effect'
+import { Duration, Effect, Option, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { NodeServices } from '@effect/platform-node'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk/protocol'
-import type { McpClientInfo, McpSecurityPolicy, McpServerConfig } from './config'
+import type {
+  McpClientInfo,
+  McpLocalServerConfig,
+  McpRemoteServerConfig,
+  McpSecurityPolicy,
+  McpServerConfig
+} from './config'
 import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config'
 import { McpError } from './errors'
 import {
@@ -29,9 +35,6 @@ type McpClientOptions = {
   readonly securityPolicy?: McpSecurityPolicy
   readonly timeoutMs?: number
 }
-
-type RemoteMcpServerConfig = Extract<McpServerConfig, { type: 'remote' }>
-type LocalMcpServerConfig = Extract<McpServerConfig, { type: 'local' }>
 
 export type McpResolvedTool = {
   readonly serverName: string
@@ -65,7 +68,7 @@ const securityPolicy = (options?: McpClientOptions) =>
 const fail = (server: string, message: string, cause: McpError['cause']) =>
   Effect.fail(new McpError({ server, message, cause }))
 
-const validateRemoteUrl = (config: RemoteMcpServerConfig, policy: McpSecurityPolicy) =>
+const validateRemoteUrl = (config: McpRemoteServerConfig, policy: McpSecurityPolicy) =>
   Effect.gen(function* () {
     const url = yield* Effect.try({
       try: () => new URL(config.url),
@@ -92,7 +95,7 @@ const validateRemoteUrl = (config: RemoteMcpServerConfig, policy: McpSecurityPol
     return yield* fail(config.name, 'Remote MCP requires https: URL', 'security')
   })
 
-const validateLocal = (config: LocalMcpServerConfig, policy: McpSecurityPolicy) =>
+const validateLocal = (config: McpLocalServerConfig, policy: McpSecurityPolicy) =>
   Effect.gen(function* () {
     if (!policy.allowLocalServers) {
       return yield* fail(config.name, 'Local MCP servers are disabled by policy', 'security')
@@ -154,7 +157,7 @@ const mapUnknownToMcpError =
         })
 
 const requestRemote = (
-  config: RemoteMcpServerConfig,
+  config: McpRemoteServerConfig,
   request: JsonRpcRequest,
   options?: McpClientOptions
 ) =>
@@ -187,7 +190,7 @@ const requestRemote = (
             })
         ),
         Effect.timeoutOrElse({
-          duration: timeoutMs(options),
+          duration: Duration.millis(timeoutMs(options)),
           orElse: () => fail(config.name, 'MCP request timed out', 'timeout')
         })
       )
@@ -207,7 +210,7 @@ const requestRemote = (
   })
 
 const notifyRemote = (
-  config: RemoteMcpServerConfig,
+  config: McpRemoteServerConfig,
   notification: JsonRpcNotification,
   options?: McpClientOptions
 ) =>
@@ -240,14 +243,14 @@ const notifyRemote = (
             })
         ),
         Effect.timeoutOrElse({
-          duration: timeoutMs(options),
+          duration: Duration.millis(timeoutMs(options)),
           orElse: () => fail(config.name, 'MCP notification timed out', 'timeout')
         })
       )
   })
 
 const requestRemoteSession = (
-  config: RemoteMcpServerConfig,
+  config: McpRemoteServerConfig,
   request: JsonRpcRequest,
   options?: McpClientOptions
 ) =>
@@ -263,7 +266,7 @@ type EncodedLocalMessage = {
 }
 
 const requestLocalEncoded = (
-  config: LocalMcpServerConfig,
+  config: McpLocalServerConfig,
   messages: ReadonlyArray<EncodedLocalMessage>,
   expectedResponses: number,
   options?: McpClientOptions
@@ -309,7 +312,7 @@ const requestLocalEncoded = (
   }).pipe(
     Effect.scoped,
     Effect.timeoutOrElse({
-      duration: timeoutMs(options),
+      duration: Duration.millis(timeoutMs(options)),
       orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
     }),
     Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport')),
@@ -318,7 +321,7 @@ const requestLocalEncoded = (
 }
 
 const requestLocal = (
-  config: LocalMcpServerConfig,
+  config: McpLocalServerConfig,
   requests: ReadonlyArray<JsonRpcRequest | JsonRpcNotification>,
   expectedResponses: number,
   options?: McpClientOptions
@@ -349,20 +352,12 @@ const callToolRequest = (input: { readonly toolName: string; readonly params: un
     params: { name: input.toolName, arguments: input.params }
   })
 
-const requestServer = (
-  config: McpServerConfig,
+const requestLocalSession = (
+  config: McpLocalServerConfig,
   request: JsonRpcRequest,
   options?: McpClientOptions
-) => {
-  if (config.enabled === false) {
-    return fail(config.name, 'MCP server is disabled', 'disabled')
-  }
-
-  if (config.type === 'remote') {
-    return requestRemoteSession(config, request, options)
-  }
-
-  return requestLocal(
+) =>
+  requestLocal(
     config,
     [initializeRequest(options), makeInitializedNotification(), request],
     2,
@@ -375,19 +370,9 @@ const requestServer = (
         : unwrapResponse(config.name, response)
     })
   )
-}
 
-export const listMcpServerTools = (config: McpServerConfig, options?: McpClientOptions) =>
+const resolveMcpTools = (config: McpServerConfig, result: unknown) =>
   Effect.gen(function* () {
-    if (config.enabled === false) {
-      return []
-    }
-
-    if (config.type === 'local') {
-      yield* validateLocal(config, securityPolicy(options))
-    }
-
-    const result = yield* requestServer(config, listToolsRequest(), options)
     const tools = yield* decodeToolsListResult(result).pipe(
       Effect.mapError(
         error =>
@@ -406,6 +391,46 @@ export const listMcpServerTools = (config: McpServerConfig, options?: McpClientO
     }))
   })
 
+export const listRemoteMcpServerTools = (
+  config: McpRemoteServerConfig,
+  options?: McpClientOptions
+): Effect.Effect<ReadonlyArray<McpResolvedTool>, McpError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    if (config.enabled === false) {
+      return []
+    }
+
+    const result = yield* requestRemoteSession(config, listToolsRequest(), options)
+    return yield* resolveMcpTools(config, result)
+  })
+
+export const listLocalMcpServerTools = (
+  config: McpLocalServerConfig,
+  options?: McpClientOptions
+): Effect.Effect<ReadonlyArray<McpResolvedTool>, McpError> =>
+  Effect.gen(function* () {
+    if (config.enabled === false) {
+      return []
+    }
+
+    yield* validateLocal(config, securityPolicy(options))
+    const result = yield* requestLocalSession(config, listToolsRequest(), options)
+    return yield* resolveMcpTools(config, result)
+  })
+
+export const listMcpServerTools = (config: McpServerConfig, options?: McpClientOptions) =>
+  Effect.gen(function* () {
+    if (config.enabled === false) {
+      return []
+    }
+
+    if (config.type === 'local') {
+      return yield* listLocalMcpServerTools(config, options)
+    }
+
+    return yield* listRemoteMcpServerTools(config, options)
+  })
+
 type CallMcpServerToolInput = {
   readonly config: McpServerConfig
   readonly mcpToolName: string
@@ -414,15 +439,8 @@ type CallMcpServerToolInput = {
   readonly options?: McpClientOptions
 }
 
-export const callMcpServerTool = (
-  input: CallMcpServerToolInput
-): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
+const resolveMcpToolResult = (input: CallMcpServerToolInput, result: unknown) =>
   Effect.gen(function* () {
-    const result = yield* requestServer(
-      input.config,
-      callToolRequest({ toolName: input.mcpToolName, params: input.params }),
-      input.options
-    )
     const toolCallResult = yield* decodeToolCallResult(result).pipe(
       Effect.mapError(
         error =>
@@ -440,6 +458,49 @@ export const callMcpServerTool = (
 
     return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
+
+export const callRemoteMcpServerTool = (
+  input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpRemoteServerConfig }
+): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const result = yield* requestRemoteSession(
+      input.config,
+      callToolRequest({ toolName: input.mcpToolName, params: input.params }),
+      input.options
+    )
+    return yield* resolveMcpToolResult(input, result)
+  })
+
+export const callLocalMcpServerTool = (
+  input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpLocalServerConfig }
+): Effect.Effect<ToolResult, McpError> =>
+  Effect.gen(function* () {
+    const result = yield* requestLocalSession(
+      input.config,
+      callToolRequest({ toolName: input.mcpToolName, params: input.params }),
+      input.options
+    )
+    return yield* resolveMcpToolResult(input, result)
+  })
+
+export const callMcpServerTool = (
+  input: CallMcpServerToolInput
+): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
+  input.config.type === 'local'
+    ? callLocalMcpServerTool({
+        config: input.config,
+        mcpToolName: input.mcpToolName,
+        toolCallId: input.toolCallId,
+        params: input.params,
+        options: input.options
+      })
+    : callRemoteMcpServerTool({
+        config: input.config,
+        mcpToolName: input.mcpToolName,
+        toolCallId: input.toolCallId,
+        params: input.params,
+        options: input.options
+      })
 
 export const listMcpTools = (configs: ReadonlyArray<McpServerConfig>, options?: McpClientOptions) =>
   Effect.flatMap(

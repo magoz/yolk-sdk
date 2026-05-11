@@ -1,15 +1,20 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, type Result } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
-import { callMcpServerTool, listMcpServerTools } from '../src'
-import type { McpServerConfig } from '../src'
+import {
+  callLocalMcpServerTool,
+  callMcpServerTool,
+  listLocalMcpServerTools,
+  listMcpServerTools
+} from '../src'
+import type { McpError, McpServerConfig } from '../src'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp'))
   ? join(process.cwd(), 'test/fixtures/fake-stdio-mcp-server.mjs')
   : join(process.cwd(), 'packages/mcp/test/fixtures/fake-stdio-mcp-server.mjs')
 
-type ResponseMode = 'json' | 'sse'
+type ResponseMode = 'json' | 'sse' | 'invalid-json' | 'json-rpc-error' | 'status-error'
 
 const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
@@ -36,6 +41,29 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
     HttpClient.make(request =>
       Effect.gen(function* () {
         const method = requestMethod(request)
+
+        if (mode === 'status-error') {
+          return HttpClientResponse.fromWeb(request, new Response('nope', { status: 500 }))
+        }
+
+        if (mode === 'invalid-json') {
+          return HttpClientResponse.fromWeb(request, new Response('not json', { status: 200 }))
+        }
+
+        if (mode === 'json-rpc-error') {
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: method === 'initialize' ? 1 : method === 'tools/list' ? 2 : 3,
+                error: { code: -32_000, message: 'fixture failure' }
+              }),
+              { status: 200 }
+            )
+          )
+        }
+
         const result =
           method === 'initialize'
             ? {
@@ -72,6 +100,16 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
       })
     )
   )
+}
+
+const expectMcpFailureCause = (
+  result: Result.Result<unknown, McpError>,
+  cause: McpError['cause']
+) => {
+  expect(result._tag).toBe('Failure')
+  if (result._tag === 'Failure') {
+    expect(result.failure.cause).toBe(cause)
+  }
 }
 
 describe('MCP client', () => {
@@ -112,6 +150,39 @@ describe('MCP client', () => {
     })
   )
 
+  it.effect('maps malformed remote JSON-RPC responses to protocol errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('invalid-json')), Effect.result)
+
+      expectMcpFailureCause(result, 'protocol')
+    })
+  )
+
+  it.effect('maps remote JSON-RPC error responses to protocol errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json-rpc-error')), Effect.result)
+
+      expectMcpFailureCause(result, 'protocol')
+    })
+  )
+
+  it.effect('maps remote non-2xx responses to transport errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('status-error')), Effect.result)
+
+      expectMcpFailureCause(result, 'transport')
+    })
+  )
+
   it.effect('lists and calls local stdio tools when enabled', () =>
     Effect.gen(function* () {
       const config: McpServerConfig = {
@@ -121,19 +192,28 @@ describe('MCP client', () => {
       }
       const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
 
-      const tools = yield* listMcpServerTools(config, options).pipe(
-        Effect.provide(makeFakeRemoteMcpLayer('json'))
-      )
+      const tools = yield* listLocalMcpServerTools(config, options)
       expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
 
-      const result = yield* callMcpServerTool({
+      const result = yield* callLocalMcpServerTool({
         config,
         mcpToolName: 'echo',
         toolCallId: 'call_1',
         params: { text: 'hello' },
         options
-      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')))
+      })
       expect(result.content).toBe('local result')
+    })
+  )
+
+  it.effect('maps local stdio early exit to protocol errors', () =>
+    Effect.gen(function* () {
+      const result = yield* listLocalMcpServerTools(
+        { name: 'local', type: 'local', command: [process.execPath, '-e', ''] },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.result)
+
+      expectMcpFailureCause(result, 'protocol')
     })
   )
 })
