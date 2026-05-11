@@ -16,6 +16,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
+- `context-transformer.ts` compacts oversized text transcripts with deterministic window-summary events before provider calls.
 - Browser/client cancellation aborts active response body readers
 - Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.

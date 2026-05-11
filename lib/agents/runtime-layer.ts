@@ -1,13 +1,9 @@
 import { Layer } from 'effect'
-import {
-  ContextTransformer,
-  LoopConfig,
-  type LLMProvider,
-  type ToolExecutor
-} from '@yolk/agent-loop'
+import { LoopConfig, type LLMProvider, type ToolExecutor } from '@yolk/agent-loop'
 import { NoToolExecutorLayer } from './no-tool-executor-layer'
 import { OpenAiProviderLayer } from './providers/openai-provider'
 import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
+import { AgentContextTransformerLayer } from './context-transformer'
 
 export const makeAgentRuntimeLayerWithTools = <
   ProviderError,
@@ -19,7 +15,7 @@ export const makeAgentRuntimeLayerWithTools = <
   toolExecutorLayer: Layer.Layer<ToolExecutor, ToolError, ToolRequirements>
 ) =>
   Layer.mergeAll(
-    ContextTransformer.identity,
+    AgentContextTransformerLayer,
     LoopConfig.defaultLayer,
     providerLayer,
     toolExecutorLayer,
