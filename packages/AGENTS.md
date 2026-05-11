@@ -136,7 +136,6 @@ mcp-server -> mcp + protocol + Effect
 
 - Move publishable package exports from `src` to `dist` before npm publishing.
 - Add `peerDependencies` for host-owned runtime singletons like `effect`.
-- Change internal package deps from `workspace:*` to `workspace:^` before publishing.
 - Move test helpers to explicit testing subpath exports.
 - Add Changesets for package versioning/release notes.
 - Add package metadata: license, repository directory, engines, publishConfig.

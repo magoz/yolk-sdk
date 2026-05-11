@@ -16,7 +16,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@yolk/protocol": "workspace:*",
+    "@yolk/protocol": "workspace:^",
     "effect": "catalog:"
   }
 }
