@@ -40,4 +40,5 @@
 ## Tests
 
 - Cover NDJSON streaming, abort behavior, parse errors, non-2xx responses, and state transitions.
+- Cover Cloudflare WS with a fake `WebSocket`; assert `SessionSnapshot` revision becomes `UserInput.expectedRevision`.
 - Do not depend on a real browser, real network, or app routes.

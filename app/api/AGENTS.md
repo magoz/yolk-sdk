@@ -41,6 +41,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Realtime routes resolve voice tools with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is Worker-to-Next only; it forwards allowlisted Codex headers/body to avoid Worker egress blocks.
+- Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` so it stays testable without importing full Next route/layers.
 
 ## Exceptions
 

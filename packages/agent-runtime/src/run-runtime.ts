@@ -87,11 +87,6 @@ const runAndCollectMessages = (
     })
   )
 
-const appendAfterSuccess = (
-  stream: Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>,
-  append: Effect.Effect<void, RuntimeError>
-) => stream.pipe(Stream.concat(Stream.fromEffect(append).pipe(Stream.flatMap(() => Stream.empty))))
-
 const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: RuntimeConfig) =>
   Stream.unwrap(
     Ref.make<ReadonlyArray<AgentMessage>>([]).pipe(
@@ -140,8 +135,18 @@ const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config
         ]
       })
       const messages = [...replayRuntimeSessionEvents(initialLog.events), request.input]
-      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
-      const stream = runAndCollectMessages(config, messages, createdMessages).pipe(
+      return run(runtimeRunConfig(config, messages)).pipe(
+        Stream.tap(event =>
+          event._tag === 'AgentEnd'
+            ? store
+                .append({
+                  sessionId: request.sessionId,
+                  expectedRevision: startedLog.revision,
+                  events: [RunCompleted.make({ runId: request.runId, messages: event.messages })]
+                })
+                .pipe(Effect.asVoid)
+            : Effect.void
+        ),
         Stream.catchTags({
           AbortError: error =>
             Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
@@ -164,20 +169,6 @@ const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config
               Stream.flatMap(() => Stream.fail(error))
             )
         })
-      )
-
-      return appendAfterSuccess(
-        stream,
-        Ref.get(createdMessages).pipe(
-          Effect.flatMap(messages =>
-            store.append({
-              sessionId: request.sessionId,
-              expectedRevision: startedLog.revision,
-              events: [RunCompleted.make({ runId: request.runId, messages })]
-            })
-          ),
-          Effect.asVoid
-        )
       )
     })
   )

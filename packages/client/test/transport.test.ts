@@ -6,8 +6,21 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentError, AgentStart, LLMTextDelta, UserMessage } from '@yolk/protocol'
-import { appendAgentMessage, collectAgentEvents, streamAgentEvents } from '../src'
+import {
+  AgentEnd,
+  AgentError,
+  AgentStart,
+  LLMTextDelta,
+  SessionSnapshot,
+  UserMessage,
+  zeroAgentUsage
+} from '@yolk/protocol'
+import {
+  appendAgentMessage,
+  collectAgentEvents,
+  streamAgentEvents,
+  streamCloudflareAgentEvents
+} from '../src'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
@@ -130,4 +143,141 @@ describe('collectAgentEvents', () => {
 
     expect(cancelled).toBe(true)
   })
+
+  it('streams Cloudflare WebSocket events after sending user input with snapshot revision', async () => {
+    const originalWebSocket = globalThis.WebSocket
+    FakeWebSocket.instances = []
+    Object.defineProperty(globalThis, 'WebSocket', { value: FakeWebSocket, configurable: true })
+
+    try {
+      const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+      const eventsPromise = collectAsync(
+        streamCloudflareAgentEvents({ webSocketUrl: 'wss://worker.example/connect/session_1', messages })
+      )
+
+      await waitForSocket()
+
+      const socket = firstSocket()
+      socket.emitMessage(SessionSnapshot.make({ revision: 7, messages: [] }))
+
+      await waitForSent(socket)
+
+      socket.emitMessage(AgentStart.make({}))
+      socket.emitMessage(
+        AgentEnd.make({
+          messages: [],
+          turns: 1,
+          usage: zeroAgentUsage
+        })
+      )
+
+      const events = await eventsPromise
+
+      expect(socket.sent).toEqual([
+        JSON.stringify({
+          message: { _tag: 'User', content: 'hello' },
+          expectedRevision: 7,
+          _tag: 'UserInput'
+        })
+      ])
+      expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+      expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'done' }])
+    } finally {
+      Object.defineProperty(globalThis, 'WebSocket', { value: originalWebSocket, configurable: true })
+    }
+  })
 })
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+
+  static instances: Array<FakeWebSocket> = []
+
+  readonly sent: Array<string> = []
+  readonly closeCalls: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
+  readyState = FakeWebSocket.OPEN
+  private readonly listeners = new Map<string, Array<EventListenerOrEventListenerObject>>()
+
+  constructor(readonly url: string) {
+    FakeWebSocket.instances.push(this)
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter(current => current !== listener)
+    )
+  }
+
+  send(data: string) {
+    this.sent.push(data)
+  }
+
+  close(code?: number, reason?: string) {
+    this.readyState = 3
+    this.closeCalls.push({ code, reason })
+  }
+
+  emitMessage(value: unknown) {
+    this.dispatch(new MessageEvent('message', { data: JSON.stringify(value) }))
+  }
+
+  private dispatch(event: Event) {
+    for (const listener of this.listeners.get(event.type) ?? []) {
+      if (typeof listener === 'function') {
+        listener(event)
+      } else {
+        listener.handleEvent(event)
+      }
+    }
+  }
+}
+
+const collectAsync = async <A>(items: AsyncIterable<A>) => {
+  const collected: Array<A> = []
+
+  for await (const item of items) {
+    collected.push(item)
+  }
+
+  return collected
+}
+
+const wait = () => new Promise(resolve => setTimeout(resolve, 0))
+
+const waitForSocket = async () => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const socket = FakeWebSocket.instances[0]
+    if (socket !== undefined) {
+      return socket
+    }
+    await wait()
+  }
+
+  throw new Error('Expected WebSocket instance')
+}
+
+const firstSocket = () => {
+  const socket = FakeWebSocket.instances[0]
+  if (socket === undefined) {
+    throw new Error('Expected WebSocket instance')
+  }
+
+  return socket
+}
+
+const waitForSent = async (socket: FakeWebSocket) => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (socket.sent.length > 0) {
+      return
+    }
+    await wait()
+  }
+
+  throw new Error('Expected WebSocket send')
+}

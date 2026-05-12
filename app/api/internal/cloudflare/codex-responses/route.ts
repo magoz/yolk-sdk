@@ -9,32 +9,11 @@ import {
 } from 'effect/unstable/http'
 import { AppLayer } from '@/lib/layers'
 import { openAiCodexResponsesUrl } from '@/lib/agents/providers/openai-codex-provider'
+import { forwardedHeaders } from './route-model'
 
 export const dynamic = 'force-dynamic'
 
 const bridgeSecretHeader = 'x-yolk-cloudflare-secret'
-
-const forwardHeaderNames = [
-  'accept',
-  'authorization',
-  'content-type',
-  'originator',
-  'chatgpt-account-id'
-] as const
-
-const forwardedHeaders = (headers: Readonly<Record<string, string | undefined>>) => {
-  const forwarded: Record<string, string> = {}
-
-  for (const name of forwardHeaderNames) {
-    const value = headers[name]
-
-    if (value !== undefined) {
-      forwarded[name] = value
-    }
-  }
-
-  return forwarded
-}
 
 const handler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest

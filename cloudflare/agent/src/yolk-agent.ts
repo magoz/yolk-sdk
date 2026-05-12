@@ -101,6 +101,9 @@ const toAgentError = (error: Parameters<typeof cloudflareRuntimeErrorToAgentErro
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
 
+const unknownToDebugMessage = (error: unknown) =>
+  error instanceof Error ? error.stack ?? error.message : String(error)
+
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
   LLMProvider.of({
@@ -353,7 +356,11 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           )
 
           return response
-        }),
+        }).pipe(
+          Effect.catch(error =>
+            HttpServerResponse.text(unknownToDebugMessage(error), { status: 500 })
+          )
+        ),
         webSocketMessage: Effect.fnUntraced(function* (
           socket: Cloudflare.DurableWebSocket,
           message: string | ArrayBuffer
@@ -385,18 +392,12 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const input = decodedInput.success
           yield* handleUserInput(socket, attachment.sessionId, input)
         }),
-        webSocketClose: Effect.fnUntraced(function* (
-          socket: Cloudflare.DurableWebSocket,
-          code: number,
-          reason: string
-        ) {
+        webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.DurableWebSocket) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
 
           if (attachment !== null) {
             sockets.delete(attachment.socketId)
           }
-
-          yield* socket.close(code, reason)
         })
       }
     })
