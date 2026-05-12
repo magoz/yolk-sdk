@@ -1,7 +1,10 @@
+import type { MergedSkillset } from '@yolk/skillset'
+
 export type AgentToolSurface = 'text' | 'voice'
 
 export type AgentToolContext = {
   readonly surface: AgentToolSurface
   readonly route: string
   readonly userId: string
+  readonly skillset?: MergedSkillset
 }

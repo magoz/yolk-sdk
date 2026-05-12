@@ -10,6 +10,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/agent-loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/protocol`, Effect                     |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop         | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/protocol`, Effect                     |
 | `@yolk/react`         | Headless React hooks over client state/transport        | `@yolk/client`, `@yolk/protocol`, Effect     |
@@ -22,6 +23,7 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 app -> agent-runtime -> agent-loop -> protocol
 app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
+app -> skillset -> Effect
 app -> voice-runtime -> agent-loop -> protocol
 app -> client -> protocol + Effect
 app -> react -> client -> protocol + Effect
@@ -44,6 +46,7 @@ mcp-server -> mcp-client + protocol + Effect
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
+- Skillset owns generic skills/commands parsing, rendering, manifests, and merge helpers; no source adapters or runtime policy.
 - Client transport should work for Next UI and Chrome extension by consuming protocol events from a server endpoint; app UI may own richer parts state.
 - React package owns headless hooks only: no components, styling, auth chrome, or provider-specific UI.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
@@ -77,6 +80,15 @@ mcp-server -> mcp-client + protocol + Effect
 - Lock projection refactors with semantic ordering/state tests, not implementation-shape tests.
 - Test-local probe mutation (`requests.push`, `saved.push`, counters) is acceptable when it keeps spies clearer than Effect refs.
 - Do not import auth, storage, provider SDKs, or product tool catalogs here.
+
+## Skillset
+
+- `@yolk/skillset` is the domain-free core for skills and commands.
+- Core owns `SKILL.md` parsing, command markdown parsing, command argument rendering, manifest schemas, and deterministic merge helpers.
+- Core must not import filesystem, Next.js, Cloudflare, DB, auth, provider SDKs, `@yolk/tool-registry`, or app code.
+- Host apps own source adapters: filesystem, generated bundles, KV/R2, DB, or remote packages.
+- Host apps own policy and runtime wiring: available-skills prompt injection, `skill` tool registration, and slash command UI/routes.
+- Keep v1 scoped to skills and commands; do not broaden into tools, providers, models, agents, storage, or permissions.
 
 ## MCP
 

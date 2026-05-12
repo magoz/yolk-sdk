@@ -525,6 +525,26 @@ skillset core
 
 Do not start with UI. Lock runtime contract first.
 
+## Implementation status
+
+Completed:
+
+- `packages/skillset` core package.
+- Skill parsing + name/directory validation.
+- Command parsing + argument rendering.
+- Manifest schema + merge helpers.
+- App filesystem source for standard project folders.
+- Text-only `skill` tool via `@yolk/tool-registry`.
+- `/api/agent` loads project skillset and injects `<available_skills>`.
+- Tests for package core, file source, and skill tool.
+
+Remaining:
+
+- Build-generated manifest for Cloudflare/no-filesystem runtime.
+- Command render route/server action.
+- Slash command UI.
+- Global dirs, DB/KV/R2 sources, permissions, file refs, shell interpolation.
+
 ## Open questions
 
 - Global skills?

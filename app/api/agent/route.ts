@@ -6,6 +6,7 @@ import {
 } from 'effect/unstable/http'
 import { Config, Data, Effect, Layer } from 'effect'
 import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import {
   type AgentModelCapabilities,
   type AgentReasoningEffort,
@@ -22,6 +23,7 @@ import {
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
+import { loadProjectSkillset } from '@/lib/agents/skillset/file-source'
 import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
@@ -54,6 +56,12 @@ const getAgentRouteConfig = () =>
     }
   })
 
+const appendAvailableSkills = (systemPrompt: string, skillset: MergedSkillset) => {
+  const availableSkills = formatAvailableSkills(skillset.skills)
+
+  return availableSkills.length === 0 ? systemPrompt : `${systemPrompt}\n\n${availableSkills}`
+}
+
 const makeAgentResponseWithProvider = (
   input: AgentRouteRequest,
   config: AgentRouteRuntimeConfig,
@@ -82,14 +90,21 @@ const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
   const baseConfig = yield* getAgentRouteConfig()
+  const skillset = yield* loadProjectSkillset()
   const toolSet = yield* resolveAgentTools({
     surface: 'text',
     route: '/agent',
-    userId: session.user.id
+    userId: session.user.id,
+    skillset
   })
   const response = yield* makeAgentResponseWithProvider(
     input,
-    { ...baseConfig, tools: toolSet.tools, capabilities: agentTextCapabilities },
+    {
+      ...baseConfig,
+      systemPrompt: appendAvailableSkills(baseConfig.systemPrompt, skillset),
+      tools: toolSet.tools,
+      capabilities: agentTextCapabilities
+    },
     toolSet,
     session.user.id
   )

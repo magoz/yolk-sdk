@@ -47,6 +47,9 @@ importers:
       '@effect/opentelemetry':
         specifier: 'catalog:'
         version: 4.0.0-beta.59(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.39.0)(effect@4.0.0-beta.65)
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65(effect@4.0.0-beta.65)(ioredis@5.10.1)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 4.0.0-beta.59(effect@4.0.0-beta.65)
@@ -89,6 +92,9 @@ importers:
       '@yolk/react':
         specifier: workspace:^
         version: link:packages/react
+      '@yolk/skillset':
+        specifier: workspace:^
+        version: link:packages/skillset
       '@yolk/tool-registry':
         specifier: workspace:^
         version: link:packages/tool-registry
@@ -331,6 +337,12 @@ importers:
       react:
         specifier: '>=19'
         version: 19.2.3
+
+  packages/skillset:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
 
   packages/tool-registry:
     dependencies:
