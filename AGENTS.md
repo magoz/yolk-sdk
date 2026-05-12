@@ -104,6 +104,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `resolveAgentTools`              | Function | `lib/agents/tools/registry.ts`                  | Resolves app-scoped text/voice toolsets                |
 | `run`                            | Function | `packages/agent-loop/src/run.ts`                | Stateless LLM/tool loop                                |
 | `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`     | Session load/save orchestration over agent loop        |
+| `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts` | Append-only runtime event storage contract             |
 | `AgentTranscript`                | Type     | `packages/client/src/state.ts`                  | Non-empty client-owned protocol transcript             |
 | `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side tool lifecycle with call/result/timing     |
 | `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`           | Headless React chat parts source of truth              |

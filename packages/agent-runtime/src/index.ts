@@ -17,5 +17,22 @@ export type {
 } from './run-runtime.ts'
 export { makeInMemorySessionStoreLayer, SessionStore } from './session-store.ts'
 export type { SessionSnapshot } from './session-store.ts'
+export {
+  InputAppended,
+  makeInMemorySessionEventStoreLayer,
+  replayRuntimeSessionEvents,
+  RunCompleted,
+  RunFailed,
+  RunInterrupted,
+  RunStarted,
+  RuntimeSessionEvent,
+  SessionEventStore
+} from './session-event-store.ts'
+export type {
+  AppendRuntimeSessionEventsInput,
+  RuntimeSessionEventLog,
+  SessionRevision,
+  StoredRuntimeSessionEvent
+} from './session-event-store.ts'
 
 export type RuntimeSessionId = string

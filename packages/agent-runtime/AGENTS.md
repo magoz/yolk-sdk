@@ -25,7 +25,8 @@
 | `RuntimeConfig`     | Loop config passed through by host apps         |
 | `RuntimeRequest`    | Transcript or input mode request union          |
 | `RuntimeTranscript` | Non-empty protocol transcript                   |
-| `session-store`     | Storage interface for transcripts/session state |
+| `session-store`       | Snapshot storage interface for legacy transcript persistence       |
+| `session-event-store` | Append-only event storage contract, replay helper, in-memory tests |
 | `error`             | Runtime-specific typed errors                   |
 | `RuntimeSessionId`  | Opaque session id alias                         |
 
@@ -41,7 +42,9 @@
 - Input mode persists `{ loaded messages + input + created messages }` after successful stream completion.
 - Failed/interrupted streams do not save partial snapshots.
 - Created messages come from `AgentEnd.messages`; runtime does not infer/fabricate assistant or tool messages from partial events.
-- Current store API is snapshot-based. Add append/revision semantics before building concurrent durable sessions.
+- Snapshot store remains for current runtime paths; append store adds revisioned session events for durable hosts.
+- Append replay derives protocol transcript from `InputAppended` and `RunCompleted` only.
+- Failed/interrupted runs are durable lifecycle metadata; they do not add transcript messages.
 
 ## Design rules
 
@@ -54,7 +57,8 @@
 - Do not encode HTTP, NDJSON, SSE, WebSockets, auth, provider choice, or tool policy here.
 - There is no current Effect Platform dependency; add platform services only when runtime owns generic IO.
 - Keep resume/fanout adapters outside this package until generic enough.
-- Future durable behavior should prefer append/run-event semantics over whole-snapshot overwrite.
+- Durable behavior should prefer append/run-event semantics over whole-snapshot overwrite.
+- Append store revisions are numeric and conflict on stale `expectedRevision`.
 
 ## Tests
 
@@ -63,3 +67,4 @@
 - Cover input mode load + append + save behavior.
 - Cover config pass-through for reasoning/capabilities.
 - Cover store/runtime error mapping when adding new runtime errors.
+- Cover append replay, revision conflicts, failed runs, and interrupted runs when changing `session-event-store.ts`.
