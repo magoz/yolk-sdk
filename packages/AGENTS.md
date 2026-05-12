@@ -115,7 +115,7 @@ mcp-server -> mcp-client + protocol + Effect
 
 ## Client Transport
 
-- `/agent` uses app-local parts state (`app/agent/agent-chat-messages.ts`) and imports `@yolk/client` primarily for transport.
+- `/agent` uses `@yolk/react` headless chat state; `@yolk/client` owns lower-level protocol transport/state helpers.
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
 - `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant turns during active runs.
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
@@ -141,6 +141,10 @@ mcp-server -> mcp-client + protocol + Effect
 - `@yolk/react` is the headless React layer for app builders.
 - It wraps `@yolk/client` transport and exposes render-ready chat state.
 - `chatMessages` is the primary UI model; `messages` is derived protocol replay for transport/debugging.
+- `AgentChatState.sessionEvents` records local UI/session edits: submitted/appended messages, turn deletion, regeneration.
+- `AgentChatAction` is the deterministic reducer command surface; keep submit/delete/regenerate behavior pure.
+- `useAgentChat` exposes `deleteTurn` and `regenerateFrom`; only regeneration starts transport.
+- `chat-session-events.ts` defines UI/session edit audit records, distinct from runtime `SessionEventStore` events.
 - `AgentChatPart` covers text, reasoning, tool call/result, and error parts; no DOM assumptions.
 - `buildAgentChatItems` is a convenience flat projection, not a required UI structure.
 - Keep actual components, styling, auth panels, provider controls, and app chrome outside this package.

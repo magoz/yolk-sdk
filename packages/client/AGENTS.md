@@ -15,6 +15,7 @@
 - No app auth chrome, model defaults, Codex/OpenAI specifics, or product permissions.
 - No server-side loop execution.
 - Transport endpoint shape is generic; app owns concrete route and auth.
+- Message edit actions (`deleteTurn`, `regenerateFrom`) and UI session events live in `@yolk/react`, not here.
 
 ## Public model
 

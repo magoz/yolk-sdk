@@ -48,9 +48,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry        | OpenTelemetry spans + Sentry error tracking                                                                             |
 | UI components      | shadcn/ui        | Base UI primitives (not Radix), see `components/ui/`                                                                    |
 | Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks                |
-| Text agent         | app/lib          | `/agent` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                             |
-| Voice agent        | app/lib          | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
-| Web tools          | app/lib          | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
+| Text agent         | app/agent + app/api/agent + lib/agents | `/agent` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                             |
+| Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
+| Web tools          | lib/agents/tools | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
 | Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object smoke deploy running `@yolk/agent-runtime` with faux provider               |
 
@@ -107,6 +107,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts` | Append-only runtime event storage contract             |
 | `AgentTranscript`                | Type     | `packages/client/src/state.ts`                  | Non-empty client-owned protocol transcript             |
 | `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side rich tool lifecycle state                  |
+| `reduceAgentChatState`           | Function | `packages/react/src/chat-core.ts`               | Pure reducer for chat actions/events                   |
+| `AgentChatAction`                | Type     | `packages/react/src/chat-core.ts`               | Headless chat reducer action model                     |
+| `AgentChatSessionEvent`          | Schema   | `packages/react/src/chat-session-events.ts`     | UI/session edit event model                            |
 | `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`           | Headless React chat parts source of truth              |
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`           | Converts chat parts to protocol transcript             |
 | `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`             | Resolves configured MCP server tools                   |
@@ -191,6 +194,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
+- `packages/client/AGENTS.md` - Agent transport and protocol replay helpers
+- `packages/agent-runtime/AGENTS.md` - Runtime append-store orchestration
+- `packages/react/AGENTS.md` - Headless React chat hook/state/session events
 - `cloudflare/agent/AGENTS.md` - Cloudflare Worker/Durable Object agent app
 - `components/ui/AGENTS.md` - UI component install sources and customizations
 - `e2e/AGENTS.md` - E2E test patterns, locator priority, streaming guards, auth cookies

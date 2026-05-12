@@ -52,7 +52,7 @@ Do not build these here yet unless explicitly requested:
 
 1. Keep Cloudflare smoke deploy passing.
 2. Stabilize protocol events in packages.
-3. Make runtime event-log based in packages.
+3. Harden runtime append-log behavior and Cloudflare coverage.
 4. Add transport/client abstractions in packages.
 5. Add tool policy/context seams in packages.
 6. Test with fake provider/store/tools.

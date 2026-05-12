@@ -19,15 +19,18 @@
 
 ## Public model
 
-| Export                | Purpose                                          |
-| --------------------- | ------------------------------------------------ |
-| `useAgentChat`        | Headless chat hook over streamed `AgentEvent`s   |
-| `AgentChatState`      | Render-ready state: status, error, chat messages |
-| `AgentChatMessage`    | Role-grouped render message                      |
-| `AgentChatPart`       | Text, reasoning, tool call/result, error parts   |
-| `toAgentMessages`     | Render model → protocol transcript               |
-| `buildAgentChatItems` | Flat render-item projection for simple UIs       |
-| selectors             | Reasoning/tool/activity helpers                  |
+| Export                    | Purpose                                                     |
+| ------------------------- | ----------------------------------------------------------- |
+| `useAgentChat`            | Headless chat hook over streamed `AgentEvent`s              |
+| `AgentChatState`          | Render-ready state: status, error, chat messages, events    |
+| `AgentChatAction`         | Reducer command model for hydrate/submit/edit/run lifecycle |
+| `AgentChatSessionEvent`   | Schema-backed UI/session edit event model                   |
+| `AgentChatMessage`        | Role-grouped render message                                 |
+| `AgentChatPart`           | Text, reasoning, tool call/result, error parts              |
+| `toAgentMessages`         | Render model → protocol transcript                          |
+| `buildAgentChatItems`     | Flat render-item projection for simple UIs                  |
+| `reduceAgentChatState`    | Pure reducer for headless chat actions/events               |
+| selectors                 | Reasoning/tool/activity helpers                             |
 
 ## Hook contract
 
@@ -35,8 +38,9 @@
 
 - `chatMessages`: primary UI source of truth.
 - `messages`: protocol transcript derived from `chatMessages`.
+- `state.sessionEvents`: append-only local session edit events.
 - `status`, `error`, `isRunning`.
-- `submitMessage`, `submitText`, `stop`.
+- `submitMessage`, `submitText`, `deleteTurn`, `regenerateFrom`, `stop`.
 - `applyEvent`, `appendMessage`, `fail` for custom transports/integrations.
 
 ## Design rules
@@ -49,6 +53,9 @@
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
+- `deleteTurn` removes a user+assistant turn without transport; avoid deleting flat render items.
+- `regenerateFrom` truncates from a selected message and starts a new run.
+- `chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
 - Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.
 - Retain `Effect.runFork` fibers and interrupt on `stop`/unmount; abort signals alone are not enough.
 
@@ -56,6 +63,8 @@
 
 - Keep hook lifecycle tests in `src/use-agent-chat.test.ts`.
 - Cover injected transport requests, streamed events, blank submit guards, and abort cleanup.
+- Cover delete/regenerate behavior and session event emission in `src/use-agent-chat.test.ts`.
+- Keep session event schema coverage near `chat-session-events.ts` or reducer tests.
 - Keep render model tests next to their modules: `chat-core.test.ts`, `chat-messages.test.ts`, `chat-items.test.ts`.
 - Test package behavior here, not through the example app.
 

@@ -45,6 +45,7 @@
 - Append mode uses `expectedRevision` for conflict detection; omit only when host accepts latest loaded revision.
 - Use `appendRuntimeSessionEventsToLog` in host stores to keep revision/id generation consistent.
 - Use `latestIncompleteRuntimeRun` for reconnect/cleanup; append `RunInterrupted` instead of fabricating transcript messages.
+- Runtime events (`InputAppended`, `RunStarted`, `RunCompleted`, `RunFailed`, `RunInterrupted`) are durable server append-log events, distinct from `@yolk/react` UI edit events.
 
 ## Design rules
 
