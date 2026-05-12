@@ -214,6 +214,13 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
       switch (event._tag) {
+        case 'TransportReady':
+          recordActivity({
+            title: 'Voice transport ready',
+            detail: `peer=${event.peerConnectionState} · data=${event.dataChannelState}`,
+            tone: 'success'
+          })
+          return
         case 'SessionOpened':
           recordActivity({
             title: 'Voice session opened',

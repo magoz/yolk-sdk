@@ -43,6 +43,11 @@ import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/ope
 export type VoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
 export type VoiceDebugEvent =
+  | {
+      readonly _tag: 'TransportReady'
+      readonly peerConnectionState: string
+      readonly dataChannelState: string
+    }
   | { readonly _tag: 'SessionOpened'; readonly seededMessageCount: number }
   | {
       readonly _tag: 'SessionConfigured'
@@ -228,6 +233,45 @@ const closeSessionResources = (
   peerConnection.close()
   mediaStream?.getTracks().forEach(track => track.stop())
 }
+
+const waitForRealtimeReady = (
+  peerConnection: RTCPeerConnection,
+  dataChannel: RTCDataChannel
+) =>
+  new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('Realtime connection timed out before ready'))
+    }, 10_000)
+    const cleanup = () => {
+      window.clearTimeout(timeout)
+      peerConnection.removeEventListener('connectionstatechange', checkReady)
+      dataChannel.removeEventListener('open', checkReady)
+      dataChannel.removeEventListener('close', checkReady)
+      dataChannel.removeEventListener('error', fail)
+    }
+    const fail = () => {
+      cleanup()
+      reject(new Error('Realtime connection closed before ready'))
+    }
+    const checkReady = () => {
+      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
+        fail()
+        return
+      }
+
+      if (peerConnection.connectionState === 'connected' && dataChannel.readyState === 'open') {
+        cleanup()
+        resolve()
+      }
+    }
+
+    peerConnection.addEventListener('connectionstatechange', checkReady)
+    dataChannel.addEventListener('open', checkReady)
+    dataChannel.addEventListener('close', checkReady)
+    dataChannel.addEventListener('error', fail)
+    checkReady()
+  })
 
 const assistantEndMessages = (content: string, toolMessages: ReadonlyArray<AgentMessage>) => {
   if (content.trim().length === 0) {
@@ -612,6 +656,12 @@ export const useRealtimeVoice = ({
 
         const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: answerSdp }
         yield* tryBrowserPromise(() => peerConnection.setRemoteDescription(answer))
+        yield* tryBrowserPromise(() => waitForRealtimeReady(peerConnection, dataChannel))
+        onDebug({
+          _tag: 'TransportReady',
+          peerConnectionState: peerConnection.connectionState,
+          dataChannelState: dataChannel.readyState
+        })
         setStatus('live')
 
         return { _tag: 'Started' } satisfies VoiceStartOutcome

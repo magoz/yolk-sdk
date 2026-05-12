@@ -131,6 +131,7 @@ e2e/
   ui/
     login.spec.ts                 — Public smoke tests
     agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
+    agent-voice.spec.ts           — Voice startup readiness + fake-mic Realtime transcription smoke
 ```
 
 ## Env Isolation
