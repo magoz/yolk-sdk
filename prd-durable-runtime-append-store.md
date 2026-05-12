@@ -73,6 +73,7 @@ When this PRD is complete, the following will be true:
 
 - [ ] Runtime can load a session transcript by replaying persisted events.
 - [ ] Replay output is protocol messages only, not UI render models.
+- [ ] Replay understands ordered assistant parts from the tool lifecycle PRD once implemented.
 - [ ] Unknown/future event variants fail safely or are ignored only when explicitly versioned.
 
 ### Feature: Run Lifecycle Durability
@@ -216,6 +217,7 @@ The final API may differ, but it must represent these semantics without product-
 | Revision type: numeric sequence, opaque token, or both? | Package owner | Before implementation | Open |
 | Should runtime persist `AgentEvent` traces separately from transcript events? | Package owner | Before implementation | Open |
 | Should active run cleanup be runtime-owned or host-owned? | Package owner | Before implementation | Open |
+| How should append-store replay handle provider-executed assistant tool parts? | Package owner | 2026-05-12 | Resolved direction: replay protocol transcript parts, not UI-local state. |
 
 ---
 
