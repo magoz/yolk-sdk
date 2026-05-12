@@ -29,26 +29,32 @@ describe('reduceAgentEvents', () => {
       content: result.content
     })
 
-    const state = reduceAgentEvents([
-      AgentStart.make({}),
-      LLMTextDelta.make({ text: 'o' }),
-      LLMTextDelta.make({ text: 'k' }),
-      LLMToolCall.make({ call }),
-      AssistantMessageEvent.make({ message }),
-      ToolExecutionStart.make({ call }),
-      ToolExecutionEnd.make({ call, result }),
-      ToolResultEvent.make({ result }),
-      AgentEnd.make({
-        messages: [message, toolResultMessage],
-        turns: 1,
-        usage: zeroAgentUsage
-      })
-    ])
+    const state = reduceAgentEvents(
+      [
+        AgentStart.make({}),
+        LLMTextDelta.make({ text: 'o' }),
+        LLMTextDelta.make({ text: 'k' }),
+        LLMToolCall.make({ call }),
+        AssistantMessageEvent.make({ message }),
+        ToolExecutionStart.make({ call }),
+        ToolExecutionEnd.make({ call, result }),
+        ToolResultEvent.make({ result }),
+        AgentEnd.make({
+          messages: [message, toolResultMessage],
+          turns: 1,
+          usage: zeroAgentUsage
+        })
+      ],
+      undefined,
+      { nowMs: 123 }
+    )
 
     expect(state.status).toBe('done')
     expect(state.text).toBe('')
     expect(state.liveMessages).toEqual([])
-    expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
+    expect(state.toolRuns).toEqual([
+      expect.objectContaining({ _tag: 'Completed', call, result, startedAtMs: 123, endedAtMs: 123 })
+    ])
     expect(state.messages).toEqual([message, toolResultMessage])
     expect(state.error).toBeNull()
   })

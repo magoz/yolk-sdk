@@ -33,6 +33,7 @@ export {
 export type {
   AgentChatMessage,
   AgentChatPart,
+  ApplyAgentEventToChatMessagesOptions,
   BuildAgentChatMessagesInput,
   ChatPartState,
   ChatToolState

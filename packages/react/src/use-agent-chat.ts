@@ -38,6 +38,7 @@ export type UseAgentChatOptions = {
   readonly onEvent?: (event: AgentEvent) => void
   readonly onError?: (message: string) => void
   readonly onAbort?: () => void
+  readonly nowMs?: () => number
 }
 
 export type AgentChatSubmitResult =
@@ -54,6 +55,8 @@ const errorMessage = (error: unknown) =>
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
+const defaultNowMs = () => globalThis.performance?.now() ?? 0
+
 export function useAgentChat({
   sessionId,
   endpoint,
@@ -62,7 +65,8 @@ export function useAgentChat({
   transport,
   onEvent,
   onError,
-  onAbort
+  onAbort,
+  nowMs = defaultNowMs
 }: UseAgentChatOptions) {
   const [state, dispatch] = useReducer(reduceAgentChatState, initialMessages ?? [], messages =>
     messages.reduce(
@@ -77,9 +81,9 @@ export function useAgentChat({
   const applyEvent = useCallback(
     (event: AgentEvent) => {
       onEvent?.(event)
-      dispatch({ _tag: 'Event', event })
+      dispatch({ _tag: 'Event', event, nowMs: nowMs() })
     },
-    [onEvent]
+    [nowMs, onEvent]
   )
 
   const fail = useCallback(

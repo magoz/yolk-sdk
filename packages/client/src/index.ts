@@ -9,7 +9,13 @@ export {
   reduceAgentEvents,
   submitAgentUserMessage
 } from './state.ts'
-export type { AgentClientState, AgentRunStatus, AgentToolRun, AgentTranscript } from './state.ts'
+export type {
+  AgentClientState,
+  AgentRunStatus,
+  AgentToolRun,
+  AgentTranscript,
+  ApplyAgentEventOptions
+} from './state.ts'
 export {
   AgentTransportError,
   collectAgentEvents,

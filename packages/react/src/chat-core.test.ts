@@ -88,13 +88,12 @@ describe('agent chat core', () => {
       params: { url: 'https://example.com' }
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
-    const startedAt = Date.now()
     const state = [
       LLMToolCall.make({ call }),
       ToolExecutionStart.make({ call }),
       ToolExecutionEnd.make({ call, result })
     ].reduce(
-      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event, nowMs: 123 }),
       initialAgentChatState
     )
     const afterResult = reduceAgentChatState(state, {
@@ -115,8 +114,8 @@ describe('agent chat core', () => {
       throw new Error('Expected completed tool call part')
     }
 
-    expect(toolPart.state.startedAtMs).toBeGreaterThanOrEqual(startedAt)
-    expect(toolPart.state.endedAtMs).toBeGreaterThanOrEqual(startedAt)
+    expect(toolPart.state.startedAtMs).toBe(123)
+    expect(toolPart.state.endedAtMs).toBe(123)
   })
 
   it('counts active text, tool, and voice work', () => {

@@ -61,6 +61,10 @@ export type AgentChatMessage = {
   readonly parts: ReadonlyArray<AgentChatPart>
 }
 
+export type ApplyAgentEventToChatMessagesOptions = {
+  readonly nowMs?: number
+}
+
 const userChatMessage = (message: UserMessage, index: number): AgentChatMessage => ({
   id: `message-${index}-user`,
   role: 'user',
@@ -577,8 +581,11 @@ export const markChatError = (
 
 export const applyAgentEventToChatMessages = (
   messages: ReadonlyArray<AgentChatMessage>,
-  event: AgentEvent
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions = {}
 ): ReadonlyArray<AgentChatMessage> => {
+  const nowMs = options.nowMs ?? 0
+
   switch (event._tag) {
     case 'AgentStart':
       return clearTransientParts(messages)
@@ -591,12 +598,12 @@ export const applyAgentEventToChatMessages = (
     case 'AssistantMessage':
       return appendOrReplaceAssistantMessage(messages, event.message)
     case 'ToolExecutionStart':
-      return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: Date.now() })
+      return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: nowMs })
     case 'ToolExecutionEnd':
       return upsertToolCallPart(messages, event.call, {
         _tag: 'Completed',
         result: event.result,
-        endedAtMs: Date.now()
+        endedAtMs: nowMs
       })
     case 'ToolResult':
       return applyToolResult(messages, event.result)

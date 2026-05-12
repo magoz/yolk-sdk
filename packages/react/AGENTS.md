@@ -44,6 +44,7 @@
 - Provider reasoning only: display `LLMReasoningDelta` / `Assistant.reasoning`, never invented reasoning.
 - Tool calls are anchored as `ToolCall` parts and transition `Called → Running → Completed`.
 - Preserve timing when tool result/completion events arrive in different order.
+- `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
 - Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.

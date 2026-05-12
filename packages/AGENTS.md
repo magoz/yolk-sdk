@@ -117,6 +117,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
 - `AgentToolRun` is the single client tool lifecycle object: `Called` → `Running(startedAtMs)` → `Completed(result, startedAtMs, endedAtMs)`.
 - Keep tool timing/result on `AgentToolRun`; avoid separate arrays that must be rejoined by id.
+- Reducers/projections receive `nowMs`; do not call wall-clock APIs inside state reducers.
 - `submitAgentUserMessage` appends user messages locally before transport starts.
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
@@ -140,6 +141,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `buildAgentChatItems` is a convenience flat projection, not a required UI structure.
 - Keep actual components, styling, auth panels, provider controls, and app chrome outside this package.
 - Default transport is injectable; host apps can point at any compatible agent endpoint.
+- `useAgentChat` owns runtime clock injection via `nowMs`; pure chat reducers stay deterministic.
 - App local chat files may re-export this package to keep example tests close to the UI.
 
 ## Test Helpers

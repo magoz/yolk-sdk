@@ -27,6 +27,7 @@
 
 - `AgentTranscript` is client-owned and non-empty when sent to the server.
 - Keep `AgentToolRun` as the single source for called/running/completed state.
+- Pass `nowMs` into event reducers for tool timing; reducers must stay deterministic.
 - Use Effect `HttpClient`; tests inject fake clients instead of raw fetch mocks.
 - Keep transport/parse failures typed as `AgentTransportError`.
 - `streamAgentEventStream` is the native Effect API; `streamAgentEvents` is async-generator compatibility.

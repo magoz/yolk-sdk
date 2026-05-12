@@ -30,6 +30,10 @@ export type AgentClientState = {
   readonly error: string | null
 }
 
+export type ApplyAgentEventOptions = {
+  readonly nowMs?: number
+}
+
 export type AgentTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
 
 export const initialAgentClientState: AgentClientState = {
@@ -96,6 +100,18 @@ export const appendAgentMessage = (
 }
 
 export const applyAgentEvent = (state: AgentClientState, event: AgentEvent): AgentClientState => {
+  const nowMs = 0
+
+  return applyAgentEventWithOptions(state, event, { nowMs })
+}
+
+export const applyAgentEventWithOptions = (
+  state: AgentClientState,
+  event: AgentEvent,
+  options: ApplyAgentEventOptions = {}
+): AgentClientState => {
+  const nowMs = options.nowMs ?? 0
+
   switch (event._tag) {
     case 'AgentStart':
       return {
@@ -124,11 +140,11 @@ export const applyAgentEvent = (state: AgentClientState, event: AgentEvent): Age
         toolRuns: replaceToolRun(state.toolRuns, {
           _tag: 'Running',
           call: event.call,
-          startedAtMs: Date.now()
+          startedAtMs: nowMs
         })
       }
     case 'ToolExecutionEnd': {
-      const endedAtMs = Date.now()
+      const endedAtMs = nowMs
       const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
 
       return {
@@ -215,5 +231,6 @@ export const markAgentAborted = (state: AgentClientState): AgentClientState => (
 
 export const reduceAgentEvents = (
   events: ReadonlyArray<AgentEvent>,
-  initialState: AgentClientState = initialAgentClientState
-) => events.reduce(applyAgentEvent, initialState)
+  initialState: AgentClientState = initialAgentClientState,
+  options: ApplyAgentEventOptions = {}
+) => events.reduce((state, event) => applyAgentEventWithOptions(state, event, options), initialState)

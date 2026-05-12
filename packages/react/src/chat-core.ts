@@ -4,7 +4,8 @@ import {
   applyAgentEventToChatMessages,
   markChatError,
   type AgentChatMessage,
-  type AgentChatPart
+  type AgentChatPart,
+  type ApplyAgentEventToChatMessagesOptions
 } from './chat-messages.ts'
 
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
@@ -24,7 +25,7 @@ export const initialAgentChatState: AgentChatState = {
 export type AgentChatAction =
   | { readonly _tag: 'Submit'; readonly message: UserMessage }
   | { readonly _tag: 'AppendMessage'; readonly message: AgentMessage }
-  | { readonly _tag: 'Event'; readonly event: AgentEvent }
+  | ({ readonly _tag: 'Event'; readonly event: AgentEvent } & ApplyAgentEventToChatMessagesOptions)
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
 
@@ -53,21 +54,21 @@ export const reduceAgentChatState = (
             ...state,
             status: 'running',
             error: null,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)
+            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
           }
         case 'AgentError':
           return {
             ...state,
             status: 'error',
             error: action.event.message,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)
+            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
           }
         case 'AgentEnd':
           return {
             ...state,
             status: 'done',
             error: null,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)
+            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
           }
         case 'AssistantMessage':
         case 'AgentRetry':
@@ -86,7 +87,7 @@ export const reduceAgentChatState = (
         case 'UsageUpdate':
           return {
             ...state,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event)
+            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
           }
       }
     }
