@@ -12,6 +12,7 @@ import { contentFromInput, type ImageAttachment } from './image-attachment-conte
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
 
 const imageAttachment: ImageAttachment = {
+  _tag: 'Ready',
   id: 'image-1',
   name: 'image.png',
   mimeType: 'image/png',
@@ -20,11 +21,21 @@ const imageAttachment: ImageAttachment = {
 }
 
 const secondImageAttachment: ImageAttachment = {
+  _tag: 'Ready',
   id: 'image-2',
   name: 'image-2.png',
   mimeType: 'image/png',
   previewUrl: 'data:image/png;base64,def',
   data: 'def'
+}
+
+const failedImageAttachment: ImageAttachment = {
+  _tag: 'Failed',
+  id: 'image-failed',
+  name: 'bad.txt',
+  mimeType: 'text/plain',
+  reason: 'Unsupported file type.',
+  file: new File(['bad'], 'bad.txt', { type: 'text/plain' })
 }
 
 const usage = AgentUsage.make({
@@ -55,6 +66,13 @@ describe('agent playground', () => {
       TextPart.make({ text: 'compare' }),
       ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
       ImagePart.make({ data: 'def', mimeType: 'image/png' })
+    ])
+  })
+
+  it('omits failed images from submit content', () => {
+    expect(contentFromInput(' describe ', [failedImageAttachment, imageAttachment])).toEqual([
+      TextPart.make({ text: 'describe' }),
+      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
     ])
   })
 

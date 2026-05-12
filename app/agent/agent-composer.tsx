@@ -11,6 +11,7 @@ import {
   type KeyboardEvent
 } from 'react'
 import Image from 'next/image'
+import { Array as Arr, Option } from 'effect'
 import {
   ArrowUpIcon,
   ImageIcon,
@@ -25,10 +26,24 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
 export type AgentComposerImageAttachment = {
+  readonly _tag: 'Ready'
+  readonly id: string
   readonly name: string
   readonly mimeType: string
   readonly previewUrl: string
 }
+
+export type AgentComposerFailedImageAttachment = {
+  readonly _tag: 'Failed'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly reason: string
+}
+
+export type AgentComposerAttachment =
+  | AgentComposerImageAttachment
+  | AgentComposerFailedImageAttachment
 
 type AgentComposerProps = {
   readonly input: string
@@ -38,10 +53,11 @@ type AgentComposerProps = {
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
   readonly imageInputSupported: boolean
-  readonly imageAttachments: ReadonlyArray<AgentComposerImageAttachment>
+  readonly imageAttachments: ReadonlyArray<AgentComposerAttachment>
   readonly onInputChange: (value: string) => void
   readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
-  readonly onRemoveImageAttachment: (index: number) => void
+  readonly onRemoveImageAttachment: (id: string) => void
+  readonly onRetryImageAttachment: (id: string) => void
   readonly onSubmit: () => void
   readonly onStop: () => void
   readonly onToggleVoice: () => void
@@ -59,6 +75,7 @@ export function AgentComposer({
   onInputChange,
   onImageAttachmentsChange,
   onRemoveImageAttachment,
+  onRetryImageAttachment,
   onSubmit,
   onStop,
   onToggleVoice
@@ -69,6 +86,9 @@ export function AgentComposer({
   const dropDisabled = isRunning || isVoiceMode || !imageInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
   const hasAttachments = imageAttachments.length > 0
+  const hasReadyAttachments = Option.isSome(
+    Arr.findFirst(imageAttachments, imageAttachment => imageAttachment._tag === 'Ready')
+  )
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -191,30 +211,63 @@ export function AgentComposer({
         />
         {hasAttachments ? (
           <div className="flex flex-wrap gap-2 px-2 pt-2">
-            {imageAttachments.map((imageAttachment, index) => (
+            {imageAttachments.map(imageAttachment => (
               <div
-                key={`${imageAttachment.name}-${index}`}
-                className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-foreground/10 bg-muted/50 p-1.5 pr-2 text-xs text-muted-foreground"
+                key={imageAttachment.id}
+                className={cn(
+                  'inline-flex max-w-full items-center gap-2 rounded-2xl border p-1.5 pr-2 text-xs text-muted-foreground',
+                  imageAttachment._tag === 'Failed'
+                    ? 'border-destructive/25 bg-destructive/5'
+                    : 'border-foreground/10 bg-muted/50'
+                )}
               >
-                <Image
-                  src={imageAttachment.previewUrl}
-                  alt="Attached image preview"
-                  width={48}
-                  height={48}
-                  unoptimized
-                  className="size-12 rounded-xl object-cover"
-                />
+                {imageAttachment._tag === 'Ready' ? (
+                  <Image
+                    src={imageAttachment.previewUrl}
+                    alt="Attached image preview"
+                    width={48}
+                    height={48}
+                    unoptimized
+                    className="size-12 rounded-xl object-cover"
+                  />
+                ) : (
+                  <div className="grid size-12 place-items-center rounded-xl bg-destructive/10 text-destructive">
+                    <ImageIcon className="size-5" aria-hidden />
+                  </div>
+                )}
                 <div className="min-w-0">
                   <div className="max-w-36 truncate font-medium text-foreground">
                     {imageAttachment.name}
                   </div>
-                  <div className="truncate">{imageAttachment.mimeType}</div>
+                  <div
+                    className={cn(
+                      'max-w-48 truncate',
+                      imageAttachment._tag === 'Failed' ? 'text-destructive' : undefined
+                    )}
+                  >
+                    {imageAttachment._tag === 'Failed'
+                      ? imageAttachment.reason
+                      : imageAttachment.mimeType}
+                  </div>
                 </div>
+                {imageAttachment._tag === 'Failed' ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onRetryImageAttachment(imageAttachment.id)}
+                    disabled={dropDisabled}
+                    className="h-8 rounded-full px-2 text-xs"
+                  >
+                    Retry
+                    <span className="sr-only"> {imageAttachment.name}</span>
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  onClick={() => onRemoveImageAttachment(index)}
+                  onClick={() => onRemoveImageAttachment(imageAttachment.id)}
                   className="ml-1 rounded-full"
                 >
                   <XIcon />
@@ -295,7 +348,7 @@ export function AgentComposer({
               <Button
                 type="submit"
                 size="icon-lg"
-                disabled={(input.trim().length === 0 && !hasAttachments) || submitDisabled}
+                disabled={(input.trim().length === 0 && !hasReadyAttachments) || submitDisabled}
                 className="size-10 rounded-full"
               >
                 <ArrowUpIcon />

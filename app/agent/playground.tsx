@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { Option } from 'effect'
+import { Array as Arr, Option } from 'effect'
 import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk/protocol'
 import {
   buildAgentChatItems,
@@ -19,7 +19,12 @@ import {
   type AgentActivityItem
 } from './agent-activity-model'
 import { AgentComposer } from './agent-composer'
-import { contentFromInput, type ImageAttachment } from './image-attachment-content'
+import {
+  contentFromInput,
+  isFailedImageAttachment,
+  isReadyImageAttachment,
+  type ImageAttachment
+} from './image-attachment-content'
 import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
@@ -104,17 +109,87 @@ const base64FromDataUrl = (dataUrl: string) => {
   return separatorIndex === -1 ? '' : dataUrl.slice(separatorIndex + 1)
 }
 
-const attachmentFromFile = async (file: File): Promise<ImageAttachment> => {
+const readyImageAttachmentFromFile = async (file: File): Promise<ImageAttachment> => {
   const blob = await compressedImageBlob(file)
   const previewUrl = await blobToDataUrl(blob)
 
   return {
+    _tag: 'Ready',
     id: imageAttachmentId(file),
     name: file.name,
     mimeType: blob.type.length > 0 ? blob.type : file.type,
     previewUrl,
     data: base64FromDataUrl(previewUrl)
   }
+}
+
+const failedImageAttachmentFromFile = (file: File, reason: string): ImageAttachment => ({
+  _tag: 'Failed',
+  id: imageAttachmentId(file),
+  name: file.name,
+  mimeType: file.type.length > 0 ? file.type : 'unknown',
+  reason,
+  file
+})
+
+const readyImageAttachmentCount = (attachments: ReadonlyArray<ImageAttachment>) =>
+  Arr.filter(attachments, isReadyImageAttachment).length
+
+const attachmentReadyLabel = (count: number) => `${count} image${count === 1 ? '' : 's'}`
+
+const sourceImageCanBeReady = (file: File) =>
+  file.type.startsWith('image/') && file.size <= maxSourceImageBytes
+
+const readyCandidateCountBefore = (files: ReadonlyArray<File>, index: number) =>
+  Arr.filter(Arr.take(files, index), sourceImageCanBeReady).length
+
+const processImageFile = async (
+  file: File,
+  readySlotAvailable: boolean
+): Promise<ImageAttachment> => {
+  if (!file.type.startsWith('image/')) {
+    return failedImageAttachmentFromFile(file, 'Unsupported file type.')
+  }
+
+  if (file.size > maxSourceImageBytes) {
+    return failedImageAttachmentFromFile(file, 'Image must be 15MB or smaller.')
+  }
+
+  if (!readySlotAvailable) {
+    return failedImageAttachmentFromFile(file, `Attach up to ${maxImageAttachments} images.`)
+  }
+
+  try {
+    const attachment = await readyImageAttachmentFromFile(file)
+
+    if (attachment._tag === 'Ready' && attachment.data.length === 0) {
+      return failedImageAttachmentFromFile(file, 'Could not decode image.')
+    }
+
+    if (attachment._tag === 'Ready' && attachment.data.length > maxEncodedImageBytes) {
+      return failedImageAttachmentFromFile(file, 'Compressed image is still too large.')
+    }
+
+    return attachment
+  } catch {
+    return failedImageAttachmentFromFile(file, 'Could not read image.')
+  }
+}
+
+const processImageFiles = (
+  files: ReadonlyArray<File>,
+  currentAttachments: ReadonlyArray<ImageAttachment>
+) => {
+  const currentReadyCount = readyImageAttachmentCount(currentAttachments)
+
+  return Promise.all(
+    Arr.map(files, (file, index) => {
+      const readySlotAvailable =
+        sourceImageCanBeReady(file) &&
+        currentReadyCount + readyCandidateCountBefore(files, index) < maxImageAttachments
+      return processImageFile(file, readySlotAvailable)
+    })
+  )
 }
 
 export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
@@ -369,6 +444,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   )
 
   const handleSubmit = useCallback(() => {
+    const readyImages = readyImageAttachmentCount(imageAttachments)
     const content = contentFromInput(input, imageAttachments)
 
     if (submitDisabled || !canSubmitContent(content)) {
@@ -376,11 +452,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     }
 
     recordActivity({
-      title: imageAttachments.length === 0 ? 'Prompt submitted' : 'Image prompt submitted',
-      detail:
-        imageAttachments.length === 0
-          ? input.trim()
-          : `${imageAttachments.length} image${imageAttachments.length === 1 ? '' : 's'}`,
+      title: readyImages === 0 ? 'Prompt submitted' : 'Image prompt submitted',
+      detail: readyImages === 0 ? input.trim() : attachmentReadyLabel(readyImages),
       tone: 'neutral'
     })
     const result = submitMessage(UserMessage.make({ content }))
@@ -454,90 +527,83 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         return
       }
 
-      const availableSlots = maxImageAttachments - imageAttachments.length
-      const acceptedFiles = files
-        .filter(file => {
-          if (!file.type.startsWith('image/')) {
-            recordActivity({
-              title: 'Image rejected',
-              detail: `${file.name}: unsupported file type.`,
-              tone: 'error'
-            })
-            return false
-          }
-
-          if (file.size > maxSourceImageBytes) {
-            recordActivity({
-              title: 'Image rejected',
-              detail: `${file.name}: image must be 15MB or smaller.`,
-              tone: 'error'
-            })
-            return false
-          }
-
-          return true
-        })
-        .slice(0, Math.max(0, availableSlots))
-
-      if (acceptedFiles.length < files.length && availableSlots <= files.length) {
-        recordActivity({
-          title: 'Image limit reached',
-          detail: `Attach up to ${maxImageAttachments} images.`,
-          tone: 'error'
-        })
-      }
-
-      Promise.all(acceptedFiles.map(attachmentFromFile))
+      processImageFiles(files, imageAttachments)
         .then(attachments => {
-          const readyAttachments = attachments.filter(attachment => {
-            if (attachment.data.length === 0) {
-              recordActivity({
-                title: 'Image rejected',
-                detail: `${attachment.name}: could not decode image.`,
-                tone: 'error'
-              })
-              return false
-            }
+          const readyAttachments = Arr.filter(attachments, isReadyImageAttachment)
+          const failedAttachments = Arr.filter(attachments, isFailedImageAttachment)
 
-            if (attachment.data.length > maxEncodedImageBytes) {
-              recordActivity({
-                title: 'Image rejected',
-                detail: `${attachment.name}: compressed image is still too large.`,
-                tone: 'error'
-              })
-              return false
-            }
-
-            return true
-          })
-
-          if (readyAttachments.length === 0) {
+          if (attachments.length === 0) {
             return
           }
 
-          setImageAttachments(current => [...current, ...readyAttachments])
-          recordActivity({
-            title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
-            detail: readyAttachments.map(attachment => attachment.name).join(', '),
-            tone: 'neutral'
-          })
-        })
-        .catch(() => {
-          recordActivity({
-            title: 'Image rejected',
-            detail: 'Could not read image.',
-            tone: 'error'
-          })
+          setImageAttachments(current => [...current, ...attachments])
+
+          if (readyAttachments.length > 0) {
+            recordActivity({
+              title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
+              detail: Arr.map(readyAttachments, attachment => attachment.name).join(', '),
+              tone: 'neutral'
+            })
+          }
+
+          if (failedAttachments.length > 0) {
+            recordActivity({
+              title: failedAttachments.length === 1 ? 'Image failed' : 'Images failed',
+              detail: Arr.map(
+                failedAttachments,
+                attachment => `${attachment.name}: ${attachment.reason}`
+              ).join(', '),
+              tone: 'error'
+            })
+          }
         })
     },
-    [imageAttachments.length, recordActivity]
+    [imageAttachments, recordActivity]
   )
 
-  const handleRemoveImageAttachment = useCallback((index: number) => {
+  const handleRemoveImageAttachment = useCallback((id: string) => {
     setImageAttachments(current =>
-      current.filter((_, attachmentIndex) => attachmentIndex !== index)
+      Arr.filter(current, imageAttachment => imageAttachment.id !== id)
     )
   }, [])
+
+  const handleRetryImageAttachment = useCallback(
+    (id: string) => {
+      Option.match(Arr.findFirst(imageAttachments, imageAttachment => imageAttachment.id === id), {
+        onNone: () => undefined,
+        onSome: attachment => {
+          if (attachment._tag !== 'Failed') {
+            return
+          }
+
+          const remainingAttachments = Arr.filter(
+            imageAttachments,
+            imageAttachment => imageAttachment.id !== id
+          )
+          setImageAttachments(remainingAttachments)
+          processImageFiles([attachment.file], remainingAttachments).then(attachments => {
+            setImageAttachments(current => [...current, ...attachments])
+
+            Option.match(Arr.findFirst(attachments, isFailedImageAttachment), {
+              onNone: () =>
+                recordActivity({
+                  title: 'Image retry succeeded',
+                  detail: attachment.name,
+                  tone: 'neutral'
+                }),
+              onSome: failedAttachment =>
+                recordActivity({
+                  title: 'Image retry failed',
+                  detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
+                  tone: 'error'
+                })
+            })
+          })
+        }
+      })
+    },
+    [imageAttachments, recordActivity]
+  )
 
   const handleInputChange = useCallback((value: string) => {
     setInput(value)
@@ -618,6 +684,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             onInputChange={handleInputChange}
             onImageAttachmentsChange={handleImageAttachmentsChange}
             onRemoveImageAttachment={handleRemoveImageAttachment}
+            onRetryImageAttachment={handleRetryImageAttachment}
             onSubmit={handleSubmit}
             onStop={stop}
             onToggleVoice={toggleVoice}

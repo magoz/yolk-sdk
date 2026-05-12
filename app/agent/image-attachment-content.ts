@@ -1,10 +1,24 @@
+import { Array as Arr } from 'effect'
 import { ImagePart, TextPart, type Content } from '@yolk/protocol'
-import type { AgentComposerImageAttachment } from './agent-composer'
+import type { AgentComposerFailedImageAttachment, AgentComposerImageAttachment } from './agent-composer'
 
-export type ImageAttachment = AgentComposerImageAttachment & {
-  readonly id: string
+export type ReadyImageAttachment = AgentComposerImageAttachment & {
   readonly data: string
 }
+
+export type FailedImageAttachment = AgentComposerFailedImageAttachment & {
+  readonly file: File
+}
+
+export type ImageAttachment = ReadyImageAttachment | FailedImageAttachment
+
+export const isReadyImageAttachment = (
+  imageAttachment: ImageAttachment
+): imageAttachment is ReadyImageAttachment => imageAttachment._tag === 'Ready'
+
+export const isFailedImageAttachment = (
+  imageAttachment: ImageAttachment
+): imageAttachment is FailedImageAttachment => imageAttachment._tag === 'Failed'
 
 export const contentFromInput = (
   input: string,
@@ -12,11 +26,13 @@ export const contentFromInput = (
 ): Content => {
   const text = input.trim()
 
-  if (imageAttachments.length === 0) {
+  const readyAttachments = Arr.filter(imageAttachments, isReadyImageAttachment)
+
+  if (readyAttachments.length === 0) {
     return text
   }
 
-  const imageParts = imageAttachments.map(imageAttachment =>
+  const imageParts = Arr.map(readyAttachments, imageAttachment =>
     ImagePart.make({ data: imageAttachment.data, mimeType: imageAttachment.mimeType })
   )
 

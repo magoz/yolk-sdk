@@ -52,7 +52,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 
 - Server route validates image count, MIME, base64 shape, per-image size, and total payload before provider calls; keep UI compression as convenience only.
 - Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode image support in UI.
-- Consider richer image failure UI: per-file reason, retry, and remove failed attachments without clearing valid ones.
+- Image attachment UI preserves failed files as removable/retryable chips with per-file reasons; submit only includes ready images.
 - Add full-suite E2E coverage when image flow becomes less route-stubbed.
 
 ## References
