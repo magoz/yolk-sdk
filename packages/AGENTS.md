@@ -96,7 +96,7 @@ mcp-server -> mcp-client + protocol + Effect
 - Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
 - `listMcpTools` rejects duplicate generated tool names after server/tool sanitization.
 - Prefer local/remote-specific helper APIs in tests (`listLocalMcpServerTools`, `callLocalMcpServerTool`, `listRemoteMcpServerTools`, `callRemoteMcpServerTool`) when the config kind is known; use union helpers at app boundaries.
-- Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE and tiny checked-in stdio fixture servers for local process behavior.
+- Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE, fake `ChildProcessSpawner` for core local behavior, and tiny checked-in stdio fixtures for real process behavior.
 - Cover protocol/transport error paths: malformed JSON-RPC, JSON-RPC error responses, non-2xx remote responses, local stdio early exit, policy rejection, unknown methods/tools, invalid params, and tool failures.
 - Use Playwright for MCP only when browser-visible `/agent` behavior is under test; avoid it for protocol/client transport coverage.
 

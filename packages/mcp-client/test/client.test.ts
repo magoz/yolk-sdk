@@ -1,9 +1,11 @@
-import { Duration, Effect, Fiber, Layer, type Result } from 'effect'
+import { Duration, Effect, Fiber, Layer, Sink, Stream, type Result } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
 import {
+  listLocalMcpServerTools,
   callRemoteMcpServerTool,
   listRemoteMcpServerTools
 } from '../src'
@@ -45,6 +47,36 @@ type ResponseMode =
   | 'status-error'
   | 'timeout'
   | 'duplicate-tools'
+
+const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(command =>
+      Effect.sync(() => {
+        if (!ChildProcess.isStandardCommand(command)) {
+          throw new Error('Expected standard command')
+        }
+        expect(command.options.extendEnv).toBe(false)
+        expect(command.options.env).toEqual({ MCP_TOKEN: 'token' })
+
+        const stdout = Stream.fromIterable(lines.map(line => `${line}\n`)).pipe(Stream.encodeText)
+
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout,
+          stderr: Stream.empty,
+          all: stdout,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void)
+        })
+      })
+    )
+  )
 
 const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
@@ -282,6 +314,39 @@ describe('MCP client', () => {
         options
       })
       expect(result.content).toBe('local result')
+    })
+  )
+
+  it.effect('supports injected local process spawners without Node services', () =>
+    Effect.gen(function* () {
+      const initializeResponse = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          serverInfo: { name: 'local', version: '0' }
+        }
+      })
+      const toolsResponse = JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        result: {
+          tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }]
+        }
+      })
+
+      const tools = yield* listLocalMcpServerTools(
+        {
+          name: 'local',
+          type: 'local',
+          command: ['fake-mcp'],
+          environment: { MCP_TOKEN: 'token' }
+        },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeLocalMcpLayer([initializeResponse, toolsResponse])))
+
+      expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
     })
   )
 

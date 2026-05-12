@@ -44,5 +44,6 @@
 ## Tests
 
 - Test remote transports with fake `HttpClient` layers.
+- Test core local stdio with fake `ChildProcessSpawner` layers when process behavior is not under test.
 - Test local stdio with tiny checked-in fixture servers.
 - Cover malformed JSON-RPC, JSON-RPC errors, non-2xx remote responses, early exit, policy rejection, duplicate names, invalid params, and tool failures.
