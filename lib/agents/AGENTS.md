@@ -140,7 +140,7 @@ Codex backend quirks:
 
 Image TODOs:
 
-- Validate image count, MIME, base64 size, and total request size at `/api/agent` before provider call.
+- `/api/agent` validates image count, MIME, base64 shape, per-image size, and total image payload before provider calls.
 - Keep Codex image mapping covered by provider tests whenever Responses payload shape changes.
 - If adding provider switching, derive image support from selected provider capabilities, not from UI assumptions.
 

@@ -116,6 +116,9 @@ const handler = Effect.gen(function* () {
       Effect.andThen(HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }))
     )
   ),
+  Effect.catchTag('AgentImageLimitError', error =>
+    HttpServerResponse.json({ error: error.message }, { status: 400 })
+  ),
   Effect.catchTag('OpenAiCodexAuthNotFoundError', () =>
     HttpServerResponse.json({ error: 'OpenAI Codex not connected' }, { status: 409 })
   ),

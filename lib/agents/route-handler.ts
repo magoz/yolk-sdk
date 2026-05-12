@@ -1,10 +1,14 @@
-import { Effect, Stream } from 'effect'
+import { Array as Arr, Effect, Option, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  assistantContent,
+  contentParts,
   AgentMessage,
   AgentReasoningEffort,
   type AgentEvent,
   type AgentModelCapabilities,
+  type ContentPart,
+  type ImagePart,
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
 } from '@yolk/protocol'
@@ -18,7 +22,82 @@ export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentRes
   }
 ) {}
 
+export class AgentImageLimitError extends Schema.TaggedErrorClass<AgentImageLimitError>()(
+  'AgentImageLimitError',
+  {
+    message: Schema.String
+  }
+) {}
+
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
+const maxImageCount = 4
+const maxImageBase64Chars = 5 * 1024 * 1024
+const maxTotalImageBase64Chars = 12 * 1024 * 1024
+const allowedImageMimeTypes: ReadonlyArray<string> = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+
+const isAllowedImageMimeType = (mimeType: string) =>
+  allowedImageMimeTypes.some(allowedMimeType => allowedMimeType === mimeType)
+
+const isValidBase64 = (data: string) =>
+  data.length > 0 && data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data)
+
+const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> => {
+  switch (message._tag) {
+    case 'Assistant':
+      return contentParts(assistantContent(message))
+    case 'ToolResult':
+    case 'User':
+      return contentParts(message.content)
+  }
+}
+
+const requestImageParts = (input: AgentRouteRequest) =>
+  Arr.filter(Arr.flatMap(input.messages, messageContentParts), part => part._tag === 'Image')
+
+const imageLimitError = (message: string) => new AgentImageLimitError({ message })
+
+const imagePartLimitError = (image: ImagePart) => {
+  if (!isAllowedImageMimeType(image.mimeType)) {
+    return Option.some(imageLimitError(`Unsupported image type: ${image.mimeType}`))
+  }
+
+  if (image.data.length > maxImageBase64Chars) {
+    return Option.some(imageLimitError('Image is too large.'))
+  }
+
+  if (!isValidBase64(image.data)) {
+    return Option.some(imageLimitError('Invalid image data.'))
+  }
+
+  return Option.none<AgentImageLimitError>()
+}
+
+const validateAgentRouteImages = (input: AgentRouteRequest) =>
+  Effect.gen(function* () {
+    const images = requestImageParts(input)
+    const totalBase64Chars = Arr.reduce(images, 0, (total, image) => total + image.data.length)
+
+    if (images.length > maxImageCount) {
+      return yield* Effect.fail(imageLimitError(`Attach up to ${maxImageCount} images.`))
+    }
+
+    if (totalBase64Chars > maxTotalImageBase64Chars) {
+      return yield* Effect.fail(imageLimitError('Image payload is too large.'))
+    }
+
+    const imageErrors = Arr.flatMap(images, image =>
+      Option.match(imagePartLimitError(image), {
+        onNone: () => [],
+        onSome: error => [error]
+      })
+    )
+
+    return yield* Option.match(Arr.findFirst(imageErrors, () => true), {
+      onNone: () => Effect.void,
+      onSome: Effect.fail
+    })
+  })
 
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({
   sessionId: NonEmptyTrimmedString,
@@ -77,6 +156,8 @@ const encodeNdjsonEvent = (event: AgentEvent) =>
 
 export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRouteConfig) =>
   Effect.gen(function* () {
+    yield* validateAgentRouteImages(input)
+
     const body = yield* runRuntime(
       {
         _tag: 'Transcript',

@@ -8,6 +8,7 @@ import {
   assistantContent,
   AgentContentCapabilities,
   AgentModelCapabilities,
+  ImagePart,
   ToolDef,
   UserMessage,
   type AgentMessage
@@ -411,6 +412,102 @@ describe('makeAgentPostResponse', () => {
       expect(result).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'SchemaError' }
+      })
+    })
+  )
+
+  it.effect('rejects too many images before provider execution', () =>
+    Effect.gen(function* () {
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
+                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
+                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
+                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
+                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentImageLimitError', message: 'Attach up to 4 images.' }
+      })
+    })
+  )
+
+  it.effect('rejects unsupported image MIME types', () =>
+    Effect.gen(function* () {
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [ImagePart.make({ data: 'aaaa', mimeType: 'image/svg+xml' })]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentImageLimitError', message: 'Unsupported image type: image/svg+xml' }
+      })
+    })
+  )
+
+  it.effect('rejects invalid image base64', () =>
+    Effect.gen(function* () {
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [ImagePart.make({ data: 'abc', mimeType: 'image/png' })]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentImageLimitError', message: 'Invalid image data.' }
+      })
+    })
+  )
+
+  it.effect('rejects oversized image payloads', () =>
+    Effect.gen(function* () {
+      const imageData = 'a'.repeat(4 * 1024 * 1024)
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
+                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
+                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
+                ImagePart.make({ data: imageData, mimeType: 'image/png' })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentImageLimitError', message: 'Image payload is too large.' }
       })
     })
   )
