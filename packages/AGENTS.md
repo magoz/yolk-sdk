@@ -218,3 +218,37 @@ Use this order when preparing the first public alpha/canary release:
    - Remove `private: true` only after artifact validation passes.
    - Publish with provenance if available.
    - Treat the first alpha as API feedback, not stability commitment.
+
+## Reference Repo Gap TODOs
+
+Use these before broadening package scope:
+
+1. **Add protocol conformance tests**
+   - Initial coverage added in `packages/protocol/test/wire.test.ts`.
+   - Continue covering new message/event/tool/usage variants as they are added.
+   - Cover schema round-trips and invalid wire payloads.
+   - Keep tests semantic and provider-agnostic.
+
+2. **Improve MCP result fidelity**
+   - Preserve `structuredContent` and non-text content blocks where possible.
+   - Surface MCP tool error content instead of collapsing to generic errors.
+
+3. **Design durable runtime append store**
+   - Write PRD before implementation.
+   - Define session events, revisions, resume semantics, interrupted cleanup, and fanout boundaries.
+
+4. **Design richer tool lifecycle events**
+   - Write PRD before implementation.
+   - Evaluate tool input start/delta/end, approvals, output-error, provider-executed tools, and step metadata.
+
+5. **Assess reusable provider adapter package**
+   - Avoid moving app providers prematurely.
+   - Extract only stable OpenAI/Codex request lowering, streaming parse, and provider quirks.
+
+6. **Plan product/session UX layer separately**
+   - Keep packages headless.
+   - App layer owns persisted drafts, threads, model picker, attachment recovery, virtualization, and command palette.
+
+7. **Freeze package API before publish prep**
+   - Decide root vs subpath exports.
+   - Add READMEs, metadata, dist builds, and artifact validation after API review.
