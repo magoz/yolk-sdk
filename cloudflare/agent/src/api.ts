@@ -5,6 +5,7 @@ import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import YolkAgent from './yolk-agent.ts'
 
 const connectPath = '/connect/'
+const bootstrapPath = '/bootstrap/'
 
 export class Api extends Cloudflare.Worker<Api>()('Api', {
   main: './src/api-runtime.ts',
@@ -25,6 +26,16 @@ export const ApiLive = Api.make(
 
         if (request.url.startsWith(connectPath)) {
           const sessionId = request.url.slice(connectPath.length)
+
+          if (sessionId.length === 0) {
+            return HttpServerResponse.text('Missing session id', { status: 400 })
+          }
+
+          return yield* agents.getByName(sessionId).fetch(request)
+        }
+
+        if (request.url.startsWith(bootstrapPath)) {
+          const sessionId = request.url.slice(bootstrapPath.length)
 
           if (sessionId.length === 0) {
             return HttpServerResponse.text('Missing session id', { status: 400 })

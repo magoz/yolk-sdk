@@ -4,11 +4,12 @@ Cloudflare app for the future Yolk durable agent runtime.
 
 ## Current Status
 
-- This app is a proving adapter, not the main product surface yet.
+- This app is a proving adapter and optional direct-WS app runtime; keep main app fallback alive.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
+- App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token bridge config before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current goal: prove `@yolk/*` packages run inside Cloudflare Durable Objects with typed protocol events and append-log durable transcript storage.
-- DO storage uses `SessionEventStore`; reconnect marks latest incomplete run `RunInterrupted` before accepting a new socket.
+- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, and app-centralized Codex token refresh.
+- DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
 - Do not expand into full product infrastructure until package APIs are stable.
 
@@ -22,7 +23,7 @@ Primary work should stay in reusable packages first:
 - `@yolk/client`
 - `@yolk/tool-registry`
 
-Cloudflare should remain a thin adapter + smoke deploy until package holes are closed.
+Cloudflare should remain a thin runtime adapter; policy, auth, token refresh, and tools stay app-owned until stable.
 
 ## Defer For Now
 
@@ -33,7 +34,7 @@ Do not build these here yet unless explicitly requested:
 - Vectorize
 - Workers AI embeddings
 - Queues
-- full auth bridge
+- full auth bridge (v1 only has app-server bootstrap + bridge secret)
 - production Cloudflare topology
 - real integration tools beyond minimal adapter validation
 
@@ -44,8 +45,7 @@ Do not build these here yet unless explicitly requested:
 - Context provider API.
 - Compaction hook shape.
 - Protocol event completeness and stability.
-- Client transport abstraction for WebSocket/SSE.
-- Later enhancement: once Cloudflare needs real UI integration, consider a shared `@yolk/client` transport interface for NDJSON/SSE/WebSocket; defer until backend needs are concrete.
+- Broader client transport abstraction for SSE/fanout/replay beyond current NDJSON + Cloudflare WS helpers.
 - Tests for event ordering, persistence, retries, failures.
 - Package docs and public API cleanup.
 
@@ -57,7 +57,7 @@ Do not build these here yet unless explicitly requested:
 4. Add transport/client abstractions in packages.
 5. Add tool policy/context seams in packages.
 6. Test with fake provider/store/tools.
-7. Update Cloudflare adapter to consume stable APIs.
+7. Keep app bootstrap/token bridge narrow and auditable.
 8. Only then expand Cloudflare infra.
 
 ## Rule Of Thumb
@@ -72,7 +72,9 @@ Do not build these here yet unless explicitly requested:
 - Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep `@yolk/*` packages provider/runtime-neutral.
-- Use faux provider until Cloudflare DO + persistence path is proven.
+- Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
+- Centralize Codex refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
+- Direct browser WS uses protocol `SessionSnapshot` + `UserInput`; keep schemas in `@yolk/protocol`.
 - Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.

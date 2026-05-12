@@ -11,6 +11,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | `agent/commands/route.ts`      | Agent command list/render    |
 | `agent/realtime/call/route.ts` | OpenAI Realtime SDP exchange |
 | `agent/realtime/tool/route.ts` | Voice tool execution bridge  |
+| `internal/cloudflare/codex-token/route.ts` | Internal DO token bridge |
 
 ## Effect Route Pattern
 
@@ -37,10 +38,12 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
 - Realtime routes resolve voice tools with `{ surface: 'voice', route: '/agent', userId }`.
+- Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
 
 ## Exceptions
 
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
+- `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
 - Browser/WebRTC specifics stay in `app/agent/use-realtime-voice.ts` and `lib/agents/realtime/*`, not route bodies.
 
 ## Anti-Patterns

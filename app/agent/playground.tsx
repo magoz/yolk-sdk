@@ -8,8 +8,10 @@ import {
   getActiveChatToolParts,
   getAgentChatLiveActivityCount,
   getCompletedChatToolParts,
-  useAgentChat
+  useAgentChat,
+  type AgentChatTransport
 } from '@yolk/react'
+import { streamCloudflareAgentEvents } from '@yolk/client'
 import { agentTextCapabilities, agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
@@ -39,6 +41,7 @@ import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 type AgentPlaygroundProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
+  readonly cloudflareWebSocketUrl?: string
 }
 
 const maxImageAttachments = 4
@@ -196,7 +199,11 @@ const processImageFiles = (
   )
 }
 
-export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygroundProps) {
+export function AgentPlayground({
+  sessionId,
+  openAiCodexConnected,
+  cloudflareWebSocketUrl
+}: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
   const [imageAttachments, setImageAttachments] = useState<ReadonlyArray<ImageAttachment>>([])
   const [activityVisible, setActivityVisible] = useState(false)
@@ -373,10 +380,24 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     },
     [recordActivity]
   )
+  const cloudflareTransport = useMemo<AgentChatTransport | undefined>(() => {
+    if (cloudflareWebSocketUrl === undefined) {
+      return undefined
+    }
+
+    return request =>
+      streamCloudflareAgentEvents({
+        webSocketUrl: cloudflareWebSocketUrl,
+        messages: request.messages,
+        reasoningEffort: request.reasoningEffort,
+        signal: request.signal
+      })
+  }, [cloudflareWebSocketUrl])
 
   const agentChat = useAgentChat({
     sessionId,
     reasoningEffort,
+    transport: cloudflareTransport,
     onEvent: recordAgentEvent,
     onError: recordAgentError,
     onAbort: recordAgentAbort

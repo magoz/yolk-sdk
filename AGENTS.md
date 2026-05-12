@@ -52,7 +52,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
-| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object smoke deploy running `@yolk/agent-runtime` with faux provider               |
+| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object session runtime; direct WS optional app transport; Codex access token bridge |
 
 ## WHERE TO LOOK
 
@@ -114,8 +114,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`           | Converts chat parts to protocol transcript             |
 | `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`             | Resolves configured MCP server tools                   |
 | `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`             | Creates tool-only MCP JSON-RPC server                  |
-| `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                   | Cloudflare Worker exposing `/health` + WebSocket route |
-| `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`            | Durable Object running agent runtime + DO persistence  |
+| `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                   | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |
+| `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`            | Durable Object running agent runtime + append-log persistence |
 
 ## REFERENCE REPOS
 

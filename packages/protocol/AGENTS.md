@@ -9,6 +9,7 @@
 - Define tool metadata, calls, results, and errors.
 - Define model capability and reasoning request types.
 - Define canonical usage, retry, and compaction lifecycle events.
+- Define generic session/transport envelopes such as `SessionSnapshot` and `UserInput` without app auth assumptions.
 - Provide content helpers for text and multimodal parts.
 
 ## Boundaries
@@ -28,6 +29,7 @@
 | `content`    | Text/image/audio content helpers        |
 | `capability` | Model input/tool capability flags       |
 | `reasoning`  | Provider-supplied reasoning config/data |
+| `session`    | Generic session snapshot and WS envelope schemas |
 | `usage`      | Provider-neutral token usage helpers    |
 
 ## Design rules
@@ -43,6 +45,7 @@
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.
 - Provider adapters normalize usage; protocol stays provider-neutral.
+- Session envelopes may reference transport flow but must not depend on concrete HTTP/WS APIs.
 
 ## Tests
 

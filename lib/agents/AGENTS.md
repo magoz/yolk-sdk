@@ -7,12 +7,14 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Unified `/agent` UI with text+image input and mic voice mode
 - `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
+- Optional Cloudflare direct-WS transport bootstraps from `/agent` when `CLOUDFLARE_AGENT_URL`, `YOLK_APP_URL`, and `YOLK_CLOUDFLARE_BRIDGE_SECRET` are set.
 - Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + optional configured MCP tools
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; durable session lifecycle is deferred
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
+- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
 - `context-budget.ts` owns app text model context window, reserved output, warning, and compaction thresholds.
@@ -115,6 +117,7 @@ MCP security:
 - Used for ChatGPT Plus/Pro/Max subscription access
 - Does **not** use `OPENAI_API_KEY`
 - Requires per-user Codex OAuth token from `lib/core/agent/openai-codex-auth.ts`
+- Cloudflare token bridge returns access/account/expiry only; keep refresh token in Next/Postgres.
 - Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`; `accountId` stores ChatGPT account id when present
 - Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
 - `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use

@@ -62,6 +62,12 @@ export {
   assistantReasoningText
 } from './message.ts'
 export { AgentReasoningEffort } from './reasoning.ts'
+export {
+  AgentWebSocketClientMessage,
+  AgentWebSocketServerMessage,
+  SessionSnapshot,
+  UserInput
+} from './session.ts'
 export { ToolCall, ToolDef, ToolResult } from './tool.ts'
 export {
   addAgentUsage,

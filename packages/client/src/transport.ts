@@ -1,4 +1,4 @@
-import { Effect, Stream, type Layer } from 'effect'
+import { Cause, Effect, Queue, Stream, type Layer } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -7,8 +7,14 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { AgentEvent } from '@yolk/protocol'
-import type { AgentEvent as AgentEventType, AgentReasoningEffort } from '@yolk/protocol'
+import { AgentEvent, AgentWebSocketServerMessage, UserInput } from '@yolk/protocol'
+import type {
+  AgentEvent as AgentEventType,
+  AgentMessage,
+  AgentReasoningEffort,
+  AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
+  UserMessage
+} from '@yolk/protocol'
 import type { AgentTranscript } from './state.ts'
 
 export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportError>()(
@@ -26,6 +32,13 @@ export type StreamAgentEventsRequest = {
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+}
+
+export type StreamCloudflareAgentEventsRequest = {
+  readonly webSocketUrl: string
+  readonly messages: AgentTranscript
+  readonly reasoningEffort?: AgentReasoningEffort
+  readonly signal?: AbortSignal
 }
 
 const defaultEndpoint = '/api/agent'
@@ -48,6 +61,17 @@ const decodeAgentEvent = (value: unknown) =>
       error =>
         new AgentTransportError({
           message: `Invalid agent event: ${unknownToMessage(error)}`,
+          cause: error
+        })
+    )
+  )
+
+const decodeWebSocketServerMessage = (value: unknown) =>
+  Schema.decodeUnknownEffect(AgentWebSocketServerMessage)(value).pipe(
+    Effect.mapError(
+      error =>
+        new AgentTransportError({
+          message: `Invalid agent WebSocket message: ${unknownToMessage(error)}`,
           cause: error
         })
     )
@@ -81,6 +105,52 @@ const parseAgentEventLine = (line: string) =>
 
     return yield* decodeAgentEvent(parsed)
   })
+
+const parseWebSocketServerMessage = (
+  raw: string
+): Effect.Effect<AgentWebSocketServerMessageType, AgentTransportError> =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeJsonString(raw, 'Invalid WebSocket message')
+
+    return yield* decodeWebSocketServerMessage(parsed)
+  })
+
+const isUserMessage = (message: AgentMessage): message is UserMessage => message._tag === 'User'
+
+const lastUserMessage = (
+  messages: AgentTranscript
+): Effect.Effect<UserMessage, AgentTransportError> => {
+  const reversed = messages.slice().reverse()
+  const message = reversed.find(isUserMessage)
+
+  if (message === undefined) {
+    return Effect.fail(
+      new AgentTransportError({
+        message: 'Cloudflare WebSocket transport requires a user message',
+        cause: messages
+      })
+    )
+  }
+
+  return Effect.succeed(message)
+}
+
+const makeUserInputJson = (
+  request: StreamCloudflareAgentEventsRequest,
+  expectedRevision: number
+): Effect.Effect<string, AgentTransportError> =>
+  lastUserMessage(request.messages).pipe(
+    Effect.flatMap(message =>
+      encodeJsonString(
+        UserInput.make({
+          message,
+          expectedRevision,
+          reasoningEffort: request.reasoningEffort
+        }),
+        'Could not serialize WebSocket user input'
+      )
+    )
+  )
 
 const responseErrorMessage = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(
@@ -171,6 +241,97 @@ export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
     Stream.fromEffect(requestAgentResponse(request)).pipe(Stream.flatMap(responseToEventStream)),
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
+
+const isAgentEvent = (
+  message: AgentWebSocketServerMessageType
+): message is AgentEventType => message._tag !== 'SessionSnapshot'
+
+export const streamCloudflareAgentEventStream = (
+  request: StreamCloudflareAgentEventsRequest
+) =>
+  applyAbortSignal(
+    Stream.callback<AgentEventType, AgentTransportError>(queue =>
+      Effect.gen(function* () {
+        const socket = new WebSocket(request.webSocketUrl)
+        let sentInput = false
+        let settled = false
+        const closeSocket = Effect.sync(() => {
+          if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+            socket.close(1000, 'done')
+          }
+        })
+        const failQueue = (error: AgentTransportError) =>
+          Queue.failCauseUnsafe(queue, Cause.fail(error))
+        const endQueue = () => Queue.endUnsafe(queue)
+        const handleMessage = (event: MessageEvent) => {
+          if (typeof event.data !== 'string') {
+            failQueue(toTransportError('Agent WebSocket returned binary data', event.data))
+            return
+          }
+
+          Effect.runFork(
+            parseWebSocketServerMessage(event.data).pipe(
+              Effect.flatMap(message => {
+                if (message._tag === 'SessionSnapshot') {
+                  return sentInput
+                    ? Effect.void
+                    : makeUserInputJson(request, message.revision).pipe(
+                        Effect.flatMap(body => Effect.sync(() => socket.send(body))),
+                        Effect.tap(() => Effect.sync(() => { sentInput = true }))
+                      )
+                }
+
+                if (!isAgentEvent(message)) {
+                  return Effect.void
+                }
+
+                return Effect.sync(() => {
+                  Queue.offerUnsafe(queue, message)
+                  if (message._tag === 'AgentEnd' || message._tag === 'AgentError') {
+                    settled = true
+                    endQueue()
+                    socket.close(1000, 'done')
+                  }
+                })
+              }),
+              Effect.catch(error => Effect.sync(() => failQueue(error)))
+            )
+          )
+        }
+        const handleError = () => {
+          failQueue(toTransportError('Agent WebSocket failed', request.webSocketUrl))
+        }
+        const handleClose = () => {
+          if (!settled) {
+            failQueue(toTransportError('Agent WebSocket closed', request.webSocketUrl))
+          }
+        }
+
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            socket.addEventListener('message', handleMessage)
+            socket.addEventListener('error', handleError)
+            socket.addEventListener('close', handleClose)
+          }),
+          () =>
+            Effect.sync(() => {
+              socket.removeEventListener('message', handleMessage)
+              socket.removeEventListener('error', handleError)
+              socket.removeEventListener('close', handleClose)
+            }).pipe(Effect.andThen(closeSocket))
+        )
+      })
+    ),
+    request.signal
+  )
+
+export async function* streamCloudflareAgentEvents(
+  request: StreamCloudflareAgentEventsRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  for await (const event of Stream.toAsyncIterable(streamCloudflareAgentEventStream(request))) {
+    yield event
+  }
+}
 
 export async function* streamAgentEvents(
   request: StreamAgentEventsRequest

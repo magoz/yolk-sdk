@@ -20,7 +20,9 @@ export {
   AgentTransportError,
   collectAgentEvents,
   collectAgentEventsEffect,
+  streamCloudflareAgentEventStream,
+  streamCloudflareAgentEvents,
   streamAgentEvents,
   streamAgentEventStream
 } from './transport.ts'
-export type { StreamAgentEventsRequest } from './transport.ts'
+export type { StreamAgentEventsRequest, StreamCloudflareAgentEventsRequest } from './transport.ts'

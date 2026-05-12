@@ -35,9 +35,10 @@ import {
   agentTextReasoningEffort,
   agentTextReasoningSummary,
   type AgentTextReasoningSummary
-} from '@/lib/agents/text-agent-config'
-import { OPENAI_CODEX_RESPONSES_URL } from '@/lib/services/openai-codex-oauth/live-layer'
-import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
+} from '../text-agent-config.ts'
+import type { OpenAiCodexOAuthToken } from '../../services/openai-codex-oauth/schemas.ts'
+
+const OPENAI_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 
 type OpenAiCodexConfigShape = {
   readonly token: OpenAiCodexOAuthToken

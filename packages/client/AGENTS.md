@@ -4,8 +4,8 @@
 
 ## Role
 
-- Stream `AgentEvent`s from an app endpoint via Effect `HttpClient`.
-- Parse NDJSON/event payloads through protocol schemas.
+- Stream `AgentEvent`s from app HTTP NDJSON endpoints and Cloudflare direct WebSocket sessions.
+- Parse NDJSON/WS payloads through protocol schemas.
 - Maintain generic client-owned transcript and live run state.
 - Expose async-generator compatibility helpers for browser UI code.
 
@@ -14,7 +14,7 @@
 - No React, JSX, CSS, or UI components.
 - No app auth chrome, model defaults, Codex/OpenAI specifics, or product permissions.
 - No server-side loop execution.
-- Transport endpoint shape is generic; app owns concrete route and auth.
+- Transport endpoint shape is generic; app owns concrete route, WS URL, bootstrap, and auth.
 - Message edit actions (`deleteTurn`, `regenerateFrom`, `editUserMessage`) and UI session events live in `@yolk/react`, not here.
 
 ## Public model
@@ -32,8 +32,9 @@
 - Do not handle removed protocol lifecycle aliases (`ToolExecutionStart`, `ToolExecutionEnd`, old event-level `ToolResult`).
 - Use Effect `HttpClient`; tests inject fake clients instead of raw fetch mocks.
 - Keep transport/parse failures typed as `AgentTransportError`.
-- `streamAgentEventStream` is the native Effect API; `streamAgentEvents` is async-generator compatibility.
+- `streamAgentEventStream` is the native HTTP Effect API; `streamCloudflareAgentEventStream` is the native WS Effect API; async-generator wrappers are compatibility.
 - `StreamAgentEventsRequest.signal` interrupts request/body streams.
+- Cloudflare WS transport expects server `SessionSnapshot`, then sends latest user message as `UserInput` with snapshot revision.
 - Use protocol messages for replay; app/UI packages may project richer render parts.
 
 ## Tests

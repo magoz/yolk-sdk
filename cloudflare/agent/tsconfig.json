@@ -6,9 +6,15 @@
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "target": "ESNext",
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["alchemy.run.ts", "src/**/*.ts"]
+  "include": [
+    "alchemy.run.ts",
+    "src/**/*.ts",
+    "../../lib/agents/providers/openai-codex-provider.ts",
+    "../../lib/agents/text-agent-config.ts",
+    "../../lib/services/openai-codex-oauth/schemas.ts"
+  ]
 }
