@@ -52,7 +52,10 @@ export type OpenAiRealtimeSessionConfig = {
     readonly input: {
       readonly transcription: OpenAiRealtimeInputTranscription
       readonly turn_detection: {
-        readonly type: 'semantic_vad'
+        readonly type: 'server_vad'
+        readonly threshold: 0.5
+        readonly prefix_padding_ms: 500
+        readonly silence_duration_ms: 700
       }
     }
     readonly output: {
@@ -141,7 +144,10 @@ export const makeOpenAiRealtimeSessionConfig = ({
     input: {
       transcription: makeOpenAiRealtimeInputTranscription(transcriptionModel),
       turn_detection: {
-        type: 'semantic_vad'
+        type: 'server_vad',
+        threshold: 0.5,
+        prefix_padding_ms: 500,
+        silence_duration_ms: 700
       }
     },
     output: {
