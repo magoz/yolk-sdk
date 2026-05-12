@@ -15,8 +15,11 @@ import {
   UserMessage
 } from '@yolk/protocol'
 import {
+  appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
+  deleteChatTurn,
+  regenerateChatMessagesFrom,
   toAgentMessages,
   type AgentChatMessage
 } from './chat-messages'
@@ -159,5 +162,84 @@ describe('agent chat messages', () => {
       call,
       state: { _tag: 'ProviderCompleted', result }
     })
+  })
+
+  it('deletes whole turns from any message in the turn', () => {
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'second' })] })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    const deleted = deleteChatTurn(messages, 'message-1-assistant')
+
+    expect(deleted).toEqual({
+      _tag: 'Deleted',
+      turnStartMessageId: 'message-0-user',
+      deletedMessageIds: ['message-0-user', 'message-1-assistant'],
+      messages: messages.slice(2)
+    })
+  })
+
+  it('truncates transcript for regeneration by target role', () => {
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'second' })] })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    expect(regenerateChatMessagesFrom(messages, 'message-2-user')).toEqual({
+      _tag: 'Regenerated',
+      messages: messages.slice(0, 3)
+    })
+    expect(regenerateChatMessagesFrom(messages, 'message-3-assistant')).toEqual({
+      _tag: 'Regenerated',
+      messages: messages.slice(0, 3)
+    })
+  })
+
+  it('appends with monotonic message ids after deletion', () => {
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+    const deleted = deleteChatTurn(messages, 'message-0-user')
+
+    if (deleted._tag !== 'Deleted') {
+      throw new Error('Expected deleted turn')
+    }
+
+    expect(appendProtocolMessage(deleted.messages, UserMessage.make({ content: 'three' }))).toEqual([
+      messages[2],
+      {
+        id: 'message-3-user',
+        role: 'user',
+        parts: [{ _tag: 'Text', id: 'message-3-user-text', content: 'three', state: 'done' }]
+      }
+    ])
   })
 })

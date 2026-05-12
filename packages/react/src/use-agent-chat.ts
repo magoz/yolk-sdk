@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Option, Stream } from 'effect'
 import {
   appendAgentMessage,
   streamAgentEventStream,
@@ -21,7 +21,7 @@ import {
   initialAgentChatState,
   reduceAgentChatState
 } from './chat-core.ts'
-import { toAgentMessages } from './chat-messages.ts'
+import { deleteChatTurn, regenerateChatMessagesFrom, toAgentMessages } from './chat-messages.ts'
 
 export type AgentChatTransportRequest = Omit<StreamAgentEventsRequest, 'signal'> & {
   readonly signal: AbortSignal
@@ -50,12 +50,36 @@ export type AgentChatSubmitResult =
     }
   | { readonly _tag: 'Ignored' }
 
+export type AgentChatDeleteTurnResult =
+  | {
+      readonly _tag: 'Deleted'
+      readonly turnStartMessageId: string
+      readonly deletedMessageIds: ReadonlyArray<string>
+    }
+  | { readonly _tag: 'Ignored' }
+
+export type AgentChatRegenerateResult =
+  | {
+      readonly _tag: 'Regenerated'
+      readonly messageId: string
+      readonly messages: AgentTranscript
+    }
+  | { readonly _tag: 'Ignored' }
+
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Agent request failed'
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
 const defaultNowMs = () => globalThis.performance?.now() ?? 0
+
+const transcriptFromChatMessages = (messages: ReadonlyArray<AgentMessage>) => {
+  const first = messages[0]
+
+  return first === undefined
+    ? Option.none<AgentTranscript>()
+    : Option.some<AgentTranscript>([first, ...messages.slice(1)])
+}
 
 export function useAgentChat({
   sessionId,
@@ -70,7 +94,7 @@ export function useAgentChat({
 }: UseAgentChatOptions) {
   const [state, dispatch] = useReducer(reduceAgentChatState, initialMessages ?? [], messages =>
     messages.reduce(
-      (current, message) => reduceAgentChatState(current, { _tag: 'AppendMessage', message }),
+      (current, message) => reduceAgentChatState(current, { _tag: 'HydrateMessage', message }),
       initialAgentChatState
     )
   )
@@ -196,6 +220,57 @@ export function useAgentChat({
     [canSubmitText, submitMessage]
   )
 
+  const deleteTurn = useCallback(
+    (messageId: string): AgentChatDeleteTurnResult => {
+      if (isRunning || abortControllerRef.current !== null) {
+        return { _tag: 'Ignored' }
+      }
+
+      const next = deleteChatTurn(state.chatMessages, messageId)
+
+      if (next._tag === 'NotFound') {
+        return { _tag: 'Ignored' }
+      }
+
+      dispatch({ _tag: 'DeleteTurn', messageId })
+
+      return {
+        _tag: 'Deleted',
+        turnStartMessageId: next.turnStartMessageId,
+        deletedMessageIds: next.deletedMessageIds
+      }
+    },
+    [isRunning, state.chatMessages]
+  )
+
+  const regenerateFrom = useCallback(
+    (messageId: string): AgentChatRegenerateResult => {
+      if (isRunning || abortControllerRef.current !== null) {
+        return { _tag: 'Ignored' }
+      }
+
+      const next = regenerateChatMessagesFrom(state.chatMessages, messageId)
+
+      if (next._tag === 'NotFound') {
+        return { _tag: 'Ignored' }
+      }
+
+      const messages = toAgentMessages(next.messages)
+      const transcript = transcriptFromChatMessages(messages)
+
+      return Option.match(transcript, {
+        onNone: () => ({ _tag: 'Ignored' }),
+        onSome: value => {
+          dispatch({ _tag: 'RegenerateFrom', messageId })
+          runAgent(value)
+
+          return { _tag: 'Regenerated', messageId, messages: value }
+        }
+      })
+    },
+    [isRunning, runAgent, state.chatMessages]
+  )
+
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
@@ -232,6 +307,8 @@ export function useAgentChat({
     canSubmitContent,
     submitMessage,
     submitText,
+    deleteTurn,
+    regenerateFrom,
     stop,
     applyEvent,
     appendMessage,

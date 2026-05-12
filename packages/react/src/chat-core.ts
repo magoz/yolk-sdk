@@ -2,11 +2,20 @@ import type { AgentEvent, AgentMessage, UserMessage } from '@yolk/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
+  deleteChatTurn,
   markChatError,
+  regenerateChatMessagesFrom,
   type AgentChatMessage,
   type AgentChatPart,
   type ApplyAgentEventToChatMessagesOptions
 } from './chat-messages.ts'
+import {
+  MessagesRegenerated,
+  ProtocolMessageAppended,
+  TurnDeleted,
+  UserMessageSubmitted,
+  type AgentChatSessionEvent
+} from './chat-session-events.ts'
 
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 
@@ -14,17 +23,22 @@ export type AgentChatState = {
   readonly status: AgentRunStatus
   readonly error: string | null
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
+  readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
 }
 
 export const initialAgentChatState: AgentChatState = {
   status: 'idle',
   error: null,
-  chatMessages: []
+  chatMessages: [],
+  sessionEvents: []
 }
 
 export type AgentChatAction =
+  | { readonly _tag: 'HydrateMessage'; readonly message: AgentMessage }
   | { readonly _tag: 'Submit'; readonly message: UserMessage }
   | { readonly _tag: 'AppendMessage'; readonly message: AgentMessage }
+  | { readonly _tag: 'DeleteTurn'; readonly messageId: string }
+  | { readonly _tag: 'RegenerateFrom'; readonly messageId: string }
   | ({ readonly _tag: 'Event'; readonly event: AgentEvent } & ApplyAgentEventToChatMessagesOptions)
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
@@ -34,19 +48,71 @@ export const reduceAgentChatState = (
   action: AgentChatAction
 ): AgentChatState => {
   switch (action._tag) {
-    case 'Submit':
-      return {
-        ...state,
-        status: 'running',
-        error: null,
-        chatMessages: appendProtocolMessage(state.chatMessages, action.message)
-      }
-    case 'AppendMessage':
+    case 'HydrateMessage':
       return {
         ...state,
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
         error: null
       }
+    case 'Submit':
+      return {
+        ...state,
+        status: 'running',
+        error: null,
+        chatMessages: appendProtocolMessage(state.chatMessages, action.message),
+        sessionEvents: [...state.sessionEvents, UserMessageSubmitted.make({ message: action.message })]
+      }
+    case 'AppendMessage':
+      return {
+        ...state,
+        chatMessages: appendProtocolMessage(state.chatMessages, action.message),
+        error: null,
+        sessionEvents: [
+          ...state.sessionEvents,
+          ProtocolMessageAppended.make({ message: action.message })
+        ]
+      }
+    case 'DeleteTurn': {
+      const next = deleteChatTurn(state.chatMessages, action.messageId)
+
+      if (next._tag === 'NotFound') {
+        return state
+      }
+
+      return {
+        ...state,
+        error: null,
+        chatMessages: next.messages,
+        sessionEvents: [
+          ...state.sessionEvents,
+          TurnDeleted.make({
+            turnStartMessageId: next.turnStartMessageId,
+            deletedMessageIds: next.deletedMessageIds
+          })
+        ]
+      }
+    }
+    case 'RegenerateFrom': {
+      const next = regenerateChatMessagesFrom(state.chatMessages, action.messageId)
+
+      if (next._tag === 'NotFound') {
+        return state
+      }
+
+      return {
+        ...state,
+        status: 'running',
+        error: null,
+        chatMessages: next.messages,
+        sessionEvents: [
+          ...state.sessionEvents,
+          MessagesRegenerated.make({
+            fromMessageId: action.messageId,
+            keptMessageIds: next.messages.map(message => message.id)
+          })
+        ]
+      }
+    }
     case 'Event': {
       switch (action.event._tag) {
         case 'AgentStart':

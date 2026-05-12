@@ -168,4 +168,73 @@ describe('useAgentChat', () => {
 
     hook.unmount()
   })
+
+  it('deletes a persisted turn without sending transport requests', () => {
+    const requests: Array<AgentChatTransportRequest> = []
+    const transport: AgentChatTransport = async function* (request) {
+      requests.push(request)
+    }
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      initialMessages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' })
+      ]
+    })
+
+    expect(hook.value.state.sessionEvents).toEqual([])
+
+    act(() => {
+      expect(hook.value.deleteTurn('message-1-assistant')).toEqual({
+        _tag: 'Deleted',
+        turnStartMessageId: 'message-0-user',
+        deletedMessageIds: ['message-0-user', 'message-1-assistant']
+      })
+    })
+
+    expect(requests).toEqual([])
+    expect(hook.value.messages).toEqual([UserMessage.make({ content: 'two' })])
+    expect(hook.value.state.sessionEvents.at(-1)).toEqual({
+      _tag: 'TurnDeleted',
+      turnStartMessageId: 'message-0-user',
+      deletedMessageIds: ['message-0-user', 'message-1-assistant']
+    })
+
+    hook.unmount()
+  })
+
+  it('regenerates from a selected assistant message', async () => {
+    const requests: Array<AgentChatTransportRequest> = []
+    const transport: AgentChatTransport = async function* (request) {
+      requests.push(request)
+      yield AgentStart.make({})
+      yield agentEnd('again')
+    }
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      initialMessages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] })
+      ]
+    })
+
+    await act(async () => {
+      const result = hook.value.regenerateFrom('message-1-assistant')
+      expect(result._tag).toBe('Regenerated')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'done')
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.messages).toEqual([UserMessage.make({ content: 'one' })])
+    expect(hook.value.messages).toEqual([
+      UserMessage.make({ content: 'one' }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'again' })] })
+    ])
+
+    hook.unmount()
+  })
 })

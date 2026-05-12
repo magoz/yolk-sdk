@@ -71,6 +71,22 @@ export type AgentChatMessage = {
   readonly parts: ReadonlyArray<AgentChatPart>
 }
 
+export type DeleteChatTurnResult =
+  | { readonly _tag: 'NotFound' }
+  | {
+      readonly _tag: 'Deleted'
+      readonly turnStartMessageId: string
+      readonly deletedMessageIds: ReadonlyArray<string>
+      readonly messages: ReadonlyArray<AgentChatMessage>
+    }
+
+export type RegenerateChatMessagesResult =
+  | { readonly _tag: 'NotFound' }
+  | {
+      readonly _tag: 'Regenerated'
+      readonly messages: ReadonlyArray<AgentChatMessage>
+    }
+
 export type ApplyAgentEventToChatMessagesOptions = {
   readonly nowMs?: number
 }
@@ -310,6 +326,88 @@ const findLastMessageIndex = (
   predicate: (message: AgentChatMessage) => boolean
 ) => messages.reduce((lastIndex, message, index) => (predicate(message) ? index : lastIndex), -1)
 
+const findMessageIndex = (messages: ReadonlyArray<AgentChatMessage>, messageId: string) =>
+  messages.findIndex(message => message.id === messageId)
+
+const messageIndexFromId = (id: string) => {
+  const rawIndex = /^message-(\d+)-/.exec(id)?.[1]
+
+  if (rawIndex === undefined) {
+    return -1
+  }
+
+  const parsed = Number.parseInt(rawIndex, 10)
+
+  return Number.isFinite(parsed) ? parsed : -1
+}
+
+const nextMessageIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
+  messages.reduce((max, message) => Math.max(max, messageIndexFromId(message.id)), -1) + 1
+
+const turnStartIndexFor = (messages: ReadonlyArray<AgentChatMessage>, index: number) => {
+  const beforeTarget = messages.slice(0, index + 1)
+  const turnStartIndex = findLastMessageIndex(beforeTarget, message => message.role === 'user')
+
+  return turnStartIndex === -1 ? index : turnStartIndex
+}
+
+const turnEndIndexFor = (messages: ReadonlyArray<AgentChatMessage>, turnStartIndex: number) => {
+  const nextUserOffset = messages
+    .slice(turnStartIndex + 1)
+    .findIndex(message => message.role === 'user')
+
+  return nextUserOffset === -1 ? messages.length : turnStartIndex + 1 + nextUserOffset
+}
+
+export const deleteChatTurn = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  messageId: string
+): DeleteChatTurnResult => {
+  const targetIndex = findMessageIndex(messages, messageId)
+
+  if (targetIndex === -1) {
+    return { _tag: 'NotFound' }
+  }
+
+  const turnStartIndex = turnStartIndexFor(messages, targetIndex)
+  const turnEndIndex = turnEndIndexFor(messages, turnStartIndex)
+  const deletedMessages = messages.slice(turnStartIndex, turnEndIndex)
+  const turnStartMessage = messages[turnStartIndex]
+
+  if (turnStartMessage === undefined) {
+    return { _tag: 'NotFound' }
+  }
+
+  return {
+    _tag: 'Deleted',
+    turnStartMessageId: turnStartMessage.id,
+    deletedMessageIds: deletedMessages.map(message => message.id),
+    messages: [...messages.slice(0, turnStartIndex), ...messages.slice(turnEndIndex)]
+  }
+}
+
+export const regenerateChatMessagesFrom = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  messageId: string
+): RegenerateChatMessagesResult => {
+  const targetIndex = findMessageIndex(messages, messageId)
+
+  if (targetIndex === -1) {
+    return { _tag: 'NotFound' }
+  }
+
+  const target = messages[targetIndex]
+
+  if (target === undefined) {
+    return { _tag: 'NotFound' }
+  }
+
+  return {
+    _tag: 'Regenerated',
+    messages: messages.slice(0, target.role === 'user' ? targetIndex + 1 : targetIndex)
+  }
+}
+
 const lastAssistantIndex = (messages: ReadonlyArray<AgentChatMessage>) => {
   const index = findLastMessageIndex(messages, message => message.role === 'assistant')
 
@@ -324,10 +422,11 @@ const appendAssistantPart = (
   part: AgentChatPart
 ): ReadonlyArray<AgentChatMessage> =>
   Option.match(targetAssistantIndex(messages), {
-    onNone: () => [
-      ...messages,
-      { id: `message-${messages.length}-assistant`, role: 'assistant', parts: [part] }
-    ],
+    onNone: () => {
+      const index = nextMessageIndex(messages)
+
+      return [...messages, { id: `message-${index}-assistant`, role: 'assistant', parts: [part] }]
+    },
     onSome: index =>
       messages.map((message, messageIndex) =>
         messageIndex === index ? { ...message, parts: [...message.parts, part] } : message
@@ -341,9 +440,11 @@ const appendAssistantTextDelta = (
   const index = targetAssistantIndex(messages)
 
   if (Option.isNone(index)) {
+    const messageIndex = nextMessageIndex(messages)
+
     return appendAssistantPart(messages, {
       _tag: 'Text',
-      id: `message-${messages.length}-assistant-text`,
+      id: `message-${messageIndex}-assistant-text`,
       content: delta,
       state: 'streaming'
     })
@@ -380,9 +481,11 @@ const appendAssistantReasoningDelta = (
   const index = targetAssistantIndex(messages)
 
   if (Option.isNone(index)) {
+    const messageIndex = nextMessageIndex(messages)
+
     return appendAssistantPart(messages, {
       _tag: 'Reasoning',
-      id: `message-${messages.length}-reasoning`,
+      id: `message-${messageIndex}-reasoning`,
       text: delta,
       state: 'streaming'
     })
@@ -537,7 +640,7 @@ const appendOrReplaceAssistantMessage = (
   })
 
   return Option.match(index, {
-    onNone: () => [...messages, assistantChatMessage(message, messages.length)],
+    onNone: () => [...messages, assistantChatMessage(message, nextMessageIndex(messages))],
     onSome: assistantIndex =>
       messages.map((current, messageIndex) =>
         messageIndex === assistantIndex
@@ -553,22 +656,26 @@ const appendOrReplaceAssistantMessage = (
 const appendOrphanToolResult = (
   messages: ReadonlyArray<AgentChatMessage>,
   result: ToolResult
-): ReadonlyArray<AgentChatMessage> => [
-  ...messages,
-  {
-    id: `message-${messages.length}-tool-result-message`,
-    role: 'system',
-    parts: [
-      {
-        _tag: 'ToolResult',
-        id: `tool-result-${result.toolCallId}`,
-        toolCallId: result.toolCallId,
-        name: result.toolCallId,
-        content: result.content
-      }
-    ]
-  }
-]
+): ReadonlyArray<AgentChatMessage> => {
+  const index = nextMessageIndex(messages)
+
+  return [
+    ...messages,
+    {
+      id: `message-${index}-tool-result-message`,
+      role: 'system',
+      parts: [
+        {
+          _tag: 'ToolResult',
+          id: `tool-result-${result.toolCallId}`,
+          toolCallId: result.toolCallId,
+          name: result.toolCallId,
+          content: result.content
+        }
+      ]
+    }
+  ]
+}
 
 const clearTransientParts = (
   messages: ReadonlyArray<AgentChatMessage>
@@ -613,11 +720,13 @@ export const appendProtocolMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
   message: AgentMessage
 ) => {
+  const index = nextMessageIndex(messages)
+
   switch (message._tag) {
     case 'User':
-      return [...messages, userChatMessage(message, messages.length)]
+      return [...messages, userChatMessage(message, index)]
     case 'Assistant':
-      return [...messages, assistantChatMessage(message, messages.length)]
+      return [...messages, assistantChatMessage(message, index)]
     case 'ToolResult':
       return appendOrphanToolResult(
         messages,

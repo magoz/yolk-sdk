@@ -16,6 +16,13 @@ export type {
   AgentRunStatus,
   CompletedChatToolPart
 } from './chat-core.ts'
+export {
+  AgentChatSessionEvent,
+  MessagesRegenerated,
+  ProtocolMessageAppended,
+  TurnDeleted,
+  UserMessageSubmitted
+} from './chat-session-events.ts'
 export { buildAgentChatItems } from './chat-items.ts'
 export type {
   AgentChatItem,
@@ -27,7 +34,9 @@ export {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
+  deleteChatTurn,
   markChatError,
+  regenerateChatMessagesFrom,
   toAgentMessages
 } from './chat-messages.ts'
 export type {
@@ -36,10 +45,14 @@ export type {
   ApplyAgentEventToChatMessagesOptions,
   BuildAgentChatMessagesInput,
   ChatPartState,
-  ChatToolState
+  ChatToolState,
+  DeleteChatTurnResult,
+  RegenerateChatMessagesResult
 } from './chat-messages.ts'
 export { useAgentChat } from './use-agent-chat.ts'
 export type {
+  AgentChatDeleteTurnResult,
+  AgentChatRegenerateResult,
   AgentChatSubmitResult,
   AgentChatTransport,
   AgentChatTransportRequest,
