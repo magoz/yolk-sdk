@@ -183,12 +183,5 @@ export async function* streamAgentEvents(
 export const collectAgentEventsEffect = (request: StreamAgentEventsRequest) =>
   streamAgentEventStream(request).pipe(Stream.runCollect)
 
-export const collectAgentEvents = async (request: StreamAgentEventsRequest) => {
-  const events: Array<AgentEventType> = []
-
-  for await (const event of streamAgentEvents(request)) {
-    events.push(event)
-  }
-
-  return events
-}
+export const collectAgentEvents = async (request: StreamAgentEventsRequest) =>
+  Array.from(await Effect.runPromise(collectAgentEventsEffect(request)))

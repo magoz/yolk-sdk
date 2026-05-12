@@ -20,6 +20,8 @@ export type AgentToolRun =
       readonly endedAtMs: number
     }
 
+type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Running' | 'Completed' }>
+
 export type AgentClientState = {
   readonly status: AgentRunStatus
   readonly messages: ReadonlyArray<AgentMessage>
@@ -55,36 +57,25 @@ const replaceToolRun = (
   runs: ReadonlyArray<AgentToolRun>,
   run: AgentToolRun
 ): ReadonlyArray<AgentToolRun> => {
-  const next: Array<AgentToolRun> = []
-  let replaced = false
+  const replaceIndex = runs.findIndex(current => current.call.id === run.call.id)
 
-  for (const current of runs) {
-    if (current.call.id === run.call.id) {
-      if (!replaced) {
-        next.push(run)
-        replaced = true
-      }
-    } else {
-      next.push(current)
+  if (replaceIndex === -1) {
+    return [...runs, run]
+  }
+
+  return runs.flatMap((current, index) => {
+    if (current.call.id !== run.call.id) {
+      return [current]
     }
-  }
 
-  if (!replaced) {
-    next.push(run)
-  }
-
-  return next
+    return index === replaceIndex ? [run] : []
+  })
 }
 
-const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) => {
-  for (const run of runs) {
-    if (run.call.id === toolCallId && run._tag !== 'Called') {
-      return run.startedAtMs
-    }
-  }
+const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun => run._tag !== 'Called'
 
-  return undefined
-}
+const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
+  runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
 
 export const appendAgentMessage = (
   messages: ReadonlyArray<AgentMessage>,
