@@ -454,6 +454,48 @@ describe('OpenAiCodexProviderLayer', () => {
     })
   )
 
+  it.effect('parses OpenAI Codex message output items before completion', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
+          [
+            'event: response.reasoning_summary_text.delta',
+            'data: {"type":"response.reasoning_summary_text.delta","delta":"think","item_id":"rs_1","summary_index":0}',
+            '',
+            'event: response.output_item.done',
+            'data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","content":[{"type":"output_text","text":"ok"}]}}',
+            '',
+            'event: response.completed',
+            'data: {"type":"response.completed","response":{"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"think"}]},{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}',
+            ''
+          ].join('\n'),
+          requests
+        )
+      )
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'TextDelta', 'Done'])
+      expect(events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))).toEqual([
+        'ReasoningDelta',
+        'ok',
+        'Done'
+      ])
+    })
+  )
+
   it.effect('emits OpenAI Codex SSE deltas before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

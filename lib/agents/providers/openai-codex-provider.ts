@@ -577,11 +577,17 @@ const dataFromSseBlock = (block: string) => {
 const parseOpenAiCodexSseJson = (data: string) =>
   decodeJsonString(data, 'Could not parse OpenAI Codex stream event JSON')
 
-const stringField = (record: Record<string, unknown>, key: string) => {
-  const value = record[key]
-
-  return typeof value === 'string' ? value : undefined
-}
+const decodeOpenAiCodexOutputItem = (value: unknown) =>
+  Schema.decodeUnknownEffect(OpenAiCodexOutputItem)(value).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `Invalid OpenAI Codex output item: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
 
 const invalidFunctionCallSseItemError = () =>
   new LLMError({
@@ -590,36 +596,52 @@ const invalidFunctionCallSseItemError = () =>
     retryable: false
   })
 
-const toolCallFromOutputItemDone = (event: Record<string, unknown>) =>
+const eventsFromOutputItem = (
+  item: OpenAiCodexOutputItem
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> => {
+  switch (item.type) {
+    case 'message': {
+      const text = textFromOutputItems([item])
+
+      return Effect.succeed(text.length > 0 ? [LLMTextDelta.make({ text })] : [])
+    }
+    case 'reasoning': {
+      const reasoning = reasoningFromOutputItems([item])
+
+      return Effect.succeed(
+        reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
+      )
+    }
+    case 'function_call':
+      return parseToolArguments(item.arguments).pipe(
+        Effect.map(params => [
+          LLMToolCall.make({
+            call: ToolCall.make({
+              id: item.call_id,
+              name: item.name,
+              params
+            })
+          })
+        ])
+      )
+  }
+}
+
+const eventsFromOutputItemDone = (
+  event: Record<string, unknown>
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     if (event.type !== 'response.output_item.done') {
-      return Option.none<LLMToolCall>()
+      return []
     }
 
     const item = event.item
-    if (!isRecord(item) || item.type !== 'function_call') {
-      return Option.none<LLMToolCall>()
-    }
 
-    const callId = stringField(item, 'call_id')
-    const name = stringField(item, 'name')
-    const rawArguments = stringField(item, 'arguments')
-
-    if (callId === undefined || name === undefined || rawArguments === undefined) {
+    if (item === undefined) {
       return yield* Effect.fail(invalidFunctionCallSseItemError())
     }
 
-    const params = yield* parseToolArguments(rawArguments)
-
-    return Option.some(
-      LLMToolCall.make({
-        call: ToolCall.make({
-          id: callId,
-          name,
-          params
-        })
-      })
-    )
+    return yield* decodeOpenAiCodexOutputItem(item).pipe(Effect.flatMap(eventsFromOutputItem))
   })
 
 const finalResponseToEvents = (
@@ -664,7 +686,11 @@ const processSseData = (
       return { state, events: [] }
     }
 
-    if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+    if (
+      (parsed.type === 'response.output_text.delta' ||
+        parsed.type === 'response.content_part.delta') &&
+      typeof parsed.delta === 'string'
+    ) {
       return {
         state: { ...state, hasTextDelta: true },
         events: [LLMTextDelta.make({ text: parsed.delta })]
@@ -682,11 +708,33 @@ const processSseData = (
       }
     }
 
-    const streamedToolCall = yield* toolCallFromOutputItemDone(parsed)
-    if (Option.isSome(streamedToolCall)) {
+    const outputItemDoneEvents = yield* eventsFromOutputItemDone(parsed)
+    if (outputItemDoneEvents.length > 0) {
+      const events = outputItemDoneEvents.filter(event => {
+        if (state.hasTextDelta && event._tag === 'TextDelta') {
+          return false
+        }
+
+        if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
+          return false
+        }
+
+        if (state.hasToolCall && event._tag === 'ToolCall') {
+          return false
+        }
+
+        return true
+      })
+
       return {
-        state: { ...state, hasToolCall: true },
-        events: [streamedToolCall.value]
+        state: {
+          hasTextDelta: state.hasTextDelta || events.some(event => event._tag === 'TextDelta'),
+          hasReasoningDelta:
+            state.hasReasoningDelta || events.some(event => event._tag === 'ReasoningDelta'),
+          hasToolCall: state.hasToolCall || events.some(event => event._tag === 'ToolCall'),
+          hasDone: state.hasDone
+        },
+        events
       }
     }
 

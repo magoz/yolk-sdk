@@ -135,6 +135,7 @@ Codex backend quirks:
 - User `ImagePart` maps to Responses content `{ type: 'input_image', image_url: 'data:<mime>;base64,<data>' }`
 - Response may be SSE even with `content-type: text/plain`; detect by raw `event:`/`data:` body
 - Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
+- Text can arrive as `response.output_text.delta`, `response.content_part.delta`, or `response.output_item.done` message items; stream output items before completion
 - Tool calls may arrive before completion as `response.output_item.done` with `item.type = 'function_call'`; parse immediately and tolerate empty final `response.completed`
 
 Image TODOs:
