@@ -132,6 +132,7 @@ e2e/
     login.spec.ts                 — Public smoke tests
     agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
     agent-voice.spec.ts           — Voice startup readiness + fake-mic Realtime transcription smoke
+    agent-cloudflare.spec.ts      — Direct Worker WS reconnect/persistence smoke; skips without CLOUDFLARE_AGENT_URL
 ```
 
 ## Env Isolation
@@ -186,6 +187,10 @@ await Effect.gen(function* () {
 `Effect.runPromise` is acceptable here because Playwright hooks are the async boundary. Do not use it inside reusable helpers; helpers should return `Effect` values.
 
 Root Vitest currently may discover package tests; `pnpm test:run` then also runs `packages/*` tests. If scripts/config change, update root/package docs together.
+
+### Direct WebSocket specs
+
+Cloudflare direct-WS E2E may use Node-side `WebSocket` with `Effect.callback` helpers because browser WS APIs are imperative. Keep protocol encode/decode typed with `@yolk/protocol` schemas; use the unbootstrapped faux-provider path for deterministic persistence checks.
 
 ### Per-file data seeding
 
@@ -305,3 +310,4 @@ await expect.soft(page.getByText('Settings')).toBeVisible()
 - **Test IDs must not be substrings of each other** — e.g. `e2e-project-foo` is a prefix of `e2e-project-foobar`, breaking `url.includes()` checks. Use distinct stems.
 - **Full suite flaky under cold start** — parallel workers hitting a cold Next.js dev server can cause timeouts. Config is `retries: 1` local, `retries: 2` CI.
 - **Filter buttons with similar names** — `/saved/i` regex matches both "Saved" and "Unsaved". Use `{ name: 'Saved', exact: true }`.
+- **Generated Playwright artifacts** — `playwright-report/**` and `test-results/**` are ESLint-ignored; do not put source/docs there.

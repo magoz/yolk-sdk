@@ -23,6 +23,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 
 - Prefer chat language: `AgentChatMessage`, `AgentChatPart`, `AgentChatItem`; avoid “timeline”.
 - `AgentChatState.chatMessages` is UI source of truth; protocol `AgentMessage[]` is replay format only.
+- Cloudflare reconnect snapshots are transport/runtime state; UI reload hydration from `SessionSnapshot` is not implemented yet.
 - Use `toAgentMessages(chatMessages)` before text transport; keep protocol conversion at the boundary.
 - Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
 - Text may begin after reasoning in the same assistant turn; keep it streaming from first `LLMTextDelta`, not only final `AssistantMessage`.

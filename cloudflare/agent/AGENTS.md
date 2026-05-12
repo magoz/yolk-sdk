@@ -93,4 +93,5 @@ Do not build these here yet unless explicitly requested:
 ## Checks
 
 - Run `pnpm cloudflare:check` after touching this app.
+- Run `NODE_ENV=test pnpm playwright test e2e/ui/agent-cloudflare.spec.ts --project=chromium` for direct-WS reconnect/persistence changes.
 - Run root `pnpm tsc`, `pnpm lint`, and `pnpm test:run` before finishing larger changes.
