@@ -42,7 +42,7 @@ const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
     try: () => {
       const parsed = new URL(url)
       parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
-      parsed.pathname = `/connect/${sessionId}`
+      parsed.pathname = `/connect/${encodeURIComponent(sessionId)}`
       return parsed.toString()
     },
     catch: error => error
@@ -62,10 +62,11 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
     const body = yield* encodeJson({
       userId: input.userId,
       tokenEndpoint: `${appUrl.value}/api/internal/cloudflare/codex-token`,
+      codexResponsesEndpoint: `${appUrl.value}/api/internal/cloudflare/codex-responses`,
       bridgeSecret: bridgeSecret.value
     })
     const response = yield* client.execute(
-      HttpClientRequest.post(`${workerUrl.value}/bootstrap/${input.sessionId}`).pipe(
+      HttpClientRequest.post(`${workerUrl.value}/bootstrap/${encodeURIComponent(input.sessionId)}`).pipe(
         HttpClientRequest.setHeaders({
           accept: 'application/json',
           'content-type': 'application/json'
@@ -94,7 +95,7 @@ async function Content() {
     Effect.gen(function* () {
       const session = yield* getSession()
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
-      const sessionId = `agent:${session.user.id}`
+      const sessionId = `agent-${session.user.id}`
       const cloudflareAgentUrl = openAiCodexConnected
         ? yield* bootstrapCloudflareAgent({ sessionId, userId: session.user.id })
         : Option.none<string>()

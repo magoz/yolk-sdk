@@ -14,7 +14,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; durable session lifecycle is deferred
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
-- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner.
+- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and Codex response proxy.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
 - `context-budget.ts` owns app text model context window, reserved output, warning, and compaction thresholds.
@@ -118,6 +118,7 @@ MCP security:
 - Does **not** use `OPENAI_API_KEY`
 - Requires per-user Codex OAuth token from `lib/core/agent/openai-codex-auth.ts`
 - Cloudflare token bridge returns access/account/expiry only; keep refresh token in Next/Postgres.
+- Cloudflare Codex calls route through Next `internal/cloudflare/codex-responses`; direct Worker → `chatgpt.com` can be blocked by Cloudflare.
 - Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`; `accountId` stores ChatGPT account id when present
 - Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
 - `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use
@@ -129,6 +130,7 @@ Route status conventions:
 Codex backend quirks:
 
 - Endpoint: `https://chatgpt.com/backend-api/codex/responses`
+- Provider accepts an override `responsesUrl` and `extraHeaders` for trusted server-side proxies only.
 - Request must set `store: false`
 - Request must set `stream: true`
 - Do not send `max_output_tokens`

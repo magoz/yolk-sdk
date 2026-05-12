@@ -52,7 +52,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
-| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object session runtime; direct WS optional app transport; Codex access token bridge |
+| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object session runtime; direct WS optional app transport; Next bridges Codex token + responses |
 
 ## WHERE TO LOOK
 
@@ -116,6 +116,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`             | Creates tool-only MCP JSON-RPC server                  |
 | `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                   | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |
 | `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`            | Durable Object running agent runtime + append-log persistence |
+| `codex-responses`                | Route    | `app/api/internal/cloudflare/codex-responses/route.ts` | Internal Worker-to-Next proxy for ChatGPT Codex responses |
 
 ## REFERENCE REPOS
 

@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 export const BootstrapRequest = Schema.Struct({
   userId: Schema.String,
   tokenEndpoint: Schema.String,
+  codexResponsesEndpoint: Schema.String,
   bridgeSecret: Schema.String
 })
 export type BootstrapRequest = typeof BootstrapRequest.Type

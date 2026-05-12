@@ -38,10 +38,12 @@ import {
 } from '../text-agent-config.ts'
 import type { OpenAiCodexOAuthToken } from '../../services/openai-codex-oauth/schemas.ts'
 
-const OPENAI_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
+export const openAiCodexResponsesUrl = 'https://chatgpt.com/backend-api/codex/responses'
 
 type OpenAiCodexConfigShape = {
   readonly token: OpenAiCodexOAuthToken
+  readonly responsesUrl?: string
+  readonly extraHeaders?: Readonly<Record<string, string>>
 }
 
 type OpenAiCodexMessageInput = {
@@ -915,6 +917,7 @@ const sendOpenAiCodexRequest = (
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI Codex request')
 
     const headers: Record<string, string> = {
+      ...config.extraHeaders,
       accept: 'application/json',
       authorization: `Bearer ${config.token.access}`,
       'content-type': 'application/json',
@@ -925,7 +928,7 @@ const sendOpenAiCodexRequest = (
       headers['ChatGPT-Account-Id'] = config.token.accountId
     }
 
-    const httpRequest = HttpClientRequest.post(OPENAI_CODEX_RESPONSES_URL).pipe(
+    const httpRequest = HttpClientRequest.post(config.responsesUrl ?? openAiCodexResponsesUrl).pipe(
       HttpClientRequest.setHeaders(headers),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )

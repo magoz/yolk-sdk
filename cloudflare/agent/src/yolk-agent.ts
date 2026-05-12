@@ -38,6 +38,7 @@ import {
 } from '@yolk/protocol'
 import { formatAvailableSkills } from '@yolk/skillset'
 import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/openai-codex-provider.ts'
+import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
@@ -71,7 +72,7 @@ const runtimeConfig = {
   systemPrompt:
     availableSkills.length === 0 ? cloudflareSystemPrompt : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
   tools: [],
-  model: 'faux-cloudflare'
+  model: agentTextModel
 }
 
 const messageText = (message: string | ArrayBuffer) =>
@@ -258,6 +259,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                           refresh: '',
                           expires: token.expires,
                           accountId: token.accountId
+                        },
+                        responsesUrl: bootstrap.codexResponsesEndpoint,
+                        extraHeaders: {
+                          'x-yolk-cloudflare-secret': bootstrap.bridgeSecret
                         }
                       }).pipe(Layer.provide(FetchHttpClient.layer))
                     )

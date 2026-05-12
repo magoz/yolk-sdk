@@ -5,6 +5,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 ## Boundaries
 
 - `page.tsx` may bootstrap optional Cloudflare direct-WS sessions; fallback stays `/api/agent` NDJSON.
+- Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
 - `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.

@@ -6,9 +6,9 @@ Cloudflare app for the future Yolk durable agent runtime.
 
 - This app is a proving adapter and optional direct-WS app runtime; keep main app fallback alive.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
-- App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token bridge config before direct browser WS.
+- App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token/response-proxy bridge config before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, and app-centralized Codex token refresh.
+- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized Codex token refresh, and Next-proxied Codex responses.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
 - Do not expand into full product infrastructure until package APIs are stable.
@@ -74,7 +74,9 @@ Do not build these here yet unless explicitly requested:
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
 - Centralize Codex refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
+- Route bootstrapped DO Codex response calls through Next proxy; direct Worker egress to ChatGPT Codex may get Cloudflare-blocked.
 - Direct browser WS uses protocol `SessionSnapshot` + `UserInput`; keep schemas in `@yolk/protocol`.
+- App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.
