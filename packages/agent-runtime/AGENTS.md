@@ -49,7 +49,10 @@
 - Keep loop behavior in `@yolk/agent-loop`; runtime only coordinates lifecycle.
 - Map runtime/store errors to protocol `AgentError` via `runtimeErrorToAgentError`; do not duplicate mapping in adapters.
 - Persist protocol transcript/state, not app render models.
+- Use Effect `Ref` for stream-owned completion state; avoid mutable arrays/objects in runtime streams.
+- Use Effect nullish helpers at boundaries instead of manual `undefined` branching.
 - Do not encode HTTP, NDJSON, SSE, WebSockets, auth, provider choice, or tool policy here.
+- There is no current Effect Platform dependency; add platform services only when runtime owns generic IO.
 - Keep resume/fanout adapters outside this package until generic enough.
 - Future durable behavior should prefer append/run-event semantics over whole-snapshot overwrite.
 

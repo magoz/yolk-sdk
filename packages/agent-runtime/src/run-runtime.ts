@@ -1,4 +1,4 @@
-import { Effect, Stream } from 'effect'
+import { Effect, Ref, Stream } from 'effect'
 import type {
   AgentEvent,
   AgentMessage,
@@ -52,12 +52,8 @@ export type RuntimeRequest =
   | PersistentTranscriptRuntimeRequest
   | InputRuntimeRequest
 
-type RuntimeRequirements =
-  | ContextTransformer
-  | LLMProvider
-  | LoopConfig
-  | SessionStore
-  | ToolExecutor
+type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
+type RuntimeRequirements = LoopRequirements | SessionStore
 type RuntimeErrorUnion = RuntimeError | AgentLoopError
 
 const extractNewMessages = (event: AgentEvent) => (event._tag === 'AgentEnd' ? event.messages : [])
@@ -74,14 +70,16 @@ const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMe
 const runAndCollectMessages = (
   config: RuntimeConfig,
   messages: ReadonlyArray<AgentMessage>,
-  createdMessages: Array<AgentMessage>
+  createdMessages: Ref.Ref<ReadonlyArray<AgentMessage>>
 ) =>
   run(runtimeRunConfig(config, messages)).pipe(
-    Stream.tap(event =>
-      Effect.sync(() => {
-        createdMessages.push(...extractNewMessages(event))
-      })
-    )
+    Stream.tap(event => {
+      const newMessages = extractNewMessages(event)
+
+      return newMessages.length === 0
+        ? Effect.void
+        : Ref.update(createdMessages, messages => [...messages, ...newMessages])
+    })
   )
 
 const saveAfterSuccess = (
@@ -89,27 +87,31 @@ const saveAfterSuccess = (
   save: Effect.Effect<void, RuntimeError>
 ) => stream.pipe(Stream.concat(Stream.fromEffect(save).pipe(Stream.flatMap(() => Stream.empty))))
 
-const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: RuntimeConfig) => {
-  const createdMessages: Array<AgentMessage> = []
-
-  return runAndCollectMessages(config, request.messages, createdMessages)
-}
+const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: RuntimeConfig) =>
+  Stream.unwrap(
+    Ref.make<ReadonlyArray<AgentMessage>>([]).pipe(
+      Effect.map(createdMessages =>
+        runAndCollectMessages(config, request.messages, createdMessages)
+      )
+    )
+  )
 
 const makePersistentTranscriptRuntimeStream = (
   request: PersistentTranscriptRuntimeRequest,
   config: RuntimeConfig
 ) => {
-  const createdMessages: Array<AgentMessage> = []
-  const stream = runAndCollectMessages(config, request.messages, createdMessages)
-
   return Stream.unwrap(
     Effect.gen(function* () {
       const store = yield* SessionStore
+      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const stream = runAndCollectMessages(config, request.messages, createdMessages)
 
       return saveAfterSuccess(
         stream,
-        Effect.suspend(() =>
-          store.save({ id: request.sessionId, messages: [...request.messages, ...createdMessages] })
+        Ref.get(createdMessages).pipe(
+          Effect.flatMap(messages =>
+            store.save({ id: request.sessionId, messages: [...request.messages, ...messages] })
+          )
         )
       )
     })
@@ -122,21 +124,35 @@ const makeInputRuntimeStream = (request: InputRuntimeRequest, config: RuntimeCon
       const store = yield* SessionStore
       const snapshot = yield* store.load(request.sessionId)
       const messages = [...snapshot.messages, request.input]
-      const createdMessages: Array<AgentMessage> = []
+      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
 
       return saveAfterSuccess(
         runAndCollectMessages(config, messages, createdMessages),
-        Effect.suspend(() =>
-          store.save({ id: snapshot.id, messages: [...messages, ...createdMessages] })
+        Ref.get(createdMessages).pipe(
+          Effect.flatMap(created =>
+            store.save({ id: snapshot.id, messages: [...messages, ...created] })
+          )
         )
       )
     })
   )
 
-export const runRuntime = (
+export function runRuntime(
+  request: TranscriptRuntimeRequest,
+  config: RuntimeConfig
+): Stream.Stream<AgentEvent, AgentLoopError, LoopRequirements>
+export function runRuntime(
+  request: PersistentTranscriptRuntimeRequest | InputRuntimeRequest,
+  config: RuntimeConfig
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>
+export function runRuntime(
   request: RuntimeRequest,
   config: RuntimeConfig
-): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements> => {
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>
+export function runRuntime(
+  request: RuntimeRequest,
+  config: RuntimeConfig
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements> {
   switch (request._tag) {
     case 'Transcript':
       if (request.persist === true) {

@@ -28,14 +28,6 @@ const makeAgentLoopLayer = (
     TestToolExecutor.layer({})
   )
 
-const NoopStoreLayer = Layer.succeed(
-  SessionStore,
-  SessionStore.of({
-    load: sessionId => Effect.succeed({ id: sessionId, messages: [] }),
-    save: () => Effect.void
-  })
-)
-
 const getFirstRequest = (requests: ReadonlyArray<LLMRequest>) => {
   const request = requests[0]
 
@@ -61,7 +53,7 @@ describe('runRuntime', () => {
         runtimeConfig
       ).pipe(
         Stream.runCollect,
-        Effect.provide(Layer.mergeAll(makeAgentLoopLayer(requests), NoopStoreLayer))
+        Effect.provide(makeAgentLoopLayer(requests))
       )
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')

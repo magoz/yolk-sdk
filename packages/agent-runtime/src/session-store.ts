@@ -28,13 +28,10 @@ export const makeInMemorySessionStoreLayer = (initial: ReadonlyArray<SessionSnap
         load: sessionId =>
           Effect.gen(function* () {
             const current = yield* Ref.get(snapshots)
-            const snapshot = current.get(sessionId)
 
-            if (snapshot === undefined) {
-              return yield* Effect.fail(new SessionNotFoundError({ sessionId }))
-            }
-
-            return snapshot
+            return yield* Effect.fromNullishOr(current.get(sessionId)).pipe(
+              Effect.mapError(() => new SessionNotFoundError({ sessionId }))
+            )
           }),
         save: snapshot =>
           Ref.update(snapshots, current => {
