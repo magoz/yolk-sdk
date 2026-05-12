@@ -19,7 +19,7 @@ Next.js 16 App Router app with Effect-TS services, Drizzle ORM (PostgreSQL/Neon)
 | `local/no-catch-all-cause`                      | NEVER use `Effect.catchCause` - catches defects       |
 | `local/no-schema-from-self`                     | NEVER use `*FromSelf` schemas (use standard variants) |
 | `local/no-schema-decode-sync`                   | NEVER use sync decode/encode (throws exceptions)      |
-| `local/prefer-option-from-nullable`             | Use `Option.fromNullable()` instead of ternary        |
+| `local/prefer-option-from-nullable`             | Use Effect nullish helpers instead of ternary         |
 | `@typescript-eslint/no-explicit-any`            | NEVER use `any` type                                  |
 | `@typescript-eslint/consistent-type-assertions` | NEVER use `as` type casts                             |
 

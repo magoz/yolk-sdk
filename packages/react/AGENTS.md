@@ -46,8 +46,7 @@
 - Preserve timing when tool result/completion events arrive in different order.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
-- Transport can be injected; default is `streamAgentEventStream` from `@yolk/client`.
-- Default transport uses Effect `streamAgentEventStream`; async iterable transport stays injection-compatible.
+- Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.
 - Retain `Effect.runFork` fibers and interrupt on `stop`/unmount; abort signals alone are not enough.
 
 ## Tests

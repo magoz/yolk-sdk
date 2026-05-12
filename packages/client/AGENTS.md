@@ -29,6 +29,8 @@
 - Keep `AgentToolRun` as the single source for called/running/completed state.
 - Use Effect `HttpClient`; tests inject fake clients instead of raw fetch mocks.
 - Keep transport/parse failures typed as `AgentTransportError`.
+- `streamAgentEventStream` is the native Effect API; `streamAgentEvents` is async-generator compatibility.
+- `StreamAgentEventsRequest.signal` interrupts request/body streams.
 - Use protocol messages for replay; app/UI packages may project richer render parts.
 
 ## Tests

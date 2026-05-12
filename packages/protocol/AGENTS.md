@@ -35,6 +35,7 @@
 - Keep protocol data JSON-serializable unless a type is explicitly app-local.
 - Keep `AgentErrorCode` small and stable; packages map richer local errors to these wire codes.
 - Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
+- Tool ids/names are non-empty trimmed strings; validate at protocol boundaries.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.
 - Provider adapters normalize usage; protocol stays provider-neutral.

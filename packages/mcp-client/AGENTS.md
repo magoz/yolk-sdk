@@ -15,6 +15,7 @@
 - No app auth, product permissions, persisted config store, or UI.
 - No raw `node:child_process`; use Effect platform APIs.
 - No raw JSON parsing in production paths; use Effect Schema boundaries.
+- Decode wire JSON in two steps: JSON string → unknown → JSON-RPC schema.
 - Agent-loop and providers remain MCP-agnostic.
 
 ## Public model
@@ -33,6 +34,7 @@
 - Do not inject default env into local stdio; use exactly `config.environment ?? {}` with `extendEnv: false`.
 - Match stdio responses by JSON-RPC id; never assume response order.
 - Validate `initialize` JSON-RPC response before consuming target request response.
+- Keep parse/encoding/validation causes distinct for transport debugging.
 - Reject duplicate generated tool names after server/tool sanitization.
 - Keep host policy decisions outside this package except generic config gates.
 
