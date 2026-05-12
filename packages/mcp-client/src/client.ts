@@ -1,7 +1,7 @@
 import { Duration, Effect, Option, Stream } from 'effect'
-import { NodeServices } from '@effect/platform-node'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
+import type { ChildProcessSpawner } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk/protocol'
 import type {
   McpClientInfo,
@@ -30,7 +30,7 @@ import {
 
 const defaultRequestTimeoutMs = 30_000
 
-type McpClientOptions = {
+export type McpClientOptions = {
   readonly clientInfo?: McpClientInfo
   readonly securityPolicy?: McpSecurityPolicy
   readonly timeoutMs?: number
@@ -279,8 +279,7 @@ const requestLocalEncoded = (
       duration: Duration.millis(timeoutMs(options)),
       orElse: () => fail(config.name, 'Local MCP request timed out', 'timeout')
     }),
-    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport')),
-    Effect.provide(NodeServices.layer)
+    Effect.mapError(mapUnknownToMcpError(config.name, 'Local MCP request failed', 'transport'))
   )
 }
 
@@ -384,7 +383,7 @@ export const listRemoteMcpServerTools = (
 export const listLocalMcpServerTools = (
   config: McpLocalServerConfig,
   options?: McpClientOptions
-): Effect.Effect<ReadonlyArray<McpResolvedTool>, McpError> =>
+): Effect.Effect<ReadonlyArray<McpResolvedTool>, McpError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     if (config.enabled === false) {
       return []
@@ -408,7 +407,7 @@ export const listMcpServerTools = (config: McpServerConfig, options?: McpClientO
     return yield* listRemoteMcpServerTools(config, options)
   })
 
-type CallMcpServerToolInput = {
+export type CallMcpServerToolInput = {
   readonly config: McpServerConfig
   readonly mcpToolName: string
   readonly toolCallId: string
@@ -450,7 +449,7 @@ export const callRemoteMcpServerTool = (
 
 export const callLocalMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpLocalServerConfig }
-): Effect.Effect<ToolResult, McpError> =>
+): Effect.Effect<ToolResult, McpError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const result = yield* requestLocalSession(
       input.config,
@@ -462,7 +461,7 @@ export const callLocalMcpServerTool = (
 
 export const callMcpServerTool = (
   input: CallMcpServerToolInput
-): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
+): Effect.Effect<ToolResult, McpError, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient> =>
   input.config.type === 'local'
     ? callLocalMcpServerTool({
         config: input.config,

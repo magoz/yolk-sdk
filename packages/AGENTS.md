@@ -86,6 +86,7 @@ mcp-server -> mcp-client + protocol + Effect
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stdio`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`, `node:readline`, or direct `process.stdin/stdout/stderr`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
 - Local stdio must not inject default env; pass only `config.environment ?? {}`.
+- MCP client core local helpers require `ChildProcessSpawner`; Node convenience helpers live at `@yolk/mcp-client/node`.
 - Local MCP sessions must validate `initialize` response before trusting target request response.
 - MCP server stdio runners depend on `Stdio.Stdio`; Node CLI/test fixtures provide `NodeStdio.layer` at the boundary.
 - Local stdio responses are matched by JSON-RPC id; do not assume response order.
@@ -146,6 +147,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `@yolk/agent-loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
 - Keep test helpers behind explicit `./testing` subpath exports; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
+- Node-specific package APIs use explicit subpath exports (for example `@yolk/mcp-client/node`) so core imports stay portable.
 - Package-internal relative imports use explicit `.ts` extensions, matching Alchemy's source style. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
 

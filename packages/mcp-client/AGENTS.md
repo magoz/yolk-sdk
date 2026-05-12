@@ -14,6 +14,7 @@
 
 - No app auth, product permissions, persisted config store, or UI.
 - No raw `node:child_process`; use Effect platform APIs.
+- Core APIs must not provide `NodeServices.layer`; expose Node convenience through `@yolk/mcp-client/node`.
 - No raw JSON parsing in production paths; use Effect Schema boundaries.
 - Decode wire JSON in two steps: JSON string → unknown → JSON-RPC schema.
 - Agent-loop and providers remain MCP-agnostic.
@@ -24,6 +25,7 @@
 | ----------- | ------------------------------------------------------ |
 | `config`    | Local/remote MCP server config and policy types        |
 | `client`    | List/call helpers for local, remote, and union configs |
+| `node`      | Node convenience wrappers providing `NodeServices.layer` |
 | `protocol`  | MCP JSON-RPC protocol helpers/types                    |
 | `errors`    | Typed MCP client/transport/protocol errors             |
 
@@ -32,6 +34,7 @@
 - Remote MCP requires `https:` by default; localhost `http:` must be explicit dev policy.
 - Local stdio receives explicit env only and must not inherit arbitrary env.
 - Do not inject default env into local stdio; use exactly `config.environment ?? {}` with `extendEnv: false`.
+- Core local helpers require `ChildProcessSpawner`; Node wrappers provide it at the boundary.
 - Match stdio responses by JSON-RPC id; never assume response order.
 - Validate `initialize` JSON-RPC response before consuming target request response.
 - Keep parse/encoding/validation causes distinct for transport debugging.

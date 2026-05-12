@@ -6,6 +6,7 @@ Domain-free MCP client and tool adapter.
 
 - Remote MCP JSON-RPC over HTTP POST and SSE responses.
 - Local MCP stdio process transport through Effect platform APIs.
+- Node stdio convenience wrappers via `@yolk/mcp-client/node`.
 - Tool listing and call helpers.
 - MCP tool to Yolk `ToolDef`/`ToolResult` adapters.
 - Security policy gates for local and remote transports.
@@ -20,3 +21,4 @@ Domain-free MCP client and tool adapter.
 - No persisted config store.
 - No app auth or product permissions.
 - No agent loop/provider imports.
+- Core local APIs require platform services; Node wrappers provide them at host boundary.

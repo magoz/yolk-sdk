@@ -1,7 +1,8 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent-loop'
-import { callMcpServerTool, listMcpServerTools, sanitizeMcpName } from '@yolk/mcp-client'
+import { sanitizeMcpName } from '@yolk/mcp-client'
+import { callMcpServerToolNode, listMcpServerToolsNode } from '@yolk/mcp-client/node'
 import type { McpResolvedTool, McpServerConfig } from '@yolk/mcp-client'
 import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
 import type { AgentToolContext } from './tool-context'
@@ -42,7 +43,7 @@ const makeRegistration = (
       }
 
       const policy = yield* loadMcpSecurityPolicy()
-      return yield* callMcpServerTool({
+      return yield* callMcpServerToolNode({
         config: configOption.value,
         mcpToolName: resolved.mcpToolName,
         toolCallId: call.id,
@@ -66,7 +67,7 @@ export const makeMcpToolModule = (): Effect.Effect<ToolModule<AgentToolContext>,
     )
     const policy = yield* loadMcpSecurityPolicy()
     const resolvedByServer = yield* Effect.forEach(configs, config =>
-      listMcpServerTools(config, { securityPolicy: policy }).pipe(
+      listMcpServerToolsNode(config, { securityPolicy: policy }).pipe(
         Effect.provide(FetchHttpClient.layer),
         Effect.catch(error =>
           Effect.logWarning('MCP server unavailable', {

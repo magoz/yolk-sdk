@@ -1,12 +1,12 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
-  callLocalMcpServerTool,
   defaultMcpSecurityPolicy,
   mcpToolToToolDef,
   sanitizeMcpName,
   toolCallResultToToolResult
 } from '../src'
+import { callLocalMcpServerToolNode } from '../src/node.ts'
 
 describe('MCP protocol helpers', () => {
   it('sanitizes server and tool names for protocol tool defs', () => {
@@ -41,7 +41,7 @@ describe('MCP protocol helpers', () => {
 
   it.effect('rejects local MCP when disabled by policy', () =>
     Effect.gen(function* () {
-      const result = yield* callLocalMcpServerTool({
+      const result = yield* callLocalMcpServerToolNode({
         config: {
           name: 'local',
           type: 'local',

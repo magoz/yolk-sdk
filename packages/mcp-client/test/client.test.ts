@@ -4,12 +4,14 @@ import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/u
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
 import {
-  callLocalMcpServerTool,
-  callMcpServerTool,
-  listLocalMcpServerTools,
-  listMcpTools,
-  listMcpServerTools
+  callRemoteMcpServerTool,
+  listRemoteMcpServerTools
 } from '../src'
+import {
+  callLocalMcpServerToolNode,
+  listLocalMcpServerToolsNode,
+  listMcpToolsNode
+} from '../src/node.ts'
 import type { McpError, McpServerConfig } from '../src'
 
 const stdioFixturePath = process.cwd().endsWith(join('packages', 'mcp-client'))
@@ -172,12 +174,12 @@ describe('MCP client', () => {
       }
       const options = { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
 
-      const tools = yield* listMcpServerTools(config, options).pipe(
+      const tools = yield* listRemoteMcpServerTools(config, options).pipe(
         Effect.provide(makeFakeRemoteMcpLayer('json'))
       )
       expect(tools.map(tool => tool.def.name)).toEqual(['remote_search'])
 
-      const result = yield* callMcpServerTool({
+      const result = yield* callRemoteMcpServerTool({
         config,
         mcpToolName: 'search',
         toolCallId: 'call_1',
@@ -191,7 +193,7 @@ describe('MCP client', () => {
 
   it.effect('parses remote SSE JSON-RPC responses', () =>
     Effect.gen(function* () {
-      const tools = yield* listMcpServerTools(
+      const tools = yield* listRemoteMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('sse')))
@@ -202,7 +204,7 @@ describe('MCP client', () => {
 
   it.effect('maps malformed remote JSON-RPC responses to protocol errors', () =>
     Effect.gen(function* () {
-      const result = yield* listMcpServerTools(
+      const result = yield* listRemoteMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('invalid-json')), Effect.result)
@@ -213,7 +215,7 @@ describe('MCP client', () => {
 
   it.effect('maps remote JSON-RPC error responses to protocol errors', () =>
     Effect.gen(function* () {
-      const result = yield* listMcpServerTools(
+      const result = yield* listRemoteMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json-rpc-error')), Effect.result)
@@ -224,7 +226,7 @@ describe('MCP client', () => {
 
   it.effect('maps remote non-2xx responses to transport errors', () =>
     Effect.gen(function* () {
-      const result = yield* listMcpServerTools(
+      const result = yield* listRemoteMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('status-error')), Effect.result)
@@ -235,7 +237,7 @@ describe('MCP client', () => {
 
   it.effect('maps remote timeouts to timeout errors', () =>
     Effect.gen(function* () {
-      const fiber = yield* listMcpServerTools(
+      const fiber = yield* listRemoteMcpServerTools(
         { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
         {
           securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false },
@@ -251,7 +253,7 @@ describe('MCP client', () => {
 
   it.effect('rejects duplicate generated tool names', () =>
     Effect.gen(function* () {
-      const result = yield* listMcpTools(
+      const result = yield* listMcpToolsNode(
         [{ name: 'remote', type: 'remote', url: 'https://example.com/mcp' }],
         { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('duplicate-tools')), Effect.result)
@@ -269,10 +271,10 @@ describe('MCP client', () => {
       }
       const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
 
-      const tools = yield* listLocalMcpServerTools(config, options)
+      const tools = yield* listLocalMcpServerToolsNode(config, options)
       expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
 
-      const result = yield* callLocalMcpServerTool({
+      const result = yield* callLocalMcpServerToolNode({
         config,
         mcpToolName: 'echo',
         toolCallId: 'call_1',
@@ -285,7 +287,7 @@ describe('MCP client', () => {
 
   it.effect('maps local stdio early exit to protocol errors', () =>
     Effect.gen(function* () {
-      const result = yield* listLocalMcpServerTools(
+      const result = yield* listLocalMcpServerToolsNode(
         { name: 'local', type: 'local', command: [process.execPath, '-e', ''] },
         { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
       ).pipe(Effect.result)
@@ -296,7 +298,7 @@ describe('MCP client', () => {
 
   it.effect('routes local stdio responses by request id', () =>
     Effect.gen(function* () {
-      const tools = yield* listLocalMcpServerTools(
+      const tools = yield* listLocalMcpServerToolsNode(
         { name: 'local', type: 'local', command: [process.execPath, '-e', outOfOrderStdioScript] },
         { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
       )
@@ -307,7 +309,7 @@ describe('MCP client', () => {
 
   it.effect('rejects local stdio initialize errors before target responses', () =>
     Effect.gen(function* () {
-      const result = yield* listLocalMcpServerTools(
+      const result = yield* listLocalMcpServerToolsNode(
         {
           name: 'local',
           type: 'local',

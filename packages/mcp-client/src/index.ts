@@ -15,7 +15,7 @@ export {
   listMcpTools,
   listRemoteMcpServerTools
 } from './client.ts'
-export type { McpResolvedTool } from './client.ts'
+export type { CallMcpServerToolInput, McpClientOptions, McpResolvedTool } from './client.ts'
 export { McpError, McpErrorCause } from './errors.ts'
 export {
   decodeJsonRpcMessageFromJson,
