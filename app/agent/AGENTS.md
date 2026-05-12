@@ -13,6 +13,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
 - `agent-usage-meter.tsx` formats provider-normalized token usage/context budget for header/console chrome.
+- `message-edit-model.ts` owns pure edit shortcut/save-state helpers; keep keyboard semantics testable outside JSX.
 
 ## Chat Model
 
@@ -38,6 +39,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Message actions are turn-level: delete removes a user+assistant turn; regenerate starts from an assistant message.
 - Editing is user-message-only in app UI; save replaces text content and reruns from that turn.
 - Edit textarea shortcuts: Enter saves, Shift+Enter newline, Escape cancels; keep Save disabled for blank/unchanged edits.
+- Text-only edits are app policy; multimodal `Content` support remains headless package capability.
 - App-created transient messages must include `turnId` and `sequence`; keep IDs compatible but do not parse them for behavior.
 - Show provider reasoning only (`LLMReasoningDelta` / assistant reasoning parts); never invent reasoning.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.

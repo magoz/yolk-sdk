@@ -57,6 +57,7 @@
 - `deleteTurn` removes a user+assistant turn without transport; avoid deleting flat render items.
 - `regenerateFrom` truncates from a selected message and starts a new run.
 - `editUserMessage` replaces user content, truncates later messages, records an edit event, then starts a new run.
+- `editUserMessage` accepts protocol `Content`; host UIs decide whether to expose text-only or multimodal edits.
 - `chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
 - Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.
 - Retain `Effect.runFork` fibers and interrupt on `stop`/unmount; abort signals alone are not enough.
