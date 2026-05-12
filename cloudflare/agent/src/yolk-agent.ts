@@ -28,6 +28,7 @@ import {
 } from '@yolk/agent-runtime'
 import {
   AgentError,
+  AgentMessage,
   AgentWebSocketClientMessage,
   SessionSnapshot,
   UserInput,
@@ -101,8 +102,8 @@ const toAgentError = (error: Parameters<typeof cloudflareRuntimeErrorToAgentErro
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
 
-const unknownToDebugMessage = (error: unknown) =>
-  error instanceof Error ? error.stack ?? error.message : String(error)
+const replayHydratedMessages = (log: RuntimeSessionEventLog) =>
+  Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(replayRuntimeSessionEvents(log.events))
 
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
@@ -344,6 +345,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const sessionId = state.id.toString()
           yield* interruptLatestIncompleteRun(sessionId, runtimeEventLogStorage)
           const log = yield* loadLogOrEmpty(sessionId)
+          const messages = yield* replayHydratedMessages(log)
 
           socket.serializeAttachment({ sessionId, socketId })
           sockets.set(socketId, socket)
@@ -351,16 +353,12 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             socket,
             SessionSnapshot.make({
               revision: log.revision,
-              messages: replayRuntimeSessionEvents(log.events)
+              messages
             })
           )
 
           return response
-        }).pipe(
-          Effect.catch(error =>
-            HttpServerResponse.text(unknownToDebugMessage(error), { status: 500 })
-          )
-        ),
+        }),
         webSocketMessage: Effect.fnUntraced(function* (
           socket: Cloudflare.DurableWebSocket,
           message: string | ArrayBuffer

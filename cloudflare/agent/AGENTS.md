@@ -77,6 +77,7 @@ Do not build these here yet unless explicitly requested:
 - Route bootstrapped DO Codex response calls through Next proxy; direct Worker egress to ChatGPT Codex may get Cloudflare-blocked.
 - Direct browser WS uses protocol `SessionSnapshot` + `UserInput`; keep schemas in `@yolk/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
+- DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.
 - Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.

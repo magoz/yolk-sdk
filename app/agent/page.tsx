@@ -95,7 +95,7 @@ async function Content() {
     Effect.gen(function* () {
       const session = yield* getSession()
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
-      const sessionId = `agent-v4-${session.user.id}`
+      const sessionId = `agent-${session.user.id}`
       const cloudflareAgentUrl = openAiCodexConnected
         ? yield* bootstrapCloudflareAgent({ sessionId, userId: session.user.id })
         : Option.none<string>()

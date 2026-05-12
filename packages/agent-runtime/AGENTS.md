@@ -38,7 +38,7 @@
 
 - Transcript mode is stateless to match client-owned transcript flows.
 - AppendInput persists `InputAppended` + `RunStarted` before loop execution.
-- AppendInput appends `RunCompleted` after success and `RunFailed` after loop failure.
+- AppendInput appends `RunCompleted` when `AgentEnd` is emitted and `RunFailed` after loop failure.
 - Created messages come from `AgentEnd.messages`; runtime does not infer/fabricate assistant or tool messages from partial events.
 - Append replay derives protocol transcript from `InputAppended` and `RunCompleted` only.
 - Failed/interrupted runs are durable lifecycle metadata; they do not add transcript messages.
