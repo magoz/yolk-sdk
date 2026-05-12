@@ -299,6 +299,9 @@ const hasStreamingPart = (message: AgentChatMessage) =>
     part => (part._tag === 'Text' || part._tag === 'Reasoning') && part.state === 'streaming'
   )
 
+const hasStreamingTextPart = (message: AgentChatMessage) =>
+  message.parts.some(part => part._tag === 'Text' && part.state === 'streaming')
+
 const hasToolCall = (message: AgentChatMessage, callId: string) =>
   message.parts.some(part => part._tag === 'ToolCall' && part.call.id === callId)
 
@@ -350,11 +353,21 @@ const appendAssistantTextDelta = (
     messageIndex === index.value
       ? {
           ...message,
-          parts: message.parts.map(part =>
-            part._tag === 'Text' && part.state === 'streaming'
-              ? { ...part, content: appendTextToContent(part.content, delta) }
-              : part
-          )
+          parts: hasStreamingTextPart(message)
+            ? message.parts.map(part =>
+                part._tag === 'Text' && part.state === 'streaming'
+                  ? { ...part, content: appendTextToContent(part.content, delta) }
+                  : part
+              )
+            : [
+                ...message.parts,
+                {
+                  _tag: 'Text',
+                  id: `message-${messageIndex}-assistant-text`,
+                  content: delta,
+                  state: 'streaming'
+                }
+              ]
         }
       : message
   )

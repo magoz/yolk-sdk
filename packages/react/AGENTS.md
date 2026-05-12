@@ -42,6 +42,7 @@
 ## Design rules
 
 - Provider reasoning only: display `LLMReasoningDelta` / assistant reasoning parts, never invented reasoning.
+- Text may start after reasoning in the same assistant turn: first `LLMTextDelta` must create a streaming `Text` part if only `Reasoning` is streaming. Do not wait for final `AssistantMessage`.
 - Tool parts expose input streaming, approval, denied, executing, completed, errored, and provider-completed states.
 - Preserve ordered assistant parts when converting render messages back to protocol messages.
 - Preserve timing when tool result/completion events arrive in different order.

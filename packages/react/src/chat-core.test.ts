@@ -56,6 +56,28 @@ describe('agent chat core', () => {
     ])
   })
 
+  it('streams text after reasoning in the same assistant message', () => {
+    const state = [
+      LLMReasoningDelta.make({ text: 'Thinking.' }),
+      LLMTextDelta.make({ text: 'hel' }),
+      LLMTextDelta.make({ text: 'lo' })
+    ].reduce(
+      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      initialAgentChatState
+    )
+
+    expect(state.chatMessages).toEqual([
+      {
+        id: 'message-0-assistant',
+        role: 'assistant',
+        parts: [
+          { _tag: 'Reasoning', id: 'message-0-reasoning', text: 'Thinking.', state: 'streaming' },
+          { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+        ]
+      }
+    ])
+  })
+
   it('merges final assistant messages with existing streamed tool state', () => {
     const call = ToolCall.make({
       id: 'call_1',
