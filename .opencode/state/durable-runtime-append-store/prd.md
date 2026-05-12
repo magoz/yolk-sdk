@@ -8,11 +8,11 @@
 
 ### What problem are we solving?
 
-`@yolk/agent-runtime` currently persists whole session snapshots only after a successful run. This is simple, but it cannot safely support durable multi-client sessions, reconnect/resume, concurrent writes, partial run inspection, interrupted cleanup, or event fanout. Host apps that need durable agents must either overwrite full transcripts or build ad hoc storage outside the package.
+`@yolk/agent-runtime` now supports append-backed sessions, but durable coverage is not complete. The remaining risk is adapter-level confidence: Cloudflare Durable Objects need tests proving multiple turns append and replay correctly, reconnect cleanup records interruptions, and docs stay aligned with the package API. Host apps should not need whole-session snapshot overwrites or ad hoc lifecycle storage.
 
 ### Why now?
 
-Reference repo review highlighted durable runtime/session state as the next foundational package gap. Cloudflare Durable Object smoke storage already proves package portability, but its `messages` snapshot model will not scale to real durable sessions.
+Reference repo review highlighted durable runtime/session state as the next foundational package gap. The package contract and Cloudflare adapter have moved to `SessionEventStore`; now the task is hardening tests and docs around that latest append-log pattern.
 
 ### Who is affected?
 
@@ -25,7 +25,7 @@ Reference repo review highlighted durable runtime/session state as the next foun
 
 ### Overview
 
-Add a generic append-oriented runtime storage contract that records session inputs, created messages, run lifecycle events, and revisions without tying packages to a database, WebSocket, HTTP, auth, or product model. The runtime should retain existing transcript/input behavior while enabling hosts to implement durable sessions from an ordered event log rather than whole-snapshot overwrite.
+Use a generic append-oriented runtime storage contract that records session inputs, run lifecycle events, protocol transcript additions, and numeric revisions without tying packages to a database, WebSocket, HTTP, auth, or product model. `Transcript` mode stays client-owned and stateless. `AppendInput` mode replays prior protocol `AgentMessage`s from the append log, appends input/start before loop execution, and appends completion/failure after the run.
 
 ---
 
@@ -33,13 +33,14 @@ Add a generic append-oriented runtime storage contract that records session inpu
 
 When this PRD is complete, the following will be true:
 
-- [ ] Runtime persistence can append ordered session events with revision metadata.
-- [ ] Runtime can reconstruct protocol transcript state from append-store data.
-- [ ] Runtime can detect conflicting writes instead of silently overwriting sessions.
-- [ ] Runtime can represent started, completed, failed, and interrupted runs.
-- [ ] Existing snapshot semantics remain compatible or have a documented migration path.
-- [ ] Tests cover append, replay, conflict, failure, and interrupted-run behavior.
-- [ ] Package docs explain store boundaries and host responsibilities.
+- [x] Runtime persistence can append ordered session events with revision metadata.
+- [x] Runtime can reconstruct protocol transcript state from append-store data.
+- [x] Runtime can detect conflicting writes instead of silently overwriting sessions.
+- [x] Runtime can represent started, completed, failed, and interrupted runs.
+- [x] Existing transcript mode remains stateless; append persistence is opt-in via `AppendInput`.
+- [x] Package tests cover append, replay, conflict, failure, and interrupted-run helpers.
+- [ ] Cloudflare tests cover multi-turn append logs and reconnect interruption.
+- [ ] Docs explain store boundaries, host responsibilities, and README/example status.
 
 ---
 
@@ -49,9 +50,9 @@ When this PRD is complete, the following will be true:
 
 | Metric | Current | Target | Measurement Method |
 | --- | --- | --- | --- |
-| Snapshot overwrites in runtime persistence | 100% | 0 for append-store mode | Runtime tests |
-| Durable replay coverage | none | session replay tested | Package tests |
-| Conflict handling coverage | none | stale revision rejected | Package tests |
+| Snapshot overwrites in append mode | 0 in package/adapter code | Remain 0 | Runtime + Cloudflare tests |
+| Durable replay coverage | package covered | Cloudflare multi-turn covered | Package + Cloudflare tests |
+| Conflict handling coverage | package covered | stale revision rejected | Package tests |
 
 ### Qualitative
 
@@ -64,35 +65,35 @@ When this PRD is complete, the following will be true:
 
 ### Feature: Append Store Contract
 
-- [ ] A package-level storage interface supports append-only session events.
-- [ ] Appended events include session id, run id, event id/order, and revision information.
-- [ ] The interface does not depend on app auth, product tenancy, database clients, HTTP, or Cloudflare APIs.
-- [ ] The in-memory implementation supports deterministic tests.
+- [x] A package-level storage interface supports append-only session events.
+- [x] Appended events include session id, run id where applicable, event id/order, and revision information.
+- [x] The interface does not depend on app auth, product tenancy, database clients, HTTP, or Cloudflare APIs.
+- [x] The in-memory implementation supports deterministic tests.
 
 ### Feature: Runtime Replay
 
-- [ ] Runtime can load a session transcript by replaying persisted events.
-- [ ] Replay output is protocol messages only, not UI render models.
-- [ ] Replay understands ordered assistant parts from the tool lifecycle PRD once implemented.
-- [ ] Unknown/future event variants fail safely or are ignored only when explicitly versioned.
+- [x] Runtime can load a session transcript by replaying persisted events.
+- [x] Replay output is protocol `AgentMessage` values only, not UI render models.
+- [x] Replay preserves ordered assistant parts because it stores/replays protocol `AgentMessage` values, including provider tool parts/results and `ToolResult.isError` metadata.
+- [x] Unknown/future event variants fail at the Schema boundary unless explicitly versioned later.
 
 ### Feature: Run Lifecycle Durability
 
-- [ ] Runtime records run start and successful completion.
-- [ ] Runtime records failure/interruption without persisting fabricated assistant/tool messages.
-- [ ] Runtime can identify an incomplete active run for host-level cleanup/resume decisions.
+- [x] Runtime records run start and successful completion.
+- [x] Runtime records failure/interruption without persisting fabricated assistant/tool messages.
+- [x] Runtime can identify an incomplete active run for host-level cleanup/resume decisions.
 
 ### Feature: Conflict Semantics
 
-- [ ] Store writes can reject stale expected revisions.
-- [ ] Runtime maps conflict failures to existing runtime/protocol error paths.
-- [ ] Concurrent input mode does not silently drop or overwrite messages.
+- [x] Store writes can reject stale expected revisions.
+- [x] Runtime maps conflict failures to existing runtime/protocol error paths.
+- [x] Concurrent append input mode does not silently drop or overwrite protocol messages.
 
 ### Feature: Compatibility
 
-- [ ] Existing `runRuntime` transcript mode remains stateless by default.
-- [ ] Existing input mode behavior is preserved for callers using snapshot stores, or migration docs explicitly describe the replacement.
-- [ ] Cloudflare smoke adapter has a clear path from snapshot storage to append storage.
+- [x] Existing `runRuntime` transcript mode remains stateless by default.
+- [x] Append persistence is opt-in through `AppendInput`; no snapshot store is required for transcript mode.
+- [x] Cloudflare smoke adapter uses `SessionEventStore` over Durable Object storage.
 
 ---
 
@@ -100,16 +101,17 @@ When this PRD is complete, the following will be true:
 
 ### Existing Patterns
 
-- `packages/agent-runtime/src/run-runtime.ts` — coordinates transcript/input mode and saves after success.
-- `packages/agent-runtime/src/session-store.ts` — current snapshot store contract and in-memory layer.
-- `packages/agent-runtime/AGENTS.md` — already states future durable behavior should prefer append/run-event semantics.
-- `cloudflare/agent/src/yolk-agent.ts` — thin adapter currently persists `messages` in Durable Object storage.
+- `packages/agent-runtime/src/run-runtime.ts` — coordinates stateless `Transcript` mode and append-backed `AppendInput` mode.
+- `packages/agent-runtime/src/session-event-store.ts` — current append-only store contract, replay helpers, incomplete-run helper, and in-memory layer.
+- `packages/agent-runtime/AGENTS.md` — documents append/run-event semantics.
+- `cloudflare/agent/src/yolk-agent.ts` — thin adapter persists `SessionEventStore` logs in Durable Object storage.
 - `packages/protocol/src/message.ts` and `packages/protocol/src/event.ts` — protocol transcript and stream event source of truth.
 
 ### Key Files
 
 - `packages/agent-runtime/src/run-runtime.ts` — runtime integration point.
-- `packages/agent-runtime/src/session-store.ts` — likely store contract evolution point.
+- `packages/agent-runtime/src/session-event-store.ts` — append store contract and helpers.
+- `packages/agent-runtime/test/session-event-store.test.ts` — append/replay/conflict/incomplete-run tests.
 - `packages/agent-runtime/test/run-runtime.test.ts` — current persistence semantics tests.
 - `cloudflare/agent/src/yolk-agent.ts` — downstream smoke adapter to validate portability later.
 
@@ -125,9 +127,10 @@ The package should define generic data shapes only. Host apps own physical table
 
 Expected logical entities:
 
-- **Session metadata:** session id, current revision, optional active run marker.
-- **Session event:** event id/order, session id, run id, kind, payload, revision.
-- **Run record:** run id, status, timestamps/order markers, failure/interruption details.
+- **RuntimeSessionEventLog:** session id, current numeric revision, ordered stored events.
+- **StoredRuntimeSessionEvent:** event id/order, session id, revision, and runtime event payload.
+- **RuntimeSessionEvent:** `InputAppended`, `RunStarted`, `RunCompleted`, `RunFailed`, or `RunInterrupted`.
+- **IncompleteRuntimeRun:** latest started run without terminal completion/failure/interruption.
 
 ---
 
@@ -138,8 +141,8 @@ Expected logical entities:
 | Store contract becomes database-specific | Medium | High | Keep package interface logical; adapters own physical persistence. |
 | Event model duplicates protocol events incorrectly | Medium | High | Persist protocol messages/events where possible; separate runtime metadata from protocol payload. |
 | Resume semantics become too broad | High | Medium | Define resumability as storage/read model first; transport reconnect/fanout can remain host-owned. |
-| Backcompat breaks current app/Cloudflare smoke | Medium | Medium | Keep snapshot store until migration path exists. |
-| Partial runs expose fabricated messages | Medium | High | Only persist created protocol messages from `AgentEnd`; record partial lifecycle separately. |
+| Backcompat breaks transcript callers | Low | Medium | Keep `Transcript` mode stateless and make append persistence opt-in. |
+| Partial runs expose fabricated protocol messages | Medium | High | Only persist created protocol messages from loop `AgentEnd`; record partial lifecycle separately. |
 
 ---
 
@@ -147,7 +150,7 @@ Expected logical entities:
 
 ### Alternative 1: Keep snapshot-only store
 
-- **Description:** Continue loading/saving whole transcripts.
+- **Description:** Continue loading/saving whole protocol transcripts as a single blob.
 - **Pros:** Simple and already implemented.
 - **Cons:** Silent overwrites, no run lifecycle, weak resume/fanout story.
 - **Decision:** Rejected for durable sessions.
@@ -183,10 +186,10 @@ Expected logical entities:
 
 ### Package API
 
-Exact names are not specified by this PRD, but the public interface must expose:
+Current package API exposes:
 
 ```ts
-type SessionRevision = string | number
+type SessionRevision = number
 
 type RuntimeSessionEvent =
   | { readonly _tag: 'InputAppended'; readonly message: AgentMessage }
@@ -196,7 +199,7 @@ type RuntimeSessionEvent =
   | { readonly _tag: 'RunInterrupted'; readonly runId: string }
 ```
 
-The final API may differ, but it must represent these semantics without product-specific fields.
+These semantics must remain product-free. Physical storage belongs to host adapters.
 
 ---
 
@@ -204,7 +207,7 @@ The final API may differ, but it must represent these semantics without product-
 
 - [ ] Update `packages/agent-runtime/AGENTS.md` persistence semantics.
 - [ ] Update `packages/AGENTS.md` runtime section if package boundaries shift.
-- [ ] Add README examples for snapshot vs append usage once API stabilizes.
+- [ ] Add README examples for transcript vs append usage once API stabilizes, or document why README examples remain deferred.
 - [ ] Document host-owned storage responsibilities and conflict behavior.
 
 ---
@@ -213,10 +216,10 @@ The final API may differ, but it must represent these semantics without product-
 
 | Question | Owner | Due Date | Status |
 | --- | --- | --- | --- |
-| Keep `SessionStore` and add `SessionEventStore`, or replace contract? | Package owner | Before implementation | Open |
-| Revision type: numeric sequence, opaque token, or both? | Package owner | Before implementation | Open |
-| Should runtime persist `AgentEvent` traces separately from transcript events? | Package owner | Before implementation | Open |
-| Should active run cleanup be runtime-owned or host-owned? | Package owner | Before implementation | Open |
+| Keep `SessionStore` and add `SessionEventStore`, or replace contract? | Package owner | 2026-05-12 | Resolved: use `SessionEventStore`; no snapshot store in current runtime package. |
+| Revision type: numeric sequence, opaque token, or both? | Package owner | 2026-05-12 | Resolved: numeric `SessionRevision`. |
+| Should runtime persist `AgentEvent` traces separately from transcript events? | Package owner | 2026-05-12 | Deferred: append store persists lifecycle + protocol messages; traces can be future optional telemetry. |
+| Should active run cleanup be runtime-owned or host-owned? | Package owner | 2026-05-12 | Resolved: package exposes `latestIncompleteRuntimeRun`; host appends `RunInterrupted`. |
 | How should append-store replay handle provider-executed assistant tool parts? | Package owner | 2026-05-12 | Resolved direction: replay protocol transcript parts, not UI-local state. |
 
 ---
@@ -225,9 +228,10 @@ The final API may differ, but it must represent these semantics without product-
 
 ### Glossary
 
-- **Snapshot store:** Current whole-transcript load/save model.
-- **Append store:** Ordered event storage model with revision/conflict semantics.
-- **Revision:** Store token used to detect stale writes.
+- **Transcript mode:** Stateless runtime mode where the caller supplies a complete client-owned protocol transcript.
+- **AppendInput mode:** Durable runtime mode where the runtime appends input/run lifecycle events and replays prior protocol messages.
+- **Append store:** Ordered event storage model with numeric revision/conflict semantics.
+- **Revision:** Numeric store sequence used to detect stale writes.
 - **Run:** One runtime invocation over a transcript/input.
 
 ### References
