@@ -1,6 +1,7 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolDef, ToolResult } from '@yolk/protocol'
+import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk/protocol'
+import type { Content, ContentPart } from '@yolk/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2024-11-05'
@@ -122,15 +123,110 @@ export const sanitizeMcpName = (name: string) => {
   return sanitized.length === 0 ? 'mcp' : sanitized
 }
 
+const stringProperty = (block: GenericContentBlock, key: string) => {
+  const value = block[key]
+
+  return typeof value === 'string' ? Option.some(value) : Option.none<string>()
+}
+
+const audioFormatFromMimeType = (
+  mimeType: string
+): Option.Option<'pcm16' | 'wav' | 'mp3' | 'opus'> => {
+  switch (mimeType) {
+    case 'audio/pcm':
+    case 'audio/pcm16':
+      return Option.some('pcm16')
+    case 'audio/wav':
+    case 'audio/wave':
+    case 'audio/x-wav':
+      return Option.some('wav')
+    case 'audio/mpeg':
+    case 'audio/mp3':
+      return Option.some('mp3')
+    case 'audio/opus':
+    case 'audio/ogg; codecs=opus':
+      return Option.some('opus')
+    default:
+      return Option.none<'pcm16' | 'wav' | 'mp3' | 'opus'>()
+  }
+}
+
 const contentBlockText = (block: GenericContentBlock): Option.Option<string> => {
   const type = block['type']
-  const text = block['text']
+  const text = stringProperty(block, 'text')
 
-  if (type === 'text' && typeof text === 'string') {
-    return Option.some(text)
+  if (type === 'text') {
+    return text
   }
 
   return Option.none()
+}
+
+const fallbackTextForContentBlock = (block: GenericContentBlock) => {
+  const type = stringProperty(block, 'type').pipe(Option.getOrElse(() => 'unknown'))
+  const name = stringProperty(block, 'name')
+  const uri = stringProperty(block, 'uri')
+  const url = stringProperty(block, 'url')
+  const label = Option.getOrElse(Option.firstSomeOf([name, uri, url]), () => type)
+
+  switch (type) {
+    case 'resource':
+      return `MCP resource: ${label}`
+    case 'link':
+      return `MCP link: ${label}`
+    case 'image':
+      return `MCP image: ${label}`
+    case 'audio':
+      return `MCP audio: ${label}`
+    default:
+      return `Unsupported MCP ${type} content.`
+  }
+}
+
+const imagePartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
+  Option.all({ data: stringProperty(block, 'data'), mimeType: stringProperty(block, 'mimeType') }).pipe(
+    Option.map(({ data, mimeType }) => ImagePart.make({ data, mimeType }))
+  )
+
+const audioPartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
+  Option.all({ data: stringProperty(block, 'data'), mimeType: stringProperty(block, 'mimeType') }).pipe(
+    Option.flatMap(({ data, mimeType }) =>
+      audioFormatFromMimeType(mimeType).pipe(
+        Option.map(format => AudioPart.make({ data, format }))
+      )
+    )
+  )
+
+const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {
+  const type = block['type']
+
+  if (type === 'text') {
+    return TextPart.make({ text: Option.getOrElse(contentBlockText(block), () => '') })
+  }
+
+  if (type === 'image') {
+    return Option.getOrElse(imagePartFromBlock(block), () =>
+      TextPart.make({ text: fallbackTextForContentBlock(block) })
+    )
+  }
+
+  if (type === 'audio') {
+    return Option.getOrElse(audioPartFromBlock(block), () =>
+      TextPart.make({ text: fallbackTextForContentBlock(block) })
+    )
+  }
+
+  return TextPart.make({ text: fallbackTextForContentBlock(block) })
+}
+
+const contentFromBlocks = (blocks: ReadonlyArray<GenericContentBlock>): Content => {
+  const textBlocks = Arr.getSomes(Arr.map(blocks, contentBlockText))
+
+  if (textBlocks.length === blocks.length) {
+    return textBlocks.join('\n')
+  }
+
+  return Arr.map(blocks, contentPartFromBlock)
 }
 
 export const toolCallResultToToolResult = (input: {
@@ -138,12 +234,17 @@ export const toolCallResultToToolResult = (input: {
   readonly result: ToolCallResult
 }) => {
   const content = input.result.content ?? []
-  const textBlocks = Arr.getSomes(Arr.map(content, contentBlockText))
-  const text = textBlocks.length > 0 ? textBlocks.join('\n') : 'Unsupported MCP tool content.'
+  const resultContent =
+    content.length > 0
+      ? contentFromBlocks(content)
+      : input.result.structuredContent === undefined
+        ? 'Unsupported MCP tool content.'
+        : 'Structured MCP tool result.'
 
   return ToolResult.make({
     toolCallId: input.toolCallId,
-    content: text
+    content: resultContent,
+    structuredContent: input.result.structuredContent
   })
 }
 

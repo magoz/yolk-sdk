@@ -230,6 +230,8 @@ Use these before broadening package scope:
    - Keep tests semantic and provider-agnostic.
 
 2. **Improve MCP result fidelity**
+   - Architecture: preserve agent-readable `ToolResult.content` plus generic `ToolResult.structuredContent`.
+   - Do not leak MCP-specific result types into protocol unless UI/runtime needs typed artifacts.
    - Preserve `structuredContent` and non-text content blocks where possible.
    - Surface MCP tool error content instead of collapsing to generic errors.
 

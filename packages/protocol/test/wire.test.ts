@@ -91,7 +91,11 @@ describe('protocol wire schemas', () => {
   it.effect('round-trips all agent event variants through JSON wire values', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
-      const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+      const result = ToolResult.make({
+        toolCallId: call.id,
+        content: 'Example Domain',
+        structuredContent: { title: 'Example Domain' }
+      })
       const assistant = AssistantAgentMessage.make({ content: 'done', toolCalls: [call] })
       const events: ReadonlyArray<AgentEventType> = [
         AgentStart.make({}),
@@ -124,7 +128,11 @@ describe('protocol wire schemas', () => {
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
       const def = ToolDef.make({ name: 'web_fetch', description: 'Fetch URL', parameters: { type: 'object' } })
-      const result = ToolResult.make({ toolCallId: call.id, content: 'ok' })
+      const result = ToolResult.make({
+        toolCallId: call.id,
+        content: 'ok',
+        structuredContent: { ok: true }
+      })
       const content = [TextPart.make({ text: 'hi' }), AudioPart.make({ data: 'abc', format: 'mp3' })]
       const capabilities = AgentModelCapabilities.make({
         input: AgentContentCapabilities.make({ text: true, image: true, audio: false }),

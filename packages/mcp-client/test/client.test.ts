@@ -47,6 +47,7 @@ type ResponseMode =
   | 'status-error'
   | 'timeout'
   | 'duplicate-tools'
+  | 'tool-error'
 
 const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
   Layer.succeed(
@@ -161,6 +162,8 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
                           }
                         ]
                 }
+            : mode === 'tool-error'
+              ? { content: [{ type: 'text', text: 'bad params' }], isError: true }
               : { content: [{ type: 'text', text: 'remote result' }] }
 
         if (method === 'notifications/initialized') {
@@ -253,6 +256,23 @@ describe('MCP client', () => {
       ).pipe(Effect.provide(makeFakeRemoteMcpLayer('json-rpc-error')), Effect.result)
 
       expectMcpFailureCause(result, 'protocol')
+    })
+  )
+
+  it.effect('preserves MCP tool error content in failures', () =>
+    Effect.gen(function* () {
+      const result = yield* callRemoteMcpServerTool({
+        config: { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        mcpToolName: 'search',
+        toolCallId: 'call_1',
+        params: {},
+        options: { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('tool-error')), Effect.result)
+
+      expectMcpFailureCause(result, 'tool_error')
+      if (result._tag === 'Failure') {
+        expect(result.failure.message).toContain('bad params')
+      }
     })
   )
 
