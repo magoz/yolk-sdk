@@ -11,11 +11,17 @@ import {
   LLMReasoningDelta,
   LLMTextDelta,
   ToolExecutionCompleted,
+  ToolExecutionError,
   ToolExecutionStarted,
   ToolCall,
+  ProviderToolResult,
+  ToolApprovalDenied,
+  ToolApprovalRequested,
+  ToolInputDelta,
   ToolResult,
   ToolResultMessage,
   ToolInputEnd,
+  ToolInputStart,
   UserMessage,
   zeroAgentUsage
 } from '@yolk/protocol'
@@ -79,6 +85,47 @@ describe('reduceAgentEvents', () => {
 
     expect(state.liveMessages).toEqual([message])
     expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
+  })
+
+  it('projects rich tool lifecycle states', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
+    const inputStreaming = reduceAgentEvents([
+      AgentStart.make({}),
+      ToolInputStart.make({ id: call.id, name: call.name }),
+      ToolInputDelta.make({ id: call.id, delta: '{"url"' }),
+      ToolInputDelta.make({ id: call.id, delta: ':"https://e.com"}' })
+    ])
+
+    expect(inputStreaming.toolRuns).toEqual([
+      { _tag: 'InputStreaming', id: call.id, name: call.name, input: '{"url":"https://e.com"}' }
+    ])
+
+    const approval = reduceAgentEvents([AgentStart.make({}), ToolApprovalRequested.make({ call })])
+    expect(approval.toolRuns).toEqual([{ _tag: 'ApprovalRequested', call }])
+
+    const denied = reduceAgentEvents([
+      AgentStart.make({}),
+      ToolApprovalRequested.make({ call }),
+      ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy' })
+    ])
+    expect(denied.toolRuns).toEqual([{ _tag: 'Denied', toolCallId: call.id, reason: 'policy' }])
+
+    const errored = reduceAgentEvents(
+      [AgentStart.make({}), ToolExecutionError.make({ call, message: 'safe failure', code: 'tool_error' })],
+      undefined,
+      { nowMs: 42 }
+    )
+    expect(errored.toolRuns).toEqual([
+      { _tag: 'Errored', call, message: 'safe failure', endedAtMs: 42 }
+    ])
+
+    const providerCompleted = reduceAgentEvents([
+      AgentStart.make({}),
+      ProviderToolResult.make({ call, result })
+    ])
+    expect(providerCompleted.toolRuns).toEqual([{ _tag: 'ProviderCompleted', call, result }])
   })
 
   it('stores in-band agent errors', () => {

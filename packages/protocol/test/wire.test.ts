@@ -27,12 +27,21 @@ import {
   LLMStreamStart,
   LLMTextDelta,
   HostToolCallPart,
+  ProviderToolCallPart,
+  ProviderToolResult,
+  ProviderToolResultPart,
   TextPart,
+  ToolApprovalDenied,
+  ToolApprovalGranted,
+  ToolApprovalRequested,
   ToolCall,
   ToolDef,
   ToolExecutionCompleted,
+  ToolExecutionError,
   ToolExecutionStarted,
+  ToolInputDelta,
   ToolInputEnd,
+  ToolInputStart,
   ToolResult,
   ToolResultMessage,
   TurnEnd,
@@ -84,7 +93,12 @@ describe('protocol wire schemas', () => {
           parts: [
             AssistantReasoningPart.make({ text: 'summary' }),
             AssistantTextPart.make({ content: 'ok' }),
-            HostToolCallPart.make({ call })
+            HostToolCallPart.make({ call }),
+            ProviderToolCallPart.make({ call }),
+            ProviderToolResultPart.make({
+              toolCallId: call.id,
+              result: ToolResult.make({ toolCallId: call.id, content: 'provider result' })
+            })
           ]
         }),
         ToolResultMessage.make({ toolCallId: call.id, content: 'result' })
@@ -120,11 +134,18 @@ describe('protocol wire schemas', () => {
         LLMStreamStart.make({ turn: 1 }),
         LLMTextDelta.make({ text: 'hello' }),
         LLMReasoningDelta.make({ text: 'thinking' }),
+        ToolInputStart.make({ id: call.id, name: call.name }),
+        ToolInputDelta.make({ id: call.id, delta: '{"url"' }),
         ToolInputEnd.make({ call }),
         LLMStreamEnd.make({ turn: 1 }),
         AssistantMessageEvent.make({ message: assistant }),
+        ToolApprovalRequested.make({ call }),
+        ToolApprovalGranted.make({ toolCallId: call.id }),
+        ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy' }),
         ToolExecutionStarted.make({ call }),
-        ToolExecutionCompleted.make({ call, result })
+        ToolExecutionCompleted.make({ call, result }),
+        ToolExecutionError.make({ call, message: 'failed safely', code: 'tool_error' }),
+        ProviderToolResult.make({ call, result })
       ]
 
       const decoded = yield* Effect.forEach(events, roundTripEvent)

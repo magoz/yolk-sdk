@@ -15,6 +15,9 @@ import {
   ToolExecutionError,
   ToolExecutionStarted,
   ToolInputEnd,
+  ToolInputDelta,
+  ToolInputStart,
+  ProviderToolResult,
   ToolResultMessage,
   type ToolCall,
   type AgentReasoningEffort,
@@ -120,6 +123,12 @@ const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => {
       return [AgentLLMReasoningDelta.make({ text: event.text })]
     case 'ToolCall':
       return [ToolInputEnd.make({ call: event.call })]
+    case 'ToolInputStart':
+      return [ToolInputStart.make({ id: event.id, name: event.name })]
+    case 'ToolInputDelta':
+      return [ToolInputDelta.make({ id: event.id, delta: event.delta })]
+    case 'ProviderToolResult':
+      return [ProviderToolResult.make({ call: event.call, result: event.result })]
     case 'Usage':
       return [UsageUpdate.make({ usage: event.usage })]
     case 'Done':
@@ -133,6 +142,9 @@ const isLlmEvent = (event: LLMEvent | AgentEvent | AgentRetry): event is LLMEven
     case 'ReasoningDelta':
     case 'Done':
     case 'ToolCall':
+    case 'ToolInputStart':
+    case 'ToolInputDelta':
+    case 'ProviderToolResult':
     case 'Usage':
       return true
     default:

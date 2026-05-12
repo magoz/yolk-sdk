@@ -57,7 +57,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
-- `accumulateAssistantMessage` stores collected reasoning as ordered assistant reasoning parts.
+- `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
 
 ## Content + Capabilities
 
@@ -244,9 +244,10 @@ Use these before broadening package scope:
    - Next: Cloudflare tests — cover multiple persisted WebSocket turns and event log contents.
    - Next: PRD task JSON — convert durable PRD into executable tracked tasks.
 
-4. **Design richer tool lifecycle events**
-   - PRD drafted in `.opencode/state/tool-lifecycle-events/prd.md`.
-   - Evaluate tool input start/delta/end, approvals, output-error, provider-executed tools, and step metadata.
+4. **Rich tool lifecycle events**
+   - Implemented in protocol/client/react/agent-loop; PRD tracked in `.opencode/state/tool-lifecycle-events/prd.md`.
+   - Provider adapters can emit `LLMToolInputStart`/`LLMToolInputDelta` and `LLMProviderToolResult` for hosted tools.
+   - Packages model approval events only; host apps still own policy/enforcement.
 
 5. **Assess reusable provider adapter package**
    - Avoid moving app providers prematurely.

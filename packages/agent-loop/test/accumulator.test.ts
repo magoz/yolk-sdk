@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
-import { assistantContent, assistantHostToolCalls, ToolCall } from '@yolk/protocol'
+import { assistantContent, assistantHostToolCalls, contentText, ToolCall, ToolResult } from '@yolk/protocol'
 import { accumulateAssistantMessage } from '../src'
-import { LLMDone, LLMTextDelta, LLMToolCall } from '../src/llm-event'
+import { LLMDone, LLMProviderToolResult, LLMTextDelta, LLMToolCall } from '../src/llm-event'
 
 describe('accumulateAssistantMessage', () => {
   it('collects text and tool calls', () => {
@@ -14,5 +14,19 @@ describe('accumulateAssistantMessage', () => {
 
     expect(assistantContent(message)).toBe('Let me check.')
     expect(assistantHostToolCalls(message)).toEqual([call])
+  })
+
+  it('preserves provider-executed tool parts in event order', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_search', params: { q: 'weather' } })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'sunny' })
+    const message = accumulateAssistantMessage([
+      LLMTextDelta.make({ text: 'Before.' }),
+      LLMProviderToolResult.make({ call, result }),
+      LLMTextDelta.make({ text: 'After.' }),
+      LLMDone.make({ stopReason: 'stop' })
+    ])
+
+    expect(message.parts.map(part => part._tag)).toEqual(['Text', 'ProviderToolCall', 'ProviderToolResult', 'Text'])
+    expect(contentText(assistantContent(message))).toBe('Before.After.')
   })
 })

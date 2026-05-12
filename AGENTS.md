@@ -106,7 +106,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`     | Stateless or append-backed runtime over agent loop     |
 | `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts` | Append-only runtime event storage contract             |
 | `AgentTranscript`                | Type     | `packages/client/src/state.ts`                  | Non-empty client-owned protocol transcript             |
-| `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side tool lifecycle with call/result/timing     |
+| `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                  | Client-side rich tool lifecycle state                  |
 | `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`           | Headless React chat parts source of truth              |
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`           | Converts chat parts to protocol transcript             |
 | `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`             | Resolves configured MCP server tools                   |

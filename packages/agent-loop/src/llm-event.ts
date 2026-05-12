@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AgentUsage, ToolCall } from '@yolk/protocol'
+import { AgentUsage, ToolCall, ToolResult } from '@yolk/protocol'
 
 export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('TextDelta', {
   text: Schema.String
@@ -17,6 +17,24 @@ export class LLMToolCall extends Schema.TaggedClass<LLMToolCall>()('ToolCall', {
   call: ToolCall
 }) {}
 
+export class LLMToolInputStart extends Schema.TaggedClass<LLMToolInputStart>()('ToolInputStart', {
+  id: Schema.String,
+  name: Schema.optional(Schema.String)
+}) {}
+
+export class LLMToolInputDelta extends Schema.TaggedClass<LLMToolInputDelta>()('ToolInputDelta', {
+  id: Schema.String,
+  delta: Schema.String
+}) {}
+
+export class LLMProviderToolResult extends Schema.TaggedClass<LLMProviderToolResult>()(
+  'ProviderToolResult',
+  {
+    call: ToolCall,
+    result: ToolResult
+  }
+) {}
+
 export class LLMUsage extends Schema.TaggedClass<LLMUsage>()('Usage', {
   usage: AgentUsage
 }) {}
@@ -26,6 +44,9 @@ export const LLMEvent = Schema.Union([
   LLMReasoningDelta,
   LLMDone,
   LLMToolCall,
+  LLMToolInputStart,
+  LLMToolInputDelta,
+  LLMProviderToolResult,
   LLMUsage
 ])
 export type LLMEvent = typeof LLMEvent.Type

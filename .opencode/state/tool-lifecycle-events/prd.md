@@ -65,14 +65,14 @@ Users should see tools progress through understandable states instead of a binar
 
 When this PRD is complete, the following will be true:
 
-- [ ] Protocol can represent tool input start/delta/end.
-- [ ] Protocol can represent approval requested, approved, and denied outcomes.
-- [ ] Protocol can represent output success and output error distinctly.
-- [ ] Protocol can represent provider-executed tools without local dispatch.
-- [ ] Client and React projections preserve richer lifecycle states.
-- [ ] Agent loop preserves semantics for simple local tools using the new event names/states.
-- [ ] Tests cover event ordering, projection, error states, and removal of old lifecycle events.
-- [ ] Docs explain host-owned policy and provider adapter responsibilities.
+- [x] Protocol can represent tool input start/delta/end.
+- [x] Protocol can represent approval requested, approved, and denied outcomes.
+- [x] Protocol can represent output success and output error distinctly.
+- [x] Protocol can represent provider-executed tools without local dispatch.
+- [x] Client and React projections preserve richer lifecycle states.
+- [x] Agent loop preserves semantics for simple local tools using the new event names/states.
+- [x] Tests cover event ordering, projection, error states, and removal of old lifecycle events.
+- [x] Docs explain host-owned policy and provider adapter responsibilities.
 
 ---
 
@@ -97,37 +97,37 @@ When this PRD is complete, the following will be true:
 
 ### Feature: Tool Input Lifecycle
 
-- [ ] Protocol includes events for tool input start, delta, and end.
-- [ ] Events preserve call id, tool name when available, and raw JSON string fragments.
-- [ ] Final tool call remains representable as `ToolCall` for existing loop/tool execution.
-- [ ] Client projections can derive current streamed input for a tool call.
+- [x] Protocol includes events for tool input start, delta, and end.
+- [x] Events preserve call id, tool name when available, and raw JSON string fragments.
+- [x] Final tool call remains representable as `ToolCall` for existing loop/tool execution.
+- [x] Client projections can derive current streamed input for a tool call.
 
 ### Feature: Approval Lifecycle
 
-- [ ] Protocol can represent approval requested for a tool call.
-- [ ] Protocol can represent approval granted and denied.
-- [ ] Denied tools do not require a local `ToolExecutor` call.
-- [ ] Approval policy is host-owned; packages only model events/states.
+- [x] Protocol can represent approval requested for a tool call.
+- [x] Protocol can represent approval granted and denied.
+- [x] Denied tools do not require a local `ToolExecutor` call.
+- [x] Approval policy is host-owned; packages only model events/states.
 
 ### Feature: Execution Outcome Lifecycle
 
-- [ ] Protocol distinguishes successful output from tool execution error.
-- [ ] Tool error events preserve safe error message/code.
-- [ ] Existing `ToolExecutionStart`/`ToolExecutionEnd` events are removed or renamed into the new event vocabulary without aliases.
-- [ ] `ToolResult` continues to carry agent-readable content and optional structured content.
+- [x] Protocol distinguishes successful output from tool execution error.
+- [x] Tool error events preserve safe error message/code.
+- [x] Existing `ToolExecutionStart`/`ToolExecutionEnd` events are removed or renamed into the new event vocabulary without aliases.
+- [x] `ToolResult` continues to carry agent-readable content and optional structured content.
 
 ### Feature: Provider-Executed Tools
 
-- [ ] Assistant transcript can preserve ordered provider-executed call/result parts.
-- [ ] Host-executed tool calls still produce separate `ToolResultMessage` entries.
-- [ ] Agent loop can avoid local dispatch for provider-executed results.
-- [ ] UI/client can display provider-executed state without pretending a local run occurred.
+- [x] Assistant transcript can preserve ordered provider-executed call/result parts.
+- [x] Host-executed tool calls still produce separate `ToolResultMessage` entries.
+- [x] Agent loop can avoid local dispatch for provider-executed results.
+- [x] UI/client can display provider-executed state without pretending a local run occurred.
 
 ### Feature: Step Metadata
 
-- [ ] Events can be correlated to turn/step/run where needed.
-- [ ] Step metadata is optional and does not require durable runtime adoption.
-- [ ] Durable append-store PRD can consume the lifecycle vocabulary without redesign.
+- [x] Events can be correlated to turn/step/run where needed.
+- [x] Step metadata is optional and does not require durable runtime adoption.
+- [x] Durable append-store PRD can consume the lifecycle vocabulary without redesign.
 
 ---
 
@@ -265,11 +265,11 @@ The final API may differ, but it must preserve these semantics.
 
 ## Documentation Requirements
 
-- [ ] Update `packages/protocol/AGENTS.md` event guidance.
-- [ ] Update `packages/client/AGENTS.md` tool reducer guidance.
-- [ ] Update `packages/react/AGENTS.md` render-state guidance.
-- [ ] Update `packages/agent-loop/AGENTS.md` local execution semantics.
-- [ ] Update `packages/AGENTS.md` reference gap TODO after implementation.
+- [x] Update `packages/protocol/AGENTS.md` event guidance.
+- [x] Update `packages/client/AGENTS.md` tool reducer guidance.
+- [x] Update `packages/react/AGENTS.md` render-state guidance.
+- [x] Update `packages/agent-loop/AGENTS.md` local execution semantics.
+- [x] Update `packages/AGENTS.md` reference gap TODO after implementation.
 
 ---
 

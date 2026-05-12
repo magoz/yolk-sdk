@@ -28,7 +28,7 @@
 - `AgentTranscript` is client-owned and non-empty when sent to the server.
 - Keep `AgentToolRun` as the single source for input streaming, approval, execution, error, and provider-completed state.
 - Pass `nowMs` into event reducers for tool timing; reducers must stay deterministic.
-- Do not handle removed lifecycle aliases (`LLMToolCall`, `ToolExecutionStart`, `ToolExecutionEnd`, `ToolResult`).
+- Do not handle removed protocol lifecycle aliases (`ToolExecutionStart`, `ToolExecutionEnd`, old event-level `ToolResult`).
 - Use Effect `HttpClient`; tests inject fake clients instead of raw fetch mocks.
 - Keep transport/parse failures typed as `AgentTransportError`.
 - `streamAgentEventStream` is the native Effect API; `streamAgentEvents` is async-generator compatibility.

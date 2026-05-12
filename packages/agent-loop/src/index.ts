@@ -16,9 +16,12 @@ export type { AgentLoopError, LLMProviderError } from './error.ts'
 export {
   LLMDone,
   LLMEvent,
+  LLMProviderToolResult,
   LLMReasoningDelta,
   LLMTextDelta,
   LLMToolCall,
+  LLMToolInputDelta,
+  LLMToolInputStart,
   LLMUsage
 } from './llm-event.ts'
 export { run } from './run.ts'

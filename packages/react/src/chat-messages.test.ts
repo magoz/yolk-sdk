@@ -5,13 +5,21 @@ import {
   AssistantTextPart,
   HostToolCallPart,
   ImagePart,
+  ProviderToolResult,
   TextPart,
   ToolCall,
+  ToolInputDelta,
+  ToolInputStart,
   ToolResult,
   ToolResultMessage,
   UserMessage
 } from '@yolk/protocol'
-import { buildAgentChatMessages, toAgentMessages, type AgentChatMessage } from './chat-messages'
+import {
+  applyAgentEventToChatMessages,
+  buildAgentChatMessages,
+  toAgentMessages,
+  type AgentChatMessage
+} from './chat-messages'
 
 describe('agent chat messages', () => {
   it('preserves multipart user content for protocol replay', () => {
@@ -110,5 +118,46 @@ describe('agent chat messages', () => {
         state: { _tag: 'Completed', result, startedAtMs: 10, endedAtMs: 25 }
       }
     ])
+  })
+
+  it('renders streamed tool input and provider-completed tools', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const streamingCall = ToolCall.make({ id: call.id, name: call.name, params: {} })
+    const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+    const inputStarted = applyAgentEventToChatMessages(
+      [],
+      ToolInputStart.make({ id: call.id, name: call.name })
+    )
+    const inputUpdated = applyAgentEventToChatMessages(
+      inputStarted,
+      ToolInputDelta.make({ id: call.id, delta: '{"url":"https://e.com"}' })
+    )
+
+    expect(inputUpdated).toEqual([
+      {
+        id: 'message-0-assistant',
+        role: 'assistant',
+        parts: [
+          {
+            _tag: 'ToolCall',
+            id: `tool-call-${call.id}`,
+            call: streamingCall,
+            state: { _tag: 'InputStreaming', input: '{"url":"https://e.com"}' }
+          }
+        ]
+      }
+    ])
+
+    const providerCompleted = applyAgentEventToChatMessages(
+      inputUpdated,
+      ProviderToolResult.make({ call, result })
+    )
+
+    expect(providerCompleted[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: `tool-call-${call.id}`,
+      call,
+      state: { _tag: 'ProviderCompleted', result }
+    })
   })
 })

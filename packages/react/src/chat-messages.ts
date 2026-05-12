@@ -9,6 +9,7 @@ import {
   ProviderToolResultPart,
   ToolResult,
   ToolResultMessage,
+  ToolCall,
   UserMessage,
   appendTextToContent,
   contentParts,
@@ -16,8 +17,7 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AssistantPart,
-  type Content,
-  type ToolCall
+  type Content
 } from '@yolk/protocol'
 
 export type ChatPartState = 'streaming' | 'done'
@@ -450,7 +450,7 @@ const upsertToolCallPart = (
             ...message,
             parts: message.parts.map(part =>
               part._tag === 'ToolCall' && part.call.id === call.id
-                ? { ...part, state: mergeToolState(part.state, state) }
+                ? { ...part, call, state: mergeToolState(part.state, state) }
                 : part
             )
           }
@@ -465,6 +465,23 @@ const upsertToolCallPart = (
     state
   })
 }
+
+const inputStreamingToolCall = (id: string, name: string | undefined) =>
+  ToolCall.make({ id, name: name ?? id, params: {} })
+
+const appendToolInputDelta = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  id: string,
+  delta: string
+): ReadonlyArray<AgentChatMessage> =>
+  messages.map(message => ({
+    ...message,
+    parts: message.parts.map(part =>
+      part._tag === 'ToolCall' && part.call.id === id && part.state._tag === 'InputStreaming'
+        ? { ...part, state: { ...part.state, input: `${part.state.input}${delta}` } }
+        : part
+    )
+  }))
 
 const finalizeAssistantParts = (
   parts: ReadonlyArray<AgentChatPart>
@@ -640,9 +657,12 @@ export const applyAgentEventToChatMessages = (
     case 'AssistantMessage':
       return appendOrReplaceAssistantMessage(messages, event.message)
     case 'ToolInputStart':
-      return messages
+      return upsertToolCallPart(messages, inputStreamingToolCall(event.id, event.name), {
+        _tag: 'InputStreaming',
+        input: ''
+      })
     case 'ToolInputDelta':
-      return messages
+      return appendToolInputDelta(messages, event.id, event.delta)
     case 'ToolApprovalRequested':
       return upsertToolCallPart(messages, event.call, { _tag: 'ApprovalRequested' })
     case 'ToolApprovalGranted':
