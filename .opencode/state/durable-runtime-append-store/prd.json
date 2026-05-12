@@ -83,7 +83,7 @@
         "Verify durable storage contains ordered InputAppended, RunStarted, and RunCompleted events for both runs.",
         "Run pnpm cloudflare:check and pnpm test:run."
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "cloudflare-3",
@@ -95,7 +95,7 @@
         "Verify replayed transcript excludes the interrupted run lifecycle event.",
         "Run pnpm cloudflare:check and pnpm test:run."
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "docs-1",
@@ -107,7 +107,7 @@
         "Verify cloudflare/agent/AGENTS.md documents Durable Object append-log storage and reconnect interruption behavior.",
         "Add README examples for Transcript vs AppendInput usage when runtime API surface stabilizes, or document why README examples remain deferred."
       ],
-      "passes": false
+      "passes": true
     }
   ],
   "context": {
@@ -164,7 +164,7 @@
       "AppendInput records input/start/completion/failure and uses expectedRevision.",
       "Agent runtime tests cover append, replay, conflict, failure, interruption helper, and transcript compatibility.",
       "Cloudflare Durable Object adapter uses SessionEventStore over Durable Object storage and interrupts incomplete runs on reconnect.",
-      "Cloudflare tests currently cover error mapping only; multi-turn durable event-log tests are still missing."
+      "Cloudflare tests cover error mapping, multi-turn durable event logs, and reconnect interruption."
     ]
   }
 }

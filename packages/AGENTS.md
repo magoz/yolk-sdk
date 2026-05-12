@@ -254,12 +254,12 @@ Use these before broadening package scope:
    - MCP server preserves protocol text/image/audio content, `structuredContent`, and `isError` when serving tool results.
 
 3. **Design durable runtime append store**
-   - PRD drafted in `prd-durable-runtime-append-store.md`; initial `SessionEventStore` contract exists.
+   - PRD tracked in `.opencode/state/durable-runtime-append-store/prd.md`; initial `SessionEventStore` contract exists.
    - `AppendInput` runtime mode records input, run start, completion, and failure.
    - `appendRuntimeSessionEventsToLog` centralizes append-log revision/id generation for package and host stores.
    - `latestIncompleteRuntimeRun` lets host adapters mark stale active runs interrupted on reconnect/cleanup.
-   - Next: Cloudflare tests — cover multiple persisted WebSocket turns and event log contents.
-   - Next: PRD task JSON — convert durable PRD into executable tracked tasks.
+   - Cloudflare tests cover multiple persisted turns, event log contents, and reconnect interruption.
+   - Runtime README documents `Transcript` vs `AppendInput` and host-owned storage responsibilities.
 
 4. **Rich tool lifecycle events**
    - Implemented in protocol/client/react/agent-loop; PRD tracked in `.opencode/state/tool-lifecycle-events/prd.md`.

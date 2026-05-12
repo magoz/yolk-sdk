@@ -39,8 +39,8 @@ When this PRD is complete, the following will be true:
 - [x] Runtime can represent started, completed, failed, and interrupted runs.
 - [x] Existing transcript mode remains stateless; append persistence is opt-in via `AppendInput`.
 - [x] Package tests cover append, replay, conflict, failure, and interrupted-run helpers.
-- [ ] Cloudflare tests cover multi-turn append logs and reconnect interruption.
-- [ ] Docs explain store boundaries, host responsibilities, and README/example status.
+- [x] Cloudflare tests cover multi-turn append logs and reconnect interruption.
+- [x] Docs explain store boundaries, host responsibilities, and README/example status.
 
 ---
 
@@ -205,10 +205,10 @@ These semantics must remain product-free. Physical storage belongs to host adapt
 
 ## Documentation Requirements
 
-- [ ] Update `packages/agent-runtime/AGENTS.md` persistence semantics.
-- [ ] Update `packages/AGENTS.md` runtime section if package boundaries shift.
-- [ ] Add README examples for transcript vs append usage once API stabilizes, or document why README examples remain deferred.
-- [ ] Document host-owned storage responsibilities and conflict behavior.
+- [x] Update `packages/agent-runtime/AGENTS.md` persistence semantics.
+- [x] Update `packages/AGENTS.md` runtime section if package boundaries shift.
+- [x] Add README examples for transcript vs append usage once API stabilizes, or document why README examples remain deferred.
+- [x] Document host-owned storage responsibilities and conflict behavior.
 
 ---
 

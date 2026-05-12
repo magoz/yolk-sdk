@@ -11,6 +11,7 @@ import {
   type HttpClientError
 } from 'effect/unstable/http'
 import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
+import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import {
   ContextTransformer,
   LLMDone,
@@ -20,14 +21,10 @@ import {
   ToolExecutor
 } from '@yolk/agent-loop'
 import {
-  appendRuntimeSessionEventsToLog,
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
-  type RuntimeSessionEventLog,
   runRuntime,
-  SessionConflictError,
-  SessionEventStore,
-  SessionNotFoundError
+  type RuntimeSessionEventLog
 } from '@yolk/agent-runtime'
 import {
   AgentError,
@@ -44,6 +41,13 @@ import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/open
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
+  interruptLatestIncompleteRun,
+  loadRuntimeEventLogOrEmpty,
+  makeDurableObjectSessionEventStoreLayer,
+  runtimeEventsStorageKey,
+  type RuntimeEventLogStorage
+} from './session-event-storage.ts'
+import {
   BootstrapRequest,
   CodexAccessToken,
   type BootstrapRequest as BootstrapRequestType,
@@ -55,7 +59,6 @@ type SocketAttachment = {
   readonly socketId: string
 }
 
-const eventsKey = 'runtime-events'
 const bootstrapKey = 'bootstrap'
 const codexTokenKey = 'codex-access-token'
 const tokenRefreshBufferMs = 5 * 60 * 1000
@@ -97,12 +100,6 @@ const toAgentError = (error: Parameters<typeof cloudflareRuntimeErrorToAgentErro
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
 
-const emptyLog = (sessionId: string): RuntimeSessionEventLog => ({
-  sessionId,
-  revision: 0,
-  events: []
-})
-
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
   LLMProvider.of({
@@ -138,10 +135,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const state = yield* Cloudflare.DurableObjectState
       const sockets = new Map<string, Cloudflare.DurableWebSocket>()
 
+      const runtimeEventLogStorage: RuntimeEventLogStorage = {
+        get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
+        put: log => state.storage.put(runtimeEventsStorageKey, log)
+      }
+
       const loadLogOrEmpty = (sessionId: string) =>
-        state.storage
-          .get<RuntimeSessionEventLog>(eventsKey)
-          .pipe(Effect.map(log => log ?? emptyLog(sessionId)))
+        loadRuntimeEventLogOrEmpty(sessionId, runtimeEventLogStorage)
 
       const loadBootstrap = () =>
         state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
@@ -243,43 +243,6 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return token
         })
 
-      const makeSessionEventStoreLayer = (sessionId: string) =>
-        Layer.succeed(
-          SessionEventStore,
-          SessionEventStore.of({
-            load: () =>
-              state.storage.get<RuntimeSessionEventLog>(eventsKey).pipe(
-                Effect.flatMap(log =>
-                  log === undefined
-                    ? Effect.fail(new SessionNotFoundError({ sessionId }))
-                    : Effect.succeed(log)
-                )
-              ),
-            append: input =>
-              Effect.gen(function* () {
-                const current =
-                  (yield* state.storage.get<RuntimeSessionEventLog>(eventsKey)) ?? emptyLog(sessionId)
-
-                if (
-                  input.expectedRevision !== undefined &&
-                  input.expectedRevision !== current.revision
-                ) {
-                  return yield* Effect.fail(
-                    new SessionConflictError({
-                      sessionId,
-                      message: `Session revision conflict: expected ${input.expectedRevision}, got ${current.revision}`
-                    })
-                  )
-                }
-
-                const next = appendRuntimeSessionEventsToLog(current, input)
-                yield* state.storage.put(eventsKey, next)
-
-                return next
-              })
-          })
-        )
-
       const makeRuntimeLayer = (sessionId: string) =>
         Layer.unwrap(
           state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
@@ -306,7 +269,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                 LoopConfig.defaultLayer,
                 providerLayer,
                 noToolExecutorLayer,
-                makeSessionEventStoreLayer(sessionId)
+                makeDurableObjectSessionEventStoreLayer(sessionId, runtimeEventLogStorage)
               )
             )
           )
@@ -365,12 +328,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             yield* state.storage.put(bootstrapKey, bootstrap)
             yield* state.storage.delete(codexTokenKey)
 
-            return Response.json({ ok: true })
+            return yield* HttpServerResponse.json({ ok: true })
           }
 
           const [response, socket] = yield* Cloudflare.upgrade()
           const socketId = crypto.randomUUID()
           const sessionId = state.id.toString()
+          yield* interruptLatestIncompleteRun(sessionId, runtimeEventLogStorage)
           const log = yield* loadLogOrEmpty(sessionId)
 
           socket.serializeAttachment({ sessionId, socketId })
