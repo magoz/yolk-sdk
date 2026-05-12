@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref } from 'effect'
+import { Context, Effect, Layer, Option, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AgentError, AgentMessage } from '@yolk/protocol'
 import { SessionConflictError, SessionNotFoundError } from './error.ts'
@@ -50,6 +50,11 @@ export type RuntimeSessionEventLog = {
   readonly events: ReadonlyArray<StoredRuntimeSessionEvent>
 }
 
+export type IncompleteRuntimeRun = {
+  readonly runId: string
+  readonly startedRevision: SessionRevision
+}
+
 export type AppendRuntimeSessionEventsInput = {
   readonly sessionId: string
   readonly expectedRevision?: SessionRevision
@@ -86,13 +91,71 @@ export const replayRuntimeSessionEvents = (
     }
   })
 
+type IncompleteRunSearch =
+  | {
+      readonly _tag: 'Found'
+      readonly run: IncompleteRuntimeRun
+    }
+  | {
+      readonly _tag: 'Searching'
+      readonly terminalRunIds: ReadonlySet<string>
+    }
+
+const terminalRunId = (event: RuntimeSessionEvent): Option.Option<string> => {
+  switch (event._tag) {
+    case 'RunCompleted':
+    case 'RunFailed':
+    case 'RunInterrupted':
+      return Option.some(event.runId)
+    case 'InputAppended':
+    case 'RunStarted':
+      return Option.none()
+  }
+}
+
+export const latestIncompleteRuntimeRun = (
+  events: ReadonlyArray<StoredRuntimeSessionEvent>
+): Option.Option<IncompleteRuntimeRun> => {
+  const search = events.reduceRight<IncompleteRunSearch>(
+    (state, stored) => {
+      if (state._tag === 'Found') {
+        return state
+      }
+
+      const terminal = terminalRunId(stored.event)
+
+      if (Option.isSome(terminal)) {
+        return {
+          _tag: 'Searching',
+          terminalRunIds: new Set([...state.terminalRunIds, terminal.value])
+        }
+      }
+
+      if (stored.event._tag === 'RunStarted' && !state.terminalRunIds.has(stored.event.runId)) {
+        return {
+          _tag: 'Found',
+          run: {
+            runId: stored.event.runId,
+            startedRevision: stored.revision
+          }
+        }
+      }
+
+      return state
+    },
+    { _tag: 'Searching', terminalRunIds: new Set() }
+  )
+
+  return search._tag === 'Found' ? Option.some(search.run) : Option.none()
+}
+
 const emptyLog = (sessionId: string): RuntimeSessionEventLog => ({
   sessionId,
   revision: 0,
   events: []
 })
 
-const makeStoredEvents = (
+const makeStoredRuntimeSessionEvents = (
   sessionId: string,
   currentRevision: SessionRevision,
   events: ReadonlyArray<RuntimeSessionEvent>
@@ -108,15 +171,15 @@ const makeStoredEvents = (
     }
   })
 
-const appendToLog = (
+export const appendRuntimeSessionEventsToLog = (
   current: RuntimeSessionEventLog,
-  events: ReadonlyArray<RuntimeSessionEvent>
+  input: AppendRuntimeSessionEventsInput
 ): RuntimeSessionEventLog => {
-  const stored = makeStoredEvents(current.sessionId, current.revision, events)
+  const stored = makeStoredRuntimeSessionEvents(input.sessionId, current.revision, input.events)
   const last = stored.at(-1)
 
   return {
-    sessionId: current.sessionId,
+    sessionId: input.sessionId,
     revision: last?.revision ?? current.revision,
     events: [...current.events, ...stored]
   }
@@ -156,7 +219,7 @@ export const makeInMemorySessionEventStoreLayer = (
               )
             }
 
-            const nextLog = appendToLog(currentLog, input.events)
+            const nextLog = appendRuntimeSessionEventsToLog(currentLog, input)
             yield* Ref.set(logs, new Map([...current, [input.sessionId, nextLog]]))
 
             return nextLog

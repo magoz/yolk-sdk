@@ -15,8 +15,10 @@ export type {
   TranscriptRuntimeRequest
 } from './run-runtime.ts'
 export {
+  appendRuntimeSessionEventsToLog,
   InputAppended,
   makeInMemorySessionEventStoreLayer,
+  latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   RunCompleted,
   RunFailed,
@@ -27,6 +29,7 @@ export {
 } from './session-event-store.ts'
 export type {
   AppendRuntimeSessionEventsInput,
+  IncompleteRuntimeRun,
   RuntimeSessionEventLog,
   SessionEventStoreApi,
   SessionRevision,

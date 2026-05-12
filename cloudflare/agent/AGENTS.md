@@ -7,7 +7,8 @@ Cloudflare app for the future Yolk durable agent runtime.
 - This app is a proving adapter, not the main product surface yet.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current goal: prove `@yolk/*` packages run inside Cloudflare Durable Objects with typed protocol events and durable transcript storage.
+- Current goal: prove `@yolk/*` packages run inside Cloudflare Durable Objects with typed protocol events and append-log durable transcript storage.
+- DO storage uses `SessionEventStore`; reconnect marks latest incomplete run `RunInterrupted` before accepting a new socket.
 - Do not expand into full product infrastructure until package APIs are stable.
 
 ## Strategic Direction
@@ -37,9 +38,7 @@ Do not build these here yet unless explicitly requested:
 
 ## Package Holes To Close First
 
-- Append-log/session event model.
-- Runtime persistence semantics: append event log.
-- Cancellation, resume, reconnect.
+- Cancellation/resume beyond reconnect interruption.
 - Tool approval and permission hooks.
 - Context provider API.
 - Compaction hook shape.
@@ -74,7 +73,7 @@ Do not build these here yet unless explicitly requested:
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Use faux provider until Cloudflare DO + persistence path is proven.
 - Prefer typed protocol events over app-local render models.
-- Persist protocol transcripts only.
+- Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.
 
 ## Smoke Script

@@ -1,6 +1,7 @@
 import * as Cloudflare from 'alchemy/Cloudflare'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import {
@@ -12,9 +13,11 @@ import {
   ToolExecutor
 } from '@yolk/agent-loop'
 import {
-  type AppendRuntimeSessionEventsInput,
+  appendRuntimeSessionEventsToLog,
+  latestIncompleteRuntimeRun,
   type RuntimeSessionEventLog,
   runRuntime,
+  RunInterrupted,
   SessionConflictError,
   SessionEventStore,
   SessionNotFoundError
@@ -55,29 +58,6 @@ const emptyLog = (sessionId: string): RuntimeSessionEventLog => ({
   revision: 0,
   events: []
 })
-
-const appendLog = (
-  current: RuntimeSessionEventLog,
-  input: AppendRuntimeSessionEventsInput
-): RuntimeSessionEventLog => {
-  const stored = input.events.map((event, index) => {
-    const revision = current.revision + index + 1
-
-    return {
-      id: `${input.sessionId}:${revision}`,
-      sessionId: input.sessionId,
-      revision,
-      event
-    }
-  })
-  const last = stored.at(-1)
-
-  return {
-    sessionId: input.sessionId,
-    revision: last?.revision ?? current.revision,
-    events: [...current.events, ...stored]
-  }
-}
 
 const makeFauxProviderLayer = Layer.succeed(
   LLMProvider,
@@ -143,7 +123,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                   )
                 }
 
-                const next = appendLog(current, input)
+                const next = appendRuntimeSessionEventsToLog(current, input)
                 yield* state.storage.put(eventsKey, next)
 
                 return next
@@ -160,6 +140,29 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           makeSessionEventStoreLayer(sessionId)
         )
 
+      const interruptLatestIncompleteRun = (sessionId: string) =>
+        Effect.gen(function* () {
+          const log = yield* state.storage.get<RuntimeSessionEventLog>(eventsKey)
+
+          if (log === undefined) {
+            return
+          }
+
+          const activeRun = latestIncompleteRuntimeRun(log.events)
+
+          if (Option.isNone(activeRun)) {
+            return
+          }
+
+          const next = appendRuntimeSessionEventsToLog(log, {
+            sessionId,
+            expectedRevision: log.revision,
+            events: [RunInterrupted.make({ runId: activeRun.value.runId })]
+          })
+
+          yield* state.storage.put(eventsKey, next)
+        })
+
       for (const socket of yield* state.getWebSockets()) {
         const attachment = socket.deserializeAttachment<SocketAttachment>()
 
@@ -174,6 +177,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const socketId = crypto.randomUUID()
           const sessionId = state.id.toString()
 
+          yield* interruptLatestIncompleteRun(sessionId)
           socket.serializeAttachment({ sessionId, socketId })
           sockets.set(socketId, socket)
 

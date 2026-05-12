@@ -25,7 +25,7 @@
 | `RuntimeConfig`     | Loop config passed through by host apps         |
 | `RuntimeRequest`    | `Transcript` or `AppendInput` request union     |
 | `RuntimeTranscript` | Non-empty protocol transcript                   |
-| `session-event-store` | Append-only event storage contract, replay helper, in-memory tests |
+| `session-event-store` | Append-only event storage contract, replay/append/incomplete-run helpers, in-memory tests |
 | `error`             | Runtime-specific typed errors                   |
 | `RuntimeSessionId`  | Opaque session id alias                         |
 
@@ -43,6 +43,8 @@
 - Append replay derives protocol transcript from `InputAppended` and `RunCompleted` only.
 - Failed/interrupted runs are durable lifecycle metadata; they do not add transcript messages.
 - Append mode uses `expectedRevision` for conflict detection; omit only when host accepts latest loaded revision.
+- Use `appendRuntimeSessionEventsToLog` in host stores to keep revision/id generation consistent.
+- Use `latestIncompleteRuntimeRun` for reconnect/cleanup; append `RunInterrupted` instead of fabricating transcript messages.
 
 ## Design rules
 
@@ -57,6 +59,7 @@
 - Keep resume/fanout adapters outside this package until generic enough.
 - Durable behavior uses append/run-event semantics, not whole-snapshot overwrite.
 - Append store revisions are numeric and conflict on stale `expectedRevision`.
+- Incomplete-run detection scans event logs only; host adapters decide when to cleanup/resume.
 
 ## Tests
 

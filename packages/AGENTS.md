@@ -239,13 +239,13 @@ Use these before broadening package scope:
 3. **Design durable runtime append store**
    - PRD drafted in `prd-durable-runtime-append-store.md`; initial `SessionEventStore` contract exists.
    - `AppendInput` runtime mode records input, run start, completion, and failure.
-   - Next: append store API polish — export pure append-log helper and use it in Cloudflare DO adapter.
-   - Next: active run cleanup — detect latest incomplete run and mark interrupted for cleanup/reconnect.
+   - `appendRuntimeSessionEventsToLog` centralizes append-log revision/id generation for package and host stores.
+   - `latestIncompleteRuntimeRun` lets host adapters mark stale active runs interrupted on reconnect/cleanup.
    - Next: Cloudflare tests — cover multiple persisted WebSocket turns and event log contents.
    - Next: PRD task JSON — convert durable PRD into executable tracked tasks.
 
 4. **Design richer tool lifecycle events**
-   - PRD drafted in `prd-tool-lifecycle-events.md`.
+   - PRD drafted in `.opencode/state/tool-lifecycle-events/prd.md`.
    - Evaluate tool input start/delta/end, approvals, output-error, provider-executed tools, and step metadata.
 
 5. **Assess reusable provider adapter package**

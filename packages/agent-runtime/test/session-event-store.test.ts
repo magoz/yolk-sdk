@@ -1,8 +1,10 @@
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { AgentError, AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk/protocol'
 import {
+  appendRuntimeSessionEventsToLog,
   InputAppended,
+  latestIncompleteRuntimeRun,
   makeInMemorySessionEventStoreLayer,
   replayRuntimeSessionEvents,
   RunCompleted,
@@ -86,4 +88,50 @@ describe('SessionEventStore', () => {
       expect(replayRuntimeSessionEvents(log.events)).toEqual([input])
     }).pipe(Effect.provide(makeInMemorySessionEventStoreLayer()))
   )
+
+  it('finds the latest started run without a terminal event', () => {
+    const log = appendRuntimeSessionEventsToLog(
+      {
+        sessionId: 'session_1',
+        revision: 0,
+        events: []
+      },
+      {
+        sessionId: 'session_1',
+        events: [
+          RunStarted.make({ runId: 'run_1' }),
+          RunCompleted.make({ runId: 'run_1', messages: [] }),
+          RunStarted.make({ runId: 'run_2' }),
+          RunStarted.make({ runId: 'run_3' }),
+          RunInterrupted.make({ runId: 'run_3' })
+        ]
+      }
+    )
+
+    const activeRun = latestIncompleteRuntimeRun(log.events)
+
+    expect(activeRun).toEqual(Option.some({ runId: 'run_2', startedRevision: 3 }))
+  })
+
+  it('returns none when every started run has a terminal event', () => {
+    const log = appendRuntimeSessionEventsToLog(
+      {
+        sessionId: 'session_1',
+        revision: 0,
+        events: []
+      },
+      {
+        sessionId: 'session_1',
+        events: [
+          RunStarted.make({ runId: 'run_1' }),
+          RunFailed.make({
+            runId: 'run_1',
+            error: AgentError.make({ code: 'provider_error', message: 'failed', retryable: true })
+          })
+        ]
+      }
+    )
+
+    expect(latestIncompleteRuntimeRun(log.events)).toEqual(Option.none())
+  })
 })

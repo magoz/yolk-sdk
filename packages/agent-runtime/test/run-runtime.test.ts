@@ -9,6 +9,7 @@ import {
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent-loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
 import {
+  appendRuntimeSessionEventsToLog,
   InputAppended,
   makeInMemorySessionEventStoreLayer,
   replayRuntimeSessionEvents,
@@ -207,4 +208,31 @@ describe('runRuntime', () => {
       })
     })
   )
+
+  it('appends runtime session events with deterministic revisions', () => {
+    const first = UserMessage.make({ content: 'first' })
+    const second = UserMessage.make({ content: 'second' })
+    const initialLog: RuntimeSessionEventLog = {
+      sessionId: 'session_1',
+      revision: 1,
+      events: [
+        {
+          id: 'session_1:1',
+          sessionId: 'session_1',
+          revision: 1,
+          event: InputAppended.make({ message: first })
+        }
+      ]
+    }
+
+    const nextLog = appendRuntimeSessionEventsToLog(initialLog, {
+      sessionId: 'session_1',
+      expectedRevision: 1,
+      events: [InputAppended.make({ message: second })]
+    })
+
+    expect(nextLog.revision).toBe(2)
+    expect(nextLog.events.map(event => event.id)).toEqual(['session_1:1', 'session_1:2'])
+    expect(replayRuntimeSessionEvents(nextLog.events)).toEqual([first, second])
+  })
 })
