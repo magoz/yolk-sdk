@@ -17,18 +17,30 @@ export type ToolRunState =
   | { readonly _tag: 'ProviderCompleted'; readonly duration: ToolDuration; readonly result: ToolResult }
 
 export type AgentChatItem =
-  | { readonly _tag: 'UserMessage'; readonly id: string; readonly content: Content }
-  | { readonly _tag: 'AssistantMessage'; readonly id: string; readonly content: Content }
-  | { readonly _tag: 'Reasoning'; readonly id: string; readonly text: string }
+  | {
+      readonly _tag: 'UserMessage'
+      readonly id: string
+      readonly messageId: string
+      readonly content: Content
+    }
+  | {
+      readonly _tag: 'AssistantMessage'
+      readonly id: string
+      readonly messageId: string
+      readonly content: Content
+    }
+  | { readonly _tag: 'Reasoning'; readonly id: string; readonly messageId: string; readonly text: string }
   | {
       readonly _tag: 'ToolRun'
       readonly id: string
+      readonly messageId: string
       readonly call: ToolCall
       readonly state: ToolRunState
     }
   | {
       readonly _tag: 'ToolResult'
       readonly id: string
+      readonly messageId: string
       readonly toolCallId: string
       readonly name: string
       readonly content: Content
@@ -141,9 +153,19 @@ const textItemFromPart = (
 
   switch (message.role) {
     case 'user':
-      return Option.some({ _tag: 'UserMessage', id: part.id, content: part.content })
+      return Option.some({
+        _tag: 'UserMessage',
+        id: part.id,
+        messageId: message.id,
+        content: part.content
+      })
     case 'assistant':
-      return Option.some({ _tag: 'AssistantMessage', id: part.id, content: part.content })
+      return Option.some({
+        _tag: 'AssistantMessage',
+        id: part.id,
+        messageId: message.id,
+        content: part.content
+      })
     case 'system':
       return Option.none()
   }
@@ -157,11 +179,12 @@ const itemFromPart = (
     case 'Text':
       return textItemFromPart(message, part)
     case 'Reasoning':
-      return Option.some({ _tag: 'Reasoning', id: part.id, text: part.text })
+      return Option.some({ _tag: 'Reasoning', id: part.id, messageId: message.id, text: part.text })
     case 'ToolCall':
       return Option.some({
         _tag: 'ToolRun',
         id: part.id,
+        messageId: message.id,
         call: part.call,
         state: toolRunStateFor(part.state)
       })
@@ -169,6 +192,7 @@ const itemFromPart = (
       return Option.some({
         _tag: 'ToolResult',
         id: part.id,
+        messageId: message.id,
         toolCallId: part.toolCallId,
         name: part.name,
         content: part.content

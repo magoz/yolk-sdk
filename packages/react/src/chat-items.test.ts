@@ -144,6 +144,7 @@ describe('buildAgentChatItems', () => {
     expect(items).toContainEqual({
       _tag: 'ToolRun',
       id: 'message-1-tool-call-call_1',
+      messageId: 'message-1-assistant',
       call,
       state: {
         _tag: 'Completed',
@@ -172,6 +173,7 @@ describe('buildAgentChatItems', () => {
       {
         _tag: 'ToolResult',
         id: 'message-0-tool-result-missing_call',
+        messageId: 'message-0-tool-result-message',
         toolCallId: 'missing_call',
         name: 'missing_call',
         content: 'ok'
@@ -223,6 +225,7 @@ describe('buildAgentChatItems', () => {
     expect(toolItems.at(-2)).toEqual({
       _tag: 'ToolRun',
       id: 'message-1-tool-call-call_1',
+      messageId: 'message-1-assistant',
       call,
       state: { _tag: 'Running', duration: { _tag: 'Unknown' } }
     })
@@ -257,6 +260,7 @@ describe('buildAgentChatItems', () => {
     expect(items.at(-2)).toEqual({
       _tag: 'ToolRun',
       id: 'message-1-tool-call-call_1',
+      messageId: 'message-1-assistant',
       call,
       state: {
         _tag: 'Completed',

@@ -6,7 +6,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 
 - `playground.tsx` owns page composition/wiring: text chat, voice hook, activity, console, input state.
 - `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
-- `agent-conversation.tsx` renders `AgentChatItem[]`; no transport or protocol mutation.
+- `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
@@ -35,6 +35,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Gate image attach/drop/paste from `agentTextCapabilities.input.image`; console exposes text/image/audio + tools support.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
+- Message actions are turn-level: delete removes a user+assistant turn; regenerate starts from an assistant message.
 - Show provider reasoning only (`LLMReasoningDelta` / assistant reasoning parts); never invent reasoning.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.

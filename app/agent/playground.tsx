@@ -283,6 +283,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     isRunning,
     canSubmitContent,
     submitMessage,
+    deleteTurn,
+    regenerateFrom,
     stop,
     applyEvent,
     appendMessage,
@@ -307,6 +309,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const imageInputSupported = agentTextCapabilities.input.image
   const submitDisabled = isRunning || isVoiceMode
+  const messageActionsDisabled = isRunning || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
     [state.chatMessages]
@@ -384,6 +387,44 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
       setImageAttachments([])
     }
   }, [canSubmitContent, imageAttachments, input, recordActivity, submitDisabled, submitMessage])
+
+  const handleDeleteTurn = useCallback(
+    (messageId: string) => {
+      if (messageActionsDisabled) {
+        return
+      }
+
+      const result = deleteTurn(messageId)
+
+      if (result._tag === 'Deleted') {
+        recordActivity({
+          title: 'Turn deleted',
+          detail: result.turnStartMessageId,
+          tone: 'neutral'
+        })
+      }
+    },
+    [deleteTurn, messageActionsDisabled, recordActivity]
+  )
+
+  const handleRegenerateFrom = useCallback(
+    (messageId: string) => {
+      if (messageActionsDisabled) {
+        return
+      }
+
+      const result = regenerateFrom(messageId)
+
+      if (result._tag === 'Regenerated') {
+        recordActivity({
+          title: 'Response regenerated',
+          detail: result.messageId,
+          tone: 'neutral'
+        })
+      }
+    },
+    [messageActionsDisabled, recordActivity, regenerateFrom]
+  )
 
   const handleImageAttachmentsChange = useCallback(
     (files: ReadonlyArray<File>) => {
@@ -537,6 +578,9 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             items={chatItems}
             showInlineTools={showInlineTools}
             showReasoning={showReasoning}
+            actionsDisabled={messageActionsDisabled}
+            onDeleteTurn={handleDeleteTurn}
+            onRegenerateFrom={handleRegenerateFrom}
           />
 
           <AgentComposer

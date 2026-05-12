@@ -8,11 +8,14 @@ import {
   ChevronDownIcon,
   CircleAlertIcon,
   LoaderCircleIcon,
+  RotateCcwIcon,
   SparklesIcon,
+  Trash2Icon,
   WrenchIcon
 } from 'lucide-react'
 import { contentParts, type Content, type ContentPart, type ToolCall } from '@yolk/protocol'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
@@ -207,13 +210,27 @@ function ReasoningCard({ text }: { readonly text: string }) {
 
 function MessageCard({
   content,
-  role
+  role,
+  messageId,
+  actionsDisabled,
+  onDeleteTurn,
+  onRegenerateFrom
 }: {
   readonly content: Content
   readonly role: 'user' | 'assistant'
+  readonly messageId: string
+  readonly actionsDisabled: boolean
+  readonly onDeleteTurn: (messageId: string) => void
+  readonly onRegenerateFrom: (messageId: string) => void
 }) {
   const parts = contentParts(content)
   const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
+  const handleDelete = useCallback(() => {
+    onDeleteTurn(messageId)
+  }, [messageId, onDeleteTurn])
+  const handleRegenerate = useCallback(() => {
+    onRegenerateFrom(messageId)
+  }, [messageId, onRegenerateFrom])
 
   if (!hasVisibleContent) {
     return null
@@ -223,8 +240,16 @@ function MessageCard({
     return (
       <div className={chatRowClass}>
         <div className="flex justify-end">
-          <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs">
-            <MessageContentParts parts={parts} role="user" />
+          <div className="flex max-w-[78%] flex-col items-end gap-2">
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs">
+              <MessageContentParts parts={parts} role="user" />
+            </div>
+            <MessageActions
+              role="user"
+              disabled={actionsDisabled}
+              onDelete={handleDelete}
+              onRegenerate={handleRegenerate}
+            />
           </div>
         </div>
       </div>
@@ -234,14 +259,63 @@ function MessageCard({
   return (
     <div className={chatRowClass}>
       <div className="min-w-0 px-1 py-1">
-        <div className="mb-1.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/60">
-          <BotIcon className="size-3" />
-          Assistant
+        <div className="mb-1.5 flex min-h-11 flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-muted-foreground/60">
+          <div className="flex items-center gap-2">
+            <BotIcon className="size-3" />
+            Assistant
+          </div>
+          <MessageActions
+            role="assistant"
+            disabled={actionsDisabled}
+            onDelete={handleDelete}
+            onRegenerate={handleRegenerate}
+          />
         </div>
         <div className="whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
           <MessageContentParts parts={parts} role="assistant" />
         </div>
       </div>
+    </div>
+  )
+}
+
+function MessageActions({
+  role,
+  disabled,
+  onDelete,
+  onRegenerate
+}: {
+  readonly role: 'user' | 'assistant'
+  readonly disabled: boolean
+  readonly onDelete: () => void
+  readonly onRegenerate: () => void
+}) {
+  return (
+    <div className="flex items-center gap-1" aria-label={`${role} message actions`}>
+      {role === 'assistant' ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="min-h-11 min-w-11 text-muted-foreground hover:text-foreground"
+          disabled={disabled}
+          aria-label="Regenerate response"
+          onClick={onRegenerate}
+        >
+          <RotateCcwIcon className="size-3.5" aria-hidden />
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="min-h-11 min-w-11 text-muted-foreground hover:text-destructive"
+        disabled={disabled}
+        aria-label="Delete turn"
+        onClick={onDelete}
+      >
+        <Trash2Icon className="size-3.5" aria-hidden />
+      </Button>
     </div>
   )
 }
@@ -346,17 +420,41 @@ function AssistantStatusCard({ label }: { readonly label: string }) {
 function AgentChatItemView({
   item,
   showInlineTools,
-  showReasoning
+  showReasoning,
+  actionsDisabled,
+  onDeleteTurn,
+  onRegenerateFrom
 }: {
   readonly item: AgentChatItem
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
+  readonly actionsDisabled: boolean
+  readonly onDeleteTurn: (messageId: string) => void
+  readonly onRegenerateFrom: (messageId: string) => void
 }) {
   switch (item._tag) {
     case 'UserMessage':
-      return <MessageCard content={item.content} role="user" />
+      return (
+        <MessageCard
+          content={item.content}
+          role="user"
+          messageId={item.messageId}
+          actionsDisabled={actionsDisabled}
+          onDeleteTurn={onDeleteTurn}
+          onRegenerateFrom={onRegenerateFrom}
+        />
+      )
     case 'AssistantMessage':
-      return <MessageCard content={item.content} role="assistant" />
+      return (
+        <MessageCard
+          content={item.content}
+          role="assistant"
+          messageId={item.messageId}
+          actionsDisabled={actionsDisabled}
+          onDeleteTurn={onDeleteTurn}
+          onRegenerateFrom={onRegenerateFrom}
+        />
+      )
     case 'Reasoning':
       return showReasoning ? <ReasoningCard text={item.text} /> : null
     case 'ToolRun':
@@ -386,12 +484,18 @@ type AgentConversationProps = {
   readonly items: ReadonlyArray<AgentChatItem>
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
+  readonly actionsDisabled: boolean
+  readonly onDeleteTurn: (messageId: string) => void
+  readonly onRegenerateFrom: (messageId: string) => void
 }
 
 export function AgentConversation({
   items,
   showInlineTools,
-  showReasoning
+  showReasoning,
+  actionsDisabled,
+  onDeleteTurn,
+  onRegenerateFrom
 }: AgentConversationProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -446,6 +550,9 @@ export function AgentConversation({
             item={item}
             showInlineTools={showInlineTools}
             showReasoning={showReasoning}
+            actionsDisabled={actionsDisabled}
+            onDeleteTurn={onDeleteTurn}
+            onRegenerateFrom={onRegenerateFrom}
           />
         ))}
         <div ref={bottomRef} />
