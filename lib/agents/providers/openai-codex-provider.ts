@@ -654,25 +654,32 @@ const finalResponseToEvents = (
       allowEmptyStop: state.hasTextDelta || state.hasToolCall
     })
 
-    if (!state.hasTextDelta && !state.hasReasoningDelta && !state.hasToolCall) {
-      return finalEvents
+    const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || state.hasToolCall
+    const dedupedEvents = shouldDedupe
+      ? finalEvents.filter(event => {
+          if (state.hasTextDelta && event._tag === 'TextDelta') {
+            return false
+          }
+
+          if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
+            return false
+          }
+
+          if (state.hasToolCall && event._tag === 'ToolCall') {
+            return false
+          }
+
+          return true
+        })
+      : finalEvents
+
+    if (!state.hasToolCall) {
+      return dedupedEvents
     }
 
-    return finalEvents.filter(event => {
-      if (state.hasTextDelta && event._tag === 'TextDelta') {
-        return false
-      }
-
-      if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
-        return false
-      }
-
-      if (state.hasToolCall && event._tag === 'ToolCall') {
-        return false
-      }
-
-      return true
-    })
+    return dedupedEvents.map(event =>
+      event._tag === 'Done' ? LLMDone.make({ stopReason: 'tool_use' }) : event
+    )
   })
 
 const processSseData = (
@@ -852,7 +859,7 @@ const finalizeBodyState = (
     }
 
     if (!sseState.hasDone) {
-      events.push(LLMDone.make({ stopReason: 'stop' }))
+      events.push(LLMDone.make({ stopReason: sseState.hasToolCall ? 'tool_use' : 'stop' }))
     }
 
     return events

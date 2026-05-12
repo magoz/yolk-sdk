@@ -137,6 +137,7 @@ Codex backend quirks:
 - Reasoning can arrive as `response.reasoning_summary_text.delta` / `response.reasoning_text.delta` or final `reasoning.summary`
 - Text can arrive as `response.output_text.delta`, `response.content_part.delta`, or `response.output_item.done` message items; stream output items before completion
 - Tool calls may arrive before completion as `response.output_item.done` with `item.type = 'function_call'`; parse immediately and tolerate empty final `response.completed`
+- If any tool call streamed before completion, final loop `LLMDone` must be `tool_use` even when `response.completed.output` is empty
 
 Image TODOs:
 

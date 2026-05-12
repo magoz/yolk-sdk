@@ -313,6 +313,41 @@ describe('OpenAiCodexProviderLayer', () => {
       expect(events[0]).toMatchObject({
         call: { id: 'call_1', name: 'web_search', params: { query: 'magoz.com' } }
       })
+      expect(events[1]).toMatchObject({ stopReason: 'tool_use' })
+    })
+  )
+
+  it.effect('ends streamed OpenAI Codex function calls as tool use without completion event', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
+          [
+            'event: response.output_item.done',
+            'data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"web_search","arguments":"{\\"query\\":\\"magoz.com\\"}","status":"completed"}}',
+            ''
+          ].join('\n'),
+          requests
+        )
+      )
+
+      const eventsChunk = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'what is magoz.com about?' })],
+            tools: [
+              ToolDef.make({ name: 'web_search', description: 'Search web.', parameters: {} })
+            ],
+            model: 'gpt-5.4',
+            systemPrompt: 'Use tools.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual(['ToolCall', 'Done'])
+      expect(events[1]).toMatchObject({ stopReason: 'tool_use' })
     })
   )
 
