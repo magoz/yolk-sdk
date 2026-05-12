@@ -10,6 +10,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
 - Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized Codex token refresh, and Next-proxied Codex responses.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
+- Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
 - Do not expand into full product infrastructure until package APIs are stable.
 
@@ -93,5 +94,5 @@ Do not build these here yet unless explicitly requested:
 ## Checks
 
 - Run `pnpm cloudflare:check` after touching this app.
-- Run `NODE_ENV=test pnpm playwright test e2e/ui/agent-cloudflare.spec.ts --project=chromium` for direct-WS reconnect/persistence changes.
+- Run `NODE_ENV=test pnpm playwright test e2e/ui/agent-cloudflare.spec.ts --project=chromium` for direct-WS reconnect/persistence/conflict/fallback changes.
 - Run root `pnpm tsc`, `pnpm lint`, and `pnpm test:run` before finishing larger changes.

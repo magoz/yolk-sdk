@@ -132,7 +132,7 @@ e2e/
     login.spec.ts                 — Public smoke tests
     agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
     agent-voice.spec.ts           — Voice startup readiness + fake-mic Realtime transcription smoke
-    agent-cloudflare.spec.ts      — Direct Worker WS reconnect/persistence smoke; skips without CLOUDFLARE_AGENT_URL
+    agent-cloudflare.spec.ts      — Direct Worker WS reconnect/persistence/conflict/fallback smoke; skips without CLOUDFLARE_AGENT_URL
 ```
 
 ## Env Isolation
@@ -190,7 +190,7 @@ Root Vitest currently may discover package tests; `pnpm test:run` then also runs
 
 ### Direct WebSocket specs
 
-Cloudflare direct-WS E2E may use Node-side `WebSocket` with `Effect.callback` helpers because browser WS APIs are imperative. Keep protocol encode/decode typed with `@yolk/protocol` schemas; use the unbootstrapped faux-provider path for deterministic persistence checks.
+Cloudflare direct-WS E2E may use Node-side `WebSocket` with `Effect.callback` helpers because browser WS APIs are imperative. Keep protocol encode/decode typed with `@yolk/protocol` schemas; use fresh UUID sessions and the unbootstrapped faux-provider path for deterministic persistence/conflict/fallback checks.
 
 ### Per-file data seeding
 
