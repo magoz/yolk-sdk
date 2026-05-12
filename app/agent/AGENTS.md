@@ -1,14 +1,11 @@
 # Agent Chat UI
 
-App-local parts-native chat UI. `@yolk/client` is transport-only here; move stable APIs to `packages/*` only after they settle.
+App-local conversation UI over headless `@yolk/react` chat state.
 
 ## Boundaries
 
 - `playground.tsx` owns page composition/wiring: text chat, voice hook, activity, console, input state.
-- `use-agent-chat.ts` is the headless React hook: transport, abort, reducer dispatch, callbacks. No UI imports.
-- `agent-chat-core.ts` is pure reducer/selectors over parts-native `AgentChatState`; test in `agent-chat-core.test.ts`.
-- `agent-chat-messages.ts` owns `AgentChatMessage`/`AgentChatPart`, AgentEvent → parts reduction, and `toAgentMessages()` protocol replay.
-- `agent-chat-items.ts` projects `AgentChatMessage[]` to `AgentChatItem[]`; test every new item/status in `agent-chat-items.test.ts`.
+- `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]`; no transport or protocol mutation.
 - `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
@@ -23,6 +20,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - `AgentChatState.chatMessages` is UI source of truth; protocol `AgentMessage[]` is replay format only.
 - Use `toAgentMessages(chatMessages)` before text transport; keep protocol conversion at the boundary.
 - Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
+- Text may begin after reasoning in the same assistant turn; keep it streaming from first `LLMTextDelta`, not only final `AssistantMessage`.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.

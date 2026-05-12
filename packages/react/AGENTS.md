@@ -59,6 +59,6 @@
 - Keep render model tests next to their modules: `chat-core.test.ts`, `chat-messages.test.ts`, `chat-items.test.ts`.
 - Test package behavior here, not through the example app.
 
-## App example
+## App usage
 
-The Next app keeps component/UI concerns local under `app/agent/*`. The local files `agent-chat-core.ts`, `agent-chat-messages.ts`, `agent-chat-items.ts`, and `use-agent-chat.ts` re-export this package so existing app tests document package behavior.
+The Next app keeps component/UI concerns local under `app/agent/*` and imports `useAgentChat`, `buildAgentChatItems`, and chat item types from this package.
