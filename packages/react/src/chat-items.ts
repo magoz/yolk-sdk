@@ -47,16 +47,21 @@ const activeStatusLabel = ({
     return activeToolLabel.value
   }
 
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part._tag === 'Text' && part.state === 'streaming' && message.role === 'assistant') {
-        return 'Responding'
-      }
+  const parts = messages.flatMap(message =>
+    message.parts.map(part => ({ messageRole: message.role, part }))
+  )
 
-      if (part._tag === 'Reasoning' && part.state === 'streaming') {
-        return 'Thinking'
-      }
-    }
+  if (
+    parts.some(
+      ({ messageRole, part }) =>
+        part._tag === 'Text' && part.state === 'streaming' && messageRole === 'assistant'
+    )
+  ) {
+    return 'Responding'
+  }
+
+  if (parts.some(({ part }) => part._tag === 'Reasoning' && part.state === 'streaming')) {
+    return 'Thinking'
   }
 
   return 'Thinking'

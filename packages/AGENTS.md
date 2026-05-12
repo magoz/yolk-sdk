@@ -73,6 +73,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `access: read | write | destructive` is metadata for policy/approvals; enforcement is host-owned.
 - Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Prefer pure `map`/`flatMap` projections over mutable `push`/`set`/`add` helper accumulators.
+- Lock projection refactors with semantic ordering/state tests, not implementation-shape tests.
 - Do not import auth, storage, provider SDKs, or product tool catalogs here.
 
 ## MCP

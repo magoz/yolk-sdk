@@ -95,22 +95,19 @@ const validateLocal = (config: McpLocalServerConfig, policy: McpSecurityPolicy) 
 
 const parseSseJsonRpcResponse = (server: string, body: string) =>
   Effect.gen(function* () {
-    const direct = yield* decodeJsonRpcResponseFromJson(server, body).pipe(Effect.option)
+    const candidates = [
+      body,
+      ...body
+        .split('\n')
+        .filter(line => line.startsWith('data: '))
+        .map(line => line.substring('data: '.length))
+    ]
+    const parsed = yield* Effect.forEach(candidates, candidate =>
+      decodeJsonRpcResponseFromJson(server, candidate).pipe(Effect.option)
+    ).pipe(Effect.map(Option.firstSomeOf))
 
-    if (Option.isSome(direct)) {
-      return direct.value
-    }
-
-    for (const line of body.split('\n')) {
-      if (line.startsWith('data: ')) {
-        const parsed = yield* decodeJsonRpcResponseFromJson(
-          server,
-          line.substring('data: '.length)
-        ).pipe(Effect.option)
-        if (Option.isSome(parsed)) {
-          return parsed.value
-        }
-      }
+    if (Option.isSome(parsed)) {
+      return parsed.value
     }
 
     return yield* fail(server, 'MCP response did not contain a JSON-RPC message', 'protocol')

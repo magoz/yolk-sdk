@@ -34,11 +34,7 @@ export const makeInMemorySessionStoreLayer = (initial: ReadonlyArray<SessionSnap
             )
           }),
         save: snapshot =>
-          Ref.update(snapshots, current => {
-            const next = new Map(current)
-            next.set(snapshot.id, snapshot)
-            return next
-          })
+          Ref.update(snapshots, current => new Map([...current, [snapshot.id, snapshot]]))
       })
     })
   )
