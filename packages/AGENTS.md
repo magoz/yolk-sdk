@@ -74,6 +74,7 @@ mcp-server -> mcp-client + protocol + Effect
 - Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Prefer pure `map`/`flatMap` projections over mutable `push`/`set`/`add` helper accumulators.
 - Lock projection refactors with semantic ordering/state tests, not implementation-shape tests.
+- Test-local probe mutation (`requests.push`, `saved.push`, counters) is acceptable when it keeps spies clearer than Effect refs.
 - Do not import auth, storage, provider SDKs, or product tool catalogs here.
 
 ## MCP
