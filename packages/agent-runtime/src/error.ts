@@ -62,6 +62,7 @@ export const runtimeErrorToAgentError = (error: RuntimeError | AgentLoopError): 
       })
     case 'LLMError':
     case 'ToolError':
+    case 'ContextTransformError':
     case 'AbortError':
     case 'FauxExhaustedError':
       return agentLoopErrorToAgentError(error)

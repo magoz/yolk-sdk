@@ -34,10 +34,13 @@
 - Keep illegal states unrepresentable in turn and tool lifecycle types.
 - Reject unsupported content/tools before provider calls.
 - Keep provider quirks in app/provider adapters, not loop core.
+- Provider streams must emit exactly one `LLMDone`; `stopReason` must match tool-call presence.
+- `LLMProvider` fails with provider-only `LLMProviderError`, not full `AgentLoopError`.
+- Use `Ref` for loop-owned stream state; avoid mutable arrays/object counters in `run`.
 - Preserve tool call ids and ordering semantics across call/result events.
 - Retry retryable provider errors in-loop; never retry context overflow blindly.
 - Map loop errors to protocol `AgentError` via `agentLoopErrorToAgentError`; keep richer causes local.
-- Keep compaction strategy outside loop; `ContextTransformer` returns compacted messages + lifecycle events.
+- Keep compaction strategy outside loop; `ContextTransformer` returns compacted messages + lifecycle events and fails with `ContextTransformError`.
 - Keep test helpers out of the root export.
 
 ## Tests

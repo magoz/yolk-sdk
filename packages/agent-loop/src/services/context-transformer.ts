@@ -1,5 +1,6 @@
 import { Context, Effect, Layer } from 'effect'
 import type { AgentEvent, AgentMessage } from '@yolk/protocol'
+import type { ContextTransformError } from '../error.ts'
 
 export type ContextTransformResult = {
   readonly messages: ReadonlyArray<AgentMessage>
@@ -11,7 +12,7 @@ export class ContextTransformer extends Context.Service<
   {
     readonly transform: (
       messages: ReadonlyArray<AgentMessage>
-    ) => Effect.Effect<ContextTransformResult>
+    ) => Effect.Effect<ContextTransformResult, ContextTransformError>
   }
 >()('@yolk/agent-loop/ContextTransformer') {
   static identity = Layer.succeed(

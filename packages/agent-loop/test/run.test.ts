@@ -6,14 +6,17 @@ import {
   CompactionStart,
   AgentModelCapabilities,
   ImagePart,
+  ToolCall,
   ToolDef,
   UserMessage
 } from '@yolk/protocol'
 import {
   ContextTransformer,
+  LLMDone,
   LLMError,
   LLMProvider,
   LLMTextDelta,
+  LLMToolCall,
   LoopConfig,
   run,
   type LLMRequest
@@ -487,6 +490,80 @@ describe('run', () => {
       })
       expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
         message: { content: 'ok' }
+      })
+    })
+  )
+
+  it.effect('fails invalid provider stream without done event', () =>
+    Effect.gen(function* () {
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => Stream.make(LLMTextDelta.make({ text: 'o' }))
+        })
+      )
+
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(Layer.provideMerge(BaseLayer))
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          message: 'Expected exactly one LLM done event, received 0'
+        }
+      })
+    })
+  )
+
+  it.effect('fails invalid provider done reason', () =>
+    Effect.gen(function* () {
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () =>
+            Stream.fromIterable([
+              LLMToolCall.make({
+                call: ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+              }),
+              LLMDone.make({ stopReason: 'stop' })
+            ])
+        })
+      )
+
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({ weather: '72F' })).pipe(
+            Layer.provideMerge(BaseLayer)
+          )
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          message: 'LLM done reason must be tool_use'
+        }
       })
     })
   )

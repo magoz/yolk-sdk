@@ -7,11 +7,12 @@ export {
 export {
   AbortError,
   agentLoopErrorToAgentError,
+  ContextTransformError,
   FauxExhaustedError,
   LLMError,
   ToolError
 } from './error.ts'
-export type { AgentLoopError } from './error.ts'
+export type { AgentLoopError, LLMProviderError } from './error.ts'
 export {
   LLMDone,
   LLMEvent,

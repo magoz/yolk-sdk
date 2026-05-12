@@ -54,6 +54,7 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
     Stream.catchTags({
       LLMError: error => Stream.make(toAgentErrorEvent(error)),
       ToolError: error => Stream.make(toAgentErrorEvent(error)),
+      ContextTransformError: error => Stream.make(toAgentErrorEvent(error)),
       AbortError: error => Stream.make(toAgentErrorEvent(error)),
       FauxExhaustedError: error => Stream.make(toAgentErrorEvent(error)),
       SessionNotFoundError: error => Stream.make(toAgentErrorEvent(error)),

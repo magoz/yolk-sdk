@@ -35,11 +35,22 @@ export class ToolError extends Schema.TaggedErrorClass<ToolError>()('ToolError',
   ])
 }) {}
 
+export class ContextTransformError extends Schema.TaggedErrorClass<ContextTransformError>()(
+  'ContextTransformError',
+  {
+    cause: Schema.Literals(['context_overflow', 'invalid_response']),
+    message: Schema.String,
+    retryable: Schema.Boolean
+  }
+) {}
+
 export class AbortError extends Schema.TaggedErrorClass<AbortError>()('AbortError', {
   reason: Schema.Literals(['user', 'system', 'max_turns'])
 }) {}
 
-export type AgentLoopError = LLMError | FauxExhaustedError | ToolError | AbortError
+export type LLMProviderError = LLMError | FauxExhaustedError | AbortError
+
+export type AgentLoopError = LLMProviderError | ToolError | ContextTransformError
 
 const toolErrorCode = (error: ToolError): AgentErrorCode => {
   switch (error.cause) {
@@ -71,6 +82,12 @@ export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError =>
         code: toolErrorCode(error),
         message: error.message,
         retryable: error.cause === 'timeout'
+      })
+    case 'ContextTransformError':
+      return AgentError.make({
+        code: error.cause,
+        message: error.message,
+        retryable: error.retryable
       })
     case 'AbortError':
       return AgentError.make({
