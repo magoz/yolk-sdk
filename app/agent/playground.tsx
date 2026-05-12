@@ -347,6 +347,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
                 ...state.chatMessages,
                 {
                   id: 'draft-user',
+                  turnId: 'draft-user-turn',
+                  sequence: -1,
                   role: 'user',
                   parts: [
                     {

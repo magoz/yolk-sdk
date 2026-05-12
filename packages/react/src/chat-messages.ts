@@ -67,6 +67,8 @@ export type AgentChatPart =
 
 export type AgentChatMessage = {
   readonly id: string
+  readonly turnId: string
+  readonly sequence: number
   readonly role: 'user' | 'assistant' | 'system'
   readonly parts: ReadonlyArray<AgentChatPart>
 }
@@ -91,13 +93,24 @@ export type ApplyAgentEventToChatMessagesOptions = {
   readonly nowMs?: number
 }
 
-const userChatMessage = (message: UserMessage, index: number): AgentChatMessage => ({
-  id: `message-${index}-user`,
+const messageId = (sequence: number, role: AgentChatMessage['role']) => `message-${sequence}-${role}`
+
+const turnId = (sequence: number) => `turn-${sequence}`
+
+const lastTurnId = (messages: ReadonlyArray<AgentChatMessage>) => messages.at(-1)?.turnId
+
+const nextMessageSequence = (messages: ReadonlyArray<AgentChatMessage>) =>
+  messages.reduce((max, message) => Math.max(max, message.sequence), -1) + 1
+
+const userChatMessage = (message: UserMessage, sequence: number): AgentChatMessage => ({
+  id: messageId(sequence, 'user'),
+  turnId: turnId(sequence),
+  sequence,
   role: 'user',
   parts: [
     {
       _tag: 'Text',
-      id: `message-${index}-user-text`,
+      id: `message-${sequence}-user-text`,
       content: message.content,
       state: 'done'
     }
@@ -297,15 +310,18 @@ const assistantPartsFromMessage = ({
 
 const assistantChatMessage = (
   message: AssistantAgentMessage,
-  index: number,
+  sequence: number,
+  currentTurnId: string,
   parts: ReadonlyArray<AgentChatPart> = assistantPartsFromMessage({
     message,
-    messageIndex: index,
+    messageIndex: sequence,
     toolResultsById: new Map(),
     toolRunsById: new Map()
   })
 ): AgentChatMessage => ({
-  id: `message-${index}-assistant`,
+  id: messageId(sequence, 'assistant'),
+  turnId: currentTurnId,
+  sequence,
   role: 'assistant',
   parts
 })
@@ -329,36 +345,6 @@ const findLastMessageIndex = (
 const findMessageIndex = (messages: ReadonlyArray<AgentChatMessage>, messageId: string) =>
   messages.findIndex(message => message.id === messageId)
 
-const messageIndexFromId = (id: string) => {
-  const rawIndex = /^message-(\d+)-/.exec(id)?.[1]
-
-  if (rawIndex === undefined) {
-    return -1
-  }
-
-  const parsed = Number.parseInt(rawIndex, 10)
-
-  return Number.isFinite(parsed) ? parsed : -1
-}
-
-const nextMessageIndex = (messages: ReadonlyArray<AgentChatMessage>) =>
-  messages.reduce((max, message) => Math.max(max, messageIndexFromId(message.id)), -1) + 1
-
-const turnStartIndexFor = (messages: ReadonlyArray<AgentChatMessage>, index: number) => {
-  const beforeTarget = messages.slice(0, index + 1)
-  const turnStartIndex = findLastMessageIndex(beforeTarget, message => message.role === 'user')
-
-  return turnStartIndex === -1 ? index : turnStartIndex
-}
-
-const turnEndIndexFor = (messages: ReadonlyArray<AgentChatMessage>, turnStartIndex: number) => {
-  const nextUserOffset = messages
-    .slice(turnStartIndex + 1)
-    .findIndex(message => message.role === 'user')
-
-  return nextUserOffset === -1 ? messages.length : turnStartIndex + 1 + nextUserOffset
-}
-
 export const deleteChatTurn = (
   messages: ReadonlyArray<AgentChatMessage>,
   messageId: string
@@ -369,20 +355,20 @@ export const deleteChatTurn = (
     return { _tag: 'NotFound' }
   }
 
-  const turnStartIndex = turnStartIndexFor(messages, targetIndex)
-  const turnEndIndex = turnEndIndexFor(messages, turnStartIndex)
-  const deletedMessages = messages.slice(turnStartIndex, turnEndIndex)
-  const turnStartMessage = messages[turnStartIndex]
+  const target = messages[targetIndex]
 
-  if (turnStartMessage === undefined) {
+  if (target === undefined) {
     return { _tag: 'NotFound' }
   }
 
+  const deletedMessages = messages.filter(message => message.turnId === target.turnId)
+  const turnStartMessage = deletedMessages[0]
+
   return {
     _tag: 'Deleted',
-    turnStartMessageId: turnStartMessage.id,
+    turnStartMessageId: turnStartMessage?.id ?? target.id,
     deletedMessageIds: deletedMessages.map(message => message.id),
-    messages: [...messages.slice(0, turnStartIndex), ...messages.slice(turnEndIndex)]
+    messages: messages.filter(message => message.turnId !== target.turnId)
   }
 }
 
@@ -423,9 +409,19 @@ const appendAssistantPart = (
 ): ReadonlyArray<AgentChatMessage> =>
   Option.match(targetAssistantIndex(messages), {
     onNone: () => {
-      const index = nextMessageIndex(messages)
+      const sequence = nextMessageSequence(messages)
+      const currentTurnId = lastTurnId(messages) ?? turnId(sequence)
 
-      return [...messages, { id: `message-${index}-assistant`, role: 'assistant', parts: [part] }]
+      return [
+        ...messages,
+        {
+          id: messageId(sequence, 'assistant'),
+          turnId: currentTurnId,
+          sequence,
+          role: 'assistant',
+          parts: [part]
+        }
+      ]
     },
     onSome: index =>
       messages.map((message, messageIndex) =>
@@ -440,11 +436,11 @@ const appendAssistantTextDelta = (
   const index = targetAssistantIndex(messages)
 
   if (Option.isNone(index)) {
-    const messageIndex = nextMessageIndex(messages)
+    const sequence = nextMessageSequence(messages)
 
     return appendAssistantPart(messages, {
       _tag: 'Text',
-      id: `message-${messageIndex}-assistant-text`,
+      id: `message-${sequence}-assistant-text`,
       content: delta,
       state: 'streaming'
     })
@@ -464,7 +460,7 @@ const appendAssistantTextDelta = (
                 ...message.parts,
                 {
                   _tag: 'Text',
-                  id: `message-${messageIndex}-assistant-text`,
+                  id: `message-${message.sequence}-assistant-text`,
                   content: delta,
                   state: 'streaming'
                 }
@@ -481,11 +477,11 @@ const appendAssistantReasoningDelta = (
   const index = targetAssistantIndex(messages)
 
   if (Option.isNone(index)) {
-    const messageIndex = nextMessageIndex(messages)
+    const sequence = nextMessageSequence(messages)
 
     return appendAssistantPart(messages, {
       _tag: 'Reasoning',
-      id: `message-${messageIndex}-reasoning`,
+      id: `message-${sequence}-reasoning`,
       text: delta,
       state: 'streaming'
     })
@@ -505,7 +501,7 @@ const appendAssistantReasoningDelta = (
                 ...message.parts,
                 {
                   _tag: 'Reasoning',
-                  id: `message-${messageIndex}-reasoning`,
+                  id: `message-${message.sequence}-reasoning`,
                   text: delta,
                   state: 'streaming'
                 }
@@ -640,13 +636,17 @@ const appendOrReplaceAssistantMessage = (
   })
 
   return Option.match(index, {
-    onNone: () => [...messages, assistantChatMessage(message, nextMessageIndex(messages))],
+    onNone: () => {
+      const sequence = nextMessageSequence(messages)
+
+      return [...messages, assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))]
+    },
     onSome: assistantIndex =>
       messages.map((current, messageIndex) =>
         messageIndex === assistantIndex
           ? {
               ...current,
-              parts: partsFromAssistantMessage(message, messageIndex, current.parts)
+              parts: partsFromAssistantMessage(message, current.sequence, current.parts)
             }
           : current
       )
@@ -657,12 +657,15 @@ const appendOrphanToolResult = (
   messages: ReadonlyArray<AgentChatMessage>,
   result: ToolResult
 ): ReadonlyArray<AgentChatMessage> => {
-  const index = nextMessageIndex(messages)
+  const sequence = nextMessageSequence(messages)
+  const currentTurnId = lastTurnId(messages) ?? turnId(sequence)
 
   return [
     ...messages,
     {
-      id: `message-${index}-tool-result-message`,
+      id: `message-${sequence}-tool-result-message`,
+      turnId: currentTurnId,
+      sequence,
       role: 'system',
       parts: [
         {
@@ -720,13 +723,13 @@ export const appendProtocolMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
   message: AgentMessage
 ) => {
-  const index = nextMessageIndex(messages)
+  const sequence = nextMessageSequence(messages)
 
   switch (message._tag) {
     case 'User':
-      return [...messages, userChatMessage(message, index)]
+      return [...messages, userChatMessage(message, sequence)]
     case 'Assistant':
-      return [...messages, assistantChatMessage(message, index)]
+      return [...messages, assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))]
     case 'ToolResult':
       return appendOrphanToolResult(
         messages,
@@ -742,6 +745,8 @@ export const markChatError = (
   ...messages.filter(chatMessage => !chatMessage.parts.some(part => part._tag === 'Error')),
   {
     id: 'error-message',
+    turnId: 'error-turn',
+    sequence: nextMessageSequence(messages),
     role: 'system',
     parts: [{ _tag: 'Error', id: 'error', message }]
   }
@@ -822,14 +827,16 @@ export const applyAgentEventToChatMessages = (
 
 const chatMessagesFromProtocolMessage = ({
   message,
-  index,
+  sequence,
+  currentTurnId,
   toolNames,
   toolResultsById,
   toolCallIds,
   toolRunsById
 }: {
   readonly message: AgentMessage
-  readonly index: number
+  readonly sequence: number
+  readonly currentTurnId: string
   readonly toolNames: ReadonlyMap<string, string>
   readonly toolResultsById: ReadonlyMap<string, ToolResult>
   readonly toolCallIds: ReadonlySet<string>
@@ -837,15 +844,17 @@ const chatMessagesFromProtocolMessage = ({
 }): ReadonlyArray<AgentChatMessage> => {
   switch (message._tag) {
     case 'User':
-      return [userChatMessage(message, index)]
+      return [userChatMessage(message, sequence)]
     case 'Assistant':
       return [
         {
-          id: `message-${index}-assistant`,
+          id: messageId(sequence, 'assistant'),
+          turnId: currentTurnId,
+          sequence,
           role: 'assistant',
           parts: assistantPartsFromMessage({
             message,
-            messageIndex: index,
+            messageIndex: sequence,
             toolResultsById,
             toolRunsById
           })
@@ -856,12 +865,14 @@ const chatMessagesFromProtocolMessage = ({
         ? []
         : [
             {
-              id: `message-${index}-tool-result-message`,
+              id: `message-${sequence}-tool-result-message`,
+              turnId: currentTurnId,
+              sequence,
               role: 'system',
               parts: [
                 {
                   _tag: 'ToolResult',
-                  id: `message-${index}-tool-result-${message.toolCallId}`,
+                  id: `message-${sequence}-tool-result-${message.toolCallId}`,
                   toolCallId: message.toolCallId,
                   name: toolNames.get(message.toolCallId) ?? message.toolCallId,
                   content: message.content
@@ -877,6 +888,8 @@ const draftUserMessage = (userDraft: string): ReadonlyArray<AgentChatMessage> =>
     ? [
         {
           id: 'draft-user',
+          turnId: 'draft-user-turn',
+          sequence: -1,
           role: 'user',
           parts: [{ _tag: 'Text', id: 'draft-user-text', content: userDraft, state: 'streaming' }]
         }
@@ -927,7 +940,9 @@ const draftAssistantMessage = ({
 }): ReadonlyArray<AgentChatMessage> => {
   const parts = draftAssistantPart({ reasoningDraft, assistantDraft })
 
-  return parts.length > 0 ? [{ id: 'draft-assistant', role: 'assistant', parts }] : []
+  return parts.length > 0
+    ? [{ id: 'draft-assistant', turnId: 'draft-assistant-turn', sequence: -1, role: 'assistant', parts }]
+    : []
 }
 
 const errorChatMessage = (message: string | null): ReadonlyArray<AgentChatMessage> =>
@@ -936,6 +951,8 @@ const errorChatMessage = (message: string | null): ReadonlyArray<AgentChatMessag
     : [
         {
           id: 'error-message',
+          turnId: 'error-turn',
+          sequence: -1,
           role: 'system',
           parts: [{ _tag: 'Error', id: 'error', message }]
         }
@@ -954,17 +971,25 @@ export const buildAgentChatMessages = ({
   const toolCallIds = collectToolCallIds(messages)
   const toolRunsById = collectToolRunsById(toolRuns)
 
-  return [
-    ...messages.flatMap((message, index) =>
-      chatMessagesFromProtocolMessage({
+  const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>((current, message, index) => {
+    const currentTurnId = message._tag === 'User' ? turnId(index) : (lastTurnId(current) ?? turnId(index))
+
+    return [
+      ...current,
+      ...chatMessagesFromProtocolMessage({
         message,
-        index,
+        sequence: index,
+        currentTurnId,
         toolNames,
         toolResultsById,
         toolCallIds,
         toolRunsById
       })
-    ),
+    ]
+  }, [])
+
+  return [
+    ...builtMessages,
     ...draftUserMessage(userDraft),
     ...draftAssistantMessage({ reasoningDraft, assistantDraft }),
     ...errorChatMessage(error)

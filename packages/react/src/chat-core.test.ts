@@ -48,6 +48,8 @@ describe('agent chat core', () => {
     expect(state.chatMessages).toEqual([
       {
         id: 'message-0-assistant',
+        turnId: 'turn-0',
+        sequence: 0,
         role: 'assistant',
         parts: [
           { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
@@ -69,6 +71,8 @@ describe('agent chat core', () => {
     expect(state.chatMessages).toEqual([
       {
         id: 'message-0-assistant',
+        turnId: 'turn-0',
+        sequence: 0,
         role: 'assistant',
         parts: [
           { _tag: 'Reasoning', id: 'message-0-reasoning', text: 'Thinking.', state: 'streaming' },

@@ -29,6 +29,8 @@ describe('agent chat messages', () => {
     const chatMessages: ReadonlyArray<AgentChatMessage> = [
       {
         id: 'message-0-user',
+        turnId: 'turn-0',
+        sequence: 0,
         role: 'user',
         parts: [
           {
@@ -139,6 +141,8 @@ describe('agent chat messages', () => {
     expect(inputUpdated).toEqual([
       {
         id: 'message-0-assistant',
+        turnId: 'turn-0',
+        sequence: 0,
         role: 'assistant',
         parts: [
           {
@@ -237,6 +241,8 @@ describe('agent chat messages', () => {
       messages[2],
       {
         id: 'message-3-user',
+        turnId: 'turn-3',
+        sequence: 3,
         role: 'user',
         parts: [{ _tag: 'Text', id: 'message-3-user-text', content: 'three', state: 'done' }]
       }

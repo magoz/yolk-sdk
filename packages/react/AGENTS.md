@@ -53,6 +53,7 @@
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
+- `AgentChatMessage` carries stable `turnId` and monotonic `sequence`; do not infer turns by parsing IDs or array position.
 - `deleteTurn` removes a user+assistant turn without transport; avoid deleting flat render items.
 - `regenerateFrom` truncates from a selected message and starts a new run.
 - `chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
