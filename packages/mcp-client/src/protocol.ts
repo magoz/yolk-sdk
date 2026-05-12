@@ -69,6 +69,23 @@ export type TextContentBlock = typeof TextContentBlock.Type
 export const GenericContentBlock = Schema.Record(Schema.String, Schema.Unknown)
 export type GenericContentBlock = typeof GenericContentBlock.Type
 
+const EmbeddedResourceContentBlock = Schema.Struct({
+  type: Schema.Literal('resource'),
+  resource: Schema.Struct({
+    uri: Schema.optional(Schema.String),
+    text: Schema.optional(Schema.String),
+    blob: Schema.optional(Schema.String),
+    mimeType: Schema.optional(Schema.String)
+  })
+})
+
+const ResourceLinkContentBlock = Schema.Struct({
+  type: Schema.Literal('resource_link'),
+  uri: Schema.String,
+  name: Schema.optional(Schema.String),
+  mimeType: Schema.optional(Schema.String)
+})
+
 export const ToolCallResult = Schema.Struct({
   content: Schema.optional(Schema.Array(GenericContentBlock)),
   isError: Schema.optional(Schema.Boolean),
@@ -172,8 +189,8 @@ const fallbackTextForContentBlock = (block: GenericContentBlock) => {
   switch (type) {
     case 'resource':
       return `MCP resource: ${label}`
-    case 'link':
-      return `MCP link: ${label}`
+    case 'resource_link':
+      return `MCP resource link: ${label}`
     case 'image':
       return `MCP image: ${label}`
     case 'audio':
@@ -182,6 +199,27 @@ const fallbackTextForContentBlock = (block: GenericContentBlock) => {
       return `Unsupported MCP ${type} content.`
   }
 }
+
+const embeddedResourceText = (block: GenericContentBlock): Option.Option<string> =>
+  Schema.decodeUnknownOption(EmbeddedResourceContentBlock)(block).pipe(
+    Option.flatMap(({ resource }) => {
+      if (resource.text !== undefined) {
+        return Option.some(resource.text)
+      }
+
+      return Option.all({ uri: Option.fromNullishOr(resource.uri), blob: Option.fromNullishOr(resource.blob) }).pipe(
+        Option.map(({ uri, blob }) => `MCP resource: ${uri}\n${blob}`)
+      )
+    })
+  )
+
+const resourceLinkText = (block: GenericContentBlock): Option.Option<string> =>
+  Schema.decodeUnknownOption(ResourceLinkContentBlock)(block).pipe(
+    Option.map(({ name, uri }) => {
+      const label = name ?? uri
+      return `MCP resource link: ${label} (${uri})`
+    })
+  )
 
 const imagePartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
   Option.all({ data: stringProperty(block, 'data'), mimeType: stringProperty(block, 'mimeType') }).pipe(
@@ -214,6 +252,18 @@ const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {
     return Option.getOrElse(audioPartFromBlock(block), () =>
       TextPart.make({ text: fallbackTextForContentBlock(block) })
     )
+  }
+
+  if (type === 'resource') {
+    return TextPart.make({
+      text: embeddedResourceText(block).pipe(Option.getOrElse(() => fallbackTextForContentBlock(block)))
+    })
+  }
+
+  if (type === 'resource_link') {
+    return TextPart.make({
+      text: resourceLinkText(block).pipe(Option.getOrElse(() => fallbackTextForContentBlock(block)))
+    })
   }
 
   return TextPart.make({ text: fallbackTextForContentBlock(block) })

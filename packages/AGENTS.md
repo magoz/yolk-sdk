@@ -250,8 +250,9 @@ Use these before broadening package scope:
 2. **Improve MCP result fidelity**
    - Architecture: preserve agent-readable `ToolResult.content` plus generic `ToolResult.structuredContent`.
    - Do not leak MCP-specific result types into protocol unless UI/runtime needs typed artifacts.
-   - Preserve `structuredContent` and non-text content blocks where possible.
-   - Surface MCP tool error content instead of collapsing to generic errors.
+   - MCP client preserves `structuredContent`, text/image/audio/resource/resource_link content, and `isError` result content for model self-correction.
+   - MCP server preserves protocol text/image/audio content and `structuredContent` when serving tool results.
+   - Next: decide whether generic tool-result error metadata belongs in protocol/UI, or keep `isError` model-visible only.
 
 3. **Design durable runtime append store**
    - PRD drafted in `prd-durable-runtime-append-store.md`; initial `SessionEventStore` contract exists.

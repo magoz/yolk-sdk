@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, ToolResult } from '@yolk/protocol'
+import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk/protocol'
 import { McpServerError, makeMcpToolServer } from '../src'
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
@@ -25,6 +25,28 @@ const failingServer = makeMcpToolServer({
     {
       def: ToolDef.make({ name: 'fail', description: 'Fail', parameters: { type: 'object' } }),
       execute: () => Effect.fail(new McpServerError({ message: 'boom', cause: 'tool_error' }))
+    }
+  ]
+})
+
+const richResultServer = makeMcpToolServer({
+  name: 'test-server',
+  version: '0',
+  tools: [
+    {
+      def: ToolDef.make({ name: 'rich', description: 'Rich', parameters: { type: 'object' } }),
+      execute: call =>
+        Effect.succeed(
+          ToolResult.make({
+            toolCallId: call.id,
+            content: [
+              TextPart.make({ text: 'hello' }),
+              ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+              AudioPart.make({ data: 'def', format: 'mp3' })
+            ],
+            structuredContent: { ok: true }
+          })
+        )
     }
   ]
 })
@@ -155,7 +177,7 @@ describe('MCP tool server', () => {
     })
   )
 
-  it.effect('returns JSON-RPC errors for tool failures', () =>
+  it.effect('returns safe MCP error results for tool failures', () =>
     Effect.gen(function* () {
       const responseOption = yield* failingServer.handleLine(
         requestLine({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'fail' } })
@@ -168,7 +190,32 @@ describe('MCP tool server', () => {
       expect(response).toMatchObject({
         jsonrpc: '2.0',
         id: 7,
-        error: { code: -32_000 }
+        result: { content: [{ type: 'text', text: 'MCP tool failed: boom' }], isError: true }
+      })
+    })
+  )
+
+  it.effect('preserves protocol media and structured tool results', () =>
+    Effect.gen(function* () {
+      const responseOption = yield* richResultServer.handleLine(
+        requestLine({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'rich' } })
+      )
+      if (Option.isNone(responseOption)) {
+        return yield* Effect.fail(new Error('Expected MCP response'))
+      }
+      const response = yield* decodeJson(responseOption.value)
+
+      expect(response).toMatchObject({
+        jsonrpc: '2.0',
+        id: 9,
+        result: {
+          content: [
+            { type: 'text', text: 'hello' },
+            { type: 'image', data: 'abc', mimeType: 'image/png' },
+            { type: 'audio', data: 'def', mimeType: 'audio/mp3' }
+          ],
+          structuredContent: { ok: true }
+        }
       })
     })
   )

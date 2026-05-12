@@ -259,7 +259,7 @@ describe('MCP client', () => {
     })
   )
 
-  it.effect('preserves MCP tool error content in failures', () =>
+  it.effect('preserves MCP tool error content as tool results', () =>
     Effect.gen(function* () {
       const result = yield* callRemoteMcpServerTool({
         config: { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
@@ -267,12 +267,9 @@ describe('MCP client', () => {
         toolCallId: 'call_1',
         params: {},
         options: { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
-      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('tool-error')), Effect.result)
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('tool-error')))
 
-      expectMcpFailureCause(result, 'tool_error')
-      if (result._tag === 'Failure') {
-        expect(result.failure.message).toContain('bad params')
-      }
+      expect(result.content).toBe('bad params')
     })
   )
 

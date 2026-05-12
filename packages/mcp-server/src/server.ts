@@ -1,6 +1,12 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolCall, contentText, type ToolDef, type ToolResult } from '@yolk/protocol'
+import {
+  ToolCall,
+  contentParts,
+  type ContentPart,
+  type ToolDef,
+  type ToolResult
+} from '@yolk/protocol'
 import { latestMcpProtocolVersion } from '@yolk/mcp-client'
 import { McpServerError } from './errors.ts'
 
@@ -136,9 +142,32 @@ const protocolErrorCode = (error: McpServerError) => {
 const protocolErrorResponse = (id: string | number | null, error: McpServerError) =>
   errorResponse(id, protocolErrorCode(error), error.message)
 
-const mcpResultFromToolResult = (result: ToolResult) => ({
-  content: [{ type: 'text', text: contentText(result.content) }]
+const mcpContentBlockFromPart = (part: ContentPart) => {
+  switch (part._tag) {
+    case 'Text':
+      return { type: 'text', text: part.text }
+    case 'Image':
+      return { type: 'image', data: part.data, mimeType: part.mimeType }
+    case 'Audio':
+      return { type: 'audio', data: part.data, mimeType: `audio/${part.format}` }
+  }
+}
+
+const mcpResultFromToolResult = (result: ToolResult) => {
+  const content = Arr.map(contentParts(result.content), mcpContentBlockFromPart)
+
+  return result.structuredContent === undefined
+    ? { content }
+    : { content, structuredContent: result.structuredContent }
+}
+
+const mcpErrorResult = (message: string) => ({
+  content: [{ type: 'text', text: message }],
+  isError: true
 })
+
+const mcpResultFromExecutionResult = (result: ToolResult | ReturnType<typeof mcpErrorResult>) =>
+  'toolCallId' in result ? mcpResultFromToolResult(result) : result
 
 const toolListItem = (tool: ToolDef) => ({
   name: tool.name,
@@ -225,16 +254,11 @@ export const makeMcpToolServer = <R>(input: {
             )
             .pipe(
               Effect.catch(error =>
-                Effect.fail(
-                  new McpServerError({
-                    message: `MCP tool failed: ${error.message}`,
-                    cause: 'tool_error'
-                  })
-                )
+                Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
               )
             )
 
-          return successResponse(request.id, mcpResultFromToolResult(result))
+          return successResponse(request.id, mcpResultFromExecutionResult(result))
         }
         default:
           return errorResponse(request.id, -32_601, `Method not found: ${request.method}`)

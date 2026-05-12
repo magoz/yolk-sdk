@@ -49,7 +49,8 @@ describe('MCP protocol helpers', () => {
           { type: 'text', text: 'hello' },
           { type: 'image', data: 'abc', mimeType: 'image/png' },
           { type: 'audio', data: 'def', mimeType: 'audio/mpeg' },
-          { type: 'resource', uri: 'file:///tmp/out.txt' }
+          { type: 'resource', resource: { uri: 'file:///tmp/out.txt', text: 'file text' } },
+          { type: 'resource_link', uri: 'file:///tmp/linked.txt', name: 'linked.txt' }
         ]
       }
     })
@@ -59,7 +60,23 @@ describe('MCP protocol helpers', () => {
       { _tag: 'Text', text: 'hello' },
       { _tag: 'Image', data: 'abc', mimeType: 'image/png' },
       { _tag: 'Audio', data: 'def', format: 'mp3' },
-      { _tag: 'Text', text: 'MCP resource: file:///tmp/out.txt' }
+      { _tag: 'Text', text: 'file text' },
+      { _tag: 'Text', text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' }
+    ])
+  })
+
+  it('maps embedded blob resources to agent-readable text', () => {
+    const result = toolCallResultToToolResult({
+      toolCallId: 'call_1',
+      result: {
+        content: [
+          { type: 'resource', resource: { uri: 'file:///tmp/out.bin', blob: 'Ym9keQ==', mimeType: 'text/plain' } }
+        ]
+      }
+    })
+
+    expect(result.content).toEqual([
+      { _tag: 'Text', text: 'MCP resource: file:///tmp/out.bin\nYm9keQ==' }
     ])
   })
 

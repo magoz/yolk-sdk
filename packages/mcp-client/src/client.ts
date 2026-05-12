@@ -1,7 +1,6 @@
 import { Duration, Effect, Option, Stream } from 'effect'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
-import { contentText } from '@yolk/protocol'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk/protocol'
 import type {
@@ -426,17 +425,7 @@ const resolveMcpToolResult = (input: CallMcpServerToolInput, result: unknown) =>
       )
     )
 
-    const toolResult = toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
-
-    if (toolCallResult.isError === true) {
-      return yield* fail(
-        input.config.name,
-        `MCP tool returned error: ${contentText(toolResult.content)}`,
-        'tool_error'
-      )
-    }
-
-    return toolResult
+    return toolCallResultToToolResult({ toolCallId: input.toolCallId, result: toolCallResult })
   })
 
 export const callRemoteMcpServerTool = (

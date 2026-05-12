@@ -28,7 +28,8 @@
 
 - Keep JSON-RPC id handling exact for responses and errors.
 - Unknown methods/tools and invalid params must return protocol-shaped errors.
-- Tool failures should be converted into safe MCP tool results/errors.
+- Tool handler failures should return safe MCP `isError` tool results, not JSON-RPC errors, so callers can show error content to models.
+- Convert protocol text/image/audio content and `structuredContent` back to MCP tool results without flattening media to text.
 - Keep server primitives reusable across CLI, app routes, and tests.
 - Use Effect platform `Stdio`/streams for stdio; callers provide `NodeStdio.layer` in Node CLIs.
 - Do not use raw `node:readline` or direct `process.stdin/stdout/stderr` in package stdio code.
