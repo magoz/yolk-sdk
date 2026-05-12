@@ -539,6 +539,7 @@ Completed:
 - `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
 - `/api/agent/commands` lists commands and renders command prompt macros.
 - `/agent` composer has slash command picker + render/submit flow.
+- `pnpm skillset:build` generates `cloudflare/agent/src/generated/skillset.ts` for no-filesystem Worker/DO runtime consumption.
 - Tests for package core, file source, skill tool, and slash command model.
 
 Config shape:
@@ -567,7 +568,6 @@ YOLK_SKILLSET config
 
 Remaining:
 
-- Build-generated manifest for Cloudflare/no-filesystem runtime.
 - Global dirs, DB/KV/R2 sources, permissions, file refs, shell interpolation.
 
 ## Open questions

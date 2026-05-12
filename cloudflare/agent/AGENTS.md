@@ -9,6 +9,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
 - Current goal: prove `@yolk/*` packages run inside Cloudflare Durable Objects with typed protocol events and append-log durable transcript storage.
 - DO storage uses `SessionEventStore`; reconnect marks latest incomplete run `RunInterrupted` before accepting a new socket.
+- Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
 - Do not expand into full product infrastructure until package APIs are stable.
 
 ## Strategic Direction
@@ -72,6 +73,7 @@ Do not build these here yet unless explicitly requested:
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Use faux provider until Cloudflare DO + persistence path is proven.
+- Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.

@@ -237,6 +237,9 @@ importers:
       '@yolk/protocol':
         specifier: workspace:^
         version: link:../../packages/protocol
+      '@yolk/skillset':
+        specifier: workspace:^
+        version: link:../../packages/skillset
       alchemy:
         specifier: 2.0.0-beta.36
         version: 2.0.0-beta.36(patch_hash=54ab540a0c44f12091440e1ae5132c255329eb3b936ce1f4b3779147406b9e07)(@effect/platform-bun@4.0.0-beta.65(effect@4.0.0-beta.65))(@effect/platform-node@4.0.0-beta.65(effect@4.0.0-beta.65)(ioredis@5.10.1))(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@types/react@19.2.8)(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(zod@4.3.5))(effect@4.0.0-beta.65)(typescript@5.9.3)(vite@7.3.1(@types/node@25.6.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(workerd@1.20260417.1)(ws@8.20.0)(zod@4.3.5)

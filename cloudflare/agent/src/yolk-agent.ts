@@ -29,7 +29,9 @@ import {
   UserMessage,
   type AgentEvent as AgentEventType
 } from '@yolk/protocol'
+import { formatAvailableSkills } from '@yolk/skillset'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
+import { generatedSkillsetManifest } from './generated/skillset.ts'
 
 type SocketAttachment = {
   readonly sessionId: string
@@ -38,8 +40,13 @@ type SocketAttachment = {
 
 const eventsKey = 'runtime-events'
 
+const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
+
+const availableSkills = formatAvailableSkills(generatedSkillsetManifest.skills)
+
 const runtimeConfig = {
-  systemPrompt: 'You are a minimal Yolk Cloudflare runtime smoke-test agent.',
+  systemPrompt:
+    availableSkills.length === 0 ? cloudflareSystemPrompt : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
   tools: [],
   model: 'faux-cloudflare'
 }
