@@ -23,6 +23,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
 - Text may begin after reasoning in the same assistant turn; keep it streaming from first `LLMTextDelta`, not only final `AssistantMessage`.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
+- Tool-origin error results (`ToolResult.isError`) render as failed tool output, distinct from transport/tool execution errors.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.

@@ -44,6 +44,7 @@ export type AgentChatItem =
       readonly toolCallId: string
       readonly name: string
       readonly content: Content
+      readonly isError?: boolean
     }
   | { readonly _tag: 'UserDraft'; readonly id: string; readonly text: string }
   | { readonly _tag: 'AssistantDraft'; readonly id: string; readonly text: string }
@@ -195,7 +196,8 @@ const itemFromPart = (
         messageId: message.id,
         toolCallId: part.toolCallId,
         name: part.name,
-        content: part.content
+        content: part.content,
+        isError: part.isError
       })
     case 'Error':
       return Option.some({ _tag: 'Error', id: part.id, message: part.message })

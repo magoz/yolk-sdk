@@ -110,14 +110,65 @@ const formatToolDuration = (duration: ToolDuration) => {
 
 const toolStateLabel = (state: ToolRunState) => {
   switch (state._tag) {
+    case 'InputStreaming':
+      return 'input'
+    case 'ApprovalRequested':
+      return 'approval'
+    case 'Denied':
+      return 'denied'
     case 'Running':
       return 'running'
     case 'Called':
       return state.duration._tag === 'Known' ? formatToolDuration(state.duration) : 'called'
     case 'Completed':
-      return formatToolDuration(state.duration)
+      return state.result.isError === true ? 'error' : formatToolDuration(state.duration)
+    case 'Errored':
+      return 'error'
+    case 'ProviderCompleted':
+      return state.result.isError === true ? 'error' : 'done'
   }
 }
+
+const toolStateHasError = (state: ToolRunState) => {
+  switch (state._tag) {
+    case 'Completed':
+    case 'ProviderCompleted':
+      return state.result.isError === true
+    case 'Denied':
+    case 'Errored':
+      return true
+    case 'ApprovalRequested':
+    case 'Called':
+    case 'InputStreaming':
+    case 'Running':
+      return false
+  }
+}
+
+const toolStateContent = (state: ToolRunState) => {
+  switch (state._tag) {
+    case 'Completed':
+    case 'ProviderCompleted':
+      return contentPreview(state.result.content)
+    case 'Denied':
+      return state.reason
+    case 'Errored':
+      return state.message
+    case 'ApprovalRequested':
+    case 'Called':
+    case 'InputStreaming':
+    case 'Running':
+      return undefined
+  }
+}
+
+const toolResultLabel = (isError: boolean) => (isError ? 'tool error' : 'tool result')
+
+const toolResultRole = (isError: boolean) => (isError ? 'error' : 'tool')
+
+const toolResultBadgeVariant = (isError: boolean) => (isError ? 'destructive' : 'outline')
+
+const toolResultTitle = (name: string, isError: boolean) => (isError ? `${name} failed` : name)
 
 function ToolRunCard({
   id,
@@ -130,6 +181,8 @@ function ToolRunCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = state._tag === 'Running'
+  const isError = toolStateHasError(state)
+  const output = toolStateContent(state)
   const detailsId = `${id}-details`
   const handleToggle = useCallback(() => {
     setExpanded(current => !current)
@@ -138,8 +191,15 @@ function ToolRunCard({
   return (
     <div className={chatRowClass}>
       <div className="flex gap-3">
-        <UtilityIcon role="tool" />
-        <div className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-amber-500/20 bg-amber-500/5 text-amber-900 shadow-xs dark:text-amber-200">
+        <UtilityIcon role={isError ? 'error' : 'tool'} />
+        <div
+          className={cn(
+            'min-w-0 flex-1 overflow-hidden rounded-2xl border shadow-xs',
+            isError
+              ? 'border-destructive/20 bg-destructive/5 text-destructive'
+              : 'border-amber-500/20 bg-amber-500/5 text-amber-900 dark:text-amber-200'
+          )}
+        >
           <button
             type="button"
             aria-expanded={expanded}
@@ -147,7 +207,7 @@ function ToolRunCard({
             onClick={handleToggle}
             className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <Badge variant="outline">tool</Badge>
+            <Badge variant={toolResultBadgeVariant(isError)}>{isError ? 'tool error' : 'tool'}</Badge>
             {isRunning ? (
               <LoaderCircleIcon
                 className="size-3 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
@@ -182,16 +242,16 @@ function ToolRunCard({
               <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground">
                 {unknownPreview(call.params)}
               </div>
-              {state._tag === 'Completed' ? (
+              {output === undefined ? null : (
                 <>
                   <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
                     Output
                   </div>
                   <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5">
-                    {contentPreview(state.result.content)}
+                    {output}
                   </div>
                 </>
-              ) : null}
+              )}
             </div>
           ) : null}
         </div>
@@ -200,9 +260,17 @@ function ToolRunCard({
   )
 }
 
-function ToolResultCard({ name, content }: { readonly name: string; readonly content: string }) {
+function ToolResultCard({
+  name,
+  content,
+  isError
+}: {
+  readonly name: string
+  readonly content: string
+  readonly isError: boolean
+}) {
   return (
-    <UtilityCard role="tool" title={name} badge="tool result">
+    <UtilityCard role={toolResultRole(isError)} title={toolResultTitle(name, isError)} badge={toolResultLabel(isError)}>
       {content}
     </UtilityCard>
   )
@@ -588,7 +656,11 @@ function AgentChatItemView({
       ) : null
     case 'ToolResult':
       return showInlineTools ? (
-        <ToolResultCard name={item.name} content={contentPreview(item.content)} />
+        <ToolResultCard
+          name={item.name}
+          content={contentPreview(item.content)}
+          isError={item.isError === true}
+        />
       ) : null
     case 'UserDraft':
       return <DraftCard text={item.text} role="user" />

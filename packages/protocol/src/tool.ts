@@ -18,5 +18,6 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
 export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   toolCallId: NonEmptyTrimmedString,
   content: Content,
+  isError: Schema.optional(Schema.Boolean),
   structuredContent: Schema.optional(Schema.Unknown)
 }) {}

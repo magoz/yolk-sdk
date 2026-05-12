@@ -270,6 +270,7 @@ describe('MCP client', () => {
       }).pipe(Effect.provide(makeFakeRemoteMcpLayer('tool-error')))
 
       expect(result.content).toBe('bad params')
+      expect(result.isError).toBe(true)
     })
   )
 

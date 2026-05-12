@@ -37,7 +37,7 @@
 - Core local helpers require `ChildProcessSpawner`; Node wrappers provide it at the boundary.
 - Match stdio responses by JSON-RPC id; never assume response order.
 - Validate `initialize` JSON-RPC response before consuming target request response.
-- Preserve MCP `isError` tool-call results as normal `ToolResult`s so the model can self-correct from tool-visible error content.
+- Preserve MCP `isError` tool-call results as normal `ToolResult`s so the model can self-correct and UI can style tool-origin errors.
 - Map MCP text/image/audio/resource/resource_link blocks into protocol content without leaking MCP-specific block types.
 - Keep parse/encoding/validation causes distinct for transport debugging.
 - Reject duplicate generated tool names after server/tool sanitization.

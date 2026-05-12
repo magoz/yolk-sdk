@@ -97,11 +97,11 @@ describe('protocol wire schemas', () => {
             ProviderToolCallPart.make({ call }),
             ProviderToolResultPart.make({
               toolCallId: call.id,
-              result: ToolResult.make({ toolCallId: call.id, content: 'provider result' })
+              result: ToolResult.make({ toolCallId: call.id, content: 'provider result', isError: true })
             })
           ]
         }),
-        ToolResultMessage.make({ toolCallId: call.id, content: 'result' })
+        ToolResultMessage.make({ toolCallId: call.id, content: 'result', isError: true })
       ]
 
       const decoded = yield* Effect.forEach(messages, roundTripMessage)
@@ -116,6 +116,7 @@ describe('protocol wire schemas', () => {
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'Example Domain',
+        isError: true,
         structuredContent: { title: 'Example Domain' }
       })
       const assistant = AssistantAgentMessage.make({
@@ -161,6 +162,7 @@ describe('protocol wire schemas', () => {
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'ok',
+        isError: true,
         structuredContent: { ok: true }
       })
       const content = [TextPart.make({ text: 'hi' }), AudioPart.make({ data: 'abc', format: 'mp3' })]

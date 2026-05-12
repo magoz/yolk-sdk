@@ -294,6 +294,7 @@ export const toolCallResultToToolResult = (input: {
   return ToolResult.make({
     toolCallId: input.toolCallId,
     content: resultContent,
+    isError: input.result.isError,
     structuredContent: input.result.structuredContent
   })
 }

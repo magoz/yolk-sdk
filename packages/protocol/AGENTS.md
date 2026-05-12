@@ -37,6 +37,7 @@
 - Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
 - Assistant messages use ordered `AssistantPart`s: text, reasoning, host tool calls, provider tool calls, provider tool results.
 - Host tool results stay as separate `ToolResultMessage`s; provider-executed results stay inside assistant parts/events.
+- `ToolResult.isError` marks tool-origin failures that remain model-visible; transport/execution failures still use error events.
 - Tool lifecycle events are `ToolInput*`, `ToolApproval*`, `ToolExecution*`, and `ProviderToolResult`; no old lifecycle aliases.
 - Tool ids/names are non-empty trimmed strings; validate at protocol boundaries.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.

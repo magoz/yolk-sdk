@@ -44,6 +44,7 @@ const richResultServer = makeMcpToolServer({
               ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
               AudioPart.make({ data: 'def', format: 'mp3' })
             ],
+            isError: true,
             structuredContent: { ok: true }
           })
         )
@@ -214,6 +215,7 @@ describe('MCP tool server', () => {
             { type: 'image', data: 'abc', mimeType: 'image/png' },
             { type: 'audio', data: 'def', mimeType: 'audio/mp3' }
           ],
+          isError: true,
           structuredContent: { ok: true }
         }
       })

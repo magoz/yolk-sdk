@@ -91,13 +91,23 @@ describe('agent chat messages', () => {
 
   it('preserves tool state and hides matched tool result messages', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
-    const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+    const result = ToolResult.make({
+      toolCallId: call.id,
+      content: 'Example Domain',
+      isError: true,
+      structuredContent: { title: 'Example Domain' }
+    })
     const messages = buildAgentChatMessages({
       messages: [
         AssistantAgentMessage.make({
           parts: [AssistantTextPart.make({ content: '' }), HostToolCallPart.make({ call })]
         }),
-        ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+        ToolResultMessage.make({
+          toolCallId: call.id,
+          content: result.content,
+          isError: result.isError,
+          structuredContent: result.structuredContent
+        })
       ],
       userDraft: '',
       assistantDraft: '',

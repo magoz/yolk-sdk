@@ -255,6 +255,7 @@ const makeToolExecutionStream = (
             const toolResultMessage = ToolResultMessage.make({
               toolCallId: result.toolCallId,
               content: result.content,
+              isError: result.isError,
               structuredContent: result.structuredContent
             })
 

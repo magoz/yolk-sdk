@@ -45,6 +45,7 @@ describe('MCP protocol helpers', () => {
       toolCallId: 'call_1',
       result: {
         structuredContent,
+        isError: true,
         content: [
           { type: 'text', text: 'hello' },
           { type: 'image', data: 'abc', mimeType: 'image/png' },
@@ -56,6 +57,7 @@ describe('MCP protocol helpers', () => {
     })
 
     expect(result.structuredContent).toEqual(structuredContent)
+    expect(result.isError).toBe(true)
     expect(result.content).toEqual([
       { _tag: 'Text', text: 'hello' },
       { _tag: 'Image', data: 'abc', mimeType: 'image/png' },

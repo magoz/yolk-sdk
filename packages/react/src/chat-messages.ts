@@ -62,6 +62,8 @@ export type AgentChatPart =
       readonly toolCallId: string
       readonly name: string
       readonly content: Content
+      readonly isError?: boolean
+      readonly structuredContent?: unknown
     }
   | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
 
@@ -177,7 +179,9 @@ const toolResultEntry = (
           message.toolCallId,
           ToolResult.make({
             toolCallId: message.toolCallId,
-            content: message.content
+            content: message.content,
+            isError: message.isError,
+            structuredContent: message.structuredContent
           })
         ]
       ]
@@ -310,7 +314,9 @@ const assistantPartsFromMessage = ({
             id: `message-${messageIndex}-provider-tool-result-${part.toolCallId}`,
             toolCallId: part.toolCallId,
             name: part.toolCallId,
-            content: part.result.content
+            content: part.result.content,
+            isError: part.result.isError,
+            structuredContent: part.result.structuredContent
           }
         ]
     }
@@ -723,7 +729,9 @@ const appendOrphanToolResult = (
           id: `tool-result-${result.toolCallId}`,
           toolCallId: result.toolCallId,
           name: result.toolCallId,
-          content: result.content
+          content: result.content,
+          isError: result.isError,
+          structuredContent: result.structuredContent
         }
       ]
     }
@@ -788,7 +796,12 @@ export const appendProtocolMessage = (
     case 'ToolResult':
       return appendOrphanToolResult(
         messages,
-        ToolResult.make({ toolCallId: message.toolCallId, content: message.content })
+        ToolResult.make({
+          toolCallId: message.toolCallId,
+          content: message.content,
+          isError: message.isError,
+          structuredContent: message.structuredContent
+        })
       )
   }
 }
@@ -930,7 +943,9 @@ const chatMessagesFromProtocolMessage = ({
                   id: `message-${sequence}-tool-result-${message.toolCallId}`,
                   toolCallId: message.toolCallId,
                   name: toolNames.get(message.toolCallId) ?? message.toolCallId,
-                  content: message.content
+                  content: message.content,
+                  isError: message.isError,
+                  structuredContent: message.structuredContent
                 }
               ]
             }
@@ -1074,12 +1089,20 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
               ToolResultMessage.make({
                 toolCallId: part.state.result.toolCallId,
                 content: part.state.result.content,
+                isError: part.state.result.isError,
                 structuredContent: part.state.result.structuredContent
               })
             ]
           : []
       case 'ToolResult':
-        return [ToolResultMessage.make({ toolCallId: part.toolCallId, content: part.content })]
+        return [
+          ToolResultMessage.make({
+            toolCallId: part.toolCallId,
+            content: part.content,
+            isError: part.isError,
+            structuredContent: part.structuredContent
+          })
+        ]
       case 'Error':
       case 'Reasoning':
       case 'Text':

@@ -155,10 +155,11 @@ const mcpContentBlockFromPart = (part: ContentPart) => {
 
 const mcpResultFromToolResult = (result: ToolResult) => {
   const content = Arr.map(contentParts(result.content), mcpContentBlockFromPart)
+  const base = result.isError === undefined ? { content } : { content, isError: result.isError }
 
   return result.structuredContent === undefined
-    ? { content }
-    : { content, structuredContent: result.structuredContent }
+    ? base
+    : { ...base, structuredContent: result.structuredContent }
 }
 
 const mcpErrorResult = (message: string) => ({

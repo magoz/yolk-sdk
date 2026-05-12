@@ -57,6 +57,7 @@ export class AssistantAgentMessage extends Schema.TaggedClass<AssistantAgentMess
 export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('ToolResult', {
   toolCallId: Schema.String,
   content: Content,
+  isError: Schema.optional(Schema.Boolean),
   structuredContent: Schema.optional(Schema.Unknown)
 }) {}
 
