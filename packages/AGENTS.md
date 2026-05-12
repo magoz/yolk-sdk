@@ -236,11 +236,11 @@ Use these before broadening package scope:
    - Surface MCP tool error content instead of collapsing to generic errors.
 
 3. **Design durable runtime append store**
-   - Write PRD before implementation.
+   - PRD drafted in `prd-durable-runtime-append-store.md`.
    - Define session events, revisions, resume semantics, interrupted cleanup, and fanout boundaries.
 
 4. **Design richer tool lifecycle events**
-   - Write PRD before implementation.
+   - PRD drafted in `prd-tool-lifecycle-events.md`.
    - Evaluate tool input start/delta/end, approvals, output-error, provider-executed tools, and step metadata.
 
 5. **Assess reusable provider adapter package**
