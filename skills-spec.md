@@ -537,7 +537,9 @@ Completed:
 - App config source via `YOLK_SKILLSET` manifest JSON.
 - Text-only `skill` tool via `@yolk/tool-registry`.
 - `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
-- Tests for package core, file source, and skill tool.
+- `/api/agent/commands` lists commands and renders command prompt macros.
+- `/agent` composer has slash command picker + render/submit flow.
+- Tests for package core, file source, skill tool, and slash command model.
 
 Config shape:
 
@@ -566,8 +568,6 @@ YOLK_SKILLSET config
 Remaining:
 
 - Build-generated manifest for Cloudflare/no-filesystem runtime.
-- Command render route/server action.
-- Slash command UI.
 - Global dirs, DB/KV/R2 sources, permissions, file refs, shell interpolation.
 
 ## Open questions

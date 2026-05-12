@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { Array as Arr, Option } from 'effect'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Array as Arr, Effect, Option } from 'effect'
 import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk/protocol'
 import {
   buildAgentChatItems,
@@ -19,6 +19,7 @@ import {
   type AgentActivityItem
 } from './agent-activity-model'
 import { AgentComposer } from './agent-composer'
+import { loadAgentCommands, renderAgentCommand } from './command-client'
 import {
   contentFromInput,
   isFailedImageAttachment,
@@ -29,6 +30,9 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
+import {
+  type AgentCommandSummary
+} from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
@@ -208,6 +212,8 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
   const [contextTokens, setContextTokens] = useState<number | null>(null)
   const [compaction, setCompaction] = useState<AgentCompactionState>({ _tag: 'Idle' })
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
+  const [commands, setCommands] = useState<ReadonlyArray<AgentCommandSummary>>([])
+  const [isCommandRendering, setIsCommandRendering] = useState(false)
   const nextActivityIdRef = useRef(0)
 
   const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
@@ -291,6 +297,28 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
       tone: 'neutral'
     })
   }, [recordActivity])
+
+  useEffect(() => {
+    let active = true
+
+    Effect.runPromise(loadAgentCommands())
+      .then(loadedCommands => {
+        if (!active) {
+          return
+        }
+
+        setCommands(loadedCommands)
+      })
+      .catch(() => {
+        if (active) {
+          setCommands([])
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
@@ -463,6 +491,42 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
       setImageAttachments([])
     }
   }, [canSubmitContent, imageAttachments, input, recordActivity, submitDisabled, submitMessage])
+
+  const handleSlashCommandSubmit = useCallback(
+    (command: string, argumentsText: string) => {
+      if (submitDisabled || isCommandRendering) {
+        return
+      }
+
+      setIsCommandRendering(true)
+      Effect.runPromise(renderAgentCommand(command, argumentsText))
+        .then(renderedContent => {
+          if (!canSubmitContent(renderedContent)) {
+            recordActivity({ title: 'Command empty', detail: `/${command}`, tone: 'error' })
+            return
+          }
+
+          recordActivity({
+            title: 'Command submitted',
+            detail: `/${command}`,
+            tone: 'neutral'
+          })
+          const result = submitMessage(UserMessage.make({ content: renderedContent }))
+
+          if (result._tag === 'Submitted') {
+            setInput('')
+            setImageAttachments([])
+          }
+        })
+        .catch(() => {
+          recordActivity({ title: 'Command failed', detail: `/${command}`, tone: 'error' })
+        })
+        .finally(() => {
+          setIsCommandRendering(false)
+        })
+    },
+    [canSubmitContent, isCommandRendering, recordActivity, submitDisabled, submitMessage]
+  )
 
   const handleDeleteTurn = useCallback(
     (messageId: string) => {
@@ -681,10 +745,13 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             isVoiceLive={isVoiceLive}
             imageInputSupported={imageInputSupported}
             imageAttachments={imageAttachments}
+            commands={commands}
+            isCommandRendering={isCommandRendering}
             onInputChange={handleInputChange}
             onImageAttachmentsChange={handleImageAttachmentsChange}
             onRemoveImageAttachment={handleRemoveImageAttachment}
             onRetryImageAttachment={handleRetryImageAttachment}
+            onSlashCommandSubmit={handleSlashCommandSubmit}
             onSubmit={handleSubmit}
             onStop={stop}
             onToggleVoice={toggleVoice}

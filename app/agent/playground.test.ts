@@ -10,6 +10,12 @@ import {
 } from './agent-usage-meter'
 import { contentFromInput, type ImageAttachment } from './image-attachment-content'
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
+import {
+  matchingSlashCommands,
+  normalizeSlashSelectionIndex,
+  slashCommandInput,
+  type AgentCommandSummary
+} from './slash-command-model'
 
 const imageAttachment: ImageAttachment = {
   _tag: 'Ready',
@@ -42,6 +48,12 @@ const usage = AgentUsage.make({
   input: AgentInputUsage.make({ total: 1_200, cacheRead: 300 }),
   output: AgentOutputUsage.make({ total: 450, reasoning: 50 })
 })
+
+const commands: ReadonlyArray<AgentCommandSummary> = [
+  { name: 'review', description: 'Review changes', hints: ['$ARGUMENTS'] },
+  { name: 'refactor', hints: ['$1'] },
+  { name: 'test', hints: [] }
+]
 
 describe('agent playground', () => {
   it('builds text-only submit content', () => {
@@ -129,4 +141,14 @@ describe('agent playground', () => {
       false
     )
   })
+
+  it('models slash command input', () => {
+    expect(slashCommandInput('hello')._tag).toBe('None')
+    expect(slashCommandInput('/review app/agent')._tag).toBe('Some')
+    expect(matchingSlashCommands('/re', commands)).toEqual([commands[0], commands[1]])
+    expect(matchingSlashCommands('/test now', commands)).toEqual([commands[2]])
+    expect(normalizeSlashSelectionIndex(-1, 3)).toBe(2)
+    expect(normalizeSlashSelectionIndex(3, 3)).toBe(0)
+  })
+
 })

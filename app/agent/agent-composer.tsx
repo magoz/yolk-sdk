@@ -19,11 +19,18 @@ import {
   MicIcon,
   PhoneOffIcon,
   SquareIcon,
+  TerminalIcon,
   XIcon
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import {
+  matchingSlashCommands,
+  normalizeSlashSelectionIndex,
+  slashCommandInput,
+  type AgentCommandSummary
+} from './slash-command-model'
 
 export type AgentComposerImageAttachment = {
   readonly _tag: 'Ready'
@@ -54,10 +61,13 @@ type AgentComposerProps = {
   readonly isVoiceLive: boolean
   readonly imageInputSupported: boolean
   readonly imageAttachments: ReadonlyArray<AgentComposerAttachment>
+  readonly commands: ReadonlyArray<AgentCommandSummary>
+  readonly isCommandRendering: boolean
   readonly onInputChange: (value: string) => void
   readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
   readonly onRemoveImageAttachment: (id: string) => void
   readonly onRetryImageAttachment: (id: string) => void
+  readonly onSlashCommandSubmit: (command: string, argumentsText: string) => void
   readonly onSubmit: () => void
   readonly onStop: () => void
   readonly onToggleVoice: () => void
@@ -72,10 +82,13 @@ export function AgentComposer({
   isVoiceLive,
   imageInputSupported,
   imageAttachments,
+  commands,
+  isCommandRendering,
   onInputChange,
   onImageAttachmentsChange,
   onRemoveImageAttachment,
   onRetryImageAttachment,
+  onSlashCommandSubmit,
   onSubmit,
   onStop,
   onToggleVoice
@@ -83,12 +96,28 @@ export function AgentComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragDepth, setDragDepth] = useState(0)
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0)
   const dropDisabled = isRunning || isVoiceMode || !imageInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
   const hasAttachments = imageAttachments.length > 0
   const hasReadyAttachments = Option.isSome(
     Arr.findFirst(imageAttachments, imageAttachment => imageAttachment._tag === 'Ready')
   )
+  const commandMatches = matchingSlashCommands(input, commands)
+  const slashCommandsDisabled = isRunning || isVoiceMode || hasAttachments || isCommandRendering
+  const slashMenuOpen = commandMatches.length > 0 && !slashCommandsDisabled
+  const normalizedActiveCommandIndex = normalizeSlashSelectionIndex(
+    activeCommandIndex,
+    commandMatches.length
+  )
+  const selectedCommand = commandMatches[normalizedActiveCommandIndex]
+
+  const submitSlashCommand = (command: AgentCommandSummary) => {
+    Option.match(slashCommandInput(input), {
+      onNone: () => undefined,
+      onSome: slash => onSlashCommandSubmit(command.name, slash.argumentsText)
+    })
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -100,8 +129,26 @@ export function AgentComposer({
       return
     }
 
+    if (slashMenuOpen && event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveCommandIndex(current => normalizeSlashSelectionIndex(current + 1, commandMatches.length))
+      return
+    }
+
+    if (slashMenuOpen && event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveCommandIndex(current => normalizeSlashSelectionIndex(current - 1, commandMatches.length))
+      return
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
+
+      if (slashMenuOpen && selectedCommand !== undefined) {
+        submitSlashCommand(selectedCommand)
+        return
+      }
+
       onSubmit()
     }
   }
@@ -113,6 +160,11 @@ export function AgentComposer({
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     onImageAttachmentsChange(Array.from(event.target.files ?? []))
     event.target.value = ''
+  }
+
+  const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    setActiveCommandIndex(0)
+    onInputChange(event.target.value)
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -280,13 +332,48 @@ export function AgentComposer({
         <Textarea
           ref={textareaRef}
           value={input}
-          onChange={event => onInputChange(event.target.value)}
+          onChange={handleTextChange}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={isVoiceMode ? 'Voice mode is active...' : 'Ask the agent...'}
           className="max-h-48 min-h-20 resize-none border-0 bg-transparent px-3 py-3 text-base shadow-none focus-visible:border-transparent focus-visible:ring-0 md:text-sm"
           aria-label="Agent prompt"
         />
+        {slashMenuOpen ? (
+          <div className="px-1 pb-2">
+            <div
+              role="listbox"
+              aria-label="Slash commands"
+              className="max-h-56 overflow-y-auto rounded-2xl border border-foreground/10 bg-popover p-1 shadow-lg shadow-foreground/10"
+            >
+              {commandMatches.map((command, index) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  role="option"
+                  aria-selected={index === normalizedActiveCommandIndex}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => submitSlashCommand(command)}
+                  className={cn(
+                    'flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150 ease-out',
+                    index === normalizedActiveCommandIndex
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-popover-foreground hover:bg-accent/60'
+                  )}
+                >
+                  <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">/{command.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {command.description ??
+                        (command.hints.length > 0 ? command.hints.join(' ') : 'Run command')}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-3 px-1 pb-1">
           <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
             <span
@@ -297,7 +384,9 @@ export function AgentComposer({
               }
               aria-hidden
             />
-            <span className="truncate">{hint}</span>
+            <span className="truncate">
+              {isCommandRendering ? 'Rendering command' : slashMenuOpen ? 'Select command' : hint}
+            </span>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
