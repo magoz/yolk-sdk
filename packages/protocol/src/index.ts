@@ -32,15 +32,35 @@ export {
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,
-  LLMToolCall,
-  ToolExecutionEnd,
-  ToolExecutionStart,
-  ToolResultEvent,
+  ProviderToolResult,
+  ToolApprovalDenied,
+  ToolApprovalGranted,
+  ToolApprovalRequested,
+  ToolExecutionCompleted,
+  ToolExecutionError,
+  ToolExecutionStarted,
+  ToolInputDelta,
+  ToolInputEnd,
+  ToolInputStart,
   TurnEnd,
   TurnStart,
   UsageUpdate
 } from './event.ts'
-export { AgentMessage, AssistantAgentMessage, ToolResultMessage, UserMessage } from './message.ts'
+export {
+  AgentMessage,
+  AssistantAgentMessage,
+  AssistantPart,
+  AssistantReasoningPart,
+  AssistantTextPart,
+  HostToolCallPart,
+  ProviderToolCallPart,
+  ProviderToolResultPart,
+  ToolResultMessage,
+  UserMessage,
+  assistantContent,
+  assistantHostToolCalls,
+  assistantReasoningText
+} from './message.ts'
 export { AgentReasoningEffort } from './reasoning.ts'
 export { ToolCall, ToolDef, ToolResult } from './tool.ts'
 export {

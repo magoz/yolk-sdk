@@ -5,15 +5,17 @@ import {
   AgentStart,
   AssistantAgentMessage,
   AssistantMessageEvent,
+  AssistantReasoningPart,
+  AssistantTextPart,
+  HostToolCallPart,
   LLMReasoningDelta,
   LLMTextDelta,
-  LLMToolCall,
-  ToolExecutionEnd,
-  ToolExecutionStart,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
   ToolCall,
   ToolResult,
-  ToolResultEvent,
   ToolResultMessage,
+  ToolInputEnd,
   UserMessage,
   zeroAgentUsage
 } from '@yolk/protocol'
@@ -23,7 +25,9 @@ describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
-    const message = AssistantAgentMessage.make({ content: 'ok', toolCalls: [call] })
+    const message = AssistantAgentMessage.make({
+      parts: [AssistantTextPart.make({ content: 'ok' }), HostToolCallPart.make({ call })]
+    })
     const toolResultMessage = ToolResultMessage.make({
       toolCallId: call.id,
       content: result.content
@@ -34,11 +38,10 @@ describe('reduceAgentEvents', () => {
         AgentStart.make({}),
         LLMTextDelta.make({ text: 'o' }),
         LLMTextDelta.make({ text: 'k' }),
-        LLMToolCall.make({ call }),
+        ToolInputEnd.make({ call }),
         AssistantMessageEvent.make({ message }),
-        ToolExecutionStart.make({ call }),
-        ToolExecutionEnd.make({ call, result }),
-        ToolResultEvent.make({ result }),
+        ToolExecutionStarted.make({ call }),
+        ToolExecutionCompleted.make({ call, result }),
         AgentEnd.make({
           messages: [message, toolResultMessage],
           turns: 1,
@@ -62,19 +65,19 @@ describe('reduceAgentEvents', () => {
   it('keeps tool runs anchored in live messages during active runs', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
-    const message = AssistantAgentMessage.make({ content: '', toolCalls: [call] })
-    const resultMessage = ToolResultMessage.make({ toolCallId: call.id, content: result.content })
+    const message = AssistantAgentMessage.make({
+      parts: [HostToolCallPart.make({ call })]
+    })
 
     const state = reduceAgentEvents([
       AgentStart.make({}),
-      LLMToolCall.make({ call }),
+      ToolInputEnd.make({ call }),
       AssistantMessageEvent.make({ message }),
-      ToolExecutionStart.make({ call }),
-      ToolExecutionEnd.make({ call, result }),
-      ToolResultEvent.make({ result })
+      ToolExecutionStarted.make({ call }),
+      ToolExecutionCompleted.make({ call, result })
     ])
 
-    expect(state.liveMessages).toEqual([message, resultMessage])
+    expect(state.liveMessages).toEqual([message])
     expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
   })
 
@@ -118,9 +121,10 @@ describe('reduceAgentEvents', () => {
 
   it('stores reasoning while streaming and moves final reasoning into messages', () => {
     const message = AssistantAgentMessage.make({
-      content: 'ok',
-      toolCalls: [],
-      reasoning: 'thinking'
+      parts: [
+        AssistantReasoningPart.make({ text: 'thinking' }),
+        AssistantTextPart.make({ content: 'ok' })
+      ]
     })
 
     const streaming = reduceAgentEvents([

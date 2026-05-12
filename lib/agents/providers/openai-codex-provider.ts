@@ -11,6 +11,8 @@ import {
   AgentOutputUsage,
   AgentUsage,
   ToolCall,
+  assistantContent,
+  assistantHostToolCalls,
   contentParts,
   type AgentMessage,
   type AgentReasoningEffort,
@@ -289,8 +291,8 @@ const messageToCodexInput = (
       case 'User':
         return [{ role: 'user', content: yield* contentToUserInput(message.content) }]
       case 'Assistant': {
-        const content = yield* contentToText(message.content, 'Assistant')
-        const toolCallInputs = yield* Effect.forEach(message.toolCalls, toolCallToCodexInput)
+        const content = yield* contentToText(assistantContent(message), 'Assistant')
+        const toolCallInputs = yield* Effect.forEach(assistantHostToolCalls(message), toolCallToCodexInput)
 
         if (content.length > 0) {
           const assistantMessage: OpenAiCodexInputItem = { role: 'assistant', content }

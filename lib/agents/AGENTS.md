@@ -36,7 +36,7 @@ Reasoning:
 
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex request sets `reasoning.summary = 'auto'`; summaries are optional provider output.
-- Show reasoning only from `LLMReasoningDelta` / `Assistant.reasoning`; never synthesize or label missing reasoning as available.
+- Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.
 
 ## Current Tools
 

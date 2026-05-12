@@ -78,10 +78,16 @@ export const reduceAgentChatState = (
         case 'LLMStreamEnd':
         case 'LLMStreamStart':
         case 'LLMTextDelta':
-        case 'LLMToolCall':
-        case 'ToolExecutionEnd':
-        case 'ToolExecutionStart':
-        case 'ToolResult':
+        case 'ProviderToolResult':
+        case 'ToolApprovalDenied':
+        case 'ToolApprovalGranted':
+        case 'ToolApprovalRequested':
+        case 'ToolExecutionCompleted':
+        case 'ToolExecutionError':
+        case 'ToolExecutionStarted':
+        case 'ToolInputDelta':
+        case 'ToolInputEnd':
+        case 'ToolInputStart':
         case 'TurnEnd':
         case 'TurnStart':
         case 'UsageUpdate':
@@ -105,7 +111,8 @@ export const reduceAgentChatState = (
 }
 
 export const hasAgentMessageReasoning = (message: AgentMessage) =>
-  message._tag === 'Assistant' && message.reasoning !== undefined && message.reasoning.length > 0
+  message._tag === 'Assistant' &&
+  message.parts.some(part => part._tag === 'Reasoning' && part.text.length > 0)
 
 export const hasAgentChatReasoningSummary = (state: AgentChatState) =>
   state.chatMessages.some(message =>
@@ -113,7 +120,11 @@ export const hasAgentChatReasoningSummary = (state: AgentChatState) =>
   )
 
 export const isActiveChatToolPart = (part: AgentChatPart) =>
-  part._tag === 'ToolCall' && part.state._tag !== 'Completed'
+  part._tag === 'ToolCall' &&
+  part.state._tag !== 'Completed' &&
+  part.state._tag !== 'ProviderCompleted' &&
+  part.state._tag !== 'Errored' &&
+  part.state._tag !== 'Denied'
 export type ActiveChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
 
 export const isCompletedChatToolPart = (part: AgentChatPart) =>

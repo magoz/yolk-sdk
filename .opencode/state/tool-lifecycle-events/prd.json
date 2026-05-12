@@ -11,7 +11,7 @@
         "Provider-executed tool call/result parts can carry providerMetadata without importing provider SDKs",
         "packages/protocol/test/wire.test.ts covers JSON round-trips and invalid payloads for assistant parts"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "protocol-2",
@@ -23,7 +23,7 @@
         "Old ToolExecutionStart and ToolExecutionEnd names are removed or renamed with no compatibility aliases",
         "Protocol tests verify all new event variants round-trip through JSON wire values"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "loop-1",
@@ -35,7 +35,7 @@
         "AgentEnd messages still contain only protocol transcript messages produced by completed turns",
         "agent-loop tests cover successful local execution and tool failure event ordering"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "client-1",
@@ -47,7 +47,7 @@
         "Reducer tests cover streamed input deltas, approval denial, execution error, provider result, and completed local tool paths",
         "No old ToolExecutionStart/ToolExecutionEnd handling remains"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "react-1",
@@ -59,7 +59,7 @@
         "chat-messages and chat-items tests cover ordering, provider-executed parts, denial, and execution errors",
         "Package remains headless and imports no provider SDKs or app UI components"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "adapters-1",
@@ -71,7 +71,7 @@
         "lib/agents/route-handler.ts streams only supported AgentEvent variants",
         "Existing provider and route-handler tests pass with updated expectations"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "docs-1",
@@ -83,7 +83,7 @@
         "packages/react/AGENTS.md documents headless projection expectations for lifecycle states",
         "packages/agent-loop/AGENTS.md documents local execution event semantics and no compatibility aliases"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "verification-1",
@@ -95,7 +95,7 @@
         "pnpm tsc passes",
         "pnpm test:run passes"
       ],
-      "passes": false
+      "passes": true
     }
   ],
   "context": {

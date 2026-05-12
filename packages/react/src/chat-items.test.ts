@@ -2,6 +2,9 @@ import { describe, expect, it } from '@effect/vitest'
 import { Option } from 'effect'
 import {
   AssistantAgentMessage,
+  AssistantReasoningPart,
+  AssistantTextPart,
+  HostToolCallPart,
   ToolCall,
   ToolResult,
   ToolResultMessage,
@@ -9,6 +12,19 @@ import {
 } from '@yolk/protocol'
 import { buildAgentChatItems } from './chat-items'
 import { buildAgentChatMessages, toAgentMessages } from './chat-messages'
+
+const assistantMessage = (input: {
+  readonly content: string
+  readonly reasoning?: string
+  readonly toolCalls?: ReadonlyArray<ToolCall>
+}) =>
+  AssistantAgentMessage.make({
+    parts: [
+      ...(input.reasoning === undefined ? [] : [AssistantReasoningPart.make({ text: input.reasoning })]),
+      AssistantTextPart.make({ content: input.content }),
+      ...(input.toolCalls ?? []).map(call => HostToolCallPart.make({ call }))
+    ]
+  })
 
 describe('buildAgentChatMessages', () => {
   it('projects protocol transcript into ordered message parts', () => {
@@ -21,7 +37,7 @@ describe('buildAgentChatMessages', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({
+        assistantMessage({
           content: 'Fetching.',
           reasoning: 'Need source.',
           toolCalls: [call]
@@ -52,7 +68,7 @@ describe('buildAgentChatMessages', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({
+        assistantMessage({
           content: 'Fetching.',
           reasoning: 'Need source.',
           toolCalls: [call]
@@ -68,7 +84,7 @@ describe('buildAgentChatMessages', () => {
 
     expect(toAgentMessages(messages)).toEqual([
       UserMessage.make({ content: 'summarize https://example.com' }),
-      AssistantAgentMessage.make({
+      assistantMessage({
         content: 'Fetching.',
         reasoning: 'Need source.',
         toolCalls: [call]
@@ -88,7 +104,7 @@ describe('buildAgentChatItems', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({
+        assistantMessage({
           content: 'I will fetch it.',
           reasoning: 'Need page content.',
           toolCalls: [call]
@@ -185,12 +201,12 @@ describe('buildAgentChatItems', () => {
     const toolMessages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
-        AssistantAgentMessage.make({ content: '', toolCalls: [call] })
+        assistantMessage({ content: '', toolCalls: [call] })
       ],
       userDraft: '',
       assistantDraft: '',
       reasoningDraft: '',
-      toolRuns: [{ _tag: 'Running', call, startedAtMs: 1000 }],
+      toolRuns: [{ _tag: 'Executing', call, startedAtMs: 1000 }],
       error: null
     })
     const toolItems = buildAgentChatItems({
@@ -227,7 +243,7 @@ describe('buildAgentChatItems', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
-        AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
+        assistantMessage({ content: '', toolCalls: [call] }),
         ToolResultMessage.make({ toolCallId: call.id, content: result.content })
       ],
       userDraft: '',
@@ -265,7 +281,7 @@ describe('buildAgentChatItems', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
-        AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
+        assistantMessage({ content: '', toolCalls: [call] }),
         ToolResultMessage.make({ toolCallId: call.id, content: result.content })
       ],
       userDraft: '',

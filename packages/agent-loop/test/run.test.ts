@@ -2,6 +2,8 @@ import { Effect, Layer, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
+  assistantContent,
+  assistantReasoningText,
   CompactionEnd,
   CompactionStart,
   AgentModelCapabilities,
@@ -10,6 +12,7 @@ import {
   ToolDef,
   UserMessage
 } from '@yolk/protocol'
+import type { AssistantAgentMessage } from '@yolk/protocol'
 import {
   ContextTransformer,
   LLMDone,
@@ -30,6 +33,19 @@ const noToolReasoningCapabilities = AgentModelCapabilities.make({
   tools: false,
   reasoning: false
 })
+
+const assistantMessageFromEvents = (events: ReadonlyArray<{ readonly _tag: string }>) => {
+  const event = events.find(
+    (candidate): candidate is { readonly _tag: 'AssistantMessage'; readonly message: AssistantAgentMessage } =>
+      candidate._tag === 'AssistantMessage'
+  )
+
+  if (event === undefined) {
+    throw new Error('Expected assistant message')
+  }
+
+  return event.message
+}
 
 describe('run', () => {
   it.effect('emits a text-only event sequence', () =>
@@ -61,8 +77,7 @@ describe('run', () => {
         'AgentEnd'
       ])
 
-      const assistant = events.find(event => event._tag === 'AssistantMessage')
-      expect(assistant).toMatchObject({ message: { content: 'ok' } })
+      expect(assistantContent(assistantMessageFromEvents(events))).toBe('ok')
     })
   )
 
@@ -96,9 +111,9 @@ describe('run', () => {
         'TurnEnd',
         'AgentEnd'
       ])
-      expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
-        message: { content: 'ok', reasoning: 'thinking' }
-      })
+      const assistant = assistantMessageFromEvents(events)
+      expect(assistantContent(assistant)).toBe('ok')
+      expect(assistantReasoningText(assistant)).toBe('thinking')
     })
   )
 
@@ -173,12 +188,11 @@ describe('run', () => {
         'AgentStart',
         'TurnStart',
         'LLMStreamStart',
-        'LLMToolCall',
+        'ToolInputEnd',
         'LLMStreamEnd',
         'AssistantMessage',
-        'ToolExecutionStart',
-        'ToolExecutionEnd',
-        'ToolResult',
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted',
         'TurnEnd',
         'TurnStart',
         'LLMStreamStart',
@@ -354,9 +368,7 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(requests).toMatchObject([{ messages: [{ content: 'context' }, { content: 'hello' }] }])
-      expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
-        message: { content: 'ok' }
-      })
+      expect(assistantContent(assistantMessageFromEvents(events))).toBe('ok')
     })
   )
 
@@ -488,9 +500,7 @@ describe('run', () => {
         reason: 'rate_limit',
         delayMs: 0
       })
-      expect(events.find(event => event._tag === 'AssistantMessage')).toMatchObject({
-        message: { content: 'ok' }
-      })
+      expect(assistantContent(assistantMessageFromEvents(events))).toBe('ok')
     })
   )
 

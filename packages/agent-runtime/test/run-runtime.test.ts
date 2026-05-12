@@ -1,6 +1,11 @@
 import { Effect, Layer, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { AssistantAgentMessage, UserMessage, textOnlyModelCapabilities } from '@yolk/protocol'
+import {
+  AssistantAgentMessage,
+  AssistantTextPart,
+  UserMessage,
+  textOnlyModelCapabilities
+} from '@yolk/protocol'
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent-loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
 import {
@@ -88,7 +93,7 @@ describe('runRuntime', () => {
           id: 'session_1',
           messages: [
             UserMessage.make({ content: 'persist this transcript' }),
-            AssistantAgentMessage.make({ content: 'ok', toolCalls: [] })
+            AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
           ]
         }
       ])
@@ -126,7 +131,7 @@ describe('runRuntime', () => {
           messages: [
             UserMessage.make({ content: 'old' }),
             UserMessage.make({ content: 'new' }),
-            AssistantAgentMessage.make({ content: 'ok', toolCalls: [] })
+            AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
           ]
         }
       ])

@@ -1,5 +1,4 @@
 import {
-  ToolResultMessage,
   type AgentEvent,
   type AgentMessage,
   type ToolCall,
@@ -10,8 +9,11 @@ import {
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 
 export type AgentToolRun =
-  | { readonly _tag: 'Called'; readonly call: ToolCall }
-  | { readonly _tag: 'Running'; readonly call: ToolCall; readonly startedAtMs: number }
+  | { readonly _tag: 'InputStreaming'; readonly id: string; readonly name?: string; readonly input: string }
+  | { readonly _tag: 'InputReady'; readonly call: ToolCall }
+  | { readonly _tag: 'ApprovalRequested'; readonly call: ToolCall }
+  | { readonly _tag: 'Denied'; readonly toolCallId: string; readonly reason: string }
+  | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
       readonly call: ToolCall
@@ -19,8 +21,10 @@ export type AgentToolRun =
       readonly startedAtMs: number
       readonly endedAtMs: number
     }
+  | { readonly _tag: 'Errored'; readonly call: ToolCall; readonly message: string; readonly endedAtMs: number }
+  | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
 
-type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Running' | 'Completed' }>
+type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Executing' | 'Completed' }>
 
 export type AgentClientState = {
   readonly status: AgentRunStatus
@@ -48,7 +52,27 @@ export const initialAgentClientState: AgentClientState = {
   error: null
 }
 
-export const isActiveToolRun = (run: AgentToolRun) => run._tag !== 'Completed'
+const toolRunId = (run: AgentToolRun) => {
+  switch (run._tag) {
+    case 'InputStreaming':
+      return run.id
+    case 'Denied':
+      return run.toolCallId
+    case 'InputReady':
+    case 'ApprovalRequested':
+    case 'Executing':
+    case 'Completed':
+    case 'Errored':
+    case 'ProviderCompleted':
+      return run.call.id
+  }
+}
+
+export const isActiveToolRun = (run: AgentToolRun) =>
+  run._tag !== 'Completed' &&
+  run._tag !== 'Errored' &&
+  run._tag !== 'Denied' &&
+  run._tag !== 'ProviderCompleted'
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => run._tag === 'Completed')
@@ -57,14 +81,15 @@ const replaceToolRun = (
   runs: ReadonlyArray<AgentToolRun>,
   run: AgentToolRun
 ): ReadonlyArray<AgentToolRun> => {
-  const replaceIndex = runs.findIndex(current => current.call.id === run.call.id)
+  const id = toolRunId(run)
+  const replaceIndex = runs.findIndex(current => toolRunId(current) === id)
 
   if (replaceIndex === -1) {
     return [...runs, run]
   }
 
   return runs.flatMap((current, index) => {
-    if (current.call.id !== run.call.id) {
+    if (toolRunId(current) !== id) {
       return [current]
     }
 
@@ -72,10 +97,20 @@ const replaceToolRun = (
   })
 }
 
-const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun => run._tag !== 'Called'
+const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun =>
+  run._tag === 'Executing' || run._tag === 'Completed'
 
 const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
   runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
+
+const appendToolInputDelta = (
+  runs: ReadonlyArray<AgentToolRun>,
+  id: string,
+  delta: string
+): ReadonlyArray<AgentToolRun> =>
+  runs.map(run =>
+    run._tag === 'InputStreaming' && run.id === id ? { ...run, input: `${run.input}${delta}` } : run
+  )
 
 export const appendAgentMessage = (
   messages: ReadonlyArray<AgentMessage>,
@@ -120,21 +155,49 @@ export const applyAgentEventWithOptions = (
       return { ...state, text: `${state.text}${event.text}` }
     case 'LLMReasoningDelta':
       return { ...state, reasoning: `${state.reasoning}${event.text}` }
-    case 'LLMToolCall':
-      return {
-        ...state,
-        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'Called', call: event.call })
-      }
-    case 'ToolExecutionStart':
+    case 'ToolInputStart':
       return {
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Running',
+          _tag: 'InputStreaming',
+          id: event.id,
+          name: event.name,
+          input: ''
+        })
+      }
+    case 'ToolInputDelta':
+      return { ...state, toolRuns: appendToolInputDelta(state.toolRuns, event.id, event.delta) }
+    case 'ToolInputEnd':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'InputReady', call: event.call })
+      }
+    case 'ToolApprovalRequested':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'ApprovalRequested', call: event.call })
+      }
+    case 'ToolApprovalGranted':
+      return state
+    case 'ToolApprovalDenied':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Denied',
+          toolCallId: event.toolCallId,
+          reason: event.reason
+        })
+      }
+    case 'ToolExecutionStarted':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Executing',
           call: event.call,
           startedAtMs: nowMs
         })
       }
-    case 'ToolExecutionEnd': {
+    case 'ToolExecutionCompleted': {
       const endedAtMs = nowMs
       const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
 
@@ -149,23 +212,31 @@ export const applyAgentEventWithOptions = (
         })
       }
     }
+    case 'ToolExecutionError':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Errored',
+          call: event.call,
+          message: event.message,
+          endedAtMs: nowMs
+        })
+      }
+    case 'ProviderToolResult':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'ProviderCompleted',
+          call: event.call,
+          result: event.result
+        })
+      }
     case 'AssistantMessage':
       return {
         ...state,
         liveMessages: [...state.liveMessages, event.message],
         text: '',
         reasoning: ''
-      }
-    case 'ToolResult':
-      return {
-        ...state,
-        liveMessages: [
-          ...state.liveMessages,
-          ToolResultMessage.make({
-            toolCallId: event.result.toolCallId,
-            content: event.result.content
-          })
-        ]
       }
     case 'AgentEnd':
       return {

@@ -178,10 +178,16 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
         case 'LLMStreamEnd':
         case 'LLMStreamStart':
         case 'LLMTextDelta':
-        case 'LLMToolCall':
-        case 'ToolExecutionEnd':
-        case 'ToolExecutionStart':
-        case 'ToolResult':
+        case 'ProviderToolResult':
+        case 'ToolApprovalDenied':
+        case 'ToolApprovalGranted':
+        case 'ToolApprovalRequested':
+        case 'ToolExecutionCompleted':
+        case 'ToolExecutionError':
+        case 'ToolExecutionStarted':
+        case 'ToolInputDelta':
+        case 'ToolInputEnd':
+        case 'ToolInputStart':
         case 'TurnEnd':
         case 'TurnStart':
           break

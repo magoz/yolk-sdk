@@ -12,6 +12,8 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  assistantContent,
+  assistantHostToolCalls,
   type AgentMessage,
   type Content,
   type ContentPart,
@@ -246,19 +248,20 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
       case 'User':
         return { role: 'user', content: yield* contentToUserContent(message.content) }
       case 'Assistant': {
-        const toolCalls = yield* Effect.forEach(message.toolCalls, toolCallToOpenAiToolCall)
+        const content = assistantContent(message)
+        const toolCalls = yield* Effect.forEach(assistantHostToolCalls(message), toolCallToOpenAiToolCall)
 
         if (toolCalls.length > 0) {
           return {
             role: 'assistant',
-            content: yield* contentToText(message.content, 'Assistant'),
+            content: yield* contentToText(content, 'Assistant'),
             tool_calls: toolCalls
           }
         }
 
         return {
           role: 'assistant',
-          content: yield* contentToText(message.content, 'Assistant')
+          content: yield* contentToText(content, 'Assistant')
         }
       }
       case 'ToolResult':

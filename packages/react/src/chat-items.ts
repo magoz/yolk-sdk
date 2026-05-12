@@ -9,7 +9,12 @@ export type ToolDuration =
 export type ToolRunState =
   | { readonly _tag: 'Running'; readonly duration: ToolDuration }
   | { readonly _tag: 'Called'; readonly duration: ToolDuration }
+  | { readonly _tag: 'InputStreaming'; readonly duration: ToolDuration; readonly input: string }
+  | { readonly _tag: 'ApprovalRequested'; readonly duration: ToolDuration }
+  | { readonly _tag: 'Denied'; readonly duration: ToolDuration; readonly reason: string }
   | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
+  | { readonly _tag: 'Errored'; readonly duration: ToolDuration; readonly message: string }
+  | { readonly _tag: 'ProviderCompleted'; readonly duration: ToolDuration; readonly result: ToolResult }
 
 export type AgentChatItem =
   | { readonly _tag: 'UserMessage'; readonly id: string; readonly content: Content }
@@ -86,6 +91,26 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
 
   if (state._tag === 'Completed') {
     return { _tag: 'Completed', duration: durationFromToolState(state), result: state.result }
+  }
+
+  if (state._tag === 'InputStreaming') {
+    return { _tag: 'InputStreaming', duration: { _tag: 'Unknown' }, input: state.input }
+  }
+
+  if (state._tag === 'ApprovalRequested') {
+    return { _tag: 'ApprovalRequested', duration: { _tag: 'Unknown' } }
+  }
+
+  if (state._tag === 'Denied') {
+    return { _tag: 'Denied', duration: { _tag: 'Unknown' }, reason: state.reason }
+  }
+
+  if (state._tag === 'Errored') {
+    return { _tag: 'Errored', duration: { _tag: 'Unknown' }, message: state.message }
+  }
+
+  if (state._tag === 'ProviderCompleted') {
+    return { _tag: 'ProviderCompleted', duration: { _tag: 'Unknown' }, result: state.result }
   }
 
   return { _tag: 'Called', duration: { _tag: 'Unknown' } }

@@ -38,6 +38,9 @@
 - `LLMProvider` fails with provider-only `LLMProviderError`, not full `AgentLoopError`.
 - Use `Ref` for loop-owned stream state; avoid mutable arrays/object counters in `run`.
 - Preserve tool call ids and ordering semantics across call/result events.
+- Local host tools emit `ToolInputEnd`, `ToolExecutionStarted`, then `ToolExecutionCompleted` or `ToolExecutionError`.
+- Tool failures emit `ToolExecutionError` before failing the loop; no `ToolResultMessage` is fabricated on failure.
+- Do not add compatibility aliases for removed tool lifecycle event names.
 - Retry retryable provider errors in-loop; never retry context overflow blindly.
 - Map loop errors to protocol `AgentError` via `agentLoopErrorToAgentError`; keep richer causes local.
 - Keep compaction strategy outside loop; `ContextTransformer` returns compacted messages + lifecycle events and fails with `ContextTransformError`.

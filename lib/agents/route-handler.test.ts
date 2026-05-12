@@ -4,6 +4,8 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEvent,
   AssistantAgentMessage,
+  AssistantTextPart,
+  assistantContent,
   AgentContentCapabilities,
   AgentModelCapabilities,
   ToolDef,
@@ -42,6 +44,16 @@ const decodeEvents = (body: string) =>
       .map(parseJson),
     decodeEvent
   )
+
+const messageContent = (message: AgentMessage) => {
+  switch (message._tag) {
+    case 'Assistant':
+      return assistantContent(message)
+    case 'ToolResult':
+    case 'User':
+      return message.content
+  }
+}
 
 const makeLayer = () =>
   Layer.mergeAll(
@@ -266,13 +278,18 @@ describe('makeAgentPostResponse', () => {
         'AgentStart',
         'TurnStart',
         'LLMStreamStart',
-        'LLMToolCall',
+        'ToolInputEnd',
         'LLMStreamEnd',
         'AssistantMessage',
-        'ToolExecutionStart',
+        'ToolExecutionStarted',
+        'ToolExecutionError',
         'AgentError'
       ])
       expect(events[7]).toMatchObject({
+        code: 'tool_timeout',
+        message: 'Tool timed out'
+      })
+      expect(events[8]).toMatchObject({
         code: 'tool_timeout',
         message: 'Tool timed out',
         retryable: true
@@ -299,7 +316,7 @@ describe('makeAgentPostResponse', () => {
       ]
       const secondMessages = [
         ...firstMessages,
-        AssistantAgentMessage.make({ content: 'ok', toolCalls: [] }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] }),
         UserMessage.make({ content: 'again' })
       ] satisfies readonly [AgentMessage, ...Array<AgentMessage>]
 
@@ -319,7 +336,7 @@ describe('makeAgentPostResponse', () => {
       ).pipe(Effect.provide(layer))
       yield* Effect.promise(() => secondResponse.text())
 
-      expect(requests.map(request => request.messages.map(message => message.content))).toEqual([
+      expect(requests.map(request => request.messages.map(messageContent))).toEqual([
         ['hello'],
         ['hello', 'ok', 'again']
       ])
@@ -362,19 +379,18 @@ describe('makeAgentPostResponse', () => {
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
       const toolResultContents = Arr.filterMap(events, event =>
-        event._tag === 'ToolExecutionEnd' ? Result.succeed(event.result.content) : Result.failVoid
+        event._tag === 'ToolExecutionCompleted' ? Result.succeed(event.result.content) : Result.failVoid
       )
 
       expect(events.map(event => event._tag)).toEqual([
         'AgentStart',
         'TurnStart',
         'LLMStreamStart',
-        'LLMToolCall',
+        'ToolInputEnd',
         'LLMStreamEnd',
         'AssistantMessage',
-        'ToolExecutionStart',
-        'ToolExecutionEnd',
-        'ToolResult',
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted',
         'TurnEnd',
         'TurnStart',
         'LLMStreamStart',

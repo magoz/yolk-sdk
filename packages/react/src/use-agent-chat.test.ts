@@ -5,6 +5,7 @@ import {
   AgentEnd,
   AgentStart,
   AssistantAgentMessage,
+  AssistantTextPart,
   LLMTextDelta,
   UserMessage,
   zeroAgentUsage,
@@ -81,7 +82,7 @@ const renderUseAgentChat = (options: Parameters<typeof useAgentChat>[0]) => {
 
 const agentEnd = (content: string) =>
   AgentEnd.make({
-    messages: [AssistantAgentMessage.make({ content, toolCalls: [] })],
+    messages: [AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })],
     turns: 1,
     usage: zeroAgentUsage
   })
@@ -116,7 +117,7 @@ describe('useAgentChat', () => {
     expect(hook.value.chatMessages.map(message => message.role)).toEqual(['user', 'assistant'])
     expect(hook.value.messages).toEqual([
       UserMessage.make({ content: 'hello' }),
-      AssistantAgentMessage.make({ content: 'hello', toolCalls: [] })
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'hello' })] })
     ])
 
     hook.unmount()

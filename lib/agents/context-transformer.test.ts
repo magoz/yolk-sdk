@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  AssistantTextPart,
+  HostToolCallPart,
   ToolCall,
   ToolResultMessage,
   UserMessage,
@@ -15,12 +17,12 @@ import {
 const longText = 'context '.repeat(6_000)
 
 const user = (content: string) => UserMessage.make({ content })
-const assistant = (content: string) => AssistantAgentMessage.make({ content, toolCalls: [] })
+const assistant = (content: string) =>
+  AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })
 
 const toolCallingAssistant = () =>
   AssistantAgentMessage.make({
-    content: '',
-    toolCalls: [ToolCall.make({ id: 'call_1', name: 'lookup', params: {} })]
+    parts: [HostToolCallPart.make({ call: ToolCall.make({ id: 'call_1', name: 'lookup', params: {} }) })]
   })
 
 const toolResult = () => ToolResultMessage.make({ toolCallId: 'call_1', content: 'result' })

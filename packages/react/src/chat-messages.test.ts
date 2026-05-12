@@ -1,6 +1,9 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  AssistantReasoningPart,
+  AssistantTextPart,
+  HostToolCallPart,
   ImagePart,
   TextPart,
   ToolCall,
@@ -46,7 +49,13 @@ describe('agent chat messages', () => {
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'hi' }),
-        AssistantAgentMessage.make({ content: 'done', reasoning: 'thinking', toolCalls: [call] })
+        AssistantAgentMessage.make({
+          parts: [
+            AssistantReasoningPart.make({ text: 'thinking' }),
+            AssistantTextPart.make({ content: 'done' }),
+            HostToolCallPart.make({ call })
+          ]
+        })
       ],
       userDraft: 'draft user',
       assistantDraft: 'draft assistant',
@@ -71,7 +80,9 @@ describe('agent chat messages', () => {
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const messages = buildAgentChatMessages({
       messages: [
-        AssistantAgentMessage.make({ content: '', toolCalls: [call] }),
+        AssistantAgentMessage.make({
+          parts: [AssistantTextPart.make({ content: '' }), HostToolCallPart.make({ call })]
+        }),
         ToolResultMessage.make({ toolCallId: call.id, content: result.content })
       ],
       userDraft: '',
@@ -91,7 +102,7 @@ describe('agent chat messages', () => {
 
     expect(messages).toHaveLength(1)
     expect(messages[0]?.parts).toEqual([
-      { _tag: 'Text', id: 'message-0-assistant-text', content: '', state: 'done' },
+      { _tag: 'Text', id: 'message-0-assistant-text-0', content: '', state: 'done' },
       {
         _tag: 'ToolCall',
         id: 'message-0-tool-call-call_1',

@@ -3,6 +3,9 @@ import {
   CompactionEnd,
   CompactionStart,
   UserMessage,
+  assistantContent,
+  assistantHostToolCalls,
+  assistantReasoningText,
   contentPreview,
   contentText,
   type AgentMessage,
@@ -43,9 +46,9 @@ export const estimateAgentMessageTokens = (message: AgentMessage) => {
       return estimateContentTokens(message.content) + messageOverheadTokens
     case 'Assistant':
       return (
-        estimateContentTokens(message.content) +
-        estimateTextTokens(message.reasoning ?? '') +
-        message.toolCalls.reduce(
+        estimateContentTokens(assistantContent(message)) +
+        estimateTextTokens(assistantReasoningText(message)) +
+        assistantHostToolCalls(message).reduce(
           (total, call) =>
             total +
             estimateTextTokens(call.id) +
@@ -76,7 +79,9 @@ const messagePreview = (message: AgentMessage) => {
     case 'User':
       return `User: ${truncatePreview(contentText(message.content) || contentPreview(message.content))}`
     case 'Assistant':
-      return `Assistant: ${truncatePreview(contentText(message.content) || contentPreview(message.content))}`
+      return `Assistant: ${truncatePreview(
+        contentText(assistantContent(message)) || contentPreview(assistantContent(message))
+      )}`
     case 'ToolResult':
       return `Tool ${message.toolCallId}: ${truncatePreview(
         contentText(message.content) || contentPreview(message.content)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/protocol'
+import { assistantContent, assistantHostToolCalls, ToolCall } from '@yolk/protocol'
 import { accumulateAssistantMessage } from '../src'
 import { LLMDone, LLMTextDelta, LLMToolCall } from '../src/llm-event'
 
@@ -12,7 +12,7 @@ describe('accumulateAssistantMessage', () => {
       LLMDone.make({ stopReason: 'tool_use' })
     ])
 
-    expect(message.content).toBe('Let me check.')
-    expect(message.toolCalls).toEqual([call])
+    expect(assistantContent(message)).toBe('Let me check.')
+    expect(assistantHostToolCalls(message)).toEqual([call])
   })
 })

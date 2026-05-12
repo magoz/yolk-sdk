@@ -163,7 +163,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `dotenv.config({ path: '.env.local' })` in a module  | `import '@/lib/dotenv'` — centralized, respects `NODE_ENV=test` → `.env.test`                 |
 | Raw `fetch` in Effect services/providers             | Effect `HttpClient`; provide `FetchHttpClient.layer`; tests inject `HttpClient` layer         |
 | Raw `JSON.parse/stringify` in production Effect code | `Schema.UnknownFromJsonString` + Effect encode/decode; direct JSON is fine in tests           |
-| Fake/display-only reasoning                          | Only show provider-supplied reasoning summaries (`LLMReasoningDelta` / `Assistant.reasoning`) |
+| Fake/display-only reasoning                          | Only show provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts) |
 
 ## NOTES
 

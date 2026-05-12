@@ -7,14 +7,14 @@ import {
   UsageUpdate,
   addAgentUsage,
   contentParts,
-  LLMToolCall as AgentLLMToolCall,
   LLMReasoningDelta as AgentLLMReasoningDelta,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta as AgentLLMTextDelta,
-  ToolExecutionEnd,
-  ToolExecutionStart,
-  ToolResultEvent,
+  ToolExecutionCompleted,
+  ToolExecutionError,
+  ToolExecutionStarted,
+  ToolInputEnd,
   ToolResultMessage,
   type ToolCall,
   type AgentReasoningEffort,
@@ -62,7 +62,7 @@ const unsupportedInputError = (message: string) =>
   })
 
 const validateContent = (message: AgentMessage, capabilities: AgentModelCapabilities) =>
-  Effect.forEach(contentParts(message.content), part => {
+  Effect.forEach(contentPartsFromMessage(message), part => {
     switch (part._tag) {
       case 'Text':
         return capabilities.input.text
@@ -78,6 +78,16 @@ const validateContent = (message: AgentMessage, capabilities: AgentModelCapabili
           : Effect.fail(unsupportedInputError('Audio input is not supported by this model'))
     }
   })
+
+const contentPartsFromMessage = (message: AgentMessage) => {
+  switch (message._tag) {
+    case 'User':
+    case 'ToolResult':
+      return contentParts(message.content)
+    case 'Assistant':
+      return message.parts.flatMap(part => (part._tag === 'Text' ? contentParts(part.content) : []))
+  }
+}
 
 const validateCapabilities = (
   config: RunConfig,
@@ -109,7 +119,7 @@ const toLlmEvent = (event: LLMEvent): ReadonlyArray<AgentEvent> => {
     case 'ReasoningDelta':
       return [AgentLLMReasoningDelta.make({ text: event.text })]
     case 'ToolCall':
-      return [AgentLLMToolCall.make({ call: event.call })]
+      return [ToolInputEnd.make({ call: event.call })]
     case 'Usage':
       return [UsageUpdate.make({ usage: event.usage })]
     case 'Done':
@@ -225,30 +235,55 @@ const makeToolExecutionStream = (
   createdMessages: Ref.Ref<ReadonlyArray<AgentMessage>>,
   toolResultMessages: Ref.Ref<ReadonlyArray<AgentMessage>>
 ): Stream.Stream<AgentEvent, AgentLoopError> =>
-  Stream.make(ToolExecutionStart.make({ call })).pipe(
+  Stream.make(ToolExecutionStarted.make({ call })).pipe(
     Stream.concat(
       Stream.fromEffect(
         executor.execute(call).pipe(
           Effect.flatMap(result => {
             const toolResultMessage = ToolResultMessage.make({
               toolCallId: result.toolCallId,
-              content: result.content
+              content: result.content,
+              structuredContent: result.structuredContent
             })
 
             return Ref.update(createdMessages, messages => [...messages, toolResultMessage]).pipe(
               Effect.flatMap(() =>
                 Ref.update(toolResultMessages, messages => [...messages, toolResultMessage])
               ),
-              Effect.as<ReadonlyArray<AgentEvent>>([
-                ToolExecutionEnd.make({ call, result }),
-                ToolResultEvent.make({ result })
-              ])
+              Effect.as(ToolExecutionCompleted.make({ call, result }))
             )
           })
         )
-      ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
+      ).pipe(
+        Stream.catchTag('ToolError', error =>
+          Stream.make(
+            ToolExecutionError.make({
+              call,
+              message: error.message,
+              code: toolErrorCode(error)
+            })
+          ).pipe(Stream.concat(Stream.fail(error)))
+        )
+      )
     )
   )
+
+const toolErrorCode = (error: ToolError): AgentErrorCode => {
+  switch (error.cause) {
+    case 'validation':
+    case 'invalid_input':
+      return 'validation_error'
+    case 'timeout':
+      return 'tool_timeout'
+    case 'permission':
+    case 'denied':
+      return 'tool_denied'
+    case 'execution':
+    case 'not_found':
+    case 'unavailable':
+      return 'tool_error'
+  }
+}
 
 type TurnCompletion = {
   readonly toolCalls: ReadonlyArray<ToolCall>

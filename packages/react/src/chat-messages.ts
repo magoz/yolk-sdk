@@ -2,15 +2,20 @@ import { Array as Arr, Option } from 'effect'
 import type { AgentToolRun } from '@yolk/client'
 import {
   AssistantAgentMessage,
+  AssistantReasoningPart,
+  AssistantTextPart,
+  HostToolCallPart,
+  ProviderToolCallPart,
+  ProviderToolResultPart,
   ToolResult,
   ToolResultMessage,
   UserMessage,
   appendTextToContent,
   contentParts,
-  contentText,
   isContentEmpty,
   type AgentEvent,
   type AgentMessage,
+  type AssistantPart,
   type Content,
   type ToolCall
 } from '@yolk/protocol'
@@ -19,6 +24,9 @@ export type ChatPartState = 'streaming' | 'done'
 
 export type ChatToolState =
   | { readonly _tag: 'Called' }
+  | { readonly _tag: 'InputStreaming'; readonly input: string }
+  | { readonly _tag: 'ApprovalRequested' }
+  | { readonly _tag: 'Denied'; readonly reason: string }
   | { readonly _tag: 'Running'; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
@@ -26,6 +34,8 @@ export type ChatToolState =
       readonly startedAtMs?: number
       readonly endedAtMs?: number
     }
+  | { readonly _tag: 'Errored'; readonly message: string; readonly endedAtMs?: number }
+  | { readonly _tag: 'ProviderCompleted'; readonly result: ToolResult }
 
 export type AgentChatPart =
   | {
@@ -87,21 +97,38 @@ export type BuildAgentChatMessagesInput = {
   readonly error: string | null
 }
 
-const toolRunNameEntry = (run: AgentToolRun): readonly [string, string] => [
-  run.call.id,
-  run.call.name
-]
+const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, string]> => {
+  switch (run._tag) {
+    case 'InputStreaming':
+      return run.name === undefined ? [] : [[run.id, run.name]]
+    case 'Denied':
+      return []
+    case 'InputReady':
+    case 'ApprovalRequested':
+    case 'Executing':
+    case 'Completed':
+    case 'Errored':
+    case 'ProviderCompleted':
+      return [[run.call.id, run.call.name]]
+  }
+}
 
 const assistantToolNameEntries = (
   message: AgentMessage
 ): ReadonlyArray<readonly [string, string]> =>
-  message._tag === 'Assistant' ? message.toolCalls.map(call => [call.id, call.name]) : []
+  message._tag === 'Assistant'
+    ? message.parts.flatMap(part =>
+        part._tag === 'HostToolCall' || part._tag === 'ProviderToolCall'
+          ? [[part.call.id, part.call.name]]
+          : []
+      )
+    : []
 
 const collectToolNames = (
   messages: ReadonlyArray<AgentMessage>,
   toolRuns: ReadonlyArray<AgentToolRun>
 ): ReadonlyMap<string, string> =>
-  new Map([...toolRuns.map(toolRunNameEntry), ...messages.flatMap(assistantToolNameEntries)])
+  new Map([...toolRuns.flatMap(toolRunNameEntry), ...messages.flatMap(assistantToolNameEntries)])
 
 const toolResultEntry = (
   message: AgentMessage
@@ -124,19 +151,51 @@ const collectToolResultsById = (messages: ReadonlyArray<AgentMessage>) =>
 const collectToolCallIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
   new Set(
     messages.flatMap(message =>
-      message._tag === 'Assistant' ? message.toolCalls.map(call => call.id) : []
+      message._tag === 'Assistant'
+        ? message.parts.flatMap(part =>
+            part._tag === 'HostToolCall' || part._tag === 'ProviderToolCall' ? [part.call.id] : []
+          )
+        : []
     )
   )
 
+const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] => {
+  switch (run._tag) {
+    case 'InputStreaming':
+      return [run.id, run]
+    case 'Denied':
+      return [run.toolCallId, run]
+    case 'InputReady':
+    case 'ApprovalRequested':
+    case 'Executing':
+    case 'Completed':
+    case 'Errored':
+    case 'ProviderCompleted':
+      return [run.call.id, run]
+  }
+}
+
 const collectToolRunsById = (runs: ReadonlyArray<AgentToolRun>): ReadonlyMap<string, AgentToolRun> =>
-  new Map(runs.map(run => [run.call.id, run]))
+  new Map(runs.map(toolRunEntry))
 
 const toolStateFor = (
   run: AgentToolRun | undefined,
   result: ToolResult | undefined
 ): ChatToolState => {
-  if (run?._tag === 'Running') {
+  if (run?._tag === 'Executing') {
     return { _tag: 'Running', startedAtMs: run.startedAtMs }
+  }
+
+  if (run?._tag === 'InputStreaming') {
+    return { _tag: 'InputStreaming', input: run.input }
+  }
+
+  if (run?._tag === 'ApprovalRequested') {
+    return { _tag: 'ApprovalRequested' }
+  }
+
+  if (run?._tag === 'Denied') {
+    return { _tag: 'Denied', reason: run.reason }
   }
 
   if (run?._tag === 'Completed') {
@@ -146,6 +205,14 @@ const toolStateFor = (
       startedAtMs: run.startedAtMs,
       endedAtMs: run.endedAtMs
     }
+  }
+
+  if (run?._tag === 'Errored') {
+    return { _tag: 'Errored', message: run.message, endedAtMs: run.endedAtMs }
+  }
+
+  if (run?._tag === 'ProviderCompleted') {
+    return { _tag: 'ProviderCompleted', result: run.result }
   }
 
   if (result !== undefined) {
@@ -166,31 +233,50 @@ const assistantPartsFromMessage = ({
   readonly toolResultsById: ReadonlyMap<string, ToolResult>
   readonly toolRunsById: ReadonlyMap<string, AgentToolRun>
 }): ReadonlyArray<AgentChatPart> => {
-  const reasoningParts: ReadonlyArray<AgentChatPart> =
-    message.reasoning !== undefined && message.reasoning.length > 0
-      ? [
+  return message.parts.flatMap((part, partIndex): ReadonlyArray<AgentChatPart> => {
+    switch (part._tag) {
+      case 'Reasoning':
+        return part.text.length > 0
+          ? [
+              {
+                _tag: 'Reasoning',
+                id: `message-${messageIndex}-reasoning-${partIndex}`,
+                text: part.text,
+                state: 'done'
+              }
+            ]
+          : []
+      case 'Text':
+        return [
           {
-            _tag: 'Reasoning',
-            id: `message-${messageIndex}-reasoning`,
-            text: message.reasoning,
+            _tag: 'Text',
+            id: `message-${messageIndex}-assistant-text-${partIndex}`,
+            content: part.content,
             state: 'done'
           }
         ]
-      : []
-  const textPart: AgentChatPart = {
-    _tag: 'Text',
-    id: `message-${messageIndex}-assistant-text`,
-    content: message.content,
-    state: 'done'
-  }
-  const toolParts: ReadonlyArray<AgentChatPart> = message.toolCalls.map(call => ({
-    _tag: 'ToolCall',
-    id: `message-${messageIndex}-tool-call-${call.id}`,
-    call,
-    state: toolStateFor(toolRunsById.get(call.id), toolResultsById.get(call.id))
-  }))
-
-  return [...reasoningParts, textPart, ...toolParts]
+      case 'HostToolCall':
+      case 'ProviderToolCall':
+        return [
+          {
+            _tag: 'ToolCall',
+            id: `message-${messageIndex}-tool-call-${part.call.id}`,
+            call: part.call,
+            state: toolStateFor(toolRunsById.get(part.call.id), toolResultsById.get(part.call.id))
+          }
+        ]
+      case 'ProviderToolResult':
+        return [
+          {
+            _tag: 'ToolResult',
+            id: `message-${messageIndex}-provider-tool-result-${part.toolCallId}`,
+            toolCallId: part.toolCallId,
+            name: part.toolCallId,
+            content: part.result.content
+          }
+        ]
+    }
+  })
 }
 
 const assistantChatMessage = (
@@ -314,6 +400,10 @@ const appendAssistantReasoningDelta = (
 }
 
 const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolState => {
+  if (next._tag === 'Errored' || next._tag === 'Denied' || next._tag === 'ProviderCompleted') {
+    return next
+  }
+
   if (next._tag === 'Completed') {
     return {
       ...next,
@@ -407,12 +497,13 @@ const appendOrReplaceAssistantMessage = (
   messages: ReadonlyArray<AgentChatMessage>,
   message: AssistantAgentMessage
 ) => {
+  const messageToolCallIds = message.parts.flatMap(part =>
+    part._tag === 'HostToolCall' || part._tag === 'ProviderToolCall' ? [part.call.id] : []
+  )
   const index = Option.filter(lastAssistantIndex(messages), assistantIndex => {
     const current = messages[assistantIndex]
 
-    return (
-      hasStreamingPart(current) || message.toolCalls.some(call => hasToolCall(current, call.id))
-    )
+    return hasStreamingPart(current) || messageToolCallIds.some(callId => hasToolCall(current, callId))
   })
 
   return Option.match(index, {
@@ -448,32 +539,6 @@ const appendOrphanToolResult = (
     ]
   }
 ]
-
-const applyToolResult = (
-  messages: ReadonlyArray<AgentChatMessage>,
-  result: ToolResult
-): ReadonlyArray<AgentChatMessage> => {
-  const existingIndex = findLastMessageIndex(messages, message =>
-    hasToolCall(message, result.toolCallId)
-  )
-
-  if (existingIndex === -1) {
-    return appendOrphanToolResult(messages, result)
-  }
-
-  return messages.map((message, messageIndex) =>
-    messageIndex === existingIndex
-      ? {
-          ...message,
-          parts: message.parts.map(part =>
-            part._tag === 'ToolCall' && part.call.id === result.toolCallId
-              ? { ...part, state: mergeToolState(part.state, { _tag: 'Completed', result }) }
-              : part
-          )
-        }
-      : message
-  )
-}
 
 const clearTransientParts = (
   messages: ReadonlyArray<AgentChatMessage>
@@ -557,20 +622,46 @@ export const applyAgentEventToChatMessages = (
       return appendAssistantTextDelta(messages, event.text)
     case 'LLMReasoningDelta':
       return appendAssistantReasoningDelta(messages, event.text)
-    case 'LLMToolCall':
+    case 'ToolInputEnd':
       return upsertToolCallPart(messages, event.call, { _tag: 'Called' })
     case 'AssistantMessage':
       return appendOrReplaceAssistantMessage(messages, event.message)
-    case 'ToolExecutionStart':
+    case 'ToolInputStart':
+      return messages
+    case 'ToolInputDelta':
+      return messages
+    case 'ToolApprovalRequested':
+      return upsertToolCallPart(messages, event.call, { _tag: 'ApprovalRequested' })
+    case 'ToolApprovalGranted':
+      return messages
+    case 'ToolApprovalDenied':
+      return messages.map(message => ({
+        ...message,
+        parts: message.parts.map(part =>
+          part._tag === 'ToolCall' && part.call.id === event.toolCallId
+            ? { ...part, state: { _tag: 'Denied', reason: event.reason } }
+            : part
+        )
+      }))
+    case 'ToolExecutionStarted':
       return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: nowMs })
-    case 'ToolExecutionEnd':
+    case 'ToolExecutionCompleted':
       return upsertToolCallPart(messages, event.call, {
         _tag: 'Completed',
         result: event.result,
         endedAtMs: nowMs
       })
-    case 'ToolResult':
-      return applyToolResult(messages, event.result)
+    case 'ToolExecutionError':
+      return upsertToolCallPart(messages, event.call, {
+        _tag: 'Errored',
+        message: event.message,
+        endedAtMs: nowMs
+      })
+    case 'ProviderToolResult':
+      return upsertToolCallPart(messages, event.call, {
+        _tag: 'ProviderCompleted',
+        result: event.result
+      })
     case 'AgentError':
       return markChatError(messages, event.message)
     case 'AgentEnd':
@@ -738,12 +829,6 @@ export const buildAgentChatMessages = ({
   ]
 }
 
-const collectTextContent = (parts: ReadonlyArray<AgentChatPart>) =>
-  parts
-    .filter(part => part._tag === 'Text')
-    .map(part => contentText(part.content))
-    .join('')
-
 const collectContent = (parts: ReadonlyArray<AgentChatPart>): Content => {
   const contentPartsList = parts
     .filter(part => part._tag === 'Text')
@@ -758,15 +843,6 @@ const collectContent = (parts: ReadonlyArray<AgentChatPart>): Content => {
   return contentPartsList
 }
 
-const collectReasoning = (parts: ReadonlyArray<AgentChatPart>) =>
-  parts
-    .filter(part => part._tag === 'Reasoning')
-    .map(part => part.text)
-    .join('')
-
-const collectToolCalls = (parts: ReadonlyArray<AgentChatPart>) =>
-  parts.filter(part => part._tag === 'ToolCall').map(part => part.call)
-
 const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
   parts.flatMap(part => {
     switch (part._tag) {
@@ -775,7 +851,8 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
           ? [
               ToolResultMessage.make({
                 toolCallId: part.state.result.toolCallId,
-                content: part.state.result.content
+                content: part.state.result.content,
+                structuredContent: part.state.result.structuredContent
               })
             ]
           : []
@@ -788,20 +865,39 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
     }
   })
 
-const assistantMessageFromParts = (parts: ReadonlyArray<AgentChatPart>) => {
-  const content = collectTextContent(parts)
-  const reasoning = collectReasoning(parts)
-  const toolCalls = collectToolCalls(parts)
+const assistantProtocolPartsFromChatParts = (
+  parts: ReadonlyArray<AgentChatPart>
+): ReadonlyArray<AssistantPart> =>
+  parts.flatMap((part): ReadonlyArray<AssistantPart> => {
+    switch (part._tag) {
+      case 'Text':
+        return isContentEmpty(part.content) ? [] : [AssistantTextPart.make({ content: part.content })]
+      case 'Reasoning':
+        return part.text.length === 0 ? [] : [AssistantReasoningPart.make({ text: part.text })]
+      case 'ToolCall':
+        return part.state._tag === 'ProviderCompleted'
+          ? [
+              ProviderToolCallPart.make({ call: part.call }),
+              ProviderToolResultPart.make({
+                toolCallId: part.call.id,
+                result: part.state.result
+              })
+            ]
+          : [HostToolCallPart.make({ call: part.call })]
+      case 'Error':
+      case 'ToolResult':
+        return []
+    }
+  })
 
-  if (content.length === 0 && reasoning.length === 0 && toolCalls.length === 0) {
+const assistantMessageFromParts = (parts: ReadonlyArray<AgentChatPart>) => {
+  const assistantParts = assistantProtocolPartsFromChatParts(parts)
+
+  if (assistantParts.length === 0) {
     return Option.none<AgentMessage>()
   }
 
-  return Option.some(
-    reasoning.length > 0
-      ? AssistantAgentMessage.make({ content, reasoning, toolCalls })
-      : AssistantAgentMessage.make({ content, toolCalls })
-  )
+  return Option.some(AssistantAgentMessage.make({ parts: assistantParts }))
 }
 
 const protocolMessagesFromChatMessage = (

@@ -79,8 +79,37 @@ export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()(
   }
 ) {}
 
-export class LLMToolCall extends Schema.TaggedClass<LLMToolCall>()('LLMToolCall', {
+export class ToolInputStart extends Schema.TaggedClass<ToolInputStart>()('ToolInputStart', {
+  id: Schema.String,
+  name: Schema.optional(Schema.String)
+}) {}
+
+export class ToolInputDelta extends Schema.TaggedClass<ToolInputDelta>()('ToolInputDelta', {
+  id: Schema.String,
+  delta: Schema.String
+}) {}
+
+export class ToolInputEnd extends Schema.TaggedClass<ToolInputEnd>()('ToolInputEnd', {
   call: ToolCall
+}) {}
+
+export class ToolApprovalRequested extends Schema.TaggedClass<ToolApprovalRequested>()(
+  'ToolApprovalRequested',
+  {
+    call: ToolCall
+  }
+) {}
+
+export class ToolApprovalGranted extends Schema.TaggedClass<ToolApprovalGranted>()(
+  'ToolApprovalGranted',
+  {
+    toolCallId: Schema.String
+  }
+) {}
+
+export class ToolApprovalDenied extends Schema.TaggedClass<ToolApprovalDenied>()('ToolApprovalDenied', {
+  toolCallId: Schema.String,
+  reason: Schema.String
 }) {}
 
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
@@ -94,19 +123,26 @@ export class AssistantMessageEvent extends Schema.TaggedClass<AssistantMessageEv
   }
 ) {}
 
-export class ToolExecutionStart extends Schema.TaggedClass<ToolExecutionStart>()(
-  'ToolExecutionStart',
+export class ToolExecutionStarted extends Schema.TaggedClass<ToolExecutionStarted>()(
+  'ToolExecutionStarted',
   {
     call: ToolCall
   }
 ) {}
 
-export class ToolExecutionEnd extends Schema.TaggedClass<ToolExecutionEnd>()('ToolExecutionEnd', {
+export class ToolExecutionCompleted extends Schema.TaggedClass<ToolExecutionCompleted>()('ToolExecutionCompleted', {
   call: ToolCall,
   result: ToolResult
 }) {}
 
-export class ToolResultEvent extends Schema.TaggedClass<ToolResultEvent>()('ToolResult', {
+export class ToolExecutionError extends Schema.TaggedClass<ToolExecutionError>()('ToolExecutionError', {
+  call: ToolCall,
+  message: Schema.String,
+  code: AgentErrorCode
+}) {}
+
+export class ProviderToolResult extends Schema.TaggedClass<ProviderToolResult>()('ProviderToolResult', {
+  call: ToolCall,
   result: ToolResult
 }) {}
 
@@ -123,11 +159,17 @@ export const AgentEvent = Schema.Union([
   LLMStreamStart,
   LLMTextDelta,
   LLMReasoningDelta,
-  LLMToolCall,
+  ToolInputStart,
+  ToolInputDelta,
+  ToolInputEnd,
   LLMStreamEnd,
   AssistantMessageEvent,
-  ToolExecutionStart,
-  ToolExecutionEnd,
-  ToolResultEvent
+  ToolApprovalRequested,
+  ToolApprovalGranted,
+  ToolApprovalDenied,
+  ToolExecutionStarted,
+  ToolExecutionCompleted,
+  ToolExecutionError,
+  ProviderToolResult
 ])
 export type AgentEvent = typeof AgentEvent.Type

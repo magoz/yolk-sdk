@@ -12,14 +12,17 @@ import {
 import * as Schema from 'effect/Schema'
 import {
   AgentEnd,
+  AssistantTextPart,
+  HostToolCallPart,
+  assistantContent,
   contentPreview,
   type AgentMessage,
   AssistantAgentMessage,
-  LLMToolCall,
   LLMTextDelta,
   ToolCall,
-  ToolExecutionEnd,
-  ToolExecutionStart,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
+  ToolInputEnd,
   ToolResultMessage,
   ToolResult,
   UserMessage,
@@ -112,7 +115,7 @@ const toRealtimeConversationMessage = (
     case 'User':
       return makeOpenAiRealtimeUserMessageItem(contentPreview(message.content))
     case 'Assistant': {
-      const text = contentPreview(message.content)
+      const text = contentPreview(assistantContent(message))
 
       if (text.length === 0) {
         return null
@@ -278,7 +281,7 @@ const assistantEndMessages = (content: string, toolMessages: ReadonlyArray<Agent
     return [...toolMessages]
   }
 
-  return [...toolMessages, AssistantAgentMessage.make({ content, toolCalls: [] })]
+  return [...toolMessages, AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })]
 }
 
 const assistantEndEvent = (content: string, toolMessages: ReadonlyArray<AgentMessage>) =>
@@ -385,8 +388,8 @@ export const useRealtimeVoice = ({
         const call = request.realtimeCall
         const toolCall = request.toolCall
         yield* Effect.sync(() => {
-          emitAgentEvent(LLMToolCall.make({ call: toolCall }))
-          emitAgentEvent(ToolExecutionStart.make({ call: toolCall }))
+          emitAgentEvent(ToolInputEnd.make({ call: toolCall }))
+          emitAgentEvent(ToolExecutionStarted.make({ call: toolCall }))
         })
 
         const payload = yield* requestToolExecution(call)
@@ -407,14 +410,18 @@ export const useRealtimeVoice = ({
 
         yield* Effect.sync(() => {
           emitAgentEvent(
-            ToolExecutionEnd.make({
+            ToolExecutionCompleted.make({
               call: toolCall,
               result
             })
           )
         })
 
-        return ToolResultMessage.make({ toolCallId: result.toolCallId, content: result.content })
+          return ToolResultMessage.make({
+            toolCallId: result.toolCallId,
+            content: result.content,
+            structuredContent: result.structuredContent
+          })
       }),
     [emitAgentEvent, sendClientEvent]
   )
@@ -504,8 +511,10 @@ export const useRealtimeVoice = ({
                 voiceCreatedMessagesRef.current = [
                   ...voiceCreatedMessagesRef.current,
                   AssistantAgentMessage.make({
-                    content: '',
-                    toolCalls: requests.map(request => request.toolCall)
+                    parts: [
+                      AssistantTextPart.make({ content: '' }),
+                      ...requests.map(request => HostToolCallPart.make({ call: request.toolCall }))
+                    ]
                   }),
                   ...resultMessages
                 ]

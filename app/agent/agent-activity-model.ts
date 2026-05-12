@@ -23,20 +23,22 @@ export const activityItemFromAgentEvent = (
       return { title: 'Thinking', detail: `Turn ${event.turn}`, tone: 'active' }
     case 'LLMStreamStart':
       return { title: 'Model stream started', detail: `Turn ${event.turn}`, tone: 'active' }
-    case 'LLMToolCall':
+    case 'ToolInputEnd':
       return {
         title: `Tool requested: ${event.call.name}`,
         detail: unknownPreview(event.call.params),
         tone: 'tool'
       }
-    case 'ToolExecutionStart':
+    case 'ToolExecutionStarted':
       return { title: `Running tool: ${event.call.name}`, detail: event.call.id, tone: 'tool' }
-    case 'ToolExecutionEnd':
+    case 'ToolExecutionCompleted':
       return {
         title: `Tool result: ${event.call.name}`,
         detail: truncate(contentPreview(event.result.content)),
         tone: 'success'
       }
+    case 'ToolExecutionError':
+      return { title: `Tool error: ${event.call.name}`, detail: event.message, tone: 'error' }
     case 'TurnEnd':
       return { title: 'Turn ended', detail: event.reason, tone: 'neutral' }
     case 'AgentEnd':
@@ -65,7 +67,12 @@ export const activityItemFromAgentEvent = (
     case 'LLMReasoningDelta':
     case 'LLMStreamEnd':
     case 'LLMTextDelta':
-    case 'ToolResult':
+    case 'ProviderToolResult':
+    case 'ToolApprovalDenied':
+    case 'ToolApprovalGranted':
+    case 'ToolApprovalRequested':
+    case 'ToolInputDelta':
+    case 'ToolInputStart':
     case 'UsageUpdate':
       return null
   }

@@ -22,8 +22,8 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - Prefer chat language: `AgentChatMessage`, `AgentChatPart`, `AgentChatItem`; avoid “timeline”.
 - `AgentChatState.chatMessages` is UI source of truth; protocol `AgentMessage[]` is replay format only.
 - Use `toAgentMessages(chatMessages)` before text transport; keep protocol conversion at the boundary.
-- Agent events update parts directly: text/reasoning stream as parts; tool calls transition `Called` → `Running` → `Completed`.
-- Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` when later `ToolResult` events re-merge results.
+- Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
+- Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.
@@ -37,7 +37,7 @@ App-local parts-native chat UI. `@yolk/client` is transport-only here; move stab
 - Gate image attach/drop/paste from `agentTextCapabilities.input.image`; console exposes text/image/audio + tools support.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
-- Show provider reasoning only (`LLMReasoningDelta` / `Assistant.reasoning`); never invent reasoning.
+- Show provider reasoning only (`LLMReasoningDelta` / assistant reasoning parts); never invent reasoning.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.

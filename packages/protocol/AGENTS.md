@@ -35,6 +35,9 @@
 - Keep protocol data JSON-serializable unless a type is explicitly app-local.
 - Keep `AgentErrorCode` small and stable; packages map richer local errors to these wire codes.
 - Prefer helpers (`contentText`, `contentParts`, `appendTextToContent`) over duplicate parsing logic downstream.
+- Assistant messages use ordered `AssistantPart`s: text, reasoning, host tool calls, provider tool calls, provider tool results.
+- Host tool results stay as separate `ToolResultMessage`s; provider-executed results stay inside assistant parts/events.
+- Tool lifecycle events are `ToolInput*`, `ToolApproval*`, `ToolExecution*`, and `ProviderToolResult`; no old lifecycle aliases.
 - Tool ids/names are non-empty trimmed strings; validate at protocol boundaries.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.

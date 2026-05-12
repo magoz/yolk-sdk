@@ -1,0 +1,6 @@
+2026-05-12
+- Completed protocol assistant ordered parts + tool lifecycle events.
+- Migrated loop/client/react/app/provider tests to new event/message shape.
+- Tool execution failures now emit ToolExecutionError before canonical AgentError.
+- Updated package docs for ordered parts and lifecycle states.
+- Verified: pnpm packages:check, pnpm lint, pnpm tsc --noEmit, pnpm test:run.

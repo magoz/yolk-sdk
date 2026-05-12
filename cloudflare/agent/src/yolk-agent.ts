@@ -14,6 +14,7 @@ import {
 import { runRuntime, SessionStore } from '@yolk/agent-runtime'
 import {
   AgentError,
+  assistantContent,
   contentText,
   UserMessage,
   type AgentEvent as AgentEventType,
@@ -48,7 +49,12 @@ const makeFauxProviderLayer = Layer.succeed(
   LLMProvider.of({
     stream: request => {
       const last = request.messages.at(-1)
-      const text = last === undefined ? '' : contentText(last.content)
+      const text =
+        last === undefined
+          ? ''
+          : last._tag === 'Assistant'
+            ? contentText(assistantContent(last))
+            : contentText(last.content)
       const reply = `faux-cloudflare: ${text}`
 
       return Stream.fromIterable([

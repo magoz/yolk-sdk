@@ -14,6 +14,8 @@ import {
   AgentUsage,
   AssistantAgentMessage,
   AssistantMessageEvent,
+  AssistantReasoningPart,
+  AssistantTextPart,
   AudioPart,
   CompactionEnd,
   CompactionStart,
@@ -24,14 +26,14 @@ import {
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,
-  LLMToolCall,
+  HostToolCallPart,
   TextPart,
   ToolCall,
   ToolDef,
-  ToolExecutionEnd,
-  ToolExecutionStart,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
+  ToolInputEnd,
   ToolResult,
-  ToolResultEvent,
   ToolResultMessage,
   TurnEnd,
   TurnStart,
@@ -78,7 +80,13 @@ describe('protocol wire schemas', () => {
             AudioPart.make({ data: 'def', format: 'wav' })
           ]
         }),
-        AssistantAgentMessage.make({ content: 'ok', reasoning: 'summary', toolCalls: [call] }),
+        AssistantAgentMessage.make({
+          parts: [
+            AssistantReasoningPart.make({ text: 'summary' }),
+            AssistantTextPart.make({ content: 'ok' }),
+            HostToolCallPart.make({ call })
+          ]
+        }),
         ToolResultMessage.make({ toolCallId: call.id, content: 'result' })
       ]
 
@@ -96,7 +104,9 @@ describe('protocol wire schemas', () => {
         content: 'Example Domain',
         structuredContent: { title: 'Example Domain' }
       })
-      const assistant = AssistantAgentMessage.make({ content: 'done', toolCalls: [call] })
+      const assistant = AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'done' }), HostToolCallPart.make({ call })]
+      })
       const events: ReadonlyArray<AgentEventType> = [
         AgentStart.make({}),
         AgentError.make({ code: 'provider_error', message: 'slow down', retryable: true }),
@@ -110,12 +120,11 @@ describe('protocol wire schemas', () => {
         LLMStreamStart.make({ turn: 1 }),
         LLMTextDelta.make({ text: 'hello' }),
         LLMReasoningDelta.make({ text: 'thinking' }),
-        LLMToolCall.make({ call }),
+        ToolInputEnd.make({ call }),
         LLMStreamEnd.make({ turn: 1 }),
         AssistantMessageEvent.make({ message: assistant }),
-        ToolExecutionStart.make({ call }),
-        ToolExecutionEnd.make({ call, result }),
-        ToolResultEvent.make({ result })
+        ToolExecutionStarted.make({ call }),
+        ToolExecutionCompleted.make({ call, result })
       ]
 
       const decoded = yield* Effect.forEach(events, roundTripEvent)

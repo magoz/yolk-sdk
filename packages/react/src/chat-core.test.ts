@@ -2,14 +2,15 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
   AssistantMessageEvent,
+  AssistantTextPart,
+  HostToolCallPart,
   LLMReasoningDelta,
   LLMTextDelta,
-  LLMToolCall,
   ToolCall,
-  ToolExecutionEnd,
-  ToolExecutionStart,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
+  ToolInputEnd,
   ToolResult,
-  ToolResultEvent,
   UserMessage
 } from '@yolk/protocol'
 import {
@@ -63,10 +64,12 @@ describe('agent chat core', () => {
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const state = [
-      LLMToolCall.make({ call }),
-      ToolExecutionEnd.make({ call, result }),
+      ToolInputEnd.make({ call }),
+      ToolExecutionCompleted.make({ call, result }),
       AssistantMessageEvent.make({
-        message: AssistantAgentMessage.make({ content: '', toolCalls: [call] })
+        message: AssistantAgentMessage.make({
+          parts: [AssistantTextPart.make({ content: '' }), HostToolCallPart.make({ call })]
+        })
       })
     ].reduce(
       (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
@@ -89,18 +92,14 @@ describe('agent chat core', () => {
     })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const state = [
-      LLMToolCall.make({ call }),
-      ToolExecutionStart.make({ call }),
-      ToolExecutionEnd.make({ call, result })
+      ToolInputEnd.make({ call }),
+      ToolExecutionStarted.make({ call }),
+      ToolExecutionCompleted.make({ call, result })
     ].reduce(
       (current, event) => reduceAgentChatState(current, { _tag: 'Event', event, nowMs: 123 }),
       initialAgentChatState
     )
-    const afterResult = reduceAgentChatState(state, {
-      _tag: 'Event',
-      event: ToolResultEvent.make({ result })
-    })
-    const toolPart = afterResult.chatMessages[0]?.parts.find(part => part._tag === 'ToolCall')
+    const toolPart = state.chatMessages[0]?.parts.find(part => part._tag === 'ToolCall')
 
     expect(toolPart).toMatchObject({
       _tag: 'ToolCall',

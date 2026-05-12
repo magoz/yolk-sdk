@@ -1,4 +1,4 @@
-import { AssistantAgentMessage } from '@yolk/protocol'
+import { AssistantAgentMessage, AssistantReasoningPart, AssistantTextPart, HostToolCallPart } from '@yolk/protocol'
 import type { LLMEvent } from './llm-event.ts'
 
 export const collectText = (events: ReadonlyArray<LLMEvent>) =>
@@ -15,14 +15,12 @@ export const collectToolCalls = (events: ReadonlyArray<LLMEvent>) =>
 
 export const accumulateAssistantMessage = (events: ReadonlyArray<LLMEvent>) => {
   const reasoning = collectReasoning(events)
-  const message = {
-    content: collectText(events),
-    toolCalls: collectToolCalls(events)
-  }
+  const content = collectText(events)
+  const parts = [
+    ...(reasoning.length === 0 ? [] : [AssistantReasoningPart.make({ text: reasoning })]),
+    AssistantTextPart.make({ content }),
+    ...collectToolCalls(events).map(call => HostToolCallPart.make({ call }))
+  ]
 
-  if (reasoning.length === 0) {
-    return AssistantAgentMessage.make(message)
-  }
-
-  return AssistantAgentMessage.make({ ...message, reasoning })
+  return AssistantAgentMessage.make({ parts })
 }

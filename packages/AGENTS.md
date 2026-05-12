@@ -56,7 +56,7 @@ mcp-server -> mcp-client + protocol + Effect
 - `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
-- `accumulateAssistantMessage` stores collected reasoning on `Assistant.reasoning`.
+- `accumulateAssistantMessage` stores collected reasoning as ordered assistant reasoning parts.
 
 ## Content + Capabilities
 
@@ -116,9 +116,9 @@ mcp-server -> mcp-client + protocol + Effect
 
 - `/agent` uses app-local parts state (`app/agent/agent-chat-messages.ts`) and imports `@yolk/client` primarily for transport.
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
-- `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant/tool turns during active runs.
+- `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant turns during active runs.
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
-- `AgentToolRun` is the single client tool lifecycle object: `Called` → `Running(startedAtMs)` → `Completed(result, startedAtMs, endedAtMs)`.
+- `AgentToolRun` is the single client tool lifecycle object: input streaming/ready, approval requested/denied, executing, completed, errored, provider-completed.
 - Keep tool timing/result on `AgentToolRun`; avoid separate arrays that must be rejoined by id.
 - Reducers/projections receive `nowMs`; do not call wall-clock APIs inside state reducers.
 - `submitAgentUserMessage` appends user messages locally before transport starts.
