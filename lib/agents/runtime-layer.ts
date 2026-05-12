@@ -2,7 +2,6 @@ import { Layer } from 'effect'
 import { LoopConfig, type LLMProvider, type ToolExecutor } from '@yolk/agent-loop'
 import { NoToolExecutorLayer } from './no-tool-executor-layer'
 import { OpenAiProviderLayer } from './providers/openai-provider'
-import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentContextTransformerLayer } from './context-transformer'
 
 export const makeAgentRuntimeLayerWithTools = <
@@ -18,8 +17,7 @@ export const makeAgentRuntimeLayerWithTools = <
     AgentContextTransformerLayer,
     LoopConfig.defaultLayer,
     providerLayer,
-    toolExecutorLayer,
-    StatelessSessionStoreLayer
+    toolExecutorLayer
   )
 
 export const makeAgentRuntimeLayer = <E, R>(providerLayer: Layer.Layer<LLMProvider, E, R>) =>

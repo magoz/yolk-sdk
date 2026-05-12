@@ -23,7 +23,6 @@ import {
 } from '@yolk/agent-loop'
 import type { LLMRequest } from '@yolk/agent-loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
-import { StatelessSessionStoreLayer } from './stateless-session-store-layer'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
 
 const config = {
@@ -60,8 +59,7 @@ const makeLayer = () =>
     ContextTransformer.identity,
     LoopConfig.defaultLayer,
     FauxProvider.layer(Reply.text('ok')),
-    TestToolExecutor.layer({}),
-    StatelessSessionStoreLayer
+    TestToolExecutor.layer({})
   )
 
 const makeNeverCompletingLayer = () =>
@@ -74,8 +72,7 @@ const makeNeverCompletingLayer = () =>
         stream: () => Stream.never
       })
     ),
-    TestToolExecutor.layer({}),
-    StatelessSessionStoreLayer
+    TestToolExecutor.layer({})
   )
 
 const makeFailingLayer = () =>
@@ -99,8 +96,7 @@ const makeFailingLayer = () =>
           )
       })
     ),
-    TestToolExecutor.layer({}),
-    StatelessSessionStoreLayer
+    TestToolExecutor.layer({})
   )
 
 const makeFailingToolLayer = () =>
@@ -126,8 +122,7 @@ const makeFailingToolLayer = () =>
             })
           )
       })
-    ),
-    StatelessSessionStoreLayer
+    )
   )
 
 const noToolReasoningCapabilities = AgentModelCapabilities.make({
@@ -307,8 +302,7 @@ describe('makeAgentPostResponse', () => {
           responses: [Reply.text('ok'), Reply.text('next')],
           requests
         }),
-        TestToolExecutor.layer({}),
-        StatelessSessionStoreLayer
+        TestToolExecutor.layer({})
       )
       const firstMessages = [UserMessage.make({ content: 'hello' })] satisfies readonly [
         AgentMessage,
@@ -366,8 +360,7 @@ describe('makeAgentPostResponse', () => {
           ],
           requests
         }),
-        TestToolExecutor.layer({ echo: 'pong' }),
-        StatelessSessionStoreLayer
+        TestToolExecutor.layer({ echo: 'pong' })
       )
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({

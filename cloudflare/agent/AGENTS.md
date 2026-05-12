@@ -38,7 +38,7 @@ Do not build these here yet unless explicitly requested:
 ## Package Holes To Close First
 
 - Append-log/session event model.
-- Runtime persistence semantics: event log vs snapshot.
+- Runtime persistence semantics: append event log.
 - Cancellation, resume, reconnect.
 - Tool approval and permission hooks.
 - Context provider API.

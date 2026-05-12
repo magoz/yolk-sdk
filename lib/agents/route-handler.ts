@@ -81,8 +81,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       {
         _tag: 'Transcript',
         sessionId: input.sessionId,
-        messages: input.messages,
-        persist: false
+        messages: input.messages
       },
       {
         systemPrompt: config.systemPrompt,

@@ -9,11 +9,14 @@ import {
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent-loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
 import {
+  InputAppended,
+  makeInMemorySessionEventStoreLayer,
+  replayRuntimeSessionEvents,
   runRuntime,
-  SessionStore,
+  SessionEventStore,
   type RuntimeConfig,
-  type RuntimeTranscript,
-  type SessionSnapshot
+  type RuntimeSessionEventLog,
+  type RuntimeTranscript
 } from '../src'
 
 const runtimeConfig: RuntimeConfig = {
@@ -66,88 +69,9 @@ describe('runRuntime', () => {
     })
   )
 
-  it.effect('can persist transcript mode after a successful run', () =>
-    Effect.gen(function* () {
-      const saved: Array<SessionSnapshot> = []
-      const StoreLayer = Layer.succeed(
-        SessionStore,
-        SessionStore.of({
-          load: sessionId => Effect.succeed({ id: sessionId, messages: [] }),
-          save: snapshot => Effect.sync(() => saved.push(snapshot))
-        })
-      )
-      const messages: RuntimeTranscript = [UserMessage.make({ content: 'persist this transcript' })]
-
-      yield* runRuntime(
-        {
-          _tag: 'Transcript',
-          sessionId: 'session_1',
-          messages,
-          persist: true
-        },
-        runtimeConfig
-      ).pipe(Stream.runCollect, Effect.provide(Layer.mergeAll(makeAgentLoopLayer(), StoreLayer)))
-
-      expect(saved).toEqual([
-        {
-          id: 'session_1',
-          messages: [
-            UserMessage.make({ content: 'persist this transcript' }),
-            AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
-          ]
-        }
-      ])
-    })
-  )
-
-  it.effect('loads session input mode, runs agent loop, and saves transcript', () =>
-    Effect.gen(function* () {
-      const saved: Array<SessionSnapshot> = []
-      const session = {
-        id: 'session_1',
-        messages: [UserMessage.make({ content: 'old' })]
-      }
-      const StoreLayer = Layer.succeed(
-        SessionStore,
-        SessionStore.of({
-          load: () => Effect.succeed(session),
-          save: snapshot => Effect.sync(() => saved.push(snapshot))
-        })
-      )
-
-      const eventsChunk = yield* runRuntime(
-        {
-          _tag: 'Input',
-          sessionId: session.id,
-          input: UserMessage.make({ content: 'new' })
-        },
-        runtimeConfig
-      ).pipe(Stream.runCollect, Effect.provide(Layer.mergeAll(makeAgentLoopLayer(), StoreLayer)))
-
-      expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
-      expect(saved).toEqual([
-        {
-          id: 'session_1',
-          messages: [
-            UserMessage.make({ content: 'old' }),
-            UserMessage.make({ content: 'new' }),
-            AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
-          ]
-        }
-      ])
-    })
-  )
-
   it.effect('passes reasoning effort and capabilities to the agent loop', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
-      const StoreLayer = Layer.succeed(
-        SessionStore,
-        SessionStore.of({
-          load: sessionId => Effect.succeed({ id: sessionId, messages: [] }),
-          save: () => Effect.void
-        })
-      )
 
       yield* runRuntime(
         {
@@ -162,40 +86,125 @@ describe('runRuntime', () => {
         }
       ).pipe(
         Stream.runCollect,
-        Effect.provide(Layer.mergeAll(makeAgentLoopLayer(requests), StoreLayer))
+        Effect.provide(makeAgentLoopLayer(requests))
       )
 
       expect(getFirstRequest(requests).reasoningEffort).toBe('medium')
     })
   )
 
-  it.effect('does not persist when the loop fails before completion', () =>
-    Effect.gen(function* () {
-      const saved: Array<SessionSnapshot> = []
-      const StoreLayer = Layer.succeed(
-        SessionStore,
-        SessionStore.of({
-          load: sessionId =>
-            Effect.succeed({ id: sessionId, messages: [UserMessage.make({ content: 'old' })] }),
-          save: snapshot => Effect.sync(() => saved.push(snapshot))
-        })
-      )
+  it.effect('runs append input mode from replayed session events', () => {
+    const requests: Array<LLMRequest> = []
+    const old = UserMessage.make({ content: 'old' })
+    const input = UserMessage.make({ content: 'new' })
+    const initialLog: RuntimeSessionEventLog = {
+      sessionId: 'session_1',
+      revision: 1,
+      events: [
+        {
+          id: 'session_1:1',
+          sessionId: 'session_1',
+          revision: 1,
+          event: InputAppended.make({ message: old })
+        }
+      ]
+    }
+    const layer = Layer.mergeAll(
+      makeAgentLoopLayer(requests),
+      makeInMemorySessionEventStoreLayer([initialLog])
+    )
 
+    return Effect.gen(function* () {
+      const eventsChunk = yield* runRuntime(
+        {
+          _tag: 'AppendInput',
+          sessionId: 'session_1',
+          input,
+          runId: 'run_1',
+          expectedRevision: 1
+        },
+        runtimeConfig
+      ).pipe(Stream.runCollect)
+
+      const store = yield* SessionEventStore
+      const log = yield* store.load('session_1')
+      const assistant = AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
+
+      expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
+      expect(getFirstRequest(requests).messages).toEqual([old, input])
+      expect(log.events.map(event => event.event._tag)).toEqual([
+        'InputAppended',
+        'InputAppended',
+        'RunStarted',
+        'RunCompleted'
+      ])
+      expect(replayRuntimeSessionEvents(log.events)).toEqual([old, input, assistant])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('records run failure in append input mode without completed messages', () => {
+    const input = UserMessage.make({ content: 'new' })
+    const layer = Layer.mergeAll(makeAgentLoopLayer([], []), makeInMemorySessionEventStoreLayer())
+
+    return Effect.gen(function* () {
       const exit = yield* runRuntime(
         {
-          _tag: 'Input',
+          _tag: 'AppendInput',
           sessionId: 'session_1',
-          input: UserMessage.make({ content: 'new' })
+          input,
+          runId: 'run_1'
+        },
+        runtimeConfig
+      ).pipe(Stream.runCollect, Effect.exit)
+
+      const store = yield* SessionEventStore
+      const log = yield* store.load('session_1')
+
+      expect(exit._tag).toBe('Failure')
+      expect(log.events.map(event => event.event._tag)).toEqual([
+        'InputAppended',
+        'RunStarted',
+        'RunFailed'
+      ])
+      expect(replayRuntimeSessionEvents(log.events)).toEqual([input])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('rejects append input mode with stale expected revision', () =>
+    Effect.gen(function* () {
+      const old = UserMessage.make({ content: 'old' })
+      const initialLog: RuntimeSessionEventLog = {
+        sessionId: 'session_1',
+        revision: 1,
+        events: [
+          {
+            id: 'session_1:1',
+            sessionId: 'session_1',
+            revision: 1,
+            event: InputAppended.make({ message: old })
+          }
+        ]
+      }
+
+      const result = yield* runRuntime(
+        {
+          _tag: 'AppendInput',
+          sessionId: 'session_1',
+          input: UserMessage.make({ content: 'new' }),
+          runId: 'run_1',
+          expectedRevision: 0
         },
         runtimeConfig
       ).pipe(
         Stream.runCollect,
-        Effect.provide(Layer.mergeAll(makeAgentLoopLayer([], []), StoreLayer)),
-        Effect.exit
+        Effect.provide(Layer.mergeAll(makeAgentLoopLayer(), makeInMemorySessionEventStoreLayer([initialLog]))),
+        Effect.result
       )
 
-      expect(exit._tag).toBe('Failure')
-      expect(saved).toEqual([])
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
+      })
     })
   )
 })

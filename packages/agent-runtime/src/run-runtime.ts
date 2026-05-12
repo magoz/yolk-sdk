@@ -14,7 +14,18 @@ import {
   type LoopConfig,
   type ToolExecutor
 } from '@yolk/agent-loop'
-import { SessionStore } from './session-store.ts'
+import { runtimeErrorToAgentError } from './error.ts'
+import {
+  InputAppended,
+  replayRuntimeSessionEvents,
+  RunCompleted,
+  RunFailed,
+  RunStarted,
+  SessionEventStore,
+  type RuntimeSessionEventLog,
+  type SessionEventStoreApi,
+  type SessionRevision
+} from './session-event-store.ts'
 import type { RuntimeError } from './error.ts'
 
 export type RuntimeTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
@@ -31,29 +42,23 @@ export type TranscriptRuntimeRequest = {
   readonly _tag: 'Transcript'
   readonly sessionId: string
   readonly messages: RuntimeTranscript
-  readonly persist?: false
 }
 
-export type PersistentTranscriptRuntimeRequest = {
-  readonly _tag: 'Transcript'
-  readonly sessionId: string
-  readonly messages: RuntimeTranscript
-  readonly persist: true
-}
-
-export type InputRuntimeRequest = {
-  readonly _tag: 'Input'
+export type AppendInputRuntimeRequest = {
+  readonly _tag: 'AppendInput'
   readonly sessionId: string
   readonly input: AgentMessage
+  readonly runId: string
+  readonly expectedRevision?: SessionRevision
 }
 
 export type RuntimeRequest =
   | TranscriptRuntimeRequest
-  | PersistentTranscriptRuntimeRequest
-  | InputRuntimeRequest
+  | AppendInputRuntimeRequest
 
 type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
-type RuntimeRequirements = LoopRequirements | SessionStore
+type AppendRuntimeRequirements = LoopRequirements | SessionEventStore
+type RuntimeRequirements = LoopRequirements | AppendRuntimeRequirements
 type RuntimeErrorUnion = RuntimeError | AgentLoopError
 
 const extractNewMessages = (event: AgentEvent) => (event._tag === 'AgentEnd' ? event.messages : [])
@@ -82,10 +87,10 @@ const runAndCollectMessages = (
     })
   )
 
-const saveAfterSuccess = (
+const appendAfterSuccess = (
   stream: Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>,
-  save: Effect.Effect<void, RuntimeError>
-) => stream.pipe(Stream.concat(Stream.fromEffect(save).pipe(Stream.flatMap(() => Stream.empty))))
+  append: Effect.Effect<void, RuntimeError>
+) => stream.pipe(Stream.concat(Stream.fromEffect(append).pipe(Stream.flatMap(() => Stream.empty))))
 
 const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: RuntimeConfig) =>
   Stream.unwrap(
@@ -96,42 +101,82 @@ const makeTranscriptRuntimeStream = (request: TranscriptRuntimeRequest, config: 
     )
   )
 
-const makePersistentTranscriptRuntimeStream = (
-  request: PersistentTranscriptRuntimeRequest,
-  config: RuntimeConfig
-) => {
-  return Stream.unwrap(
-    Effect.gen(function* () {
-      const store = yield* SessionStore
-      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
-      const stream = runAndCollectMessages(config, request.messages, createdMessages)
+const emptyRuntimeSessionEventLog = (sessionId: string): RuntimeSessionEventLog => ({
+  sessionId,
+  revision: 0,
+  events: []
+})
 
-      return saveAfterSuccess(
+const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
+  store.load(sessionId).pipe(
+    Effect.catchTag('SessionNotFoundError', () =>
+      Effect.succeed(emptyRuntimeSessionEventLog(sessionId))
+    )
+  )
+
+const appendRunFailed = (
+  store: SessionEventStoreApi,
+  request: AppendInputRuntimeRequest,
+  revision: SessionRevision,
+  error: AgentLoopError
+) =>
+  store.append({
+    sessionId: request.sessionId,
+    expectedRevision: revision,
+    events: [RunFailed.make({ runId: request.runId, error: runtimeErrorToAgentError(error) })]
+  })
+
+const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config: RuntimeConfig) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const store = yield* SessionEventStore
+      const initialLog = yield* loadAppendLogOrEmpty(store, request.sessionId)
+      const startedLog = yield* store.append({
+        sessionId: request.sessionId,
+        expectedRevision: request.expectedRevision ?? initialLog.revision,
+        events: [
+          InputAppended.make({ message: request.input }),
+          RunStarted.make({ runId: request.runId })
+        ]
+      })
+      const messages = [...replayRuntimeSessionEvents(initialLog.events), request.input]
+      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const stream = runAndCollectMessages(config, messages, createdMessages).pipe(
+        Stream.catchTags({
+          AbortError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          ContextTransformError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          FauxExhaustedError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          LLMError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          ToolError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            )
+        })
+      )
+
+      return appendAfterSuccess(
         stream,
         Ref.get(createdMessages).pipe(
           Effect.flatMap(messages =>
-            store.save({ id: request.sessionId, messages: [...request.messages, ...messages] })
-          )
-        )
-      )
-    })
-  )
-}
-
-const makeInputRuntimeStream = (request: InputRuntimeRequest, config: RuntimeConfig) =>
-  Stream.unwrap(
-    Effect.gen(function* () {
-      const store = yield* SessionStore
-      const snapshot = yield* store.load(request.sessionId)
-      const messages = [...snapshot.messages, request.input]
-      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
-
-      return saveAfterSuccess(
-        runAndCollectMessages(config, messages, createdMessages),
-        Ref.get(createdMessages).pipe(
-          Effect.flatMap(created =>
-            store.save({ id: snapshot.id, messages: [...messages, ...created] })
-          )
+            store.append({
+              sessionId: request.sessionId,
+              expectedRevision: startedLog.revision,
+              events: [RunCompleted.make({ runId: request.runId, messages })]
+            })
+          ),
+          Effect.asVoid
         )
       )
     })
@@ -142,9 +187,9 @@ export function runRuntime(
   config: RuntimeConfig
 ): Stream.Stream<AgentEvent, AgentLoopError, LoopRequirements>
 export function runRuntime(
-  request: PersistentTranscriptRuntimeRequest | InputRuntimeRequest,
+  request: AppendInputRuntimeRequest,
   config: RuntimeConfig
-): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, AppendRuntimeRequirements>
 export function runRuntime(
   request: RuntimeRequest,
   config: RuntimeConfig
@@ -155,12 +200,8 @@ export function runRuntime(
 ): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements> {
   switch (request._tag) {
     case 'Transcript':
-      if (request.persist === true) {
-        return makePersistentTranscriptRuntimeStream(request, config)
-      }
-
       return makeTranscriptRuntimeStream(request, config)
-    case 'Input':
-      return makeInputRuntimeStream(request, config)
+    case 'AppendInput':
+      return makeAppendInputRuntimeStream(request, config)
   }
 }

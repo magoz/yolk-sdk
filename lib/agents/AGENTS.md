@@ -11,8 +11,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - No durable transcript: text client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
-- Text route calls `agent-runtime` transcript mode with `persist: false`; durable session lifecycle is deferred
-- `StatelessSessionStoreLayer` remains no-op scaffolding for future runtime persistence
+- Text route calls stateless `agent-runtime` transcript mode; durable session lifecycle is deferred
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.

@@ -53,7 +53,7 @@ mcp-server -> mcp-client + protocol + Effect
 
 - `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
 - `agent-runtime` threads `reasoningEffort` and `capabilities`; text `/api/agent` uses transcript mode with app-owned HTTP/auth/tool/provider wiring.
-- `agent-runtime` has both legacy snapshot `SessionStore` and append-only `SessionEventStore`; runtime integration still uses snapshot paths until explicitly migrated.
+- `agent-runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
 - `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
@@ -238,7 +238,8 @@ Use these before broadening package scope:
 
 3. **Design durable runtime append store**
    - PRD drafted in `prd-durable-runtime-append-store.md`; initial `SessionEventStore` contract exists.
-   - Next: wire runtime append mode, active run cleanup, resume/fanout boundaries.
+   - `AppendInput` runtime mode records input, run start, completion, and failure.
+   - Next: active run cleanup, interruption marking, resume/fanout boundaries.
 
 4. **Design richer tool lifecycle events**
    - PRD drafted in `prd-tool-lifecycle-events.md`.

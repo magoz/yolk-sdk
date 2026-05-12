@@ -8,15 +8,12 @@ export {
 export type { RuntimeError } from './error.ts'
 export { runRuntime } from './run-runtime.ts'
 export type {
-  InputRuntimeRequest,
-  PersistentTranscriptRuntimeRequest,
+  AppendInputRuntimeRequest,
   RuntimeConfig,
   RuntimeRequest,
   RuntimeTranscript,
   TranscriptRuntimeRequest
 } from './run-runtime.ts'
-export { makeInMemorySessionStoreLayer, SessionStore } from './session-store.ts'
-export type { SessionSnapshot } from './session-store.ts'
 export {
   InputAppended,
   makeInMemorySessionEventStoreLayer,
@@ -31,6 +28,7 @@ export {
 export type {
   AppendRuntimeSessionEventsInput,
   RuntimeSessionEventLog,
+  SessionEventStoreApi,
   SessionRevision,
   StoredRuntimeSessionEvent
 } from './session-event-store.ts'

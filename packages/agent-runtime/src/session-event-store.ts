@@ -56,16 +56,18 @@ export type AppendRuntimeSessionEventsInput = {
   readonly events: ReadonlyArray<RuntimeSessionEvent>
 }
 
+export type SessionEventStoreApi = {
+  readonly load: (
+    sessionId: string
+  ) => Effect.Effect<RuntimeSessionEventLog, SessionNotFoundError | SessionLoadError>
+  readonly append: (
+    input: AppendRuntimeSessionEventsInput
+  ) => Effect.Effect<RuntimeSessionEventLog, SessionSaveError | SessionConflictError>
+}
+
 export class SessionEventStore extends Context.Service<
   SessionEventStore,
-  {
-    readonly load: (
-      sessionId: string
-    ) => Effect.Effect<RuntimeSessionEventLog, SessionNotFoundError | SessionLoadError>
-    readonly append: (
-      input: AppendRuntimeSessionEventsInput
-    ) => Effect.Effect<RuntimeSessionEventLog, SessionSaveError | SessionConflictError>
-  }
+  SessionEventStoreApi
 >()('@yolk/agent-runtime/SessionEventStore') {}
 
 export const replayRuntimeSessionEvents = (
