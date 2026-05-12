@@ -1,4 +1,4 @@
-export { McpServerError } from './errors'
-export { makeMcpToolServer } from './server'
-export type { McpServerTool, McpToolServer } from './server'
-export { runStdioMcpServer } from './stdio'
+export { McpServerError } from './errors.ts'
+export { makeMcpToolServer } from './server.ts'
+export type { McpServerTool, McpToolServer } from './server.ts'
+export { runStdioMcpServer } from './stdio.ts'

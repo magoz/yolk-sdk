@@ -6,7 +6,7 @@ Reusable tool-only MCP server primitives.
 
 - MCP `initialize`, `tools/list`, and `tools/call` handling.
 - HTTP POST JSON-RPC entrypoint.
-- Newline-delimited stdio runner.
+- Newline-delimited stdio runner over Effect `Stdio`.
 - Tool-only server creation from generic Yolk tool handlers.
 
 ## Use it when
@@ -19,3 +19,4 @@ Reusable tool-only MCP server primitives.
 - No MCP resources or prompts.
 - No OAuth/app auth.
 - No framework-specific server dependency.
+- Node stdio CLIs provide `NodeStdio.layer` at the boundary.

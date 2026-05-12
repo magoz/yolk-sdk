@@ -134,7 +134,23 @@ describe('MCP tool server', () => {
       expect(response).toMatchObject({
         jsonrpc: '2.0',
         id: 6,
-        error: { code: -32_000 }
+        error: { code: -32_600 }
+      })
+    })
+  )
+
+  it.effect('returns JSON-RPC errors for malformed JSON', () =>
+    Effect.gen(function* () {
+      const responseOption = yield* server.handleLine('{')
+      if (Option.isNone(responseOption)) {
+        return yield* Effect.fail(new Error('Expected MCP response'))
+      }
+      const response = yield* decodeJson(responseOption.value)
+
+      expect(response).toMatchObject({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32_700 }
       })
     })
   )

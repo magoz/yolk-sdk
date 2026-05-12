@@ -298,6 +298,9 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65(effect@4.0.0-beta.65)(ioredis@5.10.1)
       '@yolk/mcp-client':
         specifier: workspace:^
         version: link:../mcp-client

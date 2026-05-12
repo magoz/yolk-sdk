@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { NodeStdio } from '@effect/platform-node'
 import { ToolDef, ToolResult } from '@yolk/protocol'
 import { makeMcpToolServer, runStdioMcpServer } from '@yolk/mcp-server'
 
@@ -14,4 +15,4 @@ const server = makeMcpToolServer({
   ]
 })
 
-Effect.runPromise(runStdioMcpServer(server))
+Effect.runPromise(runStdioMcpServer(server).pipe(Effect.provide(NodeStdio.layer)))

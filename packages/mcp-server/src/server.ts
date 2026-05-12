@@ -1,8 +1,8 @@
-import { Effect, Option } from 'effect'
+import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolCall, contentText, type ToolDef, type ToolResult } from '@yolk/protocol'
 import { latestMcpProtocolVersion } from '@yolk/mcp-client'
-import { McpServerError } from './errors'
+import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {
   readonly jsonrpc: '2.0'
@@ -47,10 +47,21 @@ const CallToolParamsSchema = Schema.Struct({
 
 const JsonRpcMessageSchema = Schema.Union([JsonRpcRequestSchema, JsonRpcNotificationSchema])
 
-const decodeJsonRpcMessageFromJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(JsonRpcMessageSchema)
-)
+type JsonRpcMessage = typeof JsonRpcMessageSchema.Type
 
+type DecodedLine =
+  | { readonly _tag: 'Message'; readonly message: JsonRpcMessage }
+  | { readonly _tag: 'Response'; readonly response: Option.Option<string> }
+
+const decodedMessage = (message: JsonRpcMessage): DecodedLine => ({ _tag: 'Message', message })
+
+const decodedResponse = (response: Option.Option<string>): DecodedLine => ({
+  _tag: 'Response',
+  response
+})
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
 const decodeCallToolParams = Schema.decodeUnknownEffect(CallToolParamsSchema)
 
 const encodeJson = (value: unknown) =>
@@ -59,19 +70,30 @@ const encodeJson = (value: unknown) =>
       error =>
         new McpServerError({
           message: `Could not encode MCP response: ${String(error)}`,
-          cause: 'validation'
+          cause: 'encoding'
         })
     )
   )
 
 const decodeMessage = (line: string) =>
-  decodeJsonRpcMessageFromJson(line).pipe(
+  decodeJson(line).pipe(
     Effect.mapError(
       error =>
         new McpServerError({
-          message: `Invalid MCP JSON-RPC message: ${String(error)}`,
-          cause: 'validation'
+          message: `Malformed MCP JSON: ${String(error)}`,
+          cause: 'parse'
         })
+    ),
+    Effect.flatMap(value =>
+      decodeJsonRpcMessage(value).pipe(
+        Effect.mapError(
+          error =>
+            new McpServerError({
+              message: `Invalid MCP JSON-RPC message: ${String(error)}`,
+              cause: 'validation'
+            })
+        )
+      )
     )
   )
 
@@ -96,6 +118,23 @@ const unknownToMessage = (error: unknown) =>
 
 const isRequest = (message: JsonRpcRequest | JsonRpcNotification): message is JsonRpcRequest =>
   'id' in message
+
+const protocolErrorCode = (error: McpServerError) => {
+  switch (error.cause) {
+    case 'parse':
+      return -32_700
+    case 'validation':
+      return -32_600
+    case 'protocol':
+      return -32_603
+    case 'tool_error':
+    case 'encoding':
+      return -32_000
+  }
+}
+
+const protocolErrorResponse = (id: string | number | null, error: McpServerError) =>
+  errorResponse(id, protocolErrorCode(error), error.message)
 
 const mcpResultFromToolResult = (result: ToolResult) => ({
   content: [{ type: 'text', text: contentText(result.content) }]
@@ -146,7 +185,7 @@ export const makeMcpToolServer = <R>(input: {
   readonly version: string
   readonly tools: ReadonlyArray<McpServerTool<R>>
 }): McpToolServer<R> => {
-  const findTool = (name: string) => input.tools.find(tool => tool.def.name === name)
+  const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
 
   const handleRequest = (request: JsonRpcRequest) =>
     Effect.gen(function* () {
@@ -172,11 +211,11 @@ export const makeMcpToolServer = <R>(input: {
             )
           )
           const tool = findTool(params.name)
-          if (tool === undefined) {
+          if (Option.isNone(tool)) {
             return errorResponse(request.id, -32_602, `Unknown tool: ${params.name}`)
           }
 
-          const result = yield* tool
+          const result = yield* tool.value
             .execute(
               ToolCall.make({
                 id: String(request.id),
@@ -202,13 +241,29 @@ export const makeMcpToolServer = <R>(input: {
       }
     }).pipe(
       Effect.catch(error =>
-        Effect.succeed(errorResponse(request.id, -32_000, unknownToMessage(error)))
+        error instanceof McpServerError
+          ? Effect.succeed(protocolErrorResponse(request.id, error))
+          : Effect.succeed(errorResponse(request.id, -32_000, unknownToMessage(error)))
       )
     )
 
   const handleLine = (line: string) =>
     Effect.gen(function* () {
-      const message = yield* decodeMessage(line)
+      const decoded: DecodedLine = yield* decodeMessage(line).pipe(
+        Effect.map(decodedMessage),
+        Effect.catch(error =>
+          encodeJson(protocolErrorResponse(null, error)).pipe(
+            Effect.map(response => decodedResponse(Option.some(response)))
+          )
+        )
+      )
+
+      if (decoded._tag === 'Response') {
+        return decoded.response
+      }
+
+      const { message } = decoded
+
       if (!isRequest(message)) {
         return Option.none<string>()
       }

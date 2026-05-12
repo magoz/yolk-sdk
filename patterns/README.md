@@ -12,6 +12,7 @@ Architecture and convention patterns for this codebase.
 | [EFFECT_PAGES.md](./EFFECT_PAGES.md)                       | Suspense + Content, streaming sections, filter-driven selective loading (nuqs) |
 | [EFFECT_API_ROUTES.md](./EFFECT_API_ROUTES.md)             | HttpEffect API routes, request schemas, response/error handling                |
 | [EFFECT_TESTING.md](./EFFECT_TESTING.md)                   | Testing Effect programs, mocking services, property testing                    |
+| [MCP_TRANSPORTS.md](./MCP_TRANSPORTS.md)                   | MCP JSON-RPC, stdio, HTTP, and Effect platform transport boundaries            |
 
 ## Data Flow
 

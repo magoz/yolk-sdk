@@ -30,8 +30,16 @@
 - Unknown methods/tools and invalid params must return protocol-shaped errors.
 - Tool failures should be converted into safe MCP tool results/errors.
 - Keep server primitives reusable across CLI, app routes, and tests.
+- Use Effect platform `Stdio`/streams for stdio; callers provide `NodeStdio.layer` in Node CLIs.
+- Do not use raw `node:readline` or direct `process.stdin/stdout/stderr` in package stdio code.
+- Decode/encode JSON through `Schema.UnknownFromJsonString`; no raw JSON in production paths.
+- Decode wire JSON in two steps: JSON string → unknown → JSON-RPC schema.
+- Map parse vs validation separately: malformed JSON returns `-32700`; invalid JSON-RPC/params returns `-32600`.
+- Do not write internal stdio errors to stderr; avoid leaking secrets and return JSON-RPC errors when possible.
+- Keep `McpServerError.cause` granular enough to map protocol codes.
 
 ## Tests
 
 - Cover initialize, tools/list, tools/call, unknown method/tool, invalid params, line handling, and HTTP handling.
 - Use simple fake tools only.
+- Stdio fixtures provide `NodeStdio.layer` explicitly.

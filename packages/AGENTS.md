@@ -83,10 +83,13 @@ mcp-server -> mcp-client + protocol + Effect
 - MCP server exposes both newline JSON-RPC (`handleLine`/stdio) and HTTP POST (`handleHttpRequest`) entrypoints.
 - Remote MCP depends on `HttpClient`; package tests inject a fake client, app adapters provide `FetchHttpClient.layer`.
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
-- Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`.
+- Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stdio`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`, `node:readline`, or direct `process.stdin/stdout/stderr`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
+- MCP server stdio runners depend on `Stdio.Stdio`; Node CLI/test fixtures provide `NodeStdio.layer` at the boundary.
 - Local stdio responses are matched by JSON-RPC id; do not assume response order.
-- JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code.
+- JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code. Decode wire JSON in two steps: JSON string → unknown → protocol schema.
+- MCP server maps parse vs validation separately: JSON parse errors return `-32700`, invalid JSON-RPC/request params return `-32600`.
+- MCP server stdio should not write internal errors to stderr; return protocol-shaped JSON-RPC errors when possible.
 - Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
 - `listMcpTools` rejects duplicate generated tool names after server/tool sanitization.
 - Prefer local/remote-specific helper APIs in tests (`listLocalMcpServerTools`, `callLocalMcpServerTool`, `listRemoteMcpServerTools`, `callRemoteMcpServerTool`) when the config kind is known; use union helpers at app boundaries.
