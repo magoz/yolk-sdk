@@ -23,7 +23,7 @@ import {
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
-import { loadProjectSkillset } from '@/lib/agents/skillset/file-source'
+import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
 import { resolveAgentTools } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'

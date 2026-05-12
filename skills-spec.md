@@ -534,9 +534,34 @@ Completed:
 - Command parsing + argument rendering.
 - Manifest schema + merge helpers.
 - App filesystem source for standard project folders.
+- App config source via `YOLK_SKILLSET` manifest JSON.
 - Text-only `skill` tool via `@yolk/tool-registry`.
-- `/api/agent` loads project skillset and injects `<available_skills>`.
+- `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
 - Tests for package core, file source, and skill tool.
+
+Config shape:
+
+```json
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "user-skill",
+      "description": "User-authored skill",
+      "location": "config:user-skill",
+      "content": "Use this instruction when relevant."
+    }
+  ],
+  "commands": []
+}
+```
+
+Source priority:
+
+```txt
+YOLK_SKILLSET config
+> project filesystem folders
+```
 
 Remaining:
 
