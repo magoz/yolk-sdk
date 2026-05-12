@@ -1,0 +1,152 @@
+{
+  "prdName": "tool-lifecycle-events",
+  "tasks": [
+    {
+      "id": "protocol-1",
+      "category": "protocol",
+      "description": "Protocol transcript supports ordered assistant parts for text, reasoning, host tool calls, provider tool calls, and provider tool results.",
+      "steps": [
+        "packages/protocol exports an ordered AssistantPart schema and AssistantAgentMessage uses ordered parts instead of separated content/reasoning/toolCalls fields",
+        "Host-executed tool calls remain representable and host tool results remain separate ToolResultMessage entries",
+        "Provider-executed tool call/result parts can carry providerMetadata without importing provider SDKs",
+        "packages/protocol/test/wire.test.ts covers JSON round-trips and invalid payloads for assistant parts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "protocol-2",
+      "category": "protocol",
+      "description": "Protocol stream events model the full tool lifecycle with raw input deltas, approvals, execution outcomes, and provider results.",
+      "steps": [
+        "AgentEvent includes ToolInputStart, ToolInputDelta, ToolInputEnd, ToolApprovalRequested, ToolApprovalGranted, ToolApprovalDenied, ToolExecutionStarted, ToolExecutionCompleted, ToolExecutionError, and ProviderToolResult semantics",
+        "ToolInputDelta carries raw JSON string fragments and final ToolInputEnd carries a validated ToolCall",
+        "Old ToolExecutionStart and ToolExecutionEnd names are removed or renamed with no compatibility aliases",
+        "Protocol tests verify all new event variants round-trip through JSON wire values"
+      ],
+      "passes": false
+    },
+    {
+      "id": "loop-1",
+      "category": "agent-loop",
+      "description": "Agent loop emits the new lifecycle events for simple local tool execution while preserving current execution semantics.",
+      "steps": [
+        "packages/agent-loop/src/run.ts emits ToolExecutionStarted and ToolExecutionCompleted for successful local tools",
+        "Tool execution failures emit ToolExecutionError with safe message/code and do not fabricate assistant or tool result messages unless explicitly modeled",
+        "AgentEnd messages still contain only protocol transcript messages produced by completed turns",
+        "agent-loop tests cover successful local execution and tool failure event ordering"
+      ],
+      "passes": false
+    },
+    {
+      "id": "client-1",
+      "category": "client",
+      "description": "Client state reducer derives rich tool lifecycle state from the new protocol events.",
+      "steps": [
+        "AgentToolRun or replacement state covers input streaming, input ready, approval requested, approved, denied, executing, completed, errored, and provider-executed states",
+        "Reducers preserve deterministic timing via injected nowMs only",
+        "Reducer tests cover streamed input deltas, approval denial, execution error, provider result, and completed local tool paths",
+        "No old ToolExecutionStart/ToolExecutionEnd handling remains"
+      ],
+      "passes": false
+    },
+    {
+      "id": "react-1",
+      "category": "react",
+      "description": "React headless chat projections render richer tool lifecycle states without UI/styling concerns.",
+      "steps": [
+        "AgentChatPart/ChatToolState or replacements expose input streaming, approval, denied, errored, completed, and provider-executed states",
+        "toAgentMessages preserves ordered assistant parts and host ToolResultMessage entries correctly",
+        "chat-messages and chat-items tests cover ordering, provider-executed parts, denial, and execution errors",
+        "Package remains headless and imports no provider SDKs or app UI components"
+      ],
+      "passes": false
+    },
+    {
+      "id": "adapters-1",
+      "category": "adapters",
+      "description": "App/provider adapters compile against the new protocol shape and normalize current OpenAI/Codex behavior without losing tool lifecycle data.",
+      "steps": [
+        "lib/agents/providers/openai-provider.ts maps provider tool calls/results into the new protocol shape",
+        "lib/agents/providers/openai-codex-provider.ts maps Codex tool/reasoning/text output into ordered assistant parts/events",
+        "lib/agents/route-handler.ts streams only supported AgentEvent variants",
+        "Existing provider and route-handler tests pass with updated expectations"
+      ],
+      "passes": false
+    },
+    {
+      "id": "docs-1",
+      "category": "docs",
+      "description": "Package documentation reflects the new tool lifecycle and breaking protocol migration.",
+      "steps": [
+        "packages/protocol/AGENTS.md documents ordered assistant parts and tool lifecycle events",
+        "packages/client/AGENTS.md documents rich tool reducer states and deterministic timing",
+        "packages/react/AGENTS.md documents headless projection expectations for lifecycle states",
+        "packages/agent-loop/AGENTS.md documents local execution event semantics and no compatibility aliases"
+      ],
+      "passes": false
+    },
+    {
+      "id": "verification-1",
+      "category": "verification",
+      "description": "Full workspace validation passes after the breaking protocol migration.",
+      "steps": [
+        "pnpm packages:check passes",
+        "pnpm lint passes",
+        "pnpm tsc passes",
+        "pnpm test:run passes"
+      ],
+      "passes": false
+    }
+  ],
+  "context": {
+    "patterns": [
+      "Protocol schemas use Effect Schema tagged classes/unions in packages/protocol/src",
+      "Agent loop is stateless and emits AgentEvent streams from packages/agent-loop/src/run.ts",
+      "Client reducers are deterministic and receive nowMs via options",
+      "React package is headless; app UI/components stay outside packages/react",
+      "Package-internal relative imports use explicit .ts extensions",
+      "Breaking changes are acceptable for this migration; do not add compatibility aliases solely for old lifecycle event names"
+    ],
+    "keyFiles": [
+      "packages/protocol/src/event.ts",
+      "packages/protocol/src/message.ts",
+      "packages/protocol/src/tool.ts",
+      "packages/protocol/test/wire.test.ts",
+      "packages/agent-loop/src/run.ts",
+      "packages/agent-loop/test/run.test.ts",
+      "packages/client/src/state.ts",
+      "packages/client/test/state.test.ts",
+      "packages/react/src/chat-messages.ts",
+      "packages/react/src/chat-items.ts",
+      "packages/react/src/chat-messages.test.ts",
+      "lib/agents/providers/openai-provider.ts",
+      "lib/agents/providers/openai-codex-provider.ts",
+      "lib/agents/route-handler.ts"
+    ],
+    "nonGoals": [
+      "Implement host approval UI or policy engine",
+      "Add database schema or durable append-store implementation",
+      "Add file/resource/artifact typed rendering beyond existing Content/structuredContent",
+      "Add provider SDK imports to packages",
+      "Add sandbox/runtime isolation for tool execution",
+      "Add MCP output schemas/annotations"
+    ],
+    "projectConstraints": [
+      "Use pnpm exclusively",
+      "Run pnpm packages:check when touching packages/*",
+      "Run pnpm lint, pnpm tsc, and pnpm test:run before finishing",
+      "No any, no non-null assertions, no type assertions",
+      "Reusable packages stay domain-free and provider/runtime neutral",
+      "App/server owns auth, tool policy, provider SDKs, prompts, and product context",
+      "Do not use raw JSON parse/stringify in production Effect code; use Effect Schema boundaries"
+    ],
+    "existingImplementation": [
+      "Current protocol has AssistantAgentMessage with content, toolCalls, and optional reasoning",
+      "Current AgentEvent has LLMToolCall, ToolExecutionStart, ToolExecutionEnd, and ToolResult",
+      "Current client AgentToolRun has Called, Running, and Completed states",
+      "Current React ChatToolState mirrors Called, Running, and Completed",
+      "ToolResult already supports structuredContent from MCP result fidelity work",
+      "MCP result fidelity preserves structuredContent and maps media blocks into protocol Content"
+    ]
+  }
+}
