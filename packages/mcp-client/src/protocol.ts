@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolDef, ToolResult } from '@yolk/protocol'
-import { McpError } from './errors'
+import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2024-11-05'
 
@@ -29,18 +29,23 @@ export type JsonRpcErrorResponse = typeof JsonRpcErrorResponse.Type
 export const JsonRpcResponse = Schema.Union([JsonRpcSuccessResponse, JsonRpcErrorResponse])
 export type JsonRpcResponse = typeof JsonRpcResponse.Type
 
-export type JsonRpcRequest = {
-  readonly jsonrpc: '2.0'
-  readonly id: string | number
-  readonly method: string
-  readonly params?: unknown
-}
+export const JsonRpcRequest = Schema.Struct({
+  jsonrpc: Schema.Literal('2.0'),
+  id: Schema.Union([Schema.String, Schema.Number]),
+  method: Schema.String,
+  params: Schema.optional(Schema.Unknown)
+})
+export type JsonRpcRequest = typeof JsonRpcRequest.Type
 
-export type JsonRpcNotification = {
-  readonly jsonrpc: '2.0'
-  readonly method: string
-  readonly params?: unknown
-}
+export const JsonRpcNotification = Schema.Struct({
+  jsonrpc: Schema.Literal('2.0'),
+  method: Schema.String,
+  params: Schema.optional(Schema.Unknown)
+})
+export type JsonRpcNotification = typeof JsonRpcNotification.Type
+
+export const JsonRpcMessage = Schema.Union([JsonRpcRequest, JsonRpcNotification])
+export type JsonRpcMessage = typeof JsonRpcMessage.Type
 
 export const McpTool = Schema.Struct({
   name: Schema.String,
@@ -146,15 +151,58 @@ export const decodeJsonRpcResponse = Schema.decodeUnknownEffect(JsonRpcResponse)
 export const decodeToolsListResult = Schema.decodeUnknownEffect(ToolsListResult)
 export const decodeToolCallResult = Schema.decodeUnknownEffect(ToolCallResult)
 
-export const decodeJsonRpcResponseFromJson = (server: string, text: string) =>
-  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
-    Effect.flatMap(decodeJsonRpcResponse),
+export const encodeJsonRpcMessage = (
+  server: string,
+  message: JsonRpcRequest | JsonRpcNotification
+) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(message).pipe(
     Effect.mapError(
       error =>
         new McpError({
           server,
-          message: `Invalid MCP JSON-RPC response: ${String(error)}`,
-          cause: 'validation'
+          message: `Could not encode MCP JSON-RPC message: ${String(error)}`,
+          cause: 'encoding'
         })
+    )
+  )
+
+const decodeJsonString = (server: string, text: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+    Effect.mapError(
+      error =>
+        new McpError({
+          server,
+          message: `Malformed MCP JSON: ${String(error)}`,
+          cause: 'parse'
+        })
+    )
+  )
+
+export const decodeJsonRpcResponseFromJson = (server: string, text: string) =>
+  decodeJsonString(server, text).pipe(
+    Effect.flatMap(decodeJsonRpcResponse),
+    Effect.mapError(
+      error =>
+        error instanceof McpError
+          ? error
+          : new McpError({
+              server,
+              message: `Invalid MCP JSON-RPC response: ${String(error)}`,
+              cause: 'validation'
+            })
+    )
+  )
+
+export const decodeJsonRpcMessageFromJson = (server: string, text: string) =>
+  decodeJsonString(server, text).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(JsonRpcMessage)),
+    Effect.mapError(error =>
+      error instanceof McpError
+        ? error
+        : new McpError({
+            server,
+            message: `Invalid MCP JSON-RPC message: ${String(error)}`,
+            cause: 'validation'
+          })
     )
   )

@@ -9,7 +9,7 @@ import {
 import * as Schema from 'effect/Schema'
 import { AgentEvent } from '@yolk/protocol'
 import type { AgentEvent as AgentEventType, AgentReasoningEffort } from '@yolk/protocol'
-import type { AgentTranscript } from './state'
+import type { AgentTranscript } from './state.ts'
 
 export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportError>()(
   'AgentTransportError',

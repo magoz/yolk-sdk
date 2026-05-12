@@ -1,3 +1,4 @@
+import { Array as Arr, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 
 export class AgentInputUsage extends Schema.Class<AgentInputUsage>('AgentInputUsage')({
@@ -23,13 +24,13 @@ export const zeroAgentUsage = AgentUsage.make({
   output: AgentOutputUsage.make({ total: 0 })
 })
 
-const sumOptional = (left: number | undefined, right: number | undefined) => {
-  if (left === undefined && right === undefined) {
-    return undefined
-  }
-
-  return (left ?? 0) + (right ?? 0)
-}
+const sumOptional = (left: number | undefined, right: number | undefined) =>
+  Option.getOrUndefined(
+    Option.liftPredicate(
+      Arr.getSomes([Option.fromNullishOr(left), Option.fromNullishOr(right)]),
+      values => values.length > 0
+    ).pipe(Option.map(values => Arr.reduce(values, 0, (sum, value) => sum + value)))
+  )
 
 export const addAgentUsage = (left: AgentUsage, right: AgentUsage) =>
   AgentUsage.make({

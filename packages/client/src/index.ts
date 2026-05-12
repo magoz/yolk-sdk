@@ -8,13 +8,13 @@ export {
   markAgentError,
   reduceAgentEvents,
   submitAgentUserMessage
-} from './state'
-export type { AgentClientState, AgentRunStatus, AgentToolRun, AgentTranscript } from './state'
+} from './state.ts'
+export type { AgentClientState, AgentRunStatus, AgentToolRun, AgentTranscript } from './state.ts'
 export {
   AgentTransportError,
   collectAgentEvents,
   collectAgentEventsEffect,
   streamAgentEvents,
   streamAgentEventStream
-} from './transport'
-export type { StreamAgentEventsRequest } from './transport'
+} from './transport.ts'
+export type { StreamAgentEventsRequest } from './transport.ts'

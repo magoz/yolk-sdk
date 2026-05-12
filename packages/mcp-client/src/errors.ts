@@ -5,6 +5,8 @@ export const McpErrorCause = Schema.Literals([
   'security',
   'transport',
   'protocol',
+  'parse',
+  'encoding',
   'timeout',
   'validation',
   'tool_error'

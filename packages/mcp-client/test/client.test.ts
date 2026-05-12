@@ -27,6 +27,14 @@ process.stdin.on('end', () => {
 });
 `
 
+const initializeErrorStdioScript = `
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'echo', description: 'Echo', inputSchema: { type: 'object' } }] } }) + '\\n');
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'init failed' } }) + '\\n');
+});
+`
+
 type ResponseMode =
   | 'json'
   | 'sse'
@@ -294,6 +302,21 @@ describe('MCP client', () => {
       )
 
       expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
+    })
+  )
+
+  it.effect('rejects local stdio initialize errors before target responses', () =>
+    Effect.gen(function* () {
+      const result = yield* listLocalMcpServerTools(
+        {
+          name: 'local',
+          type: 'local',
+          command: [process.execPath, '-e', initializeErrorStdioScript]
+        },
+        { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.result)
+
+      expectMcpFailureCause(result, 'protocol')
     })
   )
 })

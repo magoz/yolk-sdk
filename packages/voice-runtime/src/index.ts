@@ -3,4 +3,4 @@ export {
   VoiceToolBridgeError,
   VoiceToolCallRequest,
   VoiceToolExecutionResult
-} from './tool-bridge'
+} from './tool-bridge.ts'

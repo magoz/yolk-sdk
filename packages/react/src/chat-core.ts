@@ -5,7 +5,7 @@ import {
   markChatError,
   type AgentChatMessage,
   type AgentChatPart
-} from './chat-messages'
+} from './chat-messages.ts'
 
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 

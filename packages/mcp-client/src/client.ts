@@ -1,5 +1,4 @@
 import { Duration, Effect, Option, Stream } from 'effect'
-import * as Schema from 'effect/Schema'
 import { NodeServices } from '@effect/platform-node'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
@@ -10,13 +9,14 @@ import type {
   McpRemoteServerConfig,
   McpSecurityPolicy,
   McpServerConfig
-} from './config'
-import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config'
-import { McpError } from './errors'
+} from './config.ts'
+import { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config.ts'
+import { McpError } from './errors.ts'
 import {
   decodeJsonRpcResponseFromJson,
   decodeToolCallResult,
   decodeToolsListResult,
+  encodeJsonRpcMessage,
   jsonRpcErrorToMcpError,
   makeInitializedNotification,
   makeInitializeParams,
@@ -26,7 +26,7 @@ import {
   type JsonRpcNotification,
   type JsonRpcRequest,
   type JsonRpcResponse
-} from './protocol'
+} from './protocol.ts'
 
 const defaultRequestTimeoutMs = 30_000
 
@@ -41,19 +41,6 @@ export type McpResolvedTool = {
   readonly mcpToolName: string
   readonly def: ReturnType<typeof mcpToolToToolDef>
 }
-
-const JsonRpcRequestSchema = Schema.Struct({
-  jsonrpc: Schema.Literal('2.0'),
-  id: Schema.Union([Schema.String, Schema.Number]),
-  method: Schema.String,
-  params: Schema.optional(Schema.Unknown)
-})
-
-const JsonRpcNotificationSchema = Schema.Struct({
-  jsonrpc: Schema.Literal('2.0'),
-  method: Schema.String,
-  params: Schema.optional(Schema.Unknown)
-})
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -134,18 +121,6 @@ const unwrapResponse = (server: string, response: JsonRpcResponse) =>
     ? Effect.fail(jsonRpcErrorToMcpError(server, response.error))
     : Effect.succeed(response.result)
 
-const encodeJsonRpcMessage = (server: string, message: JsonRpcRequest | JsonRpcNotification) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(message).pipe(
-    Effect.mapError(
-      error =>
-        new McpError({
-          server,
-          message: `Could not encode MCP JSON-RPC message: ${unknownToMessage(error)}`,
-          cause: 'validation'
-        })
-    )
-  )
-
 const mapUnknownToMcpError =
   (server: string, message: string, cause: McpError['cause']) => (error: unknown) =>
     error instanceof McpError
@@ -170,18 +145,11 @@ const requestRemote = (
     const policy = securityPolicy(options)
     const url = yield* validateRemoteUrl(config, policy)
     const http = yield* HttpClient.HttpClient
-    const encoded = yield* HttpClientRequest.post(url).pipe(
+    const body = yield* encodeJsonRpcMessage(config.name, request)
+    const encoded = HttpClientRequest.post(url).pipe(
       HttpClientRequest.accept('application/json, text/event-stream'),
       HttpClientRequest.setHeaders(config.headers ?? {}),
-      HttpClientRequest.schemaBodyJson(JsonRpcRequestSchema)(request),
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: config.name,
-            message: `Could not encode MCP request: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
+      HttpClientRequest.bodyText(body, 'application/json')
     )
     const response = yield* HttpClient.filterStatusOk(http)
       .execute(encoded)
@@ -223,18 +191,11 @@ const notifyRemote = (
     const policy = securityPolicy(options)
     const url = yield* validateRemoteUrl(config, policy)
     const http = yield* HttpClient.HttpClient
-    const encoded = yield* HttpClientRequest.post(url).pipe(
+    const body = yield* encodeJsonRpcMessage(config.name, notification)
+    const encoded = HttpClientRequest.post(url).pipe(
       HttpClientRequest.accept('application/json, text/event-stream'),
       HttpClientRequest.setHeaders(config.headers ?? {}),
-      HttpClientRequest.schemaBodyJson(JsonRpcNotificationSchema)(notification),
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: config.name,
-            message: `Could not encode MCP notification: ${unknownToMessage(error)}`,
-            cause: 'validation'
-          })
-      )
+      HttpClientRequest.bodyText(body, 'application/json')
     )
     yield* HttpClient.filterStatusOk(http)
       .execute(encoded)
@@ -291,7 +252,7 @@ const requestLocalEncoded = (
       Stream.encodeText
     )
     const child = yield* ChildProcess.make(command, config.command.slice(1), {
-      env: { NODE_ENV: 'production', ...(config.environment ?? {}) },
+      env: config.environment ?? {},
       extendEnv: false,
       stdin: { stream: stdin, endOnDone: true },
       stderr: 'ignore'
@@ -304,9 +265,7 @@ const requestLocalEncoded = (
       Stream.runCollect
     )
     const responses = yield* Effect.forEach(lines, line =>
-      decodeJsonRpcResponseFromJson(config.name, line).pipe(
-        Effect.mapError(mapUnknownToMcpError(config.name, 'Invalid local MCP response', 'protocol'))
-      )
+      decodeJsonRpcResponseFromJson(config.name, line)
     )
 
     if (responses.length < expectedResponses) {
@@ -365,12 +324,22 @@ const requestLocalSession = (
   request: JsonRpcRequest,
   options?: McpClientOptions
 ) =>
-  requestLocal(
-    config,
-    [initializeRequest(options), makeInitializedNotification(), request],
-    2,
-    options
-  ).pipe(
+  Effect.gen(function* () {
+    const initialize = initializeRequest(options)
+    const responses = yield* requestLocal(
+      config,
+      [initialize, makeInitializedNotification(), request],
+      2,
+      options
+    )
+    const initializeResponse = responseById(responses, initialize.id)
+    if (Option.isNone(initializeResponse)) {
+      return yield* fail(config.name, 'Local MCP did not return initialize response', 'protocol')
+    }
+    yield* unwrapResponse(config.name, initializeResponse.value)
+
+    return responses
+  }).pipe(
     Effect.flatMap(responses => {
       const response = responseById(responses, request.id)
       return Option.isNone(response)

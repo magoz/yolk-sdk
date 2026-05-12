@@ -1,6 +1,6 @@
 import { Array as Arr, Option } from 'effect'
 import { contentText, type ToolResult, type Content, type ToolCall } from '@yolk/protocol'
-import type { AgentChatMessage, ChatToolState } from './chat-messages'
+import type { AgentChatMessage, ChatToolState } from './chat-messages.ts'
 
 export type ToolDuration =
   | { readonly _tag: 'Known'; readonly milliseconds: number }

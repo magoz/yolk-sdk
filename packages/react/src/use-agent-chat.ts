@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Stream } from 'effect'
+import { Effect, Fiber, Stream } from 'effect'
 import {
-  streamAgentEvents,
+  appendAgentMessage,
+  streamAgentEventStream,
   type AgentTranscript,
   type StreamAgentEventsRequest
 } from '@yolk/client'
@@ -19,8 +20,8 @@ import {
   hasAgentChatReasoningSummary,
   initialAgentChatState,
   reduceAgentChatState
-} from './chat-core'
-import { toAgentMessages } from './chat-messages'
+} from './chat-core.ts'
+import { toAgentMessages } from './chat-messages.ts'
 
 export type AgentChatTransportRequest = Omit<StreamAgentEventsRequest, 'signal'> & {
   readonly signal: AbortSignal
@@ -53,19 +54,6 @@ const errorMessage = (error: unknown) =>
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError'
 
-const appendTranscriptMessage = (
-  messages: ReadonlyArray<AgentMessage>,
-  message: AgentMessage
-): AgentTranscript => {
-  const first = messages[0]
-
-  if (first === undefined) {
-    return [message]
-  }
-
-  return [first, ...messages.slice(1), message]
-}
-
 export function useAgentChat({
   sessionId,
   endpoint,
@@ -83,6 +71,7 @@ export function useAgentChat({
     )
   )
   const abortControllerRef = useRef<AbortController | null>(null)
+  const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
   const isRunning = state.status === 'running'
 
   const applyEvent = useCallback(
@@ -125,19 +114,23 @@ export function useAgentChat({
   const runAgent = useCallback(
     (messages: AgentTranscript) => {
       const controller = new AbortController()
-      const runTransport = transport ?? streamAgentEvents
       abortControllerRef.current = controller
       const clearController = Effect.sync(() => {
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null
+          fiberRef.current = null
         }
       })
+      const eventStream =
+        transport === undefined
+          ? streamAgentEventStream(makeTransportRequest(messages, controller.signal))
+          : Stream.fromAsyncIterable(
+              transport(makeTransportRequest(messages, controller.signal)),
+              error => error
+            )
 
-      Effect.runFork(
-        Stream.fromAsyncIterable(
-          runTransport(makeTransportRequest(messages, controller.signal)),
-          error => error
-        ).pipe(
+      const fiber = Effect.runFork(
+        eventStream.pipe(
           Stream.runForEach(event => Effect.sync(() => applyEvent(event))),
           Effect.matchEffect({
             onFailure: caught =>
@@ -154,6 +147,7 @@ export function useAgentChat({
           Effect.ensuring(clearController)
         )
       )
+      fiberRef.current = fiber
     },
     [applyEvent, fail, makeTransportRequest, markAborted, transport]
   )
@@ -175,7 +169,7 @@ export function useAgentChat({
         return { _tag: 'Ignored' }
       }
 
-      const messages = appendTranscriptMessage(toAgentMessages(state.chatMessages), message)
+      const messages = appendAgentMessage(toAgentMessages(state.chatMessages), message)
 
       dispatch({ _tag: 'Submit', message })
       runAgent(messages)
@@ -199,12 +193,25 @@ export function useAgentChat({
   )
 
   const stop = useCallback(() => {
-    abortControllerRef.current?.abort()
-  }, [])
+    const controller = abortControllerRef.current
+    const fiber = fiberRef.current
+    if (controller === null && fiber === null) {
+      return
+    }
+    controller?.abort()
+    if (fiber !== null) {
+      Effect.runFork(Fiber.interrupt(fiber))
+    }
+    markAborted()
+  }, [markAborted])
 
   useEffect(
     () => () => {
       abortControllerRef.current?.abort()
+      const fiber = fiberRef.current
+      if (fiber !== null) {
+        Effect.runFork(Fiber.interrupt(fiber))
+      }
     },
     []
   )

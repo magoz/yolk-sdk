@@ -1,11 +1,11 @@
-export { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config'
+export { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config.ts'
 export type {
   McpClientInfo,
   McpLocalServerConfig,
   McpRemoteServerConfig,
   McpSecurityPolicy,
   McpServerConfig
-} from './config'
+} from './config.ts'
 export {
   callLocalMcpServerTool,
   callMcpServerTool,
@@ -14,17 +14,22 @@ export {
   listMcpServerTools,
   listMcpTools,
   listRemoteMcpServerTools
-} from './client'
-export type { McpResolvedTool } from './client'
-export { McpError, McpErrorCause } from './errors'
+} from './client.ts'
+export type { McpResolvedTool } from './client.ts'
+export { McpError, McpErrorCause } from './errors.ts'
 export {
+  decodeJsonRpcMessageFromJson,
   decodeJsonRpcResponse,
   decodeJsonRpcResponseFromJson,
   decodeToolCallResult,
   decodeToolsListResult,
+  encodeJsonRpcMessage,
   GenericContentBlock,
   JsonRpcErrorObject,
   JsonRpcErrorResponse,
+  JsonRpcMessage,
+  JsonRpcNotification,
+  JsonRpcRequest,
   JsonRpcResponse,
   JsonRpcSuccessResponse,
   jsonRpcErrorToMcpError,
@@ -39,5 +44,5 @@ export {
   ToolCallResult,
   toolCallResultToToolResult,
   ToolsListResult
-} from './protocol'
-export type { JsonRpcNotification, JsonRpcRequest } from './protocol'
+} from './protocol.ts'
+export type { JsonRpcMessage as JsonRpcMessageType } from './protocol.ts'

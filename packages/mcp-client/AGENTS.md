@@ -30,7 +30,9 @@
 
 - Remote MCP requires `https:` by default; localhost `http:` must be explicit dev policy.
 - Local stdio receives explicit env only and must not inherit arbitrary env.
+- Do not inject default env into local stdio; use exactly `config.environment ?? {}` with `extendEnv: false`.
 - Match stdio responses by JSON-RPC id; never assume response order.
+- Validate `initialize` JSON-RPC response before consuming target request response.
 - Reject duplicate generated tool names after server/tool sanitization.
 - Keep host policy decisions outside this package except generic config gates.
 

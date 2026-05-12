@@ -85,6 +85,8 @@ mcp-server -> mcp-client + protocol + Effect
 - Remote MCP requires `https:` by default; `http://localhost` is policy-gated for dev only.
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stdio`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`, `node:readline`, or direct `process.stdin/stdout/stderr`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
+- Local stdio must not inject default env; pass only `config.environment ?? {}`.
+- Local MCP sessions must validate `initialize` response before trusting target request response.
 - MCP server stdio runners depend on `Stdio.Stdio`; Node CLI/test fixtures provide `NodeStdio.layer` at the boundary.
 - Local stdio responses are matched by JSON-RPC id; do not assume response order.
 - JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code. Decode wire JSON in two steps: JSON string → unknown → protocol schema.
@@ -125,6 +127,8 @@ mcp-server -> mcp-client + protocol + Effect
 - Mock client HTTP with `HttpClient` layers, not fetch-style helpers.
 - Keep parsing/schema errors typed as `AgentTransportError`.
 - Use `Schema.UnknownFromJsonString` for NDJSON/body JSON boundaries.
+- React default transport should use `streamAgentEventStream`; async iterable transport is compatibility/injection only.
+- React hooks that fork Effect streams must retain and interrupt fibers on stop/unmount.
 
 ## React
 

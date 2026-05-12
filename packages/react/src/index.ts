@@ -8,39 +8,39 @@ export {
   isActiveChatToolPart,
   isCompletedChatToolPart,
   reduceAgentChatState
-} from './chat-core'
+} from './chat-core.ts'
 export type {
   ActiveChatToolPart,
   AgentChatAction,
   AgentChatState,
   AgentRunStatus,
   CompletedChatToolPart
-} from './chat-core'
-export { buildAgentChatItems } from './chat-items'
+} from './chat-core.ts'
+export { buildAgentChatItems } from './chat-items.ts'
 export type {
   AgentChatItem,
   BuildAgentChatItemsInput,
   ToolDuration,
   ToolRunState
-} from './chat-items'
+} from './chat-items.ts'
 export {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   markChatError,
   toAgentMessages
-} from './chat-messages'
+} from './chat-messages.ts'
 export type {
   AgentChatMessage,
   AgentChatPart,
   BuildAgentChatMessagesInput,
   ChatPartState,
   ChatToolState
-} from './chat-messages'
-export { useAgentChat } from './use-agent-chat'
+} from './chat-messages.ts'
+export { useAgentChat } from './use-agent-chat.ts'
 export type {
   AgentChatSubmitResult,
   AgentChatTransport,
   AgentChatTransportRequest,
   UseAgentChatOptions
-} from './use-agent-chat'
+} from './use-agent-chat.ts'
