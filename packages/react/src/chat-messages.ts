@@ -82,6 +82,15 @@ export type DeleteChatTurnResult =
       readonly messages: ReadonlyArray<AgentChatMessage>
     }
 
+export type EditChatUserMessageResult =
+  | { readonly _tag: 'NotFound' }
+  | { readonly _tag: 'NotUserMessage' }
+  | {
+      readonly _tag: 'Edited'
+      readonly messageId: string
+      readonly messages: ReadonlyArray<AgentChatMessage>
+    }
+
 export type RegenerateChatMessagesResult =
   | { readonly _tag: 'NotFound' }
   | {
@@ -394,6 +403,47 @@ export const regenerateChatMessagesFrom = (
   }
 }
 
+export const editChatUserMessage = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  messageId: string,
+  content: Content
+): EditChatUserMessageResult => {
+  const targetIndex = findMessageIndex(messages, messageId)
+
+  if (targetIndex === -1) {
+    return { _tag: 'NotFound' }
+  }
+
+  const target = messages[targetIndex]
+
+  if (target === undefined) {
+    return { _tag: 'NotFound' }
+  }
+
+  if (target.role !== 'user') {
+    return { _tag: 'NotUserMessage' }
+  }
+
+  return {
+    _tag: 'Edited',
+    messageId: target.id,
+    messages: [
+      ...messages.slice(0, targetIndex),
+      {
+        ...target,
+        parts: [
+          {
+            _tag: 'Text',
+            id: `message-${target.sequence}-user-text`,
+            content,
+            state: 'done'
+          }
+        ]
+      }
+    ]
+  }
+}
+
 const lastAssistantIndex = (messages: ReadonlyArray<AgentChatMessage>) => {
   const index = findLastMessageIndex(messages, message => message.role === 'assistant')
 
@@ -702,7 +752,12 @@ const appendRunMessagesIfEmpty = (
   messages: ReadonlyArray<AgentChatMessage>,
   runMessages: ReadonlyArray<AgentMessage>
 ) => {
-  if (runMessages.length === 0 || messages.some(message => message.role === 'assistant')) {
+  const lastUserMessageIndex = findLastMessageIndex(messages, message => message.role === 'user')
+  const hasAssistantAfterLastUser = messages.some(
+    (message, index) => message.role === 'assistant' && index > lastUserMessageIndex
+  )
+
+  if (runMessages.length === 0 || hasAssistantAfterLastUser) {
     return messages
   }
 

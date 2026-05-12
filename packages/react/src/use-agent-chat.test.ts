@@ -237,4 +237,51 @@ describe('useAgentChat', () => {
 
     hook.unmount()
   })
+
+  it('edits a user message and reruns from the edited transcript', async () => {
+    const requests: Array<AgentChatTransportRequest> = []
+    const transport: AgentChatTransport = async function* (request) {
+      requests.push(request)
+      yield AgentStart.make({})
+      yield agentEnd('edited reply')
+    }
+    const hook = renderUseAgentChat({
+      sessionId: 'session-1',
+      transport,
+      initialMessages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'second' })] })
+      ]
+    })
+
+    await act(async () => {
+      const result = hook.value.editUserMessage('message-2-user', 'updated')
+      expect(result._tag).toBe('Edited')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'done')
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.messages).toEqual([
+      UserMessage.make({ content: 'one' }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+      UserMessage.make({ content: 'updated' })
+    ])
+    expect(hook.value.messages).toEqual([
+      UserMessage.make({ content: 'one' }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+      UserMessage.make({ content: 'updated' }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'edited reply' })] })
+    ])
+    expect(hook.value.state.sessionEvents.at(-1)).toEqual({
+      _tag: 'UserMessageEdited',
+      messageId: 'message-2-user',
+      content: 'updated',
+      keptMessageIds: ['message-0-user', 'message-1-assistant', 'message-2-user']
+    })
+
+    hook.unmount()
+  })
 })

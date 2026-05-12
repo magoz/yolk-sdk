@@ -285,6 +285,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
     submitMessage,
     deleteTurn,
     regenerateFrom,
+    editUserMessage,
     stop,
     applyEvent,
     appendMessage,
@@ -426,6 +427,25 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
       }
     },
     [messageActionsDisabled, recordActivity, regenerateFrom]
+  )
+
+  const handleEditUserMessage = useCallback(
+    (messageId: string, content: string) => {
+      if (messageActionsDisabled) {
+        return
+      }
+
+      const result = editUserMessage(messageId, content)
+
+      if (result._tag === 'Edited') {
+        recordActivity({
+          title: 'Message edited',
+          detail: result.messageId,
+          tone: 'neutral'
+        })
+      }
+    },
+    [editUserMessage, messageActionsDisabled, recordActivity]
   )
 
   const handleImageAttachmentsChange = useCallback(
@@ -582,6 +602,7 @@ export function AgentPlayground({ sessionId, openAiCodexConnected }: AgentPlaygr
             showReasoning={showReasoning}
             actionsDisabled={messageActionsDisabled}
             onDeleteTurn={handleDeleteTurn}
+            onEditUserMessage={handleEditUserMessage}
             onRegenerateFrom={handleRegenerateFrom}
           />
 

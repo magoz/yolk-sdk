@@ -1,8 +1,9 @@
-import type { AgentEvent, AgentMessage, UserMessage } from '@yolk/protocol'
+import type { AgentEvent, AgentMessage, Content, UserMessage } from '@yolk/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
   deleteChatTurn,
+  editChatUserMessage,
   markChatError,
   regenerateChatMessagesFrom,
   type AgentChatMessage,
@@ -13,6 +14,7 @@ import {
   MessagesRegenerated,
   ProtocolMessageAppended,
   TurnDeleted,
+  UserMessageEdited,
   UserMessageSubmitted,
   type AgentChatSessionEvent
 } from './chat-session-events.ts'
@@ -39,6 +41,7 @@ export type AgentChatAction =
   | { readonly _tag: 'AppendMessage'; readonly message: AgentMessage }
   | { readonly _tag: 'DeleteTurn'; readonly messageId: string }
   | { readonly _tag: 'RegenerateFrom'; readonly messageId: string }
+  | { readonly _tag: 'EditUserMessage'; readonly messageId: string; readonly content: Content }
   | ({ readonly _tag: 'Event'; readonly event: AgentEvent } & ApplyAgentEventToChatMessagesOptions)
   | { readonly _tag: 'Error'; readonly message: string }
   | { readonly _tag: 'Abort' }
@@ -108,6 +111,28 @@ export const reduceAgentChatState = (
           ...state.sessionEvents,
           MessagesRegenerated.make({
             fromMessageId: action.messageId,
+            keptMessageIds: next.messages.map(message => message.id)
+          })
+        ]
+      }
+    }
+    case 'EditUserMessage': {
+      const next = editChatUserMessage(state.chatMessages, action.messageId, action.content)
+
+      if (next._tag !== 'Edited') {
+        return state
+      }
+
+      return {
+        ...state,
+        status: 'running',
+        error: null,
+        chatMessages: next.messages,
+        sessionEvents: [
+          ...state.sessionEvents,
+          UserMessageEdited.make({
+            messageId: next.messageId,
+            content: action.content,
             keptMessageIds: next.messages.map(message => message.id)
           })
         ]

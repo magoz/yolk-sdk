@@ -36,6 +36,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
 - Message actions are turn-level: delete removes a user+assistant turn; regenerate starts from an assistant message.
+- Editing is user-message-only in app UI; save replaces text content and reruns from that turn.
 - App-created transient messages must include `turnId` and `sequence`; keep IDs compatible but do not parse them for behavior.
 - Show provider reasoning only (`LLMReasoningDelta` / assistant reasoning parts); never invent reasoning.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.

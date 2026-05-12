@@ -19,6 +19,7 @@ import {
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   deleteChatTurn,
+  editChatUserMessage,
   regenerateChatMessagesFrom,
   toAgentMessages,
   type AgentChatMessage
@@ -215,6 +216,41 @@ describe('agent chat messages', () => {
     expect(regenerateChatMessagesFrom(messages, 'message-3-assistant')).toEqual({
       _tag: 'Regenerated',
       messages: messages.slice(0, 3)
+    })
+  })
+
+  it('edits a user message and truncates following messages', () => {
+    const messages = buildAgentChatMessages({
+      messages: [
+        UserMessage.make({ content: 'one' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'first' })] }),
+        UserMessage.make({ content: 'two' }),
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'second' })] })
+      ],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    expect(editChatUserMessage(messages, 'message-2-user', 'updated')).toEqual({
+      _tag: 'Edited',
+      messageId: 'message-2-user',
+      messages: [
+        messages[0],
+        messages[1],
+        {
+          id: 'message-2-user',
+          turnId: 'turn-2',
+          sequence: 2,
+          role: 'user',
+          parts: [{ _tag: 'Text', id: 'message-2-user-text', content: 'updated', state: 'done' }]
+        }
+      ]
+    })
+    expect(editChatUserMessage(messages, 'message-3-assistant', 'updated')).toEqual({
+      _tag: 'NotUserMessage'
     })
   })
 

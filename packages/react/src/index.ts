@@ -21,6 +21,7 @@ export {
   MessagesRegenerated,
   ProtocolMessageAppended,
   TurnDeleted,
+  UserMessageEdited,
   UserMessageSubmitted
 } from './chat-session-events.ts'
 export { buildAgentChatItems } from './chat-items.ts'
@@ -35,6 +36,7 @@ export {
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
   deleteChatTurn,
+  editChatUserMessage,
   markChatError,
   regenerateChatMessagesFrom,
   toAgentMessages
@@ -47,11 +49,13 @@ export type {
   ChatPartState,
   ChatToolState,
   DeleteChatTurnResult,
+  EditChatUserMessageResult,
   RegenerateChatMessagesResult
 } from './chat-messages.ts'
 export { useAgentChat } from './use-agent-chat.ts'
 export type {
   AgentChatDeleteTurnResult,
+  AgentChatEditUserMessageResult,
   AgentChatRegenerateResult,
   AgentChatSubmitResult,
   AgentChatTransport,

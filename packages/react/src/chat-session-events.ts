@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AgentMessage, UserMessage } from '@yolk/protocol'
+import { AgentMessage, Content, UserMessage } from '@yolk/protocol'
 
 export class ProtocolMessageAppended extends Schema.TaggedClass<ProtocolMessageAppended>()(
   'ProtocolMessageAppended',
@@ -28,10 +28,17 @@ export class MessagesRegenerated extends Schema.TaggedClass<MessagesRegenerated>
   }
 ) {}
 
+export class UserMessageEdited extends Schema.TaggedClass<UserMessageEdited>()('UserMessageEdited', {
+  messageId: Schema.String,
+  content: Content,
+  keptMessageIds: Schema.Array(Schema.String)
+}) {}
+
 export const AgentChatSessionEvent = Schema.Union([
   ProtocolMessageAppended,
   UserMessageSubmitted,
   TurnDeleted,
-  MessagesRegenerated
+  MessagesRegenerated,
+  UserMessageEdited
 ])
 export type AgentChatSessionEvent = typeof AgentChatSessionEvent.Type

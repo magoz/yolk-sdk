@@ -141,9 +141,10 @@ mcp-server -> mcp-client + protocol + Effect
 - `@yolk/react` is the headless React layer for app builders.
 - It wraps `@yolk/client` transport and exposes render-ready chat state.
 - `chatMessages` is the primary UI model; `messages` is derived protocol replay for transport/debugging.
-- `AgentChatState.sessionEvents` records local UI/session edits: submitted/appended messages, turn deletion, regeneration.
+- `AgentChatState.sessionEvents` records local UI/session edits: submitted/appended messages, turn deletion, regeneration, user edits.
+- `editUserMessage` replaces a user message, truncates later messages, and reruns from the edited transcript.
 - `AgentChatAction` is the deterministic reducer command surface; keep submit/delete/regenerate behavior pure.
-- `useAgentChat` exposes `deleteTurn` and `regenerateFrom`; only regeneration starts transport.
+- `useAgentChat` exposes `deleteTurn`, `regenerateFrom`, and `editUserMessage`; regeneration and edit start transport.
 - `chat-session-events.ts` defines UI/session edit audit records, distinct from runtime `SessionEventStore` events.
 - `AgentChatPart` covers text, reasoning, tool call/result, and error parts; no DOM assumptions.
 - `buildAgentChatItems` is a convenience flat projection, not a required UI structure.

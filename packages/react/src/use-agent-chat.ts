@@ -21,7 +21,12 @@ import {
   initialAgentChatState,
   reduceAgentChatState
 } from './chat-core.ts'
-import { deleteChatTurn, regenerateChatMessagesFrom, toAgentMessages } from './chat-messages.ts'
+import {
+  deleteChatTurn,
+  editChatUserMessage,
+  regenerateChatMessagesFrom,
+  toAgentMessages
+} from './chat-messages.ts'
 
 export type AgentChatTransportRequest = Omit<StreamAgentEventsRequest, 'signal'> & {
   readonly signal: AbortSignal
@@ -61,6 +66,14 @@ export type AgentChatDeleteTurnResult =
 export type AgentChatRegenerateResult =
   | {
       readonly _tag: 'Regenerated'
+      readonly messageId: string
+      readonly messages: AgentTranscript
+    }
+  | { readonly _tag: 'Ignored' }
+
+export type AgentChatEditUserMessageResult =
+  | {
+      readonly _tag: 'Edited'
       readonly messageId: string
       readonly messages: AgentTranscript
     }
@@ -271,6 +284,34 @@ export function useAgentChat({
     [isRunning, runAgent, state.chatMessages]
   )
 
+  const editUserMessage = useCallback(
+    (messageId: string, content: Content): AgentChatEditUserMessageResult => {
+      if (isContentEmpty(content) || isRunning || abortControllerRef.current !== null) {
+        return { _tag: 'Ignored' }
+      }
+
+      const next = editChatUserMessage(state.chatMessages, messageId, content)
+
+      if (next._tag !== 'Edited') {
+        return { _tag: 'Ignored' }
+      }
+
+      const messages = toAgentMessages(next.messages)
+      const transcript = transcriptFromChatMessages(messages)
+
+      return Option.match(transcript, {
+        onNone: () => ({ _tag: 'Ignored' }),
+        onSome: value => {
+          dispatch({ _tag: 'EditUserMessage', messageId, content })
+          runAgent(value)
+
+          return { _tag: 'Edited', messageId: next.messageId, messages: value }
+        }
+      })
+    },
+    [isRunning, runAgent, state.chatMessages]
+  )
+
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
@@ -309,6 +350,7 @@ export function useAgentChat({
     submitText,
     deleteTurn,
     regenerateFrom,
+    editUserMessage,
     stop,
     applyEvent,
     appendMessage,

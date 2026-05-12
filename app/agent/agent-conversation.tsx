@@ -7,13 +7,20 @@ import {
   BrainIcon,
   ChevronDownIcon,
   CircleAlertIcon,
+  PencilIcon,
   LoaderCircleIcon,
   RotateCcwIcon,
   SparklesIcon,
   Trash2Icon,
   WrenchIcon
 } from 'lucide-react'
-import { contentParts, type Content, type ContentPart, type ToolCall } from '@yolk/protocol'
+import {
+  contentParts,
+  contentText,
+  type Content,
+  type ContentPart,
+  type ToolCall
+} from '@yolk/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -214,6 +221,7 @@ function MessageCard({
   messageId,
   actionsDisabled,
   onDeleteTurn,
+  onEditUserMessage,
   onRegenerateFrom
 }: {
   readonly content: Content
@@ -221,13 +229,36 @@ function MessageCard({
   readonly messageId: string
   readonly actionsDisabled: boolean
   readonly onDeleteTurn: (messageId: string) => void
+  readonly onEditUserMessage: (messageId: string, content: string) => void
   readonly onRegenerateFrom: (messageId: string) => void
 }) {
   const parts = contentParts(content)
+  const currentText = contentText(content)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedContent, setEditedContent] = useState(currentText)
   const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
+  const canEdit = role === 'user' && parts.every(part => part._tag === 'Text')
   const handleDelete = useCallback(() => {
     onDeleteTurn(messageId)
   }, [messageId, onDeleteTurn])
+  const handleEditStart = useCallback(() => {
+    setEditedContent(currentText)
+    setIsEditing(true)
+  }, [currentText, setEditedContent, setIsEditing])
+  const handleEditCancel = useCallback(() => {
+    setIsEditing(false)
+    setEditedContent(currentText)
+  }, [currentText, setEditedContent, setIsEditing])
+  const handleEditSubmit = useCallback(() => {
+    const nextContent = editedContent.trim()
+
+    if (nextContent.length === 0) {
+      return
+    }
+
+    onEditUserMessage(messageId, nextContent)
+    setIsEditing(false)
+  }, [editedContent, messageId, onEditUserMessage, setIsEditing])
   const handleRegenerate = useCallback(() => {
     onRegenerateFrom(messageId)
   }, [messageId, onRegenerateFrom])
@@ -241,13 +272,40 @@ function MessageCard({
       <div className={chatRowClass}>
         <div className="flex justify-end">
           <div className="flex max-w-[78%] flex-col items-end gap-2">
-            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs">
-              <MessageContentParts parts={parts} role="user" />
-            </div>
+            {isEditing ? (
+              <div className="w-full min-w-64 rounded-2xl rounded-br-md border border-primary/20 bg-background p-2 shadow-xs">
+                <textarea
+                  value={editedContent}
+                  onChange={event => setEditedContent(event.currentTarget.value)}
+                  className="min-h-24 w-full resize-none rounded-xl bg-transparent px-2 py-2 text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Edit message"
+                  autoFocus
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={handleEditCancel}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={actionsDisabled || editedContent.trim().length === 0}
+                    onClick={handleEditSubmit}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-primary/15 bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs">
+                <MessageContentParts parts={parts} role="user" />
+              </div>
+            )}
             <MessageActions
               role="user"
               disabled={actionsDisabled}
+              canEdit={canEdit}
               onDelete={handleDelete}
+              onEdit={handleEditStart}
               onRegenerate={handleRegenerate}
             />
           </div>
@@ -267,7 +325,9 @@ function MessageCard({
           <MessageActions
             role="assistant"
             disabled={actionsDisabled}
+            canEdit={false}
             onDelete={handleDelete}
+            onEdit={handleEditStart}
             onRegenerate={handleRegenerate}
           />
         </div>
@@ -282,16 +342,33 @@ function MessageCard({
 function MessageActions({
   role,
   disabled,
+  canEdit,
   onDelete,
+  onEdit,
   onRegenerate
 }: {
   readonly role: 'user' | 'assistant'
   readonly disabled: boolean
+  readonly canEdit: boolean
   readonly onDelete: () => void
+  readonly onEdit: () => void
   readonly onRegenerate: () => void
 }) {
   return (
     <div className="flex items-center gap-1" aria-label={`${role} message actions`}>
+      {canEdit ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="min-h-11 min-w-11 text-muted-foreground hover:text-foreground"
+          disabled={disabled}
+          aria-label="Edit message"
+          onClick={onEdit}
+        >
+          <PencilIcon className="size-3.5" aria-hidden />
+        </Button>
+      ) : null}
       {role === 'assistant' ? (
         <Button
           type="button"
@@ -423,6 +500,7 @@ function AgentChatItemView({
   showReasoning,
   actionsDisabled,
   onDeleteTurn,
+  onEditUserMessage,
   onRegenerateFrom
 }: {
   readonly item: AgentChatItem
@@ -430,6 +508,7 @@ function AgentChatItemView({
   readonly showReasoning: boolean
   readonly actionsDisabled: boolean
   readonly onDeleteTurn: (messageId: string) => void
+  readonly onEditUserMessage: (messageId: string, content: string) => void
   readonly onRegenerateFrom: (messageId: string) => void
 }) {
   switch (item._tag) {
@@ -441,6 +520,7 @@ function AgentChatItemView({
           messageId={item.messageId}
           actionsDisabled={actionsDisabled}
           onDeleteTurn={onDeleteTurn}
+          onEditUserMessage={onEditUserMessage}
           onRegenerateFrom={onRegenerateFrom}
         />
       )
@@ -452,6 +532,7 @@ function AgentChatItemView({
           messageId={item.messageId}
           actionsDisabled={actionsDisabled}
           onDeleteTurn={onDeleteTurn}
+          onEditUserMessage={onEditUserMessage}
           onRegenerateFrom={onRegenerateFrom}
         />
       )
@@ -486,6 +567,7 @@ type AgentConversationProps = {
   readonly showReasoning: boolean
   readonly actionsDisabled: boolean
   readonly onDeleteTurn: (messageId: string) => void
+  readonly onEditUserMessage: (messageId: string, content: string) => void
   readonly onRegenerateFrom: (messageId: string) => void
 }
 
@@ -495,6 +577,7 @@ export function AgentConversation({
   showReasoning,
   actionsDisabled,
   onDeleteTurn,
+  onEditUserMessage,
   onRegenerateFrom
 }: AgentConversationProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -552,6 +635,7 @@ export function AgentConversation({
             showReasoning={showReasoning}
             actionsDisabled={actionsDisabled}
             onDeleteTurn={onDeleteTurn}
+            onEditUserMessage={onEditUserMessage}
             onRegenerateFrom={onRegenerateFrom}
           />
         ))}
