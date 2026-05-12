@@ -9,6 +9,7 @@ import {
   totalAgentUsageTokens
 } from './agent-usage-meter'
 import { contentFromInput, type ImageAttachment } from './image-attachment-content'
+import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
 
 const imageAttachment: ImageAttachment = {
   id: 'image-1',
@@ -81,5 +82,33 @@ describe('agent playground', () => {
     expect(
       contextBudgetStatus(agentTextContextBudget.compactionInputTokens, agentTextContextBudget)
     ).toBe('compact')
+  })
+
+  it('models message edit shortcuts', () => {
+    expect(editKeyAction({ key: 'Enter', shiftKey: false, metaKey: false, ctrlKey: false })).toBe(
+      'save'
+    )
+    expect(editKeyAction({ key: 'Enter', shiftKey: true, metaKey: false, ctrlKey: false })).toBe(
+      'none'
+    )
+    expect(editKeyAction({ key: 'Escape', shiftKey: false, metaKey: false, ctrlKey: false })).toBe(
+      'cancel'
+    )
+  })
+
+  it('models message edit save state', () => {
+    expect(editDraftText(' updated ')).toBe('updated')
+    expect(canSaveEditedMessage({ currentText: 'hello', draftText: ' hello ', disabled: false })).toBe(
+      false
+    )
+    expect(canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: false })).toBe(
+      true
+    )
+    expect(canSaveEditedMessage({ currentText: 'hello', draftText: '   ', disabled: false })).toBe(
+      false
+    )
+    expect(canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: true })).toBe(
+      false
+    )
   })
 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import Image from 'next/image'
 import {
   BotIcon,
@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
+import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
 import type { AgentChatItem, ToolDuration, ToolRunState } from '@yolk/react'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
@@ -234,10 +235,17 @@ function MessageCard({
 }) {
   const parts = contentParts(content)
   const currentText = contentText(content)
+  const editHelpId = useId()
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(currentText)
   const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
   const canEdit = role === 'user' && parts.every(part => part._tag === 'Text')
+  const canSaveEdit = canSaveEditedMessage({
+    currentText,
+    draftText: editedContent,
+    disabled: actionsDisabled
+  })
   const handleDelete = useCallback(() => {
     onDeleteTurn(messageId)
   }, [messageId, onDeleteTurn])
@@ -250,18 +258,46 @@ function MessageCard({
     setEditedContent(currentText)
   }, [currentText, setEditedContent, setIsEditing])
   const handleEditSubmit = useCallback(() => {
-    const nextContent = editedContent.trim()
-
-    if (nextContent.length === 0) {
+    if (!canSaveEdit) {
       return
     }
 
-    onEditUserMessage(messageId, nextContent)
+    onEditUserMessage(messageId, editDraftText(editedContent))
     setIsEditing(false)
-  }, [editedContent, messageId, onEditUserMessage, setIsEditing])
+  }, [canSaveEdit, editedContent, messageId, onEditUserMessage, setIsEditing])
+  const handleEditKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      const action = editKeyAction(event)
+
+      if (action === 'none') {
+        return
+      }
+
+      event.preventDefault()
+
+      if (action === 'cancel') {
+        handleEditCancel()
+        return
+      }
+
+      handleEditSubmit()
+    },
+    [handleEditCancel, handleEditSubmit]
+  )
   const handleRegenerate = useCallback(() => {
     onRegenerateFrom(messageId)
   }, [messageId, onRegenerateFrom])
+
+  useEffect(() => {
+    if (!isEditing) {
+      return
+    }
+
+    const textarea = editTextareaRef.current
+
+    textarea?.focus()
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length)
+  }, [isEditing])
 
   if (!hasVisibleContent) {
     return null
@@ -275,12 +311,20 @@ function MessageCard({
             {isEditing ? (
               <div className="w-full min-w-64 rounded-2xl rounded-br-md border border-primary/20 bg-background p-2 shadow-xs">
                 <textarea
+                  ref={editTextareaRef}
                   value={editedContent}
                   onChange={event => setEditedContent(event.currentTarget.value)}
+                  onKeyDown={handleEditKeyDown}
                   className="min-h-24 w-full resize-none rounded-xl bg-transparent px-2 py-2 text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label="Edit message"
-                  autoFocus
+                  aria-describedby={editHelpId}
                 />
+                <div
+                  id={editHelpId}
+                  className="mt-1 px-2 text-[11px] leading-5 text-muted-foreground"
+                >
+                  Enter saves. Shift+Enter adds a line. Escape cancels.
+                </div>
                 <div className="mt-2 flex justify-end gap-2">
                   <Button type="button" variant="ghost" size="sm" onClick={handleEditCancel}>
                     Cancel
@@ -288,7 +332,7 @@ function MessageCard({
                   <Button
                     type="button"
                     size="sm"
-                    disabled={actionsDisabled || editedContent.trim().length === 0}
+                    disabled={!canSaveEdit}
                     onClick={handleEditSubmit}
                   >
                     Save
