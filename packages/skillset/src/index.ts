@@ -4,6 +4,8 @@ export { parseMarkdownDocument } from './markdown.ts'
 export type { MarkdownDocument } from './markdown.ts'
 export { SkillInfo, formatAvailableSkills, parseSkillMarkdown } from './skill.ts'
 export {
+  CommandArgument,
+  CommandAccess,
   CommandInfo,
   commandHints,
   parseCommandArguments,

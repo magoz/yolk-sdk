@@ -538,7 +538,9 @@ Completed:
 - Text-only `skill` tool via `@yolk/tool-registry`.
 - `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
 - `/api/agent/commands` lists commands and renders command prompt macros.
-- `/agent` composer has slash command picker + render/submit flow.
+- `/api/agent/commands` and Effect HttpClient command client have semantic tests.
+- `/agent` composer has slash command picker, empty state, Escape dismissal, metadata badges, and render/submit flow.
+- Command metadata v2 supports argument hints, access level, and file-ref capability flags.
 - `pnpm skillset:build` generates `cloudflare/agent/src/generated/skillset.ts` for no-filesystem Worker/DO runtime consumption.
 - Tests for package core, file source, skill tool, and slash command model.
 
@@ -568,7 +570,7 @@ YOLK_SKILLSET config
 
 Remaining:
 
-- Global dirs, DB/KV/R2 sources, permissions, file refs, shell interpolation.
+- Global dirs, DB/KV/R2 sources, enforced permissions, file-ref expansion, shell interpolation.
 
 ## Open questions
 

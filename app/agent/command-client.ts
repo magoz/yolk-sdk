@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, type Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -6,11 +6,29 @@ import {
   HttpClientRequest,
   HttpClientResponse
 } from 'effect/unstable/http'
+import type { AgentCommandSummary } from './slash-command-model'
+
+type CommandClientOptions = {
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+}
 
 const AgentCommandSummarySchema = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
-  hints: Schema.Array(Schema.String)
+  hints: Schema.Array(Schema.String),
+  arguments: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        required: Schema.Boolean,
+        description: Schema.optional(Schema.String)
+      })
+    )
+  ),
+  access: Schema.optional(
+    Schema.Union([Schema.Literal('read'), Schema.Literal('write'), Schema.Literal('destructive')])
+  ),
+  fileRefs: Schema.optional(Schema.Boolean)
 })
 
 const AgentCommandListResponse = Schema.Struct({
@@ -24,7 +42,9 @@ const AgentCommandRenderResponse = Schema.Struct({
 const encodeJsonString = (value: unknown) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
 
-export const loadAgentCommands = () =>
+export const loadAgentCommands = (
+  options: CommandClientOptions = {}
+): Effect.Effect<ReadonlyArray<AgentCommandSummary>, unknown> =>
   Effect.gen(function* () {
     const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk)
     const response = yield* client.get('/api/agent/commands', {
@@ -33,9 +53,13 @@ export const loadAgentCommands = () =>
     const body = yield* HttpClientResponse.schemaBodyJson(AgentCommandListResponse)(response)
 
     return body.commands
-  }).pipe(Effect.provide(FetchHttpClient.layer))
+  }).pipe(Effect.provide(options.httpClientLayer ?? FetchHttpClient.layer))
 
-export const renderAgentCommand = (command: string, argumentsText: string) =>
+export const renderAgentCommand = (
+  command: string,
+  argumentsText: string,
+  options: CommandClientOptions = {}
+) =>
   Effect.gen(function* () {
     const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk)
     const body = yield* encodeJsonString({ command, arguments: argumentsText })
@@ -47,4 +71,4 @@ export const renderAgentCommand = (command: string, argumentsText: string) =>
     const rendered = yield* HttpClientResponse.schemaBodyJson(AgentCommandRenderResponse)(response)
 
     return rendered.content
-  }).pipe(Effect.provide(FetchHttpClient.layer))
+  }).pipe(Effect.provide(options.httpClientLayer ?? FetchHttpClient.layer))

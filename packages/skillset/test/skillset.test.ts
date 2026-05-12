@@ -99,6 +99,52 @@ describe('skillset', () => {
     })
   )
 
+  it.effect('parses command metadata for arguments, access, and file refs', () =>
+    Effect.gen(function* () {
+      const command = yield* parseCommandMarkdown({
+        markdown: `---
+description: Fix files
+arguments: path, note?
+access: write
+fileRefs: true
+---
+
+Fix $1 using $2.
+`,
+        name: 'fix'
+      })
+
+      expect(command).toMatchObject({
+        name: 'fix',
+        arguments: [
+          { name: 'path', required: true },
+          { name: 'note', required: false }
+        ],
+        access: 'write',
+        fileRefs: true
+      })
+    })
+  )
+
+  it.effect('rejects invalid command metadata', () =>
+    Effect.gen(function* () {
+      const result = yield* parseCommandMarkdown({
+        markdown: `---
+access: admin
+---
+
+Do work.
+`,
+        name: 'bad'
+      }).pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'SkillsetError', cause: 'frontmatter_invalid' }
+      })
+    })
+  )
+
   it('parses quoted command arguments', () => {
     expect(parseCommandArguments('branch "with spaces" \'and more\'')).toEqual([
       'branch',

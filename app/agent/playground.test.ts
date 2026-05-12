@@ -13,7 +13,9 @@ import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-ed
 import {
   matchingSlashCommands,
   normalizeSlashSelectionIndex,
+  slashCommandHint,
   slashCommandInput,
+  slashCommandMeta,
   type AgentCommandSummary
 } from './slash-command-model'
 
@@ -50,7 +52,14 @@ const usage = AgentUsage.make({
 })
 
 const commands: ReadonlyArray<AgentCommandSummary> = [
-  { name: 'review', description: 'Review changes', hints: ['$ARGUMENTS'] },
+  {
+    name: 'review',
+    description: 'Review changes',
+    hints: ['$ARGUMENTS'],
+    arguments: [{ name: 'path', required: true }],
+    access: 'read',
+    fileRefs: true
+  },
   { name: 'refactor', hints: ['$1'] },
   { name: 'test', hints: [] }
 ]
@@ -149,6 +158,8 @@ describe('agent playground', () => {
     expect(matchingSlashCommands('/test now', commands)).toEqual([commands[2]])
     expect(normalizeSlashSelectionIndex(-1, 3)).toBe(2)
     expect(normalizeSlashSelectionIndex(3, 3)).toBe(0)
+    expect(slashCommandHint(commands[0])).toBe('<path>')
+    expect(slashCommandMeta(commands[0])).toBe('read · files')
   })
 
 })

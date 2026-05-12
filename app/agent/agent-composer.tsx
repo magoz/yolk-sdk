@@ -28,7 +28,9 @@ import { cn } from '@/lib/utils'
 import {
   matchingSlashCommands,
   normalizeSlashSelectionIndex,
+  slashCommandHint,
   slashCommandInput,
+  slashCommandMeta,
   type AgentCommandSummary
 } from './slash-command-model'
 
@@ -97,6 +99,7 @@ export function AgentComposer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragDepth, setDragDepth] = useState(0)
   const [activeCommandIndex, setActiveCommandIndex] = useState(0)
+  const [dismissedSlashInput, setDismissedSlashInput] = useState('')
   const dropDisabled = isRunning || isVoiceMode || !imageInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
   const hasAttachments = imageAttachments.length > 0
@@ -104,8 +107,9 @@ export function AgentComposer({
     Arr.findFirst(imageAttachments, imageAttachment => imageAttachment._tag === 'Ready')
   )
   const commandMatches = matchingSlashCommands(input, commands)
+  const hasSlashInput = Option.isSome(slashCommandInput(input))
   const slashCommandsDisabled = isRunning || isVoiceMode || hasAttachments || isCommandRendering
-  const slashMenuOpen = commandMatches.length > 0 && !slashCommandsDisabled
+  const slashMenuOpen = hasSlashInput && !slashCommandsDisabled && dismissedSlashInput !== input
   const normalizedActiveCommandIndex = normalizeSlashSelectionIndex(
     activeCommandIndex,
     commandMatches.length
@@ -141,11 +145,19 @@ export function AgentComposer({
       return
     }
 
+    if (slashMenuOpen && event.key === 'Escape') {
+      event.preventDefault()
+      setDismissedSlashInput(input)
+      return
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
 
-      if (slashMenuOpen && selectedCommand !== undefined) {
-        submitSlashCommand(selectedCommand)
+      if (slashMenuOpen) {
+        if (selectedCommand !== undefined) {
+          submitSlashCommand(selectedCommand)
+        }
         return
       }
 
@@ -164,6 +176,7 @@ export function AgentComposer({
 
   const handleTextChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setActiveCommandIndex(0)
+    setDismissedSlashInput('')
     onInputChange(event.target.value)
   }
 
@@ -346,31 +359,47 @@ export function AgentComposer({
               aria-label="Slash commands"
               className="max-h-56 overflow-y-auto rounded-2xl border border-foreground/10 bg-popover p-1 shadow-lg shadow-foreground/10"
             >
-              {commandMatches.map((command, index) => (
-                <button
-                  key={command.name}
-                  type="button"
-                  role="option"
-                  aria-selected={index === normalizedActiveCommandIndex}
-                  onMouseDown={event => event.preventDefault()}
-                  onClick={() => submitSlashCommand(command)}
-                  className={cn(
-                    'flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150 ease-out',
-                    index === normalizedActiveCommandIndex
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-popover-foreground hover:bg-accent/60'
-                  )}
-                >
-                  <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium">/{command.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {command.description ??
-                        (command.hints.length > 0 ? command.hints.join(' ') : 'Run command')}
-                    </span>
-                  </span>
-                </button>
-              ))}
+              {commandMatches.length === 0 ? (
+                <div className="min-h-11 rounded-xl px-3 py-2 text-sm text-muted-foreground">
+                  No matching commands
+                </div>
+              ) : (
+                commandMatches.map((command, index) => {
+                  const meta = slashCommandMeta(command)
+
+                  return (
+                    <button
+                      key={command.name}
+                      type="button"
+                      role="option"
+                      aria-selected={index === normalizedActiveCommandIndex}
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => submitSlashCommand(command)}
+                      className={cn(
+                        'flex min-h-11 w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors duration-150 ease-out',
+                        index === normalizedActiveCommandIndex
+                          ? 'bg-accent text-accent-foreground'
+                          : 'text-popover-foreground hover:bg-accent/60'
+                      )}
+                    >
+                      <TerminalIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-medium">/{command.name}</span>
+                          {meta.length > 0 ? (
+                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                              {meta}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {command.description ?? slashCommandHint(command)}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })
+              )}
             </div>
           </div>
         ) : null}

@@ -8,6 +8,8 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
+- Slash command UI stays in `agent-composer.tsx`; command route transport stays in `command-client.ts` using Effect `HttpClient`.
+- Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
 - `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/capability/status badges.

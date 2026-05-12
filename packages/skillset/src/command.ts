@@ -1,13 +1,31 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
+import { SkillsetError } from './errors.ts'
 import { parseMarkdownDocument } from './markdown.ts'
 import { validateSkillsetName } from './name.ts'
+
+export const CommandArgument = Schema.Struct({
+  name: Schema.String,
+  required: Schema.Boolean,
+  description: Schema.optional(Schema.String)
+})
+export type CommandArgument = typeof CommandArgument.Type
+
+export const CommandAccess = Schema.Union([
+  Schema.Literal('read'),
+  Schema.Literal('write'),
+  Schema.Literal('destructive')
+])
+export type CommandAccess = typeof CommandAccess.Type
 
 export const CommandInfo = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   template: Schema.String,
   hints: Schema.Array(Schema.String),
+  arguments: Schema.optional(Schema.Array(CommandArgument)),
+  access: Schema.optional(CommandAccess),
+  fileRefs: Schema.optional(Schema.Boolean),
   location: Schema.optional(Schema.String),
   source: Schema.optional(Schema.String)
 })
@@ -22,6 +40,71 @@ export type ParseCommandInput = {
 
 const numberedPlaceholderPattern = /\$(\d+)/g
 
+const parseCommandAccess = (value: string | undefined) => {
+  if (value === undefined || value.length === 0) {
+    return Effect.succeed(undefined)
+  }
+
+  switch (value) {
+    case 'read':
+    case 'write':
+    case 'destructive':
+      return Effect.succeed(value)
+    default:
+      return Effect.fail(
+        new SkillsetError({
+          cause: 'frontmatter_invalid',
+          message: 'Command access must be read, write, or destructive'
+        })
+      )
+  }
+}
+
+const parseBooleanField = (field: string, value: string | undefined) => {
+  if (value === undefined || value.length === 0) {
+    return Effect.succeed(undefined)
+  }
+
+  switch (value) {
+    case 'true':
+      return Effect.succeed(true)
+    case 'false':
+      return Effect.succeed(false)
+    default:
+      return Effect.fail(
+        new SkillsetError({
+          cause: 'frontmatter_invalid',
+          message: `${field} must be true or false`
+        })
+      )
+  }
+}
+
+const parseArgumentToken = (token: string) => {
+  const trimmed = token.trim()
+
+  if (trimmed.length === 0) {
+    return undefined
+  }
+
+  const required = !trimmed.endsWith('?')
+  const name = required ? trimmed : trimmed.slice(0, -1)
+
+  return name.length === 0 ? undefined : { name, required }
+}
+
+const parseCommandArgumentsField = (value: string | undefined): ReadonlyArray<CommandArgument> => {
+  if (value === undefined || value.length === 0) {
+    return []
+  }
+
+  return value.split(',').flatMap(token => {
+    const argument = parseArgumentToken(token)
+
+    return argument === undefined ? [] : [argument]
+  })
+}
+
 export const commandHints = (template: string) => {
   const numbered = Array.from(template.matchAll(numberedPlaceholderPattern), match => `$${match[1]}`)
   const unique = [...new Set(numbered)].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
@@ -34,12 +117,18 @@ export const parseCommandMarkdown = (input: ParseCommandInput) =>
     const name = yield* validateSkillsetName(input.name)
     const document = yield* parseMarkdownDocument(input.markdown)
     const description = document.data.description
+    const access = yield* parseCommandAccess(document.data.access)
+    const fileRefs = yield* parseBooleanField('fileRefs', document.data.fileRefs)
+    const commandArguments = parseCommandArgumentsField(document.data.arguments)
 
     return {
       name,
       description: description === undefined || description.length === 0 ? undefined : description,
       template: document.content,
       hints: commandHints(document.content),
+      ...(commandArguments.length === 0 ? {} : { arguments: commandArguments }),
+      ...(access === undefined ? {} : { access }),
+      ...(fileRefs === undefined ? {} : { fileRefs }),
       location: input.location,
       source: input.source
     }

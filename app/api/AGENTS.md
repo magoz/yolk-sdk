@@ -8,6 +8,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | ------------------------------ | ---------------------------- |
 | `auth/[...all]/route.ts`       | better-auth Next handler     |
 | `agent/route.ts`               | Text agent NDJSON stream     |
+| `agent/commands/route.ts`      | Agent command list/render    |
 | `agent/realtime/call/route.ts` | OpenAI Realtime SDP exchange |
 | `agent/realtime/tool/route.ts` | Voice tool execution bridge  |
 
@@ -31,6 +32,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 ## Agent Routes
 
 - Text route requires Codex OAuth token, model `gpt-5.4`, `agentTextCapabilities`, and non-empty text+image protocol transcript.
+- Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text route resolves tools with `{ surface: 'text', route: '/agent', userId }`.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.

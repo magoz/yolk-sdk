@@ -1,10 +1,10 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Array as Arr, Data, Effect, Option, Schema } from 'effect'
-import { renderCommand, type CommandInfo } from '@yolk/skillset'
 import { AppLayer } from '@/lib/layers'
 import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import { commandSummary, renderCommandResponse } from './route-model'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,12 +23,6 @@ class AgentCommandRenderRequest extends Schema.Class<AgentCommandRenderRequest>(
   command: Schema.String,
   arguments: Schema.String
 }) {}
-
-const commandSummary = (command: CommandInfo) => ({
-  name: command.name,
-  ...(command.description === undefined ? {} : { description: command.description }),
-  hints: command.hints
-})
 
 const listHandler = Effect.gen(function* () {
   yield* getSession()
@@ -69,7 +63,7 @@ const renderHandler = Effect.gen(function* () {
   )
 
   return yield* HttpServerResponse.json(
-    { content: renderCommand(command, input.arguments) },
+    renderCommandResponse(command, input.arguments),
     {
       headers: {
         'cache-control': 'no-store',
