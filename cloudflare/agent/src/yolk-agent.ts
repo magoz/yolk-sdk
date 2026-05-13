@@ -17,9 +17,9 @@ import {
   LLMDone,
   LLMProvider,
   LLMTextDelta,
-  LoopConfig,
-  ToolExecutor
+  LoopConfig
 } from '@yolk/agent-loop'
+import type { ToolExecutor } from '@yolk/agent-loop'
 import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
@@ -37,9 +37,12 @@ import {
   contentText,
   type AgentEvent as AgentEventType
 } from '@yolk/protocol'
-import { formatAvailableSkills } from '@yolk/skillset'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
+import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk/tool-registry'
 import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/openai-codex-provider.ts'
 import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
+import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
+import { skillToolModule } from '../../../lib/agents/tools/skill-tool.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
@@ -68,11 +71,15 @@ const tokenRefreshBufferMs = 5 * 60 * 1000
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
 
 const availableSkills = formatAvailableSkills(generatedSkillsetManifest.skills)
+const cloudflareSkillset: MergedSkillset = {
+  skills: generatedSkillsetManifest.skills,
+  commands: generatedSkillsetManifest.commands
+}
+const cloudflareToolModules = [skillToolModule]
 
-const runtimeConfig = {
+const runtimeBaseConfig = {
   systemPrompt:
     availableSkills.length === 0 ? cloudflareSystemPrompt : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
-  tools: [],
   model: agentTextModel
 }
 
@@ -126,12 +133,12 @@ const makeFauxProviderLayer = Layer.succeed(
   })
 )
 
-const noToolExecutorLayer = Layer.succeed(
-  ToolExecutor,
-  ToolExecutor.of({
-    execute: () => Effect.die('No tools configured for cloudflare agent smoke test')
+const toolRegistryErrorToAgentError = (error: ToolRegistryError) =>
+  AgentError.make({
+    code: 'tool_error',
+    message: error.message,
+    retryable: false
   })
-)
 
 export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAgent>()(
   'YolkAgent',
@@ -248,7 +255,25 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return token
         })
 
-      const makeRuntimeLayer = (sessionId: string) =>
+      const resolveCloudflareToolSet = (sessionId: string) =>
+        Effect.gen(function* () {
+          const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+
+          return yield* resolveAgentToolSet({
+            modules: cloudflareToolModules,
+            context: {
+              surface: 'text',
+              route: '/agent/cloudflare',
+              userId: bootstrap?.userId ?? sessionId,
+              skillset: cloudflareSkillset
+            }
+          }).pipe(Effect.mapError(toolRegistryErrorToAgentError))
+        })
+
+      const makeRuntimeLayer = (
+        sessionId: string,
+        toolExecutorLayer: Layer.Layer<ToolExecutor, never, never>
+      ) =>
         Layer.unwrap(
           state.storage.get<BootstrapRequestType>(bootstrapKey).pipe(
             Effect.flatMap(bootstrap =>
@@ -277,7 +302,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                 ContextTransformer.identity,
                 LoopConfig.defaultLayer,
                 providerLayer,
-                noToolExecutorLayer,
+                toolExecutorLayer,
                 makeDurableObjectSessionEventStoreLayer(sessionId, runtimeEventLogStorage)
               )
             )
@@ -304,6 +329,15 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return
         }
 
+        const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
+
+        if (resolvedToolSet._tag === 'Failure') {
+          yield* sendEvent(socket, resolvedToolSet.failure)
+          return
+        }
+
+        const toolSet = resolvedToolSet.success
+
         yield* runRuntime(
           {
             _tag: 'AppendInput',
@@ -312,10 +346,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             runId: crypto.randomUUID(),
             expectedRevision: input.expectedRevision
           },
-          { ...runtimeConfig, reasoningEffort: input.reasoningEffort }
+          { ...runtimeBaseConfig, tools: toolSet.tools, reasoningEffort: input.reasoningEffort }
         ).pipe(
           Stream.runForEach(event => sendEvent(socket, event)),
-          Effect.provide(makeRuntimeLayer(sessionId)),
+          Effect.provide(makeRuntimeLayer(sessionId, makeToolExecutorLayer(toolSet))),
           Effect.catch(error => sendEvent(socket, toAgentError(error)))
         )
       })

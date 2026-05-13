@@ -75,7 +75,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md`           | Prettier, kebab-case, file naming                            |
 | Agent providers      | `lib/agents/AGENTS.md`                         | Runtime layer, provider modes, Codex quirks                  |
 | Agent chat UI        | `app/agent/AGENTS.md`                          | Headless chat hook/items, composer, console chrome           |
-| Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; scope via `resolveAgentTools`             |
+| Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; route/runtime adapters select modules via `resolveAgentToolSet` |
 | Agent auth actions   | `lib/core/agent/*-action.ts`                   | OpenAI Codex connect/disconnect actions                      |
 | Reusable agent stack | `packages/AGENTS.md`                           | Package boundaries and naming                                |
 | Cloudflare agent app | `cloudflare/agent/AGENTS.md`                   | Alchemy Worker/DO deployment and Cloudflare-specific adapter |
@@ -101,7 +101,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `makeAgentRuntimeLayer`          | Function | `lib/agents/runtime-layer.ts`                   | Provides provider + default loop deps with no tools    |
 | `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`                   | Provides provider + app tool executor for agent routes |
 | `agentTextCapabilities`          | Const    | `lib/agents/text-agent-config.ts`               | Text agent input/tool capability source of truth       |
-| `resolveAgentTools`              | Function | `lib/agents/tools/registry.ts`                  | Resolves app-scoped text/voice toolsets                |
+| `resolveAgentToolSet`            | Function | `lib/agents/tools/resolve-toolset.ts`           | Resolves caller-provided app tool modules              |
+| `nodeTextToolModules`            | Const    | `lib/agents/tools/registry.ts`                  | Node-safe text route tool modules                      |
+| `nodeVoiceToolModules`           | Const    | `lib/agents/tools/registry.ts`                  | Node-safe Realtime voice tool modules                  |
 | `run`                            | Function | `packages/agent-loop/src/run.ts`                | Stateless LLM/tool loop                                |
 | `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`     | Stateless or append-backed runtime over agent loop     |
 | `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts` | Append-only runtime event storage contract             |

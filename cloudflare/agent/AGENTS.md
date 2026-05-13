@@ -12,6 +12,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
+- Tool modules are runtime-adapter explicit. Current Cloudflare text runtime wires only Worker-safe modules; do not import Node-only app tool modules here.
 - Do not expand into full product infrastructure until package APIs are stable.
 
 ## Strategic Direction
@@ -73,6 +74,7 @@ Do not build these here yet unless explicitly requested:
 - Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep `@yolk/*` packages provider/runtime-neutral.
+- Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
 - Centralize Codex refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
 - Route bootstrapped DO Codex response calls through Next proxy; direct Worker egress to ChatGPT Codex may get Cloudflare-blocked.

@@ -35,10 +35,10 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 - Text route requires Codex OAuth token, model `gpt-5.4`, `agentTextCapabilities`, and non-empty text+image protocol transcript.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
-- Text route resolves tools with `{ surface: 'text', route: '/agent', userId }`.
+- Text route explicitly provides Node text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
-- Realtime routes resolve voice tools with `{ surface: 'voice', route: '/agent', userId }`.
+- Realtime routes explicitly provide Node voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is Worker-to-Next only; it forwards allowlisted Codex headers/body to avoid Worker egress blocks.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` so it stays testable without importing full Next route/layers.

@@ -16,7 +16,7 @@ import {
   OpenAiRealtimeTranscriptionModelSchema,
   type OpenAiRealtimeTranscriptionModel
 } from '@/lib/agents/realtime/openai-realtime'
-import { resolveAgentTools } from '@/lib/agents/tools/registry'
+import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import type { ToolDef } from '@yolk/protocol'
@@ -162,10 +162,13 @@ const handler = Effect.gen(function* () {
   const sdp = yield* readSdp
   const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-  const toolSet = yield* resolveAgentTools({
-    surface: 'voice',
-    route: '/agent',
-    userId: session.user.id
+  const toolSet = yield* resolveAgentToolSet({
+    modules: nodeVoiceToolModules,
+    context: {
+      surface: 'voice',
+      route: '/agent',
+      userId: session.user.id
+    }
   })
   const answer = yield* requestOpenAiRealtimeAnswer({
     apiKey,

@@ -8,11 +8,13 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
-- Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + optional configured MCP tools
+- Next text runtime tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + skill + optional configured MCP tools
+- Cloudflare text runtime currently wires generated skill tool only; add Worker-safe modules explicitly in the Worker adapter.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
+- Routes/runtime adapters provide their tool modules explicitly; do not hide tool policy in a global resolver.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and Codex response proxy.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
@@ -41,16 +43,18 @@ Reasoning:
 
 ## Current Tools
 
+- Tool ownership is per route/runtime adapter for now. A future app-layer `AgentDefinition` may centralize model/prompt/tools/skillset once product agent boundaries are clearer.
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
 - `tools/mcp-tool-module.ts`: configured MCP servers; text-only; tools namespaced as `<server>_<tool>`
+- `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/tool-registry`; use this at new route/runtime boundaries.
 - Both app tools are enabled for text and voice surfaces
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
-- App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
+- App tool registry: `tools/registry.ts` exposes route-selectable Node tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No product permissions yet; durable transcript exists only in Cloudflare DO runtime
 
