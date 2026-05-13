@@ -7,7 +7,7 @@
 - Define serializable `AgentMessage` input/output shapes.
 - Define `AgentEvent` stream events emitted by loops/providers.
 - Define tool metadata, calls, results, and errors.
-- Define model capability and reasoning request types.
+- Define model capability, model selection, and reasoning request types.
 - Define canonical usage, retry, and compaction lifecycle events.
 - Define generic session/transport envelopes such as `SessionSnapshot` and `UserInput` without app auth assumptions.
 - Provide content helpers for text and multimodal parts.
@@ -45,7 +45,7 @@
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.
 - Provider adapters normalize usage; protocol stays provider-neutral.
-- Session envelopes may reference transport flow but must not depend on concrete HTTP/WS APIs.
+- Session envelopes may carry opaque host-owned `model` strings and reasoning settings, but must not depend on concrete HTTP/WS APIs.
 
 ## Tests
 

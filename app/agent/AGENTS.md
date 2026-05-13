@@ -17,7 +17,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
-- `agent-status.tsx` owns console status controls: Codex auth, text reasoning effort, Realtime transcription model, model/capability/status badges.
+- `agent-status.tsx` owns console status controls: Codex/Claude auth, text model, text reasoning effort, Realtime transcription model, capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
 - `agent-usage-meter.tsx` formats provider-normalized token usage/context budget for header/console chrome.
 - `message-edit-model.ts` owns pure edit shortcut/save-state helpers; keep keyboard semantics testable outside JSX.
@@ -54,6 +54,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
+- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/client` to Next or Cloudflare runtimes.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 

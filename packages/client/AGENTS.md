@@ -34,7 +34,7 @@
 - Keep transport/parse failures typed as `AgentTransportError`.
 - `streamAgentEventStream` is the native HTTP Effect API; `streamCloudflareAgentEventStream` is the native WS Effect API; async-generator wrappers are compatibility.
 - `StreamAgentEventsRequest.signal` interrupts request/body streams.
-- Cloudflare WS transport expects server `SessionSnapshot`, then sends latest user message as `UserInput` with snapshot revision.
+- Cloudflare WS transport expects server `SessionSnapshot`, then sends latest user message as `UserInput` with snapshot revision, optional model, and optional reasoning effort.
 - Use protocol messages for replay; app/UI packages may project richer render parts.
 
 ## Tests

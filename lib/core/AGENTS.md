@@ -6,8 +6,10 @@ Domain actions and pure Effect functions. App routes/pages call here; services r
 
 | Path                         | Role                                           |
 | ---------------------------- | ---------------------------------------------- |
-| `agent/*-action.ts`          | OpenAI Codex connect/disconnect server actions |
+| `agent/*-action.ts`          | Provider connect/disconnect server actions     |
 | `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
+| `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
+| `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
 | `errors/index.ts`            | Shared domain errors                           |
 
 ## Server Actions
@@ -26,8 +28,9 @@ Domain actions and pure Effect functions. App routes/pages call here; services r
 - Return Effect values; do not run effects inside helpers.
 - Pull infrastructure through services (`Db`, `OpenAiCodexOAuth`, etc.).
 - Keep provider/OAuth API calls in services; core composes persistence and policy.
-- Store Codex OAuth tokens in Better Auth `account` rows with `providerId = 'openai-codex'`.
-- Refresh Codex tokens in `getValidOpenAiCodexToken()` and persist refreshed token before returning.
+- Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
+- Refresh tokens in `getValid*Token()` helpers and persist refreshed token before returning.
+- `'use server'` files may export only async functions; move shared constants/types to non-server modules.
 
 ## Errors
 

@@ -27,19 +27,19 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 - Unauthenticated: `401`.
 - Invalid body/schema: `400`.
-- Missing/invalid Codex auth: `409`.
+- Missing/invalid provider auth: `409`.
 - Upstream OAuth/provider failure: `502`.
 - Unknown boundary failure: `500` with generic body.
 
 ## Agent Routes
 
-- Text route requires Codex OAuth token, model `gpt-5.4`, `agentTextCapabilities`, and non-empty text+image protocol transcript.
+- Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image protocol transcript.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text route explicitly provides runtime-portable text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`; remote MCP comes from project MCP files, not env.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
 - Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
-- Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
+- Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is legacy rollback only; direct Worker Codex execution is the intended path.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` until the legacy proxy route is deleted.
 

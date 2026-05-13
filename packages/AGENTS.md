@@ -33,6 +33,7 @@ app -> react -> client -> protocol + Effect
 app -> mcp-client -> protocol + Effect
 mcp-server -> mcp-client + protocol + Effect
 app -> openai -> oauth + Effect
+app -> anthropic -> oauth + Effect
 app -> oauth + Effect
 ```
 
@@ -148,7 +149,7 @@ app -> oauth + Effect
 - `collectAgentEventsEffect` = Effect-native collection helper.
 - `collectAgentEvents` = async collection helper.
 - Requests send a non-empty client-owned `AgentTranscript` (`messages`), not just the latest prompt.
-- Optional `reasoningEffort` is forwarded to the server; provider support is app-owned.
+- Optional `model` and `reasoningEffort` are forwarded to the server; provider support is app-owned.
 - `StreamAgentEventsRequest.signal` interrupts Effect `HttpClient` request/body reads.
 - Mock client HTTP with `HttpClient` layers, not fetch-style helpers.
 - Keep parsing/schema errors typed as `AgentTransportError`.

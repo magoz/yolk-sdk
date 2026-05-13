@@ -112,7 +112,7 @@ export const isServiceConfigError = Schema.is(ServiceConfigError)
 - Better integration with Schema validation
 - Enables serialization/deserialization of errors
 - See `patterns/EFFECT_BEST_PRACTICES.md` for detailed patterns
-- Existing simple internal errors (`Auth`, `Email`) use `Data.TaggedError`; schema-boundary errors (`OpenAiCodexOAuth`) use `Schema.TaggedErrorClass`
+- Existing simple internal errors (`Auth`, `Email`) use `Data.TaggedError`; schema-boundary errors (`OpenAiCodexOAuth`, `AnthropicClaudeOAuth`) use `Schema.TaggedErrorClass`
 
 **Error naming:**
 
@@ -165,7 +165,7 @@ Raw `process.env` is allowed only in sync infra callbacks/config boundaries; doc
 - Use Effect `HttpClient` from `effect/unstable/http` inside services.
 - Static live layers provide `FetchHttpClient.layer` internally.
 - HTTP-backed services should expose an injectable layer factory accepting `Layer.Layer<HttpClient.HttpClient>`.
-- `makeOpenAiCodexOAuthLayer(httpClientLayer)` is the current example.
+- `makeOpenAiCodexOAuthLayer(httpClientLayer)` and `makeAnthropicClaudeOAuthLayer(httpClientLayer)` are current examples.
 - Avoid raw `fetch` or storing `typeof fetch` in service config.
 
 ## Observability Pattern
@@ -202,6 +202,7 @@ Services are composed in `lib/layers.ts`:
 import { Layer, Logger } from 'effect'
 import { Auth } from './services/auth/live-layer'
 import { Db } from './services/db/live-layer'
+import { AnthropicClaudeOAuth } from './services/anthropic-oauth/live-layer'
 import { OpenAiCodexOAuth } from './services/openai-codex-oauth/live-layer'
 import { TelemetryLayer } from './services/telemetry/live-layer'
 
@@ -209,13 +210,14 @@ import { TelemetryLayer } from './services/telemetry/live-layer'
 export const AppLayer = Layer.mergeAll(
   Auth.layer,
   Db.layer,
+  AnthropicClaudeOAuth.layer,
   OpenAiCodexOAuth.layer,
   Logger.layer([Logger.consolePretty()]),
   TelemetryLayer
 )
 ```
 
-`Auth.layer` provides `Email.layer` internally for OTP delivery. Auth uses its own Neon HTTP `AuthDb` for the better-auth adapter; do not dedupe with `Db.layer` unless the adapter supports it. `OpenAiCodexOAuth.layer` is standalone because agent route/actions need it directly. Add standalone services to `AppLayer` only when app code needs them directly.
+`Auth.layer` provides `Email.layer` internally for OTP delivery. Auth uses its own Neon HTTP `AuthDb` for the better-auth adapter; do not dedupe with `Db.layer` unless the adapter supports it. OAuth services are standalone because agent route/actions need them directly. Add standalone services to `AppLayer` only when app code needs them directly.
 
 **Note:** `Logger.consolePretty()` is required for `Effect.logError` / `Effect.logWarning` to produce output. Without it, logs are silent.
 

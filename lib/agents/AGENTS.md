@@ -12,11 +12,11 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
-- Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
+- Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
 - Routes/runtime adapters provide their tool modules explicitly; do not hide tool policy in a global resolver.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
-- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and token broker, while DO executes Codex requests directly.
+- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical OAuth refresh owner and token broker, while DO executes selected providers directly when possible.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
 - `context-budget.ts` owns app text model context window, reserved output, warning, and compaction thresholds.
@@ -25,20 +25,21 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 
-## Current Provider
+## Current Providers
 
-Hardcoded in `app/api/agent/route.ts`:
+Configured in `lib/agents/text-agent-config.ts`; selected by UI and routed in `app/api/agent/route.ts` / `cloudflare/agent/src/yolk-agent.ts`:
 
 | Env                   | Values | Notes             |
 | --------------------- | ------ | ----------------- |
 | `AGENT_SYSTEM_PROMPT` | string | Optional override |
 
-Provider is Codex OAuth, model is `gpt-5.4`. Text model/reasoning/capabilities live in `text-agent-config.ts`; UI and route import `agentTextCapabilities` from there. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Codex provider accepts text+image user input; audio is rejected by capabilities.
+Providers are Codex OAuth (`gpt-5.4`) and Anthropic Claude OAuth (`claude-sonnet-4-6`). Text model/reasoning/capabilities live in `text-agent-config.ts`; UI and route import `agentTextModelOptions` / `agentTextCapabilities` from there. Use `makeAgentRuntimeLayerWithTools(providerLayer, toolExecutorLayer)` to provide provider/tool loop deps; keep provider choice at app boundary. Providers accept text+image user input; audio is rejected by capabilities.
 
 Reasoning:
 
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex request sets `reasoning.summary = 'auto'`; summaries are optional provider output.
+- Claude OAuth requests use Bearer auth with Claude Code headers/betas (`claude-code-20250219`, `oauth-2025-04-20`).
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.
 
 ## Current Tools
@@ -123,9 +124,20 @@ MCP security:
 - Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
 - `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use
 
+## Anthropic Claude OAuth Provider
+
+- File: `providers/anthropic-claude-provider.ts`
+- Used for Claude Pro/Max subscription access via model `claude-sonnet-4-6`
+- Does **not** use `ANTHROPIC_API_KEY`
+- Requires per-user Claude OAuth token from `lib/core/agent/anthropic-claude-auth.ts`
+- Cloudflare token bridge returns access/expiry only; keep refresh token in Next/Postgres.
+- Tokens stored in Better Auth `account` table with `providerId = 'anthropic-claude'`
+- Manual PKCE server actions live in `lib/core/agent/*anthropic-claude*-action.ts`; verifier cookie name lives in non-`use server` module.
+- `getValidAnthropicClaudeToken()` refreshes expired tokens and persists the refreshed token before provider use
+
 Route status conventions:
 
-- Text route returns `401` unauthenticated, `409` missing/invalid Codex auth, `502` OAuth/provider failures
+- Text route returns `401` unauthenticated, `409` missing/invalid provider auth, `502` OAuth/provider failures
 
 Codex backend quirks:
 

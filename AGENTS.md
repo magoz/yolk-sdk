@@ -50,11 +50,12 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
 | Agent stack        | packages                                                 | Domain-free protocol, loop/runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks                           |
-| Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                                   |
+| Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools                                         | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search + remote MCP tools                                      |
 | OpenAI Codex OAuth | OpenAiCodexOAuth                                         | ChatGPT subscription device flow + token refresh                                                                                   |
-| Cloudflare agent   | Alchemy                                                  | `cloudflare/agent`; Worker + Durable Object session runtime for `/agent/cloudflare`; Next bridges Codex token + responses          |
+| Anthropic OAuth    | AnthropicClaudeOAuth                                     | Claude subscription OAuth code+PKCE flow + token refresh                                                                           |
+| Cloudflare agent   | Alchemy                                                  | `cloudflare/agent`; Worker + Durable Object session runtime for `/agent/cloudflare`; Next brokers Codex/Claude access tokens       |
 
 ## WHERE TO LOOK
 
@@ -78,7 +79,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Agent providers      | `lib/agents/AGENTS.md`                         | Runtime layer, provider modes, Codex quirks                                        |
 | Agent chat UI        | `app/agent/AGENTS.md`                          | Headless chat hook/items, composer, console chrome                                 |
 | Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; route/runtime adapters select modules via `resolveAgentToolSet` |
-| Agent auth actions   | `lib/core/agent/*-action.ts`                   | OpenAI Codex connect/disconnect actions                                            |
+| Agent auth actions   | `lib/core/agent/*-action.ts`                   | OpenAI Codex + Anthropic Claude connect/disconnect actions                          |
 | Agent MCP config     | `.yolk/mcp.json` or `.opencode/mcp.json`       | Remote MCP server configs passed to Next/Cloudflare tools                          |
 | Reusable agent stack | `packages/AGENTS.md`                           | Package boundaries and naming                                                      |
 | Cloudflare agent app | `cloudflare/agent/AGENTS.md`                   | Alchemy Worker/DO deployment and Cloudflare-specific adapter                       |
@@ -98,12 +99,14 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Db`                             | Service  | `lib/services/db/live-layer.ts`                        | Database (returns Drizzle client)                                                    |
 | `Email`                          | Service  | `lib/services/email/live-layer.ts`                     | Resend email sending                                                                 |
 | `OpenAiCodexOAuth`               | Service  | `lib/services/openai-codex-oauth/live-layer.ts`        | Codex OAuth device flow + refresh                                                    |
+| `AnthropicClaudeOAuth`           | Service  | `lib/services/anthropic-oauth/live-layer.ts`           | Claude OAuth code exchange + refresh                                                 |
 | `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`                 | OpenTelemetry + Sentry span/log processing                                           |
 | `reportError`                    | Function | `lib/services/telemetry/report-error.ts`               | Log error + Sentry capture (boundaries only)                                         |
 | `reportWarning`                  | Function | `lib/services/telemetry/report-warning.ts`             | Log warning + Sentry warning (degraded paths)                                        |
 | `makeAgentRuntimeLayer`          | Function | `lib/agents/runtime-layer.ts`                          | Provides provider + default loop deps with no tools                                  |
 | `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`                          | Provides provider + app tool executor for agent routes                               |
 | `agentTextCapabilities`          | Const    | `lib/agents/text-agent-config.ts`                      | Text agent input/tool capability source of truth                                     |
+| `agentTextModelOptions`          | Const    | `lib/agents/text-agent-config.ts`                      | Text model picker options and provider routing source of truth                       |
 | `resolveAgentToolSet`            | Function | `lib/agents/tools/resolve-toolset.ts`                  | Resolves caller-provided app tool modules                                            |
 | `loadProjectMcpServers`          | Function | `lib/agents/mcp/file-source.ts`                        | Loads remote MCP configs from `.yolk/mcp.json` / `.opencode/mcp.json`                |
 | `makeTextToolModules`            | Function | `lib/agents/tools/registry.ts`                         | Adds runtime-portable text tools plus caller-provided remote MCP tools               |

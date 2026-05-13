@@ -8,7 +8,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
 - App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token broker bridge config and remote MCP server configs before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized Codex token refresh, and direct Worker Codex execution after brokered token handoff.
+- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and direct Worker provider execution after brokered token handoff.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
@@ -78,10 +78,10 @@ Do not build these here yet unless explicitly requested:
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
-- Centralize Codex refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
-- Next Codex response proxy remains temporarily for rollback; bootstrapped DO sessions call Codex directly with brokered access tokens.
-- Token broker requests use `@yolk/openai` provider ids and `@yolk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
-- Direct browser WS uses protocol `SessionSnapshot` + `UserInput`; keep schemas in `@yolk/protocol`.
+- Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
+- Next Codex response proxy remains temporarily for rollback; bootstrapped DO sessions call selected providers directly with brokered access tokens when possible.
+- Token broker requests use provider ids from `@yolk/openai` / `@yolk/anthropic` and `@yolk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
+- Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.
 - Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
