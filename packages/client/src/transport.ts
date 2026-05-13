@@ -29,6 +29,7 @@ export type StreamAgentEventsRequest = {
   readonly endpoint?: string
   readonly sessionId: string
   readonly messages: AgentTranscript
+  readonly model?: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
@@ -37,6 +38,7 @@ export type StreamAgentEventsRequest = {
 export type StreamCloudflareAgentEventsRequest = {
   readonly webSocketUrl: string
   readonly messages: AgentTranscript
+  readonly model?: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
 }
@@ -145,6 +147,7 @@ const makeUserInputJson = (
         UserInput.make({
           message,
           expectedRevision,
+          model: request.model,
           reasoningEffort: request.reasoningEffort
         }),
         'Could not serialize WebSocket user input'
@@ -160,13 +163,12 @@ const responseErrorMessage = (response: HttpClientResponse.HttpClientResponse) =
 
 const makeHttpRequest = (request: StreamAgentEventsRequest) =>
   encodeJsonString(
-    request.reasoningEffort === undefined
-      ? { sessionId: request.sessionId, messages: request.messages }
-      : {
-          sessionId: request.sessionId,
-          messages: request.messages,
-          reasoningEffort: request.reasoningEffort
-        },
+    {
+      sessionId: request.sessionId,
+      messages: request.messages,
+      model: request.model,
+      reasoningEffort: request.reasoningEffort
+    },
     'Could not serialize agent request'
   ).pipe(
     Effect.map(body =>

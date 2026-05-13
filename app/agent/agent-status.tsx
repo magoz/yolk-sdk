@@ -4,11 +4,12 @@ import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  agentTextModel,
   agentTextCapabilities,
+  agentTextModelOptions,
   agentTextReasoningEffortOptions,
   agentTextReasoningSummary
 } from '@/lib/agents/text-agent-config'
+import type { AgentTextModel } from '@/lib/agents/text-agent-config'
 import {
   defaultOpenAiRealtimeReasoningEffort,
   openAiRealtimeTranscriptionModelOptions,
@@ -55,10 +56,13 @@ type AgentStatusPanelProps = {
   readonly hasUsage: boolean
   readonly contextTokens: number | null
   readonly compaction: AgentCompactionState
+  readonly textModel: AgentTextModel
+  readonly textModelDisabled: boolean
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
   readonly transcriptionModelDisabled: boolean
+  readonly onTextModelChange: (model: AgentTextModel) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
   readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
 }
@@ -68,6 +72,33 @@ function StatusRow({ label, children }: { readonly label: string; readonly child
     <div className="flex items-center justify-between gap-3 border-t border-foreground/10 pt-3">
       <span>{label}</span>
       {children}
+    </div>
+  )
+}
+
+type TextModelControlProps = {
+  readonly value: AgentTextModel
+  readonly disabled: boolean
+  readonly onChange: (model: AgentTextModel) => void
+}
+
+function TextModelControl({ value, disabled, onChange }: TextModelControlProps) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {agentTextModelOptions.map(option => (
+        <Button
+          key={option.model}
+          type="button"
+          size="sm"
+          variant={value === option.model ? 'secondary' : 'outline'}
+          disabled={disabled}
+          className="min-h-11 px-2 text-[11px]"
+          aria-pressed={value === option.model}
+          onClick={() => onChange(option.model)}
+        >
+          {option.label}
+        </Button>
+      ))}
     </div>
   )
 }
@@ -136,10 +167,13 @@ export function AgentStatusPanel({
   hasUsage,
   contextTokens,
   compaction,
+  textModel,
+  textModelDisabled,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
   transcriptionModelDisabled,
+  onTextModelChange,
   onReasoningEffortChange,
   onTranscriptionModelChange
 }: AgentStatusPanelProps) {
@@ -152,7 +186,11 @@ export function AgentStatusPanel({
           <code className="rounded bg-muted px-2 py-1 text-foreground">{sessionId}</code>
         </StatusRow>
         <StatusRow label="Text model">
-          <Badge variant="secondary">{agentTextModel}</Badge>
+          <TextModelControl
+            value={textModel}
+            disabled={textModelDisabled}
+            onChange={onTextModelChange}
+          />
         </StatusRow>
         <StatusRow label="Reasoning">
           <ReasoningEffortControl

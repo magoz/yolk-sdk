@@ -40,8 +40,19 @@ import {
 import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk/tool-registry'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
-import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
+import {
+  agentTextModel,
+  agentTextModelProvider,
+  isAgentTextModel,
+  type AgentTextModel
+} from '../../../lib/agents/text-agent-config.ts'
+import { makeAnthropicClaudeProviderLayer } from '../../../lib/agents/providers/anthropic-claude-provider.ts'
 import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
+import {
+  isAnthropicTokenFresh,
+  makeAnthropicTokenBrokerRequest,
+  anthropicTokenToProviderToken
+} from './anthropic-token-broker.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import {
   isCodexTokenFresh,
@@ -70,6 +81,7 @@ type SocketAttachment = {
 
 const bootstrapKey = 'bootstrap'
 const codexTokenKey = 'codex-access-token'
+const anthropicTokenKey = 'anthropic-access-token'
 
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
 
@@ -112,14 +124,14 @@ const toAgentError = (
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
 
-const tokenBrokerErrorMessage = (status: number, body: string) => {
+const tokenBrokerErrorMessage = (provider: string, status: number, body: string) => {
   const normalized = body.trim()
 
   if (normalized.length === 0) {
-    return `Could not load Codex token: ${status}`
+    return `Could not load ${provider} token: ${status}`
   }
 
-  return `Could not load Codex token: ${status} ${normalized}`
+  return `Could not load ${provider} token: ${status} ${normalized}`
 }
 
 const replayHydratedMessages = (log: RuntimeSessionEventLog) =>
@@ -222,7 +234,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             return yield* Effect.fail(
               AgentError.make({
                 code: 'provider_error',
-                message: tokenBrokerErrorMessage(response.status, text),
+                message: tokenBrokerErrorMessage('Codex', response.status, text),
                 retryable: response.status >= 500
               })
             )
@@ -233,6 +245,72 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
               AgentError.make({
                 code: 'invalid_response',
                 message: `Could not parse Codex token response: ${httpClientMessage(error)}`,
+                retryable: false
+              })
+            )
+          )
+
+          return yield* Schema.decodeUnknownEffect(CodexAccessToken)(json).pipe(
+            Effect.mapError(error =>
+              AgentError.make({
+                code: 'invalid_response',
+                message: error.message,
+                retryable: false
+              })
+            )
+          )
+        }).pipe(Effect.provide(FetchHttpClient.layer))
+
+      const requestAnthropicToken = (bootstrap: BootstrapRequestType) =>
+        Effect.gen(function* () {
+          const client = yield* HttpClient.HttpClient
+          const body = yield* encodeJson(makeAnthropicTokenBrokerRequest(bootstrap.userId))
+          const response = yield* client
+            .execute(
+              HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
+                HttpClientRequest.setHeaders({
+                  accept: 'application/json',
+                  'content-type': 'application/json',
+                  'x-yolk-cloudflare-secret': bootstrap.bridgeSecret
+                }),
+                HttpClientRequest.bodyText(body, 'application/json')
+              )
+            )
+            .pipe(
+              Effect.mapError(error =>
+                AgentError.make({
+                  code: 'provider_error',
+                  message: `Could not request Anthropic token: ${httpClientMessage(error)}`,
+                  retryable: true
+                })
+              )
+            )
+
+          if (response.status < 200 || response.status >= 300) {
+            const text = yield* response.text.pipe(
+              Effect.mapError(error =>
+                AgentError.make({
+                  code: 'provider_error',
+                  message: `Could not read Anthropic token error: ${httpClientMessage(error)}`,
+                  retryable: false
+                })
+              )
+            )
+
+            return yield* Effect.fail(
+              AgentError.make({
+                code: 'provider_error',
+                message: tokenBrokerErrorMessage('Anthropic', response.status, text),
+                retryable: response.status >= 500
+              })
+            )
+          }
+
+          const json = yield* response.json.pipe(
+            Effect.mapError(error =>
+              AgentError.make({
+                code: 'invalid_response',
+                message: `Could not parse Anthropic token response: ${httpClientMessage(error)}`,
                 retryable: false
               })
             )
@@ -265,6 +343,22 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           return token
         })
 
+      const getAnthropicToken = () =>
+        Effect.gen(function* () {
+          const nowMs = yield* Clock.currentTimeMillis
+          const cached = yield* state.storage.get<CodexAccessTokenType>(anthropicTokenKey)
+
+          if (cached !== undefined && isAnthropicTokenFresh(cached, nowMs)) {
+            return cached
+          }
+
+          const bootstrap = yield* loadBootstrap()
+          const token = yield* requestAnthropicToken(bootstrap)
+          yield* state.storage.put(anthropicTokenKey, token)
+
+          return token
+        })
+
       const resolveCloudflareToolSet = (sessionId: string) =>
         Effect.gen(function* () {
           const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
@@ -284,6 +378,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
       const makeRuntimeLayer = (
         sessionId: string,
+        model: AgentTextModel,
         toolExecutorLayer: Layer.Layer<ToolExecutor, never, never>
       ) =>
         Layer.unwrap(
@@ -291,21 +386,29 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             Effect.flatMap(bootstrap =>
               bootstrap === undefined
                 ? Effect.succeed(makeFauxProviderLayer)
-                : getCodexToken().pipe(
-                    Effect.map(token =>
-                      makeCodexWsProviderLayer({
-                        token,
-                        sessionId,
-                        fallback:
-                          bootstrap.codexResponsesEndpoint === undefined
-                            ? undefined
-                            : {
-                                endpoint: bootstrap.codexResponsesEndpoint,
-                                bridgeSecret: bootstrap.bridgeSecret
-                              }
-                      }).pipe(Layer.provide(FetchHttpClient.layer))
+                : agentTextModelProvider(model) === 'anthropic-claude'
+                  ? getAnthropicToken().pipe(
+                      Effect.map(token =>
+                        makeAnthropicClaudeProviderLayer({
+                          token: anthropicTokenToProviderToken(token)
+                        }).pipe(Layer.provide(FetchHttpClient.layer))
+                      )
                     )
-                  )
+                  : getCodexToken().pipe(
+                      Effect.map(token =>
+                        makeCodexWsProviderLayer({
+                          token,
+                          sessionId,
+                          fallback:
+                            bootstrap.codexResponsesEndpoint === undefined
+                              ? undefined
+                              : {
+                                  endpoint: bootstrap.codexResponsesEndpoint,
+                                  bridgeSecret: bootstrap.bridgeSecret
+                                }
+                        }).pipe(Layer.provide(FetchHttpClient.layer))
+                      )
+                    )
             ),
             Effect.map(providerLayer =>
               Layer.mergeAll(
@@ -347,6 +450,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         }
 
         const toolSet = resolvedToolSet.success
+        const selectedModel = input.model ?? runtimeBaseConfig.model
+        const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
         yield* runRuntime(
           {
@@ -356,10 +461,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             runId: crypto.randomUUID(),
             expectedRevision: input.expectedRevision
           },
-          { ...runtimeBaseConfig, tools: toolSet.tools, reasoningEffort: input.reasoningEffort }
+          { ...runtimeBaseConfig, model, tools: toolSet.tools, reasoningEffort: input.reasoningEffort }
         ).pipe(
           Stream.runForEach(event => sendEvent(socket, event)),
-          Effect.provide(makeRuntimeLayer(sessionId, makeToolExecutorLayer(toolSet))),
+          Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
           Effect.catch(error => sendEvent(socket, toAgentError(error)))
         )
       })
@@ -380,6 +485,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             const bootstrap = yield* HttpServerRequest.schemaBodyJson(BootstrapRequest)
             yield* state.storage.put(bootstrapKey, bootstrap)
             yield* state.storage.delete(codexTokenKey)
+            yield* state.storage.delete(anthropicTokenKey)
 
             return yield* HttpServerResponse.json({ ok: true })
           }

@@ -15,12 +15,17 @@ import {
 import { AppLayer } from '@/lib/layers'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import {
+  agentTextModelProvider,
   agentTextModel,
   agentTextCapabilities,
   agentTextReasoningEffort,
-  defaultAgentSystemPrompt
+  defaultAgentSystemPrompt,
+  isAgentTextModel,
+  type AgentTextModel
 } from '@/lib/agents/text-agent-config'
+import { getValidAnthropicClaudeToken } from '@/lib/core/agent/anthropic-claude-auth'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
+import { makeAnthropicClaudeProviderLayer } from '@/lib/agents/providers/anthropic-claude-provider'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
@@ -63,6 +68,20 @@ const appendAvailableSkills = (systemPrompt: string, skillset: MergedSkillset) =
   return availableSkills.length === 0 ? systemPrompt : `${systemPrompt}\n\n${availableSkills}`
 }
 
+const providerLayerForModel = (model: AgentTextModel, userId: string) =>
+  Effect.gen(function* () {
+    switch (agentTextModelProvider(model)) {
+      case 'anthropic-claude': {
+        const token = yield* getValidAnthropicClaudeToken(userId)
+        return makeAnthropicClaudeProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
+      }
+      case 'openai-codex': {
+        const token = yield* getValidOpenAiCodexToken(userId)
+        return makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
+      }
+    }
+  })
+
 const makeAgentResponseWithProvider = (
   input: AgentRouteRequest,
   config: AgentRouteRuntimeConfig,
@@ -70,12 +89,12 @@ const makeAgentResponseWithProvider = (
   userId: string
 ) =>
   Effect.gen(function* () {
-    const token = yield* getValidOpenAiCodexToken(userId)
-    const providerLayer = makeOpenAiCodexProviderLayer({ token }).pipe(
-      Layer.provide(FetchHttpClient.layer)
-    )
+    const selectedModel = input.model ?? config.model
+    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
+    const providerLayer = yield* providerLayerForModel(model, userId)
+    const normalizedInput = new AgentRouteRequest({ ...input, model })
 
-    return yield* makeAgentPostResponse(input, config).pipe(
+    return yield* makeAgentPostResponse(normalizedInput, { ...config, model }).pipe(
       Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(toolSet)))
     )
   })
@@ -160,6 +179,29 @@ const handler = Effect.gen(function* () {
     }).pipe(
       Effect.andThen(
         HttpServerResponse.json({ error: 'OpenAI Codex OAuth failed' }, { status: 502 })
+      )
+    )
+  ),
+  Effect.catchTag('AnthropicClaudeAuthNotFoundError', () =>
+    HttpServerResponse.json({ error: 'Anthropic Claude not connected' }, { status: 409 })
+  ),
+  Effect.catchTag('AnthropicClaudeAuthInvalidError', error =>
+    reportError(new AgentRouteError({ message: 'Anthropic Claude auth invalid', cause: error }), {
+      operation: 'agent.route',
+      status: 409
+    }).pipe(
+      Effect.andThen(
+        HttpServerResponse.json({ error: 'Anthropic Claude auth invalid' }, { status: 409 })
+      )
+    )
+  ),
+  Effect.catchTag('AnthropicClaudeOAuthError', error =>
+    reportError(new AgentRouteError({ message: 'Anthropic Claude OAuth failed', cause: error }), {
+      operation: 'agent.route',
+      status: 502
+    }).pipe(
+      Effect.andThen(
+        HttpServerResponse.json({ error: 'Anthropic Claude OAuth failed' }, { status: 502 })
       )
     )
   ),

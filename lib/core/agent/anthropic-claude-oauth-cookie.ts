@@ -1,0 +1,1 @@
+export const anthropicClaudeOAuthVerifierCookieName = 'yolk_anthropic_claude_oauth_verifier'

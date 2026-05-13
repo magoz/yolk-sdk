@@ -38,6 +38,7 @@ export type UseAgentChatOptions = {
   readonly sessionId: string
   readonly endpoint?: string
   readonly initialMessages?: ReadonlyArray<AgentMessage>
+  readonly model?: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly transport?: AgentChatTransport
   readonly onEvent?: (event: AgentEvent) => void
@@ -98,6 +99,7 @@ export function useAgentChat({
   sessionId,
   endpoint,
   initialMessages,
+  model,
   reasoningEffort,
   transport,
   onEvent,
@@ -145,11 +147,9 @@ export function useAgentChat({
       const base =
         endpoint === undefined ? { sessionId, messages } : { endpoint, sessionId, messages }
 
-      return reasoningEffort === undefined
-        ? { ...base, signal }
-        : { ...base, reasoningEffort, signal }
+      return { ...base, model, reasoningEffort, signal }
     },
-    [endpoint, reasoningEffort, sessionId]
+    [endpoint, model, reasoningEffort, sessionId]
   )
 
   const runAgent = useCallback(

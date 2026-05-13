@@ -4,6 +4,7 @@ import { useEffect, useRef, type MouseEvent } from 'react'
 import { XIcon } from 'lucide-react'
 import type { AgentRunStatus } from '@yolk/client'
 import type { AgentReasoningEffort, AgentUsage } from '@yolk/protocol'
+import type { AgentTextModel } from '@/lib/agents/text-agent-config'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -41,6 +42,8 @@ type AgentConsoleDialogProps = {
   readonly hasUsage: boolean
   readonly contextTokens: number | null
   readonly compaction: AgentCompactionState
+  readonly textModel: AgentTextModel
+  readonly textModelDisabled: boolean
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
@@ -48,6 +51,7 @@ type AgentConsoleDialogProps = {
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
   readonly onOpenChange: (open: boolean) => void
+  readonly onTextModelChange: (model: AgentTextModel) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
   readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
   readonly onShowInlineToolsChange: (checked: boolean) => void
@@ -65,6 +69,8 @@ export function AgentConsoleDialog({
   hasUsage,
   contextTokens,
   compaction,
+  textModel,
+  textModelDisabled,
   reasoningEffort,
   reasoningEffortDisabled,
   transcriptionModel,
@@ -72,6 +78,7 @@ export function AgentConsoleDialog({
   showInlineTools,
   showReasoning,
   onOpenChange,
+  onTextModelChange,
   onReasoningEffortChange,
   onTranscriptionModelChange,
   onShowInlineToolsChange,
@@ -153,10 +160,13 @@ export function AgentConsoleDialog({
           hasUsage={hasUsage}
           contextTokens={contextTokens}
           compaction={compaction}
+          textModel={textModel}
+          textModelDisabled={textModelDisabled}
           reasoningEffort={reasoningEffort}
           reasoningEffortDisabled={reasoningEffortDisabled}
           transcriptionModel={transcriptionModel}
           transcriptionModelDisabled={transcriptionModelDisabled}
+          onTextModelChange={onTextModelChange}
           onReasoningEffortChange={onReasoningEffortChange}
           onTranscriptionModelChange={onTranscriptionModelChange}
         />

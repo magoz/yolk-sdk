@@ -11,6 +11,7 @@ export class SessionSnapshot extends Schema.TaggedClass<SessionSnapshot>()('Sess
 export class UserInput extends Schema.TaggedClass<UserInput>()('UserInput', {
   message: UserMessage,
   expectedRevision: Schema.optional(Schema.Number),
+  model: Schema.optional(Schema.String),
   reasoningEffort: Schema.optional(AgentReasoningEffort)
 }) {}
 

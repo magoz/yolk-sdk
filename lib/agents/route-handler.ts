@@ -110,6 +110,7 @@ const validateAgentRouteImages = (input: AgentRouteRequest) =>
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({
   sessionId: NonEmptyTrimmedString,
   messages: Schema.NonEmptyArray(AgentMessage),
+  model: Schema.optional(Schema.String),
   reasoningEffort: Schema.optional(AgentReasoningEffort)
 }) {}
 
@@ -177,7 +178,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
         tools: config.tools,
         reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
         capabilities: config.capabilities,
-        model: config.model
+        model: input.model ?? config.model
       }
     ).pipe(
       recoverAgentStreamErrors,

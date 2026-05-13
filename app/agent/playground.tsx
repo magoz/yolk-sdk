@@ -12,7 +12,12 @@ import {
   type AgentChatTransport
 } from '@yolk/react'
 import { streamCloudflareAgentEvents } from '@yolk/client'
-import { agentTextCapabilities, agentTextReasoningEffort } from '@/lib/agents/text-agent-config'
+import {
+  agentTextCapabilities,
+  agentTextModel,
+  agentTextReasoningEffort,
+  type AgentTextModel
+} from '@/lib/agents/text-agent-config'
 import { defaultOpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { AgentActivityPanel } from './agent-activity'
 import {
@@ -223,6 +228,7 @@ export function AgentPlayground({
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [showInlineTools, setShowInlineTools] = useState(true)
   const [showReasoning, setShowReasoning] = useState(true)
+  const [textModel, setTextModel] = useState<AgentTextModel>(agentTextModel)
   const [reasoningEffort, setReasoningEffort] = useState(agentTextReasoningEffort)
   const [transcriptionModel, setTranscriptionModel] = useState(
     defaultOpenAiRealtimeTranscriptionModel
@@ -402,6 +408,7 @@ export function AgentPlayground({
       streamCloudflareAgentEvents({
         webSocketUrl: runtime.webSocketUrl,
         messages: request.messages,
+        model: request.model,
         reasoningEffort: request.reasoningEffort,
         signal: request.signal
       })
@@ -409,6 +416,7 @@ export function AgentPlayground({
 
   const agentChat = useAgentChat({
     sessionId,
+    model: textModel,
     reasoningEffort,
     transport: cloudflareTransport,
     onEvent: recordAgentEvent,
@@ -807,6 +815,8 @@ export function AgentPlayground({
         hasUsage={hasUsage}
         contextTokens={contextTokens}
         compaction={compaction}
+        textModel={textModel}
+        textModelDisabled={isRunning}
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isRunning}
         transcriptionModel={transcriptionModel}
@@ -814,6 +824,7 @@ export function AgentPlayground({
         showInlineTools={showInlineTools}
         showReasoning={showReasoning}
         onOpenChange={handleConsoleOpenChange}
+        onTextModelChange={setTextModel}
         onReasoningEffortChange={setReasoningEffort}
         onTranscriptionModelChange={setTranscriptionModel}
         onShowInlineToolsChange={handleInlineToolsChange}
