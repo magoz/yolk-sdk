@@ -8,7 +8,7 @@ import {
 import { describe, expect, it } from '@effect/vitest'
 import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk/protocol'
 import { LLMProvider } from '@yolk/agent-loop'
-import { OPENAI_CODEX_RESPONSES_URL } from '@/lib/services/openai-codex-oauth/live-layer'
+import { openAiCodexResponsesUrl } from '@yolk/openai'
 import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
 import { makeOpenAiCodexProviderLayer } from './openai-codex-provider'
 
@@ -169,7 +169,7 @@ describe('OpenAiCodexProviderLayer', () => {
       const requestBody = readCapturedBody(requests)
       const headers = readCapturedHeaders(requests)
 
-      expect(requests[0]?.request.url).toBe(OPENAI_CODEX_RESPONSES_URL)
+      expect(requests[0]?.request.url).toBe(openAiCodexResponsesUrl)
       expect(Option.getOrUndefined(Headers.get(headers, 'authorization'))).toBe(
         'Bearer access-token'
       )

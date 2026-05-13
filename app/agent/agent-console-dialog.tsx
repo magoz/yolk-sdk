@@ -34,6 +34,7 @@ type AgentConsoleDialogProps = {
   readonly open: boolean
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
+  readonly anthropicClaudeConnected: boolean
   readonly textStatus: AgentRunStatus
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
@@ -57,6 +58,7 @@ export function AgentConsoleDialog({
   open,
   sessionId,
   openAiCodexConnected,
+  anthropicClaudeConnected,
   textStatus,
   voiceStatus,
   usage,
@@ -144,6 +146,7 @@ export function AgentConsoleDialog({
         <AgentStatusPanel
           sessionId={sessionId}
           openAiCodexConnected={openAiCodexConnected}
+          anthropicClaudeConnected={anthropicClaudeConnected}
           textStatus={textStatus}
           voiceStatus={voiceStatus}
           usage={usage}

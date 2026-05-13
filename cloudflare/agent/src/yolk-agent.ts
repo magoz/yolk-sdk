@@ -39,10 +39,14 @@ import {
 } from '@yolk/protocol'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk/tool-registry'
-import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/openai-codex-provider.ts'
+import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
 import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
 import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
+import {
+  isCodexTokenFresh,
+  makeCodexTokenBrokerRequest
+} from './codex-token-broker.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
   interruptLatestIncompleteRun,
@@ -66,7 +70,6 @@ type SocketAttachment = {
 
 const bootstrapKey = 'bootstrap'
 const codexTokenKey = 'codex-access-token'
-const tokenRefreshBufferMs = 5 * 60 * 1000
 
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
 
@@ -108,6 +111,16 @@ const toAgentError = (
 ) => (Schema.is(AgentError)(error) ? error : cloudflareRuntimeErrorToAgentError(error))
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
+
+const tokenBrokerErrorMessage = (status: number, body: string) => {
+  const normalized = body.trim()
+
+  if (normalized.length === 0) {
+    return `Could not load Codex token: ${status}`
+  }
+
+  return `Could not load Codex token: ${status} ${normalized}`
+}
 
 const replayHydratedMessages = (log: RuntimeSessionEventLog) =>
   Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(replayRuntimeSessionEvents(log.events))
@@ -170,13 +183,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           )
         )
 
-      const tokenIsFresh = (token: CodexAccessTokenType, nowMs: number) =>
-        token.expires > nowMs + tokenRefreshBufferMs
-
       const requestCodexToken = (bootstrap: BootstrapRequestType) =>
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
-          const body = yield* encodeJson({ userId: bootstrap.userId })
+          const body = yield* encodeJson(makeCodexTokenBrokerRequest(bootstrap.userId))
           const response = yield* client
             .execute(
               HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
@@ -212,7 +222,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             return yield* Effect.fail(
               AgentError.make({
                 code: 'provider_error',
-                message: `Could not load Codex token: ${response.status} ${text}`,
+                message: tokenBrokerErrorMessage(response.status, text),
                 retryable: response.status >= 500
               })
             )
@@ -244,7 +254,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const nowMs = yield* Clock.currentTimeMillis
           const cached = yield* state.storage.get<CodexAccessTokenType>(codexTokenKey)
 
-          if (cached !== undefined && tokenIsFresh(cached, nowMs)) {
+          if (cached !== undefined && isCodexTokenFresh(cached, nowMs)) {
             return cached
           }
 
@@ -283,18 +293,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                 ? Effect.succeed(makeFauxProviderLayer)
                 : getCodexToken().pipe(
                     Effect.map(token =>
-                      makeOpenAiCodexProviderLayer({
-                        token: {
-                          type: 'oauth',
-                          access: token.access,
-                          refresh: '',
-                          expires: token.expires,
-                          accountId: token.accountId
-                        },
-                        responsesUrl: bootstrap.codexResponsesEndpoint,
-                        extraHeaders: {
-                          'x-yolk-cloudflare-secret': bootstrap.bridgeSecret
-                        }
+                      makeCodexWsProviderLayer({
+                        token,
+                        sessionId,
+                        fallback:
+                          bootstrap.codexResponsesEndpoint === undefined
+                            ? undefined
+                            : {
+                                endpoint: bootstrap.codexResponsesEndpoint,
+                                bridgeSecret: bootstrap.bridgeSecret
+                              }
                       }).pipe(Layer.provide(FetchHttpClient.layer))
                     )
                   )

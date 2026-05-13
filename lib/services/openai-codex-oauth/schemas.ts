@@ -11,9 +11,9 @@ export const OpenAiCodexOAuthTokenSchema = Schema.Struct({
 export type OpenAiCodexOAuthToken = typeof OpenAiCodexOAuthTokenSchema.Type
 
 export const OpenAiCodexTokenResponseSchema = Schema.Struct({
-  id_token: Schema.String,
+  id_token: Schema.optional(Schema.String),
   access_token: Schema.String,
-  refresh_token: Schema.String,
+  refresh_token: Schema.optional(Schema.String),
   expires_in: Schema.optional(Schema.Number)
 })
 

@@ -7,6 +7,7 @@ import { Layer } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { hasOpenAiCodexAuth } from '@/lib/core/agent/openai-codex-auth'
+import { hasAnthropicClaudeAuth } from '@/lib/core/agent/anthropic-claude-auth'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
@@ -165,6 +166,7 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
     Effect.gen(function* () {
       const session = yield* getSession()
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
+      const anthropicClaudeConnected = yield* hasAnthropicClaudeAuth(session.user.id)
       const sessionId = `agent-${runtime}-${session.user.id}`
       const runtimeDetails =
         runtime === 'cloudflare'
@@ -177,6 +179,7 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
         <AgentPlayground
           sessionId={sessionId}
           openAiCodexConnected={openAiCodexConnected}
+          anthropicClaudeConnected={anthropicClaudeConnected}
           runtime={runtimeDetails}
         />
       )

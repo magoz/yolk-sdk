@@ -7,6 +7,15 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
+import {
+  openAiCodexClientId,
+  openAiCodexDeviceAuthCallbackRedirect,
+  openAiCodexDeviceAuthTokenUrl,
+  openAiCodexDeviceAuthUserCodeUrl,
+  openAiCodexDeviceVerificationUrl,
+  openAiCodexRefreshBufferMs,
+  openAiCodexTokenEndpoint
+} from '@yolk/openai'
 import { OpenAiCodexOAuthError } from './errors'
 import {
   OpenAiCodexDeviceAuthTokenResponseSchema,
@@ -17,16 +26,13 @@ import {
   type OpenAiCodexTokenResponse
 } from './schemas'
 
-const OPENAI_ISSUER = 'https://auth.openai.com'
-
-export const OPENAI_CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
-export const OPENAI_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
-export const OPENAI_DEVICE_AUTH_USERCODE_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/usercode`
-export const OPENAI_DEVICE_AUTH_TOKEN_URL = `${OPENAI_ISSUER}/api/accounts/deviceauth/token`
-export const OPENAI_DEVICE_AUTH_CALLBACK_REDIRECT = `${OPENAI_ISSUER}/deviceauth/callback`
-export const OPENAI_DEVICE_VERIFICATION_URL = `${OPENAI_ISSUER}/codex/device`
-export const OPENAI_TOKEN_ENDPOINT = `${OPENAI_ISSUER}/oauth/token`
-export const OPENAI_CODEX_REFRESH_BUFFER_MS = 5 * 60 * 1000
+export const OPENAI_CODEX_CLIENT_ID = openAiCodexClientId
+export const OPENAI_DEVICE_AUTH_USERCODE_URL = openAiCodexDeviceAuthUserCodeUrl
+export const OPENAI_DEVICE_AUTH_TOKEN_URL = openAiCodexDeviceAuthTokenUrl
+export const OPENAI_DEVICE_AUTH_CALLBACK_REDIRECT = openAiCodexDeviceAuthCallbackRedirect
+export const OPENAI_DEVICE_VERIFICATION_URL = openAiCodexDeviceVerificationUrl
+export const OPENAI_TOKEN_ENDPOINT = openAiCodexTokenEndpoint
+export const OPENAI_CODEX_REFRESH_BUFFER_MS = openAiCodexRefreshBufferMs
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -80,18 +86,20 @@ export const extractAccountId = (token: string): string | undefined =>
   accountIdFromPayload(parseJwtPayload(token))
 
 const extractAccountIdFromTokens = (tokens: OpenAiCodexTokenResponse): string | undefined =>
-  extractAccountId(tokens.id_token) ?? extractAccountId(tokens.access_token)
+  (tokens.id_token === undefined ? undefined : extractAccountId(tokens.id_token)) ??
+  extractAccountId(tokens.access_token)
 
 const toOAuthToken = (
   tokens: OpenAiCodexTokenResponse,
   currentAccountId: string | undefined,
+  refreshToken: string,
   nowMs: number
 ): OpenAiCodexOAuthToken => {
   const accountId = extractAccountIdFromTokens(tokens) ?? currentAccountId
   const expiresIn = tokens.expires_in ?? 3600
   const base: Omit<OpenAiCodexOAuthToken, 'accountId'> = {
     type: 'oauth',
-    refresh: tokens.refresh_token,
+    refresh: tokens.refresh_token ?? refreshToken,
     access: tokens.access_token,
     expires: nowMs + expiresIn * 1000
   }
@@ -275,9 +283,14 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           'token exchange'
         )
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token exchange')
+        if (tokens.refresh_token === undefined) {
+          return yield* new OpenAiCodexOAuthError({
+            message: 'Invalid OpenAI Codex token exchange response: missing refresh_token'
+          })
+        }
         const nowMs = yield* Clock.currentTimeMillis
 
-        return toOAuthToken(tokens, undefined, nowMs)
+        return toOAuthToken(tokens, undefined, tokens.refresh_token, nowMs)
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.exchangeDeviceToken'))
 
     const refreshToken = (refreshTokenValue: string, currentAccountId: string | undefined) =>
@@ -294,13 +307,13 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token refresh')
         const nowMs = yield* Clock.currentTimeMillis
 
-        return toOAuthToken(tokens, currentAccountId, nowMs)
+        return toOAuthToken(tokens, currentAccountId, refreshTokenValue, nowMs)
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.refreshToken'))
 
-    const needsRefresh = (token: OpenAiCodexOAuthToken) =>
+    const needsRefresh = (token: OpenAiCodexOAuthToken, minTtlMs = OPENAI_CODEX_REFRESH_BUFFER_MS) =>
       Effect.gen(function* () {
         const nowMs = yield* Clock.currentTimeMillis
-        return !token.access || token.expires < nowMs + OPENAI_CODEX_REFRESH_BUFFER_MS
+        return !token.access || token.expires < nowMs + minTtlMs
       })
 
     return {

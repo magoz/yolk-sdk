@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { and, eq } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
+import { openAiCodexProviderId } from '@yolk/openai'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { OpenAiCodexOAuth } from '@/lib/services/openai-codex-oauth/live-layer'
@@ -10,7 +11,7 @@ import {
 } from '@/lib/services/openai-codex-oauth/errors'
 import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
 
-const OPENAI_CODEX_PROVIDER_ID = 'openai-codex'
+const OPENAI_CODEX_PROVIDER_ID = openAiCodexProviderId
 
 type OpenAiCodexAccount = {
   readonly id: string
@@ -134,12 +135,16 @@ export const getOpenAiCodexToken = (userId: string) =>
     return yield* tokenFromAccount(account)
   }).pipe(Effect.withSpan('agent.openaiCodexAuth.get'))
 
-export const getValidOpenAiCodexToken = (userId: string) =>
+export const getValidOpenAiCodexToken = (
+  userId: string,
+  options: { readonly minTtlMs?: number; readonly forceRefresh?: boolean } = {}
+) =>
   Effect.gen(function* () {
     const oauth = yield* OpenAiCodexOAuth
     const token = yield* getOpenAiCodexToken(userId)
 
-    const needsRefresh = yield* oauth.needsRefresh(token)
+    const needsRefresh =
+      options.forceRefresh === true || (yield* oauth.needsRefresh(token, options.minTtlMs))
 
     if (!needsRefresh) {
       return token

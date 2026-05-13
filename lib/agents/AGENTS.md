@@ -16,7 +16,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
 - Routes/runtime adapters provide their tool modules explicitly; do not hide tool policy in a global resolver.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
-- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and Codex response proxy.
+- Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and token broker, while DO executes Codex requests directly.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
 - Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
 - `context-budget.ts` owns app text model context window, reserved output, warning, and compaction thresholds.
@@ -118,7 +118,7 @@ MCP security:
 - Does **not** use `OPENAI_API_KEY`
 - Requires per-user Codex OAuth token from `lib/core/agent/openai-codex-auth.ts`
 - Cloudflare token bridge returns access/account/expiry only; keep refresh token in Next/Postgres.
-- Cloudflare Codex calls route through Next `internal/cloudflare/codex-responses`; direct Worker → `chatgpt.com` can be blocked by Cloudflare.
+- Cloudflare Codex calls use brokered access tokens from Next and execute directly from the Worker/DO; keep the old response proxy only as temporary rollback until verified.
 - Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`; `accountId` stores ChatGPT account id when present
 - Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
 - `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use

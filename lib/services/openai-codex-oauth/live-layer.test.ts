@@ -221,6 +221,37 @@ describe('OpenAiCodexOAuth', () => {
     })
   )
 
+  it.effect('refreshes token when response omits refresh and id tokens', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiCodexOAuthLayer(
+        makeHttpClientLayer(
+          [
+            {
+              body: {
+                access_token: 'access_3',
+                expires_in: 60
+              }
+            }
+          ],
+          requests
+        )
+      )
+
+      const result = yield* Effect.gen(function* () {
+        const oauth = yield* OpenAiCodexOAuth
+        return yield* oauth.refreshToken('refresh_old', 'acct_current')
+      }).pipe(Effect.provide(layer))
+
+      expect(result).toMatchObject({
+        type: 'oauth',
+        access: 'access_3',
+        refresh: 'refresh_old',
+        accountId: 'acct_current'
+      })
+    })
+  )
+
   it.effect('fails non-OK device authorization responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

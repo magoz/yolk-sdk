@@ -15,6 +15,7 @@ import {
   openAiRealtimeModel
 } from '@/lib/agents/realtime/openai-realtime'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
+import { AnthropicClaudeAuthPanel } from './anthropic-claude-auth-panel'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
 import { AgentUsagePanel, type AgentCompactionState } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
@@ -47,6 +48,7 @@ export const textStatusVariant = (status: AgentRunStatus) => {
 type AgentStatusPanelProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
+  readonly anthropicClaudeConnected: boolean
   readonly textStatus: AgentRunStatus
   readonly voiceStatus: VoiceStatus
   readonly usage: AgentUsage
@@ -127,6 +129,7 @@ function TranscriptionModelControl({ value, disabled, onChange }: TranscriptionM
 export function AgentStatusPanel({
   sessionId,
   openAiCodexConnected,
+  anthropicClaudeConnected,
   textStatus,
   voiceStatus,
   usage,
@@ -143,6 +146,7 @@ export function AgentStatusPanel({
   return (
     <div className="space-y-4">
       <OpenAiCodexAuthPanel initialConnected={openAiCodexConnected} />
+      <AnthropicClaudeAuthPanel initialConnected={anthropicClaudeConnected} />
       <div className="grid gap-3 text-xs text-muted-foreground">
         <StatusRow label="Session">
           <code className="rounded bg-muted px-2 py-1 text-foreground">{sessionId}</code>

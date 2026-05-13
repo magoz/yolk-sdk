@@ -52,6 +52,7 @@ export type AgentRuntimeInfo =
 type AgentPlaygroundProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
+  readonly anthropicClaudeConnected: boolean
   readonly runtime: AgentRuntimeInfo
 }
 
@@ -213,6 +214,7 @@ const processImageFiles = (
 export function AgentPlayground({
   sessionId,
   openAiCodexConnected,
+  anthropicClaudeConnected,
   runtime
 }: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
@@ -798,6 +800,7 @@ export function AgentPlayground({
         open={consoleOpen}
         sessionId={sessionId}
         openAiCodexConnected={openAiCodexConnected}
+        anthropicClaudeConnected={anthropicClaudeConnected}
         textStatus={state.status}
         voiceStatus={voiceStatus}
         usage={usage}

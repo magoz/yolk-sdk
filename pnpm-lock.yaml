@@ -80,12 +80,21 @@ importers:
       '@yolk/agent-runtime':
         specifier: workspace:^
         version: link:packages/agent-runtime
+      '@yolk/anthropic':
+        specifier: workspace:^
+        version: link:packages/anthropic
       '@yolk/client':
         specifier: workspace:^
         version: link:packages/client
       '@yolk/mcp-client':
         specifier: workspace:^
         version: link:packages/mcp-client
+      '@yolk/oauth':
+        specifier: workspace:^
+        version: link:packages/oauth
+      '@yolk/openai':
+        specifier: workspace:^
+        version: link:packages/openai
       '@yolk/protocol':
         specifier: workspace:^
         version: link:packages/protocol
@@ -237,6 +246,15 @@ importers:
       '@yolk/agent-runtime':
         specifier: workspace:^
         version: link:../../packages/agent-runtime
+      '@yolk/anthropic':
+        specifier: workspace:^
+        version: link:../../packages/anthropic
+      '@yolk/oauth':
+        specifier: workspace:^
+        version: link:../../packages/oauth
+      '@yolk/openai':
+        specifier: workspace:^
+        version: link:../../packages/openai
       '@yolk/protocol':
         specifier: workspace:^
         version: link:../../packages/protocol
@@ -287,6 +305,15 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
 
+  packages/anthropic:
+    dependencies:
+      '@yolk/oauth':
+        specifier: workspace:^
+        version: link:../oauth
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+
   packages/client:
     dependencies:
       '@yolk/protocol':
@@ -319,6 +346,21 @@ importers:
       '@yolk/protocol':
         specifier: workspace:^
         version: link:../protocol
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+
+  packages/oauth:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+
+  packages/openai:
+    dependencies:
+      '@yolk/oauth':
+        specifier: workspace:^
+        version: link:../oauth
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65

@@ -31,14 +31,13 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk/agent-loop'
+import { openAiCodexResponsesUrl } from '@yolk/openai'
 import {
   agentTextReasoningEffort,
   agentTextReasoningSummary,
   type AgentTextReasoningSummary
 } from '../text-agent-config.ts'
 import type { OpenAiCodexOAuthToken } from '../../services/openai-codex-oauth/schemas.ts'
-
-export const openAiCodexResponsesUrl = 'https://chatgpt.com/backend-api/codex/responses'
 
 type OpenAiCodexConfigShape = {
   readonly token: OpenAiCodexOAuthToken
@@ -881,7 +880,7 @@ const toHttpClientLlmError =
       retryable
     })
 
-const streamOpenAiCodexResponse = (
+export const streamOpenAiCodexResponse = (
   response: HttpClientResponse.HttpClientResponse
 ): Stream.Stream<LLMEvent, LLMError> =>
   Stream.unwrap(

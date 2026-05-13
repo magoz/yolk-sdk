@@ -12,7 +12,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
-| `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex response proxy |
+| `internal/cloudflare/codex-responses/route.ts` | Temporary legacy DO Codex response proxy |
 
 ## Effect Route Pattern
 
@@ -40,8 +40,8 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
 - Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
-- Internal Cloudflare Codex responses proxy is Worker-to-Next only; it forwards allowlisted Codex headers/body to avoid Worker egress blocks.
-- Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` so it stays testable without importing full Next route/layers.
+- Internal Cloudflare Codex responses proxy is legacy rollback only; direct Worker Codex execution is the intended path.
+- Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` until the legacy proxy route is deleted.
 
 ## Exceptions
 

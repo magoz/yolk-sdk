@@ -1,6 +1,6 @@
 # Reusable Agent Stack
 
-Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge stores, or product permissions here.
+Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages may model vendor auth mechanics and wire contracts, but must not own app users, teams, orgs, projects, billing, token storage, or product permissions.
 
 ## Packages
 
@@ -16,6 +16,9 @@ Domain-free packages. No users, teams, orgs, projects, billing, OAuth, knowledge
 | `@yolk/react`         | Headless React hooks over client state/transport        | `@yolk/client`, `@yolk/protocol`, Effect     |
 | `@yolk/mcp-client`    | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/protocol`, Effect                     |
 | `@yolk/mcp-server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/protocol`, `@yolk/mcp-client`, Effect |
+| `@yolk/oauth`         | Generic OAuth token broker and credential-source contracts | Effect                                    |
+| `@yolk/anthropic`     | Anthropic/Claude provider auth mechanics and reusable constants | `@yolk/oauth`, Effect               |
+| `@yolk/openai`        | OpenAI/Codex provider auth mechanics and reusable constants | `@yolk/oauth`, Effect                    |
 
 ## Dependency Rule
 
@@ -29,6 +32,8 @@ app -> client -> protocol + Effect
 app -> react -> client -> protocol + Effect
 app -> mcp-client -> protocol + Effect
 mcp-server -> mcp-client + protocol + Effect
+app -> openai -> oauth + Effect
+app -> oauth + Effect
 ```
 
 ## Naming
@@ -42,7 +47,9 @@ mcp-server -> mcp-client + protocol + Effect
 ## Boundaries
 
 - App/server owns auth, prompts, domain context, tool policy, integrations, model choice.
-- App/server owns LLM provider implementations, OAuth flows, and token storage (`lib/agents`, `lib/services/*oauth*`).
+- App/server owns token storage, user/session mapping, provider selection, and product policy.
+- Provider packages may own reusable vendor mechanics: request lowering, stream parsing, OAuth token schemas, refresh helpers, and broker clients.
+- OAuth packages define contracts only; they never own refresh tokens or storage.
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
