@@ -42,10 +42,6 @@ import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk/tool-regist
 import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/openai-codex-provider.ts'
 import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
 import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
-import { skillToolModule } from '../../../lib/agents/tools/skill-tool.ts'
-import { makeMcpToolModule } from '../../../lib/agents/tools/mcp-tool-module.ts'
-import { webFetchWorkerToolModule } from '../../../lib/agents/tools/web-fetch-worker-tool.ts'
-import { webSearchToolModule } from '../../../lib/agents/tools/web-search-tool.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
@@ -61,6 +57,7 @@ import {
   type BootstrapRequest as BootstrapRequestType,
   type CodexAccessToken as CodexAccessTokenType
 } from './schemas.ts'
+import { makeCloudflareTextToolModules } from './tool-modules.ts'
 
 type SocketAttachment = {
   readonly sessionId: string
@@ -78,8 +75,6 @@ const cloudflareSkillset: MergedSkillset = {
   skills: generatedSkillsetManifest.skills,
   commands: generatedSkillsetManifest.commands
 }
-const cloudflareBaseToolModules = [webFetchWorkerToolModule, webSearchToolModule, skillToolModule]
-
 const runtimeBaseConfig = {
   systemPrompt:
     availableSkills.length === 0
@@ -264,11 +259,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         Effect.gen(function* () {
           const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
 
-          const mcpToolModule = yield* makeMcpToolModule(bootstrap?.mcpServers ?? [])
-          const modules =
-            mcpToolModule.tools.length === 0
-              ? cloudflareBaseToolModules
-              : [...cloudflareBaseToolModules, mcpToolModule]
+          const modules = yield* makeCloudflareTextToolModules(bootstrap?.mcpServers ?? [])
 
           return yield* resolveAgentToolSet({
             modules,

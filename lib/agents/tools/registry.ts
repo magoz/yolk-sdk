@@ -1,4 +1,6 @@
 import { Effect } from 'effect'
+import type { Layer } from 'effect'
+import type { HttpClient } from 'effect/unstable/http'
 import { webFetchWorkerToolModule as webFetchToolModule } from './web-fetch-worker-tool'
 import { webSearchToolModule } from './web-search-tool'
 import { skillToolModule } from './skill-tool'
@@ -12,9 +14,12 @@ export { resolveAgentToolSet } from './resolve-toolset'
 export const nodeTextToolModules = [webFetchToolModule, webSearchToolModule, skillToolModule]
 export const nodeVoiceToolModules = [webFetchToolModule, webSearchToolModule]
 
-export const makeTextToolModules = (mcpServers: ReadonlyArray<McpRemoteServerConfig>) =>
+export const makeTextToolModules = (
+  mcpServers: ReadonlyArray<McpRemoteServerConfig>,
+  httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+) =>
   Effect.gen(function* () {
-    const mcpToolModule = yield* makeMcpToolModule(mcpServers)
+    const mcpToolModule = yield* makeMcpToolModule(mcpServers, httpClientLayer)
 
     return mcpToolModule.tools.length === 0
       ? nodeTextToolModules

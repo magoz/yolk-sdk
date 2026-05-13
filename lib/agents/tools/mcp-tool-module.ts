@@ -1,5 +1,7 @@
 import { Array as Arr, Effect, Option } from 'effect'
+import type { Layer } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
+import type { HttpClient } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent-loop'
 import {
   callRemoteMcpServerTool,
@@ -27,6 +29,8 @@ const unknownToMessage = (error: unknown) =>
 
 const emptyMcpResolvedTools: ReadonlyArray<McpResolvedTool> = []
 
+type McpHttpClientLayer = Layer.Layer<HttpClient.HttpClient>
+
 const findServerConfig = (
   configs: ReadonlyArray<McpRemoteServerConfig>,
   serverName: string
@@ -35,7 +39,8 @@ const findServerConfig = (
 
 const makeRegistration = (
   configs: ReadonlyArray<McpRemoteServerConfig>,
-  resolved: McpResolvedTool
+  resolved: McpResolvedTool,
+  httpClientLayer: McpHttpClientLayer
 ): ToolRegistration<AgentToolContext> => ({
   def: resolved.def,
   access: 'read',
@@ -56,20 +61,21 @@ const makeRegistration = (
         params: call.params,
         options: { securityPolicy: mcpSecurityPolicy }
       }).pipe(
-        Effect.provide(FetchHttpClient.layer),
+        Effect.provide(httpClientLayer),
         Effect.mapError(error => toToolError(call.name, error.message))
       )
     })
 })
 
 export const makeMcpToolModule = (
-  allConfigs: ReadonlyArray<McpRemoteServerConfig>
+  allConfigs: ReadonlyArray<McpRemoteServerConfig>,
+  httpClientLayer: McpHttpClientLayer = FetchHttpClient.layer
 ): Effect.Effect<ToolModule<AgentToolContext>, never, never> =>
   Effect.gen(function* () {
     const configs = allConfigs
     const resolvedByServer = yield* Effect.forEach(configs, config =>
       listRemoteMcpServerTools(config, { securityPolicy: mcpSecurityPolicy }).pipe(
-        Effect.provide(FetchHttpClient.layer),
+        Effect.provide(httpClientLayer),
         Effect.catch(error =>
           Effect.logWarning('MCP server unavailable', {
             server: config.name,
@@ -78,7 +84,9 @@ export const makeMcpToolModule = (
         )
       )
     )
-    const tools = Arr.flatten(resolvedByServer).map(tool => makeRegistration(configs, tool))
+    const tools = Arr.flatten(resolvedByServer).map(tool =>
+      makeRegistration(configs, tool, httpClientLayer)
+    )
 
     return {
       id: `mcp-${sanitizeMcpName('configured')}`,
