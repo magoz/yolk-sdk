@@ -48,11 +48,11 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Observability      | Telemetry        | OpenTelemetry spans + Sentry error tracking                                                                             |
 | UI components      | shadcn/ui        | Base UI primitives (not Radix), see `components/ui/`                                                                    |
 | Agent stack        | packages         | Domain-free protocol, loop/runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks                |
-| Text agent         | app/agent + app/api/agent + lib/agents | `/agent` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                             |
-| Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside `/agent` + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
+| Text agent         | app/agent + app/api/agent + lib/agents | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + Codex OAuth + `gpt-5.4`                       |
+| Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search                                              |
 | OpenAI Codex OAuth | OpenAiCodexOAuth | ChatGPT subscription device flow + token refresh                                                                        |
-| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object session runtime; direct WS optional app transport; Next bridges Codex token + responses |
+| Cloudflare agent   | Alchemy          | `cloudflare/agent`; Worker + Durable Object session runtime for `/agent/cloudflare`; Next bridges Codex token + responses |
 
 ## WHERE TO LOOK
 

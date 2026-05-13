@@ -28,7 +28,7 @@ test('uploads image prompt and shows provider capabilities', async ({ authedPage
     })
   })
 
-  await authedPage.goto('/agent')
+  await authedPage.goto('/agent/next')
   await expect(authedPage.getByLabel('Agent prompt')).toHaveCount(1, { timeout: 15_000 })
 
   await authedPage.getByRole('button', { name: 'Console' }).click()

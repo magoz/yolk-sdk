@@ -4,7 +4,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 
 ## Current Status
 
-- This app is a proving adapter and optional direct-WS app runtime; keep main app fallback alive.
+- This app is a proving adapter for `/agent/cloudflare`; runtime page fails explicitly when unavailable, no Next fallback.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
 - App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token/response-proxy bridge config before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.

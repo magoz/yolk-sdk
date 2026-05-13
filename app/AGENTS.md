@@ -20,6 +20,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 - Protected/session-gated pages must be dynamic: `export const dynamic = 'force-dynamic'` or dynamic APIs like `cookies()`.
 - Re-fail `NextEffect.isNavigationError(error)` before catch-all fallbacks.
 - Shareable filters/search state belongs in `search-params.ts` with `nuqs/server` imports.
+- After deleting routes, stale `.next/dev/types/validator.ts` may reference removed pages; delete generated file if `pnpm tsc` reports a removed route.
 
 ## Auth UI
 
@@ -30,7 +31,8 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Agent UI
 
-- `/agent` is the unified text+image + mic page; `/agent/voice` is legacy redirect only.
+- `/agent` chooses runtime; `/agent/next` and `/agent/cloudflare` share text+image+mic UI.
+- Voice is available inside each runtime page; no separate voice route.
 - See `app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.
 

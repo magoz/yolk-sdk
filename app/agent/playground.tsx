@@ -38,10 +38,23 @@ import {
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
+export type AgentRuntimeInfo =
+  | {
+      readonly _tag: 'Next'
+      readonly label: string
+      readonly detail: string
+    }
+  | {
+      readonly _tag: 'Cloudflare'
+      readonly label: string
+      readonly detail: string
+      readonly webSocketUrl: string
+    }
+
 type AgentPlaygroundProps = {
   readonly sessionId: string
   readonly openAiCodexConnected: boolean
-  readonly cloudflareWebSocketUrl?: string
+  readonly runtime: AgentRuntimeInfo
 }
 
 const maxImageAttachments = 4
@@ -202,7 +215,7 @@ const processImageFiles = (
 export function AgentPlayground({
   sessionId,
   openAiCodexConnected,
-  cloudflareWebSocketUrl
+  runtime
 }: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
   const [imageAttachments, setImageAttachments] = useState<ReadonlyArray<ImageAttachment>>([])
@@ -381,18 +394,18 @@ export function AgentPlayground({
     [recordActivity]
   )
   const cloudflareTransport = useMemo<AgentChatTransport | undefined>(() => {
-    if (cloudflareWebSocketUrl === undefined) {
+    if (runtime._tag !== 'Cloudflare') {
       return undefined
     }
 
     return request =>
       streamCloudflareAgentEvents({
-        webSocketUrl: cloudflareWebSocketUrl,
+        webSocketUrl: runtime.webSocketUrl,
         messages: request.messages,
         reasoningEffort: request.reasoningEffort,
         signal: request.signal
       })
-  }, [cloudflareWebSocketUrl])
+  }, [runtime])
 
   const agentChat = useAgentChat({
     sessionId,
@@ -720,6 +733,8 @@ export function AgentPlayground({
       <div className="mx-auto h-[calc(100vh-1rem)] max-w-5xl overflow-hidden rounded-[2rem] border border-foreground/10 bg-background/85 shadow-2xl shadow-foreground/10 backdrop-blur md:h-[calc(100vh-3rem)]">
         <section className="flex h-full min-h-0 min-w-0 flex-col bg-card/80">
           <AgentConversationHeader
+            runtimeLabel={runtime.label}
+            runtimeDetail={runtime.detail}
             activityVisible={activityVisible}
             activityCount={activityItems.length}
             liveActivityCount={liveActivityCount}

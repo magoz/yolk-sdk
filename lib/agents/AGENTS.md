@@ -4,15 +4,15 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- Unified `/agent` UI with text+image input and mic voice mode
-- `/agent` UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
+- `/agent` runtime chooser; `/agent/next` and `/agent/cloudflare` share text+image input and mic voice mode
+- Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
-- Optional Cloudflare direct-WS transport bootstraps from `/agent` when `CLOUDFLARE_AGENT_URL`, `YOLK_APP_URL`, and `YOLK_CLOUDFLARE_BRIDGE_SECRET` are set.
+- Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
 - Live text tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + optional configured MCP tools
-- No durable transcript: text client sends full protocol transcript each turn
+- Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
-- Text route calls stateless `agent-runtime` transcript mode; durable session lifecycle is deferred
+- Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical Codex refresh owner and Codex response proxy.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
@@ -52,7 +52,7 @@ Reasoning:
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
 - App tool registry: `tools/registry.ts` resolves scoped toolsets via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
-- No durable transcript or product permissions yet
+- No product permissions yet; durable transcript exists only in Cloudflare DO runtime
 
 Configured MCP env:
 
@@ -83,7 +83,7 @@ MCP security:
 
 ## Realtime Voice
 
-- UI: mic mode in `app/agent/playground.tsx`; `/agent/voice` redirects to `/agent`
+- UI: mic mode in `app/agent/playground.tsx`; no separate voice route
 - Hook: `app/agent/use-realtime-voice.ts`
 - SDP route: `app/api/agent/realtime/call/route.ts`
 - Tool route: `app/api/agent/realtime/tool/route.ts`
@@ -96,7 +96,7 @@ MCP security:
 - Event names: input transcripts `conversation.item.input_audio_transcription.*`; assistant transcripts `response.output_audio_transcript.*` or `response.audio_transcript.*`; session config `session.created`/`session.updated`; tool calls are `function_call` items inside `response.done.response.output`
 - Uses `OPENAI_API_KEY`, not Codex OAuth
 - OpenRouter is not supported for Realtime voice: no `gpt-realtime-2`/Realtime endpoints there
-- Voice tool context route is `/agent`; `/agent/voice` is legacy redirect only
+- Voice tool context route is `/agent`; runtime pages share voice UI
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
 - Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
 - `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch` and `web_search`

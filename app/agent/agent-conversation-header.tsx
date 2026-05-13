@@ -17,6 +17,8 @@ import { AgentUsageBadge, type AgentCompactionState } from './agent-usage-meter'
 import type { VoiceStatus } from './use-realtime-voice'
 
 type AgentConversationHeaderProps = {
+  readonly runtimeLabel: string
+  readonly runtimeDetail: string
   readonly activityVisible: boolean
   readonly activityCount: number
   readonly liveActivityCount: number
@@ -34,6 +36,8 @@ type AgentConversationHeaderProps = {
 }
 
 export function AgentConversationHeader({
+  runtimeLabel,
+  runtimeDetail,
   activityVisible,
   activityCount,
   liveActivityCount,
@@ -52,8 +56,8 @@ export function AgentConversationHeader({
   return (
     <div className="flex items-center justify-between gap-3 border-b border-foreground/10 bg-background/60 px-4 py-3 backdrop-blur sm:px-5">
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium">Yolk agent</p>
-        <p className="truncate text-xs text-muted-foreground">Text, image + voice console</p>
+        <p className="truncate text-sm font-medium">{runtimeLabel}</p>
+        <p className="truncate text-xs text-muted-foreground">{runtimeDetail}</p>
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">

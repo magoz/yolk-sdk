@@ -55,7 +55,7 @@ mcp-server -> mcp-client + protocol + Effect
 ## Reasoning
 
 - `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
-- `agent-runtime` threads `reasoningEffort` and `capabilities`; text `/api/agent` uses transcript mode with app-owned HTTP/auth/tool/provider wiring.
+- `agent-runtime` threads `reasoningEffort` and `capabilities`; `/api/agent` uses `Transcript`, Cloudflare DO uses `AppendInput`.
 - `agent-runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
 - `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
@@ -127,7 +127,7 @@ mcp-server -> mcp-client + protocol + Effect
 
 ## Client Transport
 
-- `/agent` uses `@yolk/react` headless chat state; `@yolk/client` owns lower-level protocol transport/state helpers.
+- Agent runtime pages use `@yolk/react` headless chat state; `@yolk/client` owns lower-level protocol transport/state helpers.
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
 - `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant turns during active runs.
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.

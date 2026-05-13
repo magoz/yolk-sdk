@@ -99,7 +99,7 @@ test('voice mode waits for connected WebRTC transport before live', async ({ aut
     await route.fulfill({ status: 200, contentType: 'application/sdp', body: 'v=0\r\n' })
   })
 
-  await authedPage.goto('/agent')
+  await authedPage.goto('/agent/next')
   await expect(authedPage.getByLabel('Agent prompt')).toHaveCount(1, { timeout: 15_000 })
   await authedPage.getByRole('button', { name: 'Activity' }).click()
   await authedPage.getByRole('button', { name: 'Start voice mode' }).click()
@@ -120,7 +120,7 @@ test('voice mode transcribes first fake microphone words', async ({ authedPage }
     'OPENAI_API_KEY required for live Realtime voice E2E'
   )
 
-  await authedPage.goto('/agent')
+  await authedPage.goto('/agent/next')
   await expect(authedPage.getByLabel('Agent prompt')).toHaveCount(1, { timeout: 15_000 })
   await authedPage.getByRole('button', { name: 'Activity' }).click()
   await authedPage.getByRole('button', { name: 'Start voice mode' }).click()

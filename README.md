@@ -52,10 +52,11 @@ pnpm dev
 
 Current agent mode is intentionally minimal:
 
-- text + mic voice mode in `/agent`
+- runtime chooser at `/agent`
+- text + mic voice mode in `/agent/next` and `/agent/cloudflare`
 - text web tools: `web_fetch`, `web_search`
-- no durable persistence
-- browser sends full protocol transcript each turn
+- `/agent/next`: no durable persistence; browser sends full protocol transcript each turn
+- `/agent/cloudflare`: Worker/Durable Object WS runtime with append-log storage
 - streaming NDJSON token events
 - in-band `AgentError` events for stream failures
 - stop/cancel aborts active response streams
@@ -79,25 +80,25 @@ Optional prompt override:
 AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
 ```
 
-Connect OpenAI Codex from `/agent`. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key. Ask prompts like `summarize https://example.com` or `what is magoz.com about?` to test web tools.
+Connect OpenAI Codex from an agent runtime page. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key. Ask prompts like `summarize https://example.com` or `what is magoz.com about?` to test web tools.
 
 Future: provider selection will become configurable again. The API-key OpenAI provider remains as tested scaffold, but `/api/agent` is Codex-only for now.
 
 ## Voice mode smoke test
 
-The mic button in `/agent` uses GPT-Realtime-2 over WebRTC:
+The mic button in each agent runtime page uses GPT-Realtime-2 over WebRTC:
 
 - browser: mic, model audio, Realtime data channel
 - server: SDP exchange, `OPENAI_API_KEY`
 - completed speech transcripts append to the shared chat transcript
 
-Set `OPENAI_API_KEY`, sign in, open `/agent`, tap the mic, and ask a conversational prompt.
+Set `OPENAI_API_KEY`, sign in, open `/agent/next`, tap the mic, and ask a conversational prompt.
 
 Then:
 
 1. `pnpm dev`
 2. sign in
-3. open `/agent`
+3. open `/agent/next`
 4. send a prompt
 
 ## Checks
