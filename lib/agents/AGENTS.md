@@ -57,6 +57,7 @@ Reasoning:
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
 - App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/tool-registry`
+- Cloudflare adapter imports shared text tool composition via `cloudflare/agent/src/tool-modules.ts`; parity tests cover base tools and fake remote MCP.
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No product permissions yet; durable transcript exists only in Cloudflare DO runtime
 

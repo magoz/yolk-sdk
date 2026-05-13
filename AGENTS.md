@@ -123,6 +123,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`                    | Creates tool-only MCP JSON-RPC server                                                |
 | `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                          | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |
 | `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`                   | Durable Object running agent runtime + append-log persistence                        |
+| `makeCloudflareTextToolModules`  | Function | `cloudflare/agent/src/tool-modules.ts`                 | Cloudflare text toolset shim over shared app text modules                            |
 | `codex-responses`                | Route    | `app/api/internal/cloudflare/codex-responses/route.ts` | Internal Worker-to-Next proxy for ChatGPT Codex responses                            |
 
 ## REFERENCE REPOS
