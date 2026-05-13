@@ -15,7 +15,10 @@ export const canSaveEditedMessage = ({
   readonly currentText: string
   readonly draftText: string
   readonly disabled: boolean
-}) => !disabled && editDraftText(draftText).length > 0 && editDraftText(draftText) !== currentText.trim()
+}) =>
+  !disabled &&
+  editDraftText(draftText).length > 0 &&
+  editDraftText(draftText) !== currentText.trim()
 
 export const editKeyAction = (event: EditKeyInput) => {
   if (event.key === 'Escape') {

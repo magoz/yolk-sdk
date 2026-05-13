@@ -8,8 +8,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
-- Next text runtime tools: SSRF-guarded URL fetch + direct Exa/Parallel MCP web search + skill + optional configured MCP tools
-- Cloudflare text runtime currently wires generated skill tool only; add Worker-safe modules explicitly in the Worker adapter.
+- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + skill + optional remote MCP tools from project files.
+- Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
@@ -43,10 +43,12 @@ Reasoning:
 
 ## Current Tools
 
-- Tool ownership is per route/runtime adapter for now. A future app-layer `AgentDefinition` may centralize model/prompt/tools/skillset once product agent boundaries are clearer.
+- Tool ownership is per route/runtime adapter for now. A future app-layer `AgentDefinition` may centralize model/prompt/tools/skillset/MCP once product agent boundaries are clearer.
+- App tools in `lib/agents/tools/*` must be runtime-portable: no Node-only imports, no raw `fetch()`, use Effect `Config`/`HttpClient`/Schema and injected adapters.
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
-- `tools/mcp-tool-module.ts`: configured MCP servers; text-only; tools namespaced as `<server>_<tool>`
+- `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
+- `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
 - `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/tool-registry`; use this at new route/runtime boundaries.
 - Both app tools are enabled for text and voice surfaces
 - Configured MCP tools are text-only for v1; voice MCP deferred
@@ -54,28 +56,21 @@ Reasoning:
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
-- App tool registry: `tools/registry.ts` exposes route-selectable Node tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/tool-registry`
+- App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/tool-registry`
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No product permissions yet; durable transcript exists only in Cloudflare DO runtime
 
-Configured MCP env:
+Configured MCP source:
 
-Temporary dev/bootstrap source until persisted MCP connections are added (similar ownership boundary as Codex OAuth):
-
-| Env                           | Values | Notes                                                     |
-| ----------------------------- | ------ | --------------------------------------------------------- |
-| `YOLK_MCP_SERVERS`            | JSON   | `[{ name,type:'remote',url,headers?,enabled? }]` or local |
-| `YOLK_MCP_LOCAL_ENABLED`      | bool   | Enables local stdio MCP; default false                    |
-| `YOLK_MCP_DEV_HTTP_LOCALHOST` | bool   | Allows `http://localhost` remote MCP; default false       |
+- Next loads remote MCP servers from `.yolk/mcp.json` or `.opencode/mcp.json`.
+- `/agent/cloudflare` passes the loaded remote MCP servers in the bootstrap payload; the Worker/DO must not read host env or filesystem.
+- Config shape is a JSON array: `[{ "name": "docs", "type": "remote", "url": "https://example.com/mcp", "headers": {}, "enabled": true }]`.
+- Tool modules receive MCP config as data (`makeMcpToolModule(configs)`); they never read env.
 
 MCP security:
 
-- Remote URLs require `https:` unless localhost dev flag is set.
-- Localhost dev flag permits `localhost`, `127.0.0.1`, and `[::1]` loopback URLs.
-- Local config shape: `{ name, type:'local', command: string[], environment?, enabled? }`.
-- Local commands are spawned directly, not through shell strings.
-- Local MCP runs through Effect v4 `ChildProcess`/`Stream` APIs; app uses `@yolk/mcp-client/node` wrappers to provide Node services.
-- Local servers receive only explicit `environment`; inherited env is disabled.
+- Remote URLs require `https:`.
+- Local stdio MCP remains package-level only; app tools must not import `@yolk/mcp-client/node` or provide Node process services.
 - Invalid config or unavailable servers log warning and omit those tools.
 
 ## JSON Boundaries

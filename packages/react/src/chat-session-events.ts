@@ -28,11 +28,14 @@ export class MessagesRegenerated extends Schema.TaggedClass<MessagesRegenerated>
   }
 ) {}
 
-export class UserMessageEdited extends Schema.TaggedClass<UserMessageEdited>()('UserMessageEdited', {
-  messageId: Schema.String,
-  content: Content,
-  keptMessageIds: Schema.Array(Schema.String)
-}) {}
+export class UserMessageEdited extends Schema.TaggedClass<UserMessageEdited>()(
+  'UserMessageEdited',
+  {
+    messageId: Schema.String,
+    content: Content,
+    keptMessageIds: Schema.Array(Schema.String)
+  }
+) {}
 
 export const AgentChatSessionEvent = Schema.Union([
   ProtocolMessageAppended,

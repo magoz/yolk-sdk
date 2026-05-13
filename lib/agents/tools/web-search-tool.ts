@@ -4,7 +4,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/
 import { ToolError } from '@yolk/agent-loop'
 import { ToolDef, ToolResult, type ToolCall } from '@yolk/protocol'
 import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
-import type { AgentToolContext } from './tool-context'
+import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'
 const defaultNumResults = 8

@@ -80,7 +80,11 @@ const roundTripMessage = (message: AgentMessageType) =>
 describe('protocol wire schemas', () => {
   it.effect('round-trips agent message variants through JSON wire values', () =>
     Effect.gen(function* () {
-      const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+      const call = ToolCall.make({
+        id: 'call_1',
+        name: 'web_fetch',
+        params: { url: 'https://e.com' }
+      })
       const messages: ReadonlyArray<AgentMessageType> = [
         UserMessage.make({
           content: [
@@ -97,7 +101,11 @@ describe('protocol wire schemas', () => {
             ProviderToolCallPart.make({ call }),
             ProviderToolResultPart.make({
               toolCallId: call.id,
-              result: ToolResult.make({ toolCallId: call.id, content: 'provider result', isError: true })
+              result: ToolResult.make({
+                toolCallId: call.id,
+                content: 'provider result',
+                isError: true
+              })
             })
           ]
         }),
@@ -112,7 +120,11 @@ describe('protocol wire schemas', () => {
 
   it.effect('round-trips all agent event variants through JSON wire values', () =>
     Effect.gen(function* () {
-      const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+      const call = ToolCall.make({
+        id: 'call_1',
+        name: 'web_fetch',
+        params: { url: 'https://e.com' }
+      })
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'Example Domain',
@@ -157,15 +169,26 @@ describe('protocol wire schemas', () => {
 
   it.effect('round-trips exported tool, content, capability, reasoning, and usage schemas', () =>
     Effect.gen(function* () {
-      const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
-      const def = ToolDef.make({ name: 'web_fetch', description: 'Fetch URL', parameters: { type: 'object' } })
+      const call = ToolCall.make({
+        id: 'call_1',
+        name: 'web_fetch',
+        params: { url: 'https://e.com' }
+      })
+      const def = ToolDef.make({
+        name: 'web_fetch',
+        description: 'Fetch URL',
+        parameters: { type: 'object' }
+      })
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'ok',
         isError: true,
         structuredContent: { ok: true }
       })
-      const content = [TextPart.make({ text: 'hi' }), AudioPart.make({ data: 'abc', format: 'mp3' })]
+      const content = [
+        TextPart.make({ text: 'hi' }),
+        AudioPart.make({ data: 'abc', format: 'mp3' })
+      ]
       const capabilities = AgentModelCapabilities.make({
         input: AgentContentCapabilities.make({ text: true, image: true, audio: false }),
         tools: true,
@@ -184,7 +207,9 @@ describe('protocol wire schemas', () => {
       expect(yield* Schema.decodeUnknownEffect(ToolResult)(result)).toEqual(result)
       expect(yield* Schema.decodeUnknownEffect(ContentPart)(content[0])).toEqual(content[0])
       expect(yield* Schema.decodeUnknownEffect(Content)(content)).toEqual(content)
-      expect(yield* Schema.decodeUnknownEffect(AgentModelCapabilities)(capabilities)).toEqual(capabilities)
+      expect(yield* Schema.decodeUnknownEffect(AgentModelCapabilities)(capabilities)).toEqual(
+        capabilities
+      )
       expect(yield* Schema.decodeUnknownEffect(AgentReasoningEffort)('xhigh')).toBe('xhigh')
       expect(yield* Schema.decodeUnknownEffect(AgentUsage)(usage)).toEqual(usage)
       expect(textOnlyModelCapabilities.input.image).toBe(false)
@@ -209,9 +234,9 @@ describe('protocol wire schemas', () => {
         input: { total: '10' },
         output: { total: 0 }
       }).pipe(Effect.result)
-      const invalidReasoning = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)('extreme').pipe(
-        Effect.result
-      )
+      const invalidReasoning = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(
+        'extreme'
+      ).pipe(Effect.result)
 
       expect(invalidEvent._tag).toBe('Failure')
       expect(emptyToolName._tag).toBe('Failure')

@@ -29,6 +29,11 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 - Logout uses `window.location.href = '/'`; do not replace with `router.push()` because cached layouts can stay stale.
 - Keep auth form controls accessible; E2E relies on labels/roles.
 
+## Local Dev
+
+- `pnpm dev` runs through portless; `pnpm dev:app` runs plain Next dev.
+- Keep `next.config.ts` `allowedDevOrigins` in sync with portless app/e2e hostnames.
+
 ## Agent UI
 
 - `/agent` chooses runtime; `/agent/next` and `/agent/cloudflare` share text+image+mic UI.

@@ -135,13 +135,17 @@ export function AgentComposer({
 
     if (slashMenuOpen && event.key === 'ArrowDown') {
       event.preventDefault()
-      setActiveCommandIndex(current => normalizeSlashSelectionIndex(current + 1, commandMatches.length))
+      setActiveCommandIndex(current =>
+        normalizeSlashSelectionIndex(current + 1, commandMatches.length)
+      )
       return
     }
 
     if (slashMenuOpen && event.key === 'ArrowUp') {
       event.preventDefault()
-      setActiveCommandIndex(current => normalizeSlashSelectionIndex(current - 1, commandMatches.length))
+      setActiveCommandIndex(current =>
+        normalizeSlashSelectionIndex(current - 1, commandMatches.length)
+      )
       return
     }
 

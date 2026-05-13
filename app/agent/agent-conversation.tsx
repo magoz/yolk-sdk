@@ -207,7 +207,9 @@ function ToolRunCard({
             onClick={handleToggle}
             className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <Badge variant={toolResultBadgeVariant(isError)}>{isError ? 'tool error' : 'tool'}</Badge>
+            <Badge variant={toolResultBadgeVariant(isError)}>
+              {isError ? 'tool error' : 'tool'}
+            </Badge>
             {isRunning ? (
               <LoaderCircleIcon
                 className="size-3 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
@@ -270,7 +272,11 @@ function ToolResultCard({
   readonly isError: boolean
 }) {
   return (
-    <UtilityCard role={toolResultRole(isError)} title={toolResultTitle(name, isError)} badge={toolResultLabel(isError)}>
+    <UtilityCard
+      role={toolResultRole(isError)}
+      title={toolResultTitle(name, isError)}
+      badge={toolResultLabel(isError)}
+    >
       {content}
     </UtilityCard>
   )

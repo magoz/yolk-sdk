@@ -88,7 +88,11 @@ describe('reduceAgentEvents', () => {
   })
 
   it('projects rich tool lifecycle states', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://e.com' }
+    })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
 
     const inputStreaming = reduceAgentEvents([
@@ -113,7 +117,10 @@ describe('reduceAgentEvents', () => {
     expect(denied.toolRuns).toEqual([{ _tag: 'Denied', toolCallId: call.id, reason: 'policy' }])
 
     const errored = reduceAgentEvents(
-      [AgentStart.make({}), ToolExecutionError.make({ call, message: 'safe failure', code: 'tool_error' })],
+      [
+        AgentStart.make({}),
+        ToolExecutionError.make({ call, message: 'safe failure', code: 'tool_error' })
+      ],
       undefined,
       { nowMs: 42 }
     )

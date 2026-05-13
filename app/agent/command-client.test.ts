@@ -1,5 +1,10 @@
 import { Effect, Layer } from 'effect'
-import { Headers, HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import {
+  Headers,
+  HttpClient,
+  HttpClientResponse,
+  type HttpClientRequest
+} from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { loadAgentCommands, renderAgentCommand } from './command-client'
 
@@ -82,7 +87,9 @@ describe('command client', () => {
       const headers = requests[0]?.request.headers
       expect(requests[0]?.request.url).toBe('/api/agent/commands')
       expect(requests[0]?.request.method).toBe('POST')
-      expect(headers === undefined ? undefined : Headers.get(headers, 'content-type')).toMatchObject({
+      expect(
+        headers === undefined ? undefined : Headers.get(headers, 'content-type')
+      ).toMatchObject({
         _tag: 'Some',
         value: 'application/json'
       })

@@ -106,7 +106,10 @@ const parseCommandArgumentsField = (value: string | undefined): ReadonlyArray<Co
 }
 
 export const commandHints = (template: string) => {
-  const numbered = Array.from(template.matchAll(numberedPlaceholderPattern), match => `$${match[1]}`)
+  const numbered = Array.from(
+    template.matchAll(numberedPlaceholderPattern),
+    match => `$${match[1]}`
+  )
   const unique = [...new Set(numbered)].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
 
   return template.includes('$ARGUMENTS') ? [...unique, '$ARGUMENTS'] : unique

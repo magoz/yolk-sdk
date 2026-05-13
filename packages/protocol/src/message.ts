@@ -80,9 +80,7 @@ export const assistantContent = (message: AssistantAgentMessage): Content => {
 }
 
 export const assistantReasoningText = (message: AssistantAgentMessage) =>
-  message.parts
-    .flatMap(part => (part._tag === 'Reasoning' ? [part.text] : []))
-    .join('')
+  message.parts.flatMap(part => (part._tag === 'Reasoning' ? [part.text] : [])).join('')
 
 export const assistantHostToolCalls = (message: AssistantAgentMessage) =>
   message.parts.flatMap(part => (part._tag === 'HostToolCall' ? [part.call] : []))

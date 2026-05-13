@@ -32,9 +32,7 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
-import {
-  type AgentCommandSummary
-} from './slash-command-model'
+import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
 
@@ -625,36 +623,35 @@ export function AgentPlayground({
         return
       }
 
-      processImageFiles(files, imageAttachments)
-        .then(attachments => {
-          const readyAttachments = Arr.filter(attachments, isReadyImageAttachment)
-          const failedAttachments = Arr.filter(attachments, isFailedImageAttachment)
+      processImageFiles(files, imageAttachments).then(attachments => {
+        const readyAttachments = Arr.filter(attachments, isReadyImageAttachment)
+        const failedAttachments = Arr.filter(attachments, isFailedImageAttachment)
 
-          if (attachments.length === 0) {
-            return
-          }
+        if (attachments.length === 0) {
+          return
+        }
 
-          setImageAttachments(current => [...current, ...attachments])
+        setImageAttachments(current => [...current, ...attachments])
 
-          if (readyAttachments.length > 0) {
-            recordActivity({
-              title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
-              detail: Arr.map(readyAttachments, attachment => attachment.name).join(', '),
-              tone: 'neutral'
-            })
-          }
+        if (readyAttachments.length > 0) {
+          recordActivity({
+            title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
+            detail: Arr.map(readyAttachments, attachment => attachment.name).join(', '),
+            tone: 'neutral'
+          })
+        }
 
-          if (failedAttachments.length > 0) {
-            recordActivity({
-              title: failedAttachments.length === 1 ? 'Image failed' : 'Images failed',
-              detail: Arr.map(
-                failedAttachments,
-                attachment => `${attachment.name}: ${attachment.reason}`
-              ).join(', '),
-              tone: 'error'
-            })
-          }
-        })
+        if (failedAttachments.length > 0) {
+          recordActivity({
+            title: failedAttachments.length === 1 ? 'Image failed' : 'Images failed',
+            detail: Arr.map(
+              failedAttachments,
+              attachment => `${attachment.name}: ${attachment.reason}`
+            ).join(', '),
+            tone: 'error'
+          })
+        }
+      })
     },
     [imageAttachments, recordActivity]
   )
@@ -667,38 +664,41 @@ export function AgentPlayground({
 
   const handleRetryImageAttachment = useCallback(
     (id: string) => {
-      Option.match(Arr.findFirst(imageAttachments, imageAttachment => imageAttachment.id === id), {
-        onNone: () => undefined,
-        onSome: attachment => {
-          if (attachment._tag !== 'Failed') {
-            return
-          }
+      Option.match(
+        Arr.findFirst(imageAttachments, imageAttachment => imageAttachment.id === id),
+        {
+          onNone: () => undefined,
+          onSome: attachment => {
+            if (attachment._tag !== 'Failed') {
+              return
+            }
 
-          const remainingAttachments = Arr.filter(
-            imageAttachments,
-            imageAttachment => imageAttachment.id !== id
-          )
-          setImageAttachments(remainingAttachments)
-          processImageFiles([attachment.file], remainingAttachments).then(attachments => {
-            setImageAttachments(current => [...current, ...attachments])
+            const remainingAttachments = Arr.filter(
+              imageAttachments,
+              imageAttachment => imageAttachment.id !== id
+            )
+            setImageAttachments(remainingAttachments)
+            processImageFiles([attachment.file], remainingAttachments).then(attachments => {
+              setImageAttachments(current => [...current, ...attachments])
 
-            Option.match(Arr.findFirst(attachments, isFailedImageAttachment), {
-              onNone: () =>
-                recordActivity({
-                  title: 'Image retry succeeded',
-                  detail: attachment.name,
-                  tone: 'neutral'
-                }),
-              onSome: failedAttachment =>
-                recordActivity({
-                  title: 'Image retry failed',
-                  detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
-                  tone: 'error'
-                })
+              Option.match(Arr.findFirst(attachments, isFailedImageAttachment), {
+                onNone: () =>
+                  recordActivity({
+                    title: 'Image retry succeeded',
+                    detail: attachment.name,
+                    tone: 'neutral'
+                  }),
+                onSome: failedAttachment =>
+                  recordActivity({
+                    title: 'Image retry failed',
+                    detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
+                    tone: 'error'
+                  })
+              })
             })
-          })
+          }
         }
-      })
+      )
     },
     [imageAttachments, recordActivity]
   )

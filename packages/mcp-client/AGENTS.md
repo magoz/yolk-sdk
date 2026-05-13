@@ -21,13 +21,13 @@
 
 ## Public model
 
-| Export area | Purpose                                                |
-| ----------- | ------------------------------------------------------ |
-| `config`    | Local/remote MCP server config and policy types        |
-| `client`    | List/call helpers for local, remote, and union configs |
+| Export area | Purpose                                                  |
+| ----------- | -------------------------------------------------------- |
+| `config`    | Local/remote MCP server config and policy types          |
+| `client`    | List/call helpers for local, remote, and union configs   |
 | `node`      | Node convenience wrappers providing `NodeServices.layer` |
-| `protocol`  | MCP JSON-RPC protocol helpers/types                    |
-| `errors`    | Typed MCP client/transport/protocol errors             |
+| `protocol`  | MCP JSON-RPC protocol helpers/types                      |
+| `errors`    | Typed MCP client/transport/protocol errors               |
 
 ## Design rules
 

@@ -19,18 +19,18 @@
 
 ## Public model
 
-| Export                    | Purpose                                                     |
-| ------------------------- | ----------------------------------------------------------- |
-| `useAgentChat`            | Headless chat hook over streamed `AgentEvent`s              |
-| `AgentChatState`          | Render-ready state: status, error, chat messages, events    |
-| `AgentChatAction`         | Reducer command model for hydrate/submit/edit/run lifecycle |
-| `AgentChatSessionEvent`   | Schema-backed UI/session edit event model                   |
-| `AgentChatMessage`        | Role-grouped render message                                 |
-| `AgentChatPart`           | Text, reasoning, tool call/result, error parts              |
-| `toAgentMessages`         | Render model → protocol transcript                          |
-| `buildAgentChatItems`     | Flat render-item projection for simple UIs                  |
-| `reduceAgentChatState`    | Pure reducer for headless chat actions/events               |
-| selectors                 | Reasoning/tool/activity helpers                             |
+| Export                  | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `useAgentChat`          | Headless chat hook over streamed `AgentEvent`s              |
+| `AgentChatState`        | Render-ready state: status, error, chat messages, events    |
+| `AgentChatAction`       | Reducer command model for hydrate/submit/edit/run lifecycle |
+| `AgentChatSessionEvent` | Schema-backed UI/session edit event model                   |
+| `AgentChatMessage`      | Role-grouped render message                                 |
+| `AgentChatPart`         | Text, reasoning, tool call/result, error parts              |
+| `toAgentMessages`       | Render model → protocol transcript                          |
+| `buildAgentChatItems`   | Flat render-item projection for simple UIs                  |
+| `reduceAgentChatState`  | Pure reducer for headless chat actions/events               |
+| selectors               | Reasoning/tool/activity helpers                             |
 
 ## Hook contract
 

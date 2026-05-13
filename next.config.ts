@@ -3,6 +3,7 @@ import { withSentryConfig } from '@sentry/nextjs'
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  allowedDevOrigins: ['yolk.localhost', '*.yolk.localhost', 'yolk-e2e.localhost'],
 
   // PostHog reverse proxy to bypass ad-blockers
   async rewrites() {

@@ -36,7 +36,9 @@ const requiredField = (data: Readonly<Record<string, string>>, field: string) =>
 export const parseSkillMarkdown = (input: ParseSkillInput) =>
   Effect.gen(function* () {
     const document = yield* parseMarkdownDocument(input.markdown)
-    const name = yield* requiredField(document.data, 'name').pipe(Effect.flatMap(validateSkillsetName))
+    const name = yield* requiredField(document.data, 'name').pipe(
+      Effect.flatMap(validateSkillsetName)
+    )
     const description = yield* requiredField(document.data, 'description')
 
     if (input.directoryName !== undefined) {

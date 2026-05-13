@@ -40,8 +40,12 @@ const noToolReasoningCapabilities = AgentModelCapabilities.make({
 
 const assistantMessageFromEvents = (events: ReadonlyArray<{ readonly _tag: string }>) => {
   const event = events.find(
-    (candidate): candidate is { readonly _tag: 'AssistantMessage'; readonly message: AssistantAgentMessage } =>
-      candidate._tag === 'AssistantMessage'
+    (
+      candidate
+    ): candidate is {
+      readonly _tag: 'AssistantMessage'
+      readonly message: AssistantAgentMessage
+    } => candidate._tag === 'AssistantMessage'
   )
 
   if (event === undefined) {
@@ -216,55 +220,60 @@ describe('run', () => {
     })
   )
 
-  it.effect('streams provider tool input and preserves provider-executed results without local dispatch', () =>
-    Effect.gen(function* () {
-      const call = ToolCall.make({ id: 'call_1', name: 'web_search', params: { q: 'weather' } })
-      const result = ToolResult.make({ toolCallId: call.id, content: 'sunny' })
-      const provider = Layer.succeed(
-        LLMProvider,
-        LLMProvider.of({
-          stream: () =>
-            Stream.fromIterable([
-              LLMToolInputStart.make({ id: call.id, name: call.name }),
-              LLMToolInputDelta.make({ id: call.id, delta: '{"q":"weather"}' }),
-              LLMProviderToolResult.make({ call, result }),
-              LLMDone.make({ stopReason: 'stop' })
-            ])
-        })
-      )
+  it.effect(
+    'streams provider tool input and preserves provider-executed results without local dispatch',
+    () =>
+      Effect.gen(function* () {
+        const call = ToolCall.make({ id: 'call_1', name: 'web_search', params: { q: 'weather' } })
+        const result = ToolResult.make({ toolCallId: call.id, content: 'sunny' })
+        const provider = Layer.succeed(
+          LLMProvider,
+          LLMProvider.of({
+            stream: () =>
+              Stream.fromIterable([
+                LLMToolInputStart.make({ id: call.id, name: call.name }),
+                LLMToolInputDelta.make({ id: call.id, delta: '{"q":"weather"}' }),
+                LLMProviderToolResult.make({ call, result }),
+                LLMDone.make({ stopReason: 'stop' })
+              ])
+          })
+        )
 
-      const eventsChunk = yield* run({
-        messages: [UserMessage.make({ content: 'search' })],
-        systemPrompt: 'Use hosted tools when useful.',
-        tools: [],
-        model: 'faux'
-      }).pipe(
-        Stream.runCollect,
-        Effect.provide(
-          Layer.mergeAll(provider, TestToolExecutor.layer({ web_search: 'should not run' })).pipe(
-            Layer.provideMerge(BaseLayer)
+        const eventsChunk = yield* run({
+          messages: [UserMessage.make({ content: 'search' })],
+          systemPrompt: 'Use hosted tools when useful.',
+          tools: [],
+          model: 'faux'
+        }).pipe(
+          Stream.runCollect,
+          Effect.provide(
+            Layer.mergeAll(provider, TestToolExecutor.layer({ web_search: 'should not run' })).pipe(
+              Layer.provideMerge(BaseLayer)
+            )
           )
         )
-      )
 
-      const events = Array.from(eventsChunk)
-      const assistant = assistantMessageFromEvents(events)
+        const events = Array.from(eventsChunk)
+        const assistant = assistantMessageFromEvents(events)
 
-      expect(events.map(event => event._tag)).toEqual([
-        'AgentStart',
-        'TurnStart',
-        'LLMStreamStart',
-        'ToolInputStart',
-        'ToolInputDelta',
-        'ProviderToolResult',
-        'LLMStreamEnd',
-        'AssistantMessage',
-        'TurnEnd',
-        'AgentEnd'
-      ])
-      expect(assistant.parts.map(part => part._tag)).toEqual(['ProviderToolCall', 'ProviderToolResult'])
-      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
-    })
+        expect(events.map(event => event._tag)).toEqual([
+          'AgentStart',
+          'TurnStart',
+          'LLMStreamStart',
+          'ToolInputStart',
+          'ToolInputDelta',
+          'ProviderToolResult',
+          'LLMStreamEnd',
+          'AssistantMessage',
+          'TurnEnd',
+          'AgentEnd'
+        ])
+        expect(assistant.parts.map(part => part._tag)).toEqual([
+          'ProviderToolCall',
+          'ProviderToolResult'
+        ])
+        expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+      })
   )
 
   it.effect('fails when faux responses are exhausted', () =>

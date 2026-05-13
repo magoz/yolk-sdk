@@ -295,7 +295,10 @@ const messageToCodexInput = (
         return [{ role: 'user', content: yield* contentToUserInput(message.content) }]
       case 'Assistant': {
         const content = yield* contentToText(assistantContent(message), 'Assistant')
-        const toolCallInputs = yield* Effect.forEach(assistantHostToolCalls(message), toolCallToCodexInput)
+        const toolCallInputs = yield* Effect.forEach(
+          assistantHostToolCalls(message),
+          toolCallToCodexInput
+        )
 
         if (content.length > 0) {
           const assistantMessage: OpenAiCodexInputItem = { role: 'assistant', content }

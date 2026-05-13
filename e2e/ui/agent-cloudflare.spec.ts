@@ -83,7 +83,9 @@ const runSocketTurn = (url: string, input: string) =>
           Effect.runFork(
             encodeUserInput(input, message.revision).pipe(
               Effect.tap(encoded => Effect.sync(() => socket.send(encoded))),
-              Effect.catch(error => Effect.sync(() => finish(Effect.fail(socketError('Encode failed', error)))))
+              Effect.catch(error =>
+                Effect.sync(() => finish(Effect.fail(socketError('Encode failed', error))))
+              )
             )
           )
           return
@@ -110,7 +112,9 @@ const runSocketTurn = (url: string, input: string) =>
       Effect.runFork(
         decodeServerMessage(event.data).pipe(
           Effect.tap(message => Effect.sync(() => handleServerMessage(message))),
-          Effect.catch(error => Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error)))))
+          Effect.catch(error =>
+            Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error))))
+          )
         )
       )
     }
@@ -128,11 +132,7 @@ const runSocketTurn = (url: string, input: string) =>
     })
   })
 
-const runSocketTurnWithExpectedRevision = (
-  url: string,
-  input: string,
-  expectedRevision: number
-) =>
+const runSocketTurnWithExpectedRevision = (url: string, input: string, expectedRevision: number) =>
   Effect.callback<SocketAgentErrorResult, CloudflareAgentE2eError>(resume => {
     const socket = new WebSocket(url)
     let snapshotRevision = 0
@@ -162,7 +162,9 @@ const runSocketTurnWithExpectedRevision = (
           Effect.runFork(
             encodeUserInput(input, expectedRevision).pipe(
               Effect.tap(encoded => Effect.sync(() => socket.send(encoded))),
-              Effect.catch(error => Effect.sync(() => finish(Effect.fail(socketError('Encode failed', error)))))
+              Effect.catch(error =>
+                Effect.sync(() => finish(Effect.fail(socketError('Encode failed', error))))
+              )
             )
           )
           return
@@ -192,7 +194,9 @@ const runSocketTurnWithExpectedRevision = (
       Effect.runFork(
         decodeServerMessage(event.data).pipe(
           Effect.tap(message => Effect.sync(() => handleServerMessage(message))),
-          Effect.catch(error => Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error)))))
+          Effect.catch(error =>
+            Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error))))
+          )
         )
       )
     }
@@ -265,7 +269,9 @@ const runMalformedSocketTurn = (url: string, input: string) =>
       Effect.runFork(
         decodeServerMessage(event.data).pipe(
           Effect.tap(message => Effect.sync(() => handleServerMessage(message))),
-          Effect.catch(error => Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error)))))
+          Effect.catch(error =>
+            Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error))))
+          )
         )
       )
     }
@@ -284,73 +290,74 @@ const runMalformedSocketTurn = (url: string, input: string) =>
   })
 
 const readSnapshot = (url: string) =>
-  Effect.callback<{ readonly revision: number; readonly messageTags: ReadonlyArray<string> }, CloudflareAgentE2eError>(
-    resume => {
-      const socket = new WebSocket(url)
-      let done = false
+  Effect.callback<
+    { readonly revision: number; readonly messageTags: ReadonlyArray<string> },
+    CloudflareAgentE2eError
+  >(resume => {
+    const socket = new WebSocket(url)
+    let done = false
 
-      const timeout = setTimeout(() => {
-        done = true
-        socket.close(1000, 'timeout')
-        resume(Effect.fail(socketError('Timed out waiting for snapshot')))
-      }, turnTimeoutMs)
+    const timeout = setTimeout(() => {
+      done = true
+      socket.close(1000, 'timeout')
+      resume(Effect.fail(socketError('Timed out waiting for snapshot')))
+    }, turnTimeoutMs)
 
-      const finish = (
-        effect: Effect.Effect<
-          { readonly revision: number; readonly messageTags: ReadonlyArray<string> },
-          CloudflareAgentE2eError
-        >
-      ) => {
-        if (done) {
-          return
-        }
-
-        done = true
-        clearTimeout(timeout)
-        socket.close(1000, 'done')
-        resume(effect)
+    const finish = (
+      effect: Effect.Effect<
+        { readonly revision: number; readonly messageTags: ReadonlyArray<string> },
+        CloudflareAgentE2eError
+      >
+    ) => {
+      if (done) {
+        return
       }
 
-      const onMessage = (event: MessageEvent) => {
-        if (typeof event.data !== 'string') {
-          finish(Effect.fail(socketError('Expected text websocket message')))
-          return
-        }
+      done = true
+      clearTimeout(timeout)
+      socket.close(1000, 'done')
+      resume(effect)
+    }
 
-        Effect.runFork(
-          decodeServerMessage(event.data).pipe(
-            Effect.tap(message =>
-              Effect.sync(() => {
-                if (message._tag === 'SessionSnapshot') {
-                  finish(
-                    Effect.succeed({
-                      revision: message.revision,
-                      messageTags: message.messages.map(agentMessage => agentMessage._tag)
-                    })
-                  )
-                }
-              })
-            ),
-            Effect.catch(error =>
-              Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error))))
-            )
+    const onMessage = (event: MessageEvent) => {
+      if (typeof event.data !== 'string') {
+        finish(Effect.fail(socketError('Expected text websocket message')))
+        return
+      }
+
+      Effect.runFork(
+        decodeServerMessage(event.data).pipe(
+          Effect.tap(message =>
+            Effect.sync(() => {
+              if (message._tag === 'SessionSnapshot') {
+                finish(
+                  Effect.succeed({
+                    revision: message.revision,
+                    messageTags: message.messages.map(agentMessage => agentMessage._tag)
+                  })
+                )
+              }
+            })
+          ),
+          Effect.catch(error =>
+            Effect.sync(() => finish(Effect.fail(socketError('Decode failed', error))))
           )
         )
-      }
-
-      const onError = () => finish(Effect.fail(socketError('WebSocket failed')))
-
-      socket.addEventListener('message', onMessage)
-      socket.addEventListener('error', onError)
-
-      return Effect.sync(() => {
-        clearTimeout(timeout)
-        socket.removeEventListener('message', onMessage)
-        socket.removeEventListener('error', onError)
-        socket.close(1000, 'cleanup')
-      })
+      )
     }
-  )
+
+    const onError = () => finish(Effect.fail(socketError('WebSocket failed')))
+
+    socket.addEventListener('message', onMessage)
+    socket.addEventListener('error', onError)
+
+    return Effect.sync(() => {
+      clearTimeout(timeout)
+      socket.removeEventListener('message', onMessage)
+      socket.removeEventListener('error', onError)
+      socket.close(1000, 'cleanup')
+    })
+  })
 
 test('Cloudflare agent persists transcript across direct WebSocket reconnects', async () => {
   test.setTimeout(90_000)

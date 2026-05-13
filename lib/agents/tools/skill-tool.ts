@@ -4,7 +4,7 @@ import { ToolError } from '@yolk/agent-loop'
 import { ToolDef, ToolResult } from '@yolk/protocol'
 import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
 import type { SkillInfo } from '@yolk/skillset'
-import type { AgentToolContext } from './tool-context'
+import type { AgentToolContext } from './tool-context.ts'
 
 const skillToolName = 'skill'
 
@@ -45,7 +45,9 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
 
 const decodeSkillParams = (params: unknown) =>
   Schema.decodeUnknownEffect(SkillParams)(params).pipe(
-    Effect.mapError(error => makeToolError(`Invalid skill arguments: ${unknownToMessage(error)}`, 'validation'))
+    Effect.mapError(error =>
+      makeToolError(`Invalid skill arguments: ${unknownToMessage(error)}`, 'validation')
+    )
   )
 
 const findSkill = (skills: ReadonlyArray<SkillInfo>, name: string) =>

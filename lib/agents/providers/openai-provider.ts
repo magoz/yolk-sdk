@@ -249,7 +249,10 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
         return { role: 'user', content: yield* contentToUserContent(message.content) }
       case 'Assistant': {
         const content = assistantContent(message)
-        const toolCalls = yield* Effect.forEach(assistantHostToolCalls(message), toolCallToOpenAiToolCall)
+        const toolCalls = yield* Effect.forEach(
+          assistantHostToolCalls(message),
+          toolCallToOpenAiToolCall
+        )
 
         if (toolCalls.length > 0) {
           return {

@@ -14,7 +14,11 @@ export type ToolRunState =
   | { readonly _tag: 'Denied'; readonly duration: ToolDuration; readonly reason: string }
   | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
   | { readonly _tag: 'Errored'; readonly duration: ToolDuration; readonly message: string }
-  | { readonly _tag: 'ProviderCompleted'; readonly duration: ToolDuration; readonly result: ToolResult }
+  | {
+      readonly _tag: 'ProviderCompleted'
+      readonly duration: ToolDuration
+      readonly result: ToolResult
+    }
 
 export type AgentChatItem =
   | {
@@ -29,7 +33,12 @@ export type AgentChatItem =
       readonly messageId: string
       readonly content: Content
     }
-  | { readonly _tag: 'Reasoning'; readonly id: string; readonly messageId: string; readonly text: string }
+  | {
+      readonly _tag: 'Reasoning'
+      readonly id: string
+      readonly messageId: string
+      readonly text: string
+    }
   | {
       readonly _tag: 'ToolRun'
       readonly id: string

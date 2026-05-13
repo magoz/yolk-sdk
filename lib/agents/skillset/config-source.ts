@@ -1,6 +1,10 @@
 import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { emptySkillsetManifest, SkillsetManifest, type SkillsetManifest as SkillsetManifestType } from '@yolk/skillset'
+import {
+  emptySkillsetManifest,
+  SkillsetManifest,
+  type SkillsetManifest as SkillsetManifestType
+} from '@yolk/skillset'
 
 class ConfigSkillsetError extends Schema.TaggedErrorClass<ConfigSkillsetError>()(
   'ConfigSkillsetError',
@@ -49,7 +53,9 @@ export const loadConfigSkillsetManifest = (): Effect.Effect<
   }).pipe(
     Effect.catch(error =>
       Effect.fail(
-        new ConfigSkillsetError({ message: `Could not load skillset config: ${unknownToMessage(error)}` })
+        new ConfigSkillsetError({
+          message: `Could not load skillset config: ${unknownToMessage(error)}`
+        })
       )
     )
   )

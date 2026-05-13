@@ -1,12 +1,19 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent-loop'
-import { sanitizeMcpName } from '@yolk/mcp-client'
-import { callMcpServerToolNode, listMcpServerToolsNode } from '@yolk/mcp-client/node'
-import type { McpResolvedTool, McpServerConfig } from '@yolk/mcp-client'
+import {
+  callRemoteMcpServerTool,
+  listRemoteMcpServerTools,
+  sanitizeMcpName
+} from '@yolk/mcp-client'
+import type { McpRemoteServerConfig, McpResolvedTool, McpSecurityPolicy } from '@yolk/mcp-client'
 import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
-import type { AgentToolContext } from './tool-context'
-import { loadMcpSecurityPolicy, loadMcpServerConfigs } from './mcp-config'
+import type { AgentToolContext } from './tool-context.ts'
+
+const mcpSecurityPolicy: McpSecurityPolicy = {
+  allowLocalServers: false,
+  allowDevHttpLocalhost: false
+}
 
 const toToolError = (tool: string, message: string) =>
   new ToolError({
@@ -18,16 +25,16 @@ const toToolError = (tool: string, message: string) =>
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
-const emptyMcpConfigs: ReadonlyArray<McpServerConfig> = []
 const emptyMcpResolvedTools: ReadonlyArray<McpResolvedTool> = []
 
 const findServerConfig = (
-  configs: ReadonlyArray<McpServerConfig>,
+  configs: ReadonlyArray<McpRemoteServerConfig>,
   serverName: string
-): Option.Option<McpServerConfig> => Arr.findFirst(configs, config => config.name === serverName)
+): Option.Option<McpRemoteServerConfig> =>
+  Arr.findFirst(configs, config => config.name === serverName)
 
 const makeRegistration = (
-  configs: ReadonlyArray<McpServerConfig>,
+  configs: ReadonlyArray<McpRemoteServerConfig>,
   resolved: McpResolvedTool
 ): ToolRegistration<AgentToolContext> => ({
   def: resolved.def,
@@ -42,13 +49,12 @@ const makeRegistration = (
         )
       }
 
-      const policy = yield* loadMcpSecurityPolicy()
-      return yield* callMcpServerToolNode({
+      return yield* callRemoteMcpServerTool({
         config: configOption.value,
         mcpToolName: resolved.mcpToolName,
         toolCallId: call.id,
         params: call.params,
-        options: { securityPolicy: policy }
+        options: { securityPolicy: mcpSecurityPolicy }
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
         Effect.mapError(error => toToolError(call.name, error.message))
@@ -56,18 +62,13 @@ const makeRegistration = (
     })
 })
 
-export const makeMcpToolModule = (): Effect.Effect<ToolModule<AgentToolContext>, never, never> =>
+export const makeMcpToolModule = (
+  allConfigs: ReadonlyArray<McpRemoteServerConfig>
+): Effect.Effect<ToolModule<AgentToolContext>, never, never> =>
   Effect.gen(function* () {
-    const configs = yield* loadMcpServerConfigs().pipe(
-      Effect.catch(error =>
-        Effect.logWarning('Invalid MCP config', { error: unknownToMessage(error) }).pipe(
-          Effect.as(emptyMcpConfigs)
-        )
-      )
-    )
-    const policy = yield* loadMcpSecurityPolicy()
+    const configs = allConfigs
     const resolvedByServer = yield* Effect.forEach(configs, config =>
-      listMcpServerToolsNode(config, { securityPolicy: policy }).pipe(
+      listRemoteMcpServerTools(config, { securityPolicy: mcpSecurityPolicy }).pipe(
         Effect.provide(FetchHttpClient.layer),
         Effect.catch(error =>
           Effect.logWarning('MCP server unavailable', {

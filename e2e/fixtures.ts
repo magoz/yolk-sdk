@@ -24,21 +24,26 @@ type TestFixtures = {
  * Fixtures are test-scoped so each test gets an isolated browser context.
  */
 export const test = base.extend<TestFixtures>({
-  authedContext: async ({ browser }, use) => {
+  authedContext: async ({ browser, baseURL }, use) => {
     const token = process.env.TEST_SESSION_TOKEN
     if (!token) {
       throw new Error('TEST_SESSION_TOKEN not set. Did global-setup run?')
     }
+    if (baseURL === undefined) {
+      throw new Error('baseURL not configured')
+    }
+
+    const appUrl = new URL(baseURL)
 
     const context = await browser.newContext()
     await context.addCookies([
       {
         name: 'better-auth.session_token',
         value: token,
-        domain: 'localhost',
+        domain: appUrl.hostname,
         path: '/',
         httpOnly: true,
-        secure: false,
+        secure: appUrl.protocol === 'https:',
         sameSite: 'Lax'
       }
     ])
@@ -59,8 +64,11 @@ export const test = base.extend<TestFixtures>({
       throw new Error('baseURL not configured')
     }
 
+    const appUrl = new URL(baseURL)
+
     const context = await playwright.request.newContext({
       baseURL,
+      ignoreHTTPSErrors: appUrl.protocol === 'https:',
       extraHTTPHeaders: {
         Accept: 'application/json'
       }

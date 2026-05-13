@@ -63,7 +63,10 @@ export const reduceAgentChatState = (
         status: 'running',
         error: null,
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
-        sessionEvents: [...state.sessionEvents, UserMessageSubmitted.make({ message: action.message })]
+        sessionEvents: [
+          ...state.sessionEvents,
+          UserMessageSubmitted.make({ message: action.message })
+        ]
       }
     case 'AppendMessage':
       return {

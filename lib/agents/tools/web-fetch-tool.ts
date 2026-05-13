@@ -1,12 +1,10 @@
-import { lookup } from 'node:dns/promises'
-import { isIP } from 'node:net'
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent-loop'
 import { ToolDef, ToolResult, type ToolCall } from '@yolk/protocol'
 import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
-import type { AgentToolContext } from './tool-context'
+import type { AgentToolContext } from './tool-context.ts'
 
 const webFetchToolName = 'web_fetch'
 const maxResponseSizeBytes = 5 * 1024 * 1024
@@ -24,17 +22,15 @@ const WebFetchParams = Schema.Struct({
 type WebFetchFormat = typeof WebFetchFormat.Type
 type WebFetchParams = typeof WebFetchParams.Type
 
-export type BrowserHttpResponse = {
+export type WebFetchHttpResponse = {
   readonly status: number
   readonly headers: Readonly<Record<string, string | undefined>>
   readonly body: Effect.Effect<ArrayBuffer, ToolError>
 }
 
-export type BrowserToolDependencies = {
-  readonly lookupHostAddresses: (
-    hostname: string
-  ) => Effect.Effect<ReadonlyArray<string>, ToolError>
-  readonly request: (url: URL, timeoutMs: number) => Effect.Effect<BrowserHttpResponse, ToolError>
+export type WebFetchToolDependencies = {
+  readonly ensurePublicUrl: (url: URL) => Effect.Effect<void, ToolError>
+  readonly request: (url: URL, timeoutMs: number) => Effect.Effect<WebFetchHttpResponse, ToolError>
 }
 
 const webFetchParameters = {
@@ -125,7 +121,7 @@ const isLocalHostname = (hostname: string) =>
   hostname === 'local' ||
   hostname.endsWith('.local')
 
-const parseIpv4Parts = (address: string) => {
+export const parseIpv4Parts = (address: string) => {
   const parts = address.split('.').map(part => Number.parseInt(part, 10))
 
   return parts.length === 4 &&
@@ -134,7 +130,7 @@ const parseIpv4Parts = (address: string) => {
     : []
 }
 
-const isBlockedIpv4 = (address: string) => {
+export const isBlockedIpv4 = (address: string) => {
   const parts = parseIpv4Parts(address)
   if (parts.length !== 4) {
     return false
@@ -156,7 +152,7 @@ const isBlockedIpv4 = (address: string) => {
   )
 }
 
-const isBlockedIpv6 = (address: string) => {
+export const isBlockedIpv6 = (address: string) => {
   const lower = address.toLowerCase()
   const mappedIpv4 = lower.startsWith('::ffff:') ? lower.slice('::ffff:'.length) : ''
 
@@ -178,16 +174,22 @@ const isBlockedIpv6 = (address: string) => {
   )
 }
 
-const isBlockedAddress = (address: string) =>
-  isIP(address) === 4 ? isBlockedIpv4(address) : isIP(address) === 6 && isBlockedIpv6(address)
+export const isIpv4Literal = (address: string) => parseIpv4Parts(address).length === 4
 
-const ensurePublicUrl = (deps: BrowserToolDependencies, url: URL) => {
+export const isIpv6Literal = (address: string) => address.includes(':')
+
+export const isIpLiteral = (address: string) => isIpv4Literal(address) || isIpv6Literal(address)
+
+export const isBlockedAddress = (address: string) =>
+  isIpv4Literal(address) ? isBlockedIpv4(address) : isIpv6Literal(address) && isBlockedIpv6(address)
+
+export const ensurePublicUrlWithoutDns = (url: URL) => {
   const hostname = normalizeHostname(url.hostname)
   if (hostname.length === 0 || isLocalHostname(hostname)) {
     return Effect.fail(makeToolError('URL host is not public', 'permission'))
   }
 
-  if (isIP(hostname) !== 0) {
+  if (isIpLiteral(hostname)) {
     return isBlockedAddress(hostname)
       ? Effect.fail(
           makeToolError('URL host resolves to a private or reserved address', 'permission')
@@ -195,24 +197,13 @@ const ensurePublicUrl = (deps: BrowserToolDependencies, url: URL) => {
       : Effect.void
   }
 
-  return deps.lookupHostAddresses(hostname).pipe(
-    Effect.flatMap(addresses => {
-      if (addresses.length === 0 || addresses.some(isBlockedAddress)) {
-        return Effect.fail(
-          makeToolError('URL host resolves to a private or reserved address', 'permission')
-        )
-      }
-
-      return Effect.void
-    })
-  )
+  return Effect.void
 }
 
-const lookupHostAddresses = (hostname: string) =>
-  Effect.tryPromise({
-    try: () => lookup(hostname, { all: true, verbatim: true }),
-    catch: error => makeToolError(`Could not resolve host: ${unknownToMessage(error)}`, 'execution')
-  }).pipe(Effect.map(records => records.map(record => record.address)))
+export const ensureResolvedAddressesArePublic = (addresses: ReadonlyArray<string>) =>
+  addresses.length === 0 || addresses.some(isBlockedAddress)
+    ? Effect.fail(makeToolError('URL host resolves to a private or reserved address', 'permission'))
+    : Effect.void
 
 const requestHeaders = {
   accept:
@@ -223,7 +214,7 @@ const requestHeaders = {
 
 const manualRedirectRequestInit: RequestInit = { redirect: 'manual' }
 
-const requestWithHttpClient = (url: URL, timeoutMs: number) =>
+export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
     const request = HttpClientRequest.get(url.toString()).pipe(
@@ -253,11 +244,6 @@ const requestWithHttpClient = (url: URL, timeoutMs: number) =>
     Effect.provide(FetchHttpClient.layer)
   )
 
-const liveBrowserToolDependencies: BrowserToolDependencies = {
-  lookupHostAddresses,
-  request: requestWithHttpClient
-}
-
 const headerValue = (headers: Readonly<Record<string, string | undefined>>, name: string) =>
   headers[name.toLowerCase()] ?? headers[name]
 
@@ -272,13 +258,13 @@ const resolveRedirectUrl = (baseUrl: URL, location: string) => {
 }
 
 const fetchWithRedirects = (
-  deps: BrowserToolDependencies,
+  deps: WebFetchToolDependencies,
   url: URL,
   timeoutMs: number,
   remainingRedirects: number
-): Effect.Effect<{ readonly url: URL; readonly response: BrowserHttpResponse }, ToolError> =>
+): Effect.Effect<{ readonly url: URL; readonly response: WebFetchHttpResponse }, ToolError> =>
   Effect.gen(function* () {
-    yield* ensurePublicUrl(deps, url)
+    yield* deps.ensurePublicUrl(url)
     const response = yield* deps.request(url, timeoutMs)
 
     if (!isRedirectStatus(response.status)) {
@@ -438,10 +424,7 @@ const formatToolOutput = (input: {
     input.content
   ].join('\n')
 
-export const fetchWebPage = (
-  params: WebFetchParams,
-  deps: BrowserToolDependencies = liveBrowserToolDependencies
-) =>
+export const fetchWebPage = (params: WebFetchParams, deps: WebFetchToolDependencies) =>
   Effect.gen(function* () {
     const url = yield* parsePublicHttpUrl(params.url)
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
@@ -475,10 +458,7 @@ export const fetchWebPage = (
     })
   })
 
-export const executeWebFetchTool = (
-  call: ToolCall,
-  deps: BrowserToolDependencies = liveBrowserToolDependencies
-) => {
+export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependencies) => {
   if (call.name !== webFetchToolName) {
     return Effect.fail(
       new ToolError({
@@ -497,14 +477,18 @@ export const executeWebFetchTool = (
   })
 }
 
-export const webFetchToolRegistration: ToolRegistration<AgentToolContext> = {
+export const makeWebFetchToolRegistration = (
+  deps: WebFetchToolDependencies
+): ToolRegistration<AgentToolContext> => ({
   def: webFetchToolDef,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  execute: ({ call }) => executeWebFetchTool(call)
-}
+  execute: ({ call }) => executeWebFetchTool(call, deps)
+})
 
-export const webFetchToolModule: ToolModule<AgentToolContext> = {
+export const makeWebFetchToolModule = (
+  deps: WebFetchToolDependencies
+): ToolModule<AgentToolContext> => ({
   id: 'browser',
-  tools: [webFetchToolRegistration]
-}
+  tools: [makeWebFetchToolRegistration(deps)]
+})

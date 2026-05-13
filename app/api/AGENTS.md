@@ -4,14 +4,14 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 ## Routes
 
-| Route                          | Role                         |
-| ------------------------------ | ---------------------------- |
-| `auth/[...all]/route.ts`       | better-auth Next handler     |
-| `agent/route.ts`               | Text agent NDJSON stream     |
-| `agent/commands/route.ts`      | Agent command list/render    |
-| `agent/realtime/call/route.ts` | OpenAI Realtime SDP exchange |
-| `agent/realtime/tool/route.ts` | Voice tool execution bridge  |
-| `internal/cloudflare/codex-token/route.ts` | Internal DO token bridge |
+| Route                                          | Role                             |
+| ---------------------------------------------- | -------------------------------- |
+| `auth/[...all]/route.ts`                       | better-auth Next handler         |
+| `agent/route.ts`                               | Text agent NDJSON stream         |
+| `agent/commands/route.ts`                      | Agent command list/render        |
+| `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
+| `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
+| `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex response proxy |
 
 ## Effect Route Pattern
@@ -35,10 +35,10 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 - Text route requires Codex OAuth token, model `gpt-5.4`, `agentTextCapabilities`, and non-empty text+image protocol transcript.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
-- Text route explicitly provides Node text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`.
+- Text route explicitly provides runtime-portable text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`; remote MCP comes from project MCP files, not env.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
-- Realtime routes explicitly provide Node voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
+- Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is Worker-to-Next only; it forwards allowlisted Codex headers/body to avoid Worker egress blocks.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts` so it stays testable without importing full Next route/layers.

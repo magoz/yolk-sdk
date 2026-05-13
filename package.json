@@ -4,7 +4,8 @@
   "private": true,
   "packageManager": "pnpm@11.0.9",
   "scripts": {
-    "dev": "next dev",
+    "dev": "portless run next dev",
+    "dev:app": "next dev",
     "build": "next build && pnpm --filter './packages/*' build",
     "start": "next start",
     "tsc": "tsc --noEmit",
@@ -15,6 +16,7 @@
     "cloudflare:check": "pnpm --filter './cloudflare/*' check",
     "cloudflare-agent:dev": "pnpm --filter @yolk/cloudflare-agent run dev",
     "cloudflare-agent:deploy": "pnpm --filter @yolk/cloudflare-agent run deploy",
+    "cloudflare-agent:deploy:adopt": "pnpm --filter @yolk/cloudflare-agent exec alchemy deploy --adopt --force --yes",
     "cloudflare-agent:destroy": "pnpm --filter @yolk/cloudflare-agent run destroy",
     "cloudflare-agent:smoke": "pnpm --filter @yolk/cloudflare-agent run smoke",
     "skillset:build": "tsx scripts/build-skillset.ts",
@@ -31,6 +33,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
+  "portless": "yolk",
   "dependencies": {
     "@base-ui/react": "^1.1.0",
     "@effect/opentelemetry": "catalog:",
@@ -89,6 +92,7 @@
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^27.4.0",
     "knip": "^5.81.0",
+    "portless": "^0.13.0",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
     "typescript": "catalog:",

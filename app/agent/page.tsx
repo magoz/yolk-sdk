@@ -4,7 +4,9 @@ export default function Page() {
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center gap-8 p-8">
       <div className="space-y-3">
-        <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Agent runtime</p>
+        <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          Agent runtime
+        </p>
         <h1 className="text-4xl font-semibold tracking-tight">Choose where text runs</h1>
         <p className="text-lg text-muted-foreground">
           Same chat UI and voice option. Runtime only changes text transport/session semantics.
@@ -18,7 +20,10 @@ export default function Page() {
             /api/agent, stateless transcript per turn.
           </p>
         </Link>
-        <Link href="/agent/cloudflare" className="rounded-2xl border border-foreground/10 bg-card p-5">
+        <Link
+          href="/agent/cloudflare"
+          className="rounded-2xl border border-foreground/10 bg-card p-5"
+        >
           <h2 className="font-medium">Cloudflare runtime</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             Worker + Durable Object, WebSocket, append-log storage.

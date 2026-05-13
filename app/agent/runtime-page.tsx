@@ -9,6 +9,7 @@ import { NextEffect } from '@/lib/next-effect'
 import { hasOpenAiCodexAuth } from '@/lib/core/agent/openai-codex-auth'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { AgentPlayground, type AgentRuntimeInfo } from './playground'
 
 export type AgentRuntime = 'next' | 'cloudflare'
@@ -34,7 +35,13 @@ function PageSkeleton() {
   )
 }
 
-function PageMessage({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+function PageMessage({
+  title,
+  children
+}: {
+  readonly title: string
+  readonly children: ReactNode
+}) {
   return (
     <main className="min-h-screen bg-background p-6">
       <div className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-3xl place-items-center">
@@ -67,7 +74,8 @@ function CloudflareUnavailableMessage({ message }: { readonly message: string })
   )
 }
 
-const encodeJson = (value: unknown) => Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+const encodeJson = (value: unknown) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
 
 const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
   Effect.try({
@@ -107,12 +115,14 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
       'YOLK_CLOUDFLARE_BRIDGE_SECRET',
       yield* Config.option(Config.string('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
     )
+    const mcpServers = yield* loadProjectMcpServers()
     const client = yield* HttpClient.HttpClient
     const body = yield* encodeJson({
       userId: input.userId,
       tokenEndpoint: `${appUrl}/api/internal/cloudflare/codex-token`,
       codexResponsesEndpoint: `${appUrl}/api/internal/cloudflare/codex-responses`,
-      bridgeSecret
+      bridgeSecret,
+      mcpServers
     })
     const response = yield* client.execute(
       HttpClientRequest.post(`${workerUrl}/bootstrap/${encodeURIComponent(input.sessionId)}`).pipe(
@@ -181,7 +191,9 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
       Effect.catch(error =>
         NextEffect.isNavigationError(error)
           ? Effect.fail(error)
-          : reportError(error, { operation: `page.agent.${runtime}` }).pipe(Effect.as(<ErrorMessage />))
+          : reportError(error, { operation: `page.agent.${runtime}` }).pipe(
+              Effect.as(<ErrorMessage />)
+            )
       )
     )
   )

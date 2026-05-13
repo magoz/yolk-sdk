@@ -28,6 +28,8 @@ pnpm cloudflare:check
 https://yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst.expenses.workers.dev
 ```
 
+`src/api.ts` pins the Worker `name` to this script name so Alchemy updates the existing dev Worker instead of creating a new generated workers.dev URL when local state is missing.
+
 Health check:
 
 ```sh

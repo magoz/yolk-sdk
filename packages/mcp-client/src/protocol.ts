@@ -207,9 +207,10 @@ const embeddedResourceText = (block: GenericContentBlock): Option.Option<string>
         return Option.some(resource.text)
       }
 
-      return Option.all({ uri: Option.fromNullishOr(resource.uri), blob: Option.fromNullishOr(resource.blob) }).pipe(
-        Option.map(({ uri, blob }) => `MCP resource: ${uri}\n${blob}`)
-      )
+      return Option.all({
+        uri: Option.fromNullishOr(resource.uri),
+        blob: Option.fromNullishOr(resource.blob)
+      }).pipe(Option.map(({ uri, blob }) => `MCP resource: ${uri}\n${blob}`))
     })
   )
 
@@ -222,16 +223,18 @@ const resourceLinkText = (block: GenericContentBlock): Option.Option<string> =>
   )
 
 const imagePartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
-  Option.all({ data: stringProperty(block, 'data'), mimeType: stringProperty(block, 'mimeType') }).pipe(
-    Option.map(({ data, mimeType }) => ImagePart.make({ data, mimeType }))
-  )
+  Option.all({
+    data: stringProperty(block, 'data'),
+    mimeType: stringProperty(block, 'mimeType')
+  }).pipe(Option.map(({ data, mimeType }) => ImagePart.make({ data, mimeType })))
 
 const audioPartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
-  Option.all({ data: stringProperty(block, 'data'), mimeType: stringProperty(block, 'mimeType') }).pipe(
+  Option.all({
+    data: stringProperty(block, 'data'),
+    mimeType: stringProperty(block, 'mimeType')
+  }).pipe(
     Option.flatMap(({ data, mimeType }) =>
-      audioFormatFromMimeType(mimeType).pipe(
-        Option.map(format => AudioPart.make({ data, format }))
-      )
+      audioFormatFromMimeType(mimeType).pipe(Option.map(format => AudioPart.make({ data, format })))
     )
   )
 
@@ -256,7 +259,9 @@ const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {
 
   if (type === 'resource') {
     return TextPart.make({
-      text: embeddedResourceText(block).pipe(Option.getOrElse(() => fallbackTextForContentBlock(block)))
+      text: embeddedResourceText(block).pipe(
+        Option.getOrElse(() => fallbackTextForContentBlock(block))
+      )
     })
   }
 
@@ -333,15 +338,14 @@ const decodeJsonString = (server: string, text: string) =>
 export const decodeJsonRpcResponseFromJson = (server: string, text: string) =>
   decodeJsonString(server, text).pipe(
     Effect.flatMap(decodeJsonRpcResponse),
-    Effect.mapError(
-      error =>
-        error instanceof McpError
-          ? error
-          : new McpError({
-              server,
-              message: `Invalid MCP JSON-RPC response: ${String(error)}`,
-              cause: 'validation'
-            })
+    Effect.mapError(error =>
+      error instanceof McpError
+        ? error
+        : new McpError({
+            server,
+            message: `Invalid MCP JSON-RPC response: ${String(error)}`,
+            cause: 'validation'
+          })
     )
   )
 

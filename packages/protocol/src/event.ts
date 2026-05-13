@@ -107,10 +107,13 @@ export class ToolApprovalGranted extends Schema.TaggedClass<ToolApprovalGranted>
   }
 ) {}
 
-export class ToolApprovalDenied extends Schema.TaggedClass<ToolApprovalDenied>()('ToolApprovalDenied', {
-  toolCallId: Schema.String,
-  reason: Schema.String
-}) {}
+export class ToolApprovalDenied extends Schema.TaggedClass<ToolApprovalDenied>()(
+  'ToolApprovalDenied',
+  {
+    toolCallId: Schema.String,
+    reason: Schema.String
+  }
+) {}
 
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
   turn: Schema.Number
@@ -130,21 +133,30 @@ export class ToolExecutionStarted extends Schema.TaggedClass<ToolExecutionStarte
   }
 ) {}
 
-export class ToolExecutionCompleted extends Schema.TaggedClass<ToolExecutionCompleted>()('ToolExecutionCompleted', {
-  call: ToolCall,
-  result: ToolResult
-}) {}
+export class ToolExecutionCompleted extends Schema.TaggedClass<ToolExecutionCompleted>()(
+  'ToolExecutionCompleted',
+  {
+    call: ToolCall,
+    result: ToolResult
+  }
+) {}
 
-export class ToolExecutionError extends Schema.TaggedClass<ToolExecutionError>()('ToolExecutionError', {
-  call: ToolCall,
-  message: Schema.String,
-  code: AgentErrorCode
-}) {}
+export class ToolExecutionError extends Schema.TaggedClass<ToolExecutionError>()(
+  'ToolExecutionError',
+  {
+    call: ToolCall,
+    message: Schema.String,
+    code: AgentErrorCode
+  }
+) {}
 
-export class ProviderToolResult extends Schema.TaggedClass<ProviderToolResult>()('ProviderToolResult', {
-  call: ToolCall,
-  result: ToolResult
-}) {}
+export class ProviderToolResult extends Schema.TaggedClass<ProviderToolResult>()(
+  'ProviderToolResult',
+  {
+    call: ToolCall,
+    result: ToolResult
+  }
+) {}
 
 export const AgentEvent = Schema.Union([
   AgentStart,

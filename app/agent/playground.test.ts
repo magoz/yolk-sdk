@@ -137,18 +137,18 @@ describe('agent playground', () => {
 
   it('models message edit save state', () => {
     expect(editDraftText(' updated ')).toBe('updated')
-    expect(canSaveEditedMessage({ currentText: 'hello', draftText: ' hello ', disabled: false })).toBe(
-      false
-    )
-    expect(canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: false })).toBe(
-      true
-    )
+    expect(
+      canSaveEditedMessage({ currentText: 'hello', draftText: ' hello ', disabled: false })
+    ).toBe(false)
+    expect(
+      canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: false })
+    ).toBe(true)
     expect(canSaveEditedMessage({ currentText: 'hello', draftText: '   ', disabled: false })).toBe(
       false
     )
-    expect(canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: true })).toBe(
-      false
-    )
+    expect(
+      canSaveEditedMessage({ currentText: 'hello', draftText: 'updated', disabled: true })
+    ).toBe(false)
   })
 
   it('models slash command input', () => {
@@ -161,5 +161,4 @@ describe('agent playground', () => {
     expect(slashCommandHint(commands[0])).toBe('<path>')
     expect(slashCommandMeta(commands[0])).toBe('read · files')
   })
-
 })

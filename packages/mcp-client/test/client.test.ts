@@ -4,11 +4,7 @@ import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/u
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
-import {
-  listLocalMcpServerTools,
-  callRemoteMcpServerTool,
-  listRemoteMcpServerTools
-} from '../src'
+import { listLocalMcpServerTools, callRemoteMcpServerTool, listRemoteMcpServerTools } from '../src'
 import {
   callLocalMcpServerToolNode,
   listLocalMcpServerToolsNode,
@@ -162,9 +158,9 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
                           }
                         ]
                 }
-            : mode === 'tool-error'
-              ? { content: [{ type: 'text', text: 'bad params' }], isError: true }
-              : { content: [{ type: 'text', text: 'remote result' }] }
+              : mode === 'tool-error'
+                ? { content: [{ type: 'text', text: 'bad params' }], isError: true }
+                : { content: [{ type: 'text', text: 'remote result' }] }
 
         if (method === 'notifications/initialized') {
           return HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 }))

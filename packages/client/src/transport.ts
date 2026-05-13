@@ -242,13 +242,10 @@ export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
-const isAgentEvent = (
-  message: AgentWebSocketServerMessageType
-): message is AgentEventType => message._tag !== 'SessionSnapshot'
+const isAgentEvent = (message: AgentWebSocketServerMessageType): message is AgentEventType =>
+  message._tag !== 'SessionSnapshot'
 
-export const streamCloudflareAgentEventStream = (
-  request: StreamCloudflareAgentEventsRequest
-) =>
+export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentEventsRequest) =>
   applyAbortSignal(
     Stream.callback<AgentEventType, AgentTransportError>(queue =>
       Effect.gen(function* () {
@@ -277,7 +274,11 @@ export const streamCloudflareAgentEventStream = (
                     ? Effect.void
                     : makeUserInputJson(request, message.revision).pipe(
                         Effect.flatMap(body => Effect.sync(() => socket.send(body))),
-                        Effect.tap(() => Effect.sync(() => { sentInput = true }))
+                        Effect.tap(() =>
+                          Effect.sync(() => {
+                            sentInput = true
+                          })
+                        )
                       )
                 }
 

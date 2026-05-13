@@ -43,6 +43,9 @@ import { makeOpenAiCodexProviderLayer } from '../../../lib/agents/providers/open
 import { agentTextModel } from '../../../lib/agents/text-agent-config.ts'
 import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
 import { skillToolModule } from '../../../lib/agents/tools/skill-tool.ts'
+import { makeMcpToolModule } from '../../../lib/agents/tools/mcp-tool-module.ts'
+import { webFetchWorkerToolModule } from '../../../lib/agents/tools/web-fetch-worker-tool.ts'
+import { webSearchToolModule } from '../../../lib/agents/tools/web-search-tool.ts'
 import { cloudflareRuntimeErrorToAgentError } from './cloudflare-error.ts'
 import { generatedSkillsetManifest } from './generated/skillset.ts'
 import {
@@ -75,11 +78,13 @@ const cloudflareSkillset: MergedSkillset = {
   skills: generatedSkillsetManifest.skills,
   commands: generatedSkillsetManifest.commands
 }
-const cloudflareToolModules = [skillToolModule]
+const cloudflareBaseToolModules = [webFetchWorkerToolModule, webSearchToolModule, skillToolModule]
 
 const runtimeBaseConfig = {
   systemPrompt:
-    availableSkills.length === 0 ? cloudflareSystemPrompt : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
+    availableSkills.length === 0
+      ? cloudflareSystemPrompt
+      : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
   model: agentTextModel
 }
 
@@ -94,7 +99,8 @@ const decodeClientMessage = (message: string | ArrayBuffer) =>
 const encodeEvent = (event: AgentEventType) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event)
 
-const encodeJson = (value: unknown) => Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
+const encodeJson = (value: unknown) =>
+  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value)
 
 const sendJson = (socket: Cloudflare.DurableWebSocket, value: unknown) =>
   encodeJson(value).pipe(Effect.flatMap(encoded => socket.send(encoded)))
@@ -102,10 +108,9 @@ const sendJson = (socket: Cloudflare.DurableWebSocket, value: unknown) =>
 const sendEvent = (socket: Cloudflare.DurableWebSocket, event: AgentEventType) =>
   encodeEvent(event).pipe(Effect.flatMap(encoded => socket.send(encoded)))
 
-const toAgentError = (error: Parameters<typeof cloudflareRuntimeErrorToAgentError>[0] | AgentError) =>
-  Schema.is(AgentError)(error)
-    ? error
-    : cloudflareRuntimeErrorToAgentError(error)
+const toAgentError = (
+  error: Parameters<typeof cloudflareRuntimeErrorToAgentError>[0] | AgentError
+) => (Schema.is(AgentError)(error) ? error : cloudflareRuntimeErrorToAgentError(error))
 
 const httpClientMessage = (error: HttpClientError.HttpClientError) => error.message
 
@@ -259,8 +264,14 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         Effect.gen(function* () {
           const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
 
+          const mcpToolModule = yield* makeMcpToolModule(bootstrap?.mcpServers ?? [])
+          const modules =
+            mcpToolModule.tools.length === 0
+              ? cloudflareBaseToolModules
+              : [...cloudflareBaseToolModules, mcpToolModule]
+
           return yield* resolveAgentToolSet({
-            modules: cloudflareToolModules,
+            modules,
             context: {
               surface: 'text',
               route: '/agent/cloudflare',

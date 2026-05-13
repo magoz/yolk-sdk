@@ -37,7 +37,9 @@ const manifestFromMergedSkillset = (skillset: MergedSkillset): SkillsetManifest 
 
 const encodeManifestJson = (manifest: SkillsetManifest) => JSON.stringify(manifest, undefined, 2)
 
-const generatedSource = (manifestJson: string) => `import type { SkillsetManifest } from '@yolk/skillset'
+const generatedSource = (
+  manifestJson: string
+) => `import type { SkillsetManifest } from '@yolk/skillset'
 
 export const generatedSkillsetManifest: SkillsetManifest = ${manifestJson}
 `

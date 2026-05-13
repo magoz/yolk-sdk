@@ -1,5 +1,11 @@
 import { describe, expect, it } from '@effect/vitest'
-import { assistantContent, assistantHostToolCalls, contentText, ToolCall, ToolResult } from '@yolk/protocol'
+import {
+  assistantContent,
+  assistantHostToolCalls,
+  contentText,
+  ToolCall,
+  ToolResult
+} from '@yolk/protocol'
 import { accumulateAssistantMessage } from '../src'
 import { LLMDone, LLMProviderToolResult, LLMTextDelta, LLMToolCall } from '../src/llm-event'
 
@@ -26,7 +32,12 @@ describe('accumulateAssistantMessage', () => {
       LLMDone.make({ stopReason: 'stop' })
     ])
 
-    expect(message.parts.map(part => part._tag)).toEqual(['Text', 'ProviderToolCall', 'ProviderToolResult', 'Text'])
+    expect(message.parts.map(part => part._tag)).toEqual([
+      'Text',
+      'ProviderToolCall',
+      'ProviderToolResult',
+      'Text'
+    ])
     expect(contentText(assistantContent(message))).toBe('Before.After.')
   })
 })

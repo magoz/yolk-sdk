@@ -233,11 +233,10 @@ type McpServerConfig =
     }
 ```
 
-Initial app config may be env JSON:
+App config is project-file JSON and may later come from persisted agent config:
 
-```env
-YOLK_MCP_SERVERS='[{"name":"docs","type":"remote","url":"https://example.com/mcp"}]'
-YOLK_MCP_LOCAL_ENABLED=false
+```json
+[{ "name": "docs", "type": "remote", "url": "https://example.com/mcp" }]
 ```
 
 ### Package API
@@ -272,9 +271,9 @@ tools/call
 
 | Question                                           | Owner | Due Date   | Status                                               |
 | -------------------------------------------------- | ----- | ---------- | ---------------------------------------------------- |
-| Config source: env JSON vs checked-in file?        | User  | 2026-05-11 | Resolved: env JSON first (`YOLK_MCP_SERVERS`)        |
+| Config source: env JSON vs checked-in file?        | User  | 2026-05-11 | Resolved: project file / agent-provided, not env     |
 | Should MCP tools be text-only or text+voice in v1? | User  | 2026-05-11 | Resolved: text route first; voice after stable       |
-| Allow `http://localhost` remote MCP in dev?        | User  | 2026-05-11 | Resolved: only with explicit dev flag                |
+| Allow `http://localhost` remote MCP in dev?        | User  | 2026-05-11 | Resolved: no in app tools                            |
 | Should all MCP tools default `access: read`?       | User  | 2026-05-11 | Resolved: default `read`; app override can come next |
 
 ---

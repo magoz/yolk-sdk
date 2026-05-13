@@ -52,9 +52,7 @@ export type AppendInputRuntimeRequest = {
   readonly expectedRevision?: SessionRevision
 }
 
-export type RuntimeRequest =
-  | TranscriptRuntimeRequest
-  | AppendInputRuntimeRequest
+export type RuntimeRequest = TranscriptRuntimeRequest | AppendInputRuntimeRequest
 
 type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 type AppendRuntimeRequirements = LoopRequirements | SessionEventStore
@@ -103,11 +101,13 @@ const emptyRuntimeSessionEventLog = (sessionId: string): RuntimeSessionEventLog 
 })
 
 const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
-  store.load(sessionId).pipe(
-    Effect.catchTag('SessionNotFoundError', () =>
-      Effect.succeed(emptyRuntimeSessionEventLog(sessionId))
+  store
+    .load(sessionId)
+    .pipe(
+      Effect.catchTag('SessionNotFoundError', () =>
+        Effect.succeed(emptyRuntimeSessionEventLog(sessionId))
+      )
     )
-  )
 
 const appendRunFailed = (
   store: SessionEventStoreApi,

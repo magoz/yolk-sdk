@@ -44,8 +44,10 @@ const handler = Effect.gen(function* () {
   Effect.provide(FetchHttpClient.layer),
   Effect.catchTags({
     ConfigError: () => HttpServerResponse.json({ error: 'Unauthorized' }, { status: 401 }),
-    HttpServerError: () => HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }),
-    HttpClientError: () => HttpServerResponse.json({ error: 'OpenAI Codex request failed' }, { status: 502 })
+    HttpServerError: () =>
+      HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }),
+    HttpClientError: () =>
+      HttpServerResponse.json({ error: 'OpenAI Codex request failed' }, { status: 502 })
   }),
   Effect.catch(() => HttpServerResponse.json({ error: 'Internal error' }, { status: 500 }))
 )

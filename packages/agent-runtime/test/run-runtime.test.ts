@@ -60,10 +60,7 @@ describe('runRuntime', () => {
           messages
         },
         runtimeConfig
-      ).pipe(
-        Stream.runCollect,
-        Effect.provide(makeAgentLoopLayer(requests))
-      )
+      ).pipe(Stream.runCollect, Effect.provide(makeAgentLoopLayer(requests)))
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
       expect(getFirstRequest(requests).messages).toEqual(messages)
@@ -85,10 +82,7 @@ describe('runRuntime', () => {
           reasoningEffort: 'medium',
           capabilities: textOnlyModelCapabilities
         }
-      ).pipe(
-        Stream.runCollect,
-        Effect.provide(makeAgentLoopLayer(requests))
-      )
+      ).pipe(Stream.runCollect, Effect.provide(makeAgentLoopLayer(requests)))
 
       expect(getFirstRequest(requests).reasoningEffort).toBe('medium')
     })
@@ -129,7 +123,9 @@ describe('runRuntime', () => {
 
       const store = yield* SessionEventStore
       const log = yield* store.load('session_1')
-      const assistant = AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
+      const assistant = AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'ok' })]
+      })
 
       expect(Array.from(eventsChunk).map(event => event._tag)).toContain('AgentEnd')
       expect(getFirstRequest(requests).messages).toEqual([old, input])
@@ -198,7 +194,9 @@ describe('runRuntime', () => {
         runtimeConfig
       ).pipe(
         Stream.runCollect,
-        Effect.provide(Layer.mergeAll(makeAgentLoopLayer(), makeInMemorySessionEventStoreLayer([initialLog]))),
+        Effect.provide(
+          Layer.mergeAll(makeAgentLoopLayer(), makeInMemorySessionEventStoreLayer([initialLog]))
+        ),
         Effect.result
       )
 

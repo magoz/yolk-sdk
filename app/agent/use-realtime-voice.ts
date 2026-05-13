@@ -237,10 +237,7 @@ const closeSessionResources = (
   mediaStream?.getTracks().forEach(track => track.stop())
 }
 
-const waitForRealtimeReady = (
-  peerConnection: RTCPeerConnection,
-  dataChannel: RTCDataChannel
-) =>
+const waitForRealtimeReady = (peerConnection: RTCPeerConnection, dataChannel: RTCDataChannel) =>
   new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(() => {
       cleanup()
@@ -258,7 +255,10 @@ const waitForRealtimeReady = (
       reject(new Error('Realtime connection closed before ready'))
     }
     const checkReady = () => {
-      if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
+      if (
+        peerConnection.connectionState === 'failed' ||
+        peerConnection.connectionState === 'closed'
+      ) {
         fail()
         return
       }
@@ -281,7 +281,10 @@ const assistantEndMessages = (content: string, toolMessages: ReadonlyArray<Agent
     return [...toolMessages]
   }
 
-  return [...toolMessages, AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })]
+  return [
+    ...toolMessages,
+    AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })
+  ]
 }
 
 const assistantEndEvent = (content: string, toolMessages: ReadonlyArray<AgentMessage>) =>
@@ -417,11 +420,11 @@ export const useRealtimeVoice = ({
           )
         })
 
-          return ToolResultMessage.make({
-            toolCallId: result.toolCallId,
-            content: result.content,
-            structuredContent: result.structuredContent
-          })
+        return ToolResultMessage.make({
+          toolCallId: result.toolCallId,
+          content: result.content,
+          structuredContent: result.structuredContent
+        })
       }),
     [emitAgentEvent, sendClientEvent]
   )

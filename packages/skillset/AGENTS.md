@@ -10,12 +10,12 @@ Domain-free parsing and catalog primitives for portable skills and commands.
 
 ## Public model
 
-| Export area | Purpose |
-| --- | --- |
-| `skill` | Skill metadata, parsing, available-skills formatting |
-| `command` | Command metadata, parsing, argument rendering |
-| `manifest` | Portable serialized skillset shape |
-| `merge` | Deterministic source priority merging |
+| Export area | Purpose                                              |
+| ----------- | ---------------------------------------------------- |
+| `skill`     | Skill metadata, parsing, available-skills formatting |
+| `command`   | Command metadata, parsing, argument rendering        |
+| `manifest`  | Portable serialized skillset shape                   |
+| `merge`     | Deterministic source priority merging                |
 
 ## Tests
 

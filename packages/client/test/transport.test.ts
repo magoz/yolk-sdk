@@ -152,7 +152,10 @@ describe('collectAgentEvents', () => {
     try {
       const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
       const eventsPromise = collectAsync(
-        streamCloudflareAgentEvents({ webSocketUrl: 'wss://worker.example/connect/session_1', messages })
+        streamCloudflareAgentEvents({
+          webSocketUrl: 'wss://worker.example/connect/session_1',
+          messages
+        })
       )
 
       await waitForSocket()
@@ -183,7 +186,10 @@ describe('collectAgentEvents', () => {
       expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
       expect(socket.closeCalls).toEqual([{ code: 1000, reason: 'done' }])
     } finally {
-      Object.defineProperty(globalThis, 'WebSocket', { value: originalWebSocket, configurable: true })
+      Object.defineProperty(globalThis, 'WebSocket', {
+        value: originalWebSocket,
+        configurable: true
+      })
     }
   })
 })
@@ -195,7 +201,10 @@ class FakeWebSocket {
   static instances: Array<FakeWebSocket> = []
 
   readonly sent: Array<string> = []
-  readonly closeCalls: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> = []
+  readonly closeCalls: Array<{
+    readonly code: number | undefined
+    readonly reason: string | undefined
+  }> = []
   readyState = FakeWebSocket.OPEN
   private readonly listeners = new Map<string, Array<EventListenerOrEventListenerObject>>()
 

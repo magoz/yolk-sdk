@@ -48,11 +48,11 @@ When this PRD is complete, the following will be true:
 
 ### Quantitative
 
-| Metric | Current | Target | Measurement Method |
-| --- | --- | --- | --- |
-| Snapshot overwrites in append mode | 0 in package/adapter code | Remain 0 | Runtime + Cloudflare tests |
-| Durable replay coverage | package covered | Cloudflare multi-turn covered | Package + Cloudflare tests |
-| Conflict handling coverage | package covered | stale revision rejected | Package tests |
+| Metric                             | Current                   | Target                        | Measurement Method         |
+| ---------------------------------- | ------------------------- | ----------------------------- | -------------------------- |
+| Snapshot overwrites in append mode | 0 in package/adapter code | Remain 0                      | Runtime + Cloudflare tests |
+| Durable replay coverage            | package covered           | Cloudflare multi-turn covered | Package + Cloudflare tests |
+| Conflict handling coverage         | package covered           | stale revision rejected       | Package tests              |
 
 ### Qualitative
 
@@ -136,13 +136,13 @@ Expected logical entities:
 
 ## Risks & Mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-| --- | --- | --- | --- |
-| Store contract becomes database-specific | Medium | High | Keep package interface logical; adapters own physical persistence. |
-| Event model duplicates protocol events incorrectly | Medium | High | Persist protocol messages/events where possible; separate runtime metadata from protocol payload. |
-| Resume semantics become too broad | High | Medium | Define resumability as storage/read model first; transport reconnect/fanout can remain host-owned. |
-| Backcompat breaks transcript callers | Low | Medium | Keep `Transcript` mode stateless and make append persistence opt-in. |
-| Partial runs expose fabricated protocol messages | Medium | High | Only persist created protocol messages from loop `AgentEnd`; record partial lifecycle separately. |
+| Risk                                               | Likelihood | Impact | Mitigation                                                                                         |
+| -------------------------------------------------- | ---------- | ------ | -------------------------------------------------------------------------------------------------- |
+| Store contract becomes database-specific           | Medium     | High   | Keep package interface logical; adapters own physical persistence.                                 |
+| Event model duplicates protocol events incorrectly | Medium     | High   | Persist protocol messages/events where possible; separate runtime metadata from protocol payload.  |
+| Resume semantics become too broad                  | High       | Medium | Define resumability as storage/read model first; transport reconnect/fanout can remain host-owned. |
+| Backcompat breaks transcript callers               | Low        | Medium | Keep `Transcript` mode stateless and make append persistence opt-in.                               |
+| Partial runs expose fabricated protocol messages   | Medium     | High   | Only persist created protocol messages from loop `AgentEnd`; record partial lifecycle separately.  |
 
 ---
 
@@ -194,7 +194,11 @@ type SessionRevision = number
 type RuntimeSessionEvent =
   | { readonly _tag: 'InputAppended'; readonly message: AgentMessage }
   | { readonly _tag: 'RunStarted'; readonly runId: string }
-  | { readonly _tag: 'RunCompleted'; readonly runId: string; readonly messages: ReadonlyArray<AgentMessage> }
+  | {
+      readonly _tag: 'RunCompleted'
+      readonly runId: string
+      readonly messages: ReadonlyArray<AgentMessage>
+    }
   | { readonly _tag: 'RunFailed'; readonly runId: string; readonly error: RuntimeError }
   | { readonly _tag: 'RunInterrupted'; readonly runId: string }
 ```
@@ -214,13 +218,13 @@ These semantics must remain product-free. Physical storage belongs to host adapt
 
 ## Open Questions
 
-| Question | Owner | Due Date | Status |
-| --- | --- | --- | --- |
-| Keep `SessionStore` and add `SessionEventStore`, or replace contract? | Package owner | 2026-05-12 | Resolved: use `SessionEventStore`; no snapshot store in current runtime package. |
-| Revision type: numeric sequence, opaque token, or both? | Package owner | 2026-05-12 | Resolved: numeric `SessionRevision`. |
+| Question                                                                      | Owner         | Due Date   | Status                                                                                                  |
+| ----------------------------------------------------------------------------- | ------------- | ---------- | ------------------------------------------------------------------------------------------------------- |
+| Keep `SessionStore` and add `SessionEventStore`, or replace contract?         | Package owner | 2026-05-12 | Resolved: use `SessionEventStore`; no snapshot store in current runtime package.                        |
+| Revision type: numeric sequence, opaque token, or both?                       | Package owner | 2026-05-12 | Resolved: numeric `SessionRevision`.                                                                    |
 | Should runtime persist `AgentEvent` traces separately from transcript events? | Package owner | 2026-05-12 | Deferred: append store persists lifecycle + protocol messages; traces can be future optional telemetry. |
-| Should active run cleanup be runtime-owned or host-owned? | Package owner | 2026-05-12 | Resolved: package exposes `latestIncompleteRuntimeRun`; host appends `RunInterrupted`. |
-| How should append-store replay handle provider-executed assistant tool parts? | Package owner | 2026-05-12 | Resolved direction: replay protocol transcript parts, not UI-local state. |
+| Should active run cleanup be runtime-owned or host-owned?                     | Package owner | 2026-05-12 | Resolved: package exposes `latestIncompleteRuntimeRun`; host appends `RunInterrupted`.                  |
+| How should append-store replay handle provider-executed assistant tool parts? | Package owner | 2026-05-12 | Resolved direction: replay protocol transcript parts, not UI-local state.                               |
 
 ---
 

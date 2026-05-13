@@ -19,15 +19,15 @@
 
 ## Public model
 
-| Export area         | Purpose                                         |
-| ------------------- | ----------------------------------------------- |
-| `run-runtime`       | Server orchestration entrypoint                 |
-| `RuntimeConfig`     | Loop config passed through by host apps         |
-| `RuntimeRequest`    | `Transcript` or `AppendInput` request union     |
-| `RuntimeTranscript` | Non-empty protocol transcript                   |
+| Export area           | Purpose                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| `run-runtime`         | Server orchestration entrypoint                                                           |
+| `RuntimeConfig`       | Loop config passed through by host apps                                                   |
+| `RuntimeRequest`      | `Transcript` or `AppendInput` request union                                               |
+| `RuntimeTranscript`   | Non-empty protocol transcript                                                             |
 | `session-event-store` | Append-only event storage contract, replay/append/incomplete-run helpers, in-memory tests |
-| `error`             | Runtime-specific typed errors                   |
-| `RuntimeSessionId`  | Opaque session id alias                         |
+| `error`               | Runtime-specific typed errors                                                             |
+| `RuntimeSessionId`    | Opaque session id alias                                                                   |
 
 ## Request modes
 

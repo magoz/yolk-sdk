@@ -72,7 +72,10 @@ describe('MCP protocol helpers', () => {
       toolCallId: 'call_1',
       result: {
         content: [
-          { type: 'resource', resource: { uri: 'file:///tmp/out.bin', blob: 'Ym9keQ==', mimeType: 'text/plain' } }
+          {
+            type: 'resource',
+            resource: { uri: 'file:///tmp/out.bin', blob: 'Ym9keQ==', mimeType: 'text/plain' }
+          }
         ]
       }
     })

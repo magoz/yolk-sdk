@@ -104,7 +104,8 @@ export type ApplyAgentEventToChatMessagesOptions = {
   readonly nowMs?: number
 }
 
-const messageId = (sequence: number, role: AgentChatMessage['role']) => `message-${sequence}-${role}`
+const messageId = (sequence: number, role: AgentChatMessage['role']) =>
+  `message-${sequence}-${role}`
 
 const turnId = (sequence: number) => `turn-${sequence}`
 
@@ -170,9 +171,7 @@ const collectToolNames = (
 ): ReadonlyMap<string, string> =>
   new Map([...toolRuns.flatMap(toolRunNameEntry), ...messages.flatMap(assistantToolNameEntries)])
 
-const toolResultEntry = (
-  message: AgentMessage
-): ReadonlyArray<readonly [string, ToolResult]> =>
+const toolResultEntry = (message: AgentMessage): ReadonlyArray<readonly [string, ToolResult]> =>
   message._tag === 'ToolResult'
     ? [
         [
@@ -217,8 +216,9 @@ const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] => {
   }
 }
 
-const collectToolRunsById = (runs: ReadonlyArray<AgentToolRun>): ReadonlyMap<string, AgentToolRun> =>
-  new Map(runs.map(toolRunEntry))
+const collectToolRunsById = (
+  runs: ReadonlyArray<AgentToolRun>
+): ReadonlyMap<string, AgentToolRun> => new Map(runs.map(toolRunEntry))
 
 const toolStateFor = (
   run: AgentToolRun | undefined,
@@ -653,9 +653,7 @@ const finalizeAssistantParts = (
     }
   })
 
-const toolStateEntry = (
-  part: AgentChatPart
-): ReadonlyArray<readonly [string, ChatToolState]> =>
+const toolStateEntry = (part: AgentChatPart): ReadonlyArray<readonly [string, ChatToolState]> =>
   part._tag === 'ToolCall' ? [[part.call.id, part.state]] : []
 
 const toolStateByCallId = (parts: ReadonlyArray<AgentChatPart>) =>
@@ -688,14 +686,19 @@ const appendOrReplaceAssistantMessage = (
   const index = Option.filter(lastAssistantIndex(messages), assistantIndex => {
     const current = messages[assistantIndex]
 
-    return hasStreamingPart(current) || messageToolCallIds.some(callId => hasToolCall(current, callId))
+    return (
+      hasStreamingPart(current) || messageToolCallIds.some(callId => hasToolCall(current, callId))
+    )
   })
 
   return Option.match(index, {
     onNone: () => {
       const sequence = nextMessageSequence(messages)
 
-      return [...messages, assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))]
+      return [
+        ...messages,
+        assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))
+      ]
     },
     onSome: assistantIndex =>
       messages.map((current, messageIndex) =>
@@ -792,7 +795,10 @@ export const appendProtocolMessage = (
     case 'User':
       return [...messages, userChatMessage(message, sequence)]
     case 'Assistant':
-      return [...messages, assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))]
+      return [
+        ...messages,
+        assistantChatMessage(message, sequence, lastTurnId(messages) ?? turnId(sequence))
+      ]
     case 'ToolResult':
       return appendOrphanToolResult(
         messages,
@@ -1011,7 +1017,15 @@ const draftAssistantMessage = ({
   const parts = draftAssistantPart({ reasoningDraft, assistantDraft })
 
   return parts.length > 0
-    ? [{ id: 'draft-assistant', turnId: 'draft-assistant-turn', sequence: -1, role: 'assistant', parts }]
+    ? [
+        {
+          id: 'draft-assistant',
+          turnId: 'draft-assistant-turn',
+          sequence: -1,
+          role: 'assistant',
+          parts
+        }
+      ]
     : []
 }
 
@@ -1041,22 +1055,26 @@ export const buildAgentChatMessages = ({
   const toolCallIds = collectToolCallIds(messages)
   const toolRunsById = collectToolRunsById(toolRuns)
 
-  const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>((current, message, index) => {
-    const currentTurnId = message._tag === 'User' ? turnId(index) : (lastTurnId(current) ?? turnId(index))
+  const builtMessages = messages.reduce<ReadonlyArray<AgentChatMessage>>(
+    (current, message, index) => {
+      const currentTurnId =
+        message._tag === 'User' ? turnId(index) : (lastTurnId(current) ?? turnId(index))
 
-    return [
-      ...current,
-      ...chatMessagesFromProtocolMessage({
-        message,
-        sequence: index,
-        currentTurnId,
-        toolNames,
-        toolResultsById,
-        toolCallIds,
-        toolRunsById
-      })
-    ]
-  }, [])
+      return [
+        ...current,
+        ...chatMessagesFromProtocolMessage({
+          message,
+          sequence: index,
+          currentTurnId,
+          toolNames,
+          toolResultsById,
+          toolCallIds,
+          toolRunsById
+        })
+      ]
+    },
+    []
+  )
 
   return [
     ...builtMessages,
@@ -1116,7 +1134,9 @@ const assistantProtocolPartsFromChatParts = (
   parts.flatMap((part): ReadonlyArray<AssistantPart> => {
     switch (part._tag) {
       case 'Text':
-        return isContentEmpty(part.content) ? [] : [AssistantTextPart.make({ content: part.content })]
+        return isContentEmpty(part.content)
+          ? []
+          : [AssistantTextPart.make({ content: part.content })]
       case 'Reasoning':
         return part.text.length === 0 ? [] : [AssistantReasoningPart.make({ text: part.text })]
       case 'ToolCall':

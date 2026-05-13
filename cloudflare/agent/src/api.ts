@@ -8,6 +8,7 @@ const connectPath = '/connect/'
 const bootstrapPath = '/bootstrap/'
 
 export class Api extends Cloudflare.Worker<Api>()('Api', {
+  name: 'yolkagentworker-api-dev-magoz-acgmzjtxyqsevrst',
   main: './src/api-runtime.ts',
   observability: { enabled: true }
 }) {}

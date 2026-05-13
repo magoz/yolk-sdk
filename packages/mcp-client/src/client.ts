@@ -380,7 +380,11 @@ export const listRemoteMcpServerTools = (
 export const listLocalMcpServerTools = (
   config: McpLocalServerConfig,
   options?: McpClientOptions
-): Effect.Effect<ReadonlyArray<McpResolvedTool>, McpError, ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<
+  ReadonlyArray<McpResolvedTool>,
+  McpError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
   Effect.gen(function* () {
     if (config.enabled === false) {
       return []
@@ -454,7 +458,11 @@ export const callLocalMcpServerTool = (
 
 export const callMcpServerTool = (
   input: CallMcpServerToolInput
-): Effect.Effect<ToolResult, McpError, ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient> =>
+): Effect.Effect<
+  ToolResult,
+  McpError,
+  ChildProcessSpawner.ChildProcessSpawner | HttpClient.HttpClient
+> =>
   input.config.type === 'local'
     ? callLocalMcpServerTool({
         config: input.config,

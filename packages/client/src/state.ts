@@ -9,7 +9,12 @@ import {
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 
 export type AgentToolRun =
-  | { readonly _tag: 'InputStreaming'; readonly id: string; readonly name?: string; readonly input: string }
+  | {
+      readonly _tag: 'InputStreaming'
+      readonly id: string
+      readonly name?: string
+      readonly input: string
+    }
   | { readonly _tag: 'InputReady'; readonly call: ToolCall }
   | { readonly _tag: 'ApprovalRequested'; readonly call: ToolCall }
   | { readonly _tag: 'Denied'; readonly toolCallId: string; readonly reason: string }
@@ -21,7 +26,12 @@ export type AgentToolRun =
       readonly startedAtMs: number
       readonly endedAtMs: number
     }
-  | { readonly _tag: 'Errored'; readonly call: ToolCall; readonly message: string; readonly endedAtMs: number }
+  | {
+      readonly _tag: 'Errored'
+      readonly call: ToolCall
+      readonly message: string
+      readonly endedAtMs: number
+    }
   | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
 
 type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Executing' | 'Completed' }>
@@ -295,4 +305,5 @@ export const reduceAgentEvents = (
   events: ReadonlyArray<AgentEvent>,
   initialState: AgentClientState = initialAgentClientState,
   options: ApplyAgentEventOptions = {}
-) => events.reduce((state, event) => applyAgentEventWithOptions(state, event, options), initialState)
+) =>
+  events.reduce((state, event) => applyAgentEventWithOptions(state, event, options), initialState)

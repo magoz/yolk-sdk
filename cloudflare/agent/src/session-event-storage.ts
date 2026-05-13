@@ -22,15 +22,14 @@ export const emptyRuntimeEventLog = (sessionId: string): RuntimeSessionEventLog 
   events: []
 })
 
-export const loadRuntimeEventLogOrEmpty = (
-  sessionId: string,
-  storage: RuntimeEventLogStorage
-) =>
-  storage.get().pipe(
-    Effect.map(log =>
-      Option.getOrElse(Option.fromNullishOr(log), () => emptyRuntimeEventLog(sessionId))
+export const loadRuntimeEventLogOrEmpty = (sessionId: string, storage: RuntimeEventLogStorage) =>
+  storage
+    .get()
+    .pipe(
+      Effect.map(log =>
+        Option.getOrElse(Option.fromNullishOr(log), () => emptyRuntimeEventLog(sessionId))
+      )
     )
-  )
 
 export const makeDurableObjectSessionEventStoreLayer = (
   sessionId: string,
@@ -69,10 +68,7 @@ export const makeDurableObjectSessionEventStoreLayer = (
     })
   )
 
-export const interruptLatestIncompleteRun = (
-  sessionId: string,
-  storage: RuntimeEventLogStorage
-) =>
+export const interruptLatestIncompleteRun = (sessionId: string, storage: RuntimeEventLogStorage) =>
   storage.get().pipe(
     Effect.flatMap(log =>
       Option.match(Option.fromNullishOr(log), {

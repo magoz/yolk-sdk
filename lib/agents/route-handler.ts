@@ -34,7 +34,12 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 const maxImageCount = 4
 const maxImageBase64Chars = 5 * 1024 * 1024
 const maxTotalImageBase64Chars = 12 * 1024 * 1024
-const allowedImageMimeTypes: ReadonlyArray<string> = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const allowedImageMimeTypes: ReadonlyArray<string> = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif'
+]
 
 const isAllowedImageMimeType = (mimeType: string) =>
   allowedImageMimeTypes.some(allowedMimeType => allowedMimeType === mimeType)
@@ -93,10 +98,13 @@ const validateAgentRouteImages = (input: AgentRouteRequest) =>
       })
     )
 
-    return yield* Option.match(Arr.findFirst(imageErrors, () => true), {
-      onNone: () => Effect.void,
-      onSome: Effect.fail
-    })
+    return yield* Option.match(
+      Arr.findFirst(imageErrors, () => true),
+      {
+        onNone: () => Effect.void,
+        onSome: Effect.fail
+      }
+    )
   })
 
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({

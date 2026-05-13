@@ -22,7 +22,9 @@ const assistant = (content: string) =>
 
 const toolCallingAssistant = () =>
   AssistantAgentMessage.make({
-    parts: [HostToolCallPart.make({ call: ToolCall.make({ id: 'call_1', name: 'lookup', params: {} }) })]
+    parts: [
+      HostToolCallPart.make({ call: ToolCall.make({ id: 'call_1', name: 'lookup', params: {} }) })
+    ]
   })
 
 const toolResult = () => ToolResultMessage.make({ toolCallId: 'call_1', content: 'result' })

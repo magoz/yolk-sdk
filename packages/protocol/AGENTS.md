@@ -21,16 +21,16 @@
 
 ## Public model
 
-| Export area  | Purpose                                 |
-| ------------ | --------------------------------------- |
-| `message`    | Agent transcript messages and ids       |
-| `event`      | Streamed loop/provider events           |
-| `tool`       | Tool definitions, calls, results        |
-| `content`    | Text/image/audio content helpers        |
-| `capability` | Model input/tool capability flags       |
-| `reasoning`  | Provider-supplied reasoning config/data |
+| Export area  | Purpose                                          |
+| ------------ | ------------------------------------------------ |
+| `message`    | Agent transcript messages and ids                |
+| `event`      | Streamed loop/provider events                    |
+| `tool`       | Tool definitions, calls, results                 |
+| `content`    | Text/image/audio content helpers                 |
+| `capability` | Model input/tool capability flags                |
+| `reasoning`  | Provider-supplied reasoning config/data          |
 | `session`    | Generic session snapshot and WS envelope schemas |
-| `usage`      | Provider-neutral token usage helpers    |
+| `usage`      | Provider-neutral token usage helpers             |
 
 ## Design rules
 

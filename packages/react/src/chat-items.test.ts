@@ -20,7 +20,9 @@ const assistantMessage = (input: {
 }) =>
   AssistantAgentMessage.make({
     parts: [
-      ...(input.reasoning === undefined ? [] : [AssistantReasoningPart.make({ text: input.reasoning })]),
+      ...(input.reasoning === undefined
+        ? []
+        : [AssistantReasoningPart.make({ text: input.reasoning })]),
       AssistantTextPart.make({ content: input.content }),
       ...(input.toolCalls ?? []).map(call => HostToolCallPart.make({ call }))
     ]

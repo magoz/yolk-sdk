@@ -59,7 +59,11 @@ describe('agent chat messages', () => {
   })
 
   it('orders reasoning, text, tool calls, drafts, and errors', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://e.com' }
+    })
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'hi' }),
@@ -90,7 +94,11 @@ describe('agent chat messages', () => {
   })
 
   it('preserves tool state and hides matched tool result messages', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://e.com' }
+    })
     const result = ToolResult.make({
       toolCallId: call.id,
       content: 'Example Domain',
@@ -137,7 +145,11 @@ describe('agent chat messages', () => {
   })
 
   it('renders streamed tool input and provider-completed tools', () => {
-    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: { url: 'https://e.com' } })
+    const call = ToolCall.make({
+      id: 'call_1',
+      name: 'web_fetch',
+      params: { url: 'https://e.com' }
+    })
     const streamingCall = ToolCall.make({ id: call.id, name: call.name, params: {} })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
     const inputStarted = applyAgentEventToChatMessages(
@@ -283,15 +295,17 @@ describe('agent chat messages', () => {
       throw new Error('Expected deleted turn')
     }
 
-    expect(appendProtocolMessage(deleted.messages, UserMessage.make({ content: 'three' }))).toEqual([
-      messages[2],
-      {
-        id: 'message-3-user',
-        turnId: 'turn-3',
-        sequence: 3,
-        role: 'user',
-        parts: [{ _tag: 'Text', id: 'message-3-user-text', content: 'three', state: 'done' }]
-      }
-    ])
+    expect(appendProtocolMessage(deleted.messages, UserMessage.make({ content: 'three' }))).toEqual(
+      [
+        messages[2],
+        {
+          id: 'message-3-user',
+          turnId: 'turn-3',
+          sequence: 3,
+          role: 'user',
+          parts: [{ _tag: 'Text', id: 'message-3-user-text', content: 'three', state: 'done' }]
+        }
+      ]
+    )
   })
 })

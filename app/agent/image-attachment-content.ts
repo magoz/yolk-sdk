@@ -1,6 +1,9 @@
 import { Array as Arr } from 'effect'
 import { ImagePart, TextPart, type Content } from '@yolk/protocol'
-import type { AgentComposerFailedImageAttachment, AgentComposerImageAttachment } from './agent-composer'
+import type {
+  AgentComposerFailedImageAttachment,
+  AgentComposerImageAttachment
+} from './agent-composer'
 
 export type ReadyImageAttachment = AgentComposerImageAttachment & {
   readonly data: string

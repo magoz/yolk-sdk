@@ -70,10 +70,9 @@ export type SessionEventStoreApi = {
   ) => Effect.Effect<RuntimeSessionEventLog, SessionSaveError | SessionConflictError>
 }
 
-export class SessionEventStore extends Context.Service<
-  SessionEventStore,
-  SessionEventStoreApi
->()('@yolk/agent-runtime/SessionEventStore') {}
+export class SessionEventStore extends Context.Service<SessionEventStore, SessionEventStoreApi>()(
+  '@yolk/agent-runtime/SessionEventStore'
+) {}
 
 export const replayRuntimeSessionEvents = (
   events: ReadonlyArray<StoredRuntimeSessionEvent>

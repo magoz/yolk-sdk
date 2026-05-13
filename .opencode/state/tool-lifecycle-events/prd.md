@@ -80,11 +80,11 @@ When this PRD is complete, the following will be true:
 
 ### Quantitative
 
-| Metric | Current | Target | Measurement Method |
-| --- | --- | --- | --- |
-| Tool lifecycle states represented | 3 | input/approval/executing/completed/error/denied/provider-executed | Protocol tests |
-| Projection coverage | simple only | all lifecycle events | Client/React tests |
-| Old lifecycle event usages removed | 0% | 100% | Package tests + typecheck |
+| Metric                             | Current     | Target                                                            | Measurement Method        |
+| ---------------------------------- | ----------- | ----------------------------------------------------------------- | ------------------------- |
+| Tool lifecycle states represented  | 3           | input/approval/executing/completed/error/denied/provider-executed | Protocol tests            |
+| Projection coverage                | simple only | all lifecycle events                                              | Client/React tests        |
+| Old lifecycle event usages removed | 0%          | 100%                                                              | Package tests + typecheck |
 
 ### Qualitative
 
@@ -179,13 +179,13 @@ Candidate semantic states:
 
 ## Risks & Mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-| --- | --- | --- | --- |
-| Protocol becomes provider-specific | Medium | High | Use generic names; keep OpenAI/MCP details in adapters. |
-| Existing consumers break | High | Medium | Accept breakage; migrate package/app call sites in one change. |
-| Approval policy leaks into packages | Medium | Medium | Protocol models decisions only; host owns policy/enforcement. |
-| Too many states too early | Medium | Medium | Add only states needed by reference gaps; defer artifacts/output schemas. |
-| Durable append store duplicates lifecycle concepts | Medium | High | Align PRDs before implementation. |
+| Risk                                               | Likelihood | Impact | Mitigation                                                                |
+| -------------------------------------------------- | ---------- | ------ | ------------------------------------------------------------------------- |
+| Protocol becomes provider-specific                 | Medium     | High   | Use generic names; keep OpenAI/MCP details in adapters.                   |
+| Existing consumers break                           | High       | Medium | Accept breakage; migrate package/app call sites in one change.            |
+| Approval policy leaks into packages                | Medium     | Medium | Protocol models decisions only; host owns policy/enforcement.             |
+| Too many states too early                          | Medium     | Medium | Add only states needed by reference gaps; defer artifacts/output schemas. |
+| Durable append store duplicates lifecycle concepts | Medium     | High   | Align PRDs before implementation.                                         |
 
 ---
 
@@ -247,7 +247,11 @@ type ToolLifecycleEvent =
   | { readonly _tag: 'ToolApprovalGranted'; readonly toolCallId: string }
   | { readonly _tag: 'ToolApprovalDenied'; readonly toolCallId: string; readonly reason: string }
   | { readonly _tag: 'ToolExecutionStarted'; readonly call: ToolCall }
-  | { readonly _tag: 'ToolExecutionCompleted'; readonly call: ToolCall; readonly result: ToolResult }
+  | {
+      readonly _tag: 'ToolExecutionCompleted'
+      readonly call: ToolCall
+      readonly result: ToolResult
+    }
   | { readonly _tag: 'ToolExecutionError'; readonly call: ToolCall; readonly message: string }
   | { readonly _tag: 'ProviderToolResult'; readonly call: ToolCall; readonly result: ToolResult }
 
@@ -255,8 +259,17 @@ type AssistantPart =
   | { readonly _tag: 'Text'; readonly content: Content }
   | { readonly _tag: 'Reasoning'; readonly text: string }
   | { readonly _tag: 'HostToolCall'; readonly call: ToolCall }
-  | { readonly _tag: 'ProviderToolCall'; readonly call: ToolCall; readonly providerMetadata?: unknown }
-  | { readonly _tag: 'ProviderToolResult'; readonly toolCallId: string; readonly result: ToolResult; readonly providerMetadata?: unknown }
+  | {
+      readonly _tag: 'ProviderToolCall'
+      readonly call: ToolCall
+      readonly providerMetadata?: unknown
+    }
+  | {
+      readonly _tag: 'ProviderToolResult'
+      readonly toolCallId: string
+      readonly result: ToolResult
+      readonly providerMetadata?: unknown
+    }
 ```
 
 The final API may differ, but it must preserve these semantics.
@@ -275,13 +288,13 @@ The final API may differ, but it must preserve these semantics.
 
 ## Open Questions
 
-| Question | Owner | Due Date | Status |
-| --- | --- | --- | --- |
-| Should streamed tool input deltas be raw JSON string deltas or structured partial values? | Package owner | 2026-05-12 | Resolved: raw JSON string deltas. |
-| Should approval events live in protocol or tool-registry package exports? | Package owner | 2026-05-12 | Resolved: protocol events. |
+| Question                                                                                                                | Owner         | Due Date   | Status                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| Should streamed tool input deltas be raw JSON string deltas or structured partial values?                               | Package owner | 2026-05-12 | Resolved: raw JSON string deltas.                                                                         |
+| Should approval events live in protocol or tool-registry package exports?                                               | Package owner | 2026-05-12 | Resolved: protocol events.                                                                                |
 | Should provider-executed tools create assistant `toolCalls`, `ToolResultMessage`, both, or separate transcript entries? | Package owner | 2026-05-12 | Resolved: ordered assistant parts for provider-executed call/result; host tools keep `ToolResultMessage`. |
-| Should `ToolExecutionError` become a `ToolResult` with `isError`, or a distinct event only? | Package owner | 2026-05-12 | Resolved: distinct event; transcript error output remains host/runtime policy. |
-| Which existing event names stay as compatibility aliases? | Package owner | 2026-05-12 | Resolved: rename now, no long-term aliases. |
+| Should `ToolExecutionError` become a `ToolResult` with `isError`, or a distinct event only?                             | Package owner | 2026-05-12 | Resolved: distinct event; transcript error output remains host/runtime policy.                            |
+| Which existing event names stay as compatibility aliases?                                                               | Package owner | 2026-05-12 | Resolved: rename now, no long-term aliases.                                                               |
 
 ---
 

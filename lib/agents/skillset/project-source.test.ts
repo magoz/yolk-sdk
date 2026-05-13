@@ -30,23 +30,20 @@ Filesystem content.
 `
       )
 
-      const skillset = yield* withConfigEnv(
-        loadProjectSkillset(root),
-        {
-          YOLK_SKILLSET: JSON.stringify({
-            version: 1,
-            skills: [
-              {
-                name: 'review-code',
-                description: 'Config review',
-                location: 'config:review-code',
-                content: 'Config content.'
-              }
-            ],
-            commands: []
-          })
-        }
-      )
+      const skillset = yield* withConfigEnv(loadProjectSkillset(root), {
+        YOLK_SKILLSET: JSON.stringify({
+          version: 1,
+          skills: [
+            {
+              name: 'review-code',
+              description: 'Config review',
+              location: 'config:review-code',
+              content: 'Config content.'
+            }
+          ],
+          commands: []
+        })
+      })
 
       expect(skillset.skills).toMatchObject([
         { name: 'review-code', description: 'Config review', content: 'Config content.' }

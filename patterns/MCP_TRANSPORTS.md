@@ -16,8 +16,7 @@ Decode wire JSON in two steps:
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
 const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
 
-const decodeMessage = (line: string) =>
-  decodeJson(line).pipe(Effect.flatMap(decodeJsonRpcMessage))
+const decodeMessage = (line: string) => decodeJson(line).pipe(Effect.flatMap(decodeJsonRpcMessage))
 ```
 
 Rules:

@@ -62,15 +62,12 @@ const renderHandler = Effect.gen(function* () {
     }
   )
 
-  return yield* HttpServerResponse.json(
-    renderCommandResponse(command, input.arguments),
-    {
-      headers: {
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff'
-      }
+  return yield* HttpServerResponse.json(renderCommandResponse(command, input.arguments), {
+    headers: {
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff'
     }
-  )
+  })
 }).pipe(
   Effect.withSpan('AgentCommandsRoute.post'),
   Effect.catchTag('UnauthenticatedError', () =>

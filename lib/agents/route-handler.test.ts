@@ -373,7 +373,9 @@ describe('makeAgentPostResponse', () => {
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
       const toolResultContents = Arr.filterMap(events, event =>
-        event._tag === 'ToolExecutionCompleted' ? Result.succeed(event.result.content) : Result.failVoid
+        event._tag === 'ToolExecutionCompleted'
+          ? Result.succeed(event.result.content)
+          : Result.failVoid
       )
 
       expect(events.map(event => event._tag)).toEqual([

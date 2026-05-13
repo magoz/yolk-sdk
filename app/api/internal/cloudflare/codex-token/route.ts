@@ -32,7 +32,8 @@ const handler = Effect.gen(function* () {
 }).pipe(
   Effect.catchTags({
     ConfigError: () => HttpServerResponse.json({ error: 'Unauthorized' }, { status: 401 }),
-    HttpServerError: () => HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }),
+    HttpServerError: () =>
+      HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }),
     SchemaError: () => HttpServerResponse.json({ error: 'Invalid request body' }, { status: 400 }),
     OpenAiCodexAuthNotFoundError: () =>
       HttpServerResponse.json({ error: 'OpenAI Codex not connected' }, { status: 409 }),
