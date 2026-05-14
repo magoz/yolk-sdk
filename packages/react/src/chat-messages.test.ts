@@ -13,7 +13,7 @@ import {
   ToolResult,
   ToolResultMessage,
   UserMessage
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,

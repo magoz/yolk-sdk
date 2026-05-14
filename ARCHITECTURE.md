@@ -41,7 +41,7 @@ No users, teams, orgs, projects, billing, or product-specific permissions below 
 
 ---
 
-## `@yolk/protocol`
+## `@yolk/agent/protocol`
 
 Shared contract.
 
@@ -67,7 +67,7 @@ Keep it boring. Stable schemas beat clever abstractions.
 
 ---
 
-## `@yolk/agent-loop`
+## `@yolk/agent/loop`
 
 Pure loop mechanics.
 
@@ -110,7 +110,7 @@ Rule: if it needs durable state or project context, it is not agent-loop.
 
 ---
 
-## `@yolk/agent-runtime`
+## `@yolk/agent/runtime`
 
 Reusable orchestration shell around the agent loop.
 
@@ -181,7 +181,7 @@ The runtime can provide defaults: no compaction, no extra context, no extra tool
 
 ---
 
-## `@yolk/client`
+## `@yolk/agent/client`
 
 Browser/client protocol SDK.
 
@@ -248,20 +248,20 @@ The runtime should not know what those fields mean.
 
 ```txt
 Browser
-  @yolk/client sends message
+  @yolk/agent/client sends message
     ↓
 App route / Worker / DO
   auth + domain lookup
   builds opaque AppContext
     ↓
-@yolk/agent-runtime
+@yolk/agent/runtime
   loads session
   gets context/tools via adapters
   runs agent loop
   saves transcript + usage
   streams events
     ↓
-@yolk/agent-loop
+@yolk/agent/loop
   loops LLM <> tools
 ```
 

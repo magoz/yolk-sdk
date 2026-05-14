@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@yolk/protocol'
+import type { AgentEvent } from '@yolk/agent/protocol'
 import { contentPreview, countLabel, truncate, unknownPreview } from './agent-format'
 
 export type ActivityTone = 'neutral' | 'active' | 'success' | 'error' | 'tool'

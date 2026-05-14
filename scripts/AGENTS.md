@@ -9,6 +9,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | `clone-repos.ts` | Delete/re-clone gitignored reference repos under `.repos/*` |
 | `build-skillset.ts` | Compile local `.opencode/skills/*` into Cloudflare generated skillset |
 | `codex-ws-smoke.ts` | Manual Codex WebSocket smoke check |
+| `check-package-boundaries.ts` | Validate app/package facade import boundary rules |
 
 ## Rules
 

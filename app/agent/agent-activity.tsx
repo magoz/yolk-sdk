@@ -1,4 +1,4 @@
-import type { AgentRunStatus } from '@yolk/client'
+import type { AgentRunStatus } from '@yolk/agent/client'
 import { Badge } from '@/components/ui/badge'
 import { countLabel } from './agent-format'
 import { activityPanelId, type ActivityTone, type AgentActivityItem } from './agent-activity-model'

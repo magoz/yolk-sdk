@@ -1,0 +1,51 @@
+{
+  "name": "@yolk/rag",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./agent": {
+      "types": "./src/agent.ts",
+      "default": "./src/agent.ts"
+    },
+    "./chunking": {
+      "types": "./src/chunking.ts",
+      "default": "./src/chunking.ts"
+    },
+    "./documents": {
+      "types": "./src/documents.ts",
+      "default": "./src/documents.ts"
+    },
+    "./embeddings": {
+      "types": "./src/embeddings.ts",
+      "default": "./src/embeddings.ts"
+    },
+    "./ingestion": {
+      "types": "./src/ingestion.ts",
+      "default": "./src/ingestion.ts"
+    },
+    "./retrieval": {
+      "types": "./src/retrieval.ts",
+      "default": "./src/retrieval.ts"
+    },
+    "./vector-store": {
+      "types": "./src/vector-store.ts",
+      "default": "./src/vector-store.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

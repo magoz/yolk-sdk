@@ -1,0 +1,332 @@
+import {
+  type AgentEvent,
+  type AgentMessage,
+  type ToolCall,
+  type ToolResult,
+  type UserMessage
+} from '@yolk/agent/protocol'
+
+export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
+
+export type AgentToolRun =
+  | {
+      readonly _tag: 'InputStreaming'
+      readonly id: string
+      readonly name?: string
+      readonly input: string
+    }
+  | { readonly _tag: 'InputReady'; readonly call: ToolCall }
+  | { readonly _tag: 'ApprovalRequested'; readonly call: ToolCall }
+  | { readonly _tag: 'Denied'; readonly toolCallId: string; readonly reason: string }
+  | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
+  | {
+      readonly _tag: 'Completed'
+      readonly call: ToolCall
+      readonly result: ToolResult
+      readonly startedAtMs: number
+      readonly endedAtMs: number
+    }
+  | {
+      readonly _tag: 'Errored'
+      readonly call: ToolCall
+      readonly message: string
+      readonly endedAtMs: number
+    }
+  | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
+
+type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Executing' | 'Completed' }>
+
+export type AgentClientState = {
+  readonly status: AgentRunStatus
+  readonly messages: ReadonlyArray<AgentMessage>
+  readonly liveMessages: ReadonlyArray<AgentMessage>
+  readonly text: string
+  readonly reasoning: string
+  readonly toolRuns: ReadonlyArray<AgentToolRun>
+  readonly error: string | null
+  readonly seenEventIds: ReadonlyArray<string>
+}
+
+export type ApplyAgentEventOptions = {
+  readonly nowMs?: number
+}
+
+export type AgentTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
+
+export const initialAgentClientState: AgentClientState = {
+  status: 'idle',
+  messages: [],
+  liveMessages: [],
+  text: '',
+  reasoning: '',
+  toolRuns: [],
+  error: null,
+  seenEventIds: []
+}
+
+const hasSeenEvent = (state: AgentClientState, event: AgentEvent) =>
+  event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
+
+const rememberEvent = (state: AgentClientState, event: AgentEvent): AgentClientState =>
+  event.eventId === undefined
+    ? state
+    : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
+
+const toolRunId = (run: AgentToolRun) => {
+  switch (run._tag) {
+    case 'InputStreaming':
+      return run.id
+    case 'Denied':
+      return run.toolCallId
+    case 'InputReady':
+    case 'ApprovalRequested':
+    case 'Executing':
+    case 'Completed':
+    case 'Errored':
+    case 'ProviderCompleted':
+      return run.call.id
+  }
+}
+
+export const isActiveToolRun = (run: AgentToolRun) =>
+  run._tag !== 'Completed' &&
+  run._tag !== 'Errored' &&
+  run._tag !== 'Denied' &&
+  run._tag !== 'ProviderCompleted'
+
+export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
+  runs.filter(run => run._tag === 'Completed')
+
+const replaceToolRun = (
+  runs: ReadonlyArray<AgentToolRun>,
+  run: AgentToolRun
+): ReadonlyArray<AgentToolRun> => {
+  const id = toolRunId(run)
+  const replaceIndex = runs.findIndex(current => toolRunId(current) === id)
+
+  if (replaceIndex === -1) {
+    return [...runs, run]
+  }
+
+  return runs.flatMap((current, index) => {
+    if (toolRunId(current) !== id) {
+      return [current]
+    }
+
+    return index === replaceIndex ? [run] : []
+  })
+}
+
+const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun =>
+  run._tag === 'Executing' || run._tag === 'Completed'
+
+const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
+  runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
+
+const appendToolInputDelta = (
+  runs: ReadonlyArray<AgentToolRun>,
+  id: string,
+  delta: string
+): ReadonlyArray<AgentToolRun> =>
+  runs.map(run =>
+    run._tag === 'InputStreaming' && run.id === id ? { ...run, input: `${run.input}${delta}` } : run
+  )
+
+export const appendAgentMessage = (
+  messages: ReadonlyArray<AgentMessage>,
+  message: AgentMessage
+): AgentTranscript => {
+  const first = messages[0]
+
+  if (first === undefined) {
+    return [message]
+  }
+
+  return [first, ...messages.slice(1), message]
+}
+
+export const applyAgentEvent = (state: AgentClientState, event: AgentEvent): AgentClientState => {
+  const nowMs = 0
+
+  return applyAgentEventWithOptions(state, event, { nowMs })
+}
+
+export const applyAgentEventWithOptions = (
+  state: AgentClientState,
+  event: AgentEvent,
+  options: ApplyAgentEventOptions = {}
+): AgentClientState => {
+  const nowMs = options.nowMs ?? 0
+
+  if (hasSeenEvent(state, event)) {
+    return state
+  }
+
+  return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
+}
+
+const applyAgentEventUnchecked = (
+  state: AgentClientState,
+  event: AgentEvent,
+  nowMs: number
+): AgentClientState => {
+  switch (event._tag) {
+    case 'AgentStart':
+      return {
+        ...state,
+        status: 'running',
+        text: '',
+        reasoning: '',
+        liveMessages: [],
+        toolRuns: completedToolRuns(state.toolRuns),
+        error: null
+      }
+    case 'AgentError':
+      return markAgentError(state, event.message)
+    case 'LLMTextDelta':
+      return { ...state, text: `${state.text}${event.text}` }
+    case 'LLMReasoningDelta':
+      return { ...state, reasoning: `${state.reasoning}${event.text}` }
+    case 'ToolInputStart':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'InputStreaming',
+          id: event.id,
+          name: event.name,
+          input: ''
+        })
+      }
+    case 'ToolInputDelta':
+      return { ...state, toolRuns: appendToolInputDelta(state.toolRuns, event.id, event.delta) }
+    case 'ToolInputEnd':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'InputReady', call: event.call })
+      }
+    case 'ToolApprovalRequested':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'ApprovalRequested', call: event.call })
+      }
+    case 'ToolApprovalGranted':
+      return state
+    case 'ToolApprovalDenied':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Denied',
+          toolCallId: event.toolCallId,
+          reason: event.reason
+        })
+      }
+    case 'ToolExecutionStarted':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Executing',
+          call: event.call,
+          startedAtMs: nowMs
+        })
+      }
+    case 'ToolExecutionCompleted': {
+      const endedAtMs = nowMs
+      const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
+
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Completed',
+          call: event.call,
+          result: event.result,
+          startedAtMs,
+          endedAtMs
+        })
+      }
+    }
+    case 'ToolExecutionError':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'Errored',
+          call: event.call,
+          message: event.message,
+          endedAtMs: nowMs
+        })
+      }
+    case 'ProviderToolResult':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'ProviderCompleted',
+          call: event.call,
+          result: event.result
+        })
+      }
+    case 'AssistantMessage':
+      return {
+        ...state,
+        liveMessages: [...state.liveMessages, event.message],
+        text: '',
+        reasoning: ''
+      }
+    case 'AgentEnd':
+      return {
+        ...state,
+        status: 'done',
+        messages: [...state.messages, ...event.messages],
+        liveMessages: [],
+        text: '',
+        reasoning: '',
+        toolRuns: completedToolRuns(state.toolRuns)
+      }
+    case 'AgentRetry':
+    case 'CompactionEnd':
+    case 'CompactionStart':
+    case 'LLMStreamEnd':
+    case 'LLMStreamStart':
+    case 'TurnEnd':
+    case 'TurnStart':
+    case 'UsageUpdate':
+      return state
+  }
+}
+
+export const submitAgentUserMessage = (
+  state: AgentClientState,
+  message: UserMessage
+): AgentClientState => ({
+  ...state,
+  status: 'running',
+  messages: appendAgentMessage(state.messages, message),
+  liveMessages: [],
+  text: '',
+  reasoning: '',
+  toolRuns: completedToolRuns(state.toolRuns),
+  error: null,
+  seenEventIds: []
+})
+
+export const markAgentError = (
+  state: AgentClientState,
+  message = 'Agent request failed'
+): AgentClientState => ({
+  ...state,
+  status: 'error',
+  toolRuns: completedToolRuns(state.toolRuns),
+  error: message
+})
+
+export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
+  ...state,
+  status: 'aborted',
+  toolRuns: completedToolRuns(state.toolRuns),
+  error: null
+})
+
+export const reduceAgentEvents = (
+  events: ReadonlyArray<AgentEvent>,
+  initialState: AgentClientState = initialAgentClientState,
+  options: ApplyAgentEventOptions = {}
+) =>
+  events.reduce((state, event) => applyAgentEventWithOptions(state, event, options), initialState)

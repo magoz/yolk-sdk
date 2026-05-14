@@ -6,7 +6,7 @@ Filesystem boundary for app-owned remote MCP server configuration.
 
 - Reads `.yolk/mcp.json` or `.opencode/mcp.json` from project root.
 - Config shape is an array of remote MCP servers: name, type, url, headers, enabled.
-- App supports remote MCP only; local stdio stays in `@yolk/mcp-client` package tests/core.
+- App supports remote MCP only; local stdio stays in `@yolk/mcp/client` package tests/core.
 
 ## Boundaries
 

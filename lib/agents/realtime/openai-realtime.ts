@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import type { ToolDef } from '@yolk/protocol'
+import type { ToolDef } from '@yolk/agent/protocol'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
 export type OpenAiRealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'

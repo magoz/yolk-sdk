@@ -1,4 +1,4 @@
-import type { AgentUsage } from '@yolk/protocol'
+import type { AgentUsage } from '@yolk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import {
   agentTextContextBudget,

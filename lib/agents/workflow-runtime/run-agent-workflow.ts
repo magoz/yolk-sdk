@@ -21,8 +21,8 @@ import {
   UsageUpdate,
   zeroAgentUsage,
   AgentEvent
-} from '@yolk/protocol'
-import { runModelTurn, runToolBatch } from '@yolk/agent-loop'
+} from '@yolk/agent/protocol'
+import { runModelTurn, runToolBatch } from '@yolk/agent/loop'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {

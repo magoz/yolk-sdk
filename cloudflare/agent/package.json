@@ -13,12 +13,11 @@
     "tail": "alchemy tail"
   },
   "dependencies": {
-    "@yolk/agent-loop": "workspace:^",
-    "@yolk/agent-runtime": "workspace:^",
+    "@yolk/agent": "workspace:^",
     "@yolk/anthropic": "workspace:^",
+    "@yolk/mcp": "workspace:^",
     "@yolk/oauth": "workspace:^",
     "@yolk/openai": "workspace:^",
-    "@yolk/protocol": "workspace:^",
     "@yolk/skillset": "workspace:^",
     "alchemy": "2.0.0-beta.36",
     "effect": "catalog:"

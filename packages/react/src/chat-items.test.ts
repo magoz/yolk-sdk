@@ -9,7 +9,7 @@ import {
   ToolResult,
   ToolResultMessage,
   UserMessage
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import { buildAgentChatItems } from './chat-items'
 import { buildAgentChatMessages, toAgentMessages } from './chat-messages'
 

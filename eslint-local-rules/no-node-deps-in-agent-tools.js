@@ -58,7 +58,7 @@ const isForbiddenImport = source => {
     return true
   }
 
-  if (source === '@yolk/mcp-client/node' || source === '@yolk/mcp-client/node.ts') {
+  if (source === '@yolk/mcp/client/node' || source === '@yolk/mcp/client/node.ts') {
     return true
   }
 

@@ -18,8 +18,8 @@ import {
   LLMUsage,
   type LLMEvent,
   type LLMRequest
-} from '@yolk/agent-loop'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk/protocol'
+} from '@yolk/agent/loop'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk/agent/protocol'
 import {
   streamOpenAiCodexResponse,
   toOpenAiCodexRequestBody

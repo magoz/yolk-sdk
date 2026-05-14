@@ -9,8 +9,8 @@ import {
   LLMTextDelta,
   LLMToolCall,
   LLMUsage
-} from '@yolk/agent-loop'
-import { UserMessage } from '@yolk/protocol'
+} from '@yolk/agent/loop'
+import { UserMessage } from '@yolk/agent/protocol'
 
 import { TokenBrokerResponse } from '@yolk/oauth'
 import { openAiCodexProviderId } from '@yolk/openai'

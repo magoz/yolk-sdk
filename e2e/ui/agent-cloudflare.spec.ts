@@ -6,7 +6,7 @@ import {
   UserInput,
   UserMessage,
   type AgentWebSocketServerMessage as AgentWebSocketServerMessageType
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import { test, expect } from '../fixtures'
 
 type SocketTurnResult = {

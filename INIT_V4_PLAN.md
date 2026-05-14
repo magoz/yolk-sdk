@@ -126,10 +126,10 @@ packages:
 Enforce:
 
 ```txt
-@yolk/protocol
-@yolk/agent-loop    -> @yolk/protocol, effect
-@yolk/agent-runtime -> @yolk/protocol, @yolk/agent-loop, effect
-@yolk/client        -> @yolk/protocol
+@yolk/agent/protocol
+@yolk/agent/loop    -> @yolk/agent/protocol, effect
+@yolk/agent/runtime -> @yolk/agent/protocol, @yolk/agent/loop, effect
+@yolk/agent/client        -> @yolk/agent/protocol
 root app            -> any package
 ```
 
@@ -173,8 +173,8 @@ After setup, update docs if actual paths differ:
 
 Do not start with runtime. Build smallest vertical slice:
 
-1. `@yolk/protocol` message/event schemas
-2. `@yolk/agent-loop` text-only loop
+1. `@yolk/agent/protocol` message/event schemas
+2. `@yolk/agent/loop` text-only loop
 3. faux provider
 4. one passing agent-loop test
 5. runtime skeleton after loop works

@@ -19,7 +19,7 @@ import {
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import type { ToolDef } from '@yolk/protocol'
+import type { ToolDef } from '@yolk/agent/protocol'
 
 export const dynamic = 'force-dynamic'
 

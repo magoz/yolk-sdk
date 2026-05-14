@@ -1,5 +1,5 @@
 import { Array as Arr, Option } from 'effect'
-import { contentText, type ToolResult, type Content, type ToolCall } from '@yolk/protocol'
+import { contentText, type ToolResult, type Content, type ToolCall } from '@yolk/agent/protocol'
 import type { AgentChatMessage, ChatToolState } from './chat-messages.ts'
 
 export type ToolDuration =

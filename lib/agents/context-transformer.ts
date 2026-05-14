@@ -10,8 +10,8 @@ import {
   contentText,
   type AgentMessage,
   type Content
-} from '@yolk/protocol'
-import { ContextTransformer, type ContextTransformResult } from '@yolk/agent-loop'
+} from '@yolk/agent/protocol'
+import { ContextTransformer, type ContextTransformResult } from '@yolk/agent/loop'
 import { agentTextContextBudget } from './context-budget'
 
 export const contextCompactionStrategy = 'window-summary-v1'

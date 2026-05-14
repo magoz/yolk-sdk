@@ -58,7 +58,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
-- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/client` to Next, Workflow, or Cloudflare runtimes.
+- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/agent/client` to Next, Workflow, or Cloudflare runtimes.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 

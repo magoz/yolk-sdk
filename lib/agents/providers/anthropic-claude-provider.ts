@@ -17,7 +17,7 @@ import {
   type Content,
   type ContentPart,
   type ToolDef
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import {
   LLMError,
   LLMDone,
@@ -28,7 +28,7 @@ import {
   LLMUsage,
   type LLMEvent,
   type LLMRequest
-} from '@yolk/agent-loop'
+} from '@yolk/agent/loop'
 import { anthropicClaudeOAuthUserAgent } from '@yolk/anthropic'
 
 type AnthropicClaudeProviderToken = {

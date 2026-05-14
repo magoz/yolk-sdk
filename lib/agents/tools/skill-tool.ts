@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk/agent-loop'
-import { ToolDef, ToolResult } from '@yolk/protocol'
-import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
+import { ToolError } from '@yolk/agent/loop'
+import { ToolDef, ToolResult } from '@yolk/agent/protocol'
+import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
 import type { SkillInfo } from '@yolk/skillset'
 import type { AgentToolContext } from './tool-context.ts'
 

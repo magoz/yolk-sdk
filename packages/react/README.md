@@ -47,7 +47,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 
 ## Package layering
 
-- Use `@yolk/client` for framework-agnostic transport/state, including CLI clients.
+- Use `@yolk/agent/client` for framework-agnostic transport/state, including CLI clients.
 - Use `@yolk/react` for React apps that need headless chat state.
 - Keep host-specific UI, auth, providers, and tools in the app.
 

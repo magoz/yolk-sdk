@@ -1,4 +1,4 @@
-import { resolveTools, type ToolModule } from '@yolk/tool-registry'
+import { resolveTools, type ToolModule } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context'
 
 export const resolveAgentToolSet = (input: {

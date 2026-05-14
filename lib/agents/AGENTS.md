@@ -57,14 +57,14 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
-- `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/tool-registry`; use this at new route/runtime boundaries.
+- `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/agent/tools`; use this at new route/runtime boundaries.
 - `web_fetch`/`web_search` are text+voice; skill and remote MCP tools are text-only.
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
-- App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/tool-registry`
+- App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/agent/tools`
 - Cloudflare adapter imports shared text tool composition via `cloudflare/agent/src/tool-modules.ts`; parity tests cover base tools and fake remote MCP.
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - No product permissions yet; durable transcript exists only in Cloudflare DO runtime
@@ -79,7 +79,7 @@ Configured MCP source:
 MCP security:
 
 - Remote URLs require `https:`.
-- Local stdio MCP remains package-level only; app tools must not import `@yolk/mcp-client/node` or provide Node process services.
+- Local stdio MCP remains package-level only; app tools must not import `@yolk/mcp/client/node` or provide Node process services.
 - Invalid config or unavailable servers log warning and omit those tools.
 
 ## JSON Boundaries

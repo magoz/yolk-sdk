@@ -49,23 +49,23 @@ Core package boundaries decided. Product-layer details still open.
 
 Researched OpenAI Agents SDK, LangChain/LangGraph, Vercel AI SDK, MCP, AG-UI, AutoGen, Semantic Kernel, Pydantic AI, CrewAI, and Google ADK.
 
-Decision: name the low-level package `@yolk/agent-loop`.
+Decision: name the low-level package `@yolk/agent/loop`.
 
 Why:
 
 - OpenAI and LangChain use **agent loop** for the model/tool iteration we implement.
-- LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk/agent-runtime`.
+- LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk/agent/runtime`.
 - LangChain and Pydantic use **harness** for more opinionated, batteries-included layers with built-in tools, prompts, context engineering, subagents, or capability libraries. Our package intentionally excludes those.
-- MCP and AG-UI are protocol names for agent↔tools/data and agent↔UI boundaries. They validate keeping `@yolk/protocol` separate, but do not name the loop package.
+- MCP and AG-UI are protocol names for agent↔tools/data and agent↔UI boundaries. They validate keeping `@yolk/agent/protocol` separate, but do not name the loop package.
 
 Naming map:
 
 | Industry term | Yolk package          | Notes                                                     |
 | ------------- | --------------------- | --------------------------------------------------------- |
-| Protocol      | `@yolk/protocol`      | Wire/event/schema contract.                               |
-| Agent loop    | `@yolk/agent-loop`    | Stateless LLM/tool loop.                                  |
-| Agent runtime | `@yolk/agent-runtime` | Sessions, persistence, adapters, resumable runs.          |
-| Client SDK    | `@yolk/client`        | Browser protocol + reducer.                               |
+| Protocol      | `@yolk/agent/protocol`      | Wire/event/schema contract.                               |
+| Agent loop    | `@yolk/agent/loop`    | Stateless LLM/tool loop.                                  |
+| Agent runtime | `@yolk/agent/runtime` | Sessions, persistence, adapters, resumable runs.          |
+| Client SDK    | `@yolk/agent/client`        | Browser protocol + reducer.                               |
 | Harness       | Reserved              | Future opinionated batteries-included package, if needed. |
 
 ### Not yet discussed
@@ -75,6 +75,1169 @@ Naming map:
 - React UI (chat interface, knowledge browser)
 - Deployment (Wrangler config, CI/CD)
 - v1 scope (prioritized task list)
+
+---
+
+## Package Layer Big Vision — Research Notes
+
+Date: 2026-05-14
+
+Status: pure research. Nothing here is decided.
+
+Assumption: if Vercel Workflow runtime becomes part of the stack, next package-layer work could build a reusable spine around it: persistence, durable tools, retrieval, memory, evals, then planning.
+
+### Possible order
+
+1. **Persistence contracts** — durable sessions, events, snapshots, artifacts, checkpoints.
+2. **Durable tool runs** — idempotent, persisted, resumable tool execution.
+3. **RAG primitives** — domain-free indexing/retrieval pipeline.
+4. **Memory system** — explicit proposal/commit model for user/session/org memory.
+5. **Eval/replay harness** — transcript replay, fixtures, golden tests, judge adapters.
+6. **Task graph/planner** — long-running structured plans after durability exists.
+
+### 1. Persistence layer
+
+Goal: make runtime durable without app coupling.
+
+Possible package shapes:
+
+- Extend `@yolk/agent/runtime`
+- Or add `@yolk/session-store`
+
+Core abstractions:
+
+- `SessionStore`
+- `SessionEventStore`
+- `SnapshotStore`
+- `ArtifactStore`
+- `CheckpointStore`
+
+Backends should be adapters, not baked in:
+
+- memory
+- Postgres
+- Redis/KV
+- Durable Object
+- Vercel Workflow state
+- R2/S3 for artifacts
+
+Why first: every higher-level capability needs durable transcript, replay, resume, audit, and evals.
+
+Shape:
+
+```ts
+interface SessionEventStore {
+  append(sessionId, events)
+  read(sessionId, cursor?)
+  compact?(sessionId)
+}
+```
+
+### 2. Durable tool execution
+
+Goal: make tools resumable and idempotent across Workflow/DO/Node runtimes.
+
+Possible package shapes:
+
+- Extend `@yolk/agent/runtime`
+- Or add `@yolk/tool-runtime`
+
+Needed concepts:
+
+- `toolCallId`
+- idempotency key
+- persisted input/output/error
+- timeout
+- retry policy
+- approval state
+- cancellation
+- human-in-the-loop gate
+
+This should come before RAG so retrieval/tools can share the same execution semantics.
+
+### 3. RAG primitives
+
+Goal: reusable, domain-free retrieval pipeline. Do not make RAG one monolith.
+
+Possible package shapes:
+
+- `@yolk/rag`
+- Split later into `@yolk/retrieval` and `@yolk/indexing` if needed.
+
+Core abstractions:
+
+- `DocumentLoader`
+- `Chunker`
+- `Embedder`
+- `VectorStore`
+- `Retriever`
+- `Reranker`
+- `CitationBuilder`
+
+Pipeline:
+
+```text
+Load -> Normalize -> Chunk -> Embed -> Index
+Query -> Embed -> Retrieve -> Rerank -> ContextPack
+```
+
+Candidate backends:
+
+- pgvector
+- Cloudflare Vectorize
+- LibSQL/Turso vector
+- Pinecone/Weaviate later
+- in-memory for tests
+
+Product tools like `search_knowledge` can sit at app layer over these package primitives.
+
+### 4. Agent memory
+
+RAG is external knowledge retrieval. Memory is agent/session/user-derived facts, preferences, and tasks.
+
+Possible package:
+
+- `@yolk/memory`
+
+Memory types:
+
+- episodic: conversation events
+- semantic: extracted stable facts
+- procedural: user/project preferences
+- working: current run scratchpad
+
+Important: the model should propose memory writes, not mutate memory directly.
+
+```text
+MemoryProposal -> validate -> approve/auto-accept -> commit
+```
+
+### 5. Eval and replay
+
+Goal: compare runtime behavior before complexity compounds.
+
+Possible package:
+
+- `@yolk/evals`
+
+Features:
+
+- transcript replay
+- deterministic tool fixtures
+- golden tests
+- judge model adapters
+- span/event export
+- cost/latency/token accounting
+
+Use this to compare:
+
+- stateless runtime vs Workflow runtime
+- RAG strategies
+- provider behavior
+- tool-selection changes
+
+### 6. Task graph / planner
+
+Goal: structured long-running work after persistence and durable tools exist.
+
+Possible package:
+
+- `@yolk/planner`
+
+Core types:
+
+- `Task`
+- `Plan`
+- `Step`
+- `Dependency`
+- `Status`
+- `Artifact`
+
+Do not start here. Planning without durable execution becomes display-only state.
+
+### Working hypothesis
+
+Do **persistence + durable tool runs next**.
+
+RAG is tempting, but without durable sessions/tool calls it becomes another stateless helper. Persistence gives the package layer a spine.
+
+### Open questions
+
+- Postgres first?
+- R2/S3 artifacts needed?
+- Memory app-specific or package?
+- RAG source types first?
+- Workflow runtime owns checkpoints?
+
+---
+
+## Package Purpose and Boundary — Research Notes
+
+Date: 2026-05-14
+
+Status: pure research. Nothing here is decided.
+
+Question: what are `packages/*` for? Current working frame: packages are an **agent construction kit**, not Yolk application/business logic.
+
+### Possible core principle
+
+`packages/*` should help build agents, not Yolk-the-app.
+
+Package code should stay:
+
+- domain-free
+- product-free
+- auth-free
+- billing-free
+- org/user/team-free
+- mostly provider/storage abstract
+- portable across Next, Worker, Node, browser where possible
+
+App layer should own:
+
+- users/orgs/teams
+- permissions
+- billing
+- OAuth tokens
+- DB schema
+- product workflows
+- specific integrations
+- deployment topology
+
+### Package categories
+
+#### 1. Agent primitives
+
+Clearly package-worthy.
+
+Existing examples:
+
+- `@yolk/agent/protocol`
+- `@yolk/agent/loop`
+- `@yolk/agent/runtime`
+- `@yolk/agent/client`
+- `@yolk/react`
+- `@yolk/mcp/client`
+- `@yolk/mcp/server`
+- `@yolk/vercel-workflows-runtime`
+
+Possible future examples:
+
+- `@yolk/tool-runtime`
+- `@yolk/memory`
+- `@yolk/retrieval`
+- `@yolk/evals`
+
+These are about generic agent systems.
+
+#### 2. Adapter packages
+
+Maybe package-worthy if generic and thin.
+
+Examples:
+
+- `@yolk/session-store-postgres`
+- `@yolk/session-store-cloudflare-do`
+- `@yolk/vercel-workflow-checkpoints`
+- `@yolk/vector-store-vectorize`
+- `@yolk/vector-store-pgvector`
+
+These can have specific tech opinions, but should not have product opinions.
+
+Good:
+
+```text
+@yolk/session-store-postgres
+```
+
+Bad:
+
+```text
+@yolk/org-knowledge-postgres
+```
+
+#### 3. Application/business logic
+
+Probably not package-worthy unless intentionally making a product SDK.
+
+Examples likely app-layer:
+
+- org knowledge store
+- team memory
+- user integrations
+- company world model
+- Yolk agent
+- Gmail ingestion
+- Notion sync
+- billing-aware tool permissions
+
+These may use package primitives, but should not live in reusable packages by default.
+
+### Storage opinions
+
+Possible rule: core packages define interfaces; adapter packages implement specific storage/tech.
+
+Example:
+
+```text
+@yolk/agent/runtime
+  defines SessionEventStore
+
+@yolk/session-store-memory
+  implements SessionEventStore
+
+@yolk/session-store-postgres
+  implements SessionEventStore
+
+@yolk/session-store-cloudflare-do
+  implements SessionEventStore
+```
+
+Alternative: keep adapters inside the same package initially:
+
+```text
+packages/agent-runtime/src/stores/memory.ts
+packages/agent-runtime/src/stores/postgres.ts
+```
+
+Risk: heavy deps leak into core packages. Split once dependencies get heavy.
+
+### Retrieval/RAG boundary example
+
+Core package, maybe `@yolk/retrieval`, could contain:
+
+- document model
+- chunker interface
+- embedder interface
+- vector store interface
+- retriever composition
+- citation model
+- context packing
+
+App layer should contain:
+
+- org knowledge permissions
+- source definitions
+- ingestion jobs
+- R2/file layout
+- DB schema
+- what documents a user can search
+
+Adapter packages could include:
+
+- `@yolk/vector-store-pgvector`
+- `@yolk/vector-store-cloudflare-vectorize`
+- `@yolk/embedder-openai`
+- `@yolk/embedder-workers-ai`
+
+### Memory boundary example
+
+Package could define mechanics:
+
+- memory proposal
+- memory type
+- scoring
+- merge policy hooks
+- storage interface
+
+App should own semantics:
+
+- what is safe to remember
+- user/org privacy rules
+- approval policy
+- where memory is visible
+- how memory affects prompts
+
+### Working bias
+
+Keep package layer as an **agent construction kit**.
+
+It should answer:
+
+> How do I build a durable, tool-using, streaming, replayable, evaluable agent?
+
+It should not answer:
+
+> How does Yolk organize company knowledge?
+
+That belongs app-side.
+
+### Useful test
+
+A package belongs in `packages/*` if another unrelated product could use it.
+
+Likely package-worthy:
+
+- durable agent sessions
+- tool call idempotency
+- transcript reducer
+- RAG pipeline primitives
+
+Likely app-layer:
+
+- org knowledge permissions
+- Gmail sync
+- company memory policy
+
+### Open questions
+
+- Packages public SDK eventually?
+- Split adapters now or later?
+- Browser portability required for all?
+- Memory generic enough?
+- RAG package name: `rag` or `retrieval`?
+
+---
+
+## Effect v4 Package Consolidation — Research Notes
+
+Date: 2026-05-14
+
+Status: pure research. Nothing here is decided.
+
+Source: `.repos/effect` (`effect-smol`) plus GitHub PR/release trail.
+
+### Finding
+
+Effect v4 is **not moving everything into one package**.
+
+It is moving toward:
+
+1. one core package for generic primitives
+2. separate packages for platform/provider/tech adapters
+3. single version across the ecosystem
+
+This is relevant to Yolk package design.
+
+### Evidence from `MIGRATION.md`
+
+Effect v4 says:
+
+- all Effect ecosystem packages now share a **single version number**
+- many packages merged into core `effect`
+- separate packages remain for:
+  - `@effect/platform-*`
+  - `@effect/sql-*`
+  - `@effect/ai-*`
+  - `@effect/opentelemetry`
+  - `@effect/atom-*`
+  - `@effect/vitest`
+
+Core `effect` now exports unstable modules:
+
+```text
+effect/unstable/ai
+effect/unstable/cli
+effect/unstable/cluster
+effect/unstable/http
+effect/unstable/httpapi
+effect/unstable/persistence
+effect/unstable/rpc
+effect/unstable/sql
+effect/unstable/workflow
+effect/unstable/workers
+```
+
+Tech-specific packages still exist:
+
+```text
+@effect/platform-node
+@effect/platform-browser
+@effect/sql-pg
+@effect/sql-d1
+@effect/sql-sqlite-do
+@effect/ai-openai
+@effect/ai-anthropic
+```
+
+### Motivation found
+
+#### 1. Version compatibility
+
+v3 had independently versioned packages:
+
+```text
+effect@3.x
+@effect/platform@0.x
+@effect/sql@0.x
+```
+
+This made compatibility hard to track.
+
+v4 aligns package versions:
+
+```text
+effect@4.0.0-beta.66
+@effect/sql-pg@4.0.0-beta.66
+@effect/ai-openai@4.0.0-beta.66
+```
+
+Same version means ecosystem compatibility is obvious.
+
+#### 2. Package consolidation
+
+Generic modules moved into `effect` to reduce ecosystem fragmentation.
+
+Examples of generic/conceptual modules now under core `effect`:
+
+- platform abstractions
+- rpc
+- cluster
+- http
+- workflow
+- persistence
+- sql abstractions
+
+#### 3. Adapter isolation remains
+
+Runtime/provider/storage-specific packages remain separate.
+
+Examples:
+
+- `@effect/sql-pg` depends on `pg`, `pg-pool`, `pg-cursor`
+- `@effect/platform-node` depends on Node/runtime-ish deps like `undici`
+- `@effect/ai-openai` remains provider-specific
+
+#### 4. Tree-shaking makes consolidation viable
+
+`MIGRATION.md` says core `effect` supports aggressive tree-shaking:
+
+- minimal Effect program: ~6.3 KB minified+gzipped
+- with Schema: ~15 KB minified+gzipped
+
+So a larger core package does not necessarily mean a larger app bundle if exports are modular and side-effect free.
+
+### Effect v4 pattern
+
+Rough architecture:
+
+```text
+effect
+  generic runtime + abstractions + unstable higher modules
+
+@effect/platform-*
+  runtime-specific implementations
+
+@effect/sql-*
+  database-specific implementations
+
+@effect/ai-*
+  provider-specific implementations
+
+@effect/atom-*
+  framework-specific bindings
+```
+
+### Possible Yolk implication
+
+This suggests a model between “one package for everything” and “many tiny packages forever”.
+
+Possible public package shape:
+
+```text
+@yolk/agent
+  protocol
+  loop
+  runtime
+  tool runtime
+  memory core
+  eval core
+  workflow abstractions
+
+@yolk/rag
+  documents
+  ingestion
+  chunking
+  embedding interfaces
+  vector-store interfaces
+  retrieval
+  reranking
+  citations
+  context packing
+  agent tool adapter
+
+@yolk/react
+  React bindings
+
+@yolk/vercel-workflows-runtime
+  Vercel adapter
+
+@yolk/storage-postgres
+  Postgres persistence adapter
+
+@yolk/storage-cloudflare
+  DO/R2/KV/Vectorize adapters
+
+@yolk/rag-openai
+  OpenAI embedder adapter
+
+@yolk/rag-workers-ai
+  Workers AI embedder adapter
+
+@yolk/vector-store-pgvector
+  pgvector vector-store adapter
+
+@yolk/vector-store-vectorize
+  Cloudflare Vectorize adapter
+```
+
+Names are illustrative.
+
+### Possible package principle
+
+Core package can be broad if it is:
+
+- domain-free
+- agent-specific
+- storage/provider abstract
+- dependency-light
+- side-effect free
+- tree-shakeable
+- runtime portable
+
+Split package when it:
+
+- imports platform-specific APIs
+- pulls heavy deps
+- targets a specific provider
+- targets a specific storage engine
+- is framework-specific
+
+### Possible direction for Yolk
+
+This pushes away from keeping every concept as a separate public package forever:
+
+```text
+@yolk/agent/protocol
+@yolk/agent/loop
+@yolk/agent/runtime
+@yolk/tool-runtime
+@yolk/memory
+@yolk/evals
+```
+
+And toward fewer core packages with subpath exports:
+
+```text
+@yolk/agent
+@yolk/rag
+@yolk/react
+@yolk/vercel-workflows-runtime
+@yolk/storage-*
+@yolk/rag-*
+@yolk/vector-store-*
+```
+
+Example public imports:
+
+```ts
+import { run } from "@yolk/agent/loop"
+import { Memory } from "@yolk/agent/memory"
+import { createRetriever } from "@yolk/rag/retrieval"
+```
+
+Similar in spirit to:
+
+```ts
+import { HttpClient } from "effect/unstable/http"
+```
+
+### Key takeaway
+
+Effect v4's lesson is not “one package for everything”.
+
+It is:
+
+> consolidate generic abstractions; split concrete adapters; align versions.
+
+For Yolk public packages, this likely means fewer core packages and more explicit adapter packages.
+
+---
+
+## Public Package Architecture Proposal — Research Notes
+
+Date: 2026-05-14
+
+Status: pure research. Nothing here is decided.
+
+Goal: Effect-style package architecture for Yolk: broad generic core, explicit adapters, matching versions, aggressive tree-shaking.
+
+### Target public shape
+
+Possible eventual public packages:
+
+```text
+@yolk/agent
+@yolk/rag
+@yolk/react
+@yolk/vercel-workflows-runtime
+@yolk/storage-postgres
+@yolk/storage-cloudflare
+@yolk/rag-openai
+@yolk/rag-workers-ai
+@yolk/vector-store-pgvector
+@yolk/vector-store-vectorize
+@yolk/mcp
+```
+
+Possible later packages:
+
+```text
+@yolk/evals
+@yolk/devtools
+```
+
+### Core package: `@yolk/agent`
+
+`@yolk/agent` becomes the generic agent construction kit.
+
+Possible subpath exports:
+
+```text
+@yolk/agent/protocol
+@yolk/agent/loop
+@yolk/agent/runtime
+@yolk/agent/tools
+@yolk/agent/memory
+@yolk/agent/evals
+@yolk/agent/workflow
+```
+
+Rules:
+
+- no React
+- no Next
+- no Node-only imports
+- no storage driver deps
+- no provider SDK deps
+- no app/user/org concepts
+- side-effect free
+- environment effects abstracted behind services/interfaces
+
+This is the package users install first.
+
+### Core package: `@yolk/rag`
+
+RAG is likely its own top-level package, not a subpath of `@yolk/agent`.
+
+Reason: the agent only needs RAG through tool calling. The agent does not need to know retrieval is RAG-backed. RAG is a knowledge/search subsystem with useful lifecycle outside agent loops.
+
+Possible subpath exports:
+
+```text
+@yolk/rag/documents
+@yolk/rag/ingestion
+@yolk/rag/chunking
+@yolk/rag/embeddings
+@yolk/rag/vector-store
+@yolk/rag/retrieval
+@yolk/rag/reranking
+@yolk/rag/citations
+@yolk/rag/context
+@yolk/rag/agent
+```
+
+`@yolk/rag/agent` can expose helpers like `makeRagTool(retriever)` so RAG owns how it is exposed to agents.
+
+Allowed in core `@yolk/rag`:
+
+- document/chunk schemas
+- ingestion pipeline abstractions
+- chunking algorithms
+- embedder interface
+- vector-store interface
+- retrieval composition
+- reranker interface
+- context packing
+- citation model
+- agent tool adapter
+- in-memory test adapter maybe
+
+Not allowed in core `@yolk/rag`:
+
+- OpenAI SDK
+- Workers AI bindings
+- pgvector driver
+- Cloudflare Vectorize binding
+- R2/S3 file layout
+- org/user permissions
+- product source sync logic
+
+Concrete adapters stay separate:
+
+```text
+@yolk/rag-openai
+@yolk/rag-workers-ai
+@yolk/vector-store-pgvector
+@yolk/vector-store-vectorize
+```
+
+### Framework/runtime packages
+
+#### `@yolk/react`
+
+Headless React bindings only.
+
+Possible subpaths:
+
+```text
+@yolk/react/chat
+@yolk/react/transport
+```
+
+Depends on:
+
+```text
+@yolk/agent
+react
+```
+
+No app logic.
+
+#### `@yolk/vercel-workflows-runtime`
+
+Vercel-specific durable runtime adapter.
+
+Depends on:
+
+```text
+@yolk/agent
+```
+
+and Vercel workflow primitives.
+
+It should not define protocol or agent semantics. It implements workflow execution.
+
+#### `@yolk/mcp`
+
+Possible consolidation of current `mcp-client` + `mcp-server`.
+
+Subpaths:
+
+```text
+@yolk/mcp/client
+@yolk/mcp/server
+```
+
+Open question: does MCP belong in `@yolk/agent/mcp` or separate `@yolk/mcp`?
+
+Current bias: keep separate because MCP is an ecosystem protocol, not Yolk-agent-only.
+
+### Adapter packages
+
+Split by concrete tech:
+
+```text
+@yolk/storage-postgres
+@yolk/storage-cloudflare
+@yolk/rag-openai
+@yolk/rag-workers-ai
+@yolk/vector-store-pgvector
+@yolk/vector-store-vectorize
+```
+
+These implement core interfaces:
+
+```text
+SessionEventStore
+ArtifactStore
+VectorStore
+Embedder
+CheckpointStore
+```
+
+They can have dependencies and runtime assumptions. Names make that explicit.
+
+### Versioning
+
+Use one version for all public packages.
+
+Example:
+
+```text
+@yolk/agent@0.4.0
+@yolk/react@0.4.0
+@yolk/storage-postgres@0.4.0
+```
+
+Even if only one package changed, bump all public packages together.
+
+User rule:
+
+> all Yolk packages should have same version.
+
+Implementation option: Changesets fixed/linked mode or custom release script.
+
+### Repo architecture
+
+Keep workspace packages separate internally for now, then consolidate public surface.
+
+#### Now
+
+Current internal packages:
+
+```text
+packages/protocol
+packages/agent-loop
+packages/agent-runtime
+packages/client
+packages/react
+packages/mcp-client
+packages/mcp-server
+packages/vercel-workflows-runtime
+```
+
+#### Next
+
+Create public facade package:
+
+```text
+packages/agent
+```
+
+It re-exports stable APIs from internal packages via subpaths:
+
+```text
+packages/agent/src/protocol.ts
+packages/agent/src/loop.ts
+packages/agent/src/runtime.ts
+packages/agent/src/client.ts
+```
+
+Users import:
+
+```ts
+import { run } from "@yolk/agent/loop"
+```
+
+Internals can still develop as separate workspace modules.
+
+#### Later
+
+Collapse internals if useful.
+
+Options:
+
+- keep internal packages private workspaces
+- physically merge into `packages/agent`
+
+Public contract remains `@yolk/agent`.
+
+### Aggressive tree-shaking rules
+
+#### `package.json`
+
+Every package:
+
+```json
+{
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./loop": {
+      "types": "./dist/loop.d.ts",
+      "import": "./dist/loop.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    }
+  }
+}
+```
+
+Prefer subpath exports over broad root barrels.
+
+Bad:
+
+```ts
+import * from "./everything"
+```
+
+Good:
+
+```text
+@yolk/agent/loop
+@yolk/agent/runtime
+@yolk/rag/retrieval
+```
+
+#### Code structure
+
+- no top-level mutable initialization
+- no top-level service construction with env reads
+- no global registries with side effects
+- no importing adapters from core
+- pure data modules separate from runtime modules
+- schemas split by feature
+- optional integrations behind subpaths
+
+#### Exports
+
+Use subpath exports over one giant root export.
+
+Root can be tiny:
+
+```ts
+export { version } from "./version"
+```
+
+Feature imports:
+
+```ts
+import { run } from "@yolk/agent/loop"
+import { makeRuntime } from "@yolk/agent/runtime"
+```
+
+#### Type-only dependencies
+
+Use `import type` aggressively.
+
+Avoid importing runtime code just for types.
+
+#### Constructors over singletons
+
+Bad:
+
+```ts
+export const runtime = makeRuntime()
+```
+
+Good:
+
+```ts
+export const makeRuntime = (...)
+```
+
+#### Adapter boundary
+
+Core defines:
+
+```ts
+interface SessionEventStore { ... }
+```
+
+Adapter package implements:
+
+```ts
+export const makePostgresSessionEventStore = (...)
+```
+
+Core never imports adapter.
+
+### Build strategy
+
+Use `tsup`, `rollup`, or plain `tsc + preserveModules`.
+
+For tree-shaking, prefer `preserveModules` output:
+
+```text
+dist/loop/run.js
+dist/runtime/session.js
+dist/rag/chunk.js
+```
+
+This keeps module graph visible to bundlers.
+
+Avoid bundling core packages into one big file unless tested.
+
+### Runtime support matrix
+
+Document runtime support explicitly:
+
+```text
+@yolk/agent/protocol     browser/node/worker
+@yolk/agent/loop         browser/node/worker
+@yolk/agent/runtime      node/worker
+@yolk/rag                browser/node/worker core only
+@yolk/react              browser
+@yolk/storage-postgres   node/serverless
+@yolk/storage-cloudflare worker
+```
+
+### Immediate path
+
+1. Keep current packages.
+2. Add `packages/agent` as facade.
+3. Add subpath exports.
+4. Mark old packages private or keep experimental.
+5. Add package API curation docs.
+6. Add bundle/tree-shake tests.
+7. Add fixed-version release setup.
+8. Move new generic features into `@yolk/agent/*` public API.
+9. Put adapters in separate packages only when real deps appear.
+
+### Concrete short-term package set
+
+Short-term:
+
+```text
+@yolk/agent
+@yolk/rag
+@yolk/react
+@yolk/mcp
+@yolk/vercel-workflows-runtime
+```
+
+Then:
+
+```text
+@yolk/storage-memory
+@yolk/storage-postgres
+@yolk/storage-cloudflare
+@yolk/rag-openai
+@yolk/rag-workers-ai
+@yolk/vector-store-pgvector
+@yolk/vector-store-vectorize
+```
+
+### Design rule
+
+Internal package boundaries can optimize for dev velocity.
+
+Public package boundaries should optimize for users.
+
+So Yolk can keep many internal workspaces while exposing fewer public packages.
+
+### RAG boundary decision candidate
+
+Working bias after discussion:
+
+> Agent consumes RAG via tool boundary; RAG does not belong inside agent core.
+
+If a package can be used meaningfully without an agent, it deserves top-level identity. RAG can be used for search/indexing without agents, so `@yolk/rag` likely deserves top-level package status.
+
+### Main package and protocol boundary
+
+Working bias after discussion:
+
+```text
+main package: @yolk/agent
+agent protocol: @yolk/agent/protocol
+rag: @yolk/rag
+mcp: @yolk/mcp
+react: @yolk/react
+adapters: separate
+```
+
+Mental model:
+
+```text
+@yolk/agent = build/run agents
+@yolk/rag = knowledge retrieval
+@yolk/mcp = MCP protocol
+@yolk/react = UI bindings
+```
+
+Effect precedent: generic protocol abstractions live in core `effect` (`effect/unstable/rpc`, `effect/unstable/http`, `effect/unstable/httpapi`, `effect/unstable/socket`), while concrete runtime/provider implementations split out. By analogy, Yolk's internal agent wire format belongs under `@yolk/agent/protocol`.
+
+MCP is different because it is an external ecosystem protocol, not Yolk-agent-specific, so it deserves `@yolk/mcp`.
+
+Rule:
+
+- internal Yolk agent wire format → `@yolk/agent/protocol`
+- external protocol standard → own package, e.g. `@yolk/mcp`
+- generic non-agent protocol → maybe top-level later, not now
 
 ---
 

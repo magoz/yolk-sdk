@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ImagePart, TextPart } from '@yolk/protocol'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ImagePart, TextPart } from '@yolk/agent/protocol'
 import { agentTextContextBudget, contextBudgetStatus } from '@/lib/agents/context-budget'
 import {
   formatContextPercent,

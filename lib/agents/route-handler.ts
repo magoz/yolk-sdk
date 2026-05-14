@@ -11,9 +11,9 @@ import {
   type ImagePart,
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
-} from '@yolk/protocol'
-import type { AgentLoopError } from '@yolk/agent-loop'
-import { runRuntime, runtimeErrorToAgentError, type RuntimeError } from '@yolk/agent-runtime'
+} from '@yolk/agent/protocol'
+import type { AgentLoopError } from '@yolk/agent/loop'
+import { runRuntime, runtimeErrorToAgentError, type RuntimeError } from '@yolk/agent/runtime'
 
 export class AgentResponseEncodingError extends Schema.TaggedErrorClass<AgentResponseEncodingError>()(
   'AgentResponseEncodingError',

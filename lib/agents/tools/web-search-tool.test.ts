@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolError } from '@yolk/agent-loop'
-import { ToolCall } from '@yolk/protocol'
+import { ToolError } from '@yolk/agent/loop'
+import { ToolCall } from '@yolk/agent/protocol'
 import { resolveAgentTools } from './registry'
 import {
   executeWebSearchTool,

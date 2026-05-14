@@ -20,7 +20,7 @@ import {
   type Content,
   type ContentPart,
   type ToolCall
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

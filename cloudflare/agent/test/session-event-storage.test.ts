@@ -1,7 +1,7 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent-loop'
-import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
+import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent/loop/testing'
 import {
   appendRuntimeSessionEventsToLog,
   InputAppended,
@@ -9,8 +9,8 @@ import {
   runRuntime,
   RunStarted,
   type RuntimeSessionEventLog
-} from '@yolk/agent-runtime'
-import { AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk/protocol'
+} from '@yolk/agent/runtime'
+import { AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk/agent/protocol'
 import {
   emptyRuntimeEventLog,
   interruptLatestIncompleteRun,

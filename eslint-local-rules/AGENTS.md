@@ -22,7 +22,7 @@ Small project-local ESLint plugin enforcing Effect/type-safety conventions from 
 
 - Most rules match identifiers named exactly `Effect`, `Schema`, or `Option`; aliased/direct imports may bypass checks.
 - `prefer-option-from-nullable` is a warning; the other local rules are errors.
-- `no-node-deps-in-agent-tools` applies only to non-test files under `lib/agents/tools/*`; it bans Node imports, `@effect/platform-node`, `@yolk/mcp-client/node`, and raw `fetch()`.
+- `no-node-deps-in-agent-tools` applies only to non-test files under `lib/agents/tools/*`; it bans Node imports, `@effect/platform-node`, `@yolk/mcp/client/node`, and raw `fetch()`.
 - There are no dedicated rule tests yet; validate changes with `pnpm lint`.
 
 ## Anti-Patterns

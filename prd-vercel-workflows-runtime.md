@@ -67,7 +67,7 @@ When this PRD is complete:
 ### Package Boundary
 
 - [ ] Package does not import `app/*`, `lib/services/*`, auth, telemetry, provider adapters, or app tool catalogs.
-- [ ] Package may depend on `workflow`, Effect, `@yolk/protocol`, and `@yolk/agent-loop` only when needed.
+- [ ] Package may depend on `workflow`, Effect, `@yolk/agent/protocol`, and `@yolk/agent/loop` only when needed.
 - [ ] App supplies provider/tool/runtime layers or callbacks at step boundaries.
 - [ ] App remains owner of Next route handlers and route paths.
 
@@ -114,8 +114,8 @@ When this PRD is complete:
 
 - Vercel `workflow` package.
 - Effect runtime for step internals and tests.
-- `@yolk/protocol` event/message schemas.
-- `@yolk/agent-loop` model/tool step APIs.
+- `@yolk/agent/protocol` event/message schemas.
+- `@yolk/agent/loop` model/tool step APIs.
 
 ### Data Model Changes
 

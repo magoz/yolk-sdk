@@ -1,4 +1,4 @@
-export { contentPreview } from '@yolk/protocol'
+export { contentPreview } from '@yolk/agent/protocol'
 
 export const truncate = (value: string) =>
   value.length > 240 ? `${value.slice(0, 237)}...` : value

@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolExecutor, type ToolError } from '@yolk/agent-loop'
-import { ToolCall, type Content } from '@yolk/protocol'
+import { ToolExecutor, type ToolError } from '@yolk/agent/loop'
+import { ToolCall, type Content } from '@yolk/agent/protocol'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 const maxVoiceToolResultCharacters = 6000

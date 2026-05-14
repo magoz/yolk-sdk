@@ -24,7 +24,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - `web_fetch` blocks localhost/private/reserved IPs and revalidates redirects before fetching.
 - `web_search` chooses provider by checksum unless `YOLK_WEBSEARCH_PROVIDER` overrides.
 - Invalid/unavailable remote MCP config logs warning and omits tools.
-- Local stdio MCP is package-level only; never import `@yolk/mcp-client/node` here.
+- Local stdio MCP is package-level only; never import `@yolk/mcp/client/node` here.
 
 ## Tests
 

@@ -20,11 +20,12 @@ Cloudflare app for the Yolk durable agent runtime.
 
 Primary work should stay in reusable packages first:
 
-- `@yolk/protocol`
-- `@yolk/agent-loop`
-- `@yolk/agent-runtime`
-- `@yolk/client`
-- `@yolk/tool-registry`
+- `@yolk/agent/protocol`
+- `@yolk/agent/loop`
+- `@yolk/agent/runtime`
+- `@yolk/agent/client`
+- `@yolk/agent/tools`
+- `@yolk/mcp`
 
 Cloudflare should remain a thin runtime adapter; policy, auth, token refresh, and tools stay app-owned until stable.
 
@@ -81,12 +82,12 @@ Do not build these here yet unless explicitly requested:
 - Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
 - Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
 - Token broker requests use provider ids from `@yolk/openai` / `@yolk/anthropic` and `@yolk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
-- Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk/protocol`.
+- Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk/agent/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.
 - Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
-- Persist runtime append logs; replay protocol transcripts via `@yolk/agent-runtime` helpers.
+- Persist runtime append logs; replay protocol transcripts via `@yolk/agent/runtime` helpers.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.
 - Keep tool parity tests updated when adding/removing app text tools or changing MCP discovery.
 

@@ -1,4 +1,4 @@
-import { textImageModelCapabilities, type AgentReasoningEffort } from '@yolk/protocol'
+import { textImageModelCapabilities, type AgentReasoningEffort } from '@yolk/agent/protocol'
 
 export const defaultAgentSystemPrompt = 'You are Yolk assistant. Be concise and practical.'
 export const openAiCodexTextModel = 'gpt-5.4'

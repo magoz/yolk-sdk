@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/protocol'
+import { ToolCall } from '@yolk/agent/protocol'
 import { skillToolModule } from './skill-tool'
 import { resolveAgentTools } from './registry'
 import { resolveAgentToolSet } from './resolve-toolset'

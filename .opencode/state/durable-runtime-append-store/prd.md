@@ -8,7 +8,7 @@
 
 ### What problem are we solving?
 
-`@yolk/agent-runtime` now supports append-backed sessions, but durable coverage is not complete. The remaining risk is adapter-level confidence: Cloudflare Durable Objects need tests proving multiple turns append and replay correctly, reconnect cleanup records interruptions, and docs stay aligned with the package API. Host apps should not need whole-session snapshot overwrites or ad hoc lifecycle storage.
+`@yolk/agent/runtime` now supports append-backed sessions, but durable coverage is not complete. The remaining risk is adapter-level confidence: Cloudflare Durable Objects need tests proving multiple turns append and replay correctly, reconnect cleanup records interruptions, and docs stay aligned with the package API. Host apps should not need whole-session snapshot overwrites or ad hoc lifecycle storage.
 
 ### Why now?
 
@@ -16,7 +16,7 @@ Reference repo review highlighted durable runtime/session state as the next foun
 
 ### Who is affected?
 
-- **Primary users:** App/server adapters that run `@yolk/agent-runtime` for persistent agent sessions.
+- **Primary users:** App/server adapters that run `@yolk/agent/runtime` for persistent agent sessions.
 - **Secondary users:** UI clients that need reconnect/resume, history, and consistent run state.
 
 ---
@@ -118,7 +118,7 @@ When this PRD is complete, the following will be true:
 ### System Dependencies
 
 - Effect services/layers for injected storage.
-- `@yolk/protocol` message/event schemas for persisted payloads.
+- `@yolk/agent/protocol` message/event schemas for persisted payloads.
 - No direct DB, Cloudflare, HTTP, WebSocket, or auth dependency in package code.
 
 ### Data Model Changes

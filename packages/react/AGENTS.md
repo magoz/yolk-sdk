@@ -4,7 +4,7 @@
 
 ## Role
 
-- Own React lifecycle around `@yolk/client` transport: submit, stream, abort, cleanup.
+- Own React lifecycle around `@yolk/agent/client` transport: submit, stream, abort, cleanup.
 - Own a headless chat render model: `AgentChatMessage` and `AgentChatPart`.
 - Convert between render model and protocol transcript via `toAgentMessages`.
 - Keep polished UI projection generic via `buildAgentChatItems`.

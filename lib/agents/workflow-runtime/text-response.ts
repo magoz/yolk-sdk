@@ -1,13 +1,13 @@
 import { Config, Effect, Layer } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
-import type { ContextTransformer, LLMProvider, LoopConfig, ToolExecutor } from '@yolk/agent-loop'
-import { makeToolExecutorLayer } from '@yolk/tool-registry'
+import type { ContextTransformer, LLMProvider, LoopConfig, ToolExecutor } from '@yolk/agent/loop'
+import { makeToolExecutorLayer } from '@yolk/agent/tools'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import {
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import {
   agentTextCapabilities,

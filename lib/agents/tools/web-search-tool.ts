@@ -1,9 +1,9 @@
 import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
-import { ToolError } from '@yolk/agent-loop'
-import { ToolDef, ToolResult, type ToolCall } from '@yolk/protocol'
-import type { ToolModule, ToolRegistration } from '@yolk/tool-registry'
+import { ToolError } from '@yolk/agent/loop'
+import { ToolDef, ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'

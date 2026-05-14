@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Array as Arr, Effect, Option } from 'effect'
-import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk/protocol'
+import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk/agent/protocol'
 import {
   buildAgentChatItems,
   getActiveChatToolParts,
@@ -11,7 +11,7 @@ import {
   useAgentChat,
   type AgentChatTransport
 } from '@yolk/react'
-import { cancelAgentRun, streamAgentEvents, streamAgentRunEvents, streamCloudflareAgentEvents } from '@yolk/client'
+import { cancelAgentRun, streamAgentEvents, streamAgentRunEvents, streamCloudflareAgentEvents } from '@yolk/agent/client'
 import {
   agentTextCapabilities,
   agentTextModel,

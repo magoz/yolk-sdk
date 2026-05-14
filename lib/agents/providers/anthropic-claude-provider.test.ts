@@ -1,8 +1,8 @@
 import { Effect, Layer, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, UserMessage } from '@yolk/protocol'
-import { LLMProvider } from '@yolk/agent-loop'
+import { ToolDef, UserMessage } from '@yolk/agent/protocol'
+import { LLMProvider } from '@yolk/agent/loop'
 import { makeAnthropicClaudeProviderLayer } from './anthropic-claude-provider'
 
 type CapturedRequest = {

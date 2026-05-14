@@ -1,7 +1,7 @@
 import { NodeFileSystem, NodePath } from '@effect/platform-node'
 import { Effect, FileSystem, Layer, Path } from 'effect'
 import * as Schema from 'effect/Schema'
-import type { McpRemoteServerConfig } from '@yolk/mcp-client'
+import type { McpRemoteServerConfig } from '@yolk/mcp/client'
 import { McpRemoteServerConfigsSchema } from './schema'
 
 const sourceFiles = ['.yolk/mcp.json', '.opencode/mcp.json']

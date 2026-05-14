@@ -190,7 +190,7 @@ Root Vitest currently may discover package tests; `pnpm test:run` then also runs
 
 ### Direct WebSocket specs
 
-Cloudflare direct-WS E2E may use Node-side `WebSocket` with `Effect.callback` helpers because browser WS APIs are imperative. Keep protocol encode/decode typed with `@yolk/protocol` schemas; use fresh UUID sessions and the unbootstrapped faux-provider path for deterministic persistence/conflict/fallback checks.
+Cloudflare direct-WS E2E may use Node-side `WebSocket` with `Effect.callback` helpers because browser WS APIs are imperative. Keep protocol encode/decode typed with `@yolk/agent/protocol` schemas; use fresh UUID sessions and the unbootstrapped faux-provider path for deterministic persistence/conflict/fallback checks.
 
 ### Per-file data seeding
 

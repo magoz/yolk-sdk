@@ -1,6 +1,6 @@
-import { type AgentLoopError } from '@yolk/agent-loop'
-import { runtimeErrorToAgentError, type RuntimeError } from '@yolk/agent-runtime'
-import { AgentError } from '@yolk/protocol'
+import { type AgentLoopError } from '@yolk/agent/loop'
+import { runtimeErrorToAgentError, type RuntimeError } from '@yolk/agent/runtime'
+import { AgentError } from '@yolk/agent/protocol'
 import * as Schema from 'effect/Schema'
 
 export const cloudflareRuntimeErrorToAgentError = (

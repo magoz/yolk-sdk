@@ -7,7 +7,7 @@ import {
   ToolResultMessage,
   UserMessage,
   type AgentMessage
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import {
   compactAgentMessages,
   contextCompactionStrategy,

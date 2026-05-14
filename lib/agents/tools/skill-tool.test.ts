@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/protocol'
-import { resolveTools } from '@yolk/tool-registry'
+import { ToolCall } from '@yolk/agent/protocol'
+import { resolveTools } from '@yolk/agent/tools'
 import { skillToolModule } from './skill-tool'
 
 const skillset = {

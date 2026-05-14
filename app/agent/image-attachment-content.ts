@@ -1,5 +1,5 @@
 import { Array as Arr } from 'effect'
-import { ImagePart, TextPart, type Content } from '@yolk/protocol'
+import { ImagePart, TextPart, type Content } from '@yolk/agent/protocol'
 import type {
   AgentComposerFailedImageAttachment,
   AgentComposerImageAttachment

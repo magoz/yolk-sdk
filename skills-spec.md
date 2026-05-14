@@ -38,7 +38,7 @@ Keep this app-owned first.
 - App owns prompts, config, tools, auth, and policy.
 - `/api/agent` is stateless transcript mode.
 - Browser owns transcript.
-- Tools already go through `@yolk/tool-registry`.
+- Tools already go through `@yolk/agent/tools`.
 
 ## Architecture conclusion
 
@@ -535,7 +535,7 @@ Completed:
 - Manifest schema + merge helpers.
 - App filesystem source for standard project folders.
 - App config source via `YOLK_SKILLSET` manifest JSON.
-- Text-only `skill` tool via `@yolk/tool-registry`.
+- Text-only `skill` tool via `@yolk/agent/tools`.
 - `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
 - `/api/agent/commands` lists commands and renders command prompt macros.
 - `/api/agent/commands` and Effect HttpClient command client have semantic tests.

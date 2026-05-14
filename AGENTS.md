@@ -113,20 +113,20 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `makeTextToolModules`            | Function | `lib/agents/tools/registry.ts`                         | Adds runtime-portable text tools plus caller-provided remote MCP tools               |
 | `nodeTextToolModules`            | Const    | `lib/agents/tools/registry.ts`                         | Runtime-portable text route tool modules                                             |
 | `nodeVoiceToolModules`           | Const    | `lib/agents/tools/registry.ts`                         | Runtime-portable Realtime voice tool modules                                         |
-| `run`                            | Function | `packages/agent-loop/src/run.ts`                       | Stateless LLM/tool loop                                                              |
+| `run`                            | Function | `packages/agent/src/loop/run.ts`                       | Stateless LLM/tool loop                                                              |
 | `runVercelAgentWorkflow`         | Function | `packages/vercel-workflows-runtime/src/workflow-loop.ts` | Vercel Workflow durable model/tool step loop contract                                |
-| `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`            | Stateless or append-backed runtime over agent loop                                   |
-| `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts`    | Append-only runtime event storage contract                                           |
-| `AgentTranscript`                | Type     | `packages/client/src/state.ts`                         | Non-empty client-owned protocol transcript                                           |
-| `AgentToolRun`                   | Type     | `packages/client/src/state.ts`                         | Client-side rich tool lifecycle state                                                |
+| `runRuntime`                     | Function | `packages/agent/src/runtime/run-runtime.ts`            | Stateless or append-backed runtime over agent loop                                   |
+| `SessionEventStore`              | Service  | `packages/agent/src/runtime/session-event-store.ts`    | Append-only runtime event storage contract                                           |
+| `AgentTranscript`                | Type     | `packages/agent/src/client/state.ts`                   | Non-empty client-owned protocol transcript                                           |
+| `AgentToolRun`                   | Type     | `packages/agent/src/client/state.ts`                   | Client-side rich tool lifecycle state                                                |
 | `reduceAgentChatState`           | Function | `packages/react/src/chat-core.ts`                      | Pure reducer for chat actions/events                                                 |
 | `AgentChatAction`                | Type     | `packages/react/src/chat-core.ts`                      | Headless chat reducer action model                                                   |
 | `AgentChatSessionEvent`          | Schema   | `packages/react/src/chat-session-events.ts`            | UI/session edit event model                                                          |
 | `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`                  | Headless React chat parts source of truth                                            |
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`                  | Converts chat parts to protocol transcript                                           |
-| `eventId`                        | Field    | `packages/protocol/src/event.ts`                       | Optional stream event id; client/react reducers de-dupe duplicate replay             |
-| `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`                    | Resolves configured MCP server tools                                                 |
-| `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`                    | Creates tool-only MCP JSON-RPC server                                                |
+| `eventId`                        | Field    | `packages/agent/src/protocol/event.ts`                 | Optional stream event id; client/react reducers de-dupe duplicate replay             |
+| `listMcpTools`                   | Function | `packages/mcp/src/client/client.ts`                    | Resolves configured MCP server tools                                                 |
+| `makeMcpToolServer`              | Function | `packages/mcp/src/server/server.ts`                    | Creates tool-only MCP JSON-RPC server                                                |
 | `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                          | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |
 | `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`                   | Durable Object running agent runtime + append-log persistence                        |
 | `makeCloudflareTextToolModules`  | Function | `cloudflare/agent/src/tool-modules.ts`                 | Cloudflare text toolset shim over shared app text modules                            |
@@ -228,10 +228,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `packages/vercel-workflows-runtime/AGENTS.md` - Vercel Workflow runtime contract and retry/status semantics
 - `packages/vercel-workflows-runtime/test/AGENTS.md` - Workflow directive/integration test rules
-- `packages/client/AGENTS.md` - Agent transport and protocol replay helpers
-- `packages/mcp-client/test/AGENTS.md` - MCP client transport test boundaries
-- `packages/mcp-server/test/fixtures/AGENTS.md` - MCP server stdio fixture constraints
-- `packages/agent-runtime/AGENTS.md` - Runtime append-store orchestration
+- `packages/agent/AGENTS.md` - Agent package subpaths and boundaries
+- `packages/mcp/AGENTS.md` - MCP client/server package boundaries
+- `packages/mcp/test/client/AGENTS.md` - MCP client transport test boundaries
+- `packages/mcp/test/server/fixtures/AGENTS.md` - MCP server stdio fixture constraints
 - `packages/react/AGENTS.md` - Headless React chat hook/state/session events
 - `cloudflare/agent/AGENTS.md` - Cloudflare Worker/Durable Object agent app
 - `components/ui/AGENTS.md` - UI component install sources and customizations

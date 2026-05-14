@@ -8,7 +8,7 @@ Alchemy state is local under `.alchemy/state` for now.
 - `Api` Worker exposes `/connect/:sessionId`.
 - `YolkAgent` Durable Object owns a session-scoped WebSocket.
 - Incoming WebSocket text becomes a `UserMessage`.
-- `@yolk/agent-runtime` runs in input mode.
+- `@yolk/agent/runtime` runs in input mode.
 - DO storage persists the protocol transcript.
 - A faux LLM provider replies deterministically for infra/runtime validation.
 

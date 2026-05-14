@@ -12,7 +12,7 @@ import {
   ToolDef,
   UserMessage,
   type AgentMessage
-} from '@yolk/protocol'
+} from '@yolk/agent/protocol'
 import {
   ContextTransformer,
   LLMError,
@@ -21,9 +21,9 @@ import {
   LoopConfig,
   ToolError,
   ToolExecutor
-} from '@yolk/agent-loop'
-import type { LLMRequest } from '@yolk/agent-loop'
-import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent-loop/testing'
+} from '@yolk/agent/loop'
+import type { LLMRequest } from '@yolk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent/loop/testing'
 import { AgentRouteRequest, makeAgentPostResponse } from './route-handler'
 
 const config = {

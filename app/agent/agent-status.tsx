@@ -1,5 +1,5 @@
-import type { AgentRunStatus } from '@yolk/client'
-import type { AgentReasoningEffort, AgentUsage } from '@yolk/protocol'
+import type { AgentRunStatus } from '@yolk/agent/client'
+import type { AgentReasoningEffort, AgentUsage } from '@yolk/agent/protocol'
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

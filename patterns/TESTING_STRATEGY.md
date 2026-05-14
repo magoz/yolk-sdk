@@ -172,7 +172,7 @@ test('user can login with OTP', async ({ page }) => {
 - Keep fixtures minimal and test-only; raw JSON is acceptable inside fixtures that simulate external systems.
 - Use Playwright only when asserting browser-visible UI behavior.
 
-**Example:** MCP client tests use fake `HttpClient` layers for remote JSON/SSE and the reusable `@yolk/mcp-server` fixture in `packages/mcp-server/test/fixtures/fake-stdio-mcp-server.ts` for local stdio. MCP server tests cover public JSON-RPC/HTTP entrypoints and behavior errors: unknown methods/tools, invalid params, and tool failures.
+**Example:** MCP client tests use fake `HttpClient` layers for remote JSON/SSE and the reusable `@yolk/mcp/server` fixture in `packages/mcp/test/server/fixtures/fake-stdio-mcp-server.ts` for local stdio. MCP server tests cover public JSON-RPC/HTTP entrypoints and behavior errors: unknown methods/tools, invalid params, and tool failures.
 
 ## Mock Strategy for Effect Services
 

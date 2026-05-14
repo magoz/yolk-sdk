@@ -9,7 +9,7 @@
         "Verify packages/agent-runtime/src/session-event-store.ts exports RuntimeSessionEvent variants for InputAppended, RunStarted, RunCompleted, RunFailed, and RunInterrupted.",
         "Verify StoredRuntimeSessionEvent includes id, sessionId, revision, and event.",
         "Verify SessionEventStore exposes load and append only, with no app auth, database, HTTP, WebSocket, or Cloudflare imports.",
-        "Run pnpm --filter @yolk/agent-runtime test:run and confirm SessionEventStore append/replay tests pass."
+        "Run pnpm --filter @yolk/agent/runtime test:run and confirm SessionEventStore append/replay tests pass."
       ],
       "passes": true
     },
@@ -21,7 +21,7 @@
         "Verify packages/agent-runtime/src/run-runtime.ts supports RuntimeRequest._tag AppendInput with sessionId, input, runId, and expectedRevision.",
         "Verify AppendInput loads SessionEventStore, replays prior InputAppended and RunCompleted events, appends InputAppended and RunStarted before loop execution, and appends RunCompleted after success.",
         "Verify replayRuntimeSessionEvents returns protocol AgentMessage values only, preserving ordered assistant/tool parts and ToolResult.isError metadata while excluding runtime lifecycle metadata.",
-        "Run pnpm --filter @yolk/agent-runtime test:run and confirm append input replay/completion tests pass."
+        "Run pnpm --filter @yolk/agent/runtime test:run and confirm append input replay/completion tests pass."
       ],
       "passes": true
     },
@@ -33,7 +33,7 @@
         "Verify AppendInput catches loop/runtime failures and appends RunFailed using runtimeErrorToAgentError.",
         "Verify replayRuntimeSessionEvents excludes RunFailed and RunInterrupted payloads from transcript reconstruction.",
         "Verify latestIncompleteRuntimeRun returns latest started run without RunCompleted, RunFailed, or RunInterrupted.",
-        "Run pnpm --filter @yolk/agent-runtime test:run and confirm failure/interruption tests pass."
+        "Run pnpm --filter @yolk/agent/runtime test:run and confirm failure/interruption tests pass."
       ],
       "passes": true
     },
@@ -45,7 +45,7 @@
         "Verify SessionRevision is numeric and appendRuntimeSessionEventsToLog increments revisions deterministically.",
         "Verify makeInMemorySessionEventStoreLayer rejects stale expectedRevision with SessionConflictError.",
         "Verify runRuntime AppendInput passes expectedRevision and surfaces SessionConflictError on stale input.",
-        "Run pnpm --filter @yolk/agent-runtime test:run and confirm conflict tests pass."
+        "Run pnpm --filter @yolk/agent/runtime test:run and confirm conflict tests pass."
       ],
       "passes": true
     },
@@ -57,7 +57,7 @@
         "Verify RuntimeRequest remains a union of Transcript and AppendInput.",
         "Verify Transcript mode in runRuntime does not require SessionEventStore and does not load or append persisted state.",
         "Verify runRuntime transcript tests pass without a store layer.",
-        "Run pnpm --filter @yolk/agent-runtime test:run."
+        "Run pnpm --filter @yolk/agent/runtime test:run."
       ],
       "passes": true
     },
@@ -113,7 +113,7 @@
   "context": {
     "patterns": [
       "Effect services/layers for storage and runtime dependencies.",
-      "Protocol transcript uses @yolk/protocol AgentMessage only; UI render models stay out of runtime persistence.",
+      "Protocol transcript uses @yolk/agent/protocol AgentMessage only; UI render models stay out of runtime persistence.",
       "Replay preserves ordered assistant parts and generic ToolResult.isError metadata by persisting protocol messages rather than UI-local tool state.",
       "Append replay derives transcript from InputAppended and RunCompleted only.",
       "Runtime tests use @effect/vitest, fake providers, and in-memory stores.",
