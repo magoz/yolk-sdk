@@ -1,4 +1,4 @@
-import { Config, Effect, Layer, Stream } from 'effect'
+import { Clock, Config, Effect, Layer, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk/agent/loop'
 import {
@@ -111,6 +111,10 @@ const taskResult = (input: {
   readonly output: string
   readonly subagentType: string
   readonly description: string
+  readonly subagentRunId: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+  readonly model: string
   readonly isError?: boolean
 }) =>
   ToolResult.make({
@@ -118,8 +122,14 @@ const taskResult = (input: {
     content: formatTaskResult(input.output),
     isError: input.isError,
     structuredContent: {
+      subagent_run_id: input.subagentRunId,
       subagent_type: input.subagentType,
-      description: input.description
+      description: input.description,
+      started_at_ms: input.startedAtMs,
+      ended_at_ms: input.endedAtMs,
+      duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
+      status: input.isError === true ? 'error' : 'completed',
+      model: input.model
     }
   })
 
@@ -172,66 +182,88 @@ export const makeAgentTextRuntime = (
       subagents: agentTextSubagents,
       execute: ({ call, context, params }) =>
         Effect.gen(function* () {
-          const subagentToolSet = yield* resolveAgentToolSet({
-            modules: baseToolModules,
-            context: {
-              ...context,
-              sessionId: `${context.sessionId ?? input.sessionId}:task:${call.id}`,
-              subagent: true
-            }
-          }).pipe(Effect.mapError(toolRegistryErrorToToolError))
-          const eventsChunk = yield* runRuntime(
-            {
-              _tag: 'Transcript',
-              sessionId: `${input.sessionId}:task:${call.id}`,
-              messages: [UserMessage.make({ content: params.prompt })]
-            },
-            {
-              systemPrompt: subagentPrompt({
-                subagentType: params.subagent_type,
-                baseSystemPrompt
-              }),
-              tools: subagentToolSet.tools,
-              reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
-              capabilities: agentTextCapabilities,
-              model
-            }
-          ).pipe(
-            Stream.runCollect,
-            Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet)))
-          )
-          const output = subagentResultText(Array.from(eventsChunk))
+          const startedAtMs = yield* Clock.currentTimeMillis
+          const subagentRunId = `subagent:${call.id}`
 
-          return taskResult({
-            callId: call.id,
-            output,
-            subagentType: params.subagent_type,
-            description: params.description
-          })
-        }).pipe(
-          Effect.catchTag('ToolError', error =>
-            Effect.succeed(
-              taskResult({
-                callId: call.id,
-                output: `Subagent failed: ${error.message}`,
-                subagentType: params.subagent_type,
-                description: params.description,
-                isError: true
-              })
+          return yield* Effect.gen(function* () {
+            const subagentToolSet = yield* resolveAgentToolSet({
+              modules: baseToolModules,
+              context: {
+                ...context,
+                sessionId: `${context.sessionId ?? input.sessionId}:task:${call.id}`,
+                subagent: true
+              }
+            }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+            const eventsChunk = yield* runRuntime(
+              {
+                _tag: 'Transcript',
+                sessionId: `${input.sessionId}:task:${call.id}`,
+                messages: [UserMessage.make({ content: params.prompt })]
+              },
+              {
+                systemPrompt: subagentPrompt({
+                  subagentType: params.subagent_type,
+                  baseSystemPrompt
+                }),
+                tools: subagentToolSet.tools,
+                reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
+                capabilities: agentTextCapabilities,
+                model
+              }
+            ).pipe(
+              Stream.runCollect,
+              Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet)))
             )
-          ),
-          Effect.catch(error =>
-            Effect.succeed(
-              taskResult({
-                callId: call.id,
-                output: `Subagent failed: ${unknownToMessage(error)}`,
-                subagentType: params.subagent_type,
-                description: params.description,
-                isError: true
-              })
+            const output = subagentResultText(Array.from(eventsChunk))
+            const endedAtMs = yield* Clock.currentTimeMillis
+
+            return taskResult({
+              callId: call.id,
+              output,
+              subagentType: params.subagent_type,
+              description: params.description,
+              subagentRunId,
+              startedAtMs,
+              endedAtMs,
+              model
+            })
+          }).pipe(
+            Effect.catchTag('ToolError', error =>
+              Clock.currentTimeMillis.pipe(
+                Effect.map(endedAtMs =>
+                  taskResult({
+                    callId: call.id,
+                    output: `Subagent failed: ${error.message}`,
+                    subagentType: params.subagent_type,
+                    description: params.description,
+                    subagentRunId,
+                    startedAtMs,
+                    endedAtMs,
+                    model,
+                    isError: true
+                  })
+                )
+              )
+            ),
+            Effect.catch(error =>
+              Clock.currentTimeMillis.pipe(
+                Effect.map(endedAtMs =>
+                  taskResult({
+                    callId: call.id,
+                    output: `Subagent failed: ${unknownToMessage(error)}`,
+                    subagentType: params.subagent_type,
+                    description: params.description,
+                    subagentRunId,
+                    startedAtMs,
+                    endedAtMs,
+                    model,
+                    isError: true
+                  })
+                )
+              )
             )
           )
-        )
+        })
     })
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [...baseToolModules, taskToolModule]
     const toolSet = yield* resolveAgentToolSet({

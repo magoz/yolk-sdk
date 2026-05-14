@@ -11,6 +11,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + skill + optional remote MCP tools from project files.
 - Next/Workflow text runtime exposes a package-owned `task` tool for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
 - Task subagents run with normal text tools but without the `task` tool, so recursive subagents are disabled in v1.
+- Task subagents stream `ToolExecution*` plus `SubagentStarted`/`SubagentCompleted`; final task results include structured subagent metadata for status, timing, model, and ids.
+- Parallel task execution requires the provider to emit multiple `task` calls in the same assistant turn; `parallel_tool_calls: true` is a hint, not a guarantee.
 - Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Workflow text runtime has durable execution/streaming, but product transcript is still client-owned per turn in v1
@@ -70,6 +72,7 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - Cloudflare adapter imports shared text tool composition via `cloudflare/agent/src/tool-modules.ts`; parity tests cover base tools and fake remote MCP.
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - Text tool context may include `sessionId` and `subagent` for delegated task execution/policy.
+- Subagent runtime/tool failures should return `ToolResult.isError = true` so parent turns and sibling tasks can continue.
 - No product permissions yet; durable transcript exists only in Cloudflare DO runtime
 
 Configured MCP source:

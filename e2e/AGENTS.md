@@ -1,6 +1,6 @@
 # E2E Tests
 
-Playwright tests with Effect-based setup/teardown. Uses `.env.test` with a separate test database. Prefer real app services; route-stub nondeterministic external streams only when asserting UI/request encoding.
+Playwright tests with Effect-based setup/teardown. Uses `.env.test` with a separate test database. Prefer real app services; route-stub nondeterministic external streams only when asserting UI/request encoding or streamed UI projection.
 
 ## Playwright Best Practices
 

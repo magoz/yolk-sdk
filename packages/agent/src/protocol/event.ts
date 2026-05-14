@@ -6,8 +6,12 @@ import { AgentUsage } from './usage.ts'
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 const EventIdentity = {
-  eventId: Schema.optional(NonEmptyTrimmedString)
+  eventId: Schema.optional(NonEmptyTrimmedString),
+  createdAtMs: Schema.optional(Schema.Number)
 }
+
+export const SubagentStatus = Schema.Literals(['running', 'completed', 'error'])
+export type SubagentStatus = typeof SubagentStatus.Type
 
 export const AgentErrorCode = Schema.Literals([
   'validation_error',
@@ -189,6 +193,27 @@ export class ProviderToolResult extends Schema.TaggedClass<ProviderToolResult>()
   }
 ) {}
 
+export class SubagentStarted extends Schema.TaggedClass<SubagentStarted>()('SubagentStarted', {
+  ...EventIdentity,
+  parentToolCallId: NonEmptyTrimmedString,
+  subagentRunId: NonEmptyTrimmedString,
+  subagentType: NonEmptyTrimmedString,
+  description: Schema.String,
+  model: Schema.String
+}) {}
+
+export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()('SubagentCompleted', {
+  ...EventIdentity,
+  parentToolCallId: NonEmptyTrimmedString,
+  subagentRunId: NonEmptyTrimmedString,
+  subagentType: NonEmptyTrimmedString,
+  description: Schema.String,
+  model: Schema.String,
+  status: SubagentStatus,
+  durationMs: Schema.Number,
+  summary: Schema.optional(Schema.String)
+}) {}
+
 export const AgentEvent = Schema.Union([
   AgentStart,
   AgentError,
@@ -213,6 +238,8 @@ export const AgentEvent = Schema.Union([
   ToolExecutionStarted,
   ToolExecutionCompleted,
   ToolExecutionError,
-  ProviderToolResult
+  ProviderToolResult,
+  SubagentStarted,
+  SubagentCompleted
 ])
 export type AgentEvent = typeof AgentEvent.Type

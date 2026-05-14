@@ -168,6 +168,59 @@ const toolResultRole = (isError: boolean) => (isError ? 'error' : 'tool')
 
 const toolResultBadgeVariant = (isError: boolean) => (isError ? 'destructive' : 'outline')
 
+const objectField = (input: unknown, key: string) =>
+  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+
+const stringField = (input: unknown, key: string) => {
+  const value = objectField(input, key)
+
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+const numberField = (input: unknown, key: string) => {
+  const value = objectField(input, key)
+
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+const resultStructuredContent = (state: ToolRunState) => {
+  switch (state._tag) {
+    case 'Completed':
+    case 'ProviderCompleted':
+      return state.result.structuredContent
+    case 'ApprovalRequested':
+    case 'Called':
+    case 'Denied':
+    case 'Errored':
+    case 'InputStreaming':
+    case 'Running':
+      return undefined
+  }
+}
+
+const taskMetadata = (call: ToolCall, state: ToolRunState) => {
+  if (call.name !== 'task') {
+    return undefined
+  }
+
+  const structured = resultStructuredContent(state)
+  const description = stringField(structured, 'description') ?? stringField(call.params, 'description')
+  const subagentType = stringField(structured, 'subagent_type') ?? stringField(call.params, 'subagent_type')
+
+  return {
+    description,
+    subagentType,
+    subagentRunId: stringField(structured, 'subagent_run_id'),
+    startedAtMs: numberField(structured, 'started_at_ms'),
+    endedAtMs: numberField(structured, 'ended_at_ms'),
+    durationMs: numberField(structured, 'duration_ms'),
+    status: stringField(structured, 'status'),
+    model: stringField(structured, 'model')
+  }
+}
+
+const timestampLabel = (milliseconds: number) => new Date(milliseconds).toLocaleTimeString()
+
 const toolResultTitle = (name: string, isError: boolean) => (isError ? `${name} failed` : name)
 
 function ToolRunCard({
@@ -183,6 +236,8 @@ function ToolRunCard({
   const isRunning = state._tag === 'Running'
   const isError = toolStateHasError(state)
   const output = toolStateContent(state)
+  const task = taskMetadata(call, state)
+  const title = task?.description === undefined ? call.name : `Task: ${task.description}`
   const detailsId = `${id}-details`
   const handleToggle = useCallback(() => {
     setExpanded(current => !current)
@@ -216,7 +271,7 @@ function ToolRunCard({
                 aria-hidden
               />
             ) : null}
-            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{call.name}</span>
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{title}</span>
             <span
               role={isRunning ? 'status' : undefined}
               aria-live={isRunning ? 'polite' : undefined}
@@ -235,9 +290,19 @@ function ToolRunCard({
           {expanded ? (
             <div id={detailsId} className="border-t border-amber-500/15 px-3.5 py-3">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium text-foreground">{call.name}</span>
+                <span className="font-medium text-foreground">{title}</span>
                 <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
               </div>
+              {task === undefined ? null : (
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  {task.subagentType === undefined ? null : <span>type {task.subagentType}</span>}
+                  {task.subagentRunId === undefined ? null : <span>run {task.subagentRunId}</span>}
+                  {task.model === undefined ? null : <span>model {task.model}</span>}
+                  {task.startedAtMs === undefined ? null : <span>start {timestampLabel(task.startedAtMs)}</span>}
+                  {task.endedAtMs === undefined ? null : <span>end {timestampLabel(task.endedAtMs)}</span>}
+                  {task.durationMs === undefined ? null : <span>duration {formatToolDuration({ _tag: 'Known', milliseconds: task.durationMs })}</span>}
+                </div>
+              )}
               <div className="mt-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
                 Input
               </div>

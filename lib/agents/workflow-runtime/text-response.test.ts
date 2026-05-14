@@ -25,4 +25,11 @@ describe('makeAgentTextRuntime task tool wiring', () => {
     expect(taskExecuteSource).toContain('Subagent failed:')
     expect(taskExecuteSource).toContain('isError: true')
   })
+
+  it('adds task timing metadata to structured results', () => {
+    expect(source).toContain('subagent_run_id')
+    expect(source).toContain('started_at_ms')
+    expect(source).toContain('ended_at_ms')
+    expect(source).toContain('duration_ms')
+  })
 })

@@ -30,6 +30,8 @@ import {
   ProviderToolCallPart,
   ProviderToolResult,
   ProviderToolResultPart,
+  SubagentCompleted,
+  SubagentStarted,
   TextPart,
   ToolApprovalDenied,
   ToolApprovalGranted,
@@ -158,7 +160,26 @@ describe('protocol wire schemas', () => {
         ToolExecutionStarted.make({ call }),
         ToolExecutionCompleted.make({ call, result }),
         ToolExecutionError.make({ call, message: 'failed safely', code: 'tool_error' }),
-        ProviderToolResult.make({ call, result })
+        ProviderToolResult.make({ call, result }),
+        SubagentStarted.make({
+          parentToolCallId: call.id,
+          subagentRunId: 'subagent:call_1',
+          subagentType: 'general',
+          description: 'inspect bug',
+          model: 'gpt-test',
+          createdAtMs: 100
+        }),
+        SubagentCompleted.make({
+          parentToolCallId: call.id,
+          subagentRunId: 'subagent:call_1',
+          subagentType: 'general',
+          description: 'inspect bug',
+          model: 'gpt-test',
+          status: 'completed',
+          durationMs: 25,
+          summary: 'done',
+          createdAtMs: 125
+        })
       ]
 
       const decoded = yield* Effect.forEach(events, roundTripEvent)
@@ -169,7 +190,7 @@ describe('protocol wire schemas', () => {
 
   it.effect('round-trips optional event identity', () =>
     Effect.gen(function* () {
-      const event = LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hello' })
+      const event = LLMTextDelta.make({ eventId: 'workflow:1:0', createdAtMs: 123, text: 'hello' })
 
       expect(yield* roundTripEvent(event)).toEqual(event)
     })

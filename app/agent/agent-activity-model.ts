@@ -39,6 +39,18 @@ export const activityItemFromAgentEvent = (
       }
     case 'ToolExecutionError':
       return { title: `Tool error: ${event.call.name}`, detail: event.message, tone: 'error' }
+    case 'SubagentStarted':
+      return {
+        title: `Subagent started: ${event.description}`,
+        detail: `${event.subagentType} · ${event.subagentRunId} · ${event.createdAtMs ?? 'no timestamp'}`,
+        tone: 'tool'
+      }
+    case 'SubagentCompleted':
+      return {
+        title: `Subagent ${event.status}: ${event.description}`,
+        detail: `${event.subagentType} · ${event.durationMs}ms · ${event.subagentRunId}`,
+        tone: event.status === 'error' ? 'error' : 'success'
+      }
     case 'TurnEnd':
       return { title: 'Turn ended', detail: event.reason, tone: 'neutral' }
     case 'AgentEnd':

@@ -749,6 +749,86 @@ describe('run', () => {
     })
   )
 
+  it.effect('emits subagent lifecycle events for task tool calls', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({
+        id: 'call_task',
+        name: 'task',
+        params: { description: 'inspect bug', prompt: 'inspect', subagent_type: 'general' }
+      })
+      const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
+        Stream.runCollect,
+        Effect.provide(TestToolExecutor.layer({ task: 'done' })),
+        Effect.provide(LoopConfig.defaultLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolExecutionStarted',
+        'SubagentStarted',
+        'ToolExecutionCompleted',
+        'SubagentCompleted'
+      ])
+      expect(events[1]).toMatchObject({
+        parentToolCallId: 'call_task',
+        subagentRunId: 'subagent:call_task',
+        subagentType: 'general',
+        description: 'inspect bug',
+        model: 'gpt-test'
+      })
+      expect(events[3]).toMatchObject({ status: 'completed', summary: 'done' })
+    })
+  )
+
+  it.effect('starts same-turn task subagents before waiting for completions', () =>
+    Effect.gen(function* () {
+      const slow = ToolCall.make({
+        id: 'call_slow_task',
+        name: 'task',
+        params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
+      })
+      const fast = ToolCall.make({
+        id: 'call_fast_task',
+        name: 'task',
+        params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
+      })
+      const slowGate = yield* Deferred.make<void>()
+      const executor = Layer.succeed(
+        ToolExecutor,
+        ToolExecutor.of({
+          execute: call => {
+            const result = ToolResult.make({ toolCallId: call.id, content: call.id })
+
+            return call.id === slow.id
+              ? Deferred.await(slowGate).pipe(Effect.as(result))
+              : Deferred.succeed(slowGate, undefined).pipe(Effect.as(result))
+          }
+        })
+      )
+
+      const eventsChunk = yield* runToolBatch({ calls: [slow, fast], model: 'gpt-test' }).pipe(
+        Stream.runCollect,
+        Effect.provide(executor),
+        Effect.provide(
+          LoopConfig.layer({
+            maxTurns: 500,
+            maxRetries: 2,
+            retryBaseDelayMs: 1000,
+            toolConcurrency: 2
+          })
+        )
+      )
+
+      const lifecycle = Array.from(eventsChunk).map(event => event._tag)
+      const firstCompletion = lifecycle.findIndex(
+        tag => tag === 'ToolExecutionCompleted' || tag === 'SubagentCompleted'
+      )
+
+      expect(lifecycle.slice(0, firstCompletion).filter(tag => tag === 'ToolExecutionStarted')).toHaveLength(2)
+      expect(lifecycle.slice(0, firstCompletion).filter(tag => tag === 'SubagentStarted')).toHaveLength(2)
+    })
+  )
+
   it.effect('preserves transcript tool result order after concurrent execution', () =>
     Effect.gen(function* () {
       const slow = ToolCall.make({ id: 'call_slow', name: 'slow', params: {} })

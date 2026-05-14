@@ -190,6 +190,8 @@ export const reduceAgentChatState = (
         case 'LLMStreamStart':
         case 'LLMTextDelta':
         case 'ProviderToolResult':
+        case 'SubagentCompleted':
+        case 'SubagentStarted':
         case 'ToolApprovalDenied':
         case 'ToolApprovalGranted':
         case 'ToolApprovalRequested':

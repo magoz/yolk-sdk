@@ -26,9 +26,11 @@
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
+- Protocol owns `SubagentStarted`/`SubagentCompleted` events and optional `createdAtMs`; loop emits these around `task` calls while preserving generic tool lifecycle as the source of truth.
 
 ## Tests
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, and `test/tools`.
 - Use `@yolk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
+- Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.

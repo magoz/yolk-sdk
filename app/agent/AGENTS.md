@@ -23,6 +23,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
 - `agent-status.tsx` owns console status controls: Codex/Claude auth, text model, text reasoning effort, Realtime transcription model, capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
+- Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render task metadata from structured content only.
 - `agent-usage-meter.tsx` formats provider-normalized token usage/context budget for header/console chrome.
 - `message-edit-model.ts` owns pure edit shortcut/save-state helpers; keep keyboard semantics testable outside JSX.
 
@@ -35,6 +36,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
 - Text may begin after reasoning in the same assistant turn; keep it streaming from first `LLMTextDelta`, not only final `AssistantMessage`.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
+- Task tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content.
 - Tool-origin error results (`ToolResult.isError`) render as failed tool output, distinct from transport/tool execution errors.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.

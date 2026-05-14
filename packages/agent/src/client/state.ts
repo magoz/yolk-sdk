@@ -285,6 +285,8 @@ const applyAgentEventUnchecked = (
     case 'CompactionStart':
     case 'LLMStreamEnd':
     case 'LLMStreamStart':
+    case 'SubagentCompleted':
+    case 'SubagentStarted':
     case 'TurnEnd':
     case 'TurnStart':
     case 'UsageUpdate':

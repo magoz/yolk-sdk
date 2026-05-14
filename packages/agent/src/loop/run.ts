@@ -1,4 +1,4 @@
-import { Effect, Ref, Stream } from 'effect'
+import { Clock, Effect, Ref, Stream } from 'effect'
 import {
   AgentEnd,
   AgentRetry,
@@ -7,6 +7,7 @@ import {
   UsageUpdate,
   addAgentUsage,
   contentParts,
+  contentPreview,
   LLMReasoningDelta as AgentLLMReasoningDelta,
   LLMStreamEnd,
   LLMStreamStart,
@@ -19,6 +20,8 @@ import {
   ToolInputStart,
   ProviderToolResult,
   ToolResultMessage,
+  SubagentCompleted,
+  SubagentStarted,
   type ToolCall,
   type AgentReasoningEffort,
   type ToolResult,
@@ -63,6 +66,84 @@ export type ModelTurnConfig = RunConfig & {
 
 export type ToolBatchConfig = {
   readonly calls: ReadonlyArray<ToolCall>
+  readonly model?: string
+}
+
+type TaskCallMetadata = {
+  readonly subagentRunId: string
+  readonly subagentType: string
+  readonly description: string
+}
+
+const objectField = (input: unknown, key: string) =>
+  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+
+const nonEmptyStringField = (input: unknown, key: string) => {
+  const value = objectField(input, key)
+
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+const taskCallMetadata = (call: ToolCall): TaskCallMetadata | undefined => {
+  if (call.name !== 'task') {
+    return undefined
+  }
+
+  const subagentType = nonEmptyStringField(call.params, 'subagent_type')
+  const description = nonEmptyStringField(call.params, 'description')
+
+  if (subagentType === undefined || description === undefined) {
+    return undefined
+  }
+
+  return {
+    subagentRunId: `subagent:${call.id}`,
+    subagentType,
+    description
+  }
+}
+
+const subagentStartedEvent = (input: {
+  readonly call: ToolCall
+  readonly model: string
+  readonly startedAtMs: number
+}) => {
+  const metadata = taskCallMetadata(input.call)
+
+  return metadata === undefined
+    ? undefined
+    : SubagentStarted.make({
+        parentToolCallId: input.call.id,
+        subagentRunId: metadata.subagentRunId,
+        subagentType: metadata.subagentType,
+        description: metadata.description,
+        model: input.model,
+        createdAtMs: input.startedAtMs
+      })
+}
+
+const subagentCompletedEvent = (input: {
+  readonly call: ToolCall
+  readonly result: ToolResult
+  readonly model: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+}) => {
+  const metadata = taskCallMetadata(input.call)
+
+  return metadata === undefined
+    ? undefined
+    : SubagentCompleted.make({
+        parentToolCallId: input.call.id,
+        subagentRunId: metadata.subagentRunId,
+        subagentType: metadata.subagentType,
+        description: metadata.description,
+        model: input.model,
+        status: input.result.isError === true ? 'error' : 'completed',
+        durationMs: Math.max(0, input.endedAtMs - input.startedAtMs),
+        summary: contentPreview(input.result.content),
+        createdAtMs: input.endedAtMs
+      })
 }
 
 const unsupportedInputError = (message: string) =>
@@ -247,26 +328,65 @@ const withProviderRetries = (
 
 const makeToolExecutionStream = (
   executor: TurnStreamInput['executor'],
-  call: ToolCall
+  call: ToolCall,
+  model: string
 ): Stream.Stream<AgentEvent, AgentLoopError> =>
-  Stream.make(ToolExecutionStarted.make({ call })).pipe(
-    Stream.concat(
-      Stream.fromEffect(
-        executor.execute(call).pipe(
-          Effect.map(result => ToolExecutionCompleted.make({ call, result }))
-        )
-      ).pipe(
-        Stream.catchTag('ToolError', error =>
-          Stream.make(
-            ToolExecutionError.make({
-              call,
-              message: error.message,
-              code: toolErrorCode(error)
-            })
-          ).pipe(Stream.concat(Stream.fail(error)))
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const startedAtMs = yield* Clock.currentTimeMillis
+      const started = subagentStartedEvent({ call, model, startedAtMs })
+      const startEvents: ReadonlyArray<AgentEvent> = started === undefined
+        ? [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
+        : [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs }), started]
+
+      return Stream.fromIterable(startEvents).pipe(
+        Stream.concat(
+          Stream.fromEffect(
+            executor.execute(call).pipe(
+              Effect.flatMap(result =>
+                Clock.currentTimeMillis.pipe(
+                  Effect.map(endedAtMs => {
+                    const completed = subagentCompletedEvent({
+                      call,
+                      result,
+                      model,
+                      startedAtMs,
+                      endedAtMs
+                    })
+                    const toolCompleted = ToolExecutionCompleted.make({
+                      call,
+                      result,
+                      createdAtMs: endedAtMs
+                    })
+
+                    return completed === undefined
+                      ? [toolCompleted]
+                      : [toolCompleted, completed]
+                  })
+                )
+              )
+            )
+          ).pipe(
+            Stream.flatMap(Stream.fromIterable),
+            Stream.catchTag('ToolError', error =>
+              Stream.fromEffect(Clock.currentTimeMillis).pipe(
+                Stream.flatMap(endedAtMs =>
+                  Stream.make(
+                    ToolExecutionError.make({
+                      call,
+                      message: error.message,
+                      code: toolErrorCode(error),
+                      createdAtMs: endedAtMs
+                    })
+                  )
+                ),
+                Stream.concat(Stream.fail(error))
+              )
+            )
+          )
         )
       )
-    )
+    })
   )
 
 type IndexedToolResultMessage = {
@@ -292,11 +412,12 @@ const parallelToolExecutionStream = (input: {
   readonly calls: ReadonlyArray<ToolCall>
   readonly executor: TurnStreamInput['executor']
   readonly loopConfig: LoopConfigShape
+  readonly model: string
   readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
 }) =>
   Stream.mergeAll(
     input.calls.map((call, index) =>
-      makeToolExecutionStream(input.executor, call).pipe(
+      makeToolExecutionStream(input.executor, call, input.model).pipe(
         Stream.tap(event => {
           if (event._tag !== 'ToolExecutionCompleted') {
             return Effect.void
@@ -402,6 +523,7 @@ const makeAfterLlmStream = (
         calls: completion.toolCalls,
         executor: input.executor,
         loopConfig: input.loopConfig,
+        model: input.config.model,
         results: toolResultMessages
       })
       const nextTurnStream = Stream.unwrap(
@@ -634,6 +756,7 @@ export const runToolBatch = (
         calls: config.calls,
         executor,
         loopConfig,
+        model: config.model ?? '',
         results: toolResultMessages
       })
     })
