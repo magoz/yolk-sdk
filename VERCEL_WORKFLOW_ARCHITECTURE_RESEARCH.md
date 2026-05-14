@@ -398,6 +398,335 @@ full Yolk text runtime loop. This gives durable execution/stream replay, but a l
 model stream or long tool cascade still needs to fit inside one Vercel Function step.
 Open Agents-style one-model/tool-boundary-per-step remains the next architecture task.
 
+## AI SDK WorkflowAgent findings
+
+Reference files inspected:
+
+- `.repos/ai/packages/workflow/src/workflow-agent.ts`
+- `.repos/ai/packages/workflow/src/stream-text-iterator.ts`
+- `.repos/ai/packages/workflow/src/do-stream-step.ts`
+
+The AI SDK implementation is also split at the model-call boundary:
+
+```txt
+workflow context
+  streamTextIterator(...)
+    -> prepare step state
+    -> serialize tools
+    -> await doStreamStep(...)    # "use step"
+    -> yield tool calls
+    -> receive tool results
+    -> append tool results to prompt
+    -> next model step
+```
+
+Important mechanics:
+
+- tools are serialized before crossing the Workflow step boundary because Zod schemas
+  and executable functions are not Workflow-serializable;
+- the model is resolved inside the step;
+- `doStreamStep` streams each model chunk to `getWritable()` as it arrives;
+- the step returns compact step state: text, reasoning, tool calls, usage, finish reason,
+  response metadata, and provider-executed tool results;
+- tool calls are yielded back to the workflow iterator; tool results are sent back into
+  the generator and appended to the prompt;
+- helper write/close operations may need their own steps when the Workflow runtime does
+  not allow a writable operation from orchestration context.
+
+Yolk differs in one key way: tools are already protocol data plus an injected
+`ToolExecutor`, so we should not serialize executable tool definitions through Workflow.
+The Workflow step should receive only protocol `ToolCall` values and resolve app-owned
+tool execution from the injected layer inside a `"use step"` function.
+
+## Step-split plan for Yolk
+
+Keep the app-owned Workflow adapter. Add a package-level step API first, then call it
+from app `"use step"` functions.
+
+Target flow:
+
+```txt
+runAgentWorkflow                         # "use workflow"
+  decode request wire data
+  initialize continuation
+  emit AgentStart
+  loop maxSteps
+    modelResult = runAgentModelStep(...) # "use step"
+    if modelResult.stop: emit AgentEnd; return
+    toolResult = runAgentToolBatchStep(...) # "use step"
+    append assistant + tool result messages to continuation
+  emit max_turns error
+```
+
+Package seam:
+
+```txt
+packages/agent-loop
+  runModelTurn(config, continuation) -> Stream<AgentEvent> + StepResult
+  runToolBatch(calls) -> Stream<AgentEvent> + ToolResultMessage[]
+
+packages/agent-runtime
+  optional continuation schemas + append-store helpers
+
+app/lib/agents/workflow-runtime
+  "use workflow" orchestration
+  "use step" wrappers that provide AppLayer and write protocol NDJSON chunks
+```
+
+Continuation state should be plain wire data:
+
+- original request metadata: session id, model, reasoning effort, user id;
+- current transcript: user/assistant/tool-result protocol messages;
+- created messages for this run;
+- turn number and max-turn guard;
+- accumulated usage;
+- compacted/context-transformed messages for the current model step only if needed;
+- pending assistant message and tool calls between model and tool steps;
+- run status and failure metadata.
+
+Do not put these into Workflow as class instances. Encode/decode with Effect Schema at
+the route/step boundary, same as the current `AgentRouteRequest` serialization fix.
+
+Recommended implementation order:
+
+1. Extract pure loop internals from `packages/agent-loop/src/run.ts` into explicit
+   model-step and tool-batch functions without changing current `run` behavior.
+2. Add package tests with `FauxProvider` and `TestToolExecutor` proving the new step API
+   emits the same semantic event order as `run`.
+3. Add app Workflow continuation schemas and step wrappers.
+4. Change `runAgentWorkflow` from one full-loop step to a workflow-level loop that calls
+   model/tool step wrappers.
+5. Keep current `/agent/workflow` request/stream/cancel/resume API stable.
+6. Add active-run persistence in Postgres after step splitting works.
+
+Retry/idempotency policy:
+
+- keep provider retry inside the model step before any provider event is emitted;
+- once a model step writes stream chunks, Workflow retry can duplicate chunks unless the
+  client/runtime dedupes by deterministic event id;
+- add deterministic event ids before relying on automatic Workflow step retries for
+  streamed model/tool chunks;
+- for now, prefer low/no retry at the Workflow step layer and keep existing provider retry
+  semantics inside `agent-loop`.
+
+## Cross-repo persistence patterns
+
+Additional reference files inspected:
+
+- `.repos/opencode/packages/opencode/src/v2/session.ts`
+- `.repos/opencode/packages/opencode/src/v2/session-event.ts`
+- `.repos/opencode/packages/opencode/src/session/session.ts`
+- `.repos/pi/packages/coding-agent/src/core/session-manager.ts`
+- `.repos/flue/packages/runtime/src/session.ts`
+- `.repos/kody/packages/worker/src/repo/repo-session-do.ts`
+- `.repos/kody/packages/worker/src/repo/repo-sessions.ts`
+- `.repos/kody/packages/worker/src/package-runtime/realtime-session.ts`
+- `.repos/mcp-sdk/packages/server/src/server/streamableHttp.ts`
+- `.repos/mcp-sdk/examples/server/src/inMemoryEventStore.ts`
+
+### opencode
+
+opencode has two relevant ideas:
+
+1. Product session metadata is separate from streaming execution events.
+2. Step/tool/text/reasoning/compaction are explicit event variants.
+
+`session-event.ts` models durable events such as:
+
+- `Step.Started` / `Step.Ended` / `Step.Failed`;
+- `Text.Started` / `Text.Delta` / `Text.Ended`;
+- `Reasoning.Started` / `Reasoning.Delta` / `Reasoning.Ended`;
+- `Tool.Input.*`, `Tool.Called`, `Tool.Progress`, `Tool.Success`, `Tool.Failed`;
+- `Retried`;
+- `Compaction.Started` / `Delta` / `Ended`.
+
+This supports the exact split Yolk needs: durable model/tool boundary events plus
+stream-friendly deltas. For Yolk, the equivalent should stay protocol-level and not
+be Vercel-specific.
+
+opencode's context query starts from the latest compaction row, then returns newer
+messages in order. This matches the principle that compaction is a checkpoint in the
+message log, not a destructive rewrite of old history.
+
+### pi
+
+Pi stores sessions as JSONL append-only trees:
+
+```txt
+session header
+entry(id, parentId, timestamp, type, payload)
+entry(id, parentId, timestamp, type, payload)
+...
+leafId -> current branch tip
+```
+
+Key properties:
+
+- every entry has `id` and `parentId`;
+- appending creates a child of the current leaf;
+- branching moves the leaf to an earlier entry, then appends without modifying history;
+- context is derived by walking `leaf -> root`, reversing the path, and applying
+  compaction/branch-summary rules;
+- compaction stores `summary`, `firstKeptEntryId`, and `tokensBefore`;
+- malformed JSONL lines are skipped for robustness;
+- it delays flushing new sessions until an assistant message exists, avoiding empty
+  or user-only session files in normal history.
+
+Yolk does not need file JSONL, but the tree shape is useful for future edit/regenerate
+and branch UX. Current `@yolk/react` already has local edit/regenerate session events;
+server persistence should eventually model branch parentage instead of overwriting a
+linear transcript.
+
+### Flue
+
+Flue has an in-memory `SessionHistory` backed by a pluggable `SessionStore` snapshot:
+
+```txt
+SessionHistory(entries, leafId)
+  buildContext()
+  appendMessage(...)
+  appendCompaction(...)
+  appendBranchSummary(...)
+  toData(metadata, createdAt, updatedAt)
+```
+
+It persists the whole session snapshot after meaningful state transitions rather than
+append-per-event. It still keeps entry ids, parent ids, active path, compaction markers,
+and branch summaries. It also records compaction usage and folds it into the triggering
+operation's total usage.
+
+Useful Yolk takeaways:
+
+- append-log is better for concurrent/server durable runtime;
+- snapshot projection is still useful as a cache/read model;
+- compaction usage must be accounted in run usage, not hidden as maintenance;
+- overflow recovery removes the failed assistant leaf, compacts, then retries from the
+  compacted context.
+
+### Kody
+
+Kody uses Cloudflare Durable Objects for long-lived session actors, with product rows in
+D1 and hot state in DO storage.
+
+Repo sessions:
+
+- D1 row stores ownership/status/checkpoints: `user_id`, `source_id`, `status`,
+  `last_checkpoint_at`, `last_checkpoint_commit`, `conversation_id`;
+- DO storage keeps a cached state keyed by session id to survive D1 replica lag;
+- the cache is a fallback, while fresh D1 reads remain authoritative for correctness;
+- every RPC payload carries both `sessionId` and `userId`.
+
+Realtime sessions:
+
+- DO storage stores a `PackageRealtimeState` snapshot;
+- WebSocket attachments persist session id across hibernation;
+- `ctx.getWebSockets(tag)` finds live sockets by tags;
+- stale/disconnected sessions are removed from the persisted snapshot on failed send.
+
+Useful Yolk takeaways:
+
+- persist product run/session rows in Postgres, not just runtime memory;
+- keep hot runtime caches explicitly secondary to authoritative DB rows;
+- every durable operation must carry/scoped-check `userId`;
+- active run ids belong in product state for conflict/resume UX;
+- if Cloudflare DO remains, hibernatable socket attachment/tag patterns are useful for
+  live fanout, but Workflow durable streams remove most of that need for Vercel mode.
+
+### MCP SDK resumability
+
+MCP Streamable HTTP defines a small event-store interface:
+
+```ts
+type EventStore = {
+  storeEvent(streamId, message): Promise<eventId>
+  getStreamIdForEventId?(eventId): Promise<streamId | undefined>
+  replayEventsAfter(lastEventId, { send }): Promise<streamId>
+}
+```
+
+The server writes SSE event ids, lets clients resume after `Last-Event-ID`, and can close
+streams early only when the client can resume. The example store keeps `(eventId ->
+streamId, message)` and replays ordered events after the requested id.
+
+Yolk Workflow currently delegates replay to Vercel's durable stream by run id. For
+Postgres-backed product persistence, the MCP pattern suggests a complementary protocol:
+persist event ids in Yolk's own append log so clients can resume by `(runId, lastEventId)`
+even outside Vercel Workflow retention.
+
+## Store-agnostic persistence recommendation
+
+Important package boundary: Postgres is only the likely production store for this app.
+Reusable packages must not know about Postgres, Vercel, Next, Cloudflare, filesystems,
+SQLite, or browser storage.
+
+Package model:
+
+```txt
+packages/agent-loop
+  stateless model/tool loop and step APIs
+  input: transcript/context + injected provider/tool executor
+  output: protocol events + final messages/usage
+
+packages/agent-runtime
+  generic runtime orchestration
+  optional injected append store interfaces
+  supports Transcript mode with no persistence
+
+app/runtime adapters
+  choose storage implementation, transport, auth, tool policy, model policy
+```
+
+Valid host modes:
+
+- fully stateless: send the whole transcript each request (`Transcript` mode);
+- local durable: inject in-memory, JSONL, or SQLite stores;
+- Cloudflare durable: inject Durable Object storage;
+- Vercel production: app adapter can inject Postgres-backed stores;
+- tests: inject fake stores/providers/tools.
+
+So any mention of Postgres below is an app-layer implementation choice, not package
+architecture.
+
+## App production persistence recommendation
+
+Combine the patterns:
+
+```txt
+Postgres product state
+  sessions
+  messages / branch entries
+  run records: active/completed/failed/cancelled
+  active run id per session
+
+Postgres execution append log
+  runId
+  sequence/eventId
+  turn/step
+  protocol event wire payload
+  checkpoint markers: model step done, tool batch done, compaction done
+
+Workflow execution state
+  current serializable continuation
+  durable stream chunks
+  retry metadata
+```
+
+Use append-log as source of truth for durable execution; derive snapshots/read models for
+fast UI loading. Keep Vercel Workflow state execution-only and retention-bound.
+
+Recommended event model additions for Yolk:
+
+- `RunStepStarted` / `RunStepCompleted` / `RunStepFailed` in `agent-runtime` append log;
+- deterministic protocol event ids for streamed `AgentEvent`s;
+- optional branch parent ids on persisted product messages/session entries;
+- compaction checkpoint entries with `summary`, `firstKeptMessageId`, `tokensBefore`,
+  and compaction usage;
+- active-run row with `runId`, `sessionId`, `userId`, `status`, `startedAt`, `updatedAt`,
+  `cancelRequestedAt`.
+
+Do not persist every token delta as product messages. Persist deltas in execution log for
+replay/debug only; commit final assistant/tool-result messages at step/run checkpoints.
+
 ## Operational guardrails
 
 - Keep per-step model/tool work under function max duration.

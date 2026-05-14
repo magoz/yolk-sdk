@@ -36,9 +36,9 @@ import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
   LLMError,
+  ToolError,
   type AgentLoopError,
   type LLMProviderError,
-  type ToolError
 } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
@@ -55,6 +55,14 @@ export type RunConfig = {
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
+}
+
+export type ModelTurnConfig = RunConfig & {
+  readonly turn: number
+}
+
+export type ToolBatchConfig = {
+  readonly calls: ReadonlyArray<ToolCall>
 }
 
 const unsupportedInputError = (message: string) =>
@@ -395,6 +403,26 @@ const makeAfterLlmStream = (
     })
   )
 
+const makeModelOnlyAfterLlmStream = (
+  input: TurnStreamInput,
+  llmEventsRef: Ref.Ref<ReadonlyArray<LLMEvent>>
+): Stream.Stream<AgentEvent, AgentLoopError> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const llmEvents = yield* Ref.get(llmEventsRef)
+      const completion = yield* validateTurnCompletion(llmEvents)
+      const assistantMessage = accumulateAssistantMessage(llmEvents)
+
+      yield* Ref.update(input.createdMessages, messages => [...messages, assistantMessage])
+
+      return Stream.fromIterable([
+        LLMStreamEnd.make({ turn: input.turn }),
+        AssistantMessageEvent.make({ message: assistantMessage }),
+        TurnEnd.make({ turn: input.turn, reason: completion.stopReason })
+      ])
+    })
+  )
+
 const makeLlmStream = (
   input: TurnStreamInput,
   llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
@@ -438,6 +466,49 @@ const makeLlmStream = (
     )
 }
 
+const makeModelOnlyLlmStream = (
+  input: TurnStreamInput,
+  llmEvents: Ref.Ref<ReadonlyArray<LLMEvent>>,
+  result: ContextTransformResult
+): Stream.Stream<AgentEvent, AgentLoopError> => {
+  const makeStream = () =>
+    input.provider.stream({
+      messages: result.messages,
+      tools: input.config.tools,
+      model: input.config.model,
+      reasoningEffort: input.config.reasoningEffort,
+      systemPrompt: input.config.systemPrompt
+    })
+
+  return Stream.fromIterable(result.events)
+    .pipe(Stream.concat(withProviderRetries(makeStream(), input.loopConfig, makeStream, 1)))
+    .pipe(
+      Stream.tap(event => {
+        if (!isLlmEvent(event)) {
+          return Effect.void
+        }
+
+        const appendEvent = Ref.update(llmEvents, events => [...events, event])
+
+        if (event._tag !== 'Usage') {
+          return appendEvent
+        }
+
+        return Ref.update(input.usage, usage => addAgentUsage(usage, event.usage)).pipe(
+          Effect.flatMap(() => appendEvent)
+        )
+      }),
+      Stream.flatMap(event =>
+        event._tag === 'AgentRetry'
+          ? Stream.make(event)
+          : isLlmEvent(event)
+            ? Stream.fromIterable(toLlmEvent(event))
+            : Stream.make(event)
+      ),
+      Stream.concat(makeModelOnlyAfterLlmStream(input, llmEvents))
+    )
+}
+
 const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.suspend(() => {
     if (input.turn > input.loopConfig.maxTurns) {
@@ -459,6 +530,83 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
       LLMStreamStart.make({ turn: input.turn })
     ]).pipe(Stream.concat(llmStream))
   })
+
+const unavailableToolExecutor: TurnStreamInput['executor'] = {
+  execute: call =>
+    Effect.fail(
+      new ToolError({
+        tool: call.name,
+        message: 'Tool execution is not available in model turn step',
+        cause: 'execution'
+      })
+    )
+}
+
+const makeModelOnlyTurnStream = (
+  input: TurnStreamInput
+): Stream.Stream<AgentEvent, AgentLoopError> =>
+  Stream.suspend(() => {
+    if (input.turn > input.loopConfig.maxTurns) {
+      return Stream.fail(new AbortError({ reason: 'max_turns' }))
+    }
+
+    const llmStream = Stream.unwrap(
+      Effect.gen(function* () {
+        const llmEvents = yield* Ref.make<ReadonlyArray<LLMEvent>>([])
+        const result = yield* input.contextTransformer.transform(input.currentMessages)
+        yield* validateCapabilities(input.config, result.messages)
+
+        return makeModelOnlyLlmStream(input, llmEvents, result)
+      })
+    )
+
+    return Stream.fromIterable([
+      TurnStart.make({ turn: input.turn }),
+      LLMStreamStart.make({ turn: input.turn })
+    ]).pipe(Stream.concat(llmStream))
+  })
+
+export const runModelTurn = (
+  config: ModelTurnConfig
+): Stream.Stream<AgentEvent, AgentLoopError, ContextTransformer | LLMProvider | LoopConfig> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const contextTransformer = yield* ContextTransformer
+      const loopConfig = yield* LoopConfig
+      const provider = yield* LLMProvider
+      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const usage = yield* Ref.make(zeroAgentUsage)
+
+      return makeModelOnlyTurnStream({
+        config,
+        contextTransformer,
+        loopConfig,
+        provider,
+        executor: unavailableToolExecutor,
+        currentMessages: config.messages,
+        createdMessages,
+        usage,
+        turn: config.turn
+      })
+    })
+  )
+
+export const runToolBatch = (
+  config: ToolBatchConfig
+): Stream.Stream<AgentEvent, AgentLoopError, ToolExecutor> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const executor = yield* ToolExecutor
+      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const toolResultMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+
+      return Stream.fromIterable(config.calls).pipe(
+        Stream.flatMap(call =>
+          makeToolExecutionStream(executor, call, createdMessages, toolResultMessages)
+        )
+      )
+    })
+  )
 
 export const run = (
   config: RunConfig

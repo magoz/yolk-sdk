@@ -26,6 +26,8 @@ import {
   LLMToolCall,
   LoopConfig,
   run,
+  runModelTurn,
+  runToolBatch,
   type LLMRequest
 } from '../src'
 import { FauxProvider, Reply, TestToolExecutor } from '../src/testing'
@@ -638,6 +640,52 @@ describe('run', () => {
           cause: 'invalid_response',
           message: 'LLM done reason must be tool_use'
         }
+      })
+    })
+  )
+
+  it.effect('runs one model turn without executing requested tools', () =>
+    Effect.gen(function* () {
+      const eventsChunk = yield* runModelTurn({
+        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        systemPrompt: 'Use tools when useful.',
+        tools: [ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })],
+        model: 'faux',
+        turn: 1
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} }))),
+        Effect.provide(BaseLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'TurnStart',
+        'LLMStreamStart',
+        'ToolInputEnd',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'TurnEnd'
+      ])
+      expect(events.find(event => event._tag === 'TurnEnd')).toMatchObject({ reason: 'tool_use' })
+    })
+  )
+
+  it.effect('runs a tool batch as a separate stateless step', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+      const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
+        Stream.runCollect,
+        Effect.provide(TestToolExecutor.layer({ weather: '72F' }))
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted'
+      ])
+      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        result: { toolCallId: 'call_1', content: '72F' }
       })
     })
   )
