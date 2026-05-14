@@ -119,7 +119,7 @@ MCP security:
 - Does **not** use `OPENAI_API_KEY`
 - Requires per-user Codex OAuth token from `lib/core/agent/openai-codex-auth.ts`
 - Cloudflare token bridge returns access/account/expiry only; keep refresh token in Next/Postgres.
-- Cloudflare Codex calls use brokered access tokens from Next and execute directly from the Worker/DO; keep the old response proxy only as temporary rollback until verified.
+- Cloudflare Codex calls use brokered access tokens from Next, then stream through the internal Next Codex response proxy by default. Browser ↔ Worker/DO remains WebSocket; DO ↔ Next proxy is HTTP stream. Direct DO ↔ Codex WebSocket code is retained only for unproxied configs/experiments.
 - Tokens stored in Better Auth `account` table with `providerId = 'openai-codex'`; `accountId` stores ChatGPT account id when present
 - Device-flow server actions live in `lib/core/agent/*-action.ts`; they redirect unauthenticated users, save/delete tokens, and revalidate `/agent`
 - `getValidOpenAiCodexToken()` refreshes expired tokens and persists the refreshed token before provider use

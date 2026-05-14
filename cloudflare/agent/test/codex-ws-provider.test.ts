@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { Effect, Stream } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import {
   LLMDone,
   LLMError,
@@ -15,6 +16,7 @@ import { TokenBrokerResponse } from '@yolk/oauth'
 import { openAiCodexProviderId } from '@yolk/openai'
 import {
   codexWsHeaders,
+  makeCodexWsProviderLayer,
   makePreStreamFallbackProvider,
   mapWsMessage,
   toWsRequestBody,
@@ -39,6 +41,35 @@ const request = {
   messages: [UserMessage.make({ content: 'hello' })],
   tools: []
 }
+
+type CapturedRequest = {
+  readonly request: HttpClientRequest.HttpClientRequest
+}
+
+const makeProxyHttpClientLayer = (requests: Array<CapturedRequest>) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(httpRequest =>
+      Effect.sync(() => {
+        requests.push({ request: httpRequest })
+
+        return HttpClientResponse.fromWeb(
+          httpRequest,
+          new Response(
+            [
+              'event: response.output_text.delta',
+              'data: {"type":"response.output_text.delta","delta":"proxy ok","item_id":"msg_1"}',
+              '',
+              'event: response.completed',
+              'data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"proxy ok"}]}]}}',
+              ''
+            ].join('\n'),
+            { status: 200, headers: { 'content-type': 'text/plain' } }
+          )
+        )
+      })
+    )
+  )
 
 const directError = new LLMError({
   cause: 'provider_error',
@@ -101,6 +132,32 @@ describe('Codex WS request body', () => {
 })
 
 describe('Codex WS proxy fallback', () => {
+  it('uses proxy first when fallback is configured', async () => {
+    const requests: Array<CapturedRequest> = []
+    const layer = makeCodexWsProviderLayer({
+      token,
+      sessionId: 'session_1',
+      fallback: {
+        endpoint: 'https://app.example.test/api/internal/cloudflare/codex-responses',
+        bridgeSecret: 'bridge-secret'
+      }
+    }).pipe(Layer.provide(makeProxyHttpClientLayer(requests)))
+
+    const chunk = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider.stream(request).pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer))
+    )
+
+    const collected = Array.from(chunk)
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.request.url).toBe(
+      'https://app.example.test/api/internal/cloudflare/codex-responses'
+    )
+    expect(collected.map(event => event._tag)).toEqual(['TextDelta', 'Done'])
+  })
+
   it('uses fallback when direct fails before events', async () => {
     let fallbackCalls = 0
     const fallbackErrors: Array<LLMError> = []

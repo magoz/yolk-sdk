@@ -616,15 +616,7 @@ export const makeCodexWsProviderLayer = (config: CodexWsConfig) =>
         LLMProvider,
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
-          const direct = makeDirectCodexWsProvider(config)
-          const proxy = makeCodexProxyProvider(config, client)
-
-          return makePreStreamFallbackProvider(direct, proxy, error => {
-            logCodexWs('codex_direct_ws_proxy_fallback', {
-              cause: error.cause,
-              retryable: error.retryable
-            })
-          })
+          return makeCodexProxyProvider(config, client)
         })
       )
     : Layer.succeed(LLMProvider, makeDirectCodexWsProvider(config))

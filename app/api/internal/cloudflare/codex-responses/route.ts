@@ -1,4 +1,4 @@
-import { Config, Effect, Redacted } from 'effect'
+import { Config, Effect, Redacted, Stream } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -32,9 +32,9 @@ const handler = Effect.gen(function* () {
       HttpClientRequest.bodyText(body, request.headers['content-type'] ?? 'application/json')
     )
   )
-  const responseBody = yield* response.text
+  const responseBody = yield* response.stream.pipe(Stream.toReadableStreamEffect())
 
-  return HttpServerResponse.text(responseBody, {
+  return HttpServerResponse.raw(responseBody, {
     status: response.status,
     headers: {
       'content-type': response.headers['content-type'] ?? 'text/plain'

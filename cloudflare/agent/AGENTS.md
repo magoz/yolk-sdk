@@ -79,7 +79,7 @@ Do not build these here yet unless explicitly requested:
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
 - Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
-- Next Codex response proxy remains temporarily for rollback; bootstrapped DO sessions call selected providers directly with brokered access tokens when possible.
+- Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
 - Token broker requests use provider ids from `@yolk/openai` / `@yolk/anthropic` and `@yolk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
 - Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
