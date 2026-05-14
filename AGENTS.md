@@ -195,6 +195,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **LSP shows stale v3 errors** - always use `pnpm tsc` for accurate type checking
 - **NextEffect.runPromise** required because Next.js redirects must be called outside try-catch
 - **Root Vitest may discover package tests** - `pnpm test:run` then also runs package tests; update scripts/docs together if this changes
+- **Workflow package APIs** - import `@yolk/vercel-workflows-runtime/workflow`; root export intentionally empty
 - **Portless local dev** - `pnpm dev` runs `portless run next dev` at named `.localhost` URLs; use `pnpm dev:app` to bypass proxy
 - **`packages/harness/` is stale/empty** - not a real workspace package unless a `package.json` is added
 - **`CLAUDE.md` is a pointer** - `AGENTS.md` is the canonical project knowledge base

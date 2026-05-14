@@ -15,10 +15,12 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - No product transcript persistence; host app owns storage/resume policy beyond Workflow execution stream.
 - Host app supplies product route/auth/provider/tool wiring; package-owned `'use workflow'` / `'use step'` exports are allowed only with `@workflow/vitest` coverage.
 - Keep Effect runtime work out of workflow orchestration helpers; Effect may run inside host/package step callbacks.
+- Import Workflow orchestration APIs from `@yolk/vercel-workflows-runtime/workflow`; root export is intentionally empty.
 
 ## Design Rules
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
+- Keep Workflow-safe APIs behind the `./workflow` package subpath so normal imports do not accidentally couple to Workflow runtime code.
 - Preserve tool result order by original model tool-call order.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.

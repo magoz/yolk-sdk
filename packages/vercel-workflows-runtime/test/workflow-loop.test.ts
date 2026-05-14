@@ -7,7 +7,7 @@ import {
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepInput,
   type VercelAgentWorkflowToolBatchStepResult
-} from '../src/index.ts'
+} from '../src/workflow.ts'
 
 const terminalModelResult = (input: VercelAgentWorkflowModelStepInput) => ({
   done: true,
