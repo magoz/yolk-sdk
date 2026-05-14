@@ -1,3 +1,4 @@
+import { getWritable, sleep } from 'workflow'
 import { runVercelAgentWorkflow } from '@yolk/vercel-workflows-runtime'
 
 type FixtureInput = {
@@ -18,6 +19,25 @@ export async function packageOwnedDirectiveWorkflow(input: FixtureInput): Promis
   })
 
   return 'workflow-complete'
+}
+
+export async function packageStreamWorkflow(): Promise<string> {
+  'use workflow'
+
+  await packageWriteStreamStep('first')
+  await packageWriteStreamStep('second')
+  await packageCloseStreamStep()
+
+  return 'stream-complete'
+}
+
+export async function packageCancellableWorkflow(): Promise<string> {
+  'use workflow'
+
+  await packageWriteStreamStep('started')
+  await sleep('10m')
+
+  return 'cancel-not-observed'
 }
 
 async function packageModelStep(input: {
@@ -76,4 +96,21 @@ async function packageErrorStep(error: unknown) {
   'use step'
 
   throw error instanceof Error ? error : new Error('workflow fixture failed')
+}
+
+async function packageWriteStreamStep(chunk: string) {
+  'use step'
+
+  const writer = getWritable<string>().getWriter()
+  try {
+    await writer.write(chunk)
+  } finally {
+    writer.releaseLock()
+  }
+}
+
+async function packageCloseStreamStep() {
+  'use step'
+
+  await getWritable<string>().close()
 }
