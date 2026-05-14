@@ -2,7 +2,7 @@ import { getWritable } from 'workflow'
 import { Data, Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
-  runVercelAgentWorkflow,
+  defaultMaxWorkflowTurns,
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepResult
@@ -351,11 +351,57 @@ const decodeWorkflowUserId = (context: unknown) =>
 export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
-  await runVercelAgentWorkflow({
-    input: { request: input.request, context: input.userId },
-    runModelStep: runAgentWorkflowModelStep,
-    runToolBatchStep: runAgentWorkflowToolBatchStep,
-    closeStream: closeAgentWorkflowStream,
-    writeError: writeWorkflowErrorStep
-  })
+  let state: SerializableWorkflowState = {
+    request: input.request,
+    createdMessages: [],
+    turn: 1,
+    eventSequence: 0
+  }
+
+  for (let step = 0; step < defaultMaxWorkflowTurns; step++) {
+    let modelResult: VercelAgentWorkflowModelStepResult
+
+    try {
+      modelResult = await runAgentWorkflowModelStep({ context: input.userId, state })
+    } catch (error) {
+      await writeWorkflowErrorStep(error)
+      return
+    }
+
+    if (modelResult.done) {
+      try {
+        await closeAgentWorkflowStream()
+      } catch (error) {
+        await writeWorkflowErrorStep(error)
+      }
+      return
+    }
+
+    let toolsResult: VercelAgentWorkflowToolBatchStepResult
+
+    try {
+      toolsResult = await runAgentWorkflowToolBatchStep({
+        context: input.userId,
+        request: input.request,
+        calls: modelResult.toolCalls,
+        createdMessages: modelResult.createdMessages,
+        turn: modelResult.turn,
+        eventSequence: modelResult.eventSequence ?? state.eventSequence
+      })
+    } catch (error) {
+      await writeWorkflowErrorStep(error)
+      return
+    }
+
+    state = {
+      request: input.request,
+      messages: [...modelResult.messages, ...toolsResult.messages],
+      createdMessages: toolsResult.createdMessages,
+      usage: modelResult.usage,
+      turn: modelResult.turn + 1,
+      eventSequence: toolsResult.eventSequence ?? modelResult.eventSequence ?? state.eventSequence
+    }
+  }
+
+  await writeWorkflowErrorStep(new Error(`Vercel agent workflow exceeded max turns: ${defaultMaxWorkflowTurns}`))
 }

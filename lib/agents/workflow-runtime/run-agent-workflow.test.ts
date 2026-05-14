@@ -20,4 +20,11 @@ describe('runAgentWorkflow', () => {
     expect(workflowFunctionSource).toContain('closeAgentWorkflowStream')
     expect(workflowFunctionSource).toContain('writeWorkflowErrorStep')
   })
+
+  it('does not pass step functions through serializable workflow args', () => {
+    expect(workflowFunctionSource).not.toContain('runVercelAgentWorkflow')
+    expect(workflowFunctionSource).not.toContain('writeError:')
+    expect(workflowFunctionSource).not.toContain('runModelStep:')
+    expect(workflowFunctionSource).not.toContain('runToolBatchStep:')
+  })
 })

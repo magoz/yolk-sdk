@@ -19,4 +19,10 @@ describe('makeAgentTextRuntime task tool wiring', () => {
     expect(taskExecuteSource).toContain('modules: baseToolModules')
     expect(taskExecuteSource).not.toContain('modules: toolModules')
   })
+
+  it('returns subagent failures as task results', () => {
+    expect(taskExecuteSource).toContain("Effect.catchTag('ToolError'")
+    expect(taskExecuteSource).toContain('Subagent failed:')
+    expect(taskExecuteSource).toContain('isError: true')
+  })
 })

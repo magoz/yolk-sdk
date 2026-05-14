@@ -106,6 +106,23 @@ const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
   return text.length === 0 ? 'Subagent completed without a final text response.' : text
 }
 
+const taskResult = (input: {
+  readonly callId: string
+  readonly output: string
+  readonly subagentType: string
+  readonly description: string
+  readonly isError?: boolean
+}) =>
+  ToolResult.make({
+    toolCallId: input.callId,
+    content: formatTaskResult(input.output),
+    isError: input.isError,
+    structuredContent: {
+      subagent_type: input.subagentType,
+      description: input.description
+    }
+  })
+
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
     const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
@@ -181,20 +198,40 @@ export const makeAgentTextRuntime = (
             }
           ).pipe(
             Stream.runCollect,
-            Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet))),
-            Effect.mapError(error => toolError(unknownToMessage(error), 'execution'))
+            Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet)))
           )
           const output = subagentResultText(Array.from(eventsChunk))
 
-          return ToolResult.make({
-            toolCallId: call.id,
-            content: formatTaskResult(output),
-            structuredContent: {
-              subagent_type: params.subagent_type,
-              description: params.description
-            }
+          return taskResult({
+            callId: call.id,
+            output,
+            subagentType: params.subagent_type,
+            description: params.description
           })
-        })
+        }).pipe(
+          Effect.catchTag('ToolError', error =>
+            Effect.succeed(
+              taskResult({
+                callId: call.id,
+                output: `Subagent failed: ${error.message}`,
+                subagentType: params.subagent_type,
+                description: params.description,
+                isError: true
+              })
+            )
+          ),
+          Effect.catch(error =>
+            Effect.succeed(
+              taskResult({
+                callId: call.id,
+                output: `Subagent failed: ${unknownToMessage(error)}`,
+                subagentType: params.subagent_type,
+                description: params.description,
+                isError: true
+              })
+            )
+          )
+        )
     })
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [...baseToolModules, taskToolModule]
     const toolSet = yield* resolveAgentToolSet({

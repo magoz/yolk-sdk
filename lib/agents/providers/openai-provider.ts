@@ -81,6 +81,7 @@ type OpenAiRequestBody = {
   readonly messages: ReadonlyArray<OpenAiMessage>
   readonly max_completion_tokens: number
   readonly tools?: ReadonlyArray<OpenAiTool>
+  readonly parallel_tool_calls?: true
 }
 
 class OpenAiFunctionResponse extends Schema.Class<OpenAiFunctionResponse>('OpenAiFunctionResponse')(
@@ -305,7 +306,8 @@ export const toOpenAiRequestBody = (
 
     return {
       ...body,
-      tools: request.tools.map(toOpenAiTool)
+      tools: request.tools.map(toOpenAiTool),
+      parallel_tool_calls: true
     }
   })
 

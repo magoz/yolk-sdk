@@ -123,6 +123,7 @@ describe('OpenAiProviderLayer', () => {
       const events = Array.from(eventsChunk)
 
       expect(requestBody).toMatchObject({
+        parallel_tool_calls: true,
         tools: [
           {
             type: 'function',

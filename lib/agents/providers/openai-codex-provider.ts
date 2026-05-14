@@ -106,6 +106,7 @@ type OpenAiCodexRequestBody = {
     readonly summary: AgentTextReasoningSummary
   }
   readonly tools?: ReadonlyArray<OpenAiCodexTool>
+  readonly parallel_tool_calls?: true
 }
 
 class OpenAiCodexReasoningSummaryText extends Schema.Class<OpenAiCodexReasoningSummaryText>(
@@ -349,7 +350,8 @@ export const toOpenAiCodexRequestBody = (
 
     return {
       ...body,
-      tools: request.tools.map(toOpenAiCodexTool)
+      tools: request.tools.map(toOpenAiCodexTool),
+      parallel_tool_calls: true
     }
   })
 

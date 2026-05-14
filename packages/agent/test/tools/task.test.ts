@@ -34,6 +34,8 @@ describe('task tool', () => {
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([taskToolName])
       expect(toolSet.tools[0]?.description).toContain('explore')
+      expect(toolSet.tools[0]?.description).toContain('call this task tool multiple times')
+      expect(toolSet.tools[0]?.description).toContain('Do not mention or use multi_tool_use.parallel')
       expect(toolSet.metadata).toEqual([{ moduleId: 'task', name: taskToolName, access: 'read' }])
     })
   )

@@ -92,7 +92,8 @@ const taskToolDescription = (subagents: ReadonlyArray<TaskSubagentDefinition>) =
   [
     'Launch a new agent to handle complex, multistep tasks autonomously.',
     'Use this when delegating focused work to a specialized subagent would save context or allow parallel exploration.',
-    'You may call this tool multiple times in one turn to run subagents concurrently.',
+    'To run subagents in parallel, call this task tool multiple times in the same assistant response.',
+    'Do not mention or use multi_tool_use.parallel; Yolk runs same-turn task calls concurrently automatically.',
     'A fresh subagent only sees the prompt you provide, so include all required context.',
     'Subagents can use their normal tools but cannot launch further task subagents in v1.',
     subagents.length === 0
