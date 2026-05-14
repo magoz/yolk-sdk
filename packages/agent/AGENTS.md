@@ -22,6 +22,8 @@
 - Runtime depends on protocol + loop only.
 - Client depends on protocol only.
 - Tools depend on protocol + loop only.
+- Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
+- Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 
 ## Tests
 

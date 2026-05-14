@@ -13,6 +13,7 @@
 - No app users, orgs, permissions, product source sync, R2/S3 layouts, or auth.
 - No provider SDKs, database drivers, Cloudflare bindings, React, Next.js, or Node-only imports.
 - Concrete embedders/vector stores belong in adapter packages.
+- Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ## Subpaths
 

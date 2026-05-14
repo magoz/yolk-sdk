@@ -49,7 +49,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email                                                    | Transactional email via Resend                                                                                                     |
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
-| Agent stack        | packages                                                 | Domain-free protocol, loop/runtime, Workflow runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks          |
+| Agent stack        | packages                                                 | `@yolk/agent` subpaths, `@yolk/mcp`, `@yolk/rag`, Workflow runtime, voice-runtime, React hooks                                      |
 | Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools                                         | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search + remote MCP tools                                      |
@@ -209,6 +209,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 ## SUBDIRECTORY DOCS
 
 - `patterns/README.md` - Architecture and convention patterns index
+- `patterns/PACKAGE_ARCHITECTURE.md` - Package shape, boundaries, tree-shaking constraints
 - `scripts/AGENTS.md` - Node CLI/dev script boundaries
 - `app/AGENTS.md` - App Router page/layout/auth/API boundaries
 - `app/api/AGENTS.md` - HTTP route handler and Realtime route patterns

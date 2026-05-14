@@ -16,7 +16,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Workflow text runtime exposes run id in the Activity panel; stream replay uses `GET /api/agent/workflow/:runId`; stop also calls `DELETE /api/agent/workflow/:runId`.
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
-- Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
+- Text route calls stateless `@yolk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
 - Routes/runtime adapters provide their tool modules explicitly; do not hide tool policy in a global resolver.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical OAuth refresh owner/token broker and Codex HTTP stream proxy.

@@ -17,6 +17,7 @@
 - App auth, persisted config, policy, and product tool catalogs stay outside this package.
 - Keep Node-specific helpers behind `@yolk/mcp/client/node`.
 - Client/server may use `@yolk/agent/protocol` for generic `ToolDef`/`ToolResult`; agent loop/providers remain MCP-agnostic.
+- Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ## Tests
 

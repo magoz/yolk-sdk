@@ -11,7 +11,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 | `@yolk/mcp`           | MCP client/server/protocol package with explicit subpaths | `@yolk/agent/protocol`, Effect |
 | `@yolk/agent/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
 | `@yolk/agent/loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/agent/protocol`, Effect                     |
-| `@yolk/agent/runtime` | Session load/save orchestration over agent-loop         | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
+| `@yolk/agent/runtime` | Session load/save orchestration over agent loop         | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
 | `@yolk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect, workflow |
 | `@yolk/agent/tools` | Scoped tool modules + executor layer                    | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
 | `@yolk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
@@ -72,10 +72,10 @@ app -> oauth + Effect
 
 ## Reasoning
 
-- `AgentReasoningEffort` is protocol-only request config; app chooses values, agent-loop/provider layers pass through.
-- `agent-runtime` threads `reasoningEffort` and `capabilities`; `/api/agent` uses `Transcript`, Cloudflare DO uses `AppendInput`.
-- `agent-runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
-- `agent-loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
+- `AgentReasoningEffort` is protocol-only request config; app chooses values, loop/provider layers pass through.
+- `@yolk/agent/runtime` threads `reasoningEffort` and `capabilities`; `/api/agent` uses `Transcript`, Cloudflare DO uses `AppendInput`.
+- `@yolk/agent/runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
+- `@yolk/agent/loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
@@ -84,7 +84,7 @@ app -> oauth + Effect
 
 - `Content = string | ContentPart[]`; parts currently `Text`, `Image`, `Audio`.
 - Use protocol helpers (`contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`) instead of app-local duplication.
-- `AgentModelCapabilities` is protocol-only; app/provider config chooses text-only vs text+image and agent-loop rejects unsupported input before provider calls.
+- `AgentModelCapabilities` is protocol-only; app/provider config chooses text-only vs text+image and loop rejects unsupported input before provider calls.
 - Provider adapters map protocol content to provider-specific request parts; packages must not import provider SDKs.
 
 ## Tool Registry
@@ -128,7 +128,7 @@ app -> oauth + Effect
 - JSON encode/decode uses Effect Schema (`UnknownFromJsonString`); avoid raw JSON in production MCP code. Decode wire JSON in two steps: JSON string → unknown → protocol schema.
 - MCP server maps parse vs validation separately: JSON parse errors return `-32700`, invalid JSON-RPC/request params return `-32600`.
 - MCP server stdio should not write internal errors to stderr; return protocol-shaped JSON-RPC errors when possible.
-- Export normal `ToolDef`/`ToolResult`; agent-loop and providers stay MCP-agnostic.
+- Export normal `ToolDef`/`ToolResult`; agent loop and providers stay MCP-agnostic.
 - `listMcpTools` rejects duplicate generated tool names after server/tool sanitization.
 - Prefer local/remote-specific helper APIs in tests (`listLocalMcpServerTools`, `callLocalMcpServerTool`, `listRemoteMcpServerTools`, `callRemoteMcpServerTool`) when the config kind is known; use union helpers at app boundaries.
 - Test MCP transports below UI level: fake `HttpClient` layers for remote JSON/SSE, fake `ChildProcessSpawner` for core local behavior, and tiny checked-in stdio fixtures for real process behavior.
@@ -194,6 +194,7 @@ app -> oauth + Effect
 - Node-specific package APIs use explicit subpath exports (for example `@yolk/mcp/client/node`) so core imports stay portable.
 - Package-internal relative imports use explicit `.ts` extensions, matching Alchemy's source style. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
+- See `patterns/PACKAGE_ARCHITECTURE.md` for package shape, boundary, and tree-shaking constraints.
 
 ## Workspace Setup
 
@@ -283,7 +284,7 @@ Use these before broadening package scope:
    - Runtime README documents `Transcript` vs `AppendInput` and host-owned storage responsibilities.
 
 4. **Rich tool lifecycle events**
-   - Implemented in protocol/client/react/agent-loop; PRD tracked in `.opencode/state/tool-lifecycle-events/prd.md`.
+   - Implemented in agent protocol/client/react/loop; PRD tracked in `.opencode/state/tool-lifecycle-events/prd.md`.
    - Provider adapters can emit `LLMToolInputStart`/`LLMToolInputDelta` and `LLMProviderToolResult` for hosted tools.
    - Packages model approval events only; host apps still own policy/enforcement.
 

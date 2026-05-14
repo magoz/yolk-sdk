@@ -20,6 +20,12 @@ Architecture and convention patterns for this codebase.
 | ---------------------------------------------------- | ----------------------------------------------------------- |
 | [DATA_ACCESS_PATTERNS.md](./DATA_ACCESS_PATTERNS.md) | RSC for reads, server actions for mutations, S3 signed URLs |
 
+## Packages
+
+| Pattern                                                | Purpose                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------- |
+| [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Agent/MCP/RAG package shape, boundaries, tree-shaking rules   |
+
 ## URL State
 
 | Pattern                                  | Purpose                                                 |
