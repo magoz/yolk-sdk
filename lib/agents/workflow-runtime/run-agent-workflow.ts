@@ -4,12 +4,12 @@ import * as Schema from 'effect/Schema'
 import { AgentError } from '@yolk/protocol'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import type { AgentRouteRequest } from '@/lib/agents/route-handler'
+import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { makeAgentTextResponse } from './text-response'
 
 export type AgentWorkflowInput = {
   readonly userId: string
-  readonly request: AgentRouteRequest
+  readonly request: unknown
 }
 
 class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepError')<{
@@ -71,7 +71,8 @@ export async function runAgentWorkflowStep(input: AgentWorkflowInput) {
   const writer = writable.getWriter()
 
   await Effect.runPromise(
-    makeAgentTextResponse(input.request, input.userId, '/agent/workflow').pipe(
+    Schema.decodeUnknownEffect(AgentRouteRequest)(input.request).pipe(
+      Effect.flatMap(request => makeAgentTextResponse(request, input.userId, '/agent/workflow')),
       Effect.flatMap(response => writeResponseBody(writer, response)),
       Effect.catch(error => writeWorkflowError(writer, error)),
       Effect.ensuring(closeWriter(writer)),

@@ -1,5 +1,6 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Data, Effect } from 'effect'
+import * as Schema from 'effect/Schema'
 import { start } from 'workflow/api'
 import { AppLayer } from '@/lib/layers'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
@@ -24,8 +25,9 @@ const ndjsonHeaders = (runId: string) => ({
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const request = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
+  const workflowRequest = yield* Schema.encodeUnknownEffect(AgentRouteRequest)(request)
   const run = yield* Effect.promise(() =>
-    start(runAgentWorkflow, [{ userId: session.user.id, request }])
+    start(runAgentWorkflow, [{ userId: session.user.id, request: workflowRequest }])
   )
 
   return HttpServerResponse.raw(run.getReadable<Uint8Array>(), {

@@ -382,6 +382,12 @@ Architecture explainer page: `/vercel-workflows`.
 10. Use direct Vercel Codex provider path, no Cloudflare token broker/proxy.
 11. Do not add Vercel Sandbox until chat-only Workflow path is proven.
 
+Implementation note: Workflow arguments must be plain serializable values. Decode the
+HTTP body into `AgentRouteRequest` at the route boundary, encode it back to plain
+wire data before `start(runAgentWorkflow, ...)`, then decode inside the step before
+calling app runtime code. Passing Effect Schema class instances directly causes
+Workflow serialization failures.
+
 ## Operational guardrails
 
 - Keep per-step model/tool work under function max duration.
