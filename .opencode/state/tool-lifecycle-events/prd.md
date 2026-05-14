@@ -135,19 +135,19 @@ When this PRD is complete, the following will be true:
 
 ### Existing Patterns
 
-- `packages/protocol/src/event.ts` — current stream events: `LLMToolCall`, `ToolExecutionStart`, `ToolExecutionEnd`, `ToolResult`.
-- `packages/protocol/src/tool.ts` — `ToolCall`, `ToolDef`, `ToolResult` schemas.
-- `packages/agent-loop/src/run.ts` — local tool execution stream emits start/end/result after full LLM turn.
-- `packages/client/src/state.ts` — client tool run state: `Called`, `Running`, `Completed`.
+- `packages/agent/src/protocol/event.ts` — current stream events: `LLMToolCall`, `ToolExecutionStart`, `ToolExecutionEnd`, `ToolResult`.
+- `packages/agent/src/protocol/tool.ts` — `ToolCall`, `ToolDef`, `ToolResult` schemas.
+- `packages/agent/src/loop/run.ts` — local tool execution stream emits start/end/result after full LLM turn.
+- `packages/agent/src/client/state.ts` — client tool run state: `Called`, `Running`, `Completed`.
 - `packages/react/src/chat-messages.ts` — render projection mirrors the current tool states.
 - `packages/voice-runtime/src/tool-bridge.ts` — realtime voice bridge has provider-normalized tool call/result envelope.
 
 ### Key Files
 
-- `packages/protocol/src/event.ts` — event vocabulary changes.
-- `packages/client/src/state.ts` — generic reducer state changes.
+- `packages/agent/src/protocol/event.ts` — event vocabulary changes.
+- `packages/agent/src/client/state.ts` — generic reducer state changes.
 - `packages/react/src/chat-messages.ts` — headless UI state changes.
-- `packages/agent-loop/src/run.ts` — local execution compatibility path.
+- `packages/agent/src/loop/run.ts` — local execution compatibility path.
 - `lib/agents/providers/openai-provider.ts` and `lib/agents/providers/openai-codex-provider.ts` — provider adapter normalization later.
 
 ### System Dependencies
@@ -278,10 +278,10 @@ The final API may differ, but it must preserve these semantics.
 
 ## Documentation Requirements
 
-- [x] Update `packages/protocol/AGENTS.md` event guidance.
-- [x] Update `packages/client/AGENTS.md` tool reducer guidance.
+- [x] Update `packages/agent/AGENTS.md` event guidance.
+- [x] Update `packages/react/AGENTS.md` tool reducer guidance.
 - [x] Update `packages/react/AGENTS.md` render-state guidance.
-- [x] Update `packages/agent-loop/AGENTS.md` local execution semantics.
+- [x] Update `packages/agent/AGENTS.md` local execution semantics.
 - [x] Update `packages/AGENTS.md` reference gap TODO after implementation.
 
 ---

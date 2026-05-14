@@ -6,7 +6,7 @@
       "category": "runtime",
       "description": "Package exposes a generic append-only SessionEventStore contract with ordered events and revision metadata.",
       "steps": [
-        "Verify packages/agent-runtime/src/session-event-store.ts exports RuntimeSessionEvent variants for InputAppended, RunStarted, RunCompleted, RunFailed, and RunInterrupted.",
+        "Verify packages/agent/src/runtime/session-event-store.ts exports RuntimeSessionEvent variants for InputAppended, RunStarted, RunCompleted, RunFailed, and RunInterrupted.",
         "Verify StoredRuntimeSessionEvent includes id, sessionId, revision, and event.",
         "Verify SessionEventStore exposes load and append only, with no app auth, database, HTTP, WebSocket, or Cloudflare imports.",
         "Run pnpm --filter @yolk/agent/runtime test:run and confirm SessionEventStore append/replay tests pass."
@@ -18,7 +18,7 @@
       "category": "runtime",
       "description": "Runtime AppendInput mode replays prior protocol transcript state and persists input/start/completion events.",
       "steps": [
-        "Verify packages/agent-runtime/src/run-runtime.ts supports RuntimeRequest._tag AppendInput with sessionId, input, runId, and expectedRevision.",
+        "Verify packages/agent/src/runtime/run-runtime.ts supports RuntimeRequest._tag AppendInput with sessionId, input, runId, and expectedRevision.",
         "Verify AppendInput loads SessionEventStore, replays prior InputAppended and RunCompleted events, appends InputAppended and RunStarted before loop execution, and appends RunCompleted after success.",
         "Verify replayRuntimeSessionEvents returns protocol AgentMessage values only, preserving ordered assistant/tool parts and ToolResult.isError metadata while excluding runtime lifecycle metadata.",
         "Run pnpm --filter @yolk/agent/runtime test:run and confirm append input replay/completion tests pass."
@@ -102,7 +102,7 @@
       "category": "docs",
       "description": "Package and adapter docs explain append-store boundaries, conflict behavior, and host responsibilities.",
       "steps": [
-        "Verify packages/agent-runtime/AGENTS.md documents Transcript vs AppendInput modes, append events, replay semantics, expectedRevision, and host-owned cleanup.",
+        "Verify packages/agent/AGENTS.md documents Transcript vs AppendInput modes, append events, replay semantics, expectedRevision, and host-owned cleanup.",
         "Verify packages/AGENTS.md durable runtime section reflects current implementation and remaining work.",
         "Verify cloudflare/agent/AGENTS.md documents Durable Object append-log storage and reconnect interruption behavior.",
         "Add README examples for Transcript vs AppendInput usage when runtime API surface stabilizes, or document why README examples remain deferred."
@@ -121,12 +121,12 @@
       "Cloudflare source imports use explicit .ts relative extensions."
     ],
     "keyFiles": [
-      "packages/agent-runtime/src/session-event-store.ts",
-      "packages/agent-runtime/src/run-runtime.ts",
-      "packages/agent-runtime/src/error.ts",
-      "packages/agent-runtime/test/session-event-store.test.ts",
-      "packages/agent-runtime/test/run-runtime.test.ts",
-      "packages/agent-runtime/AGENTS.md",
+      "packages/agent/src/runtime/session-event-store.ts",
+      "packages/agent/src/runtime/run-runtime.ts",
+      "packages/agent/src/runtime/error.ts",
+      "packages/agent/test/runtime/session-event-store.test.ts",
+      "packages/agent/test/runtime/run-runtime.test.ts",
+      "packages/agent/AGENTS.md",
       "packages/AGENTS.md",
       "cloudflare/agent/src/yolk-agent.ts",
       "cloudflare/agent/src/cloudflare-error.ts",

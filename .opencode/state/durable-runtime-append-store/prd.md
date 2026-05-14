@@ -101,18 +101,18 @@ When this PRD is complete, the following will be true:
 
 ### Existing Patterns
 
-- `packages/agent-runtime/src/run-runtime.ts` — coordinates stateless `Transcript` mode and append-backed `AppendInput` mode.
-- `packages/agent-runtime/src/session-event-store.ts` — current append-only store contract, replay helpers, incomplete-run helper, and in-memory layer.
-- `packages/agent-runtime/AGENTS.md` — documents append/run-event semantics.
+- `packages/agent/src/runtime/run-runtime.ts` — coordinates stateless `Transcript` mode and append-backed `AppendInput` mode.
+- `packages/agent/src/runtime/session-event-store.ts` — current append-only store contract, replay helpers, incomplete-run helper, and in-memory layer.
+- `packages/agent/AGENTS.md` — documents append/run-event semantics.
 - `cloudflare/agent/src/yolk-agent.ts` — thin adapter persists `SessionEventStore` logs in Durable Object storage.
-- `packages/protocol/src/message.ts` and `packages/protocol/src/event.ts` — protocol transcript and stream event source of truth.
+- `packages/agent/src/protocol/message.ts` and `packages/agent/src/protocol/event.ts` — protocol transcript and stream event source of truth.
 
 ### Key Files
 
-- `packages/agent-runtime/src/run-runtime.ts` — runtime integration point.
-- `packages/agent-runtime/src/session-event-store.ts` — append store contract and helpers.
-- `packages/agent-runtime/test/session-event-store.test.ts` — append/replay/conflict/incomplete-run tests.
-- `packages/agent-runtime/test/run-runtime.test.ts` — current persistence semantics tests.
+- `packages/agent/src/runtime/run-runtime.ts` — runtime integration point.
+- `packages/agent/src/runtime/session-event-store.ts` — append store contract and helpers.
+- `packages/agent/test/runtime/session-event-store.test.ts` — append/replay/conflict/incomplete-run tests.
+- `packages/agent/test/runtime/run-runtime.test.ts` — current persistence semantics tests.
 - `cloudflare/agent/src/yolk-agent.ts` — downstream smoke adapter to validate portability later.
 
 ### System Dependencies
@@ -209,7 +209,7 @@ These semantics must remain product-free. Physical storage belongs to host adapt
 
 ## Documentation Requirements
 
-- [x] Update `packages/agent-runtime/AGENTS.md` persistence semantics.
+- [x] Update `packages/agent/AGENTS.md` persistence semantics.
 - [x] Update `packages/AGENTS.md` runtime section if package boundaries shift.
 - [x] Add README examples for transcript vs append usage once API stabilizes, or document why README examples remain deferred.
 - [x] Document host-owned storage responsibilities and conflict behavior.

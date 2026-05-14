@@ -131,7 +131,7 @@ When this PRD is complete, the following will be true:
 
 ### Existing Patterns
 
-- `packages/tool-registry/src/registry.ts` — host apps define `ToolModule<Context>`; registry resolves enabled tools and adapts execution.
+- `packages/agent/src/tools/registry.ts` — host apps define `ToolModule<Context>`; registry resolves enabled tools and adapts execution.
 - `lib/agents/tools/registry.ts` — app composes tool modules for text/voice surfaces.
 - `lib/agents/tools/web-search-tool.ts` — existing direct MCP-ish JSON-RPC call to remote providers.
 - `packages/voice-runtime/src/*` — provider-neutral bridge pattern; app owns provider specifics.
@@ -142,8 +142,8 @@ When this PRD is complete, the following will be true:
 ### Key Files
 
 - `packages/` — add `mcp` package and package docs.
-- `packages/protocol/src/*` — existing `ToolDef`, `ToolCall`, `ToolResult` schemas.
-- `packages/tool-registry/src/registry.ts` — integration point, should need no core change unless metadata must expand.
+- `packages/agent/src/protocol/*` — existing `ToolDef`, `ToolCall`, `ToolResult` schemas.
+- `packages/agent/src/tools/registry.ts` — integration point, should need no core change unless metadata must expand.
 - `lib/agents/tools/registry.ts` — include MCP module when configured.
 - `lib/agents/tools/` — app adapter/config boundary for MCP tools.
 - `lib/agents/AGENTS.md`, `packages/AGENTS.md` — update after implementation.

@@ -8,10 +8,10 @@ Core package boundaries decided. Product-layer details still open.
 
 | Layer             | Decision                                                                                             |
 | ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Protocol          | `packages/protocol/` shared schemas, events, wire types. No domain.                                  |
-| Agent loop        | `packages/agent-loop/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
-| Agent runtime     | `packages/agent-runtime/` reusable session/runtime shell over agent-loop. Generic over opaque `Ctx`. |
-| Client            | `packages/client/` browser protocol SDK + event reducer. Does not run agent-loop by default.         |
+| Protocol          | `packages/agent/src/protocol/` shared schemas, events, wire types. No domain.                                  |
+| Agent loop        | `packages/agent/src/loop/` pure Effect loop. Messages in, events out. No sessions/persistence/transport. |
+| Agent runtime     | `packages/agent/src/runtime/` reusable session/runtime shell over agent-loop. Generic over opaque `Ctx`. |
+| Client            | `packages/agent/src/client/` browser protocol SDK + event reducer. Does not run agent-loop by default.         |
 | App layer         | Project-specific Next.js/Worker layer: auth, users, teams, integrations, OAuth, billing, UI.         |
 | Knowledge store   | Knowledge DO per org. R2 (files) + DO SQLite (chunks, FTS5, history) + Vectorize (vectors).          |
 | Knowledge write   | Light path (text): sync ~500ms. Heavy path (PDF): async via Queue (v2).                              |
@@ -396,8 +396,8 @@ Example:
 Alternative: keep adapters inside the same package initially:
 
 ```text
-packages/agent-runtime/src/stores/memory.ts
-packages/agent-runtime/src/stores/postgres.ts
+packages/agent/src/runtime/src/stores/memory.ts
+packages/agent/src/runtime/src/stores/postgres.ts
 ```
 
 Risk: heavy deps leak into core packages. Split once dependencies get heavy.
@@ -977,13 +977,13 @@ Keep workspace packages separate internally for now, then consolidate public sur
 Current internal packages:
 
 ```text
-packages/protocol
-packages/agent-loop
-packages/agent-runtime
-packages/client
+packages/agent/src/protocol
+packages/agent/src/loop
+packages/agent/src/runtime
+packages/agent/src/client
 packages/react
-packages/mcp-client
-packages/mcp-server
+packages/mcp/src/client
+packages/mcp/src/server
 packages/vercel-workflows-runtime
 ```
 

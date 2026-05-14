@@ -249,9 +249,9 @@ Add a Vercel Workflow runtime backend, not a wholesale replacement.
 Keep core packages runtime-neutral:
 
 ```txt
-packages/agent-loop      # pure loop
-packages/agent-runtime   # runtime contract + append/session abstractions
-packages/client          # protocol/client replay helpers
+packages/agent/src/loop      # pure loop
+packages/agent/src/runtime   # runtime contract + append/session abstractions
+packages/agent/src/client          # protocol/client replay helpers
 packages/react           # headless chat state/UI hooks
 packages/openai          # Codex mechanics and OAuth schemas
 packages/oauth           # broker/credential contracts
@@ -317,7 +317,7 @@ Workflow state is execution-only:
 
 Reason: Workflow retention is plan-bound by default (Pro: 7 days after completion). It is not the long-term transcript store.
 
-## Why not create `packages/agent-runtime-vercel` first
+## Why not create `packages/agent/src/runtime-vercel` first
 
 Start in app code because the stable seam is not known yet.
 
@@ -347,7 +347,7 @@ Extract later only if the adapter stabilizes.
 Likely extractable later:
 
 ```txt
-packages/agent-runtime-vercel
+packages/agent/src/runtime-vercel
   stream protocol glue
   run status mapping
   resumable transport helpers
@@ -473,11 +473,11 @@ runAgentWorkflow                         # "use workflow"
 Package seam:
 
 ```txt
-packages/agent-loop
+packages/agent/src/loop
   runModelTurn(config, continuation) -> Stream<AgentEvent> + StepResult
   runToolBatch(calls) -> Stream<AgentEvent> + ToolResultMessage[]
 
-packages/agent-runtime
+packages/agent/src/runtime
   optional continuation schemas + append-store helpers
 
 app/lib/agents/workflow-runtime
@@ -501,7 +501,7 @@ the route/step boundary, same as the current `AgentRouteRequest` serialization f
 
 Recommended implementation order:
 
-1. Extract pure loop internals from `packages/agent-loop/src/run.ts` into explicit
+1. Extract pure loop internals from `packages/agent/src/loop/run.ts` into explicit
    model-step and tool-batch functions without changing current `run` behavior.
 2. Add package tests with `FauxProvider` and `TestToolExecutor` proving the new step API
    emits the same semantic event order as `run`.
@@ -674,12 +674,12 @@ SQLite, or browser storage.
 Package model:
 
 ```txt
-packages/agent-loop
+packages/agent/src/loop
   stateless model/tool loop and step APIs
   input: transcript/context + injected provider/tool executor
   output: protocol events + final messages/usage
 
-packages/agent-runtime
+packages/agent/src/runtime
   generic runtime orchestration
   optional injected append store interfaces
   supports Transcript mode with no persistence

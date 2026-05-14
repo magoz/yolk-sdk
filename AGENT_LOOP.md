@@ -2,7 +2,7 @@
 
 ## What it is
 
-Generic, portable agent loop. `packages/agent-loop/`. Orchestrates LLM <> tool cycles. Pure Effect. No Cloudflare, no Yolk domain logic. Don't publish until second consumer exists.
+Generic, portable agent loop. `packages/agent/src/loop/`. Orchestrates LLM <> tool cycles. Pure Effect. No Cloudflare, no Yolk domain logic. Don't publish until second consumer exists.
 
 Terminology note: planning used “harness” as shorthand. Package name is `@yolk/agent/loop` because industry usage increasingly reserves “harness” for opinionated, batteries-included agent layers.
 
@@ -24,7 +24,7 @@ This package is one layer in the reusable stack. See `ARCHITECTURE.md`.
 protocol → agent-loop → agent-runtime → app
 ```
 
-The agent loop is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent-runtime/` or the app layer.
+The agent loop is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent/src/runtime/` or the app layer.
 
 Hard boundary: no users, teams, orgs, projects, billing, OAuth, knowledge store, or product-specific permissions in this package.
 
@@ -875,7 +875,7 @@ Consumer packages (outside agent-loop) bridge to platform-specific APIs via laye
 ## Agent Loop Package Structure (Planned)
 
 ```
-packages/agent-loop/
+packages/agent/src/loop/
   src/
     index.ts                  # Public API re-exports
     run.ts                    # Text mode agent loop (Stream.asyncScoped + Effect.gen)

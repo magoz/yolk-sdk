@@ -97,7 +97,7 @@ When this PRD is complete:
 ### Existing Patterns
 
 - `lib/agents/workflow-runtime/run-agent-workflow.ts` — current app-owned Workflow orchestration and step functions.
-- `packages/agent-loop/src/run.ts` — reusable `runModelTurn` / `runToolBatch` step APIs.
+- `packages/agent/src/loop/run.ts` — reusable `runModelTurn` / `runToolBatch` step APIs.
 - `app/api/agent/workflow/route.ts` — starts Workflow and returns NDJSON stream with `x-workflow-run-id`.
 - `app/api/agent/workflow/[runId]/route.ts` — GET resume and DELETE cancel route behavior.
 - `packages/react/src/use-agent-chat.ts` — client abort/stop state behavior.
@@ -231,6 +231,6 @@ Package exports should be explicit and minimal. No broad barrels.
 ### References
 
 - `lib/agents/workflow-runtime/run-agent-workflow.ts`
-- `packages/agent-loop/src/run.ts`
+- `packages/agent/src/loop/run.ts`
 - `app/api/agent/workflow/route.ts`
 - `app/api/agent/workflow/[runId]/route.ts`

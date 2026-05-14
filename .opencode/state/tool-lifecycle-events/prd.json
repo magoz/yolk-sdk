@@ -6,10 +6,10 @@
       "category": "protocol",
       "description": "Protocol transcript supports ordered assistant parts for text, reasoning, host tool calls, provider tool calls, and provider tool results.",
       "steps": [
-        "packages/protocol exports an ordered AssistantPart schema and AssistantAgentMessage uses ordered parts instead of separated content/reasoning/toolCalls fields",
+        "packages/agent/protocol exports an ordered AssistantPart schema and AssistantAgentMessage uses ordered parts instead of separated content/reasoning/toolCalls fields",
         "Host-executed tool calls remain representable and host tool results remain separate ToolResultMessage entries",
         "Provider-executed tool call/result parts can carry providerMetadata without importing provider SDKs",
-        "packages/protocol/test/wire.test.ts covers JSON round-trips and invalid payloads for assistant parts"
+        "packages/agent/test/protocol/wire.test.ts covers JSON round-trips and invalid payloads for assistant parts"
       ],
       "passes": true
     },
@@ -30,7 +30,7 @@
       "category": "agent-loop",
       "description": "Agent loop emits the new lifecycle events for simple local tool execution while preserving current execution semantics.",
       "steps": [
-        "packages/agent-loop/src/run.ts emits ToolExecutionStarted and ToolExecutionCompleted for successful local tools",
+        "packages/agent/src/loop/run.ts emits ToolExecutionStarted and ToolExecutionCompleted for successful local tools",
         "Tool execution failures emit ToolExecutionError with safe message/code and do not fabricate assistant or tool result messages unless explicitly modeled",
         "AgentEnd messages still contain only protocol transcript messages produced by completed turns",
         "agent-loop tests cover successful local execution and tool failure event ordering"
@@ -78,10 +78,10 @@
       "category": "docs",
       "description": "Package documentation reflects the new tool lifecycle and breaking protocol migration.",
       "steps": [
-        "packages/protocol/AGENTS.md documents ordered assistant parts and tool lifecycle events",
-        "packages/client/AGENTS.md documents rich tool reducer states and deterministic timing",
+        "packages/agent/AGENTS.md documents ordered assistant parts and tool lifecycle events",
+        "packages/react/AGENTS.md documents rich tool reducer states and deterministic timing",
         "packages/react/AGENTS.md documents headless projection expectations for lifecycle states",
-        "packages/agent-loop/AGENTS.md documents local execution event semantics and no compatibility aliases"
+        "packages/agent/AGENTS.md documents local execution event semantics and no compatibility aliases"
       ],
       "passes": true
     },
@@ -100,22 +100,22 @@
   ],
   "context": {
     "patterns": [
-      "Protocol schemas use Effect Schema tagged classes/unions in packages/protocol/src",
-      "Agent loop is stateless and emits AgentEvent streams from packages/agent-loop/src/run.ts",
+      "Protocol schemas use Effect Schema tagged classes/unions in packages/agent/src/protocol/src",
+      "Agent loop is stateless and emits AgentEvent streams from packages/agent/src/loop/run.ts",
       "Client reducers are deterministic and receive nowMs via options",
       "React package is headless; app UI/components stay outside packages/react",
       "Package-internal relative imports use explicit .ts extensions",
       "Breaking changes are acceptable for this migration; do not add compatibility aliases solely for old lifecycle event names"
     ],
     "keyFiles": [
-      "packages/protocol/src/event.ts",
-      "packages/protocol/src/message.ts",
-      "packages/protocol/src/tool.ts",
-      "packages/protocol/test/wire.test.ts",
-      "packages/agent-loop/src/run.ts",
-      "packages/agent-loop/test/run.test.ts",
-      "packages/client/src/state.ts",
-      "packages/client/test/state.test.ts",
+      "packages/agent/src/protocol/event.ts",
+      "packages/agent/src/protocol/message.ts",
+      "packages/agent/src/protocol/tool.ts",
+      "packages/agent/test/protocol/wire.test.ts",
+      "packages/agent/src/loop/run.ts",
+      "packages/agent/test/loop/run.test.ts",
+      "packages/agent/src/client/state.ts",
+      "packages/agent/test/client/state.test.ts",
       "packages/react/src/chat-messages.ts",
       "packages/react/src/chat-items.ts",
       "packages/react/src/chat-messages.test.ts",
