@@ -1,0 +1,20 @@
+{
+  "runId": "wrun_01KRK632N5BQ6PYD7NCM0P9MKG",
+  "stepId": "step_01KRK632NC4516ET534YN11E2F",
+  "stepName": "step//./src/workflow-fixture//packageCloseStep",
+  "status": "completed",
+  "input": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFt7ImFyZ3MiOjEsImNsb3N1cmVWYXJzIjotMSwidGhpc1ZhbCI6Mn0sW10seyJpbnB1dCI6MywibWF4VHVybnMiOjYsInJ1bk1vZGVsU3RlcCI6NywicnVuVG9vbEJhdGNoU3RlcCI6MTAsImNsb3NlU3RyZWFtIjoxMywid3JpdGVFcnJvciI6MTZ9LHsicmVxdWVzdCI6NCwiY29udGV4dCI6NX0sInJlcXVlc3QtMSIsImNvbnRleHQtMSIsNCxbIlN0ZXBGdW5jdGlvbiIsOF0seyJzdGVwSWQiOjl9LCJzdGVwLy8uL3NyYy93b3JrZmxvdy1maXh0dXJlLy9wYWNrYWdlTW9kZWxTdGVwIixbIlN0ZXBGdW5jdGlvbiIsMTFdLHsic3RlcElkIjoxMn0sInN0ZXAvLy4vc3JjL3dvcmtmbG93LWZpeHR1cmUvL3BhY2thZ2VUb29sQmF0Y2hTdGVwIixbIlN0ZXBGdW5jdGlvbiIsMTRdLHsic3RlcElkIjoxNX0sInN0ZXAvLy4vc3JjL3dvcmtmbG93LWZpeHR1cmUvL3BhY2thZ2VDbG9zZVN0ZXAiLFsiU3RlcEZ1bmN0aW9uIiwxN10seyJzdGVwSWQiOjE4fSwic3RlcC8vLi9zcmMvd29ya2Zsb3ctZml4dHVyZS8vcGFja2FnZUVycm9yU3RlcCJd"
+  },
+  "attempt": 1,
+  "startedAt": "2026-05-14T12:06:27.666Z",
+  "createdAt": "2026-05-14T12:06:27.623Z",
+  "updatedAt": "2026-05-14T12:06:27.667Z",
+  "specVersion": 3,
+  "output": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bC0x"
+  },
+  "completedAt": "2026-05-14T12:06:27.667Z"
+}

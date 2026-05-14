@@ -1,0 +1,26 @@
+{
+  "runId": "wrun_01KRK632N5BQ6PYD7NCM0P9MKG",
+  "deploymentId": "dpl_local@4.1.1",
+  "workflowName": "workflow//./src/workflow-fixture//packageOwnedDirectiveWorkflow",
+  "specVersion": 3,
+  "executionContext": {
+    "traceCarrier": {},
+    "workflowCoreVersion": "4.2.4",
+    "features": {
+      "encryption": false
+    }
+  },
+  "input": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFtbMV0seyJyZXF1ZXN0IjoyLCJjb250ZXh0IjozfSwicmVxdWVzdC0xIiwiY29udGV4dC0xIl0="
+  },
+  "createdAt": "2026-05-14T12:06:27.240Z",
+  "startedAt": "2026-05-14T12:06:27.244Z",
+  "status": "completed",
+  "output": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFsid29ya2Zsb3ctY29tcGxldGUiXQ=="
+  },
+  "completedAt": "2026-05-14T12:06:27.715Z",
+  "updatedAt": "2026-05-14T12:06:27.715Z"
+}

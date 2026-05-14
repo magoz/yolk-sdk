@@ -59,6 +59,7 @@
     "@yolk/react": "workspace:^",
     "@yolk/skillset": "workspace:^",
     "@yolk/tool-registry": "workspace:^",
+    "@yolk/vercel-workflows-runtime": "workspace:^",
     "@yolk/voice-runtime": "workspace:^",
     "better-auth": "^1.4.14",
     "class-variance-authority": "^0.7.1",

@@ -1,0 +1,20 @@
+{
+  "runId": "wrun_01KRK632N5BQ6PYD7NCM0P9MKG",
+  "stepId": "step_01KRK632NC4516ET534YN11E2C",
+  "stepName": "step//./src/workflow-fixture//packageModelStep",
+  "status": "completed",
+  "input": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFt7ImFyZ3MiOjEsImNsb3N1cmVWYXJzIjotMSwidGhpc1ZhbCI6OH0sWzJdLHsiY29udGV4dCI6Mywic3RhdGUiOjR9LCJjb250ZXh0LTEiLHsicmVxdWVzdCI6NSwiY3JlYXRlZE1lc3NhZ2VzIjo2LCJ0dXJuIjo3fSwicmVxdWVzdC0xIixbXSwxLHsiaW5wdXQiOjksIm1heFR1cm5zIjoxMCwicnVuTW9kZWxTdGVwIjoxMSwicnVuVG9vbEJhdGNoU3RlcCI6MTQsImNsb3NlU3RyZWFtIjoxNywid3JpdGVFcnJvciI6MjB9LHsicmVxdWVzdCI6NSwiY29udGV4dCI6M30sNCxbIlN0ZXBGdW5jdGlvbiIsMTJdLHsic3RlcElkIjoxM30sInN0ZXAvLy4vc3JjL3dvcmtmbG93LWZpeHR1cmUvL3BhY2thZ2VNb2RlbFN0ZXAiLFsiU3RlcEZ1bmN0aW9uIiwxNV0seyJzdGVwSWQiOjE2fSwic3RlcC8vLi9zcmMvd29ya2Zsb3ctZml4dHVyZS8vcGFja2FnZVRvb2xCYXRjaFN0ZXAiLFsiU3RlcEZ1bmN0aW9uIiwxOF0seyJzdGVwSWQiOjE5fSwic3RlcC8vLi9zcmMvd29ya2Zsb3ctZml4dHVyZS8vcGFja2FnZUNsb3NlU3RlcCIsWyJTdGVwRnVuY3Rpb24iLDIxXSx7InN0ZXBJZCI6MjJ9LCJzdGVwLy8uL3NyYy93b3JrZmxvdy1maXh0dXJlLy9wYWNrYWdlRXJyb3JTdGVwIl0="
+  },
+  "attempt": 1,
+  "startedAt": "2026-05-14T12:06:27.368Z",
+  "createdAt": "2026-05-14T12:06:27.295Z",
+  "updatedAt": "2026-05-14T12:06:27.371Z",
+  "specVersion": 3,
+  "output": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFt7ImRvbmUiOjEsIm1lc3NhZ2VzIjoyLCJjcmVhdGVkTWVzc2FnZXMiOjUsInRvb2xDYWxscyI6NiwidXNhZ2UiOjksInR1cm4iOjEwfSxmYWxzZSxbMyw0XSwicmVxdWVzdC0xIiwiYXNzaXN0YW50LTEiLFs0XSxbNyw4XSwidG9vbC1hIiwidG9vbC1iIix7InR1cm5zIjoxMH0sMV0="
+  },
+  "completedAt": "2026-05-14T12:06:27.371Z"
+}

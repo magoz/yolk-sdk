@@ -107,6 +107,9 @@ importers:
       '@yolk/tool-registry':
         specifier: workspace:^
         version: link:packages/tool-registry
+      '@yolk/vercel-workflows-runtime':
+        specifier: workspace:^
+        version: link:packages/vercel-workflows-runtime
       '@yolk/voice-runtime':
         specifier: workspace:^
         version: link:packages/voice-runtime
@@ -406,6 +409,25 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
+
+  packages/vercel-workflows-runtime:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+      workflow:
+        specifier: ^4.2.4
+        version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(typescript@5.9.3)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65(effect@4.0.0-beta.65)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))
+      '@workflow/vitest':
+        specifier: ^4.0.5
+        version: 4.0.5(@opentelemetry/api@1.9.0)(vite@7.3.1(@types/node@25.6.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.3.6)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4)
 
   packages/voice-runtime:
     dependencies:
@@ -3897,6 +3919,15 @@ packages:
 
   '@workflow/vite@4.0.4':
     resolution: {integrity: sha512-dEw5Dg6zdlsBwwEFYYqRIXApZ4kgqN/vMzZEyEbisJEofKNPDIYP1/nAh22DkYW55Nxa0YOKdqnhxQq+kdvX2A==}
+
+  '@workflow/vitest@4.0.5':
+    resolution: {integrity: sha512-KWYTjyzX6s+NLhh0I8fG72McQbxVT8wvIfiD8dao686znBdQgKd3t2b1dayNaQKrzWvNwtHd3Kwzg465cxIQFg==}
+    peerDependencies:
+      vite: '>=6.0.0'
+      vitest: '>=3.0.0'
+    peerDependenciesMeta:
+      vite:
+        optional: true
 
   '@workflow/web@4.1.5':
     resolution: {integrity: sha512-VBdRdOBIs/TsS79TxhnjnYcmXKIOwR57gWL+n/0GSvd7aaMHcvKBybmRUTMYOe0q110KXs31eJ4aLjWLYLQxGA==}
@@ -10065,7 +10096,7 @@ snapshots:
     dependencies:
       c12: 3.3.4
       consola: 3.4.2
-      defu: 6.1.4
+      defu: 6.1.7
       destr: 2.0.5
       errx: 0.1.0
       exsolve: 1.0.8
@@ -10103,7 +10134,7 @@ snapshots:
       is-wsl: 2.2.0
       lilconfig: 3.1.3
       minimatch: 10.2.5
-      semver: 7.7.3
+      semver: 7.8.0
       string-width: 4.2.3
       supports-color: 8.1.1
       tinyglobby: 0.2.16
@@ -11163,7 +11194,7 @@ snapshots:
       commander: 8.3.0
       minimatch: 9.0.5
       piscina: 4.9.2
-      semver: 7.7.3
+      semver: 7.8.0
       slash: 3.0.0
       source-map: 0.7.6
       tinyglobby: 0.2.16
@@ -11502,8 +11533,8 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.53.0
       debug: 4.4.3(supports-color@8.1.1)
       minimatch: 9.0.5
-      semver: 7.7.3
-      tinyglobby: 0.2.15
+      semver: 7.8.0
+      tinyglobby: 0.2.16
       ts-api-utils: 2.4.0(typescript@5.9.3)
       typescript: 5.9.3
     transitivePeerDependencies:
@@ -11603,7 +11634,7 @@ snapshots:
 
   '@vercel/queue@0.1.4':
     dependencies:
-      '@vercel/oidc': 3.2.0
+      '@vercel/oidc': 3.4.1
       minimatch: 10.2.5
       mixpart: 0.0.5
       picocolors: 1.1.1
@@ -11958,6 +11989,23 @@ snapshots:
       - '@swc/helpers'
       - aws-crt
       - supports-color
+
+  '@workflow/vitest@4.0.5(@opentelemetry/api@1.9.0)(vite@7.3.1(@types/node@25.6.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.3.6)':
+    dependencies:
+      '@workflow/builders': 4.0.5(@opentelemetry/api@1.9.0)
+      '@workflow/core': 4.2.4(@opentelemetry/api@1.9.0)
+      '@workflow/rollup': 4.0.4(@opentelemetry/api@1.9.0)
+      '@workflow/world': 4.1.1(zod@4.3.6)
+      '@workflow/world-local': 4.1.1(@opentelemetry/api@1.9.0)
+      vitest: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4)
+    optionalDependencies:
+      vite: 7.3.1(@types/node@25.6.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.47.1)(tsx@4.21.0)(yaml@2.8.4)
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - '@swc/helpers'
+      - aws-crt
+      - supports-color
+      - zod
 
   '@workflow/web@4.1.5':
     dependencies:
@@ -12432,7 +12480,7 @@ snapshots:
   binary-version-check@6.1.0:
     dependencies:
       binary-version: 7.1.0
-      semver: 7.7.3
+      semver: 7.8.0
       semver-truncate: 3.0.0
 
   binary-version@7.1.0:
@@ -14135,7 +14183,7 @@ snapshots:
 
   is-bun-module@2.0.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.0
 
   is-callable@1.2.7: {}
 
@@ -15569,11 +15617,12 @@ snapshots:
 
   semver-truncate@3.0.0:
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.0
 
   semver@6.3.1: {}
 
-  semver@7.7.3: {}
+  semver@7.7.3:
+    optional: true
 
   semver@7.7.4: {}
 
@@ -16320,7 +16369,7 @@ snapshots:
   untyped@2.0.0:
     dependencies:
       citty: 0.1.6
-      defu: 6.1.4
+      defu: 6.1.7
       jiti: 2.6.1
       knitwork: 1.3.0
       scule: 1.3.0

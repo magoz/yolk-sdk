@@ -37,6 +37,7 @@ const eslintConfig = defineConfig([
     'build/**',
     'playwright-report/**',
     'test-results/**',
+    '**/.workflow-vitest/**',
     '.repos/**',
     'next-env.d.ts'
   ])

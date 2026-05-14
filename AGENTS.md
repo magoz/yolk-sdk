@@ -113,6 +113,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `nodeTextToolModules`            | Const    | `lib/agents/tools/registry.ts`                         | Runtime-portable text route tool modules                                             |
 | `nodeVoiceToolModules`           | Const    | `lib/agents/tools/registry.ts`                         | Runtime-portable Realtime voice tool modules                                         |
 | `run`                            | Function | `packages/agent-loop/src/run.ts`                       | Stateless LLM/tool loop                                                              |
+| `runVercelAgentWorkflow`         | Function | `packages/vercel-workflows-runtime/src/workflow-loop.ts` | Vercel Workflow durable model/tool step loop contract                                |
 | `runRuntime`                     | Function | `packages/agent-runtime/src/run-runtime.ts`            | Stateless or append-backed runtime over agent loop                                   |
 | `SessionEventStore`              | Service  | `packages/agent-runtime/src/session-event-store.ts`    | Append-only runtime event storage contract                                           |
 | `AgentTranscript`                | Type     | `packages/client/src/state.ts`                         | Non-empty client-owned protocol transcript                                           |

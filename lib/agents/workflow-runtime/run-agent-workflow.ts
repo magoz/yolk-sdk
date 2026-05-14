@@ -2,6 +2,12 @@ import { getWritable } from 'workflow'
 import { Data, Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  runVercelAgentWorkflow,
+  type SerializableWorkflowState,
+  type VercelAgentWorkflowModelStepResult,
+  type VercelAgentWorkflowToolBatchStepResult
+} from '@yolk/vercel-workflows-runtime'
+import {
   addAgentUsage,
   AgentEnd,
   AgentError,
@@ -31,35 +37,10 @@ export type AgentWorkflowInput = {
   readonly request: unknown
 }
 
-type AgentWorkflowState = {
-  readonly request: unknown
-  readonly messages?: ReadonlyArray<unknown>
-  readonly createdMessages: ReadonlyArray<unknown>
-  readonly usage?: unknown
-  readonly turn: number
-}
-
-type AgentWorkflowModelStepResult = {
-  readonly done: boolean
-  readonly reason: 'stop' | 'tool_use'
-  readonly messages: ReadonlyArray<unknown>
-  readonly createdMessages: ReadonlyArray<unknown>
-  readonly toolCalls: ReadonlyArray<unknown>
-  readonly usage: unknown
-  readonly turn: number
-}
-
-type AgentWorkflowToolBatchStepResult = {
-  readonly messages: ReadonlyArray<unknown>
-  readonly createdMessages: ReadonlyArray<unknown>
-}
-
 type IndexedToolResultMessage = {
   readonly index: number
   readonly message: AgentMessage
 }
-
-const maxWorkflowTurns = 500
 
 class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepError')<{
   message: string
@@ -88,7 +69,7 @@ const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 const decodeUsageOrZero = (usage: unknown | undefined) =>
   usage === undefined ? Effect.succeed(zeroAgentUsage) : Schema.decodeUnknownEffect(AgentUsage)(usage)
 
-const decodeStepRequest = (state: AgentWorkflowState) =>
+const decodeStepRequest = (state: SerializableWorkflowState) =>
   Effect.gen(function* () {
     const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(state.request)
     const messages = yield* state.messages === undefined
@@ -153,9 +134,9 @@ const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessa
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
 export async function runAgentWorkflowModelStep(input: {
-  readonly userId: string
-  readonly state: AgentWorkflowState
-}): Promise<AgentWorkflowModelStepResult> {
+  readonly context: unknown
+  readonly state: SerializableWorkflowState
+}): Promise<VercelAgentWorkflowModelStepResult> {
   'use step'
 
   const writable = getWritable<Uint8Array>()
@@ -167,7 +148,8 @@ export async function runAgentWorkflowModelStep(input: {
       yield* validateAgentRouteImages(request)
       const createdMessages = yield* decodeMessages(input.state.createdMessages)
       const initialUsage = yield* decodeUsageOrZero(input.state.usage)
-      const runtime = yield* makeAgentTextRuntime(request, input.userId, '/agent/workflow')
+      const userId = yield* decodeWorkflowUserId(input.context)
+      const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const assistantMessage = yield* Ref.make<AgentMessage | undefined>(undefined)
       const toolCalls = yield* Ref.make<ReadonlyArray<ToolCall>>([])
       const usage = yield* Ref.make(initialUsage)
@@ -212,7 +194,6 @@ export async function runAgentWorkflowModelStep(input: {
 
       return {
         done: currentReason === 'stop',
-        reason: currentReason,
         messages: yield* Effect.forEach(nextMessages, message => encodeMessage(message)),
         createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
         toolCalls: yield* Effect.forEach(currentToolCalls, call => encodeToolCall(call)),
@@ -224,11 +205,11 @@ export async function runAgentWorkflowModelStep(input: {
 }
 
 export async function runAgentWorkflowToolBatchStep(input: {
-  readonly userId: string
+  readonly context: unknown
   readonly request: unknown
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
-}): Promise<AgentWorkflowToolBatchStepResult> {
+}): Promise<VercelAgentWorkflowToolBatchStepResult> {
   'use step'
 
   const writable = getWritable<Uint8Array>()
@@ -239,7 +220,8 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const createdMessages = yield* decodeMessages(input.createdMessages)
-      const runtime = yield* makeAgentTextRuntime(request, input.userId, '/agent/workflow')
+      const userId = yield* decodeWorkflowUserId(input.context)
+      const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
 
       yield* runToolBatch({ calls }).pipe(
@@ -310,73 +292,19 @@ export async function writeAgentWorkflowError(error: unknown) {
 const writeWorkflowErrorStep = (error: unknown) =>
   writeAgentWorkflowError(error).catch(() => undefined)
 
-type WorkflowStepResult<A> =
-  | {
-      readonly _tag: 'Success'
-      readonly value: A
-    }
-  | {
-      readonly _tag: 'Failure'
-      readonly error: unknown
-    }
-
-const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
-  promise.then(
-    value => ({ _tag: 'Success', value }),
-    error => ({ _tag: 'Failure', error })
-  )
+const decodeWorkflowUserId = (context: unknown) =>
+  typeof context === 'string'
+    ? Effect.succeed(context)
+    : Effect.fail(new AgentWorkflowStepError({ message: 'Invalid workflow context' }))
 
 export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
-  let state: AgentWorkflowState = {
-    request: input.request,
-    createdMessages: [],
-    turn: 1
-  }
-
-  for (let step = 0; step < maxWorkflowTurns; step++) {
-    const modelResult = await settleWorkflowStep(
-      runAgentWorkflowModelStep({ userId: input.userId, state })
-    )
-
-    if (modelResult._tag === 'Failure') {
-      await writeWorkflowErrorStep(modelResult.error)
-      return
-    }
-
-    if (modelResult.value.done) {
-      const closeResult = await settleWorkflowStep(closeAgentWorkflowStream())
-
-      if (closeResult._tag === 'Failure') {
-        await writeWorkflowErrorStep(closeResult.error)
-      }
-
-      return
-    }
-
-    const toolsResult = await settleWorkflowStep(
-      runAgentWorkflowToolBatchStep({
-        userId: input.userId,
-        request: input.request,
-        calls: modelResult.value.toolCalls,
-        createdMessages: modelResult.value.createdMessages
-      })
-    )
-
-    if (toolsResult._tag === 'Failure') {
-      await writeWorkflowErrorStep(toolsResult.error)
-      return
-    }
-
-    state = {
-      request: input.request,
-      messages: [...modelResult.value.messages, ...toolsResult.value.messages],
-      createdMessages: toolsResult.value.createdMessages,
-      usage: modelResult.value.usage,
-      turn: modelResult.value.turn + 1
-    }
-  }
-
-  await writeWorkflowErrorStep(new Error('Workflow agent exceeded max turns'))
+  await runVercelAgentWorkflow({
+    input: { request: input.request, context: input.userId },
+    runModelStep: runAgentWorkflowModelStep,
+    runToolBatchStep: runAgentWorkflowToolBatchStep,
+    closeStream: closeAgentWorkflowStream,
+    writeError: writeWorkflowErrorStep
+  })
 }

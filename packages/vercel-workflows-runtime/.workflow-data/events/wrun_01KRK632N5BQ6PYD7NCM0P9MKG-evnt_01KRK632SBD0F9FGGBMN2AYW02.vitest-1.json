@@ -1,0 +1,14 @@
+{
+  "eventType": "step_completed",
+  "specVersion": 3,
+  "correlationId": "step_01KRK632NC4516ET534YN11E2C",
+  "eventData": {
+    "result": {
+      "__type": "Uint8Array",
+      "data": "ZGV2bFt7ImRvbmUiOjEsIm1lc3NhZ2VzIjoyLCJjcmVhdGVkTWVzc2FnZXMiOjUsInRvb2xDYWxscyI6NiwidXNhZ2UiOjksInR1cm4iOjEwfSxmYWxzZSxbMyw0XSwicmVxdWVzdC0xIiwiYXNzaXN0YW50LTEiLFs0XSxbNyw4XSwidG9vbC1hIiwidG9vbC1iIix7InR1cm5zIjoxMH0sMV0="
+    }
+  },
+  "runId": "wrun_01KRK632N5BQ6PYD7NCM0P9MKG",
+  "eventId": "evnt_01KRK632SBD0F9FGGBMN2AYW02",
+  "createdAt": "2026-05-14T12:06:27.371Z"
+}

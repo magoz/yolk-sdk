@@ -9,6 +9,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 | `@yolk/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
 | `@yolk/agent-loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/protocol`, Effect                     |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop         | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
+| `@yolk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect |
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
@@ -24,6 +25,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
+app -> vercel-workflows-runtime -> Effect
 app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> skillset -> Effect
@@ -41,6 +43,7 @@ app -> oauth + Effect
 
 - `agent-loop` = pure model/tool loop; messages in, events out.
 - `agent-runtime` = server lifecycle: sessions, persistence, resume/fanout adapters.
+- `vercel-workflows-runtime` = Vercel Workflow step-loop contract; app supplies routes/auth/providers/tools.
 - `client` = UI-side consumer; never runs the loop in production.
 - Avoid `harness` for current packages; reserve for a future batteries-included agent kit if needed.
 - Avoid `executor` for loop code; use for future sandbox/tool execution layer if needed.
@@ -52,6 +55,7 @@ app -> oauth + Effect
 - Provider packages may own reusable vendor mechanics: request lowering, stream parsing, OAuth token schemas, refresh helpers, and broker clients.
 - OAuth packages define contracts only; they never own refresh tokens or storage.
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
+- Vercel Workflow runtime must keep inputs/state plain serializable and avoid app imports.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Skillset owns generic skills/commands parsing, rendering, manifests, and merge helpers; no source adapters or runtime policy.

@@ -7,6 +7,6 @@ export default defineConfig({
   plugins: [tsconfigPaths({ projects: ['tsconfig.json'] }), react()],
   test: {
     environment: 'jsdom',
-    exclude: ['**/e2e/**', '**/node_modules/**', '**/.repos/**']
+    exclude: ['**/e2e/**', '**/node_modules/**', '**/.repos/**', '**/*.integration.test.ts']
   }
 })
