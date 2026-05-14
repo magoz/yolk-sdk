@@ -1,14 +1,27 @@
-import { Config, Effect, Layer } from 'effect'
+import { Config, Effect, Layer, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
-import type { ContextTransformer, LLMProvider, LoopConfig, ToolExecutor } from '@yolk/agent/loop'
-import { makeToolExecutorLayer } from '@yolk/agent/tools'
+import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk/agent/loop'
+import {
+  formatTaskResult,
+  makeTaskToolModule,
+  makeToolExecutorLayer,
+  type TaskSubagentDefinition,
+  type ToolModule
+} from '@yolk/agent/tools'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import {
+  assistantContent,
+  contentText,
+  ToolResult,
+  UserMessage,
+  type AgentEvent,
+  type AgentMessage,
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
 } from '@yolk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
+import { runRuntime } from '@yolk/agent/runtime'
 import {
   agentTextCapabilities,
   agentTextModel,
@@ -26,6 +39,7 @@ import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-han
 import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
+import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 
 type AgentTextRuntimeConfig = {
   readonly model: string
@@ -43,6 +57,53 @@ type AgentTextRuntime = {
   readonly input: AgentRouteRequest
   readonly config: AgentTextRuntimeConfig
   readonly layer: AgentTextRuntimeLayer
+}
+
+const agentTextSubagents: ReadonlyArray<TaskSubagentDefinition> = [
+  {
+    name: 'general',
+    description: 'General-purpose agent for researching complex questions and executing multi-step tasks.'
+  },
+  {
+    name: 'explore',
+    description:
+      'Fast agent specialized for focused exploration. Ask for quick, medium, or very thorough exploration.'
+  }
+]
+
+const subagentPrompt = (input: {
+  readonly subagentType: string
+  readonly baseSystemPrompt: string
+}) =>
+  [
+    input.baseSystemPrompt,
+    `You are a ${input.subagentType} subagent launched by the main Yolk agent.`,
+    'Work autonomously on the delegated task. Return only your final concise findings.',
+    'You cannot launch further task subagents in v1. Use your normal tools when useful.'
+  ].join('\n\n')
+
+const textFromMessages = (messages: ReadonlyArray<AgentMessage>) => {
+  const assistant = [...messages].reverse().find(message => message._tag === 'Assistant')
+
+  return assistant === undefined ? '' : contentText(assistantContent(assistant))
+}
+
+const agentEndMessages = (events: ReadonlyArray<AgentEvent>) =>
+  [...events].reverse().find(event => event._tag === 'AgentEnd')?.messages ?? []
+
+const toolError = (message: string, cause: ToolError['cause']) =>
+  new ToolError({ tool: 'task', message, cause })
+
+const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
+  toolError(error.message, 'execution')
+
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
+const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
+  const text = textFromMessages(agentEndMessages(events)).trim()
+
+  return text.length === 0 ? 'Subagent completed without a final text response.' : text
 }
 
 const getAgentTextConfig = () =>
@@ -85,24 +146,72 @@ export const makeAgentTextRuntime = (
     const baseConfig = yield* getAgentTextConfig()
     const skillset = yield* loadProjectSkillset()
     const mcpServers = yield* loadProjectMcpServers()
-    const toolModules = yield* makeTextToolModules(mcpServers)
+    const baseToolModules = yield* makeTextToolModules(mcpServers)
+    const selectedModel = input.model ?? baseConfig.model
+    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
+    const providerLayer = yield* providerLayerForModel(model, userId)
+    const baseSystemPrompt = appendAvailableSkills(baseConfig.systemPrompt, skillset)
+    const taskToolModule = makeTaskToolModule<AgentToolContext>({
+      subagents: agentTextSubagents,
+      execute: ({ call, context, params }) =>
+        Effect.gen(function* () {
+          const subagentToolSet = yield* resolveAgentToolSet({
+            modules: baseToolModules,
+            context: {
+              ...context,
+              sessionId: `${context.sessionId ?? input.sessionId}:task:${call.id}`,
+              subagent: true
+            }
+          }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+          const eventsChunk = yield* runRuntime(
+            {
+              _tag: 'Transcript',
+              sessionId: `${input.sessionId}:task:${call.id}`,
+              messages: [UserMessage.make({ content: params.prompt })]
+            },
+            {
+              systemPrompt: subagentPrompt({
+                subagentType: params.subagent_type,
+                baseSystemPrompt
+              }),
+              tools: subagentToolSet.tools,
+              reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
+              capabilities: agentTextCapabilities,
+              model
+            }
+          ).pipe(
+            Stream.runCollect,
+            Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet))),
+            Effect.mapError(error => toolError(unknownToMessage(error), 'execution'))
+          )
+          const output = subagentResultText(Array.from(eventsChunk))
+
+          return ToolResult.make({
+            toolCallId: call.id,
+            content: formatTaskResult(output),
+            structuredContent: {
+              subagent_type: params.subagent_type,
+              description: params.description
+            }
+          })
+        })
+    })
+    const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [...baseToolModules, taskToolModule]
     const toolSet = yield* resolveAgentToolSet({
       modules: toolModules,
       context: {
         surface: 'text',
         route,
         userId,
+        sessionId: input.sessionId,
         skillset
       }
     })
-    const selectedModel = input.model ?? baseConfig.model
-    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
-    const providerLayer = yield* providerLayerForModel(model, userId)
     const normalizedInput = new AgentRouteRequest({ ...input, model })
     const config: AgentTextRuntimeConfig = {
       ...baseConfig,
       model,
-      systemPrompt: appendAvailableSkills(baseConfig.systemPrompt, skillset),
+      systemPrompt: baseSystemPrompt,
       tools: toolSet.tools,
       capabilities: agentTextCapabilities
     }

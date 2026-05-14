@@ -94,6 +94,9 @@ app -> oauth + Effect
 - `makeToolExecutorLayer(toolSet)` adapts resolved tools to `ToolExecutor`.
 - Packages support route/runtime-provided tools; app-level AgentDefinition is optional host structure, not a package concern.
 - `access: read | write | destructive` is metadata for policy/approvals; enforcement is host-owned.
+- `task` is the standard subagent delegation tool name, matching Claude Code/opencode. Its schema uses `subagent_type` for model familiarity.
+- Subagent execution is package-contract/app-policy split: packages own domain-free task schemas/helpers; app/runtime adapters own available subagents, prompts, models, provider layers, session mapping, and toolsets.
+- v1 subagents can use normal tools but should not receive the `task` tool recursively.
 - Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Prefer pure `map`/`flatMap` projections over mutable `push`/`set`/`add` helper accumulators.
 - Lock projection refactors with semantic ordering/state tests, not implementation-shape tests.

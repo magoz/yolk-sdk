@@ -10,12 +10,14 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `web_search` | yes | yes | yes | Exa/Parallel MCP endpoints |
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
+| `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
 
 ## Rules
 
 - No Node-only imports/deps and no raw `fetch()` in this directory.
 - Use Effect `Config`, `HttpClient`, Schema, and runtime-injected adapters.
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
+- Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.
 - Keep tool result content model-visible and protocol-shaped.
 

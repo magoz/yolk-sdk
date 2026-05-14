@@ -24,8 +24,11 @@
 - Tools depend on protocol + loop only.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
+- `@yolk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
+- v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
 
 ## Tests
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, and `test/tools`.
 - Use `@yolk/agent/loop/testing` for fake providers/tool executors outside loop internals.
+- Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.

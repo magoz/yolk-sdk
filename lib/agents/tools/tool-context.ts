@@ -6,5 +6,7 @@ export type AgentToolContext = {
   readonly surface: AgentToolSurface
   readonly route: string
   readonly userId: string
+  readonly sessionId?: string
+  readonly subagent?: boolean
   readonly skillset?: MergedSkillset
 }

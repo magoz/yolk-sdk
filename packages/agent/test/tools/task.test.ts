@@ -1,0 +1,135 @@
+import { Effect } from 'effect'
+import { describe, expect, it } from '@effect/vitest'
+import { ToolResult } from '@yolk/agent/protocol'
+import {
+  formatTaskResult,
+  makeTaskToolModule,
+  resolveTools,
+  taskToolName,
+  type TaskSubagentDefinition
+} from '../../src/tools'
+
+type TestContext = {
+  readonly sessionId: string
+}
+
+const subagents: ReadonlyArray<TaskSubagentDefinition> = [
+  { name: 'explore', description: 'Explore code and docs.' },
+  { name: 'general', description: 'Handle complex multi-step work.' }
+]
+
+describe('task tool', () => {
+  it.effect('resolves task tool with subagent metadata', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+
+      expect(toolSet.tools.map(tool => tool.name)).toEqual([taskToolName])
+      expect(toolSet.tools[0]?.description).toContain('explore')
+      expect(toolSet.metadata).toEqual([{ moduleId: 'task', name: taskToolName, access: 'read' }])
+    })
+  )
+
+  it.effect('executes a known subagent task', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call, context, params }) =>
+              Effect.succeed(
+                ToolResult.make({
+                  toolCallId: call.id,
+                  content: formatTaskResult(
+                    `${context.sessionId}:${params.subagent_type}:${params.description}:${params.prompt}`
+                  )
+                })
+              )
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'explore'
+        }
+      })
+
+      expect(result.content).toBe('<task_result>\nsession_1:explore:Find auth:Explore auth flow\n</task_result>')
+    })
+  )
+
+  it.effect('rejects unknown subagent types', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet
+        .execute({
+          id: 'call_1',
+          name: taskToolName,
+          params: {
+            description: 'Find auth',
+            prompt: 'Explore auth flow',
+            subagent_type: 'missing'
+          }
+        })
+        .pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ToolError', cause: 'validation' }
+      })
+    })
+  )
+
+  it.effect('rejects empty prompts', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet
+        .execute({
+          id: 'call_1',
+          name: taskToolName,
+          params: {
+            description: 'Find auth',
+            prompt: ' ',
+            subagent_type: 'explore'
+          }
+        })
+        .pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ToolError', cause: 'validation' }
+      })
+    })
+  )
+})
