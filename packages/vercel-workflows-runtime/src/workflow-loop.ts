@@ -9,6 +9,7 @@ export type SerializableWorkflowState = {
   readonly createdMessages: ReadonlyArray<unknown>
   readonly usage?: unknown
   readonly turn: number
+  readonly eventSequence?: number
 }
 
 export type VercelAgentWorkflowModelStepInput = {
@@ -23,6 +24,7 @@ export type VercelAgentWorkflowModelStepResult = {
   readonly toolCalls: ReadonlyArray<unknown>
   readonly usage: unknown
   readonly turn: number
+  readonly eventSequence?: number
 }
 
 export type VercelAgentWorkflowToolBatchStepInput = {
@@ -30,11 +32,14 @@ export type VercelAgentWorkflowToolBatchStepInput = {
   readonly request: unknown
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly turn?: number
+  readonly eventSequence?: number
 }
 
 export type VercelAgentWorkflowToolBatchStepResult = {
   readonly messages: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly eventSequence?: number
 }
 
 export type WorkflowStepResult<A> =
@@ -78,7 +83,8 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
   let state: SerializableWorkflowState = {
     request: config.input.request,
     createdMessages: [],
-    turn: 1
+    turn: 1,
+    eventSequence: 0
   }
   const maxTurns = config.maxTurns ?? defaultMaxWorkflowTurns
 
@@ -107,7 +113,9 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
         context: config.input.context,
         request: config.input.request,
         calls: modelResult.value.toolCalls,
-        createdMessages: modelResult.value.createdMessages
+        createdMessages: modelResult.value.createdMessages,
+        turn: modelResult.value.turn,
+        eventSequence: modelResult.value.eventSequence ?? state.eventSequence
       })
     )
 
@@ -121,7 +129,8 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
       messages: [...modelResult.value.messages, ...toolsResult.value.messages],
       createdMessages: toolsResult.value.createdMessages,
       usage: modelResult.value.usage,
-      turn: modelResult.value.turn + 1
+      turn: modelResult.value.turn + 1,
+      eventSequence: toolsResult.value.eventSequence ?? modelResult.value.eventSequence ?? state.eventSequence
     }
   }
 

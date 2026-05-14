@@ -20,7 +20,7 @@ import {
   TurnEnd,
   UsageUpdate,
   zeroAgentUsage,
-  type AgentEvent
+  AgentEvent
 } from '@yolk/protocol'
 import { runModelTurn, runToolBatch } from '@yolk/agent-loop'
 import { AppLayer } from '@/lib/layers'
@@ -49,6 +49,26 @@ class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepError')<
 
 const writeEvent = (writer: WritableStreamDefaultWriter<Uint8Array>, event: AgentEvent) =>
   encodeAgentNdjsonEvent(event).pipe(Effect.flatMap(chunk => Effect.promise(() => writer.write(chunk))))
+
+export const addWorkflowEventId = (event: AgentEvent, eventId: string) =>
+  Schema.decodeUnknownEffect(AgentEvent)({ ...event, eventId })
+
+const workflowEventId = (turn: number, eventSequence: number) =>
+  `workflow:${turn}:${eventSequence}`
+
+const writeSequencedWorkflowEvent = (input: {
+  readonly writer: WritableStreamDefaultWriter<Uint8Array>
+  readonly event: AgentEvent
+  readonly turn: number
+  readonly eventSequence: Ref.Ref<number>
+}) =>
+  Effect.gen(function* () {
+    const sequence = yield* Ref.get(input.eventSequence)
+    yield* Ref.set(input.eventSequence, sequence + 1)
+    const event = yield* addWorkflowEventId(input.event, workflowEventId(input.turn, sequence))
+
+    yield* writeEvent(input.writer, event)
+  })
 
 const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
   Effect.promise(() => writer.close())
@@ -86,8 +106,15 @@ const collectModelEvent = (input: {
   readonly toolCalls: Ref.Ref<ReadonlyArray<ToolCall>>
   readonly usage: Ref.Ref<AgentUsage>
   readonly reason: Ref.Ref<'stop' | 'tool_use'>
+  readonly eventSequence: Ref.Ref<number>
+  readonly turn: number
 }) =>
-  writeEvent(input.writer, input.event).pipe(
+  writeSequencedWorkflowEvent({
+    writer: input.writer,
+    event: input.event,
+    turn: input.turn,
+    eventSequence: input.eventSequence
+  }).pipe(
     Effect.flatMap(() => {
       if (Schema.is(AssistantMessageEvent)(input.event)) {
         return Schema.decodeUnknownEffect(AssistantMessageEvent)(input.event).pipe(
@@ -154,6 +181,7 @@ export async function runAgentWorkflowModelStep(input: {
       const toolCalls = yield* Ref.make<ReadonlyArray<ToolCall>>([])
       const usage = yield* Ref.make(initialUsage)
       const reason = yield* Ref.make<'stop' | 'tool_use'>('stop')
+      const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
 
       yield* runModelTurn({
         messages: runtime.input.messages,
@@ -165,7 +193,16 @@ export async function runAgentWorkflowModelStep(input: {
         turn: input.state.turn
       }).pipe(
         Stream.runForEach(event =>
-          collectModelEvent({ event, writer, assistantMessage, toolCalls, usage, reason })
+          collectModelEvent({
+            event,
+            writer,
+            assistantMessage,
+            toolCalls,
+            usage,
+            reason,
+            eventSequence,
+            turn: input.state.turn
+          })
         ),
         Effect.provide(runtime.layer)
       )
@@ -182,15 +219,18 @@ export async function runAgentWorkflowModelStep(input: {
         : [...runtime.input.messages, currentAssistantMessage]
 
       if (currentReason === 'stop') {
-        yield* writeEvent(
+        yield* writeSequencedWorkflowEvent({
           writer,
-          AgentEnd.make({
+          event: AgentEnd.make({
             messages: nextCreatedMessages,
             turns: input.state.turn,
             usage: currentUsage
-          })
-        )
+          }),
+          turn: input.state.turn,
+          eventSequence
+        })
       }
+      const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
         done: currentReason === 'stop',
@@ -198,7 +238,8 @@ export async function runAgentWorkflowModelStep(input: {
         createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
         toolCalls: yield* Effect.forEach(currentToolCalls, call => encodeToolCall(call)),
         usage: yield* encodeUsage(currentUsage),
-        turn: input.state.turn
+        turn: input.state.turn,
+        eventSequence: nextEventSequence
       }
     }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
   )
@@ -209,6 +250,8 @@ export async function runAgentWorkflowToolBatchStep(input: {
   readonly request: unknown
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly turn?: number
+  readonly eventSequence?: number
 }): Promise<VercelAgentWorkflowToolBatchStepResult> {
   'use step'
 
@@ -223,10 +266,16 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const userId = yield* decodeWorkflowUserId(input.context)
       const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const eventSequence = yield* Ref.make(input.eventSequence ?? 0)
 
       yield* runToolBatch({ calls }).pipe(
         Stream.runForEach(event =>
-          writeEvent(writer, event).pipe(
+          writeSequencedWorkflowEvent({
+            writer,
+            event,
+            turn: input.turn ?? 0,
+            eventSequence
+          }).pipe(
             Effect.flatMap(() => {
               if (event._tag !== 'ToolExecutionCompleted') {
                 return Effect.void
@@ -256,10 +305,12 @@ export async function runAgentWorkflowToolBatchStep(input: {
 
       const messages = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
       const nextCreatedMessages = [...createdMessages, ...messages]
+      const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
         messages: yield* Effect.forEach(messages, message => encodeMessage(message)),
-        createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message))
+        createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
+        eventSequence: nextEventSequence
       }
     }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
   )

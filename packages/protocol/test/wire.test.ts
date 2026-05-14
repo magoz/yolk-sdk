@@ -167,6 +167,14 @@ describe('protocol wire schemas', () => {
     })
   )
 
+  it.effect('round-trips optional event identity', () =>
+    Effect.gen(function* () {
+      const event = LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hello' })
+
+      expect(yield* roundTripEvent(event)).toEqual(event)
+    })
+  )
+
   it.effect('round-trips exported tool, content, capability, reasoning, and usage schemas', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({

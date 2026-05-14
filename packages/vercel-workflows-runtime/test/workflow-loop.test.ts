@@ -53,7 +53,7 @@ describe('runVercelAgentWorkflow', () => {
       writeError: async () => undefined
     })
 
-    expect(states).toEqual([{ request: 'request-1', createdMessages: [], turn: 1 }])
+    expect(states).toEqual([{ request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }])
     expect(closeCount).toBe(1)
   })
 
@@ -80,7 +80,9 @@ describe('runVercelAgentWorkflow', () => {
         context: 'ctx-1',
         request: 'request-1',
         calls: ['tool-1-a', 'tool-1-b'],
-        createdMessages: ['assistant-1']
+        createdMessages: ['assistant-1'],
+        turn: 1,
+        eventSequence: 0
       }
     ])
     expect(modelStates[1]).toEqual({
@@ -88,8 +90,35 @@ describe('runVercelAgentWorkflow', () => {
       messages: ['request-1', 'assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
       createdMessages: ['assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
       usage: { turns: 1 },
-      turn: 2
+      turn: 2,
+      eventSequence: 0
     })
+  })
+
+  it('carries event sequence across model and tool steps', async () => {
+    const modelStates: Array<SerializableWorkflowState> = []
+    const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
+
+    await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: async input => {
+        modelStates.push(input.state)
+
+        return input.state.turn === 1
+          ? { ...toolModelResult(input), eventSequence: 3 }
+          : terminalModelResult(input)
+      },
+      runToolBatchStep: async input => {
+        toolInputs.push(input)
+
+        return { ...toolBatchResult(input), eventSequence: 5 }
+      },
+      closeStream: async () => undefined,
+      writeError: async () => undefined
+    })
+
+    expect(toolInputs[0]?.eventSequence).toBe(3)
+    expect(modelStates[1]?.eventSequence).toBe(5)
   })
 
   it('writes model step errors and stops', async () => {
