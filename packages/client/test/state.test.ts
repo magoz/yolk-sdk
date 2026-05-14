@@ -148,6 +148,29 @@ describe('reduceAgentEvents', () => {
     })
   })
 
+  it('ignores duplicate events with the same event id', () => {
+    const state = reduceAgentEvents([
+      AgentStart.make({ eventId: 'workflow:1:0' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:2', text: 'lo' })
+    ])
+
+    expect(state.text).toBe('hello')
+    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1', 'workflow:1:2'])
+  })
+
+  it('allows duplicate events without event ids', () => {
+    const state = reduceAgentEvents([
+      AgentStart.make({}),
+      LLMTextDelta.make({ text: 'ha' }),
+      LLMTextDelta.make({ text: 'ha' })
+    ])
+
+    expect(state.text).toBe('haha')
+    expect(state.seenEventIds).toEqual([])
+  })
+
   it('marks client state as errored', () => {
     const state = reduceAgentEvents([AgentStart.make({})])
 

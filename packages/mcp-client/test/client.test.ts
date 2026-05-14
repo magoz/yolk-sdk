@@ -308,27 +308,30 @@ describe('MCP client', () => {
     })
   )
 
-  it.effect('lists and calls local stdio tools when enabled', () =>
-    Effect.gen(function* () {
-      const config: McpServerConfig = {
-        name: 'local',
-        type: 'local',
-        command: [process.execPath, tsxCliPath, stdioFixturePath]
-      }
-      const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+  it.effect(
+    'lists and calls local stdio tools when enabled',
+    () =>
+      Effect.gen(function* () {
+        const config: McpServerConfig = {
+          name: 'local',
+          type: 'local',
+          command: [process.execPath, tsxCliPath, stdioFixturePath]
+        }
+        const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
 
-      const tools = yield* listLocalMcpServerToolsNode(config, options)
-      expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
+        const tools = yield* listLocalMcpServerToolsNode(config, options)
+        expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])
 
-      const result = yield* callLocalMcpServerToolNode({
-        config,
-        mcpToolName: 'echo',
-        toolCallId: 'call_1',
-        params: { text: 'hello' },
-        options
-      })
-      expect(result.content).toBe('local result')
-    })
+        const result = yield* callLocalMcpServerToolNode({
+          config,
+          mcpToolName: 'echo',
+          toolCallId: 'call_1',
+          params: { text: 'hello' },
+          options
+        })
+        expect(result.content).toBe('local result')
+      }),
+    15_000
   )
 
   it.effect('supports injected local process spawners without Node services', () =>

@@ -123,6 +123,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `AgentChatSessionEvent`          | Schema   | `packages/react/src/chat-session-events.ts`            | UI/session edit event model                                                          |
 | `AgentChatMessage`               | Type     | `packages/react/src/chat-messages.ts`                  | Headless React chat parts source of truth                                            |
 | `toAgentMessages`                | Function | `packages/react/src/chat-messages.ts`                  | Converts chat parts to protocol transcript                                           |
+| `eventId`                        | Field    | `packages/protocol/src/event.ts`                       | Optional stream event id; client/react reducers de-dupe duplicate replay             |
 | `listMcpTools`                   | Function | `packages/mcp-client/src/client.ts`                    | Resolves configured MCP server tools                                                 |
 | `makeMcpToolServer`              | Function | `packages/mcp-server/src/server.ts`                    | Creates tool-only MCP JSON-RPC server                                                |
 | `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                          | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |

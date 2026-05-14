@@ -61,6 +61,7 @@
 - `editUserMessage` accepts protocol `Content`; host UIs decide whether to expose text-only or multimodal edits.
 - `chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
 - Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.
+- Reducer de-dupes streamed events by optional protocol `eventId`; duplicate replay should not duplicate text/tool/UI state.
 - Retain `Effect.runFork` fibers and interrupt on `stop`/unmount; abort signals alone are not enough.
 
 ## Tests

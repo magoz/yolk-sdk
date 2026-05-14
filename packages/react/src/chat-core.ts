@@ -26,14 +26,24 @@ export type AgentChatState = {
   readonly error: string | null
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
+  readonly seenEventIds: ReadonlyArray<string>
 }
 
 export const initialAgentChatState: AgentChatState = {
   status: 'idle',
   error: null,
   chatMessages: [],
-  sessionEvents: []
+  sessionEvents: [],
+  seenEventIds: []
 }
+
+const hasSeenEvent = (state: AgentChatState, event: AgentEvent) =>
+  event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
+
+const rememberEvent = (state: AgentChatState, event: AgentEvent): AgentChatState =>
+  event.eventId === undefined
+    ? state
+    : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
 
 export type AgentChatAction =
   | { readonly _tag: 'HydrateMessage'; readonly message: AgentMessage }
@@ -62,6 +72,7 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        seenEventIds: [],
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
         sessionEvents: [
           ...state.sessionEvents,
@@ -109,6 +120,7 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        seenEventIds: [],
         chatMessages: next.messages,
         sessionEvents: [
           ...state.sessionEvents,
@@ -130,6 +142,7 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        seenEventIds: [],
         chatMessages: next.messages,
         sessionEvents: [
           ...state.sessionEvents,
@@ -142,28 +155,32 @@ export const reduceAgentChatState = (
       }
     }
     case 'Event': {
+      if (hasSeenEvent(state, action.event)) {
+        return state
+      }
+
       switch (action.event._tag) {
         case 'AgentStart':
-          return {
+          return rememberEvent({
             ...state,
             status: 'running',
             error: null,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }
+          }, action.event)
         case 'AgentError':
-          return {
+          return rememberEvent({
             ...state,
             status: 'error',
             error: action.event.message,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }
+          }, action.event)
         case 'AgentEnd':
-          return {
+          return rememberEvent({
             ...state,
             status: 'done',
             error: null,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }
+          }, action.event)
         case 'AssistantMessage':
         case 'AgentRetry':
         case 'CompactionEnd':
@@ -185,10 +202,10 @@ export const reduceAgentChatState = (
         case 'TurnEnd':
         case 'TurnStart':
         case 'UsageUpdate':
-          return {
+          return rememberEvent({
             ...state,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }
+          }, action.event)
       }
     }
     case 'Error': {

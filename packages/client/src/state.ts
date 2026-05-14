@@ -44,6 +44,7 @@ export type AgentClientState = {
   readonly reasoning: string
   readonly toolRuns: ReadonlyArray<AgentToolRun>
   readonly error: string | null
+  readonly seenEventIds: ReadonlyArray<string>
 }
 
 export type ApplyAgentEventOptions = {
@@ -59,8 +60,17 @@ export const initialAgentClientState: AgentClientState = {
   text: '',
   reasoning: '',
   toolRuns: [],
-  error: null
+  error: null,
+  seenEventIds: []
 }
+
+const hasSeenEvent = (state: AgentClientState, event: AgentEvent) =>
+  event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
+
+const rememberEvent = (state: AgentClientState, event: AgentEvent): AgentClientState =>
+  event.eventId === undefined
+    ? state
+    : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
 
 const toolRunId = (run: AgentToolRun) => {
   switch (run._tag) {
@@ -148,6 +158,18 @@ export const applyAgentEventWithOptions = (
 ): AgentClientState => {
   const nowMs = options.nowMs ?? 0
 
+  if (hasSeenEvent(state, event)) {
+    return state
+  }
+
+  return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
+}
+
+const applyAgentEventUnchecked = (
+  state: AgentClientState,
+  event: AgentEvent,
+  nowMs: number
+): AgentClientState => {
   switch (event._tag) {
     case 'AgentStart':
       return {
@@ -281,7 +303,8 @@ export const submitAgentUserMessage = (
   text: '',
   reasoning: '',
   toolRuns: completedToolRuns(state.toolRuns),
-  error: null
+  error: null,
+  seenEventIds: []
 })
 
 export const markAgentError = (

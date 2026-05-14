@@ -58,6 +58,22 @@ describe('agent chat core', () => {
     ])
   })
 
+  it('ignores duplicate events with the same event id', () => {
+    const state = [
+      LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'lo' })
+    ].reduce(
+      (current, event) => reduceAgentChatState(current, { _tag: 'Event', event }),
+      initialAgentChatState
+    )
+
+    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect(state.chatMessages[0]?.parts).toEqual([
+      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+    ])
+  })
+
   it('streams text after reasoning in the same assistant message', () => {
     const state = [
       LLMReasoningDelta.make({ text: 'Thinking.' }),
