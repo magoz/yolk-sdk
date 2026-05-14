@@ -41,7 +41,7 @@ describe('runVercelAgentWorkflow', () => {
     const states: Array<SerializableWorkflowState> = []
     let closeCount = 0
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async input => {
         states.push(input.state)
@@ -54,6 +54,7 @@ describe('runVercelAgentWorkflow', () => {
       writeError: async () => undefined
     })
 
+    expect(result._tag).toBe('Completed')
     expect(states).toEqual([{ request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }])
     expect(closeCount).toBe(1)
   })
@@ -62,7 +63,7 @@ describe('runVercelAgentWorkflow', () => {
     const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async input => {
         modelStates.push(input.state)
@@ -76,6 +77,7 @@ describe('runVercelAgentWorkflow', () => {
       writeError: async () => undefined
     })
 
+    expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
     expect(toolInputs).toEqual([
       {
         context: 'ctx-1',
@@ -100,7 +102,7 @@ describe('runVercelAgentWorkflow', () => {
     const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async input => {
         modelStates.push(input.state)
@@ -118,6 +120,7 @@ describe('runVercelAgentWorkflow', () => {
       writeError: async () => undefined
     })
 
+    expect(result._tag).toBe('Completed')
     expect(toolInputs[0]?.eventSequence).toBe(3)
     expect(modelStates[1]?.eventSequence).toBe(5)
   })
@@ -127,7 +130,7 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let closeCount = 0
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async () => Promise.reject(error),
       runToolBatchStep: async input => toolBatchResult(input),
@@ -139,6 +142,12 @@ describe('runVercelAgentWorkflow', () => {
       }
     })
 
+    expect(result).toEqual({
+      _tag: 'ModelStepFailed',
+      turn: 1,
+      error,
+      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+    })
     expect(errors).toEqual([error])
     expect(closeCount).toBe(0)
   })
@@ -147,7 +156,7 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let modelAttempts = 0
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       modelStepRetry: { maxAttempts: 2 },
       runModelStep: async input => {
@@ -166,6 +175,7 @@ describe('runVercelAgentWorkflow', () => {
       }
     })
 
+    expect(result._tag).toBe('Completed')
     expect(modelAttempts).toBe(2)
     expect(errors).toEqual([])
   })
@@ -175,7 +185,7 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let modelAttempts = 0
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async () => {
         modelAttempts += 1
@@ -188,6 +198,7 @@ describe('runVercelAgentWorkflow', () => {
       }
     })
 
+    expect(result._tag).toBe('ModelStepFailed')
     expect(modelAttempts).toBe(1)
     expect(errors).toEqual([error])
   })
@@ -196,7 +207,7 @@ describe('runVercelAgentWorkflow', () => {
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
     let toolAttempts = 0
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       maxTurns: 2,
       toolBatchStepRetry: { maxAttempts: 2 },
@@ -218,14 +229,34 @@ describe('runVercelAgentWorkflow', () => {
       writeError: async () => undefined
     })
 
+    expect(result._tag).toBe('Completed')
     expect(toolInputs.map(input => input.eventSequence)).toEqual([3, 3])
+  })
+
+  it('returns tool batch failures with the current workflow state', async () => {
+    const error = new Error('tools failed')
+
+    const result = await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: async input => toolModelResult(input),
+      runToolBatchStep: async () => Promise.reject(error),
+      closeStream: async () => undefined,
+      writeError: async () => undefined
+    })
+
+    expect(result).toEqual({
+      _tag: 'ToolBatchStepFailed',
+      turn: 1,
+      error,
+      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+    })
   })
 
   it('writes close errors after terminal model step', async () => {
     const error = new Error('close failed')
     const errors: Array<unknown> = []
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: async input => terminalModelResult(input),
       runToolBatchStep: async input => toolBatchResult(input),
@@ -235,13 +266,19 @@ describe('runVercelAgentWorkflow', () => {
       }
     })
 
+    expect(result).toEqual({
+      _tag: 'CloseStreamFailed',
+      turns: 1,
+      error,
+      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+    })
     expect(errors).toEqual([error])
   })
 
   it('writes max-turn error when loop does not terminate', async () => {
     const errors: Array<unknown> = []
 
-    await runVercelAgentWorkflow({
+    const result = await runVercelAgentWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       maxTurns: 2,
       runModelStep: async input => toolModelResult(input),
@@ -252,6 +289,7 @@ describe('runVercelAgentWorkflow', () => {
       }
     })
 
+    expect(result).toMatchObject({ _tag: 'MaxTurnsExceeded', maxTurns: 2 })
     expect(errors).toHaveLength(1)
     expect(errors[0]).toBeInstanceOf(Error)
     expect(String(errors[0])).toContain('exceeded max turns: 2')

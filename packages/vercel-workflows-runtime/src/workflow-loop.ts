@@ -56,6 +56,37 @@ export type VercelAgentWorkflowStepRetryPolicy = {
   readonly maxAttempts: number
 }
 
+export type VercelAgentWorkflowRunResult =
+  | {
+      readonly _tag: 'Completed'
+      readonly turns: number
+      readonly state: SerializableWorkflowState
+    }
+  | {
+      readonly _tag: 'ModelStepFailed'
+      readonly turn: number
+      readonly error: unknown
+      readonly state: SerializableWorkflowState
+    }
+  | {
+      readonly _tag: 'ToolBatchStepFailed'
+      readonly turn: number
+      readonly error: unknown
+      readonly state: SerializableWorkflowState
+    }
+  | {
+      readonly _tag: 'CloseStreamFailed'
+      readonly turns: number
+      readonly error: unknown
+      readonly state: SerializableWorkflowState
+    }
+  | {
+      readonly _tag: 'MaxTurnsExceeded'
+      readonly maxTurns: number
+      readonly error: Error
+      readonly state: SerializableWorkflowState
+    }
+
 export type VercelAgentWorkflowLoopConfig = {
   readonly input: VercelAgentWorkflowInput
   readonly maxTurns?: number
@@ -110,7 +141,9 @@ export async function retryWorkflowStep<A>(
   }
 }
 
-export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConfig): Promise<void> {
+export async function runVercelAgentWorkflow(
+  config: VercelAgentWorkflowLoopConfig
+): Promise<VercelAgentWorkflowRunResult> {
   let state: SerializableWorkflowState = {
     request: config.input.request,
     createdMessages: [],
@@ -129,7 +162,12 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
 
     if (modelResult._tag === 'Failure') {
       await writeErrorSafely(config.writeError, modelResult.error)
-      return
+      return {
+        _tag: 'ModelStepFailed',
+        turn: state.turn,
+        error: modelResult.error,
+        state
+      }
     }
 
     if (modelResult.value.done) {
@@ -139,9 +177,20 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
 
       if (closeResult._tag === 'Failure') {
         await writeErrorSafely(config.writeError, closeResult.error)
+
+        return {
+          _tag: 'CloseStreamFailed',
+          turns: modelResult.value.turn,
+          error: closeResult.error,
+          state
+        }
       }
 
-      return
+      return {
+        _tag: 'Completed',
+        turns: modelResult.value.turn,
+        state
+      }
     }
 
     const toolsResult = await settleWorkflowStep(
@@ -161,7 +210,12 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
 
     if (toolsResult._tag === 'Failure') {
       await writeErrorSafely(config.writeError, toolsResult.error)
-      return
+      return {
+        _tag: 'ToolBatchStepFailed',
+        turn: modelResult.value.turn,
+        error: toolsResult.error,
+        state
+      }
     }
 
     state = {
@@ -174,5 +228,13 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
     }
   }
 
-  await writeErrorSafely(config.writeError, workflowMaxTurnsError(maxTurns))
+  const error = workflowMaxTurnsError(maxTurns)
+  await writeErrorSafely(config.writeError, error)
+
+  return {
+    _tag: 'MaxTurnsExceeded',
+    maxTurns,
+    error,
+    state
+  }
 }

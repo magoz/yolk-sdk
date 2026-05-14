@@ -25,6 +25,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
 - Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.
+- `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
 - Test observable runtime contract, not Vercel SDK implementation details.
 
 ## Tests
