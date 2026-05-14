@@ -368,6 +368,8 @@ app/workflows/*
 
 Build a concrete app adapter first.
 
+Architecture explainer page: `/vercel-workflows`.
+
 1. Add `/agent/workflow` page or route variant.
 2. Add `POST /api/agent/workflow` that starts a Workflow run.
 3. Add `runAgentWorkflow` with `"use workflow"`.
