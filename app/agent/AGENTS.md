@@ -11,6 +11,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - `/agent/workflow` uses `/api/agent/workflow`, starts a Vercel Workflow run, and reads the durable stream returned by `run.getReadable()`.
 - Workflow runtime records `x-workflow-run-id` in Activity, can replay the durable stream by run id, and stop requests cancel the Workflow run.
 - Workflow resume is for interrupted/aborted active runs only; keep resume disabled after `done` to avoid replaying completed stream chunks into duplicate UI messages.
+- Workflow stop is optimistic in the UI: it aborts the browser stream and calls `run.cancel()`, but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
 - `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.

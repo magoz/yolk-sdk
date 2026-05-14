@@ -169,6 +169,29 @@ describe('useAgentChat', () => {
     hook.unmount()
   })
 
+  it('marks orphan running state aborted when stopped', async () => {
+    const transport: AgentChatTransport = async function* () {
+      yield AgentStart.make({})
+    }
+    const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
+
+    await act(async () => {
+      hook.value.submitText('hello')
+      await tick()
+    })
+    expect(hook.value.status).toBe('running')
+
+    await act(async () => {
+      hook.value.stop()
+      await tick()
+    })
+
+    expect(hook.value.status).toBe('aborted')
+    expect(hook.value.error).toBeNull()
+
+    hook.unmount()
+  })
+
   it('deletes a persisted turn without sending transport requests', () => {
     const requests: Array<AgentChatTransportRequest> = []
     const transport: AgentChatTransport = async function* (request) {

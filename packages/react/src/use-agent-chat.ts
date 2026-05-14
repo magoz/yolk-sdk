@@ -315,7 +315,7 @@ export function useAgentChat({
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
-    if (controller === null && fiber === null) {
+    if (controller === null && fiber === null && !isRunning) {
       return
     }
     controller?.abort()
@@ -323,7 +323,7 @@ export function useAgentChat({
       Effect.runFork(Fiber.interrupt(fiber))
     }
     markAborted()
-  }, [markAborted])
+  }, [isRunning, markAborted])
 
   useEffect(
     () => () => {
