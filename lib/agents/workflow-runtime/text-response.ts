@@ -1,6 +1,7 @@
 import { Config, Effect, Layer } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
-import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
+import type { ContextTransformer, LLMProvider, LoopConfig, ToolExecutor } from '@yolk/agent-loop'
+import { makeToolExecutorLayer } from '@yolk/tool-registry'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
 import {
   type AgentModelCapabilities,
@@ -34,6 +35,16 @@ type AgentTextRuntimeConfig = {
   readonly capabilities: AgentModelCapabilities
 }
 
+type AgentTextRuntimeLayer = Layer.Layer<
+  ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
+>
+
+type AgentTextRuntime = {
+  readonly input: AgentRouteRequest
+  readonly config: AgentTextRuntimeConfig
+  readonly layer: AgentTextRuntimeLayer
+}
+
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
     const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
@@ -65,24 +76,7 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
     }
   })
 
-const makeAgentResponseWithProvider = (
-  input: AgentRouteRequest,
-  config: AgentTextRuntimeConfig,
-  toolSet: ResolvedToolSet,
-  userId: string
-) =>
-  Effect.gen(function* () {
-    const selectedModel = input.model ?? config.model
-    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
-    const providerLayer = yield* providerLayerForModel(model, userId)
-    const normalizedInput = new AgentRouteRequest({ ...input, model })
-
-    return yield* makeAgentPostResponse(normalizedInput, { ...config, model }).pipe(
-      Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(toolSet)))
-    )
-  })
-
-export const makeAgentTextResponse = (
+export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
   route: '/agent/next' | '/agent/workflow'
@@ -101,16 +95,36 @@ export const makeAgentTextResponse = (
         skillset
       }
     })
+    const selectedModel = input.model ?? baseConfig.model
+    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
+    const providerLayer = yield* providerLayerForModel(model, userId)
+    const normalizedInput = new AgentRouteRequest({ ...input, model })
+    const config: AgentTextRuntimeConfig = {
+      ...baseConfig,
+      model,
+      systemPrompt: appendAvailableSkills(baseConfig.systemPrompt, skillset),
+      tools: toolSet.tools,
+      capabilities: agentTextCapabilities
+    }
 
-    return yield* makeAgentResponseWithProvider(
-      input,
-      {
-        ...baseConfig,
-        systemPrompt: appendAvailableSkills(baseConfig.systemPrompt, skillset),
-        tools: toolSet.tools,
-        capabilities: agentTextCapabilities
-      },
-      toolSet,
-      userId
+    const runtime: AgentTextRuntime = {
+      input: normalizedInput,
+      config,
+      layer: makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(toolSet))
+    }
+
+    return runtime
+  })
+
+export const makeAgentTextResponse = (
+  input: AgentRouteRequest,
+  userId: string,
+  route: '/agent/next' | '/agent/workflow'
+) =>
+  Effect.gen(function* () {
+    const runtime = yield* makeAgentTextRuntime(input, userId, route)
+
+    return yield* makeAgentPostResponse(runtime.input, runtime.config).pipe(
+      Effect.provide(runtime.layer)
     )
   })

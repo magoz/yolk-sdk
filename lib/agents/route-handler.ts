@@ -78,7 +78,7 @@ const imagePartLimitError = (image: ImagePart) => {
   return Option.none<AgentImageLimitError>()
 }
 
-const validateAgentRouteImages = (input: AgentRouteRequest) =>
+export const validateAgentRouteImages = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const images = requestImageParts(input)
     const totalBase64Chars = Arr.reduce(images, 0, (total, image) => total + image.data.length)
@@ -152,7 +152,7 @@ const recoverAgentStreamErrors = <R>(stream: Stream.Stream<AgentEvent, AgentStre
     })
   )
 
-const encodeNdjsonEvent = (event: AgentEvent) =>
+export const encodeAgentNdjsonEvent = (event: AgentEvent) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(event).pipe(
     Effect.mapError(
       error =>
@@ -182,7 +182,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       }
     ).pipe(
       recoverAgentStreamErrors,
-      Stream.mapEffect(encodeNdjsonEvent),
+      Stream.mapEffect(encodeAgentNdjsonEvent),
       Stream.toReadableStreamEffect()
     )
 

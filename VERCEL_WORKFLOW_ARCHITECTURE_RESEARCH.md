@@ -392,11 +392,23 @@ Current app runtime exposes `x-workflow-run-id` in the Activity panel, supports 
 replay via `GET /api/agent/workflow/:runId`, and calls `DELETE /api/agent/workflow/:runId`
 to request `run.cancel()` when the user stops a Workflow-backed text run.
 
-Current v1 does not split every LLM call or tool call into separate Workflow steps.
-One Workflow run currently executes one `runAgentWorkflowStep`, and that step runs the
-full Yolk text runtime loop. This gives durable execution/stream replay, but a long
-model stream or long tool cascade still needs to fit inside one Vercel Function step.
-Open Agents-style one-model/tool-boundary-per-step remains the next architecture task.
+Current implementation now splits the Workflow run across model/tool boundaries:
+
+```txt
+runAgentWorkflow                    # "use workflow"
+  runAgentWorkflowModelStep(...)     # "use step"
+  runAgentWorkflowToolBatchStep(...) # "use step", when tool_use
+  runAgentWorkflowModelStep(...)
+  ...
+```
+
+The workflow carries plain wire continuation data between steps: request, transcript,
+created messages, accumulated usage, pending tool calls, and turn index. `runModelTurn`
+and `runToolBatch` remain package-level, store-agnostic APIs; Vercel-specific directives
+stay in app-owned workflow wrappers. The workflow function itself is composed with Effect
+(`Effect.tryPromise`, recursive `runWorkflowLoop`, and `Effect.catch`) rather than raw
+`try/catch`, while preserving Vercel's top-level `"use workflow"` / `"use step"`
+requirements.
 
 ## AI SDK WorkflowAgent findings
 
