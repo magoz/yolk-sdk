@@ -292,84 +292,76 @@ export async function writeAgentWorkflowError(error: unknown) {
   )
 }
 
-const runModelWorkflowStep = (userId: string, state: AgentWorkflowState) =>
-  Effect.tryPromise({
-    try: () => runAgentWorkflowModelStep({ userId, state }),
-    catch: error => error
-  })
-
-const runToolBatchWorkflowStep = (
-  userId: string,
-  request: unknown,
-  model: AgentWorkflowModelStepResult
-) =>
-  Effect.tryPromise({
-    try: () =>
-      runAgentWorkflowToolBatchStep({
-        userId,
-        request,
-        calls: model.toolCalls,
-        createdMessages: model.createdMessages
-      }),
-    catch: error => error
-  })
-
-const closeWorkflowStreamStep = Effect.tryPromise({
-  try: () => closeAgentWorkflowStream(),
-  catch: error => error
-})
-
 const writeWorkflowErrorStep = (error: unknown) =>
-  Effect.tryPromise({
-    try: () => writeAgentWorkflowError(error),
-    catch: writeError => writeError
-  }).pipe(Effect.catch(() => Effect.void))
+  writeAgentWorkflowError(error).catch(() => undefined)
 
-const runWorkflowLoop = (
-  input: AgentWorkflowInput,
-  state: AgentWorkflowState,
-  step: number
-): Effect.Effect<void, unknown> =>
-  Effect.suspend(() => {
-    if (step >= maxWorkflowTurns) {
-      return writeWorkflowErrorStep(new Error('Workflow agent exceeded max turns'))
+type WorkflowStepResult<A> =
+  | {
+      readonly _tag: 'Success'
+      readonly value: A
+    }
+  | {
+      readonly _tag: 'Failure'
+      readonly error: unknown
     }
 
-    return Effect.gen(function* () {
-      const model = yield* runModelWorkflowStep(input.userId, state)
-
-      if (model.done) {
-        return yield* closeWorkflowStreamStep
-      }
-
-      const tools = yield* runToolBatchWorkflowStep(input.userId, input.request, model)
-
-      return yield* runWorkflowLoop(
-        input,
-        {
-          request: input.request,
-          messages: [...model.messages, ...tools.messages],
-          createdMessages: tools.createdMessages,
-          usage: model.usage,
-          turn: model.turn + 1
-        },
-        step + 1
-      )
-    })
-  })
+const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
+  promise.then(
+    value => ({ _tag: 'Success', value }),
+    error => ({ _tag: 'Failure', error })
+  )
 
 export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
-  await Effect.runPromise(
-    runWorkflowLoop(
-      input,
-      {
+  let state: AgentWorkflowState = {
+    request: input.request,
+    createdMessages: [],
+    turn: 1
+  }
+
+  for (let step = 0; step < maxWorkflowTurns; step++) {
+    const modelResult = await settleWorkflowStep(
+      runAgentWorkflowModelStep({ userId: input.userId, state })
+    )
+
+    if (modelResult._tag === 'Failure') {
+      await writeWorkflowErrorStep(modelResult.error)
+      return
+    }
+
+    if (modelResult.value.done) {
+      const closeResult = await settleWorkflowStep(closeAgentWorkflowStream())
+
+      if (closeResult._tag === 'Failure') {
+        await writeWorkflowErrorStep(closeResult.error)
+      }
+
+      return
+    }
+
+    const toolsResult = await settleWorkflowStep(
+      runAgentWorkflowToolBatchStep({
+        userId: input.userId,
         request: input.request,
-        createdMessages: [],
-        turn: 1
-      },
-      0
-    ).pipe(Effect.catch(error => writeWorkflowErrorStep(error)))
-  )
+        calls: modelResult.value.toolCalls,
+        createdMessages: modelResult.value.createdMessages
+      })
+    )
+
+    if (toolsResult._tag === 'Failure') {
+      await writeWorkflowErrorStep(toolsResult.error)
+      return
+    }
+
+    state = {
+      request: input.request,
+      messages: [...modelResult.value.messages, ...toolsResult.value.messages],
+      createdMessages: toolsResult.value.createdMessages,
+      usage: modelResult.value.usage,
+      turn: modelResult.value.turn + 1
+    }
+  }
+
+  await writeWorkflowErrorStep(new Error('Workflow agent exceeded max turns'))
 }

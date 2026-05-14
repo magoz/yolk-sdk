@@ -405,10 +405,10 @@ runAgentWorkflow                    # "use workflow"
 The workflow carries plain wire continuation data between steps: request, transcript,
 created messages, accumulated usage, pending tool calls, and turn index. `runModelTurn`
 and `runToolBatch` remain package-level, store-agnostic APIs; Vercel-specific directives
-stay in app-owned workflow wrappers. The workflow function itself is composed with Effect
-(`Effect.tryPromise`, recursive `runWorkflowLoop`, and `Effect.catch`) rather than raw
-`try/catch`, while preserving Vercel's top-level `"use workflow"` / `"use step"`
-requirements.
+stay in app-owned workflow wrappers. Keep Effect runtime execution out of the
+`"use workflow"` orchestration function: Vercel's workflow sandbox may not expose globals
+that Effect expects, such as `AbortController`. Effect pipelines can run inside `"use step"`
+functions, where model/tool work and stream writes happen.
 
 ## AI SDK WorkflowAgent findings
 

@@ -167,5 +167,6 @@ Image TODOs:
 
 - Provider tests: `providers/*-provider.test.ts`
 - Route encoding/schema tests: `route-handler.test.ts`
+- Workflow runtime source guard: `workflow-runtime/run-agent-workflow.test.ts` keeps Effect runtime calls out of `"use workflow"` orchestration; put Effect work in `"use step"` functions only.
 - Keep regression tests for provider quirks close to provider implementation.
 - Mock HTTP with `HttpClient` test layers, not fetch-style helpers.
