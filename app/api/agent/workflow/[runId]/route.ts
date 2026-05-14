@@ -3,6 +3,7 @@ import { getRun } from 'workflow/api'
 import { AppLayer } from '@/lib/layers'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import { workflowCancelResponse, workflowResumeResponse } from './route-model'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,13 +16,6 @@ class AgentWorkflowRunRouteError extends Data.TaggedError('AgentWorkflowRunRoute
   cause?: unknown
 }> {}
 
-const ndjsonHeaders = (runId: string) => ({
-  'cache-control': 'no-cache, no-transform',
-  'content-type': 'application/x-ndjson; charset=utf-8',
-  'x-content-type-options': 'nosniff',
-  'x-workflow-run-id': runId
-})
-
 const getRunId = (context: RouteContext) =>
   Effect.promise(() => context.params).pipe(Effect.map(params => params.runId))
 
@@ -29,12 +23,7 @@ const resumeProgram = (context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
     const runId = yield* getRunId(context)
-    const run = getRun(runId)
-
-    return new Response(run.getReadable<Uint8Array>(), {
-      status: 200,
-      headers: ndjsonHeaders(runId)
-    })
+    return workflowResumeResponse(runId, getRun)
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.get'),
     Effect.catchTag('UnauthenticatedError', () =>
@@ -53,9 +42,7 @@ const cancelProgram = (context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
     const runId = yield* getRunId(context)
-    yield* Effect.promise(() => getRun(runId).cancel())
-
-    return Response.json({ ok: true })
+    return yield* Effect.promise(() => workflowCancelResponse(runId, getRun))
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.delete'),
     Effect.catchTag('UnauthenticatedError', () =>

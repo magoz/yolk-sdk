@@ -7,6 +7,7 @@ import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { runAgentWorkflow } from '@/lib/agents/workflow-runtime/run-agent-workflow'
+import { workflowNdjsonHeaders } from './route-model'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,13 +15,6 @@ class AgentWorkflowRouteError extends Data.TaggedError('AgentWorkflowRouteError'
   message: string
   cause?: unknown
 }> {}
-
-const ndjsonHeaders = (runId: string) => ({
-  'cache-control': 'no-cache, no-transform',
-  'content-type': 'application/x-ndjson; charset=utf-8',
-  'x-content-type-options': 'nosniff',
-  'x-workflow-run-id': runId
-})
 
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
@@ -32,7 +26,7 @@ const handler = Effect.gen(function* () {
 
   return HttpServerResponse.raw(run.getReadable<Uint8Array>(), {
     status: 200,
-    headers: ndjsonHeaders(run.runId)
+    headers: workflowNdjsonHeaders(run.runId)
   })
 }).pipe(
   Effect.withSpan('AgentWorkflowRoute.post'),
