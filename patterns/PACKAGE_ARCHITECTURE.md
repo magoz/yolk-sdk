@@ -52,10 +52,13 @@ app/lib/cloudflare/e2e -> @yolk/agent/* + @yolk/mcp/*
 
 ## Boundary Enforcement
 
-- `pnpm packages:check` runs package typechecks and `scripts/check-package-boundaries.ts`.
+- `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, and `scripts/check-package-exports.ts`.
 - Boundary script prevents app/lib/cloudflare/e2e from importing retired internal package names.
+- Boundary script prevents retired package directories from reappearing.
+- Boundary script prevents root `@yolk/agent` and `@yolk/mcp` imports in app/lib/cloudflare/e2e; use explicit subpaths.
 - Boundary script prevents `@yolk/agent` from importing `@yolk/rag`, `@yolk/mcp`, `@yolk/react`, Next, React, or Node builtins.
 - Boundary script prevents RAG from importing MCP/React/Next/Node.
+- Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 
 ## When Adding A Package API
 

@@ -10,6 +10,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | `build-skillset.ts` | Compile local `.opencode/skills/*` into Cloudflare generated skillset |
 | `codex-ws-smoke.ts` | Manual Codex WebSocket smoke check |
 | `check-package-boundaries.ts` | Validate app/package import boundary rules |
+| `check-package-exports.ts` | Validate package export shape and tree-shaking smoke rules |
 
 ## Rules
 

@@ -7,51 +7,56 @@ type BoundaryRule = {
   readonly forbiddenImports: ReadonlyArray<string>
 }
 
+type RetiredPackage = {
+  readonly dir: string
+  readonly importName: string
+}
+
 const workspaceRoot = process.cwd()
+
+const retiredPackages: ReadonlyArray<RetiredPackage> = [
+  { dir: 'packages/agent-loop', importName: '@yolk/agent-loop' },
+  { dir: 'packages/agent-runtime', importName: '@yolk/agent-runtime' },
+  { dir: 'packages/client', importName: '@yolk/client' },
+  { dir: 'packages/mcp-client', importName: '@yolk/mcp-client' },
+  { dir: 'packages/mcp-server', importName: '@yolk/mcp-server' },
+  { dir: 'packages/protocol', importName: '@yolk/protocol' },
+  { dir: 'packages/tool-registry', importName: '@yolk/tool-registry' }
+]
+
+const retiredImports = retiredPackages.map(retiredPackage => retiredPackage.importName)
 
 const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'app',
     forbiddenImports: [
-      '@yolk/agent-loop',
-      '@yolk/agent-runtime',
-      '@yolk/client',
-      '@yolk/mcp-client',
-      '@yolk/protocol',
-      '@yolk/tool-registry'
+      ...retiredImports,
+      '@yolk/agent$',
+      '@yolk/mcp$'
     ]
   },
   {
     packageDir: 'lib',
     forbiddenImports: [
-      '@yolk/agent-loop',
-      '@yolk/agent-runtime',
-      '@yolk/client',
-      '@yolk/mcp-client',
-      '@yolk/protocol',
-      '@yolk/tool-registry'
+      ...retiredImports,
+      '@yolk/agent$',
+      '@yolk/mcp$'
     ]
   },
   {
     packageDir: 'cloudflare/agent/src',
     forbiddenImports: [
-      '@yolk/agent-loop',
-      '@yolk/agent-runtime',
-      '@yolk/client',
-      '@yolk/mcp-client',
-      '@yolk/protocol',
-      '@yolk/tool-registry'
+      ...retiredImports,
+      '@yolk/agent$',
+      '@yolk/mcp$'
     ]
   },
   {
     packageDir: 'e2e',
     forbiddenImports: [
-      '@yolk/agent-loop',
-      '@yolk/agent-runtime',
-      '@yolk/client',
-      '@yolk/mcp-client',
-      '@yolk/protocol',
-      '@yolk/tool-registry'
+      ...retiredImports,
+      '@yolk/agent$',
+      '@yolk/mcp$'
     ]
   },
   {
@@ -108,8 +113,13 @@ const importsFrom = (source: string): ReadonlyArray<string> => {
   return imports
 }
 
-const violates = (specifier: string, forbidden: string) =>
-  specifier === forbidden || specifier.startsWith(`${forbidden}/`)
+const violates = (specifier: string, forbidden: string) => {
+  if (forbidden.endsWith('$')) {
+    return specifier === forbidden.slice(0, -1)
+  }
+
+  return specifier === forbidden || specifier.startsWith(`${forbidden}/`)
+}
 
 const violations = rules.flatMap(rule => {
   if (!packageExists(rule.packageDir)) {
@@ -126,6 +136,15 @@ const violations = rules.flatMap(rule => {
   })
 })
 
+const retiredDirViolations = retiredPackages.filter(retiredPackage => packageExists(retiredPackage.dir))
+
+if (retiredDirViolations.length > 0) {
+  console.error('Retired package directories found:')
+  for (const retiredPackage of retiredDirViolations) {
+    console.error(`- ${retiredPackage.dir} (${retiredPackage.importName})`)
+  }
+}
+
 if (violations.length > 0) {
   console.error('Package boundary violations:')
   for (const violation of violations) {
@@ -133,5 +152,8 @@ if (violations.length > 0) {
       `- ${relative(workspaceRoot, violation.file)} imports ${violation.specifier} (forbidden: ${violation.forbidden})`
     )
   }
+}
+
+if (retiredDirViolations.length > 0 || violations.length > 0) {
   process.exitCode = 1
 }
