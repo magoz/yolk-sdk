@@ -11,7 +11,7 @@ import {
   useAgentChat,
   type AgentChatTransport
 } from '@yolk/react'
-import { streamCloudflareAgentEvents } from '@yolk/client'
+import { cancelAgentRun, streamAgentEvents, streamAgentRunEvents, streamCloudflareAgentEvents } from '@yolk/client'
 import {
   agentTextCapabilities,
   agentTextModel,
@@ -245,6 +245,8 @@ export function AgentPlayground({
   const [activityItems, setActivityItems] = useState<ReadonlyArray<AgentActivityItem>>([])
   const [commands, setCommands] = useState<ReadonlyArray<AgentCommandSummary>>([])
   const [isCommandRendering, setIsCommandRendering] = useState(false)
+  const [workflowRunId, setWorkflowRunId] = useState<string | null>(null)
+  const [isWorkflowResuming, setIsWorkflowResuming] = useState(false)
   const nextActivityIdRef = useRef(0)
 
   const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
@@ -418,14 +420,34 @@ export function AgentPlayground({
         signal: request.signal
       })
   }, [runtime])
-  const endpoint = runtime._tag === 'Workflow' ? '/api/agent/workflow' : undefined
+  const workflowTransport = useMemo<AgentChatTransport | undefined>(() => {
+    if (runtime._tag !== 'Workflow') {
+      return undefined
+    }
+
+    return request =>
+      streamAgentEvents({
+        ...request,
+        endpoint: '/api/agent/workflow',
+        onResponse: response => {
+          const runId = response.headers['x-workflow-run-id']
+
+          if (runId === undefined) {
+            return
+          }
+
+          setWorkflowRunId(runId)
+          recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
+        }
+      })
+  }, [recordActivity, runtime])
+  const agentTransport = cloudflareTransport ?? workflowTransport
 
   const agentChat = useAgentChat({
     sessionId,
-    endpoint,
     model: textModel,
     reasoningEffort,
-    transport: cloudflareTransport,
+    transport: agentTransport,
     onEvent: recordAgentEvent,
     onError: recordAgentError,
     onAbort: recordAgentAbort
@@ -615,6 +637,57 @@ export function AgentPlayground({
     [messageActionsDisabled, recordActivity, regenerateFrom]
   )
 
+  const handleResumeWorkflowRun = useCallback(() => {
+    if (runtime._tag !== 'Workflow' || workflowRunId === null || isRunning || isWorkflowResuming) {
+      return
+    }
+
+    setIsWorkflowResuming(true)
+    recordActivity({ title: 'Workflow stream resume requested', detail: workflowRunId, tone: 'neutral' })
+
+    const endpoint = `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`
+
+    Effect.runPromise(
+      Effect.promise(async () => {
+        for await (const event of streamAgentRunEvents({ endpoint })) {
+          applyEvent(event)
+        }
+      })
+    )
+      .then(() => {
+        recordActivity({ title: 'Workflow stream resumed', detail: workflowRunId, tone: 'success' })
+      })
+      .catch(error => {
+        const message = error instanceof Error ? error.message : 'Workflow resume failed'
+        fail(message)
+      })
+      .finally(() => {
+        setIsWorkflowResuming(false)
+      })
+  }, [applyEvent, fail, isRunning, isWorkflowResuming, recordActivity, runtime, workflowRunId])
+
+  const handleStop = useCallback(() => {
+    const runId = workflowRunId
+
+    stop()
+
+    if (runtime._tag !== 'Workflow' || runId === null) {
+      return
+    }
+
+    const endpoint = `/api/agent/workflow/${encodeURIComponent(runId)}`
+    recordActivity({ title: 'Workflow cancel requested', detail: runId, tone: 'neutral' })
+
+    cancelAgentRun({ endpoint })
+      .then(() => {
+        recordActivity({ title: 'Workflow canceled', detail: runId, tone: 'success' })
+      })
+      .catch(error => {
+        const message = error instanceof Error ? error.message : 'Workflow cancel failed'
+        recordActivity({ title: 'Workflow cancel failed', detail: message, tone: 'error' })
+      })
+  }, [recordActivity, runtime, stop, workflowRunId])
+
   const handleEditUserMessage = useCallback(
     (messageId: string, content: string) => {
       if (messageActionsDisabled) {
@@ -776,6 +849,9 @@ export function AgentPlayground({
               activeToolCallCount={activeToolRunCount}
               toolResultCount={completedToolRunCount}
               error={state.error}
+              workflowRunId={workflowRunId}
+              workflowResumeDisabled={isRunning || isWorkflowResuming}
+              onResumeWorkflowRun={handleResumeWorkflowRun}
             />
           ) : null}
 
@@ -806,7 +882,7 @@ export function AgentPlayground({
             onRetryImageAttachment={handleRetryImageAttachment}
             onSlashCommandSubmit={handleSlashCommandSubmit}
             onSubmit={handleSubmit}
-            onStop={stop}
+            onStop={handleStop}
             onToggleVoice={toggleVoice}
           />
         </section>

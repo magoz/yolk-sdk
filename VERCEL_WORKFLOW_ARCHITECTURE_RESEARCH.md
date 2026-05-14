@@ -388,6 +388,16 @@ wire data before `start(runAgentWorkflow, ...)`, then decode inside the step bef
 calling app runtime code. Passing Effect Schema class instances directly causes
 Workflow serialization failures.
 
+Current app runtime exposes `x-workflow-run-id` in the Activity panel, supports stream
+replay via `GET /api/agent/workflow/:runId`, and calls `DELETE /api/agent/workflow/:runId`
+to request `run.cancel()` when the user stops a Workflow-backed text run.
+
+Current v1 does not split every LLM call or tool call into separate Workflow steps.
+One Workflow run currently executes one `runAgentWorkflowStep`, and that step runs the
+full Yolk text runtime loop. This gives durable execution/stream replay, but a long
+model stream or long tool cascade still needs to fit inside one Vercel Function step.
+Open Agents-style one-model/tool-boundary-per-step remains the next architecture task.
+
 ## Operational guardrails
 
 - Keep per-step model/tool work under function max duration.

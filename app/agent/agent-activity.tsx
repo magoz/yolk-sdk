@@ -40,6 +40,9 @@ type AgentActivityPanelProps = {
   readonly activeToolCallCount: number
   readonly toolResultCount: number
   readonly error: string | null
+  readonly workflowRunId: string | null
+  readonly workflowResumeDisabled: boolean
+  readonly onResumeWorkflowRun: () => void
 }
 
 export function AgentActivityPanel({
@@ -48,7 +51,10 @@ export function AgentActivityPanel({
   voiceStatus,
   activeToolCallCount,
   toolResultCount,
-  error
+  error,
+  workflowRunId,
+  workflowResumeDisabled,
+  onResumeWorkflowRun
 }: AgentActivityPanelProps) {
   return (
     <div id={activityPanelId} className="border-b border-foreground/10 bg-muted/20 p-4">
@@ -62,7 +68,22 @@ export function AgentActivityPanel({
           {toolResultCount > 0 ? (
             <Badge variant="secondary">{countLabel(toolResultCount, 'tool result')}</Badge>
           ) : null}
+          {workflowRunId !== null ? <Badge variant="outline">workflow {workflowRunId}</Badge> : null}
         </div>
+
+        {workflowRunId !== null ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-foreground/10 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-mono">{workflowRunId}</span>
+            <button
+              type="button"
+              disabled={workflowResumeDisabled}
+              onClick={onResumeWorkflowRun}
+              className="rounded-full border border-foreground/10 px-2 py-1 font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Resume stream
+            </button>
+          </div>
+        ) : null}
 
         {error !== null ? (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">

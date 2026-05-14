@@ -17,7 +17,9 @@ import {
 } from '@yolk/protocol'
 import {
   appendAgentMessage,
+  cancelAgentRun,
   collectAgentEvents,
+  streamAgentRunEvents,
   streamAgentEvents,
   streamCloudflareAgentEvents
 } from '../src'
@@ -115,6 +117,42 @@ describe('collectAgentEvents', () => {
     })
 
     expect(events).toEqual(responseEvents)
+  })
+
+  it('reports response headers and streams existing runs', async () => {
+    const responseEvents = [AgentStart.make({})]
+    const requests: Array<CapturedRequest> = []
+    const responses: Array<Readonly<Record<string, string | undefined>>> = []
+
+    const events = await collectAsync(
+      streamAgentRunEvents({
+        endpoint: '/api/agent/workflow/run_1',
+        onResponse: response => responses.push(response.headers),
+        httpClientLayer: makeHttpClientLayer(
+          new Response(encodeEvents(responseEvents), {
+            headers: { 'x-workflow-run-id': 'run_1' }
+          }),
+          requests
+        )
+      })
+    )
+
+    expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
+    expect(requests[0]?.request.method).toBe('GET')
+    expect(responses[0]?.['x-workflow-run-id']).toBe('run_1')
+    expect(events).toEqual(responseEvents)
+  })
+
+  it('cancels existing runs with DELETE', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await cancelAgentRun({
+      endpoint: '/api/agent/workflow/run_1',
+      httpClientLayer: makeHttpClientLayer(new Response(''), requests)
+    })
+
+    expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
+    expect(requests[0]?.request.method).toBe('DELETE')
   })
 
   it('cancels the response body when event consumption stops', async () => {

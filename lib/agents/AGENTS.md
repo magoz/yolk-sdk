@@ -12,6 +12,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Workflow text runtime has durable execution/streaming, but product transcript is still client-owned per turn in v1
+- Workflow text runtime exposes run id in the Activity panel; stream replay uses `GET /api/agent/workflow/:runId`; stop also calls `DELETE /api/agent/workflow/:runId`.
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode

@@ -18,11 +18,20 @@ export type {
 } from './state.ts'
 export {
   AgentTransportError,
+  cancelAgentRun,
   collectAgentEvents,
   collectAgentEventsEffect,
   streamCloudflareAgentEventStream,
   streamCloudflareAgentEvents,
   streamAgentEvents,
-  streamAgentEventStream
+  streamAgentEventStream,
+  streamAgentRunEvents,
+  streamAgentRunEventStream
 } from './transport.ts'
-export type { StreamAgentEventsRequest, StreamCloudflareAgentEventsRequest } from './transport.ts'
+export type {
+  AgentHttpResponseInfo,
+  CancelAgentRunRequest,
+  StreamAgentEventsRequest,
+  StreamAgentRunEventsRequest,
+  StreamCloudflareAgentEventsRequest
+} from './transport.ts'

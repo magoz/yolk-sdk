@@ -33,6 +33,24 @@ export type StreamAgentEventsRequest = {
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  readonly onResponse?: (response: AgentHttpResponseInfo) => void
+}
+
+export type StreamAgentRunEventsRequest = {
+  readonly endpoint: string
+  readonly signal?: AbortSignal
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  readonly onResponse?: (response: AgentHttpResponseInfo) => void
+}
+
+export type CancelAgentRunRequest = {
+  readonly endpoint: string
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+}
+
+export type AgentHttpResponseInfo = {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string | undefined>>
 }
 
 export type StreamCloudflareAgentEventsRequest = {
@@ -191,6 +209,7 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
       .pipe(Effect.mapError(toHttpClientTransportError('Agent request failed')))
 
     if (response.status >= 200 && response.status < 300) {
+      yield* Effect.sync(() => request.onResponse?.({ status: response.status, headers: response.headers }))
       return response
     }
 
@@ -203,6 +222,53 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
       })
     )
   })
+
+const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client
+      .execute(
+        HttpClientRequest.get(request.endpoint).pipe(
+          HttpClientRequest.setHeaders({ accept: 'application/x-ndjson' })
+        )
+      )
+      .pipe(Effect.mapError(toHttpClientTransportError('Agent run request failed')))
+
+    if (response.status >= 200 && response.status < 300) {
+      yield* Effect.sync(() => request.onResponse?.({ status: response.status, headers: response.headers }))
+      return response
+    }
+
+    const message = yield* responseErrorMessage(response)
+
+    return yield* Effect.fail(
+      new AgentTransportError({
+        message: `Agent run request failed (${response.status}): ${message}`,
+        cause: response.status
+      })
+    )
+  })
+
+const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const response = yield* client
+      .execute(HttpClientRequest.delete(request.endpoint))
+      .pipe(Effect.mapError(toHttpClientTransportError('Agent run cancel failed')))
+
+    if (response.status >= 200 && response.status < 300) {
+      return
+    }
+
+    const message = yield* responseErrorMessage(response)
+
+    return yield* Effect.fail(
+      new AgentTransportError({
+        message: `Agent run cancel failed (${response.status}): ${message}`,
+        cause: response.status
+      })
+    )
+  }).pipe(Effect.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
 const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) =>
   response.stream.pipe(
@@ -241,6 +307,12 @@ const applyAbortSignal = <A, E, R>(
 export const streamAgentEventStream = (request: StreamAgentEventsRequest) =>
   applyAbortSignal(
     Stream.fromEffect(requestAgentResponse(request)).pipe(Stream.flatMap(responseToEventStream)),
+    request.signal
+  ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
+
+export const streamAgentRunEventStream = (request: StreamAgentRunEventsRequest) =>
+  applyAbortSignal(
+    Stream.fromEffect(requestAgentRunResponse(request)).pipe(Stream.flatMap(responseToEventStream)),
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
@@ -343,6 +415,17 @@ export async function* streamAgentEvents(
     yield event
   }
 }
+
+export async function* streamAgentRunEvents(
+  request: StreamAgentRunEventsRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  for await (const event of Stream.toAsyncIterable(streamAgentRunEventStream(request))) {
+    yield event
+  }
+}
+
+export const cancelAgentRun = (request: CancelAgentRunRequest) =>
+  Effect.runPromise(cancelAgentRunEffect(request))
 
 export const collectAgentEventsEffect = (request: StreamAgentEventsRequest) =>
   streamAgentEventStream(request).pipe(Stream.runCollect)

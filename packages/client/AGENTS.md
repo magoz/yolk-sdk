@@ -33,6 +33,8 @@
 - Use Effect `HttpClient`; tests inject fake clients instead of raw fetch mocks.
 - Keep transport/parse failures typed as `AgentTransportError`.
 - `streamAgentEventStream` is the native HTTP Effect API; `streamCloudflareAgentEventStream` is the native WS Effect API; async-generator wrappers are compatibility.
+- `streamAgentRunEventStream` reads an existing run stream endpoint; hosts own run id auth and replay policy.
+- `cancelAgentRun` calls host-owned cancellation endpoints; packages do not persist or authorize run ids.
 - `StreamAgentEventsRequest.signal` interrupts request/body streams.
 - Cloudflare WS transport expects server `SessionSnapshot`, then sends latest user message as `UserInput` with snapshot revision, optional model, and optional reasoning effort.
 - Use protocol messages for replay; app/UI packages may project richer render parts.

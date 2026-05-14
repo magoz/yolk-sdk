@@ -36,6 +36,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 - Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image protocol transcript.
 - Workflow route starts `runAgentWorkflow`, returns `run.getReadable()` as NDJSON, and exposes `x-workflow-run-id`.
+- Workflow run route supports `GET /api/agent/workflow/:runId` for stream replay/resume and `DELETE /api/agent/workflow/:runId` for `run.cancel()`.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text route explicitly provides runtime-portable text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`; remote MCP comes from project MCP files, not env.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.

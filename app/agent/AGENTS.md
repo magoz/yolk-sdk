@@ -9,6 +9,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - `/agent/next` uses `/api/agent` NDJSON only.
 - `/agent/cloudflare` bootstraps direct Cloudflare WS only; missing env/bootstrap shows explicit error, no Next fallback; remote MCP config is loaded by Next and passed in bootstrap.
 - `/agent/workflow` uses `/api/agent/workflow`, starts a Vercel Workflow run, and reads the durable stream returned by `run.getReadable()`.
+- Workflow runtime records `x-workflow-run-id` in Activity, can replay the durable stream by run id, and stop requests cancel the Workflow run.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
 - `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.

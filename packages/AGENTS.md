@@ -145,6 +145,8 @@ app -> oauth + Effect
 - Reducers/projections receive `nowMs`; do not call wall-clock APIs inside state reducers.
 - `submitAgentUserMessage` appends user messages locally before transport starts.
 - `streamAgentEventStream` = Effect `Stream` over NDJSON endpoint.
+- `streamAgentRunEventStream` = Effect `Stream` over an existing run NDJSON endpoint for durable replay/resume.
+- `cancelAgentRun` = HTTP `DELETE` helper for host-owned run cancellation endpoints.
 - `streamAgentEvents` = async generator compatibility wrapper for browser UI.
 - `collectAgentEventsEffect` = Effect-native collection helper.
 - `collectAgentEvents` = async collection helper.
