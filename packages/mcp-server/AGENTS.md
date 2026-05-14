@@ -43,4 +43,4 @@
 
 - Cover initialize, tools/list, tools/call, unknown method/tool, invalid params, line handling, and HTTP handling.
 - Use simple fake tools only.
-- Stdio fixtures provide `NodeStdio.layer` explicitly.
+- Stdio fixtures provide `NodeStdio.layer` explicitly; see `test/fixtures/AGENTS.md`.

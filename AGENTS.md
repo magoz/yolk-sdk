@@ -76,6 +76,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Error types          | `lib/core/errors/index.ts`                     | Shared domain errors                                                               |
 | URL state (filters)  | `app/*/search-params.ts`                       | nuqs/server imports only, see NUQS pattern                                         |
 | Code style & naming  | `patterns/TYPESCRIPT_CONVENTIONS.md`           | Prettier, kebab-case, file naming                                                  |
+| Dev/ops scripts      | `scripts/`                                     | Node CLI boundary; see `scripts/AGENTS.md`                                         |
 | Agent providers      | `lib/agents/AGENTS.md`                         | Runtime layer, provider modes, Codex quirks                                        |
 | Agent chat UI        | `app/agent/AGENTS.md`                          | Headless chat hook/items, composer, console chrome                                 |
 | Add agent tool       | `lib/agents/tools/`                            | App `ToolModule`s; route/runtime adapters select modules via `resolveAgentToolSet` |
@@ -203,13 +204,16 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **`CLAUDE.md` is a pointer** - `AGENTS.md` is the canonical project knowledge base
 - **Alchemy source style uses `.ts` relative imports** - keep explicit extensions for source-exported packages and Cloudflare app code
 - **Pinned Worker deploy** - use `pnpm cloudflare-agent:deploy:adopt` to update canonical Worker in non-interactive shells
+- **Scripts are Node CLI boundaries** - `scripts/AGENTS.md` documents allowed Node/process/console/raw JSON exceptions
 
 ## SUBDIRECTORY DOCS
 
 - `patterns/README.md` - Architecture and convention patterns index
+- `scripts/AGENTS.md` - Node CLI/dev script boundaries
 - `app/AGENTS.md` - App Router page/layout/auth/API boundaries
 - `app/api/AGENTS.md` - HTTP route handler and Realtime route patterns
 - `app/api/agent/AGENTS.md` - Agent text/Workflow/commands/Realtime route contracts
+- `app/api/internal/cloudflare/AGENTS.md` - Worker-to-Next token/stream bridge contracts
 - `app/agent/AGENTS.md` - Agent chat UI composition and headless boundaries
 - `lib/core/AGENTS.md` - Server actions, domain functions, shared errors
 - `lib/core/agent/AGENTS.md` - Provider OAuth token storage and action contracts
@@ -223,7 +227,10 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `packages/vercel-workflows-runtime/AGENTS.md` - Vercel Workflow runtime contract and retry/status semantics
+- `packages/vercel-workflows-runtime/test/AGENTS.md` - Workflow directive/integration test rules
 - `packages/client/AGENTS.md` - Agent transport and protocol replay helpers
+- `packages/mcp-client/test/AGENTS.md` - MCP client transport test boundaries
+- `packages/mcp-server/test/fixtures/AGENTS.md` - MCP server stdio fixture constraints
 - `packages/agent-runtime/AGENTS.md` - Runtime append-store orchestration
 - `packages/react/AGENTS.md` - Headless React chat hook/state/session events
 - `cloudflare/agent/AGENTS.md` - Cloudflare Worker/Durable Object agent app

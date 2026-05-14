@@ -31,6 +31,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 ## Tests
 
 - Contract tests live under `test/`.
+- Test-local rules live in `test/AGENTS.md`.
 - Cover no-tool completion, tool continuation, tool ordering, step failure, retry policy, close failure, and max-turn guard.
 - Run `pnpm --filter @yolk/vercel-workflows-runtime test:workflow` after touching package-owned directive fixtures.
 - Use fake step callbacks for pure contract tests; use `@workflow/vitest` for real directive transform/start behavior.

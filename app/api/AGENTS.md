@@ -16,6 +16,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
+| `internal/cloudflare/AGENTS.md`                | Bridge auth/header/token contracts |
 
 ## Effect Route Pattern
 
@@ -47,6 +48,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is the default DO provider path; it forwards upstream body streams with `HttpServerResponse.raw(...)`.
+- See `internal/cloudflare/AGENTS.md` before changing bridge auth, token response shapes, or proxy header allowlists.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts`; never forward cookies or bridge secrets upstream.
 
 ## Exceptions

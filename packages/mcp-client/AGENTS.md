@@ -45,6 +45,7 @@
 
 ## Tests
 
+- Test-local rules live in `test/AGENTS.md`.
 - Test remote transports with fake `HttpClient` layers.
 - Test core local stdio with fake `ChildProcessSpawner` layers when process behavior is not under test.
 - Test local stdio with tiny checked-in fixture servers.
