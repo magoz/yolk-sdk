@@ -55,7 +55,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Web tools          | lib/agents/tools                                         | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search + remote MCP tools                                      |
 | OpenAI Codex OAuth | OpenAiCodexOAuth                                         | ChatGPT subscription device flow + token refresh                                                                                   |
 | Anthropic OAuth    | AnthropicClaudeOAuth                                     | Claude subscription OAuth code+PKCE flow + token refresh                                                                           |
-| Cloudflare agent   | Alchemy                                                  | `cloudflare/agent`; Worker + Durable Object session runtime for `/agent/cloudflare`; Next brokers Codex/Claude access tokens       |
+| Cloudflare agent   | Alchemy                                                  | `cloudflare/agent`; Worker + Durable Object session runtime for `/agent/cloudflare`; Next brokers tokens + Codex HTTP stream proxy |
 
 ## WHERE TO LOOK
 
@@ -127,7 +127,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Api`                            | Worker   | `cloudflare/agent/src/api.ts`                          | Cloudflare Worker exposing `/health`, `/connect/:sessionId`, `/bootstrap/:sessionId` |
 | `YolkAgent`                      | DO       | `cloudflare/agent/src/yolk-agent.ts`                   | Durable Object running agent runtime + append-log persistence                        |
 | `makeCloudflareTextToolModules`  | Function | `cloudflare/agent/src/tool-modules.ts`                 | Cloudflare text toolset shim over shared app text modules                            |
-| `codex-responses`                | Route    | `app/api/internal/cloudflare/codex-responses/route.ts` | Internal Worker-to-Next proxy for ChatGPT Codex responses                            |
+| `codex-responses`                | Route    | `app/api/internal/cloudflare/codex-responses/route.ts` | Internal Worker-to-Next streaming proxy for ChatGPT Codex responses                  |
 
 ## REFERENCE REPOS
 
