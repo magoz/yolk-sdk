@@ -1,6 +1,0 @@
-{
-  "workflowFiles": [
-    "/Users/magoz/dev/repos/yolk/packages/vercel-workflows-runtime/src/workflow-fixture.ts"
-  ],
-  "serdeOnlyFiles": []
-}

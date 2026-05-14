@@ -1,9 +1,0 @@
-{
-  "stepFiles": [
-    "/Users/magoz/dev/repos/yolk/packages/vercel-workflows-runtime/src/workflow-fixture.ts"
-  ],
-  "workflowFiles": [
-    "/Users/magoz/dev/repos/yolk/packages/vercel-workflows-runtime/src/workflow-fixture.ts"
-  ],
-  "serdeOnlyFiles": []
-}

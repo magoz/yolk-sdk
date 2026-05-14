@@ -20,6 +20,10 @@ node_modules
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+.workflow-data/
+.workflow-vitest/
+**/.workflow-data/
+**/.workflow-vitest/
 
 # next.js
 /.next/
