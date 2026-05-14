@@ -638,7 +638,13 @@ export function AgentPlayground({
   )
 
   const handleResumeWorkflowRun = useCallback(() => {
-    if (runtime._tag !== 'Workflow' || workflowRunId === null || isRunning || isWorkflowResuming) {
+    if (
+      runtime._tag !== 'Workflow' ||
+      workflowRunId === null ||
+      state.status === 'done' ||
+      isRunning ||
+      isWorkflowResuming
+    ) {
       return
     }
 
@@ -664,7 +670,7 @@ export function AgentPlayground({
       .finally(() => {
         setIsWorkflowResuming(false)
       })
-  }, [applyEvent, fail, isRunning, isWorkflowResuming, recordActivity, runtime, workflowRunId])
+  }, [applyEvent, fail, isRunning, isWorkflowResuming, recordActivity, runtime, state.status, workflowRunId])
 
   const handleStop = useCallback(() => {
     const runId = workflowRunId
@@ -850,7 +856,7 @@ export function AgentPlayground({
               toolResultCount={completedToolRunCount}
               error={state.error}
               workflowRunId={workflowRunId}
-              workflowResumeDisabled={isRunning || isWorkflowResuming}
+              workflowResumeDisabled={state.status === 'done' || isRunning || isWorkflowResuming}
               onResumeWorkflowRun={handleResumeWorkflowRun}
             />
           ) : null}
