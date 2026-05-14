@@ -22,18 +22,19 @@ describe('just_bash tool', () => {
     })
   )
 
-  it.effect('does not expose network commands by default', () =>
+  it.effect('exposes curl for network access', () =>
     Effect.gen(function* () {
       const result = yield* executeJustBashTool(
         ToolCall.make({
           id: 'call_1',
           name: 'just_bash',
-          params: { script: 'curl -s https://example.com' }
+          params: { script: 'curl --help | head -1' }
         })
       )
 
-      expect(result.content).toContain('exit_code: 127')
-      expect(result.content).toContain('command not found')
+      expect(result.content).toContain('exit_code: 0')
+      expect(result.content).toContain('curl')
+      expect(result.content).not.toContain('command not found')
     })
   )
 

@@ -48,8 +48,9 @@ const justBashToolDef = ToolDef.make({
   name: justBashToolName,
   description: [
     'Run bash in a just-bash virtual filesystem.',
-    'Use for safe text, JSON, YAML, CSV, and file-processing pipelines with built-in Unix tools.',
-    'No host filesystem access, external binaries, persistent state, or network access is available.'
+    'Use for safe text, JSON, YAML, CSV, file-processing, and curl pipelines with built-in Unix tools.',
+    'Network access is enabled but private/loopback ranges are blocked.',
+    'No host filesystem access, external binaries, persistent state, JS, or Python is available.'
   ].join(' '),
   parameters: justBashParameters
 })
@@ -97,6 +98,14 @@ const runWithTimeout = (params: JustBashParams, timeoutMs: number) =>
       try {
         const bash = new Bash({
           cwd: params.cwd ?? '/home/user',
+          network: {
+            dangerouslyAllowFullInternetAccess: true,
+            denyPrivateRanges: true,
+            _dnsResolve: async () => [],
+            maxRedirects: 5,
+            maxResponseSize: 5 * 1024 * 1024,
+            timeoutMs
+          },
           executionLimits: {
             maxCommandCount: 10_000,
             maxLoopIterations: 10_000,
