@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   runVercelAgentWorkflow,
+  retryWorkflowStep,
   settleWorkflowStep,
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepInput,
@@ -142,6 +143,84 @@ describe('runVercelAgentWorkflow', () => {
     expect(closeCount).toBe(0)
   })
 
+  it('retries model steps when policy allows', async () => {
+    const errors: Array<unknown> = []
+    let modelAttempts = 0
+
+    await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      modelStepRetry: { maxAttempts: 2 },
+      runModelStep: async input => {
+        modelAttempts += 1
+
+        if (modelAttempts === 1) {
+          throw new Error('transient model failure')
+        }
+
+        return terminalModelResult(input)
+      },
+      runToolBatchStep: async input => toolBatchResult(input),
+      closeStream: async () => undefined,
+      writeError: async value => {
+        errors.push(value)
+      }
+    })
+
+    expect(modelAttempts).toBe(2)
+    expect(errors).toEqual([])
+  })
+
+  it('keeps step retries disabled by default', async () => {
+    const error = new Error('model failed')
+    const errors: Array<unknown> = []
+    let modelAttempts = 0
+
+    await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: async () => {
+        modelAttempts += 1
+        throw error
+      },
+      runToolBatchStep: async input => toolBatchResult(input),
+      closeStream: async () => undefined,
+      writeError: async value => {
+        errors.push(value)
+      }
+    })
+
+    expect(modelAttempts).toBe(1)
+    expect(errors).toEqual([error])
+  })
+
+  it('retries tool batch steps with the same event sequence', async () => {
+    const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
+    let toolAttempts = 0
+
+    await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      maxTurns: 2,
+      toolBatchStepRetry: { maxAttempts: 2 },
+      runModelStep: async input =>
+        input.state.turn === 1
+          ? { ...toolModelResult(input), eventSequence: 3 }
+          : terminalModelResult(input),
+      runToolBatchStep: async input => {
+        toolAttempts += 1
+        toolInputs.push(input)
+
+        if (toolAttempts === 1) {
+          throw new Error('transient tool failure')
+        }
+
+        return { ...toolBatchResult(input), eventSequence: 5 }
+      },
+      closeStream: async () => undefined,
+      writeError: async () => undefined
+    })
+
+    expect(toolInputs.map(input => input.eventSequence)).toEqual([3, 3])
+  })
+
   it('writes close errors after terminal model step', async () => {
     const error = new Error('close failed')
     const errors: Array<unknown> = []
@@ -191,5 +270,23 @@ describe('settleWorkflowStep', () => {
       _tag: 'Failure',
       error
     })
+  })
+})
+
+describe('retryWorkflowStep', () => {
+  it('normalizes invalid retry attempts to one attempt', async () => {
+    let attempts = 0
+
+    await expect(
+      retryWorkflowStep(
+        async () => {
+          attempts += 1
+          throw new Error('failed')
+        },
+        { maxAttempts: 0 }
+      )
+    ).rejects.toThrow('failed')
+
+    expect(attempts).toBe(1)
   })
 })

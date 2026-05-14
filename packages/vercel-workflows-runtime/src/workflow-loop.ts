@@ -52,6 +52,10 @@ export type WorkflowStepResult<A> =
       readonly error: unknown
     }
 
+export type VercelAgentWorkflowStepRetryPolicy = {
+  readonly maxAttempts: number
+}
+
 export type VercelAgentWorkflowLoopConfig = {
   readonly input: VercelAgentWorkflowInput
   readonly maxTurns?: number
@@ -63,9 +67,13 @@ export type VercelAgentWorkflowLoopConfig = {
   ) => Promise<VercelAgentWorkflowToolBatchStepResult>
   readonly closeStream: () => Promise<void>
   readonly writeError: (error: unknown) => Promise<void>
+  readonly modelStepRetry?: VercelAgentWorkflowStepRetryPolicy
+  readonly toolBatchStepRetry?: VercelAgentWorkflowStepRetryPolicy
+  readonly closeStreamRetry?: VercelAgentWorkflowStepRetryPolicy
 }
 
 export const defaultMaxWorkflowTurns = 500
+export const noWorkflowStepRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 1 }
 
 export const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
   promise.then(
@@ -79,6 +87,29 @@ const workflowMaxTurnsError = (maxTurns: number) =>
 const writeErrorSafely = (writeError: (error: unknown) => Promise<void>, error: unknown) =>
   writeError(error).catch(() => undefined)
 
+const maxRetryAttempts = (policy: VercelAgentWorkflowStepRetryPolicy | undefined) =>
+  Math.max(1, Math.floor(policy?.maxAttempts ?? noWorkflowStepRetry.maxAttempts))
+
+export async function retryWorkflowStep<A>(
+  runStep: () => Promise<A>,
+  policy?: VercelAgentWorkflowStepRetryPolicy
+): Promise<A> {
+  const maxAttempts = maxRetryAttempts(policy)
+  let attempt = 1
+
+  for (;;) {
+    try {
+      return await runStep()
+    } catch (error) {
+      if (attempt >= maxAttempts) {
+        throw error
+      }
+
+      attempt += 1
+    }
+  }
+}
+
 export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConfig): Promise<void> {
   let state: SerializableWorkflowState = {
     request: config.input.request,
@@ -90,7 +121,10 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
 
   for (let step = 0; step < maxTurns; step++) {
     const modelResult = await settleWorkflowStep(
-      config.runModelStep({ context: config.input.context, state })
+      retryWorkflowStep(
+        () => config.runModelStep({ context: config.input.context, state }),
+        config.modelStepRetry
+      )
     )
 
     if (modelResult._tag === 'Failure') {
@@ -99,7 +133,9 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
     }
 
     if (modelResult.value.done) {
-      const closeResult = await settleWorkflowStep(config.closeStream())
+      const closeResult = await settleWorkflowStep(
+        retryWorkflowStep(config.closeStream, config.closeStreamRetry)
+      )
 
       if (closeResult._tag === 'Failure') {
         await writeErrorSafely(config.writeError, closeResult.error)
@@ -109,14 +145,18 @@ export async function runVercelAgentWorkflow(config: VercelAgentWorkflowLoopConf
     }
 
     const toolsResult = await settleWorkflowStep(
-      config.runToolBatchStep({
-        context: config.input.context,
-        request: config.input.request,
-        calls: modelResult.value.toolCalls,
-        createdMessages: modelResult.value.createdMessages,
-        turn: modelResult.value.turn,
-        eventSequence: modelResult.value.eventSequence ?? state.eventSequence
-      })
+      retryWorkflowStep(
+        () =>
+          config.runToolBatchStep({
+            context: config.input.context,
+            request: config.input.request,
+            calls: modelResult.value.toolCalls,
+            createdMessages: modelResult.value.createdMessages,
+            turn: modelResult.value.turn,
+            eventSequence: modelResult.value.eventSequence ?? state.eventSequence
+          }),
+        config.toolBatchStepRetry
+      )
     )
 
     if (toolsResult._tag === 'Failure') {

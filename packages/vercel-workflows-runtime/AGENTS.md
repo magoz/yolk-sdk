@@ -24,11 +24,12 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - Preserve tool result order by original model tool-call order.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
+- Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.
 - Test observable runtime contract, not Vercel SDK implementation details.
 
 ## Tests
 
 - Contract tests live under `test/`.
-- Cover no-tool completion, tool continuation, tool ordering, step failure, close failure, and max-turn guard.
+- Cover no-tool completion, tool continuation, tool ordering, step failure, retry policy, close failure, and max-turn guard.
 - Run `pnpm --filter @yolk/vercel-workflows-runtime test:workflow` after touching package-owned directive fixtures.
 - Use fake step callbacks for pure contract tests; use `@workflow/vitest` for real directive transform/start behavior.

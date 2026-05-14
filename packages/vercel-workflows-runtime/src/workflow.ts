@@ -1,5 +1,7 @@
 export {
   defaultMaxWorkflowTurns,
+  noWorkflowStepRetry,
+  retryWorkflowStep,
   runVercelAgentWorkflow,
   settleWorkflowStep
 } from './workflow-loop.ts'
@@ -9,6 +11,7 @@ export type {
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,
   VercelAgentWorkflowModelStepResult,
+  VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
   VercelAgentWorkflowToolBatchStepResult,
   WorkflowStepResult

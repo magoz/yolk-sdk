@@ -57,6 +57,7 @@ app -> oauth + Effect
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Vercel Workflow runtime must keep inputs/state plain serializable and avoid app imports.
 - Import Vercel Workflow runtime APIs via `@yolk/vercel-workflows-runtime/workflow`; package root is intentionally empty.
+- Vercel Workflow model/tool step retries are opt-in; default no retry avoids duplicate streamed chunks unless host/client de-dupe is ready.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Skillset owns generic skills/commands parsing, rendering, manifests, and merge helpers; no source adapters or runtime policy.
