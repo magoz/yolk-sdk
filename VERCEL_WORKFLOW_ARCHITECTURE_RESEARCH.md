@@ -370,10 +370,10 @@ Build a concrete app adapter first.
 
 Architecture explainer page: `/vercel-workflows`.
 
-1. Add `/agent/workflow` page or route variant.
-2. Add `POST /api/agent/workflow` that starts a Workflow run.
-3. Add `runAgentWorkflow` with `"use workflow"`.
-4. Add `runAgentStep` with `"use step"`.
+1. Add `/agent/workflow` page or route variant. ✅
+2. Add `POST /api/agent/workflow` that starts a Workflow run. ✅
+3. Add `runAgentWorkflow` with `"use workflow"`. ✅
+4. Add `runAgentStep` with `"use step"`. ✅
 5. Split Yolk agent loop into one model/tool step per Workflow step.
 6. Use `getWritable()` for protocol event streaming.
 7. Persist active run id in Postgres for resume/conflict control.

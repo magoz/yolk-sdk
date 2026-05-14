@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next'
 import { withSentryConfig } from '@sentry/nextjs'
+import { withWorkflow } from 'workflow/next'
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
@@ -20,4 +21,4 @@ const nextConfig: NextConfig = {
   }
 }
 
-export default withSentryConfig(nextConfig)
+export default withWorkflow(withSentryConfig(nextConfig))

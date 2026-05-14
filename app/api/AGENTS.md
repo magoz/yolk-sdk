@@ -8,6 +8,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | ---------------------------------------------- | -------------------------------- |
 | `auth/[...all]/route.ts`                       | better-auth Next handler         |
 | `agent/route.ts`                               | Text agent NDJSON stream         |
+| `agent/workflow/route.ts`                      | Vercel Workflow text NDJSON stream |
 | `agent/commands/route.ts`                      | Agent command list/render        |
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
@@ -34,6 +35,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 ## Agent Routes
 
 - Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image protocol transcript.
+- Workflow route starts `runAgentWorkflow`, returns `run.getReadable()` as NDJSON, and exposes `x-workflow-run-id`.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text route explicitly provides runtime-portable text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`; remote MCP comes from project MCP files, not env.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.

@@ -13,7 +13,7 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { AgentPlayground, type AgentRuntimeInfo } from './playground'
 
-export type AgentRuntime = 'next' | 'cloudflare'
+export type AgentRuntime = 'next' | 'cloudflare' | 'workflow'
 
 type AgentRuntimePageProps = {
   readonly runtime: AgentRuntime
@@ -159,6 +159,12 @@ const cloudflareRuntimeInfo = (webSocketUrl: string): AgentRuntimeInfo => ({
   webSocketUrl
 })
 
+const workflowRuntimeInfo: AgentRuntimeInfo = {
+  _tag: 'Workflow',
+  label: 'Vercel Workflow runtime',
+  detail: 'Text runs in a Vercel Workflow with durable stream replay.'
+}
+
 async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
   await cookies()
 
@@ -168,12 +174,12 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
       const anthropicClaudeConnected = yield* hasAnthropicClaudeAuth(session.user.id)
       const sessionId = `agent-${runtime}-${session.user.id}`
-      const runtimeDetails =
-        runtime === 'cloudflare'
-          ? cloudflareRuntimeInfo(
-              yield* bootstrapCloudflareAgent({ sessionId, userId: session.user.id })
-            )
-          : nextRuntimeInfo
+      const runtimeDetails = yield* (runtime === 'cloudflare'
+        ? Effect.map(
+            bootstrapCloudflareAgent({ sessionId, userId: session.user.id }),
+            cloudflareRuntimeInfo
+          )
+        : Effect.succeed(runtime === 'workflow' ? workflowRuntimeInfo : nextRuntimeInfo))
 
       return (
         <AgentPlayground

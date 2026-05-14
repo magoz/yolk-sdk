@@ -13,7 +13,7 @@ export default function Page() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-3">
         <Link href="/agent/next" className="rounded-2xl border border-foreground/10 bg-card p-5">
           <h2 className="font-medium">Next runtime</h2>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -27,6 +27,15 @@ export default function Page() {
           <h2 className="font-medium">Cloudflare runtime</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             Worker + Durable Object, WebSocket, append-log storage.
+          </p>
+        </Link>
+        <Link
+          href="/agent/workflow"
+          className="rounded-2xl border border-foreground/10 bg-card p-5"
+        >
+          <h2 className="font-medium">Vercel Workflow runtime</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Workflow run, durable stream replay, app-owned policy.
           </p>
         </Link>
       </div>

@@ -4,13 +4,14 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- `/agent` runtime chooser; `/agent/next` and `/agent/cloudflare` share text+image input and mic voice mode
+- `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image input and mic voice mode
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
-- Text `/api/agent` route and Realtime voice `/api/agent/realtime/*` routes
+- Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
 - Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + skill + optional remote MCP tools from project files.
 - Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
+- Workflow text runtime has durable execution/streaming, but product transcript is still client-owned per turn in v1
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `agent-runtime` transcript mode; Cloudflare DO uses append-backed runtime mode

@@ -53,6 +53,11 @@ export type AgentRuntimeInfo =
       readonly detail: string
       readonly webSocketUrl: string
     }
+  | {
+      readonly _tag: 'Workflow'
+      readonly label: string
+      readonly detail: string
+    }
 
 type AgentPlaygroundProps = {
   readonly sessionId: string
@@ -413,9 +418,11 @@ export function AgentPlayground({
         signal: request.signal
       })
   }, [runtime])
+  const endpoint = runtime._tag === 'Workflow' ? '/api/agent/workflow' : undefined
 
   const agentChat = useAgentChat({
     sessionId,
+    endpoint,
     model: textModel,
     reasoningEffort,
     transport: cloudflareTransport,

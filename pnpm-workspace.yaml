@@ -12,7 +12,10 @@ catalog:
   typescript: ^5.9.3
   vitest: ^4.0.17
 allowBuilds:
+  '@nestjs/core': false
   '@sentry/cli': true
+  '@swc/core': true
+  cbor-extract: false
   core-js: true
   esbuild: true
   msgpackr-extract: true

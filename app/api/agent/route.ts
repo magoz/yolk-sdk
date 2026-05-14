@@ -1,36 +1,8 @@
-import {
-  FetchHttpClient,
-  HttpEffect,
-  HttpServerRequest,
-  HttpServerResponse
-} from 'effect/unstable/http'
-import { Config, Data, Effect, Layer } from 'effect'
-import { makeToolExecutorLayer, type ResolvedToolSet } from '@yolk/tool-registry'
-import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
-import {
-  type AgentModelCapabilities,
-  type AgentReasoningEffort,
-  type ToolDef
-} from '@yolk/protocol'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { Data, Effect } from 'effect'
 import { AppLayer } from '@/lib/layers'
-import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
-import {
-  agentTextModelProvider,
-  agentTextModel,
-  agentTextCapabilities,
-  agentTextReasoningEffort,
-  defaultAgentSystemPrompt,
-  isAgentTextModel,
-  type AgentTextModel
-} from '@/lib/agents/text-agent-config'
-import { getValidAnthropicClaudeToken } from '@/lib/core/agent/anthropic-claude-auth'
-import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
-import { makeAnthropicClaudeProviderLayer } from '@/lib/agents/providers/anthropic-claude-provider'
-import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
-import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
-import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
-import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
-import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
+import { AgentRouteRequest } from '@/lib/agents/route-handler'
+import { makeAgentTextResponse } from '@/lib/agents/workflow-runtime/text-response'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -41,63 +13,7 @@ class AgentRouteError extends Data.TaggedError('AgentRouteError')<{
   cause?: unknown
 }> {}
 
-type AgentRouteRuntimeConfig = {
-  readonly model: string
-  readonly reasoningEffort: AgentReasoningEffort
-  readonly systemPrompt: string
-  readonly tools: ReadonlyArray<ToolDef>
-  readonly capabilities: AgentModelCapabilities
-}
-
 const RouteLayer = AppLayer
-
-const getAgentRouteConfig = () =>
-  Effect.gen(function* () {
-    const systemPrompt = yield* Config.option(Config.string('AGENT_SYSTEM_PROMPT'))
-
-    return {
-      model: agentTextModel,
-      reasoningEffort: agentTextReasoningEffort,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultAgentSystemPrompt
-    }
-  })
-
-const appendAvailableSkills = (systemPrompt: string, skillset: MergedSkillset) => {
-  const availableSkills = formatAvailableSkills(skillset.skills)
-
-  return availableSkills.length === 0 ? systemPrompt : `${systemPrompt}\n\n${availableSkills}`
-}
-
-const providerLayerForModel = (model: AgentTextModel, userId: string) =>
-  Effect.gen(function* () {
-    switch (agentTextModelProvider(model)) {
-      case 'anthropic-claude': {
-        const token = yield* getValidAnthropicClaudeToken(userId)
-        return makeAnthropicClaudeProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
-      }
-      case 'openai-codex': {
-        const token = yield* getValidOpenAiCodexToken(userId)
-        return makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
-      }
-    }
-  })
-
-const makeAgentResponseWithProvider = (
-  input: AgentRouteRequest,
-  config: AgentRouteRuntimeConfig,
-  toolSet: ResolvedToolSet,
-  userId: string
-) =>
-  Effect.gen(function* () {
-    const selectedModel = input.model ?? config.model
-    const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
-    const providerLayer = yield* providerLayerForModel(model, userId)
-    const normalizedInput = new AgentRouteRequest({ ...input, model })
-
-    return yield* makeAgentPostResponse(normalizedInput, { ...config, model }).pipe(
-      Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(toolSet)))
-    )
-  })
 
 const toHttpResponse = (response: Response) =>
   HttpServerResponse.raw(response.body, {
@@ -109,30 +25,7 @@ const toHttpResponse = (response: Response) =>
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
-  const baseConfig = yield* getAgentRouteConfig()
-  const skillset = yield* loadProjectSkillset()
-  const mcpServers = yield* loadProjectMcpServers()
-  const toolModules = yield* makeTextToolModules(mcpServers)
-  const toolSet = yield* resolveAgentToolSet({
-    modules: toolModules,
-    context: {
-      surface: 'text',
-      route: '/agent/next',
-      userId: session.user.id,
-      skillset
-    }
-  })
-  const response = yield* makeAgentResponseWithProvider(
-    input,
-    {
-      ...baseConfig,
-      systemPrompt: appendAvailableSkills(baseConfig.systemPrompt, skillset),
-      tools: toolSet.tools,
-      capabilities: agentTextCapabilities
-    },
-    toolSet,
-    session.user.id
-  )
+  const response = yield* makeAgentTextResponse(input, session.user.id, '/agent/next')
 
   return toHttpResponse(response)
 }).pipe(
