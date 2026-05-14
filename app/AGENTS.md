@@ -9,6 +9,8 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | `page.tsx`    | Public home page                         |
 | `(auth)/`     | Login, OTP, logout, auth error UI        |
 | `agent/`      | Text+image + voice agent playground UI   |
+| `vercel-workflows/` | Workflow architecture explainer page |
+| `.well-known/workflow/v1/` | Generated Vercel Workflow artifacts; do not hand-edit |
 | `api/`        | HTTP boundaries; see `app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
 
@@ -25,7 +27,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 ## Auth UI
 
 - Auth pages live under `(auth)/`; better-auth handler lives in `app/api/auth/[...all]/route.ts`.
-- Login/OTP pages redirect authenticated users via `NextEffect.redirect('/')`.
+- Login redirects authenticated users via `NextEffect.redirect('/')`; OTP page renders verification form.
 - Logout uses `window.location.href = '/'`; do not replace with `router.push()` because cached layouts can stay stale.
 - Keep auth form controls accessible; E2E relies on labels/roles.
 

@@ -1,6 +1,6 @@
 # Cloudflare Agent
 
-Cloudflare app for the future Yolk durable agent runtime.
+Cloudflare app for the Yolk durable agent runtime.
 
 ## Current Status
 
@@ -8,7 +8,7 @@ Cloudflare app for the future Yolk durable agent runtime.
 - Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
 - App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token broker bridge config and remote MCP server configs before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current goal: run Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and proxy-first Codex streaming after brokered token handoff.
+- Current path runs Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and proxy-first Codex streaming after brokered token handoff.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
@@ -77,7 +77,7 @@ Do not build these here yet unless explicitly requested:
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep `@yolk/*` packages provider/runtime-neutral.
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
-- Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions use Codex provider in DO.
+- Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
 - Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
 - Token broker requests use provider ids from `@yolk/openai` / `@yolk/anthropic` and `@yolk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.

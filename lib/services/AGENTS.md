@@ -10,7 +10,8 @@ lib/services/
 │   ├── live-layer.ts    # Service definition and layer
 │   ├── errors.ts        # Service-specific errors (optional)
 │   ├── schemas.ts       # Service boundary schemas (optional)
-│   └── [helpers].ts     # Additional utilities (optional)
+│   ├── [helpers].ts     # Additional utilities (optional)
+│   └── live-layer.test.ts # HTTP/config services should test fake layers
 ```
 
 - **No barrel files** - Import directly from `live-layer.ts`
@@ -170,7 +171,7 @@ Raw `process.env` is allowed only in sync infra callbacks/config boundaries; doc
 
 ## Observability Pattern
 
-All service methods must include tracing; add `tapError` where it gives useful external/boundary diagnostics without duplicate noise:
+Public IO service methods must include tracing; pure cheap helpers may skip spans. Add `tapError` where it gives useful external/boundary diagnostics without duplicate noise:
 
 ```typescript
 const methodName = (arg: string) =>

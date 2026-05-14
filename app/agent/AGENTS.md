@@ -58,16 +58,21 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
-- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/client` to Next or Cloudflare runtimes.
+- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/client` to Next, Workflow, or Cloudflare runtimes.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 
 ## Image TODOs
 
-- Server route validates image count, MIME, base64 shape, per-image size, and total payload before provider calls; keep UI compression as convenience only.
+- Server route validates image count, MIME, base64 shape, per-image size, and total payload before provider calls; UI compression is convenience only.
 - Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode image support in UI.
-- Image attachment UI preserves failed files as removable/retryable chips with per-file reasons; submit only includes ready images.
 - Add full-suite E2E coverage when image flow becomes less route-stubbed.
+
+## Voice lifecycle
+
+- Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
+- Completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
+- Voice tool calls route through `/api/agent/realtime/tool`; do not execute tools in the browser hook.
 
 ## References
 

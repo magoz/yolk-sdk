@@ -65,7 +65,7 @@ app -> oauth + Effect
 - Client transport should work for Next UI and Chrome extension by consuming protocol events from a server endpoint; app UI may own richer parts state.
 - React package owns headless hooks only: no components, styling, auth chrome, or provider-specific UI.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
-- `packages/harness/` is stale/empty and not a real workspace package unless a `package.json` is added.
+- Root dev deps are shared while packages are private; add package-local dev/peer deps during publish prep.
 
 ## Reasoning
 

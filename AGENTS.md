@@ -199,7 +199,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **Workflow step retries** - opt-in only; default no retry for streamed model/tool chunks
 - **Workflow terminal status** - `runVercelAgentWorkflow` returns structured completion/failure/max-turn result
 - **Portless local dev** - `pnpm dev` runs `portless run next dev` at named `.localhost` URLs; use `pnpm dev:app` to bypass proxy
-- **`packages/harness/` is stale/empty** - not a real workspace package unless a `package.json` is added
+- **`packages/harness/` is historical** - not present unless a future real workspace package is added
 - **`CLAUDE.md` is a pointer** - `AGENTS.md` is the canonical project knowledge base
 - **Alchemy source style uses `.ts` relative imports** - keep explicit extensions for source-exported packages and Cloudflare app code
 - **Pinned Worker deploy** - use `pnpm cloudflare-agent:deploy:adopt` to update canonical Worker in non-interactive shells
@@ -209,9 +209,17 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `patterns/README.md` - Architecture and convention patterns index
 - `app/AGENTS.md` - App Router page/layout/auth/API boundaries
 - `app/api/AGENTS.md` - HTTP route handler and Realtime route patterns
+- `app/api/agent/AGENTS.md` - Agent text/Workflow/commands/Realtime route contracts
 - `app/agent/AGENTS.md` - Agent chat UI composition and headless boundaries
 - `lib/core/AGENTS.md` - Server actions, domain functions, shared errors
+- `lib/core/agent/AGENTS.md` - Provider OAuth token storage and action contracts
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
+- `lib/agents/providers/AGENTS.md` - Provider adapter quirks and tests
+- `lib/agents/tools/AGENTS.md` - Runtime-portable app tool policy
+- `lib/agents/workflow-runtime/AGENTS.md` - App Workflow step/writer boundaries
+- `lib/agents/realtime/AGENTS.md` - OpenAI Realtime voice adapter rules
+- `lib/agents/skillset/AGENTS.md` - App skill/command source adapters
+- `lib/agents/mcp/AGENTS.md` - App remote MCP config source
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `packages/vercel-workflows-runtime/AGENTS.md` - Vercel Workflow runtime contract and retry/status semantics

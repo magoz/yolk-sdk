@@ -21,14 +21,16 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical OAuth refresh owner/token broker and Codex HTTP stream proxy.
 - Route error tests cover canonical `AgentError` mapping for capability and tool failures.
-- Route streams `UsageUpdate`, `AgentRetry`, and future compaction lifecycle events in-band.
+- Route streams `UsageUpdate`, `AgentRetry`, and compaction lifecycle events in-band.
 - `context-budget.ts` owns app text model context window, reserved output, warning, and compaction thresholds.
-- `context-transformer.ts` compacts oversized text transcripts with deterministic window-summary events before provider calls.
+- `context-transformer.ts` compacts oversized text transcripts for Next/Workflow text runtime; Cloudflare currently uses identity transformer.
 - Browser/client cancellation aborts active response body readers
 - Providers use Effect `HttpClient`; app route provides `FetchHttpClient.layer`
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 
 ## Current Providers
+
+Provider-local rules live in `providers/AGENTS.md`.
 
 Configured in `lib/agents/text-agent-config.ts`; selected by UI and routed in `app/api/agent/route.ts` / `cloudflare/agent/src/yolk-agent.ts`:
 
@@ -47,6 +49,8 @@ Reasoning:
 
 ## Current Tools
 
+Tool-local runtime portability rules live in `tools/AGENTS.md`.
+
 - Tool ownership is per route/runtime adapter for now. A future app-layer `AgentDefinition` may centralize model/prompt/tools/skillset/MCP once product agent boundaries are clearer.
 - App tools in `lib/agents/tools/*` must be runtime-portable: no Node-only imports, no raw `fetch()`, use Effect `Config`/`HttpClient`/Schema and injected adapters.
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
@@ -54,7 +58,7 @@ Reasoning:
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
 - `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/tool-registry`; use this at new route/runtime boundaries.
-- Both app tools are enabled for text and voice surfaces
+- `web_fetch`/`web_search` are text+voice; skill and remote MCP tools are text-only.
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
@@ -109,7 +113,7 @@ MCP security:
 ## OpenAI API-Key Provider
 
 - File: `providers/openai-provider.ts`
-- Not wired to `/api/agent` while provider/model are hardcoded
+- Dormant/default legacy API-key layer; active text routes use model-picked Codex/Claude OAuth providers
 - Uses `https://api.openai.com/v1/chat/completions`
 - Requires `OPENAI_API_KEY`
 - Supports text + image user input; no audio

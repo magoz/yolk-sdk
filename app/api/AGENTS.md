@@ -9,6 +9,8 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | `auth/[...all]/route.ts`                       | better-auth Next handler         |
 | `agent/route.ts`                               | Text agent NDJSON stream         |
 | `agent/workflow/route.ts`                      | Vercel Workflow text NDJSON stream |
+| `agent/workflow/[runId]/route.ts`              | Workflow stream replay/cancel    |
+| `agent/AGENTS.md`                              | Agent route-local contracts      |
 | `agent/commands/route.ts`                      | Agent command list/render        |
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
@@ -17,7 +19,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 ## Effect Route Pattern
 
-- Use `HttpEffect.toWebHandlerLayer(handler, Layer)` for Effect-backed routes.
+- Use `HttpEffect.toWebHandlerLayer(handler, Layer)` for Effect-backed routes unless a framework SDK requires Web `Response` directly.
 - Parse JSON with `HttpServerRequest.schemaBodyJson(...)`.
 - Return `HttpServerResponse.*`; wrap raw streamed `Response` with `HttpServerResponse.raw(...)`.
 - Add `export const dynamic = 'force-dynamic'` for auth/session/tool routes.
@@ -34,11 +36,12 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 
 ## Agent Routes
 
+- See `agent/AGENTS.md` for route-local text/Workflow/commands/Realtime contracts.
 - Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image protocol transcript.
 - Workflow route starts `runAgentWorkflow`, returns `run.getReadable()` as NDJSON, and exposes `x-workflow-run-id`.
 - Workflow run route supports `GET /api/agent/workflow/:runId` for stream replay/resume and `DELETE /api/agent/workflow/:runId` for `run.cancel()`.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
-- Text route explicitly provides runtime-portable text tool modules and resolves with `{ surface: 'text', route: '/agent/next', userId, skillset }`; remote MCP comes from project MCP files, not env.
+- Text runtime construction lives in `makeAgentTextResponse` / `makeAgentTextRuntime`; route wrappers keep auth/status boundaries thin.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch` and `web_search` for voice.
 - Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
@@ -49,6 +52,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 ## Exceptions
 
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
+- Workflow `start/getRun` routes may use `Effect.runPromise()` + raw `Response` for Vercel Workflow streams.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
 - Browser/WebRTC specifics stay in `app/agent/use-realtime-voice.ts` and `lib/agents/realtime/*`, not route bodies.
 

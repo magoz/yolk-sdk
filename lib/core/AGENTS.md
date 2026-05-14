@@ -1,6 +1,6 @@
 # Core Domain
 
-Domain actions and pure Effect functions. App routes/pages call here; services remain infrastructure in `lib/services/*`.
+Domain actions and Effect functions. App routes/pages call here; services remain infrastructure in `lib/services/*`.
 
 ## Structure
 
@@ -10,6 +10,7 @@ Domain actions and pure Effect functions. App routes/pages call here; services r
 | `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
 | `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
+| `agent/AGENTS.md`            | Agent OAuth storage/action contracts           |
 | `errors/index.ts`            | Shared domain errors                           |
 
 ## Server Actions
@@ -20,7 +21,7 @@ Domain actions and pure Effect functions. App routes/pages call here; services r
 - Use `NextEffect.runPromise()` + `AppLayer` + `Effect.scoped`.
 - Add `Effect.withSpan(...)` and annotate current span with useful ids.
 - `UnauthenticatedError` redirects to `/login` via `NextEffect.redirect()`.
-- Report unexpected errors at the action boundary, then return safe UI messages.
+- Catch expected auth/domain errors before generic reporting where possible; return safe UI messages.
 - Revalidate affected pages (`revalidatePath('/agent')`) only after successful mutation.
 
 ## Domain Functions
