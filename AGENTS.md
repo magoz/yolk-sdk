@@ -49,7 +49,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email                                                    | Transactional email via Resend                                                                                                     |
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
-| Agent stack        | packages                                                 | Domain-free protocol, loop/runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks                           |
+| Agent stack        | packages                                                 | Domain-free protocol, loop/runtime, Workflow runtime, tool-registry, MCP client/server, voice-runtime, client, React hooks          |
 | Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web tools          | lib/agents/tools                                         | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search + remote MCP tools                                      |
@@ -214,6 +214,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/agents/AGENTS.md` - App-owned agent route/provider wiring and Codex quirks
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
+- `packages/vercel-workflows-runtime/AGENTS.md` - Vercel Workflow runtime contract and retry/status semantics
 - `packages/client/AGENTS.md` - Agent transport and protocol replay helpers
 - `packages/agent-runtime/AGENTS.md` - Runtime append-store orchestration
 - `packages/react/AGENTS.md` - Headless React chat hook/state/session events

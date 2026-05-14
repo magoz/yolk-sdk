@@ -9,7 +9,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 | `@yolk/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
 | `@yolk/agent-loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/protocol`, Effect                     |
 | `@yolk/agent-runtime` | Session load/save orchestration over agent-loop         | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
-| `@yolk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect |
+| `@yolk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect, workflow |
 | `@yolk/tool-registry` | Scoped tool modules + executor layer                    | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
 | `@yolk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
 | `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/protocol`, `@yolk/agent-loop`, Effect |
@@ -25,7 +25,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 
 ```txt
 app -> agent-runtime -> agent-loop -> protocol
-app -> vercel-workflows-runtime -> Effect
+app -> vercel-workflows-runtime -> Effect + workflow
 app -> agent-loop -> protocol
 app -> tool-registry -> agent-loop -> protocol
 app -> skillset -> Effect
@@ -58,6 +58,7 @@ app -> oauth + Effect
 - Vercel Workflow runtime must keep inputs/state plain serializable and avoid app imports.
 - Import Vercel Workflow runtime APIs via `@yolk/vercel-workflows-runtime/workflow`; package root is intentionally empty.
 - Vercel Workflow model/tool step retries are opt-in; default no retry avoids duplicate streamed chunks unless host/client de-dupe is ready.
+- `runVercelAgentWorkflow` returns terminal status; host apps still own persistence/conflict UX.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
 - Tool-registry owns generic tool metadata/scope resolution, not app/domain tools.
 - Skillset owns generic skills/commands parsing, rendering, manifests, and merge helpers; no source adapters or runtime policy.

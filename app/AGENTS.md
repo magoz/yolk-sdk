@@ -36,7 +36,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Agent UI
 
-- `/agent` chooses runtime; `/agent/next` and `/agent/cloudflare` share text+image+mic UI.
+- `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image+mic UI.
 - Voice is available inside each runtime page; no separate voice route.
 - See `app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.

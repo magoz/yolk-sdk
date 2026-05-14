@@ -41,6 +41,7 @@
 - Host tool results stay as separate `ToolResultMessage`s; provider-executed results stay inside assistant parts/events.
 - `ToolResult.isError` marks tool-origin failures that remain model-visible; transport/execution failures still use error events.
 - Tool lifecycle events are `ToolInput*`, `ToolApproval*`, `ToolExecution*`, and `ProviderToolResult`; no old lifecycle aliases.
+- `AgentEvent.eventId` is optional and transport-neutral; clients use it for replay de-dupe when present.
 - Tool ids/names are non-empty trimmed strings; validate at protocol boundaries.
 - Provider reasoning is summary text only; never model hidden chain-of-thought.
 - Adding a protocol variant requires package and app tests for every consumer boundary.
