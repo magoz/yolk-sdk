@@ -39,6 +39,7 @@
 - Use `Ref` for loop-owned stream state; avoid mutable arrays/object counters in `run`.
 - Preserve tool call ids and ordering semantics across call/result events.
 - Local host tools emit `ToolInputEnd`, `ToolExecutionStarted`, then `ToolExecutionCompleted` or `ToolExecutionError`.
+- Host tool batches run with bounded concurrency from `LoopConfig.toolConcurrency` (default 4); preserve model-visible tool result order by original tool-call order.
 - Provider-hosted tools can emit `LLMToolInputStart`/`LLMToolInputDelta` and `LLMProviderToolResult`; these become protocol events/assistant provider parts and do not call `ToolExecutor`.
 - Tool failures emit `ToolExecutionError` before failing the loop; no `ToolResultMessage` is fabricated on failure.
 - Do not add compatibility aliases for removed tool lifecycle event names.

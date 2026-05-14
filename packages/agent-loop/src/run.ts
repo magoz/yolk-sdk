@@ -43,7 +43,7 @@ import {
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
-import { LoopConfig } from './services/loop-config.ts'
+import { LoopConfig, type LoopConfigShape } from './services/loop-config.ts'
 import { ToolExecutor } from './services/tool-executor.ts'
 
 export type AgentLoopRunId = string
@@ -167,11 +167,7 @@ type TurnStreamInput = {
       messages: ReadonlyArray<AgentMessage>
     ) => Effect.Effect<ContextTransformResult, AgentLoopError>
   }
-  readonly loopConfig: {
-    readonly maxTurns: number
-    readonly maxRetries: number
-    readonly retryBaseDelayMs: number
-  }
+  readonly loopConfig: LoopConfigShape
   readonly provider: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
   }
@@ -251,29 +247,13 @@ const withProviderRetries = (
 
 const makeToolExecutionStream = (
   executor: TurnStreamInput['executor'],
-  call: ToolCall,
-  createdMessages: Ref.Ref<ReadonlyArray<AgentMessage>>,
-  toolResultMessages: Ref.Ref<ReadonlyArray<AgentMessage>>
+  call: ToolCall
 ): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.make(ToolExecutionStarted.make({ call })).pipe(
     Stream.concat(
       Stream.fromEffect(
         executor.execute(call).pipe(
-          Effect.flatMap(result => {
-            const toolResultMessage = ToolResultMessage.make({
-              toolCallId: result.toolCallId,
-              content: result.content,
-              isError: result.isError,
-              structuredContent: result.structuredContent
-            })
-
-            return Ref.update(createdMessages, messages => [...messages, toolResultMessage]).pipe(
-              Effect.flatMap(() =>
-                Ref.update(toolResultMessages, messages => [...messages, toolResultMessage])
-              ),
-              Effect.as(ToolExecutionCompleted.make({ call, result }))
-            )
-          })
+          Effect.map(result => ToolExecutionCompleted.make({ call, result }))
         )
       ).pipe(
         Stream.catchTag('ToolError', error =>
@@ -287,6 +267,49 @@ const makeToolExecutionStream = (
         )
       )
     )
+  )
+
+type IndexedToolResultMessage = {
+  readonly index: number
+  readonly message: AgentMessage
+}
+
+const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
+  Math.max(1, loopConfig.toolConcurrency)
+
+const toolResultMessageFromResult = (result: ToolResult) =>
+  ToolResultMessage.make({
+    toolCallId: result.toolCallId,
+    content: result.content,
+    isError: result.isError,
+    structuredContent: result.structuredContent
+  })
+
+const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
+  [...results].sort((left, right) => left.index - right.index).map(result => result.message)
+
+const parallelToolExecutionStream = (input: {
+  readonly calls: ReadonlyArray<ToolCall>
+  readonly executor: TurnStreamInput['executor']
+  readonly loopConfig: LoopConfigShape
+  readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
+}) =>
+  Stream.mergeAll(
+    input.calls.map((call, index) =>
+      makeToolExecutionStream(input.executor, call).pipe(
+        Stream.tap(event => {
+          if (event._tag !== 'ToolExecutionCompleted') {
+            return Effect.void
+          }
+
+          return Ref.update(input.results, results => [
+            ...results,
+            { index, message: toolResultMessageFromResult(event.result) }
+          ])
+        })
+      )
+    ),
+    { concurrency: boundedToolConcurrency(input.loopConfig) }
   )
 
 const toolErrorCode = (error: ToolError): AgentErrorCode => {
@@ -374,25 +397,32 @@ const makeAfterLlmStream = (
         ])
       }
 
-      const toolResultMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
-      const toolExecutionStream = Stream.fromIterable(completion.toolCalls).pipe(
-        Stream.flatMap(call =>
-          makeToolExecutionStream(input.executor, call, input.createdMessages, toolResultMessages)
-        )
-      )
+      const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const toolExecutionStream = parallelToolExecutionStream({
+        calls: completion.toolCalls,
+        executor: input.executor,
+        loopConfig: input.loopConfig,
+        results: toolResultMessages
+      })
       const nextTurnStream = Stream.unwrap(
         Ref.get(toolResultMessages).pipe(
-          Effect.map(results =>
-            Stream.make(TurnEnd.make({ turn: input.turn, reason: completion.stopReason })).pipe(
-              Stream.concat(
-                makeTurnStream({
-                  ...input,
-                  currentMessages: [...input.currentMessages, assistantMessage, ...results],
-                  turn: input.turn + 1
-                })
+          Effect.flatMap(results => {
+            const orderedResults = orderedToolResultMessages(results)
+
+            return Ref.update(input.createdMessages, messages => [...messages, ...orderedResults]).pipe(
+              Effect.as(
+                Stream.make(TurnEnd.make({ turn: input.turn, reason: completion.stopReason })).pipe(
+                  Stream.concat(
+                    makeTurnStream({
+                      ...input,
+                      currentMessages: [...input.currentMessages, assistantMessage, ...orderedResults],
+                      turn: input.turn + 1
+                    })
+                  )
+                )
               )
             )
-          )
+          })
         )
       )
 
@@ -593,18 +623,19 @@ export const runModelTurn = (
 
 export const runToolBatch = (
   config: ToolBatchConfig
-): Stream.Stream<AgentEvent, AgentLoopError, ToolExecutor> =>
+): Stream.Stream<AgentEvent, AgentLoopError, LoopConfig | ToolExecutor> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const executor = yield* ToolExecutor
-      const createdMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
-      const toolResultMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const loopConfig = yield* LoopConfig
+      const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
 
-      return Stream.fromIterable(config.calls).pipe(
-        Stream.flatMap(call =>
-          makeToolExecutionStream(executor, call, createdMessages, toolResultMessages)
-        )
-      )
+      return parallelToolExecutionStream({
+        calls: config.calls,
+        executor,
+        loopConfig,
+        results: toolResultMessages
+      })
     })
   )
 

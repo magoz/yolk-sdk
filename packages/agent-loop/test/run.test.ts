@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Stream } from 'effect'
+import { Deferred, Effect, Layer, Option, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
@@ -28,6 +28,7 @@ import {
   run,
   runModelTurn,
   runToolBatch,
+  ToolExecutor,
   type LLMRequest
 } from '../src'
 import { FauxProvider, Reply, TestToolExecutor } from '../src/testing'
@@ -320,7 +321,12 @@ describe('run', () => {
             Layer.provideMerge(
               Layer.mergeAll(
                 ContextTransformer.identity,
-                LoopConfig.layer({ maxTurns: 1, maxRetries: 2, retryBaseDelayMs: 1000 })
+                LoopConfig.layer({
+                  maxTurns: 1,
+                  maxRetries: 2,
+                  retryBaseDelayMs: 1000,
+                  toolConcurrency: 4
+                })
               )
             )
           )
@@ -552,7 +558,12 @@ describe('run', () => {
             Layer.provideMerge(
               Layer.mergeAll(
                 ContextTransformer.identity,
-                LoopConfig.layer({ maxTurns: 500, maxRetries: 1, retryBaseDelayMs: 0 })
+                LoopConfig.layer({
+                  maxTurns: 500,
+                  maxRetries: 1,
+                  retryBaseDelayMs: 0,
+                  toolConcurrency: 4
+                })
               )
             )
           )
@@ -676,7 +687,8 @@ describe('run', () => {
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
       const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ weather: '72F' }))
+        Effect.provide(TestToolExecutor.layer({ weather: '72F' })),
+        Effect.provide(LoopConfig.defaultLayer)
       )
 
       const events = Array.from(eventsChunk)
@@ -687,6 +699,139 @@ describe('run', () => {
       expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
         result: { toolCallId: 'call_1', content: '72F' }
       })
+    })
+  )
+
+  it.effect('runs tool batches concurrently with bounded concurrency', () =>
+    Effect.gen(function* () {
+      const slow = ToolCall.make({ id: 'call_slow', name: 'slow', params: {} })
+      const fast = ToolCall.make({ id: 'call_fast', name: 'fast', params: {} })
+      const slowGate = yield* Deferred.make<void>()
+      const started: Array<string> = []
+      const executor = Layer.succeed(
+        ToolExecutor,
+        ToolExecutor.of({
+          execute: call => {
+            started.push(call.name)
+            const result = ToolResult.make({ toolCallId: call.id, content: call.name })
+
+            return call.name === 'slow'
+              ? Deferred.await(slowGate).pipe(Effect.as(result))
+              : Deferred.succeed(slowGate, undefined).pipe(Effect.as(result))
+          }
+        })
+      )
+
+      const eventsChunk = yield* runToolBatch({ calls: [slow, fast] }).pipe(
+        Stream.runCollect,
+        Effect.provide(executor),
+        Effect.provide(
+          LoopConfig.layer({
+            maxTurns: 500,
+            maxRetries: 2,
+            retryBaseDelayMs: 1000,
+            toolConcurrency: 2
+          })
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolExecutionStarted',
+        'ToolExecutionStarted',
+        'ToolExecutionCompleted',
+        'ToolExecutionCompleted'
+      ])
+      expect(
+        events.flatMap(event => (event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []))
+      ).toEqual(['call_slow', 'call_fast'])
+      expect(started).toEqual(['slow', 'fast'])
+    })
+  )
+
+  it.effect('preserves transcript tool result order after concurrent execution', () =>
+    Effect.gen(function* () {
+      const slow = ToolCall.make({ id: 'call_slow', name: 'slow', params: {} })
+      const fast = ToolCall.make({ id: 'call_fast', name: 'fast', params: {} })
+      const slowGate = yield* Deferred.make<void>()
+      const requests: Array<LLMRequest> = []
+      const started: Array<string> = []
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: request => {
+            requests.push(request)
+
+            return requests.length === 1
+              ? Stream.fromIterable([
+                  LLMToolCall.make({ call: slow }),
+                  LLMToolCall.make({ call: fast }),
+                  LLMDone.make({ stopReason: 'tool_use' })
+                ])
+              : Stream.fromIterable([
+                  LLMTextDelta.make({ text: 'done' }),
+                  LLMDone.make({ stopReason: 'stop' })
+                ])
+          }
+        })
+      )
+      const executor = Layer.succeed(
+        ToolExecutor,
+        ToolExecutor.of({
+          execute: call => {
+            started.push(call.name)
+            const result = ToolResult.make({ toolCallId: call.id, content: call.name })
+
+            return call.name === 'slow'
+              ? Deferred.await(slowGate).pipe(Effect.as(result))
+              : Deferred.succeed(slowGate, undefined).pipe(Effect.as(result))
+          }
+        })
+      )
+
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'use both tools' })],
+        systemPrompt: 'Use tools.',
+        tools: [
+          ToolDef.make({ name: 'slow', description: 'Slow.', parameters: {} }),
+          ToolDef.make({ name: 'fast', description: 'Fast.', parameters: {} })
+        ],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, executor).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({
+                  maxTurns: 500,
+                  maxRetries: 2,
+                  retryBaseDelayMs: 1000,
+                  toolConcurrency: 2
+                })
+              )
+            )
+          )
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(
+        events.flatMap(event => (event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []))
+      ).toEqual(['call_slow', 'call_fast'])
+      expect(started).toEqual(['slow', 'fast'])
+      expect(requests[1]?.messages.map(message => message._tag)).toEqual([
+        'User',
+        'Assistant',
+        'ToolResult',
+        'ToolResult'
+      ])
+      expect(
+        requests[1]?.messages.flatMap(message =>
+          message._tag === 'ToolResult' ? [message.toolCallId] : []
+        )
+      ).toEqual(['call_slow', 'call_fast'])
     })
   )
 })

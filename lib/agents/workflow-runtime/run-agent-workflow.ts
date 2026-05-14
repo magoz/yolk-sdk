@@ -54,6 +54,11 @@ type AgentWorkflowToolBatchStepResult = {
   readonly createdMessages: ReadonlyArray<unknown>
 }
 
+type IndexedToolResultMessage = {
+  readonly index: number
+  readonly message: AgentMessage
+}
+
 const maxWorkflowTurns = 500
 
 class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepError')<{
@@ -144,6 +149,9 @@ const workflowStepError = (error: unknown) =>
     cause: error
   })
 
+const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
+  [...results].sort((left, right) => left.index - right.index).map(result => result.message)
+
 export async function runAgentWorkflowModelStep(input: {
   readonly userId: string
   readonly state: AgentWorkflowState
@@ -232,7 +240,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const createdMessages = yield* decodeMessages(input.createdMessages)
       const runtime = yield* makeAgentTextRuntime(request, input.userId, '/agent/workflow')
-      const toolResultMessages = yield* Ref.make<ReadonlyArray<AgentMessage>>([])
+      const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
 
       yield* runToolBatch({ calls }).pipe(
         Stream.runForEach(event =>
@@ -242,22 +250,29 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 return Effect.void
               }
 
-              return Ref.update(toolResultMessages, messages => [
-                ...messages,
-                ToolResultMessage.make({
-                  toolCallId: event.result.toolCallId,
-                  content: event.result.content,
-                  isError: event.result.isError,
-                  structuredContent: event.result.structuredContent
-                })
-              ])
+              return Ref.update(toolResultMessages, messages => {
+                const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
+
+                return [
+                  ...messages,
+                  {
+                    index: callIndex < 0 ? calls.length : callIndex,
+                    message: ToolResultMessage.make({
+                      toolCallId: event.result.toolCallId,
+                      content: event.result.content,
+                      isError: event.result.isError,
+                      structuredContent: event.result.structuredContent
+                    })
+                  }
+                ]
+              })
             })
           )
         ),
         Effect.provide(runtime.layer)
       )
 
-      const messages = yield* Ref.get(toolResultMessages)
+      const messages = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
       const nextCreatedMessages = [...createdMessages, ...messages]
 
       return {
