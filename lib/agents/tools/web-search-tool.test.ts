@@ -125,7 +125,7 @@ describe('web_search tool', () => {
         userId: 'user_1'
       })
 
-      expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
+      expect(textTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search', 'just_bash'])
       expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
     })
   )

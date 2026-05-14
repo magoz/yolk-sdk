@@ -95,7 +95,7 @@ describe('Cloudflare tool modules', () => {
       const cloudflareTools = yield* resolvedToolNames(makeCloudflareTextToolModules([]))
 
       expect(cloudflareTools).toEqual(nextTools)
-      expect(cloudflareTools).toEqual(['web_fetch', 'web_search', 'skill'])
+      expect(cloudflareTools).toEqual(['web_fetch', 'web_search', 'skill', 'just_bash'])
     })
   )
 
@@ -107,7 +107,13 @@ describe('Cloudflare tool modules', () => {
       )
 
       expect(cloudflareTools).toEqual(nextTools)
-      expect(cloudflareTools).toEqual(['web_fetch', 'web_search', 'skill', 'docs_search'])
+      expect(cloudflareTools).toEqual([
+        'web_fetch',
+        'web_search',
+        'skill',
+        'just_bash',
+        'docs_search'
+      ])
     })
   )
 })

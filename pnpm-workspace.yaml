@@ -12,6 +12,7 @@ catalog:
   typescript: ^5.9.3
   vitest: ^4.0.17
 allowBuilds:
+  '@mongodb-js/zstd': false
   '@nestjs/core': false
   '@sentry/cli': true
   '@swc/core': true
@@ -20,6 +21,7 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: true
   msw: true
+  node-liblzma: false
   protobufjs: true
   sharp: true
   unrs-resolver: true

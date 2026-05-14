@@ -8,7 +8,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
-- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + skill + optional remote MCP tools from project files.
+- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + just-bash virtual shell + skill + optional remote MCP tools from project files.
 - Next/Workflow text runtime exposes a package-owned `task` tool for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
 - Task subagents run with normal text tools but without the `task` tool, so recursive subagents are disabled in v1.
 - Task subagents stream `ToolExecution*` plus `SubagentStarted`/`SubagentCompleted`; final task results include structured subagent metadata for status, timing, model, and ids.
@@ -59,10 +59,11 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - App tools in `lib/agents/tools/*` must be runtime-portable: no Node-only imports, no raw `fetch()`, use Effect `Config`/`HttpClient`/Schema and injected adapters.
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
+- `tools/just-bash-tool.ts`: `just_bash`; text-only virtual shell with fresh per-call in-memory filesystem; script/cwd/stdin/timeout params only; no host filesystem/network/JS/Python
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
 - `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/agent/tools`; use this at new route/runtime boundaries.
-- `web_fetch`/`web_search` are text+voice; skill and remote MCP tools are text-only.
+- `web_fetch`/`web_search` are text+voice; `just_bash`, skill, and remote MCP tools are text-only.
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
