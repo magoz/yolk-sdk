@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import Image from 'next/image'
+import { Streamdown } from 'streamdown'
 import {
   BotIcon,
   BrainIcon,
@@ -580,6 +581,18 @@ function MessageActions({
   )
 }
 
+function MarkdownText({ text, className }: { readonly text: string; readonly className?: string }) {
+  return (
+    <Streamdown
+      className={cn('break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}
+      controls={false}
+      mode="streaming"
+    >
+      {text}
+    </Streamdown>
+  )
+}
+
 function MessageContentParts({
   parts,
   role
@@ -593,9 +606,7 @@ function MessageContentParts({
         switch (part._tag) {
           case 'Text':
             return part.text.length > 0 ? (
-              <div key={`text-${index}`} className="whitespace-pre-wrap break-words">
-                {part.text}
-              </div>
+              <MarkdownText key={`text-${index}`} text={part.text} />
             ) : null
           case 'Image':
             return (
@@ -644,9 +655,10 @@ function DraftCard({ text, role }: { readonly text: string; readonly role: 'user
           <BotIcon className="size-3" />
           Assistant
         </div>
-        <div className="animate-pulse whitespace-pre-wrap break-words text-sm leading-7 text-foreground">
-          {text}
-        </div>
+        <MarkdownText
+          text={text}
+          className="animate-pulse whitespace-pre-wrap text-sm leading-7 text-foreground"
+        />
       </div>
     </div>
   )
