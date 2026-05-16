@@ -11,6 +11,8 @@ const RagToolParams = Schema.Struct({
   query: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 })
 
+const isToolError = Schema.is(ToolError)
+
 export type RagToolScopeResolver<Context> =
   | RagSearchScope
   | ((context: Context) => Effect.Effect<RagSearchScope, ToolError>)
@@ -85,7 +87,7 @@ export const makeRagTool = <Context>(
             })
         ),
         Effect.mapError(error => {
-          if (error instanceof ToolError) {
+          if (isToolError(error)) {
             return error
           }
 
