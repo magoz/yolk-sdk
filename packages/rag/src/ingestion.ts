@@ -1,16 +1,105 @@
-import type { Effect } from 'effect'
-import type { ExtractedRagDocument, RagDocument, RagSource } from './documents.ts'
-import type { RagIngestionError } from './errors.ts'
+import { Effect } from 'effect'
+import { RagChunker } from './chunking.ts'
+import { RagEmbedder } from './embeddings.ts'
+import { RagExtractor } from './extraction.ts'
+import type { LoadedRagSource } from './extraction.ts'
+import { RagIngestionError } from './errors.ts'
+import { RagStore } from './store.ts'
 
 export type IngestRagDocumentInput = {
   readonly ragSetId: string
   readonly documentId: string
-  readonly source: RagSource
-  readonly extracted: ExtractedRagDocument
+  readonly source: LoadedRagSource
+  readonly contentHash?: string
 }
 
+const markErrorBestEffort = (input: IngestRagDocumentInput, error: RagIngestionError) =>
+  Effect.gen(function* () {
+    const store = yield* RagStore
+    yield* store.markDocumentError({
+      ragSetId: input.ragSetId,
+      documentId: input.documentId,
+      message: error.message
+    })
+  }).pipe(Effect.catch(() => Effect.void))
+
+export const ingestRagDocument = (input: IngestRagDocumentInput) =>
+  Effect.gen(function* () {
+    const store = yield* RagStore
+    const extractor = yield* RagExtractor
+    const chunker = yield* RagChunker
+    const embedder = yield* RagEmbedder
+    const ragSet = yield* store
+      .getSet(input.ragSetId)
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+
+    yield* store
+      .upsertDocument({
+        document: {
+          id: input.documentId,
+          ragSetId: input.ragSetId,
+          source: input.source.source,
+          status: 'processing',
+          metadata: input.source.metadata
+        }
+      })
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+
+    const extracted = yield* extractor
+      .extract(input.source)
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'extract' })))
+
+    const chunks = yield* chunker
+      .chunk({
+        ragSetId: input.ragSetId,
+        documentId: input.documentId,
+        content: extracted.content,
+        maxTokens: ragSet.chunkingConfig.maxTokens,
+        metadata: extracted.metadata
+      })
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'chunk' })))
+
+    const embeddings = yield* embedder
+      .embedTexts(chunks.map(chunk => chunk.content))
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'embed' })))
+
+    if (embeddings.length !== chunks.length) {
+      return yield* Effect.fail(
+        new RagIngestionError({ message: 'Embedding count did not match chunk count', stage: 'embed' })
+      )
+    }
+
+    const indexedChunks = chunks.map((chunk, index) => ({
+      chunk,
+      embedding: embeddings[index] ?? []
+    }))
+    yield* store
+      .replaceDocumentChunks({
+        ragSetId: input.ragSetId,
+        documentId: input.documentId,
+        chunks: indexedChunks
+      })
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+
+    const tokenCount = chunks.reduce((total, chunk) => total + chunk.tokenCount, 0)
+    return yield* store
+      .markDocumentReady({
+        ragSetId: input.ragSetId,
+        documentId: input.documentId,
+        title: extracted.title,
+        contentHash: input.contentHash,
+        tokenCount,
+        chunkCount: chunks.length
+      })
+      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+  }).pipe(
+    Effect.catch(error => markErrorBestEffort(input, error).pipe(Effect.flatMap(() => Effect.fail(error))))
+  )
+
 export type RagIngestionPipeline = {
-  readonly ingest: (
-    input: IngestRagDocumentInput
-  ) => Effect.Effect<RagDocument, RagIngestionError>
+  readonly ingest: (input: IngestRagDocumentInput) => ReturnType<typeof ingestRagDocument>
 }
+
+export const makeIngestionPipeline = (): RagIngestionPipeline => ({
+  ingest: ingestRagDocument
+})

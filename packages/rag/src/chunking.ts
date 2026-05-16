@@ -11,6 +11,7 @@ export type ChunkRagDocumentInput = {
   readonly ragSetId: string
   readonly documentId: string
   readonly content: string
+  readonly maxTokens?: number
   readonly metadata?: RagMetadata
 }
 
@@ -167,7 +168,7 @@ export const chunkRagText = (input: ChunkRagDocumentInput, maxTokens: number) =>
   })
 
 export const makeDefaultRagChunker = (input: { readonly maxTokens: number }): RagChunkerApi => ({
-  chunk: document => chunkRagText(document, input.maxTokens)
+  chunk: document => chunkRagText(document, document.maxTokens ?? input.maxTokens)
 })
 
 export const DefaultRagChunkerLive = (input: { readonly maxTokens: number } = { maxTokens: 512 }) =>

@@ -1,8 +1,14 @@
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { defaultRagChunkingConfig, makeRagSet } from '@yolk/rag/documents'
+import type { RagDocument, RagSet } from '@yolk/rag/documents'
 import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunking'
+import { RagEmbedder } from '@yolk/rag/embeddings'
+import { RagExtractor } from '@yolk/rag/extraction'
+import { ingestRagDocument } from '@yolk/rag/ingestion'
 import { RagChunkingError, RagStoreError } from '@yolk/rag/errors'
+import { RagStore } from '@yolk/rag/store'
+import type { RagStoreApi } from '@yolk/rag/store'
 
 describe('@yolk/rag', () => {
   it('imports public foundations', async () => {
@@ -75,4 +81,76 @@ describe('@yolk/rag', () => {
 
       expect(result).toBeInstanceOf(RagChunkingError)
     }))
+
+  it.effect('ingests extracted documents through package services', () => {
+    const ragSet: RagSet = makeRagSet({
+      id: 'set_1',
+      embeddingConfig: { model: 'test-embedding', dimensions: 2 },
+      chunkingConfig: { strategy: 'sentence-token', maxTokens: 8 }
+    })
+    const documents: Array<RagDocument> = []
+    let replacedChunkCount = 0
+
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () => Effect.succeed(ragSet),
+      upsertDocument: (input: { readonly document: RagDocument }) =>
+        Effect.sync(() => {
+          documents.push(input.document)
+          return input.document
+        }),
+      markDocumentProcessing: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'processing'
+        }),
+      replaceDocumentChunks: (input: { readonly chunks: ReadonlyArray<unknown> }) =>
+        Effect.sync(() => {
+          replacedChunkCount = input.chunks.length
+        }),
+      markDocumentReady: (input: { readonly title?: string; readonly chunkCount: number }) =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'ready',
+          title: input.title,
+          chunkCount: input.chunkCount
+        }),
+      markDocumentError: () => Effect.void,
+      deleteDocument: () => Effect.void,
+      searchChunks: () => Effect.succeed([]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies RagStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagExtractor, {
+        extract: () => Effect.succeed({ content: 'Alpha beta. Gamma delta.', title: 'Doc title' })
+      }),
+      Layer.succeed(RagChunker, makeDefaultRagChunker({ maxTokens: 8 })),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const document = yield* ingestRagDocument({
+        ragSetId: 'set_1',
+        documentId: 'doc_1',
+        source: {
+          source: { _tag: 'Text', label: 'note' },
+          content: 'ignored by fake extractor'
+        }
+      })
+
+      expect(document.status).toBe('ready')
+      expect(document.title).toBe('Doc title')
+      expect(documents.map(item => item.status)).toEqual(['processing'])
+      expect(replacedChunkCount).toBe(1)
+    }).pipe(Effect.provide(layer))
+  })
 })
