@@ -21,3 +21,14 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 - `storageObject` owns raw source refs/content.
 - `ragDocument` owns index lifecycle and status.
 - Text ingestion passes `storageObjectId` through package metadata so `DrizzleRagStoreLayer` can bind rows.
+
+## Store adapter
+
+- `DrizzleRagStoreLayer` is the app boundary for pgvector search; keep SQL/Drizzle details out of `@yolk/rag`.
+- Preserve package `RagStoreError` values when mapping store failures; avoid double-wrapping typed not-found errors.
+- `searchChunks` filters ready documents only; `getContextChunks` expands adjacent chunks by `(ragSetId, documentId, position)`.
+
+## Tests
+
+- `live-layer.test.ts` covers set/doc/chunk lifecycle, vector search, context expansion, delete cleanup.
+- DB adapter tests are opt-in with `RAG_STORE_DB_TESTS=1`; default test run skips them to avoid accidental external DB dependency.
