@@ -2,14 +2,8 @@ import { Effect } from 'effect'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
 import { ensureUserRagSet } from './ensure-user-rag-set'
-
-const textMediaTypes = new Set(['text/plain', 'text/markdown', 'text/csv', 'application/json'])
-const textExtensions = ['.txt', '.md', '.markdown', '.csv', '.json']
-
-const isTextFile = (input: { readonly filename: string; readonly mediaType: string }) =>
-  textMediaTypes.has(input.mediaType) ||
-  textExtensions.some(extension => input.filename.toLowerCase().endsWith(extension))
 
 export const createFileStorageObject = (input: {
   readonly userId: string
@@ -18,14 +12,8 @@ export const createFileStorageObject = (input: {
   readonly bytes: Uint8Array
 }) =>
   Effect.gen(function* () {
-    if (!isTextFile({ filename: input.filename, mediaType: input.mediaType })) {
-      return yield* Effect.die(new Error('Only UTF-8 text-like files are supported'))
-    }
-
-    const content = new TextDecoder('utf-8', { fatal: false }).decode(input.bytes).trim()
-    if (content.length === 0) {
-      return yield* Effect.die(new Error('Storage file content is empty'))
-    }
+    const extractor = yield* FileExtractor
+    const extracted = yield* extractor.extract(input)
 
     const db = yield* Db
     const ragSet = yield* ensureUserRagSet({ userId: input.userId })
@@ -34,11 +22,11 @@ export const createFileStorageObject = (input: {
       .values({
         userId: input.userId,
         sourceType: 'file',
-        textContent: content,
+        textContent: extracted.content,
         filename: input.filename,
-        mediaType: input.mediaType.length > 0 ? input.mediaType : 'text/plain',
+        mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
         byteSize: input.bytes.byteLength,
-        metadata: { title: input.filename }
+        metadata: { title: input.filename, ...extracted.metadata }
       })
       .returning()
 
@@ -47,15 +35,15 @@ export const createFileStorageObject = (input: {
     }
 
     yield* ingestRagDocument({
-      ragSetId: ragSet.id,
-      documentId: object.id,
-      source: {
-        source: { _tag: 'File', ref: object.id, name: object.filename ?? undefined, mediaType: object.mediaType ?? undefined },
-        content,
-        mediaType: object.mediaType ?? undefined,
-        metadata: { storageObjectId: object.id, title: object.filename ?? undefined }
-      }
-    })
+        ragSetId: ragSet.id,
+        documentId: object.id,
+        source: {
+          source: { _tag: 'File', ref: object.id, name: object.filename ?? undefined, mediaType: object.mediaType ?? undefined },
+          content: extracted.content,
+          mediaType: object.mediaType ?? undefined,
+          metadata: { storageObjectId: object.id, title: object.filename ?? undefined, ...extracted.metadata }
+        }
+      })
 
     return object
   }).pipe(Effect.withSpan('storage.createFileStorageObject'))

@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
+import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { createFileStorageObject } from './create-file-storage-object'
@@ -38,12 +39,19 @@ export const createFileStorageObjectAction = async (formData: FormData) => {
     }).pipe(
       Effect.withSpan('action.storage.createFile'),
       Effect.provide(AppRagLayer),
+      Effect.provide(FileExtractor.layer),
       Effect.provide(AppLayer),
       Effect.scoped,
-      Effect.tapError(error => reportError(error, { operation: 'action.storage.createFile' })),
-      Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.tap(() => Effect.sync(() => revalidatePath('/storage'))),
       Effect.as({ _tag: 'Success' as const }),
+      Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
+      Effect.catchTag('UnsupportedFileFormatError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('FileExtractionError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.tapError(error => reportError(error, { operation: 'action.storage.createFile' })),
       Effect.catch(() =>
         Effect.succeed({ _tag: 'Error' as const, message: 'Could not create storage file' })
       )

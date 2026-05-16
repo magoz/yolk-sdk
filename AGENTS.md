@@ -49,7 +49,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email                                                    | Transactional email via Resend                                                                                                     |
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
-| Storage/RAG        | `/storage` + `@yolk/rag` + `lib/services/rag`            | Text source ingestion, pgvector chunks, OpenAI embeddings; app owns auth/R2/DB adapters                                             |
+| Storage/RAG        | `/storage` + `@yolk/rag` + `lib/services/rag`            | Text/file source ingestion, pgvector chunks, OpenAI embeddings; app owns auth/R2/DB adapters                                        |
 | Agent stack        | packages                                                 | `@yolk/agent` subpaths, `@yolk/mcp`, `@yolk/rag`, Workflow runtime, voice-runtime, React hooks                                      |
 | Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
@@ -102,6 +102,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Auth`                           | Service  | `lib/services/auth/live-layer.ts`                      | Authentication (sign in/up/out, sessions)                                            |
 | `Db`                             | Service  | `lib/services/db/live-layer.ts`                        | Database (returns Drizzle client)                                                    |
 | `Email`                          | Service  | `lib/services/email/live-layer.ts`                     | Resend email sending                                                                 |
+| `FileExtractor`                  | Service  | `lib/services/file-extractor/live-layer.ts`            | Uploaded file text extraction for Storage ingestion                                   |
 | `OpenAiCodexOAuth`               | Service  | `lib/services/openai-codex-oauth/live-layer.ts`        | Codex OAuth device flow + refresh                                                    |
 | `AnthropicClaudeOAuth`           | Service  | `lib/services/anthropic-oauth/live-layer.ts`           | Claude OAuth code exchange + refresh                                                 |
 | `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`                 | OpenTelemetry + Sentry span/log processing                                           |

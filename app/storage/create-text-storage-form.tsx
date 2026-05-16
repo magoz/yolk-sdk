@@ -53,14 +53,15 @@ export function CreateTextStorageForm() {
         }}
       >
         <div className="space-y-1.5">
-          <Label htmlFor="file">Text file</Label>
+          <Label htmlFor="file">File</Label>
           <Input
             id="file"
             name="file"
             type="file"
-            accept=".txt,.md,.markdown,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+            accept=".txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation"
             required
           />
+          <p className="text-sm text-muted-foreground">Supports text, markdown, CSV, JSON, PDF, DOCX, XLSX, and PPTX.</p>
         </div>
         <Button type="submit" disabled={isPending}>
           {isPending ? 'Indexing…' : 'Index file'}
