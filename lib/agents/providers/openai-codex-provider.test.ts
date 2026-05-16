@@ -532,6 +532,110 @@ describe('OpenAiCodexProviderLayer', () => {
     })
   )
 
+  it.effect('rejects malformed OpenAI Codex SSE JSON events', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
+          ['event: response.output_text.delta', 'data: {"type":"response.output_text.delta"', ''].join(
+            '\n'
+          ),
+          requests
+        )
+      )
+
+      const error = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false
+      })
+      expect(error.message).toContain('Could not parse OpenAI Codex stream event JSON')
+    })
+  )
+
+  it.effect('rejects OpenAI Codex tool calls with invalid JSON arguments', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeHttpClientLayer(
+          {
+            output: [
+              {
+                type: 'function_call',
+                call_id: 'call_1',
+                name: 'weather',
+                arguments: '{"city":"Paris"'
+              }
+            ]
+          },
+          requests
+        )
+      )
+
+      const error = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'weather?' })],
+            tools: [ToolDef.make({ name: 'weather', description: 'Get weather.', parameters: {} })],
+            model: 'gpt-5.4',
+            systemPrompt: 'Use tools.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false
+      })
+      expect(error.message).toContain('Invalid OpenAI Codex tool arguments JSON')
+    })
+  )
+
+  it.effect('maps OpenAI Codex SSE error events to provider errors', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeProviderLayer(
+        makeRawHttpClientLayer(
+          ['event: error', 'data: {"type":"error","message":"backend overloaded"}', ''].join('\n'),
+          requests
+        )
+      )
+
+      const error = yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        return yield* provider
+          .stream({
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [],
+            model: 'gpt-5.4',
+            systemPrompt: 'Be brief.'
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'provider_error',
+        retryable: false
+      })
+      expect(error.message).toContain('OpenAI Codex stream error: backend overloaded')
+    })
+  )
+
   it.effect('emits OpenAI Codex SSE deltas before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
