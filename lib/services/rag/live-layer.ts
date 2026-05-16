@@ -132,8 +132,13 @@ const storageObjectIdForDocument = (input: UpsertRagDocumentInput) =>
 
 const notFound = (label: string) => new RagStoreError({ message: `${label} not found` })
 
-const mapStoreError = (error: unknown) =>
-  new RagStoreError({ message: unknownToMessage(error), cause: error })
+const mapStoreError = (error: unknown) => {
+  if (error instanceof RagStoreError) {
+    return error
+  }
+
+  return new RagStoreError({ message: unknownToMessage(error), cause: error })
+}
 
 const isOkStatus = (status: number) => status >= 200 && status < 300
 
