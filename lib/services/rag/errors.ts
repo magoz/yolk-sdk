@@ -1,27 +1,56 @@
-import { Data } from 'effect'
+import * as Schema from 'effect/Schema'
 
-export class AppRagStoreError extends Data.TaggedError('AppRagStoreError')<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class AppRagStoreError extends Schema.TaggedErrorClass<AppRagStoreError>()(
+  'AppRagStoreError',
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
 
-export class AppRagDocumentNotFoundError extends Data.TaggedError('AppRagDocumentNotFoundError')<{
-  readonly message: string
-  readonly documentId: string
-}> {}
+export class AppRagDocumentNotFoundError extends Schema.TaggedErrorClass<AppRagDocumentNotFoundError>()(
+  'AppRagDocumentNotFoundError',
+  {
+    message: Schema.String,
+    documentId: Schema.String
+  }
+) {}
 
-export class AppRagSetNotFoundError extends Data.TaggedError('AppRagSetNotFoundError')<{
-  readonly message: string
-  readonly ragSetId: string
-}> {}
+export class AppRagSetNotFoundError extends Schema.TaggedErrorClass<AppRagSetNotFoundError>()(
+  'AppRagSetNotFoundError',
+  {
+    message: Schema.String,
+    ragSetId: Schema.String
+  }
+) {}
 
-export class AppRagExtractorError extends Data.TaggedError('AppRagExtractorError')<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class AppRagSearchError extends Schema.TaggedErrorClass<AppRagSearchError>()(
+  'AppRagSearchError',
+  {
+    message: Schema.String,
+    stage: Schema.Literals(['store', 'embed']),
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
 
-export class AppRagEmbedderError extends Data.TaggedError('AppRagEmbedderError')<{
-  readonly message: string
-  readonly isTransient?: true
-  readonly cause?: unknown
-}> {}
+export class AppRagExtractorError extends Schema.TaggedErrorClass<AppRagExtractorError>()(
+  'AppRagExtractorError',
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+export class AppRagEmbedderError extends Schema.TaggedErrorClass<AppRagEmbedderError>()(
+  'AppRagEmbedderError',
+  {
+    message: Schema.String,
+    isTransient: Schema.optional(Schema.Literal(true)),
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+export const isAppRagStoreError = Schema.is(AppRagStoreError)
+export const isAppRagDocumentNotFoundError = Schema.is(AppRagDocumentNotFoundError)
+export const isAppRagSetNotFoundError = Schema.is(AppRagSetNotFoundError)
+export const isAppRagSearchError = Schema.is(AppRagSearchError)

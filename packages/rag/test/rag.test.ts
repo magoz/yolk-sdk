@@ -1,8 +1,15 @@
 import { Effect, Layer } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk/agent/protocol'
 import { makeRagTool } from '@yolk/rag/agent'
-import { defaultRagChunkingConfig, makeRagSet } from '@yolk/rag/documents'
+import {
+  defaultRagChunkingConfig,
+  makeRagSet,
+  RagChunkSchema,
+  RagSearchScopeSchema,
+  RagSetSchema
+} from '@yolk/rag/documents'
 import type { RagDocument, RagSet } from '@yolk/rag/documents'
 import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunking'
 import { RagEmbedder } from '@yolk/rag/embeddings'
@@ -10,7 +17,13 @@ import { RagExtractor } from '@yolk/rag/extraction'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
 import { packRagContext, retrieveRag } from '@yolk/rag/retrieval'
 import type { RagRetriever } from '@yolk/rag/retrieval'
-import { RagChunkingError, RagStoreError } from '@yolk/rag/errors'
+import {
+  RagChunkingError,
+  RagEmbeddingError,
+  RagExtractionError,
+  RagRetrievalError,
+  RagStoreError
+} from '@yolk/rag/errors'
 import { RagStore } from '@yolk/rag/store'
 import type { RagStoreApi } from '@yolk/rag/store'
 
@@ -44,6 +57,31 @@ describe('@yolk/rag', () => {
     expect(set.chunkingConfig).toEqual(defaultRagChunkingConfig)
     expect(new RagStoreError({ message: 'store' })._tag).toBe('RagStoreError')
   })
+
+  it.effect('rejects invalid document schema boundary values', () =>
+    Effect.gen(function* () {
+      const invalidSet = yield* Schema.decodeUnknownEffect(RagSetSchema)({
+        id: 'set_1',
+        embeddingConfig: { model: 'test-embedding', dimensions: 0 },
+        chunkingConfig: { strategy: 'sentence-token', maxTokens: 8 }
+      }).pipe(Effect.result)
+      const invalidChunk = yield* Schema.decodeUnknownEffect(RagChunkSchema)({
+        id: 'chunk_1',
+        ragSetId: 'set_1',
+        documentId: 'doc_1',
+        content: '',
+        position: -1,
+        tokenCount: 0
+      }).pipe(Effect.result)
+      const invalidScope = yield* Schema.decodeUnknownEffect(RagSearchScopeSchema)({
+        _tag: 'RagSet',
+        id: ' set_1 '
+      }).pipe(Effect.result)
+
+      expect(invalidSet._tag).toBe('Failure')
+      expect(invalidChunk._tag).toBe('Failure')
+      expect(invalidScope._tag).toBe('Failure')
+    }))
 
   it.effect('chunks sentence-first with token bounds', () =>
     Effect.gen(function* () {
@@ -158,6 +196,226 @@ describe('@yolk/rag', () => {
     }).pipe(Effect.provide(layer))
   })
 
+  it.effect('marks documents errored when extraction fails', () => {
+    const ragSet: RagSet = makeRagSet({
+      id: 'set_1',
+      embeddingConfig: { model: 'test-embedding', dimensions: 2 }
+    })
+    const errorMessages: Array<string> = []
+    const extractionError = new RagExtractionError({ message: 'extract failed' })
+
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () => Effect.succeed(ragSet),
+      upsertDocument: (input: { readonly document: RagDocument }) => Effect.succeed(input.document),
+      markDocumentProcessing: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'processing'
+        }),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'ready'
+        }),
+      markDocumentError: (input: { readonly message: string }) =>
+        Effect.sync(() => {
+          errorMessages.push(input.message)
+        }),
+      deleteDocument: () => Effect.void,
+      searchChunks: () => Effect.succeed([]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies RagStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagExtractor, { extract: () => Effect.fail(extractionError) }),
+      Layer.succeed(RagChunker, makeDefaultRagChunker({ maxTokens: 8 })),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const error = yield* ingestRagDocument({
+        ragSetId: 'set_1',
+        documentId: 'doc_1',
+        source: { source: { _tag: 'Text', label: 'note' }, content: 'ignored' }
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error.stage).toBe('extract')
+      expect(error.cause).toBe(extractionError)
+      expect(errorMessages).toEqual(['extract failed'])
+    })
+  })
+
+  it.effect('maps embedding failures and marks document errored', () => {
+    const ragSet: RagSet = makeRagSet({
+      id: 'set_1',
+      embeddingConfig: { model: 'test-embedding', dimensions: 2 }
+    })
+    const errorMessages: Array<string> = []
+    const embeddingError = new RagEmbeddingError({ message: 'embed failed' })
+
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () => Effect.succeed(ragSet),
+      upsertDocument: (input: { readonly document: RagDocument }) => Effect.succeed(input.document),
+      markDocumentProcessing: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'processing'
+        }),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'ready'
+        }),
+      markDocumentError: (input: { readonly message: string }) =>
+        Effect.sync(() => {
+          errorMessages.push(input.message)
+        }),
+      deleteDocument: () => Effect.void,
+      searchChunks: () => Effect.succeed([]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies RagStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagExtractor, {
+        extract: () => Effect.succeed({ content: 'ignored', title: 'Doc title' })
+      }),
+      Layer.succeed(RagChunker, {
+        chunk: () =>
+          Effect.succeed([
+            {
+              id: 'chunk_1',
+              ragSetId: 'set_1',
+              documentId: 'doc_1',
+              content: 'one',
+              position: 0,
+              tokenCount: 1
+            },
+            {
+              id: 'chunk_2',
+              ragSetId: 'set_1',
+              documentId: 'doc_1',
+              content: 'two',
+              position: 1,
+              tokenCount: 1
+            }
+          ])
+      }),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: () => Effect.fail(embeddingError),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const error = yield* ingestRagDocument({
+        ragSetId: 'set_1',
+        documentId: 'doc_1',
+        source: { source: { _tag: 'Text', label: 'note' }, content: 'ignored' }
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error.stage).toBe('embed')
+      expect(error.cause).toBe(embeddingError)
+      expect(errorMessages).toEqual(['embed failed'])
+    })
+  })
+
+  it.effect('rejects mismatched embedding counts and marks document errored', () => {
+    const ragSet: RagSet = makeRagSet({
+      id: 'set_1',
+      embeddingConfig: { model: 'test-embedding', dimensions: 2 }
+    })
+    const errorMessages: Array<string> = []
+
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () => Effect.succeed(ragSet),
+      upsertDocument: (input: { readonly document: RagDocument }) => Effect.succeed(input.document),
+      markDocumentProcessing: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'processing'
+        }),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () =>
+        Effect.succeed({
+          id: 'doc_1',
+          ragSetId: 'set_1',
+          source: { _tag: 'Text', label: 'note' },
+          status: 'ready'
+        }),
+      markDocumentError: (input: { readonly message: string }) =>
+        Effect.sync(() => {
+          errorMessages.push(input.message)
+        }),
+      deleteDocument: () => Effect.void,
+      searchChunks: () => Effect.succeed([]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies RagStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagExtractor, {
+        extract: () => Effect.succeed({ content: 'ignored', title: 'Doc title' })
+      }),
+      Layer.succeed(RagChunker, {
+        chunk: () =>
+          Effect.succeed([
+            {
+              id: 'chunk_1',
+              ragSetId: 'set_1',
+              documentId: 'doc_1',
+              content: 'one',
+              position: 0,
+              tokenCount: 1
+            },
+            {
+              id: 'chunk_2',
+              ragSetId: 'set_1',
+              documentId: 'doc_1',
+              content: 'two',
+              position: 1,
+              tokenCount: 1
+            }
+          ])
+      }),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: () => Effect.succeed([[1, 0]]),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const error = yield* ingestRagDocument({
+        ragSetId: 'set_1',
+        documentId: 'doc_1',
+        source: { source: { _tag: 'Text', label: 'note' }, content: 'ignored' }
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error.stage).toBe('embed')
+      expect(error.message).toBe('Embedding count did not match chunk count')
+      expect(errorMessages).toEqual(['Embedding count did not match chunk count'])
+    })
+  })
+
   it.effect('retrieves vector matches with adjacent context', () => {
     const document: RagDocument = {
       id: 'doc_1',
@@ -234,6 +492,47 @@ describe('@yolk/rag', () => {
     }).pipe(Effect.provide(layer))
   })
 
+  it.effect('rejects invalid retrieval inputs before services are required', () =>
+    Effect.gen(function* () {
+      const unusedStore = {
+        upsertSet: () => Effect.die(new Error('unused')),
+        getSet: () => Effect.die(new Error('unused')),
+        upsertDocument: () => Effect.die(new Error('unused')),
+        markDocumentProcessing: () => Effect.die(new Error('unused')),
+        replaceDocumentChunks: () => Effect.die(new Error('unused')),
+        markDocumentReady: () => Effect.die(new Error('unused')),
+        markDocumentError: () => Effect.die(new Error('unused')),
+        deleteDocument: () => Effect.die(new Error('unused')),
+        searchChunks: () => Effect.die(new Error('unused')),
+        getContextChunks: () => Effect.die(new Error('unused'))
+      } satisfies RagStoreApi
+      const unusedLayer = Layer.mergeAll(
+        Layer.succeed(RagStore, unusedStore),
+        Layer.succeed(RagEmbedder, {
+          embedTexts: () => Effect.die(new Error('unused')),
+          embedQuery: () => Effect.die(new Error('unused'))
+        })
+      )
+      const emptyQuery = yield* retrieveRag({
+        scope: { _tag: 'RagSet', id: 'set_1' },
+        query: '   '
+      }).pipe(Effect.flip, Effect.provide(unusedLayer))
+      const emptyScope = yield* retrieveRag({
+        scope: { _tag: 'RagSets', ids: [] },
+        query: 'alpha'
+      }).pipe(Effect.flip, Effect.provide(unusedLayer))
+      const invalidMinScore = yield* retrieveRag({
+        scope: { _tag: 'RagSet', id: 'set_1' },
+        query: 'alpha',
+        minScore: Number.NaN
+      }).pipe(Effect.flip, Effect.provide(unusedLayer))
+
+      expect(emptyQuery).toBeInstanceOf(RagRetrievalError)
+      expect(emptyQuery.message).toBe('Search query is empty')
+      expect(emptyScope.message).toBe('Search scope is empty')
+      expect(invalidMinScore.message).toBe('Search minScore must be finite')
+    }))
+
   it.effect('adapts retrieval as an agent tool', () => {
     const document: RagDocument = {
       id: 'doc_1',
@@ -272,6 +571,26 @@ describe('@yolk/rag', () => {
 
       expect(result.content).toBe('result for docs')
       expect(result.structuredContent).toMatchObject({ query: 'docs' })
+    })
+  })
+
+  it.effect('rejects blank agent tool queries at the boundary', () => {
+    const retriever: RagRetriever = {
+      retrieve: () => Effect.succeed([])
+    }
+    const tool = makeRagTool<Record<never, never>>(retriever, {
+      scope: { _tag: 'RagSet', id: 'set_1' }
+    })
+
+    return Effect.gen(function* () {
+      const error = yield* tool
+        .execute({
+          context: {},
+          call: ToolCall.make({ id: 'call_1', name: 'search_knowledge', params: { query: '   ' } })
+        })
+        .pipe(Effect.flip)
+
+      expect(error.cause).toBe('validation')
     })
   })
 })

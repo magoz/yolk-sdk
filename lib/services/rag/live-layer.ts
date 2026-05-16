@@ -41,7 +41,20 @@ const OpenAiEmbeddingResponseSchema = Schema.Struct({
 })
 
 type StorageSourceType = typeof dbSchema.storageSourceType.enumValues[number]
-const unknownToMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const hasStringMessage = (error: unknown): error is { readonly message: string } =>
+  typeof error === 'object' &&
+  error !== null &&
+  'message' in error &&
+  typeof error.message === 'string'
+
+const hasTag = <Tag extends string>(error: unknown, tag: Tag): error is { readonly _tag: Tag } =>
+  typeof error === 'object' && error !== null && '_tag' in error && error._tag === tag
+
+const isRagStoreError = (error: unknown): error is RagStoreError => hasTag(error, 'RagStoreError')
+const isRagExtractionError = (error: unknown): error is RagExtractionError =>
+  hasTag(error, 'RagExtractionError')
+
+const unknownToMessage = (error: unknown) => (hasStringMessage(error) ? error.message : String(error))
 
 const metadataString = (metadata: RagMetadata | undefined, key: string) => {
   const value = metadata?.[key]
@@ -134,7 +147,7 @@ const storageObjectIdForDocument = (input: UpsertRagDocumentInput) =>
 const notFound = (label: string) => new RagStoreError({ message: `${label} not found` })
 
 const mapStoreError = (error: unknown) => {
-  if (error instanceof RagStoreError) {
+  if (isRagStoreError(error)) {
     return error
   }
 
@@ -467,7 +480,7 @@ export const TextRagExtractorLayer = Layer.succeed(RagExtractor, {
       } satisfies ExtractedRagDocument
     }).pipe(
       Effect.mapError(error => {
-        if (error instanceof RagExtractionError) {
+        if (isRagExtractionError(error)) {
           return error
         }
 

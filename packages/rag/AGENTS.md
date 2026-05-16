@@ -37,3 +37,14 @@
 - Ingestion is a sync Effect program over `RagStore | RagExtractor | RagChunker | RagEmbedder`; hosts choose queues/workflows.
 - Default chunker is sentence/token, no overlap; retrieval uses `contextChunks` for adjacent content.
 - Agent helper requires host-provided scope resolver; package never decides searchable sets.
+
+## Effect Patterns
+
+- Public boundary schemas reject empty ids/content and invalid numeric counts.
+- Ingestion/retrieval map service failures into stage-tagged package errors while preserving `cause`.
+- Agent tool params decode with Effect Schema and reject blank queries at the tool boundary.
+- Keep root exports explicit; do not use broad `export *` barrels.
+
+## Tests
+
+- Cover schema boundary validation, chunking validation, ingestion success/failure, retrieval validation/context packing, and agent tool adapter validation.

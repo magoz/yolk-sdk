@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
@@ -11,7 +11,7 @@ type AccumulatedDocument = {
   readonly chunks: Array<string>
 }
 
-export const getRagDocumentsContent = (ragSetId: string) =>
+export const getRagDocumentsContent = (input: { readonly userId: string; readonly ragSetId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
     const rows = yield* db
@@ -23,7 +23,9 @@ export const getRagDocumentsContent = (ragSetId: string) =>
       .from(schema.ragDocument)
       .innerJoin(schema.storageObject, eq(schema.storageObject.id, schema.ragDocument.storageObjectId))
       .leftJoin(schema.ragChunk, eq(schema.ragChunk.documentId, schema.ragDocument.id))
-      .where(eq(schema.ragDocument.ragSetId, ragSetId))
+      .where(
+        and(eq(schema.ragDocument.ragSetId, input.ragSetId), eq(schema.storageObject.userId, input.userId))
+      )
       .orderBy(asc(schema.ragDocument.createdAt), asc(schema.ragChunk.position))
 
     const documents = new Map<string, AccumulatedDocument>()

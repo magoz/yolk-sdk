@@ -11,6 +11,7 @@ import { getRagDocument } from './get-rag-document'
 import { getRagDocuments } from './get-rag-documents'
 import { getRagDocumentsContent } from './get-rag-documents-content'
 import { DrizzleRagStoreLayer } from './live-layer'
+import { searchAppRag } from './search-app-rag'
 import { updateRagDocument } from './update-rag-document'
 
 const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
@@ -21,6 +22,7 @@ const embedding = (activeIndex: 0 | 1) =>
 describeWithDb('DrizzleRagStoreLayer', () => {
   it.effect('stores, searches, expands, and deletes RAG chunks', () => {
     const userId = createId()
+    const otherUserId = createId()
     const ragSetId = createId()
     const storageObjectId = createId()
     const documentId = createId()
@@ -142,13 +144,32 @@ describeWithDb('DrizzleRagStoreLayer', () => {
         position: 1,
         contextChunks: 1
       })
-      const listed = yield* getRagDocuments(set.id)
-      const document = yield* getRagDocument(documentId)
-      const withContent = yield* getRagDocumentsContent(set.id)
-      const chunks = yield* getRagChunks([`${documentId}:chunk:1`])
-      const updated = yield* updateRagDocument(documentId, {
-        title: 'Updated note',
-        metadata: { storageObjectId, updated: true }
+      const listed = yield* getRagDocuments({ userId, ragSetId: set.id })
+      const document = yield* getRagDocument({ userId, documentId })
+      const withContent = yield* getRagDocumentsContent({ userId, ragSetId: set.id })
+      const chunks = yield* getRagChunks({ userId, chunkIds: [`${documentId}:chunk:1`] })
+      const updated = yield* updateRagDocument({
+        userId,
+        documentId,
+        fields: { title: 'Updated note', metadata: { storageObjectId, updated: true } }
+      })
+      const appSearchResults = yield* searchAppRag({
+        userId,
+        scope: { _tag: 'RagSet', id: set.id },
+        query: 'alpha',
+        options: { limit: 1, contextChunks: 1 }
+      })
+      const otherUserDocumentError = yield* getRagDocument({ userId: otherUserId, documentId }).pipe(
+        Effect.flip
+      )
+      const otherUserUpdateError = yield* updateRagDocument({
+        userId: otherUserId,
+        documentId,
+        fields: { title: 'Should not update' }
+      }).pipe(Effect.flip)
+      const otherUserChunks = yield* getRagChunks({
+        userId: otherUserId,
+        chunkIds: [`${documentId}:chunk:1`]
       })
 
       yield* store.deleteDocument({ ragSetId: set.id, documentId })
@@ -170,6 +191,15 @@ describeWithDb('DrizzleRagStoreLayer', () => {
       expect(withContent.map(item => item.content)).toEqual(['alpha before\n\nalpha match\n\nbeta after'])
       expect(chunks.map(item => item.chunk.content)).toEqual(['alpha match'])
       expect(updated.document.title).toBe('Updated note')
+      expect(updated.document.metadata.updated).toBe(true)
+      expect(appSearchResults.map(result => result.chunk.content)).toEqual(['alpha before'])
+      expect(appSearchResults[0]?.context?.map(chunk => chunk.content)).toEqual([
+        'alpha before',
+        'alpha match'
+      ])
+      expect(otherUserDocumentError._tag).toBe('AppRagDocumentNotFoundError')
+      expect(otherUserUpdateError._tag).toBe('AppRagDocumentNotFoundError')
+      expect(otherUserChunks).toEqual([])
       expect(afterDelete).toEqual([])
     }).pipe(
       Effect.ensuring(cleanup),

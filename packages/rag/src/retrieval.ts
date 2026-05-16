@@ -83,9 +83,7 @@ const validateSearchInput = (input: RagSearchInput) => {
   return Effect.succeed({ query, limit, contextChunks })
 }
 
-export const retrieveRag = (
-  input: RagSearchInput
-): Effect.Effect<ReadonlyArray<RagSearchResult>, RagRetrievalError, RagStore | RagEmbedder> =>
+export const retrieveRag = (input: RagSearchInput) =>
   Effect.gen(function* () {
     const valid = yield* validateSearchInput(input)
     const store = yield* RagStore
@@ -97,7 +95,7 @@ export const retrieveRag = (
           error => new RagRetrievalError({ message: error.message, stage: 'embed', cause: error })
         )
       )
-    const results = yield* store
+    const results: ReadonlyArray<RagSearchResult> = yield* store
       .searchChunks({
         scope: input.scope,
         embedding,

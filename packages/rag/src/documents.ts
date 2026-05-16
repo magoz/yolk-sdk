@@ -1,5 +1,9 @@
 import { Schema } from 'effect'
 
+const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
+const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
 export const RagMetadataSchema = Schema.Record(Schema.String, Schema.Unknown)
 export type RagMetadata = Schema.Schema.Type<typeof RagMetadataSchema>
 
@@ -9,36 +13,36 @@ export type RagDocumentStatus = Schema.Schema.Type<typeof RagDocumentStatusSchem
 export const RagSourceSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('File'),
-    ref: Schema.String,
-    name: Schema.optional(Schema.String),
-    mediaType: Schema.optional(Schema.String)
+    ref: NonEmptyTrimmedString,
+    name: Schema.optional(NonEmptyTrimmedString),
+    mediaType: Schema.optional(NonEmptyTrimmedString)
   }),
   Schema.Struct({
     _tag: Schema.Literal('Url'),
-    url: Schema.String
+    url: NonEmptyTrimmedString
   }),
   Schema.Struct({
     _tag: Schema.Literal('Text'),
-    label: Schema.optional(Schema.String)
+    label: Schema.optional(NonEmptyTrimmedString)
   })
 ])
 export type RagSource = Schema.Schema.Type<typeof RagSourceSchema>
 
 export const RagEmbeddingConfigSchema = Schema.Struct({
-  model: Schema.String,
-  dimensions: Schema.Number
+  model: NonEmptyTrimmedString,
+  dimensions: PositiveInteger
 })
 export type RagEmbeddingConfig = Schema.Schema.Type<typeof RagEmbeddingConfigSchema>
 
 export const RagChunkingConfigSchema = Schema.Struct({
   strategy: Schema.Literal('sentence-token'),
-  maxTokens: Schema.Number
+  maxTokens: PositiveInteger
 })
 export type RagChunkingConfig = Schema.Schema.Type<typeof RagChunkingConfigSchema>
 
 export const RagSetSchema = Schema.Struct({
-  id: Schema.String,
-  label: Schema.optional(Schema.String),
+  id: NonEmptyTrimmedString,
+  label: Schema.optional(NonEmptyTrimmedString),
   embeddingConfig: RagEmbeddingConfigSchema,
   chunkingConfig: RagChunkingConfigSchema,
   metadata: Schema.optional(RagMetadataSchema)
@@ -46,41 +50,41 @@ export const RagSetSchema = Schema.Struct({
 export type RagSet = Schema.Schema.Type<typeof RagSetSchema>
 
 export const RagDocumentSchema = Schema.Struct({
-  id: Schema.String,
-  ragSetId: Schema.String,
+  id: NonEmptyTrimmedString,
+  ragSetId: NonEmptyTrimmedString,
   source: RagSourceSchema,
   status: RagDocumentStatusSchema,
-  title: Schema.optional(Schema.String),
+  title: Schema.optional(NonEmptyTrimmedString),
   summary: Schema.optional(Schema.String),
   errorMessage: Schema.optional(Schema.String),
-  contentHash: Schema.optional(Schema.String),
-  tokenCount: Schema.optional(Schema.Number),
-  chunkCount: Schema.optional(Schema.Number),
+  contentHash: Schema.optional(NonEmptyTrimmedString),
+  tokenCount: Schema.optional(NonNegativeInteger),
+  chunkCount: Schema.optional(NonNegativeInteger),
   metadata: Schema.optional(RagMetadataSchema)
 })
 export type RagDocument = Schema.Schema.Type<typeof RagDocumentSchema>
 
 export const RagChunkSchema = Schema.Struct({
-  id: Schema.String,
-  ragSetId: Schema.String,
-  documentId: Schema.String,
-  content: Schema.String,
-  position: Schema.Number,
-  tokenCount: Schema.Number,
+  id: NonEmptyTrimmedString,
+  ragSetId: NonEmptyTrimmedString,
+  documentId: NonEmptyTrimmedString,
+  content: NonEmptyTrimmedString,
+  position: NonNegativeInteger,
+  tokenCount: PositiveInteger,
   metadata: Schema.optional(RagMetadataSchema)
 })
 export type RagChunk = Schema.Schema.Type<typeof RagChunkSchema>
 
 export const ExtractedRagDocumentSchema = Schema.Struct({
-  content: Schema.String,
-  title: Schema.optional(Schema.String),
+  content: NonEmptyTrimmedString,
+  title: Schema.optional(NonEmptyTrimmedString),
   metadata: Schema.optional(RagMetadataSchema)
 })
 export type ExtractedRagDocument = Schema.Schema.Type<typeof ExtractedRagDocumentSchema>
 
 export const RagSearchScopeSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal('RagSet'), id: Schema.String }),
-  Schema.Struct({ _tag: Schema.Literal('RagSets'), ids: Schema.Array(Schema.String) })
+  Schema.Struct({ _tag: Schema.Literal('RagSet'), id: NonEmptyTrimmedString }),
+  Schema.Struct({ _tag: Schema.Literal('RagSets'), ids: Schema.Array(NonEmptyTrimmedString) })
 ])
 export type RagSearchScope = Schema.Schema.Type<typeof RagSearchScopeSchema>
 

@@ -1,13 +1,16 @@
-import { asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { AppRagStoreError } from './errors'
 import type { AppRagChunkRecord } from './document-records'
 
-export const getRagChunks = (chunkIds: ReadonlyArray<string>) =>
+export const getRagChunks = (input: {
+  readonly userId: string
+  readonly chunkIds: ReadonlyArray<string>
+}) =>
   Effect.gen(function* () {
-    if (chunkIds.length === 0) {
+    if (input.chunkIds.length === 0) {
       return []
     }
 
@@ -21,7 +24,9 @@ export const getRagChunks = (chunkIds: ReadonlyArray<string>) =>
       .from(schema.ragChunk)
       .innerJoin(schema.ragDocument, eq(schema.ragDocument.id, schema.ragChunk.documentId))
       .innerJoin(schema.storageObject, eq(schema.storageObject.id, schema.ragDocument.storageObjectId))
-      .where(inArray(schema.ragChunk.id, [...chunkIds]))
+      .where(
+        and(inArray(schema.ragChunk.id, [...input.chunkIds]), eq(schema.storageObject.userId, input.userId))
+      )
       .orderBy(asc(schema.ragChunk.documentId), asc(schema.ragChunk.position))
 
     return rows satisfies ReadonlyArray<AppRagChunkRecord>
