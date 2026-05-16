@@ -8,6 +8,8 @@ import {
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'
+import { RagSummarizationError } from '@yolk/rag/errors'
+import { RagSummarizer } from '@yolk/rag/summarization'
 import { AppRagSummarizerError } from './errors'
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'
@@ -18,7 +20,7 @@ const maxDocumentCharacters = 80_000
 export const SummarizeRagDocumentInputSchema = Schema.Struct({
   content: Schema.String,
   sourceTitle: Schema.optional(Schema.String),
-  metadata: Schema.Record(Schema.String, Schema.Unknown)
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 })
 
 export const RagDocumentSummarySchema = Schema.Struct({
@@ -78,7 +80,7 @@ const buildPrompt = (input: SummarizeRagDocumentInput) =>
     '',
     '<source>',
     `title: ${input.sourceTitle ?? 'unknown'}`,
-    `metadata: ${String(input.metadata.title ?? '')}`,
+    `metadata: ${String(input.metadata?.title ?? '')}`,
     '</source>',
     '',
     '<document>',
@@ -173,19 +175,8 @@ const decodeSummary = (content: string) =>
 const firstChoiceContent = (response: typeof OpenAiChatCompletionResponseSchema.Type) =>
   response.choices[0]?.message.content
 
-type RagDocumentSummarizerShape = {
-  readonly summarize: (
-    input: SummarizeRagDocumentInput
-  ) => Effect.Effect<RagDocumentSummary, AppRagSummarizerError>
-}
-
-export class RagDocumentSummarizer extends Context.Service<
-  RagDocumentSummarizer,
-  RagDocumentSummarizerShape
->()('@app/RagDocumentSummarizer') {}
-
 export const OpenAiRagDocumentSummarizerLayer = Layer.effect(
-  RagDocumentSummarizer,
+  RagSummarizer,
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const config = yield* RagDocumentSummarizerConfig
@@ -225,9 +216,10 @@ export const OpenAiRagDocumentSummarizerLayer = Layer.effect(
         Effect.withSpan('rag.document.summarize'),
         Effect.retry({ while: isTransientError, schedule: retryPolicy }),
         Effect.mapError(error =>
-          error instanceof AppRagSummarizerError
-            ? error
-            : new AppRagSummarizerError({ message: unknownToMessage(error), cause: error })
+          new RagSummarizationError({
+            message: error instanceof AppRagSummarizerError ? error.message : unknownToMessage(error),
+            cause: error
+          })
         )
       )
 

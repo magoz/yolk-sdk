@@ -5,7 +5,7 @@ User-facing source ingestion and index status UI.
 ## Current scope
 
 - `/storage` is dynamic/session-gated.
-- V1 supports pasted text sources.
+- V1 supports pasted text sources and UTF-8 text-like file uploads.
 - Mutations use server actions in `lib/core/storage/*-action.ts`.
 - Ingestion runs synchronously through `@yolk/rag` + `AppRagLayer`; future background queues should preserve the same document status lifecycle.
 

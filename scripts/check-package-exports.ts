@@ -38,6 +38,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './ingestion',
       './retrieval',
       './store',
+      './summarization',
       './vector-store'
     ],
     tinyRoot: false

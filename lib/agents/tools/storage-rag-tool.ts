@@ -164,8 +164,10 @@ const formatResults = (query: string, results: ReadonlyArray<RagSearchResult>) =
     '',
     ...results.map((result, index) =>
       [
-        `Result ${index + 1}`,
+        `Citation [${index + 1}]`,
         `Source: ${sourceLabel(result)}`,
+        `Document: ${result.document.id}`,
+        `Chunk: ${result.chunk.id}`,
         `Score: ${result.score.toFixed(3)}`,
         resultText(result)
       ].join('\n')
@@ -175,8 +177,9 @@ const formatResults = (query: string, results: ReadonlyArray<RagSearchResult>) =
 
 const structuredResult = (query: string, results: ReadonlyArray<RagSearchResult>) => ({
   query,
-  results: results.map(result => ({
+  results: results.map((result, index) => ({
     score: result.score,
+    citation: index + 1,
     documentId: result.document.id,
     source: sourceLabel(result),
     chunkId: result.chunk.id,

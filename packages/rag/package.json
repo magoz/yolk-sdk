@@ -45,6 +45,10 @@
       "types": "./src/store.ts",
       "default": "./src/store.ts"
     },
+    "./summarization": {
+      "types": "./src/summarization.ts",
+      "default": "./src/summarization.ts"
+    },
     "./vector-store": {
       "types": "./src/vector-store.ts",
       "default": "./src/vector-store.ts"

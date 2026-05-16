@@ -29,12 +29,13 @@
 | `@yolk/rag/vector-store` | Legacy vector-store aliases over `RagStore` names |
 | `@yolk/rag/retrieval` | Retriever interface and context packing |
 | `@yolk/rag/ingestion` | Generic ingestion pipeline |
+| `@yolk/rag/summarization` | Optional document title/summary service contract |
 | `@yolk/rag/agent` | Agent tool adapter helpers |
 
 ## Contracts
 
 - `RagStore` is one lifecycle contract: sets, documents, chunk replacement, vector search, context chunks.
-- Ingestion is a sync Effect program over `RagStore | RagExtractor | RagChunker | RagEmbedder`; hosts choose queues/workflows.
+- Ingestion is a sync Effect program over `RagStore | RagExtractor | RagChunker | RagEmbedder | RagSummarizer`; hosts choose queues/workflows.
 - Default chunker is sentence/token, no overlap; retrieval uses `contextChunks` for adjacent content.
 - Agent helper requires host-provided scope resolver; package never decides searchable sets.
 

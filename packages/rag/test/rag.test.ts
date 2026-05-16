@@ -15,6 +15,7 @@ import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunk
 import { RagEmbedder } from '@yolk/rag/embeddings'
 import { RagExtractor } from '@yolk/rag/extraction'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
+import { RagSummarizer } from '@yolk/rag/summarization'
 import { packRagContext, retrieveRag } from '@yolk/rag/retrieval'
 import type { RagRetriever } from '@yolk/rag/retrieval'
 import {
@@ -124,6 +125,30 @@ describe('@yolk/rag', () => {
       expect(result).toBeInstanceOf(RagChunkingError)
     }))
 
+  it.effect('chunks large documents without exceeding token bounds', () =>
+    Effect.gen(function* () {
+      const content = Array.from({ length: 200 }, (_, index) => `Sentence ${index} has useful searchable content.`).join(' ')
+      const chunks = yield* chunkRagText(
+        { ragSetId: 'set_1', documentId: 'large_doc', content },
+        32
+      )
+
+      expect(chunks.length).toBeGreaterThan(10)
+      expect(chunks.every(chunk => chunk.tokenCount <= 32)).toBe(true)
+      expect(chunks.map(chunk => chunk.position)).toEqual(chunks.map((_, index) => index))
+    }))
+
+  it.effect('splits oversized tokens for very long unbroken text', () =>
+    Effect.gen(function* () {
+      const chunks = yield* chunkRagText(
+        { ragSetId: 'set_1', documentId: 'long_word_doc', content: 'a'.repeat(20_000) },
+        128
+      )
+
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks.every(chunk => chunk.tokenCount <= 128)).toBe(true)
+    }))
+
   it.effect('ingests extracted documents through package services', () => {
     const ragSet: RagSet = makeRagSet({
       id: 'set_1',
@@ -178,9 +203,11 @@ describe('@yolk/rag', () => {
         extract: () =>
           Effect.succeed({
             content: 'Alpha beta. Gamma delta.',
-            title: 'Doc title',
-            summary: 'Doc summary'
+            title: 'Doc title'
           })
+      }),
+      Layer.succeed(RagSummarizer, {
+        summarize: () => Effect.succeed({ title: 'Doc title', summary: 'Doc summary' })
       }),
       Layer.succeed(RagChunker, makeDefaultRagChunker({ maxTokens: 8 })),
       Layer.succeed(RagEmbedder, {
@@ -246,6 +273,7 @@ describe('@yolk/rag', () => {
     const layer = Layer.mergeAll(
       Layer.succeed(RagStore, store),
       Layer.succeed(RagExtractor, { extract: () => Effect.fail(extractionError) }),
+      Layer.succeed(RagSummarizer, { summarize: () => Effect.succeed({}) }),
       Layer.succeed(RagChunker, makeDefaultRagChunker({ maxTokens: 8 })),
       Layer.succeed(RagEmbedder, {
         embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
@@ -307,6 +335,7 @@ describe('@yolk/rag', () => {
       Layer.succeed(RagExtractor, {
         extract: () => Effect.succeed({ content: 'ignored', title: 'Doc title' })
       }),
+      Layer.succeed(RagSummarizer, { summarize: () => Effect.succeed({ title: 'Doc title' }) }),
       Layer.succeed(RagChunker, {
         chunk: () =>
           Effect.succeed([
@@ -387,6 +416,7 @@ describe('@yolk/rag', () => {
       Layer.succeed(RagExtractor, {
         extract: () => Effect.succeed({ content: 'ignored', title: 'Doc title' })
       }),
+      Layer.succeed(RagSummarizer, { summarize: () => Effect.succeed({ title: 'Doc title' }) }),
       Layer.succeed(RagChunker, {
         chunk: () =>
           Effect.succeed([

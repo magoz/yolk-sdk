@@ -20,9 +20,14 @@ export class RagEmbeddingError extends Data.TaggedError('RagEmbeddingError')<{
   readonly cause?: unknown
 }> {}
 
+export class RagSummarizationError extends Data.TaggedError('RagSummarizationError')<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
 export class RagIngestionError extends Data.TaggedError('RagIngestionError')<{
   readonly message: string
-  readonly stage: 'store' | 'extract' | 'chunk' | 'embed'
+  readonly stage: 'store' | 'extract' | 'chunk' | 'embed' | 'summarize'
   readonly cause?: unknown
 }> {}
 

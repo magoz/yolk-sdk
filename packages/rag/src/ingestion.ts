@@ -2,6 +2,7 @@ import { Array as Arr, Effect } from 'effect'
 import { RagChunker } from './chunking.ts'
 import { RagEmbedder } from './embeddings.ts'
 import { RagExtractor } from './extraction.ts'
+import { RagSummarizer } from './summarization.ts'
 import type { LoadedRagSource } from './extraction.ts'
 import { RagIngestionError } from './errors.ts'
 import { RagStore } from './store.ts'
@@ -29,6 +30,7 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
     const extractor = yield* RagExtractor
     const chunker = yield* RagChunker
     const embedder = yield* RagEmbedder
+    const summarizer = yield* RagSummarizer
     const ragSet = yield* store
       .getSet(input.ragSetId)
       .pipe(
@@ -75,21 +77,36 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         )
       )
 
-    const embeddings = yield* embedder
-      .embedTexts(chunks.map(chunk => chunk.content))
-      .pipe(
-        Effect.mapError(
-          error => new RagIngestionError({ message: error.message, stage: 'embed', cause: error })
-        )
-      )
+    const indexed = yield* Effect.all(
+      {
+        embeddings: embedder.embedTexts(chunks.map(chunk => chunk.content)).pipe(
+          Effect.mapError(
+            error => new RagIngestionError({ message: error.message, stage: 'embed', cause: error })
+          )
+        ),
+        summary: summarizer
+          .summarize({
+            content: extracted.content,
+            sourceTitle: extracted.title,
+            metadata: extracted.metadata
+          })
+          .pipe(
+            Effect.mapError(
+              error =>
+                new RagIngestionError({ message: error.message, stage: 'summarize', cause: error })
+            )
+          )
+      },
+      { concurrency: 'unbounded' }
+    )
 
-    if (embeddings.length !== chunks.length) {
+    if (indexed.embeddings.length !== chunks.length) {
       return yield* Effect.fail(
         new RagIngestionError({ message: 'Embedding count did not match chunk count', stage: 'embed' })
       )
     }
 
-    const indexedChunks = Arr.zip(chunks, embeddings).map(([chunk, embedding]) => ({
+    const indexedChunks = Arr.zip(chunks, indexed.embeddings).map(([chunk, embedding]) => ({
       chunk,
       embedding
     }))
@@ -110,8 +127,8 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
       .markDocumentReady({
         ragSetId: input.ragSetId,
         documentId: input.documentId,
-        title: extracted.title,
-        summary: extracted.summary,
+        title: indexed.summary.title ?? extracted.title,
+        summary: indexed.summary.summary ?? extracted.summary,
         contentHash: input.contentHash,
         tokenCount,
         chunkCount: chunks.length
