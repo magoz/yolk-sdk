@@ -1,5 +1,6 @@
 import * as Schema from 'effect/Schema'
 import { TokenBrokerResponse } from '@yolk/oauth'
+import { SkillsetManifest } from '@yolk/skillset'
 import { McpRemoteServerConfigsSchema } from '../../../lib/agents/mcp/schema.ts'
 
 export const BootstrapRequest = Schema.Struct({
@@ -7,7 +8,8 @@ export const BootstrapRequest = Schema.Struct({
   tokenEndpoint: Schema.String,
   codexResponsesEndpoint: Schema.optional(Schema.String),
   bridgeSecret: Schema.String,
-  mcpServers: Schema.optional(McpRemoteServerConfigsSchema)
+  mcpServers: Schema.optional(McpRemoteServerConfigsSchema),
+  skillset: Schema.optional(SkillsetManifest)
 })
 export type BootstrapRequest = typeof BootstrapRequest.Type
 

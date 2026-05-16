@@ -104,6 +104,48 @@ export const verification = pgTable('verification', {
 })
 
 ////////////////////////////////////////////////////////////////////////
+// AGENT SKILLS
+////////////////////////////////////////////////////////////////////////
+
+export const agentSkill = pgTable(
+  'agentSkill',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    content: text('content').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+  },
+  table => [
+    uniqueIndex('agentSkill_userId_name_key').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.name.asc().nullsLast()
+    ),
+    index('agentSkill_userId_enabled_idx').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.enabled.asc().nullsLast()
+    ),
+    check('agentSkill_name_nonempty_check', sql`length(${table.name}) > 0`),
+    check('agentSkill_description_nonempty_check', sql`length(${table.description}) > 0`),
+    check('agentSkill_content_nonempty_check', sql`length(${table.content}) > 0`)
+  ]
+)
+export type AgentSkill = typeof agentSkill.$inferSelect
+export type InsertAgentSkill = typeof agentSkill.$inferInsert
+
+////////////////////////////////////////////////////////////////////////
 // STORAGE / RAG
 ////////////////////////////////////////////////////////////////////////
 
@@ -264,6 +306,6 @@ export type RagChunk = typeof ragChunk.$inferSelect
 export type InsertRagChunk = typeof ragChunk.$inferInsert
 
 export const relations = defineRelations(
-  { user, session, account, verification, storageObject, ragSet, ragDocument, ragChunk },
+  { user, session, account, verification, agentSkill, storageObject, ragSet, ragDocument, ragChunk },
   () => ({})
 )

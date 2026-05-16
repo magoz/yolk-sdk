@@ -1,7 +1,7 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Array as Arr, Data, Effect, Option, Schema } from 'effect'
 import { AppLayer } from '@/lib/layers'
-import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
+import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { commandSummary, renderCommandResponse } from './route-model'
@@ -25,8 +25,8 @@ class AgentCommandRenderRequest extends Schema.Class<AgentCommandRenderRequest>(
 }) {}
 
 const listHandler = Effect.gen(function* () {
-  yield* getSession()
-  const skillset = yield* loadProjectSkillset()
+  const session = yield* getSession()
+  const skillset = yield* loadRuntimeSkillset({ userId: session.user.id })
 
   return yield* HttpServerResponse.json(
     { commands: Arr.map(skillset.commands, commandSummary) },
@@ -51,9 +51,9 @@ const listHandler = Effect.gen(function* () {
 )
 
 const renderHandler = Effect.gen(function* () {
-  yield* getSession()
+  const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(AgentCommandRenderRequest)
-  const skillset = yield* loadProjectSkillset()
+  const skillset = yield* loadRuntimeSkillset({ userId: session.user.id })
   const command = yield* Option.match(
     Arr.findFirst(skillset.commands, item => item.name === input.command),
     {

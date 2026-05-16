@@ -36,7 +36,7 @@ import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { makeAnthropicClaudeProviderLayer } from '@/lib/agents/providers/anthropic-claude-provider'
 import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
-import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
+import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeStorageRagToolModule } from '@/lib/agents/tools/storage-rag-tool'
@@ -210,7 +210,7 @@ export const makeAgentTextRuntime = (
 ) =>
   Effect.gen(function* () {
     const baseConfig = yield* getAgentTextConfig()
-    const skillset = yield* loadProjectSkillset()
+    const skillset = yield* loadRuntimeSkillset({ userId })
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
     const storageToolModule = makeStorageRagToolModule(searchStorageForAgent)

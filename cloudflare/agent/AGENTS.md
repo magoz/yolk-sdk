@@ -11,7 +11,7 @@ Cloudflare app for the Yolk durable agent runtime.
 - Current path runs Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and proxy-first Codex streaming after brokered token handoff.
 - DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
-- Skillset support is bundle/static only: `src/generated/skillset.ts` is produced by `pnpm skillset:build`; no filesystem reads at Worker runtime.
+- Skillset support is bootstrap-injected: Next sends the runtime `SkillsetManifest`; `src/generated/skillset.ts` remains a smoke/unbootstrapped fallback. No filesystem reads at Worker runtime.
 - Tool modules are runtime-adapter explicit. App tool modules are runtime-portable; never import Node-only code here. Remote MCP config arrives via bootstrap, not Worker env/filesystem.
 - `src/tool-modules.ts` delegates to shared `makeTextToolModules`; `test/tool-modules.test.ts` locks Next/Cloudflare tool parity, including fake remote MCP.
 - Do not expand into full product infrastructure until package APIs are stable.
@@ -85,7 +85,7 @@ Do not build these here yet unless explicitly requested:
 - Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk/agent/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.
-- Import generated skillsets from `src/generated/skillset.ts`; never add Node filesystem adapters to Worker/DO code.
+- Use bootstrap-injected skillsets or generated fallback; never add Node filesystem adapters to Worker/DO code.
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk/agent/runtime` helpers.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.

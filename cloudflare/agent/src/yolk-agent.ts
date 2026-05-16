@@ -85,16 +85,24 @@ const anthropicTokenKey = 'anthropic-access-token'
 
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
 
-const availableSkills = formatAvailableSkills(generatedSkillsetManifest.skills)
-const cloudflareSkillset: MergedSkillset = {
-  skills: generatedSkillsetManifest.skills,
-  commands: generatedSkillsetManifest.commands
+const skillsetFromBootstrap = (bootstrap: BootstrapRequestType | undefined): MergedSkillset => {
+  const manifest = bootstrap?.skillset ?? generatedSkillsetManifest
+
+  return {
+    skills: manifest.skills,
+    commands: manifest.commands
+  }
 }
+
+const systemPromptWithSkills = (skillset: MergedSkillset) => {
+  const availableSkills = formatAvailableSkills(skillset.skills)
+
+  return availableSkills.length === 0
+    ? cloudflareSystemPrompt
+    : `${cloudflareSystemPrompt}\n\n${availableSkills}`
+}
+
 const runtimeBaseConfig = {
-  systemPrompt:
-    availableSkills.length === 0
-      ? cloudflareSystemPrompt
-      : `${cloudflareSystemPrompt}\n\n${availableSkills}`,
   model: agentTextModel
 }
 
@@ -364,6 +372,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
 
           const modules = yield* makeCloudflareTextToolModules(bootstrap?.mcpServers ?? [])
+          const skillset = skillsetFromBootstrap(bootstrap)
 
           return yield* resolveAgentToolSet({
             modules,
@@ -371,7 +380,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
               surface: 'text',
               route: '/agent/cloudflare',
               userId: bootstrap?.userId ?? sessionId,
-              skillset: cloudflareSkillset
+              skillset
             }
           }).pipe(Effect.mapError(toolRegistryErrorToAgentError))
         })
@@ -450,6 +459,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         }
 
         const toolSet = resolvedToolSet.success
+        const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+        const skillset = skillsetFromBootstrap(bootstrap)
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
@@ -461,7 +472,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             runId: crypto.randomUUID(),
             expectedRevision: input.expectedRevision
           },
-          { ...runtimeBaseConfig, model, tools: toolSet.tools, reasoningEffort: input.reasoningEffort }
+          {
+            ...runtimeBaseConfig,
+            model,
+            systemPrompt: systemPromptWithSkills(skillset),
+            tools: toolSet.tools,
+            reasoningEffort: input.reasoningEffort
+          }
         ).pipe(
           Stream.runForEach(event => sendEvent(socket, event)),
           Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),

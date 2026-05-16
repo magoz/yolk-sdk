@@ -11,6 +11,10 @@ import { hasAnthropicClaudeAuth } from '@/lib/core/agent/anthropic-claude-auth'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
+import {
+  loadRuntimeSkillset,
+  skillsetManifestFromMergedSkillset
+} from '@/lib/agents/skillset/project-source'
 import { AgentPlayground, type AgentRuntimeInfo } from './playground'
 
 export type AgentRuntime = 'next' | 'cloudflare' | 'workflow'
@@ -117,13 +121,15 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
       yield* Config.option(Config.string('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
     )
     const mcpServers = yield* loadProjectMcpServers()
+    const skillset = yield* loadRuntimeSkillset({ userId: input.userId })
     const client = yield* HttpClient.HttpClient
     const body = yield* encodeJson({
       userId: input.userId,
       tokenEndpoint: `${appUrl}/api/internal/cloudflare/codex-token`,
       codexResponsesEndpoint: `${appUrl}/api/internal/cloudflare/codex-responses`,
       bridgeSecret,
-      mcpServers
+      mcpServers,
+      skillset: skillsetManifestFromMergedSkillset(skillset)
     })
     const response = yield* client.execute(
       HttpClientRequest.post(`${workerUrl}/bootstrap/${encodeURIComponent(input.sessionId)}`).pipe(
