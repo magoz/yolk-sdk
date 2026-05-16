@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
 import type { ToolRegistration } from '@yolk/agent/tools'
 import { ToolDef, ToolResult } from '@yolk/agent/protocol'
+import type { RagSearchScope } from './documents.ts'
 import type { RagRetriever } from './retrieval.ts'
 import { packRagContext } from './retrieval.ts'
 
@@ -10,55 +11,90 @@ const RagToolParams = Schema.Struct({
   query: Schema.String
 })
 
-export type MakeRagToolOptions = {
-  readonly name: string
-  readonly description: string
-  readonly limit: number
+export type RagToolScopeResolver<Context> =
+  | RagSearchScope
+  | ((context: Context) => Effect.Effect<RagSearchScope, ToolError>)
+
+export type MakeRagToolOptions<Context> = {
+  readonly scope: RagToolScopeResolver<Context>
+  readonly name?: string
+  readonly description?: string
+  readonly limit?: number
+  readonly minScore?: number
+  readonly contextChunks?: number
 }
 
-export const defaultRagToolOptions: MakeRagToolOptions = {
-  name: 'search_knowledge',
-  description: 'Search the configured knowledge index.',
-  limit: 8
+const resolveScope = <Context>(resolver: RagToolScopeResolver<Context>, context: Context) => {
+  if (typeof resolver === 'function') {
+    return resolver(context)
+  }
+
+  return Effect.succeed(resolver)
 }
 
 export const makeRagTool = <Context>(
   retriever: RagRetriever,
-  options: MakeRagToolOptions = defaultRagToolOptions
-): ToolRegistration<Context> => ({
-  def: new ToolDef({
-    name: options.name,
-    description: options.description,
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['query'],
-      properties: {
-        query: { type: 'string' }
+  options: MakeRagToolOptions<Context>
+): ToolRegistration<Context> => {
+  const name = options.name ?? 'search_knowledge'
+
+  return {
+    def: new ToolDef({
+      name,
+      description: options.description ?? 'Search the configured knowledge index.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['query'],
+        properties: {
+          query: { type: 'string' }
+        }
       }
-    }
-  }),
-  access: 'read',
-  execute: input =>
-    Schema.decodeUnknownEffect(RagToolParams)(input.call.params).pipe(
-      Effect.flatMap(params =>
-        retriever.retrieve({ scope: { _tag: 'RagSets', ids: [] }, query: params.query, limit: options.limit }).pipe(
-          Effect.map(results => packRagContext(params.query, results))
-        )
-      ),
-      Effect.map(context =>
-        new ToolResult({
-          toolCallId: input.call.id,
-          content: context.text,
-          structuredContent: context
-        })
-      ),
-      Effect.mapError(error =>
-        new ToolError({
-          tool: input.call.name,
-          message: error.message,
-          cause: 'execution'
+    }),
+    access: 'read',
+    execute: input =>
+      Schema.decodeUnknownEffect(RagToolParams)(input.call.params).pipe(
+        Effect.mapError(
+          error =>
+            new ToolError({
+              tool: input.call.name,
+              message: error.message,
+              cause: 'validation'
+            })
+        ),
+        Effect.flatMap(params =>
+          resolveScope(options.scope, input.context).pipe(
+            Effect.flatMap(scope =>
+              retriever.retrieve({
+                scope,
+                query: params.query,
+                limit: options.limit,
+                minScore: options.minScore,
+                contextChunks: options.contextChunks
+              })
+            ),
+            Effect.map(results => packRagContext(params.query, results))
+          )
+        ),
+        Effect.map(
+          context =>
+            new ToolResult({
+              toolCallId: input.call.id,
+              content: context.text,
+              structuredContent: context
+            })
+        ),
+        Effect.mapError(error => {
+          if (error instanceof ToolError) {
+            return error
+          }
+
+          return new ToolError({
+            tool: input.call.name,
+            message: error.message,
+            cause: 'execution'
+          })
         })
       )
-    )
-})
+  }
+}

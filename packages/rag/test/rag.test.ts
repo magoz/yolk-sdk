@@ -1,5 +1,7 @@
 import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
+import { ToolCall } from '@yolk/agent/protocol'
+import { makeRagTool } from '@yolk/rag/agent'
 import { defaultRagChunkingConfig, makeRagSet } from '@yolk/rag/documents'
 import type { RagDocument, RagSet } from '@yolk/rag/documents'
 import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunking'
@@ -7,6 +9,7 @@ import { RagEmbedder } from '@yolk/rag/embeddings'
 import { RagExtractor } from '@yolk/rag/extraction'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
 import { packRagContext, retrieveRag } from '@yolk/rag/retrieval'
+import type { RagRetriever } from '@yolk/rag/retrieval'
 import { RagChunkingError, RagStoreError } from '@yolk/rag/errors'
 import { RagStore } from '@yolk/rag/store'
 import type { RagStoreApi } from '@yolk/rag/store'
@@ -229,5 +232,46 @@ describe('@yolk/rag', () => {
       expect(results[0]?.score).toBe(0.9)
       expect(context.text).toBe('before\n\nmatch')
     }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('adapts retrieval as an agent tool', () => {
+    const document: RagDocument = {
+      id: 'doc_1',
+      ragSetId: 'set_1',
+      source: { _tag: 'Text', label: 'note' },
+      status: 'ready'
+    }
+    const retriever: RagRetriever = {
+      retrieve: input =>
+        Effect.succeed([
+          {
+            chunk: {
+              id: 'chunk_1',
+              ragSetId: input.scope._tag === 'RagSet' ? input.scope.id : 'set_1',
+              documentId: 'doc_1',
+              content: `result for ${input.query}`,
+              position: 0,
+              tokenCount: 3
+            },
+            score: 0.9,
+            document
+          }
+        ])
+    }
+    const tool = makeRagTool<{ readonly ragSetId: string }>(retriever, {
+      scope: context => Effect.succeed({ _tag: 'RagSet', id: context.ragSetId }),
+      limit: 3,
+      contextChunks: 1
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* tool.execute({
+        context: { ragSetId: 'set_1' },
+        call: ToolCall.make({ id: 'call_1', name: 'search_knowledge', params: { query: 'docs' } })
+      })
+
+      expect(result.content).toBe('result for docs')
+      expect(result.structuredContent).toMatchObject({ query: 'docs' })
+    })
   })
 })
