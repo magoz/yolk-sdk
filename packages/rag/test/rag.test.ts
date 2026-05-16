@@ -6,6 +6,7 @@ import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunk
 import { RagEmbedder } from '@yolk/rag/embeddings'
 import { RagExtractor } from '@yolk/rag/extraction'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
+import { packRagContext, retrieveRag } from '@yolk/rag/retrieval'
 import { RagChunkingError, RagStoreError } from '@yolk/rag/errors'
 import { RagStore } from '@yolk/rag/store'
 import type { RagStoreApi } from '@yolk/rag/store'
@@ -151,6 +152,82 @@ describe('@yolk/rag', () => {
       expect(document.title).toBe('Doc title')
       expect(documents.map(item => item.status)).toEqual(['processing'])
       expect(replacedChunkCount).toBe(1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('retrieves vector matches with adjacent context', () => {
+    const document: RagDocument = {
+      id: 'doc_1',
+      ragSetId: 'set_1',
+      source: { _tag: 'Text', label: 'note' },
+      status: 'ready'
+    }
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () =>
+        Effect.succeed(
+          makeRagSet({ id: 'set_1', embeddingConfig: { model: 'test-embedding', dimensions: 2 } })
+        ),
+      upsertDocument: (input: { readonly document: RagDocument }) => Effect.succeed(input.document),
+      markDocumentProcessing: () => Effect.succeed(document),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () => Effect.succeed(document),
+      markDocumentError: () => Effect.void,
+      deleteDocument: () => Effect.void,
+      searchChunks: () =>
+        Effect.succeed([
+          {
+            chunk: {
+              id: 'chunk_2',
+              ragSetId: 'set_1',
+              documentId: 'doc_1',
+              content: 'match',
+              position: 1,
+              tokenCount: 1
+            },
+            score: 0.9,
+            document
+          }
+        ]),
+      getContextChunks: () =>
+        Effect.succeed([
+          {
+            id: 'chunk_1',
+            ragSetId: 'set_1',
+            documentId: 'doc_1',
+            content: 'before',
+            position: 0,
+            tokenCount: 1
+          },
+          {
+            id: 'chunk_2',
+            ragSetId: 'set_1',
+            documentId: 'doc_1',
+            content: 'match',
+            position: 1,
+            tokenCount: 1
+          }
+        ])
+    } satisfies RagStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const results = yield* retrieveRag({
+        scope: { _tag: 'RagSet', id: 'set_1' },
+        query: 'alpha',
+        contextChunks: 1
+      })
+      const context = packRagContext('alpha', results)
+
+      expect(results[0]?.score).toBe(0.9)
+      expect(context.text).toBe('before\n\nmatch')
     }).pipe(Effect.provide(layer))
   })
 })
