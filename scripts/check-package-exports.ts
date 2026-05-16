@@ -33,8 +33,11 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './chunking',
       './documents',
       './embeddings',
+      './errors',
+      './extraction',
       './ingestion',
       './retrieval',
+      './store',
       './vector-store'
     ],
     tinyRoot: false
