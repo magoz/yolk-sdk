@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@yolk/agent": "workspace:^",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "gpt-tokenizer": "^3.4.0"
   }
 }
