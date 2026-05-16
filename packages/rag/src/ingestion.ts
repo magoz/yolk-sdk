@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Array as Arr, Effect } from 'effect'
 import { RagChunker } from './chunking.ts'
 import { RagEmbedder } from './embeddings.ts'
 import { RagExtractor } from './extraction.ts'
@@ -31,7 +31,11 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
     const embedder = yield* RagEmbedder
     const ragSet = yield* store
       .getSet(input.ragSetId)
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'store', cause: error })
+        )
+      )
 
     yield* store
       .upsertDocument({
@@ -43,11 +47,19 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
           metadata: input.source.metadata
         }
       })
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'store', cause: error })
+        )
+      )
 
     const extracted = yield* extractor
       .extract(input.source)
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'extract' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'extract', cause: error })
+        )
+      )
 
     const chunks = yield* chunker
       .chunk({
@@ -57,11 +69,19 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         maxTokens: ragSet.chunkingConfig.maxTokens,
         metadata: extracted.metadata
       })
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'chunk' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'chunk', cause: error })
+        )
+      )
 
     const embeddings = yield* embedder
       .embedTexts(chunks.map(chunk => chunk.content))
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'embed' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'embed', cause: error })
+        )
+      )
 
     if (embeddings.length !== chunks.length) {
       return yield* Effect.fail(
@@ -69,9 +89,9 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
       )
     }
 
-    const indexedChunks = chunks.map((chunk, index) => ({
+    const indexedChunks = Arr.zip(chunks, embeddings).map(([chunk, embedding]) => ({
       chunk,
-      embedding: embeddings[index] ?? []
+      embedding
     }))
     yield* store
       .replaceDocumentChunks({
@@ -79,7 +99,11 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         documentId: input.documentId,
         chunks: indexedChunks
       })
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'store', cause: error })
+        )
+      )
 
     const tokenCount = chunks.reduce((total, chunk) => total + chunk.tokenCount, 0)
     return yield* store
@@ -91,7 +115,11 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         tokenCount,
         chunkCount: chunks.length
       })
-      .pipe(Effect.mapError(error => new RagIngestionError({ message: error.message, stage: 'store' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagIngestionError({ message: error.message, stage: 'store', cause: error })
+        )
+      )
   }).pipe(
     Effect.catch(error => markErrorBestEffort(input, error).pipe(Effect.flatMap(() => Effect.fail(error))))
   )
