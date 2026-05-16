@@ -32,3 +32,4 @@ App-owned provider adapters from protocol requests to vendor APIs.
 
 - Keep vendor event-shape regressions near provider implementation.
 - Cover request lowering, images, tool calls, reasoning deltas, usage, empty responses, cancellation.
+- Anthropic Claude provider tests cover multimodal/tool transcript lowering, thinking/tool-use response events, cache usage normalization, and retryable rate-limit errors.
