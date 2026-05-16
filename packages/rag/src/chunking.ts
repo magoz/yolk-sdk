@@ -1,3 +1,4 @@
+import { Context } from 'effect'
 import type { Effect } from 'effect'
 import type { RagChunk, RagMetadata } from './documents.ts'
 import type { RagChunkingError } from './errors.ts'
@@ -9,8 +10,12 @@ export type ChunkRagDocumentInput = {
   readonly metadata?: RagMetadata
 }
 
-export type RagChunker = {
+export type RagChunkerApi = {
   readonly chunk: (
     input: ChunkRagDocumentInput
   ) => Effect.Effect<ReadonlyArray<RagChunk>, RagChunkingError>
 }
+
+export class RagChunker extends Context.Service<RagChunker, RagChunkerApi>()(
+  '@yolk/rag/RagChunker'
+) {}

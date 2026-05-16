@@ -29,6 +29,10 @@
       "types": "./src/errors.ts",
       "default": "./src/errors.ts"
     },
+    "./extraction": {
+      "types": "./src/extraction.ts",
+      "default": "./src/extraction.ts"
+    },
     "./ingestion": {
       "types": "./src/ingestion.ts",
       "default": "./src/ingestion.ts"
@@ -36,6 +40,10 @@
     "./retrieval": {
       "types": "./src/retrieval.ts",
       "default": "./src/retrieval.ts"
+    },
+    "./store": {
+      "types": "./src/store.ts",
+      "default": "./src/store.ts"
     },
     "./vector-store": {
       "types": "./src/vector-store.ts",
