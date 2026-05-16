@@ -1,8 +1,9 @@
 import { createId } from '@paralleldrive/cuid2'
 import { eq } from 'drizzle-orm'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeRagSet } from '@yolk/rag/documents'
+import { RagEmbedder } from '@yolk/rag/embeddings'
 import { RagStore } from '@yolk/rag/store'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
@@ -203,6 +204,12 @@ describeWithDb('DrizzleRagStoreLayer', () => {
       expect(afterDelete).toEqual([])
     }).pipe(
       Effect.ensuring(cleanup),
+      Effect.provide(
+        Layer.succeed(RagEmbedder, {
+          embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
+          embedQuery: () => Effect.succeed(embedding(0))
+        })
+      ),
       Effect.provide(DrizzleRagStoreLayer),
       Effect.provide(Db.layer),
       Effect.scoped
