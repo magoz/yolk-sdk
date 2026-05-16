@@ -78,6 +78,7 @@ export type RagChunk = Schema.Schema.Type<typeof RagChunkSchema>
 export const ExtractedRagDocumentSchema = Schema.Struct({
   content: NonEmptyTrimmedString,
   title: Schema.optional(NonEmptyTrimmedString),
+  summary: Schema.optional(Schema.String),
   metadata: Schema.optional(RagMetadataSchema)
 })
 export type ExtractedRagDocument = Schema.Schema.Type<typeof ExtractedRagDocumentSchema>

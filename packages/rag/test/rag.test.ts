@@ -152,13 +152,18 @@ describe('@yolk/rag', () => {
         Effect.sync(() => {
           replacedChunkCount = input.chunks.length
         }),
-      markDocumentReady: (input: { readonly title?: string; readonly chunkCount: number }) =>
+      markDocumentReady: (input: {
+        readonly title?: string
+        readonly summary?: string
+        readonly chunkCount: number
+      }) =>
         Effect.succeed({
           id: 'doc_1',
           ragSetId: 'set_1',
           source: { _tag: 'Text', label: 'note' },
           status: 'ready',
           title: input.title,
+          summary: input.summary,
           chunkCount: input.chunkCount
         }),
       markDocumentError: () => Effect.void,
@@ -170,7 +175,12 @@ describe('@yolk/rag', () => {
     const layer = Layer.mergeAll(
       Layer.succeed(RagStore, store),
       Layer.succeed(RagExtractor, {
-        extract: () => Effect.succeed({ content: 'Alpha beta. Gamma delta.', title: 'Doc title' })
+        extract: () =>
+          Effect.succeed({
+            content: 'Alpha beta. Gamma delta.',
+            title: 'Doc title',
+            summary: 'Doc summary'
+          })
       }),
       Layer.succeed(RagChunker, makeDefaultRagChunker({ maxTokens: 8 })),
       Layer.succeed(RagEmbedder, {
@@ -191,6 +201,7 @@ describe('@yolk/rag', () => {
 
       expect(document.status).toBe('ready')
       expect(document.title).toBe('Doc title')
+      expect(document.summary).toBe('Doc summary')
       expect(documents.map(item => item.status)).toEqual(['processing'])
       expect(replacedChunkCount).toBe(1)
     }).pipe(Effect.provide(layer))

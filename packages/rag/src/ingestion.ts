@@ -111,6 +111,7 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         ragSetId: input.ragSetId,
         documentId: input.documentId,
         title: extracted.title,
+        summary: extracted.summary,
         contentHash: input.contentHash,
         tokenCount,
         chunkCount: chunks.length

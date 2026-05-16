@@ -28,6 +28,7 @@ import type {
 import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'
+import { OpenAiRagDocumentSummarizerLayer, RagDocumentSummarizer } from './document-summarizer'
 import { AppRagEmbedderError } from './errors'
 
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
@@ -458,9 +459,14 @@ export const DrizzleRagStoreLayer = Layer.effect(
   })
 )
 
-export const TextRagExtractorLayer = Layer.succeed(RagExtractor, {
-  extract: source =>
-    Effect.gen(function* () {
+export const TextRagExtractorLayer = Layer.effect(
+  RagExtractor,
+  Effect.gen(function* () {
+    const summarizer = yield* RagDocumentSummarizer
+
+    return {
+      extract: source =>
+        Effect.gen(function* () {
       if (typeof source.content !== 'string') {
         return yield* Effect.fail(
           new RagExtractionError({ message: 'Text extractor requires string content' })
@@ -473,9 +479,16 @@ export const TextRagExtractorLayer = Layer.succeed(RagExtractor, {
       }
 
       const title = metadataString(source.metadata, 'title')
+      const summary = yield* summarizer.summarize({
+        content,
+        sourceTitle: title,
+        metadata: source.metadata ?? {}
+      })
+
       return {
         content,
-        title,
+        title: summary.title,
+        summary: summary.summary,
         metadata: source.metadata
       } satisfies ExtractedRagDocument
     }).pipe(
@@ -487,7 +500,9 @@ export const TextRagExtractorLayer = Layer.succeed(RagExtractor, {
         return new RagExtractionError({ message: unknownToMessage(error), cause: error })
       })
     )
-})
+    }
+  })
+)
 
 type OpenAiEmbeddingsConfigShape = {
   readonly apiKey: Redacted.Redacted<string>
@@ -559,7 +574,7 @@ export const OpenAiRagEmbedderLayer = Layer.effect(
 
 export const AppRagLayer = Layer.mergeAll(
   DrizzleRagStoreLayer,
-  TextRagExtractorLayer,
+  TextRagExtractorLayer.pipe(Layer.provide(OpenAiRagDocumentSummarizerLayer)),
   DefaultRagChunkerLive(),
   OpenAiRagEmbedderLayer
 )

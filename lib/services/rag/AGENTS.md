@@ -5,8 +5,9 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 ## Role
 
 - `DrizzleRagStoreLayer`: implements `RagStore` over app Drizzle schema + pgvector.
-- `TextRagExtractorLayer`: string-only extractor for V1 `/storage` text sources.
+- `TextRagExtractorLayer`: string-only extractor for V1 `/storage` text sources; derives title/summary via `RagDocumentSummarizer`.
 - `OpenAiRagEmbedderLayer`: OpenAI embeddings via Effect `HttpClient` and `OPENAI_API_KEY`.
+- `OpenAiRagDocumentSummarizerLayer`: OpenAI chat completion title + summary generation via Effect `HttpClient` and `OPENAI_API_KEY`.
 - `AppRagLayer`: composed layer for storage/RAG ingestion and retrieval boundaries.
 
 ## Boundaries

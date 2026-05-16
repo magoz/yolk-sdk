@@ -50,7 +50,17 @@ export class AppRagEmbedderError extends Schema.TaggedErrorClass<AppRagEmbedderE
   }
 ) {}
 
+export class AppRagSummarizerError extends Schema.TaggedErrorClass<AppRagSummarizerError>()(
+  'AppRagSummarizerError',
+  {
+    message: Schema.String,
+    isTransient: Schema.optional(Schema.Literal(true)),
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
 export const isAppRagStoreError = Schema.is(AppRagStoreError)
 export const isAppRagDocumentNotFoundError = Schema.is(AppRagDocumentNotFoundError)
 export const isAppRagSetNotFoundError = Schema.is(AppRagSetNotFoundError)
 export const isAppRagSearchError = Schema.is(AppRagSearchError)
+export const isAppRagSummarizerError = Schema.is(AppRagSummarizerError)

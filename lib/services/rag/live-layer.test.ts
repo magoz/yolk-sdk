@@ -4,14 +4,16 @@ import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeRagSet } from '@yolk/rag/documents'
 import { RagEmbedder } from '@yolk/rag/embeddings'
+import { RagExtractor } from '@yolk/rag/extraction'
 import { RagStore } from '@yolk/rag/store'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { RagDocumentSummarizer } from './document-summarizer'
 import { getRagChunks } from './get-rag-chunks'
 import { getRagDocument } from './get-rag-document'
 import { getRagDocuments } from './get-rag-documents'
 import { getRagDocumentsContent } from './get-rag-documents-content'
-import { DrizzleRagStoreLayer } from './live-layer'
+import { DrizzleRagStoreLayer, TextRagExtractorLayer } from './live-layer'
 import { searchAppRag } from './search-app-rag'
 import { updateRagDocument } from './update-rag-document'
 
@@ -19,6 +21,30 @@ const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
 
 const embedding = (activeIndex: 0 | 1) =>
   Array.from({ length: 1536 }, (_, index) => (index === activeIndex ? 1 : 0))
+
+describe('TextRagExtractorLayer', () => {
+  it.effect('adds generated title and summary to extracted text', () =>
+    Effect.gen(function* () {
+      const extractor = yield* RagExtractor
+      const extracted = yield* extractor.extract({
+        source: { _tag: 'Text', label: 'Original title' },
+        content: '  Alpha beta.  ',
+        metadata: { title: 'Original title' }
+      })
+
+      expect(extracted).toEqual({
+        content: 'Alpha beta.',
+        title: 'Generated title',
+        summary: 'Generated summary',
+        metadata: { title: 'Original title' }
+      })
+    }).pipe(
+      Effect.provide(TextRagExtractorLayer),
+      Effect.provideService(RagDocumentSummarizer, {
+        summarize: () => Effect.succeed({ title: 'Generated title', summary: 'Generated summary' })
+      })
+    ))
+})
 
 describeWithDb('DrizzleRagStoreLayer', () => {
   it.effect('stores, searches, expands, and deletes RAG chunks', () => {
