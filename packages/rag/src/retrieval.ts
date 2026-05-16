@@ -73,7 +73,9 @@ const validateSearchInput = (input: RagSearchInput) => {
   return Effect.succeed({ query, limit, contextChunks })
 }
 
-export const retrieveRag = (input: RagSearchInput) =>
+export const retrieveRag = (
+  input: RagSearchInput
+): Effect.Effect<ReadonlyArray<RagSearchResult>, RagRetrievalError, RagStore | RagEmbedder> =>
   Effect.gen(function* () {
     const valid = yield* validateSearchInput(input)
     const store = yield* RagStore

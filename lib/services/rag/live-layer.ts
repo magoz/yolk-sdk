@@ -27,6 +27,7 @@ import type {
 } from '@yolk/rag/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
+import { isTransientError, retryPolicy } from '@/lib/services/retry'
 import { AppRagEmbedderError } from './errors'
 
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings'
@@ -153,7 +154,10 @@ const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
   Effect.gen(function* () {
     const body = yield* readErrorBody(response)
     return yield* Effect.fail(
-      new AppRagEmbedderError({ message: `OpenAI embeddings failed: ${response.status} ${body}` })
+      new AppRagEmbedderError({
+        message: `OpenAI embeddings failed: ${response.status} ${body}`,
+        isTransient: response.status === 429 || response.status >= 500 ? true : undefined
+      })
     )
   })
 
@@ -493,7 +497,11 @@ const OpenAiEmbeddingsConfigLayer = Layer.effect(
 )
 
 const toRequestError = (error: HttpClientError.HttpClientError) =>
-  new AppRagEmbedderError({ message: `OpenAI embeddings request failed: ${error.message}` })
+  new AppRagEmbedderError({
+    message: `OpenAI embeddings request failed: ${error.message}`,
+    isTransient: true,
+    cause: error
+  })
 
 export const OpenAiRagEmbedderLayer = Layer.effect(
   RagEmbedder,
@@ -523,6 +531,7 @@ export const OpenAiRagEmbedderLayer = Layer.effect(
         const parsed = yield* parseOpenAiResponse(response)
         return parsed.data.map(item => item.embedding)
       }).pipe(
+        Effect.retry({ while: isTransientError, schedule: retryPolicy }),
         Effect.mapError(error =>
           new RagEmbeddingError({ message: unknownToMessage(error), cause: error })
         )

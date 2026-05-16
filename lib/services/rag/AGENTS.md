@@ -31,4 +31,4 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 ## Tests
 
 - `live-layer.test.ts` covers set/doc/chunk lifecycle, vector search, context expansion, delete cleanup.
-- DB adapter tests are opt-in with `RAG_STORE_DB_TESTS=1`; default test run skips them to avoid accidental external DB dependency.
+- DB adapter tests run when `.env.test` provides `DATABASE_URL`; otherwise they skip.

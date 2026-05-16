@@ -6,9 +6,14 @@ import { makeRagSet } from '@yolk/rag/documents'
 import { RagStore } from '@yolk/rag/store'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
+import { getRagChunks } from './get-rag-chunks'
+import { getRagDocument } from './get-rag-document'
+import { getRagDocuments } from './get-rag-documents'
+import { getRagDocumentsContent } from './get-rag-documents-content'
 import { DrizzleRagStoreLayer } from './live-layer'
+import { updateRagDocument } from './update-rag-document'
 
-const describeWithDb = process.env.RAG_STORE_DB_TESTS === '1' ? describe : describe.skip
+const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
 
 const embedding = (activeIndex: 0 | 1) =>
   Array.from({ length: 1536 }, (_, index) => (index === activeIndex ? 1 : 0))
@@ -137,6 +142,14 @@ describeWithDb('DrizzleRagStoreLayer', () => {
         position: 1,
         contextChunks: 1
       })
+      const listed = yield* getRagDocuments(set.id)
+      const document = yield* getRagDocument(documentId)
+      const withContent = yield* getRagDocumentsContent(set.id)
+      const chunks = yield* getRagChunks([`${documentId}:chunk:1`])
+      const updated = yield* updateRagDocument(documentId, {
+        title: 'Updated note',
+        metadata: { storageObjectId, updated: true }
+      })
 
       yield* store.deleteDocument({ ragSetId: set.id, documentId })
       const afterDelete = yield* store.searchChunks({
@@ -152,6 +165,11 @@ describeWithDb('DrizzleRagStoreLayer', () => {
       expect(results.map(result => result.chunk.content)).toEqual(['alpha before', 'alpha match'])
       expect(results.every(result => result.document.id === documentId)).toBe(true)
       expect(context.map(chunk => chunk.content)).toEqual(['alpha before', 'alpha match', 'beta after'])
+      expect(listed.map(item => item.document.id)).toEqual([documentId])
+      expect(document.document.id).toBe(documentId)
+      expect(withContent.map(item => item.content)).toEqual(['alpha before\n\nalpha match\n\nbeta after'])
+      expect(chunks.map(item => item.chunk.content)).toEqual(['alpha match'])
+      expect(updated.document.title).toBe('Updated note')
       expect(afterDelete).toEqual([])
     }).pipe(
       Effect.ensuring(cleanup),
@@ -159,5 +177,5 @@ describeWithDb('DrizzleRagStoreLayer', () => {
       Effect.provide(Db.layer),
       Effect.scoped
     )
-  })
+  }, 30_000)
 })
