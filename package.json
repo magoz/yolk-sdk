@@ -55,6 +55,7 @@
     "@yolk/mcp": "workspace:^",
     "@yolk/oauth": "workspace:^",
     "@yolk/openai": "workspace:^",
+    "@yolk/rag": "workspace:^",
     "@yolk/react": "workspace:^",
     "@yolk/skillset": "workspace:^",
     "@yolk/vercel-workflows-runtime": "workspace:^",

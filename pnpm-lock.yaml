@@ -89,6 +89,9 @@ importers:
       '@yolk/openai':
         specifier: workspace:^
         version: link:packages/openai
+      '@yolk/rag':
+        specifier: workspace:^
+        version: link:packages/rag
       '@yolk/react':
         specifier: workspace:^
         version: link:packages/react
