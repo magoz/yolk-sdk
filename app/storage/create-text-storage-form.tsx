@@ -9,8 +9,10 @@ import { createFileStorageObjectAction } from '@/lib/core/storage/create-file-st
 import { createTextStorageObjectAction } from '@/lib/core/storage/create-text-storage-object-action'
 
 export function CreateTextStorageForm() {
-  const [message, setMessage] = useState<string | undefined>()
-  const [isPending, startTransition] = useTransition()
+  const [textMessage, setTextMessage] = useState<string | undefined>()
+  const [fileMessage, setFileMessage] = useState<string | undefined>()
+  const [isTextPending, startTextTransition] = useTransition()
+  const [isFilePending, startFileTransition] = useTransition()
 
   return (
     <div className="space-y-4">
@@ -20,9 +22,9 @@ export function CreateTextStorageForm() {
           const title = String(formData.get('title') ?? '')
           const content = String(formData.get('content') ?? '')
 
-          startTransition(() => {
+          startTextTransition(() => {
             void createTextStorageObjectAction({ title, content }).then(result => {
-              setMessage(result._tag === 'Success' ? 'Indexed' : result.message)
+              setTextMessage(result._tag === 'Success' ? 'Indexed' : result.message)
             })
           })
         }}
@@ -36,18 +38,18 @@ export function CreateTextStorageForm() {
           <Textarea id="content" name="content" placeholder="Paste text to index" required />
         </div>
         <div className="flex items-center gap-3">
-          <Button type="submit" disabled={isPending}>
-            {isPending ? 'Indexing…' : 'Index text'}
+          <Button type="submit" disabled={isTextPending}>
+            {isTextPending ? 'Indexing…' : 'Index text'}
           </Button>
-          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+          {textMessage ? <p className="text-sm text-muted-foreground" aria-live="polite">{textMessage}</p> : null}
         </div>
       </form>
       <form
         className="rounded-lg border p-4 space-y-4"
         action={formData => {
-          startTransition(() => {
+          startFileTransition(() => {
             void createFileStorageObjectAction(formData).then(result => {
-              setMessage(result._tag === 'Success' ? 'Indexed file' : result.message)
+              setFileMessage(result._tag === 'Success' ? 'Indexed file' : result.message)
             })
           })
         }}
@@ -61,11 +63,16 @@ export function CreateTextStorageForm() {
             accept=".txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation"
             required
           />
-          <p className="text-sm text-muted-foreground">Supports text, markdown, CSV, JSON, PDF, DOCX, XLSX, and PPTX.</p>
+          <p className="text-sm text-muted-foreground">
+            Supports text, markdown, CSV, JSON, PDF, DOCX, XLSX, and PPTX.
+          </p>
         </div>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? 'Indexing…' : 'Index file'}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button type="submit" disabled={isFilePending}>
+            {isFilePending ? 'Indexing…' : 'Index file'}
+          </Button>
+          {fileMessage ? <p className="text-sm text-muted-foreground" aria-live="polite">{fileMessage}</p> : null}
+        </div>
       </form>
     </div>
   )

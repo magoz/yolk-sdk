@@ -122,7 +122,7 @@ const extractPdf = (input: FileInput, format: ExtractedFileFormat) =>
 const extractDocx = (input: FileInput, format: ExtractedFileFormat) =>
   Effect.gen(function* () {
     const result = yield* Effect.tryPromise({
-      try: () => mammoth.extractRawText({ arrayBuffer: toArrayBuffer(input.bytes) }),
+      try: () => mammoth.extractRawText({ buffer: Buffer.from(toArrayBuffer(input.bytes)) }),
       catch: cause => new FileExtractionError({ message: 'Could not extract DOCX text', format, cause })
     })
 

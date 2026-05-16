@@ -35,15 +35,20 @@ export const createFileStorageObject = (input: {
     }
 
     yield* ingestRagDocument({
-        ragSetId: ragSet.id,
-        documentId: object.id,
+      ragSetId: ragSet.id,
+      documentId: object.id,
+      source: {
         source: {
-          source: { _tag: 'File', ref: object.id, name: object.filename ?? undefined, mediaType: object.mediaType ?? undefined },
-          content: extracted.content,
-          mediaType: object.mediaType ?? undefined,
-          metadata: { storageObjectId: object.id, title: object.filename ?? undefined, ...extracted.metadata }
-        }
-      })
+          _tag: 'File',
+          ref: object.id,
+          name: object.filename ?? undefined,
+          mediaType: object.mediaType ?? undefined
+        },
+        content: extracted.content,
+        mediaType: object.mediaType ?? undefined,
+        metadata: { storageObjectId: object.id, title: object.filename ?? undefined, ...extracted.metadata }
+      }
+    })
 
     return object
   }).pipe(Effect.withSpan('storage.createFileStorageObject'))
