@@ -39,7 +39,12 @@ import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-han
 import { loadProjectSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
+import { makeStorageRagToolModule } from '@/lib/agents/tools/storage-rag-tool'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
+import { ensureUserRagSet } from '@/lib/core/storage/ensure-user-rag-set'
+import { Db } from '@/lib/services/db/live-layer'
+import { AppRagLayer } from '@/lib/services/rag/live-layer'
+import { searchAppRag } from '@/lib/services/rag/search-app-rag'
 
 type AgentTextRuntimeConfig = {
   readonly model: string
@@ -164,6 +169,40 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
     }
   })
 
+const RagToolLayer = Layer.mergeAll(Db.layer, AppRagLayer.pipe(Layer.provide(Db.layer)))
+
+const searchStorageForAgent = (input: {
+  readonly userId: string
+  readonly query: string
+  readonly limit: number
+  readonly minScore?: number
+  readonly contextChunks: number
+}) =>
+  Effect.gen(function* () {
+    const ragSet = yield* ensureUserRagSet({ userId: input.userId })
+
+    return yield* searchAppRag({
+      userId: input.userId,
+      scope: { _tag: 'RagSet', id: ragSet.id },
+      query: input.query,
+      options: {
+        limit: input.limit,
+        minScore: input.minScore,
+        contextChunks: input.contextChunks
+      }
+    })
+  }).pipe(
+    Effect.provide(RagToolLayer),
+    Effect.mapError(
+      error =>
+        new ToolError({
+          tool: 'search_storage',
+          message: error.message,
+          cause: 'execution'
+        })
+    )
+  )
+
 export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
@@ -174,6 +213,11 @@ export const makeAgentTextRuntime = (
     const skillset = yield* loadProjectSkillset()
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
+    const storageToolModule = makeStorageRagToolModule(searchStorageForAgent)
+    const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
+      ...baseToolModules,
+      storageToolModule
+    ]
     const selectedModel = input.model ?? baseConfig.model
     const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
     const providerLayer = yield* providerLayerForModel(model, userId)
@@ -187,7 +231,7 @@ export const makeAgentTextRuntime = (
 
           return yield* Effect.gen(function* () {
             const subagentToolSet = yield* resolveAgentToolSet({
-              modules: baseToolModules,
+              modules: subagentToolModules,
               context: {
                 ...context,
                 sessionId: `${context.sessionId ?? input.sessionId}:task:${call.id}`,
@@ -265,7 +309,10 @@ export const makeAgentTextRuntime = (
           )
         })
     })
-    const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [...baseToolModules, taskToolModule]
+    const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
+      ...subagentToolModules,
+      taskToolModule
+    ]
     const toolSet = yield* resolveAgentToolSet({
       modules: toolModules,
       context: {
