@@ -3,7 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
 import type { ToolRegistration } from '@yolk/agent/tools'
 import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import type { Retriever } from './retrieval.ts'
+import type { RagRetriever } from './retrieval.ts'
 import { packRagContext } from './retrieval.ts'
 
 const RagToolParams = Schema.Struct({
@@ -23,7 +23,7 @@ export const defaultRagToolOptions: MakeRagToolOptions = {
 }
 
 export const makeRagTool = <Context>(
-  retriever: Retriever,
+  retriever: RagRetriever,
   options: MakeRagToolOptions = defaultRagToolOptions
 ): ToolRegistration<Context> => ({
   def: new ToolDef({
@@ -42,7 +42,7 @@ export const makeRagTool = <Context>(
   execute: input =>
     Schema.decodeUnknownEffect(RagToolParams)(input.call.params).pipe(
       Effect.flatMap(params =>
-        retriever.retrieve({ query: params.query, limit: options.limit }).pipe(
+        retriever.retrieve({ scope: { _tag: 'RagSets', ids: [] }, query: params.query, limit: options.limit }).pipe(
           Effect.map(results => packRagContext(params.query, results))
         )
       ),

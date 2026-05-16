@@ -25,6 +25,10 @@
       "types": "./src/embeddings.ts",
       "default": "./src/embeddings.ts"
     },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
     "./ingestion": {
       "types": "./src/ingestion.ts",
       "default": "./src/ingestion.ts"

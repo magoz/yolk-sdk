@@ -1,11 +1,13 @@
 import type { Effect } from 'effect'
+import type { RagEmbeddingError } from './errors.ts'
 
-export type Embedding = ReadonlyArray<number>
+export type RagEmbedding = ReadonlyArray<number>
 
-export class EmbedderError extends Error {
-  readonly _tag = 'EmbedderError'
+export type RagEmbedder = {
+  readonly embedTexts: (
+    texts: ReadonlyArray<string>
+  ) => Effect.Effect<ReadonlyArray<RagEmbedding>, RagEmbeddingError>
+  readonly embedQuery: (query: string) => Effect.Effect<RagEmbedding, RagEmbeddingError>
 }
 
-export type Embedder = {
-  readonly embed: (input: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Embedding>, EmbedderError>
-}
+export { RagEmbeddingError as EmbedderError } from './errors.ts'
