@@ -49,6 +49,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email                                                    | Transactional email via Resend                                                                                                     |
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
+| Storage/RAG        | `/storage` + `@yolk/rag` + `lib/services/rag`            | Text source ingestion, pgvector chunks, OpenAI embeddings; app owns auth/R2/DB adapters                                             |
 | Agent stack        | packages                                                 | `@yolk/agent` subpaths, `@yolk/mcp`, `@yolk/rag`, Workflow runtime, voice-runtime, React hooks                                      |
 | Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
@@ -71,6 +72,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs                                  |
 | Add E2E tests        | `e2e/`                                         | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md`                       |
 | Database schema      | `lib/services/db/schema.ts`                    | Drizzle ORM                                                                        |
+| Add storage/RAG app adapter | `lib/services/rag/`                       | App-owned `RagStore`, extractor, embedder layers over `@yolk/rag` contracts        |
+| Add storage feature  | `lib/core/storage/`, `app/storage/`             | Server actions + `/storage` UI for source ingestion                                |
 | Auth flow            | `app/(auth)/`                                  | better-auth + OTP email                                                            |
 | Service dependencies | `lib/layers.ts`                                | AppLayer merges all services                                                       |
 | Error types          | `lib/core/errors/index.ts`                     | Shared domain errors                                                               |
@@ -104,6 +107,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`                 | OpenTelemetry + Sentry span/log processing                                           |
 | `reportError`                    | Function | `lib/services/telemetry/report-error.ts`               | Log error + Sentry capture (boundaries only)                                         |
 | `reportWarning`                  | Function | `lib/services/telemetry/report-warning.ts`             | Log warning + Sentry warning (degraded paths)                                        |
+| `AppRagLayer`                    | Layer    | `lib/services/rag/live-layer.ts`                       | App adapters for `@yolk/rag`: Drizzle store, text extractor, OpenAI embedder         |
+| `createTextStorageObject`        | Function | `lib/core/storage/create-text-storage-object.ts`       | Creates text `storageObject` and indexes it through package RAG ingestion            |
+| `getUserStorage`                 | Function | `lib/core/storage/get-user-storage.ts`                 | Lists user storage sources with document index status                                |
 | `makeAgentRuntimeLayer`          | Function | `lib/agents/runtime-layer.ts`                          | Provides provider + default loop deps with no tools                                  |
 | `makeAgentRuntimeLayerWithTools` | Function | `lib/agents/runtime-layer.ts`                          | Provides provider + app tool executor for agent routes                               |
 | `agentTextCapabilities`          | Const    | `lib/agents/text-agent-config.ts`                      | Text agent input/tool capability source of truth                                     |
@@ -226,6 +232,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/agents/skillset/AGENTS.md` - App skill/command source adapters
 - `lib/agents/mcp/AGENTS.md` - App remote MCP config source
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
+- `lib/services/rag/AGENTS.md` - App-owned RAG adapter boundaries
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `packages/vercel-workflows-runtime/AGENTS.md` - Vercel Workflow runtime contract and retry/status semantics
 - `packages/vercel-workflows-runtime/test/AGENTS.md` - Workflow directive/integration test rules
@@ -236,5 +243,6 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `packages/react/AGENTS.md` - Headless React chat hook/state/session events
 - `cloudflare/agent/AGENTS.md` - Cloudflare Worker/Durable Object agent app
 - `components/ui/AGENTS.md` - UI component install sources and customizations
+- `app/storage/AGENTS.md` - Storage route/source ingestion UI boundaries
 - `e2e/AGENTS.md` - E2E test patterns, locator priority, streaming guards, auth cookies
 - `eslint-local-rules/AGENTS.md` - Custom ESLint rule conventions
