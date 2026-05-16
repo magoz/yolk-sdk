@@ -11,6 +11,8 @@ import {
   AgentReasoningEffort,
   AgentRetry,
   AgentStart,
+  AgentWebSocketClientMessage,
+  AgentWebSocketServerMessage,
   AgentUsage,
   AssistantAgentMessage,
   AssistantMessageEvent,
@@ -30,6 +32,7 @@ import {
   ProviderToolCallPart,
   ProviderToolResult,
   ProviderToolResultPart,
+  SessionSnapshot,
   SubagentCompleted,
   SubagentStarted,
   TextPart,
@@ -49,6 +52,7 @@ import {
   TurnEnd,
   TurnStart,
   UsageUpdate,
+  UserInput,
   UserMessage,
   addAgentUsage,
   textImageModelCapabilities,
@@ -62,6 +66,8 @@ const encodeJson = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
 const decodeAgentEvent = Schema.decodeUnknownEffect(AgentEvent)
 const decodeAgentMessage = Schema.decodeUnknownEffect(AgentMessage)
+const decodeClientMessage = Schema.decodeUnknownEffect(AgentWebSocketClientMessage)
+const decodeServerMessage = Schema.decodeUnknownEffect(AgentWebSocketServerMessage)
 
 const roundTripEvent = (event: AgentEventType) =>
   Effect.gen(function* () {
@@ -196,6 +202,45 @@ describe('protocol wire schemas', () => {
     })
   )
 
+  it.effect('round-trips session websocket envelope variants', () =>
+    Effect.gen(function* () {
+      const user = UserMessage.make({ content: 'hello' })
+      const clientMessages = [
+        UserInput.make({ message: user }),
+        UserInput.make({
+          message: user,
+          expectedRevision: 3,
+          model: 'gpt-test',
+          reasoningEffort: 'medium'
+        })
+      ]
+      const serverMessages = [
+        SessionSnapshot.make({ revision: 3, messages: [user] }),
+        LLMTextDelta.make({ eventId: 'evt_1', text: 'hi' })
+      ]
+
+      const decodedClientMessages = yield* Effect.forEach(clientMessages, message =>
+        Effect.gen(function* () {
+          const json = yield* encodeJson(message)
+          const value = yield* decodeJson(json)
+
+          return yield* decodeClientMessage(value)
+        })
+      )
+      const decodedServerMessages = yield* Effect.forEach(serverMessages, message =>
+        Effect.gen(function* () {
+          const json = yield* encodeJson(message)
+          const value = yield* decodeJson(json)
+
+          return yield* decodeServerMessage(value)
+        })
+      )
+
+      expect(decodedClientMessages).toEqual(clientMessages)
+      expect(decodedServerMessages).toEqual(serverMessages)
+    })
+  )
+
   it.effect('round-trips exported tool, content, capability, reasoning, and usage schemas', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({
@@ -266,12 +311,40 @@ describe('protocol wire schemas', () => {
       const invalidReasoning = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(
         'extreme'
       ).pipe(Effect.result)
+      const invalidClientEnvelope = yield* decodeClientMessage({
+        _tag: 'UserInput',
+        message: { _tag: 'Assistant', parts: [] }
+      }).pipe(Effect.result)
+      const invalidServerEnvelope = yield* decodeServerMessage({
+        _tag: 'SessionSnapshot',
+        revision: 1,
+        messages: [{ _tag: 'Nope' }]
+      }).pipe(Effect.result)
+      const invalidNestedToolResult = yield* decodeAgentEvent({
+        _tag: 'ToolExecutionCompleted',
+        call: { id: 'call_1', name: 'web_fetch', params: {} },
+        result: { toolCallId: '   ', content: 'ok' }
+      }).pipe(Effect.result)
+      const invalidSubagentStatus = yield* decodeAgentEvent({
+        _tag: 'SubagentCompleted',
+        parentToolCallId: 'call_1',
+        subagentRunId: 'subagent_1',
+        subagentType: 'general',
+        description: 'inspect',
+        model: 'gpt-test',
+        status: 'cancelled',
+        durationMs: 10
+      }).pipe(Effect.result)
 
       expect(invalidEvent._tag).toBe('Failure')
       expect(emptyToolName._tag).toBe('Failure')
       expect(invalidAudio._tag).toBe('Failure')
       expect(invalidUsage._tag).toBe('Failure')
       expect(invalidReasoning._tag).toBe('Failure')
+      expect(invalidClientEnvelope._tag).toBe('Failure')
+      expect(invalidServerEnvelope._tag).toBe('Failure')
+      expect(invalidNestedToolResult._tag).toBe('Failure')
+      expect(invalidSubagentStatus._tag).toBe('Failure')
     })
   )
 })

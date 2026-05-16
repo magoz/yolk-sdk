@@ -269,6 +269,7 @@ Use these before broadening package scope:
 
 1. **Add protocol conformance tests**
    - Initial coverage added in `packages/agent/test/protocol/wire.test.ts`.
+   - Coverage includes message/event round-trips, websocket session envelopes, nested validation failures, and invalid wire payload rejection.
    - Continue covering new message/event/tool/usage variants as they are added.
    - Cover schema round-trips and invalid wire payloads.
    - Keep tests semantic and provider-agnostic.
