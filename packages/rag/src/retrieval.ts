@@ -31,11 +31,15 @@ export type RagRetriever = {
   ) => Effect.Effect<ReadonlyArray<RagSearchResult>, RagRetrievalError>
 }
 
-export const packRagContext = (query: string, results: ReadonlyArray<RagSearchResult>): RagContext => ({
-  query,
-  results,
-  text: results.map(result => result.context?.map(chunk => chunk.content).join('\n\n') ?? result.chunk.content).join('\n\n')
-})
+const packedResultText = (result: RagSearchResult) =>
+  result.context?.map(chunk => chunk.content).join('\n\n') ?? result.chunk.content
+
+export const packRagContext = (query: string, results: ReadonlyArray<RagSearchResult>): RagContext =>
+  ({
+    query,
+    results,
+    text: results.map(packedResultText).join('\n\n')
+  })
 
 const scopeIds = (scope: RagSearchScope): ReadonlyArray<string> => {
   switch (scope._tag) {
@@ -70,6 +74,12 @@ const validateSearchInput = (input: RagSearchInput) => {
     )
   }
 
+  if (input.minScore !== undefined && !Number.isFinite(input.minScore)) {
+    return Effect.fail(
+      new RagRetrievalError({ message: 'Search minScore must be finite', stage: 'store' })
+    )
+  }
+
   return Effect.succeed({ query, limit, contextChunks })
 }
 
@@ -82,7 +92,11 @@ export const retrieveRag = (
     const embedder = yield* RagEmbedder
     const embedding = yield* embedder
       .embedQuery(valid.query)
-      .pipe(Effect.mapError(error => new RagRetrievalError({ message: error.message, stage: 'embed' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagRetrievalError({ message: error.message, stage: 'embed', cause: error })
+        )
+      )
     const results = yield* store
       .searchChunks({
         scope: input.scope,
@@ -90,7 +104,11 @@ export const retrieveRag = (
         limit: valid.limit,
         minScore: input.minScore
       })
-      .pipe(Effect.mapError(error => new RagRetrievalError({ message: error.message, stage: 'store' })))
+      .pipe(
+        Effect.mapError(
+          error => new RagRetrievalError({ message: error.message, stage: 'store', cause: error })
+        )
+      )
 
     if (valid.contextChunks === 0) {
       return results
@@ -106,7 +124,9 @@ export const retrieveRag = (
         })
         .pipe(
           Effect.map(context => ({ ...result, context })),
-          Effect.mapError(error => new RagRetrievalError({ message: error.message, stage: 'store' }))
+          Effect.mapError(
+            error => new RagRetrievalError({ message: error.message, stage: 'store', cause: error })
+          )
         )
     )
   })
