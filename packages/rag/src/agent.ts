@@ -8,7 +8,7 @@ import type { RagRetriever } from './retrieval.ts'
 import { packRagContext } from './retrieval.ts'
 
 const RagToolParams = Schema.Struct({
-  query: Schema.String
+  query: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 })
 
 export type RagToolScopeResolver<Context> =
@@ -39,7 +39,7 @@ export const makeRagTool = <Context>(
   const name = options.name ?? 'search_knowledge'
 
   return {
-    def: new ToolDef({
+    def: ToolDef.make({
       name,
       description: options.description ?? 'Search the configured knowledge index.',
       parameters: {
@@ -78,7 +78,7 @@ export const makeRagTool = <Context>(
         ),
         Effect.map(
           context =>
-            new ToolResult({
+            ToolResult.make({
               toolCallId: input.call.id,
               content: context.text,
               structuredContent: context
