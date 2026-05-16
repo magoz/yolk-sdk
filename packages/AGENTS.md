@@ -279,6 +279,7 @@ Use these before broadening package scope:
    - Do not leak MCP-specific result types into protocol unless UI/runtime needs typed artifacts.
    - MCP client preserves `structuredContent`, `isError`, and text/image/audio/resource/resource_link content for model self-correction and UI state.
    - MCP server preserves protocol text/image/audio content, `structuredContent`, and `isError` when serving tool results.
+   - Remote MCP rich-result fidelity is covered in `packages/mcp/test/client/client.test.ts`; protocol block mapping is covered in `packages/mcp/test/client/protocol.test.ts`.
 
 3. **Design durable runtime append store**
    - PRD tracked in `.opencode/state/durable-runtime-append-store/prd.md`; initial `SessionEventStore` contract exists.

@@ -44,6 +44,7 @@ type ResponseMode =
   | 'timeout'
   | 'duplicate-tools'
   | 'tool-error'
+  | 'rich-result'
 
 const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
   Layer.succeed(
@@ -160,7 +161,26 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
                 }
               : mode === 'tool-error'
                 ? { content: [{ type: 'text', text: 'bad params' }], isError: true }
-                : { content: [{ type: 'text', text: 'remote result' }] }
+                : mode === 'rich-result'
+                  ? {
+                      content: [
+                        { type: 'text', text: 'remote result' },
+                        { type: 'image', data: 'abc', mimeType: 'image/png' },
+                        { type: 'audio', data: 'def', mimeType: 'audio/opus' },
+                        {
+                          type: 'resource',
+                          resource: { uri: 'file:///tmp/out.txt', text: 'resource text' }
+                        },
+                        {
+                          type: 'resource_link',
+                          uri: 'file:///tmp/linked.txt',
+                          name: 'linked.txt'
+                        }
+                      ],
+                      structuredContent: { answer: 42 },
+                      isError: true
+                    }
+                  : { content: [{ type: 'text', text: 'remote result' }] }
 
         if (method === 'notifications/initialized') {
           return HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 }))
@@ -267,6 +287,31 @@ describe('MCP client', () => {
 
       expect(result.content).toBe('bad params')
       expect(result.isError).toBe(true)
+    })
+  )
+
+  it.effect('preserves rich remote MCP tool result fidelity', () =>
+    Effect.gen(function* () {
+      const result = yield* callRemoteMcpServerTool({
+        config: { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        mcpToolName: 'search',
+        toolCallId: 'call_1',
+        params: {},
+        options: { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      }).pipe(Effect.provide(makeFakeRemoteMcpLayer('rich-result')))
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        isError: true,
+        structuredContent: { answer: 42 },
+        content: [
+          { _tag: 'Text', text: 'remote result' },
+          { _tag: 'Image', data: 'abc', mimeType: 'image/png' },
+          { _tag: 'Audio', data: 'def', format: 'opus' },
+          { _tag: 'Text', text: 'resource text' },
+          { _tag: 'Text', text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' }
+        ]
+      })
     })
   )
 
