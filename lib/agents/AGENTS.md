@@ -6,6 +6,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image input and mic voice mode
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
+- Default text prompt says tools run in parallel and tells agents to proactively use storage when user referents are unclear.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
 - Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + just-bash virtual shell + skill + optional remote MCP tools from project files.
