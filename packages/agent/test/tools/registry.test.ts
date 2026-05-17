@@ -164,6 +164,8 @@ describe('resolveTools', () => {
 
       expect(toolSet.tools[0]?.parameters).toEqual({
         type: 'object',
+        properties: {},
+        required: [],
         additionalProperties: false
       })
       expect(toolSet.tools[0]?.parameters).not.toHaveProperty('anyOf')

@@ -110,6 +110,12 @@ const isEmptyStructJsonSchema = (schema: unknown) => {
     anyOf.some(item => hasJsonSchemaType(item, 'array'))
 }
 
+const isEmptyRecordJsonSchema = (schema: unknown) =>
+  hasJsonSchemaType(schema, 'object') &&
+  objectField(schema, 'additionalProperties') === false &&
+  objectField(schema, 'properties') === undefined &&
+  objectField(schema, 'required') === undefined
+
 const emptyObjectJsonSchema = {
   type: 'object',
   properties: {},
@@ -119,7 +125,7 @@ const emptyObjectJsonSchema = {
 
 const jsonSchemaFromSchema = (schema: Schema.Top) => {
   const document = Schema.toJsonSchemaDocument(schema)
-  const jsonSchema = isEmptyStructJsonSchema(document.schema)
+  const jsonSchema = isEmptyStructJsonSchema(document.schema) || isEmptyRecordJsonSchema(document.schema)
     ? emptyObjectJsonSchema
     : document.schema
 
