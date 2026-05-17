@@ -109,6 +109,9 @@ const storageGetSourceToolDescription = [
   'Returns metadata plus extracted text capped by maxChars.'
 ].join(' ')
 
+const isStorageToolEnabled = (context: AgentToolContext) =>
+  Effect.succeed(context.surface === 'text' || context.surface === 'voice')
+
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
@@ -315,7 +318,7 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
   description: storageSearchToolDescription,
   parameters: StorageSearchParams,
   access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
+  isEnabled: isStorageToolEnabled,
   invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {
@@ -354,7 +357,7 @@ const listSourcesTool = (
   description: storageListSourcesToolDescription,
   parameters: StorageListSourcesParams,
   access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
+  isEnabled: isStorageToolEnabled,
   execute: ({ call, context }) =>
     listSources({ userId: context.userId }).pipe(
       Effect.map(sources =>
@@ -381,7 +384,7 @@ const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentTool
   description: storageGetSourceToolDescription,
   parameters: StorageGetSourceParams,
   access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
+  isEnabled: isStorageToolEnabled,
   invalidParamsMessage: error => `Invalid storage source read arguments: ${unknownToMessage(error)}`,
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {

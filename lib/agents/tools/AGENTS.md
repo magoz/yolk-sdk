@@ -11,7 +11,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |
 | `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
-| `search_storage` / `list_storage_sources` / `get_storage_source` | yes | no | no | authenticated user storage RAG search and source reads |
+| `search_storage` / `list_storage_sources` / `get_storage_source` | yes | yes | no | authenticated user storage RAG search and source reads |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
 | `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
 
@@ -23,7 +23,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Use `EmptyToolParams` from `@yolk/agent/tools` for no-arg tools.
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
-- Storage tools are Next/Workflow-only; they use app RAG/DB adapters from route runtime wiring, not Cloudflare bootstrap.
+- Storage tools are Next/Workflow/voice only; they use app RAG/DB adapters from route runtime wiring, not Cloudflare bootstrap.
 - `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap.
 - Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.

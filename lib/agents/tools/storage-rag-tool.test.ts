@@ -208,4 +208,34 @@ describe('storage RAG tool', () => {
       expect(toolSet.tools.map(tool => tool.name)).toEqual(['search_storage'])
     })
   })
+
+  it.effect('is available to voice', () => {
+    const toolModule = makeStorageRagToolModule({
+      search: () => Effect.succeed([]),
+      listSources: () => Effect.succeed([]),
+      getSource: () =>
+        Effect.succeed({
+          id: 'source_1',
+          name: 'notes.pdf',
+          sourceType: 'file',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          text: '',
+          textTruncated: false,
+          textCharacters: 0
+        })
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'voice', route: '/agent', userId: 'user_1' }
+      })
+
+      expect(toolSet.tools.map(tool => tool.name)).toEqual([
+        'search_storage',
+        'list_storage_sources',
+        'get_storage_source'
+      ])
+    })
+  })
 })
