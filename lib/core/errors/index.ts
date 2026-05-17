@@ -11,6 +11,12 @@ export class ValidationError extends Data.TaggedError('ValidationError')<{
   field?: string
 }> {}
 
+export class PersistenceError extends Data.TaggedError('PersistenceError')<{
+  message: string
+  entity: string
+  cause?: unknown
+}> {}
+
 export class UnauthenticatedError extends Data.TaggedError('UnauthenticatedError')<{
   message: string
 }> {}

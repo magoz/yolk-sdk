@@ -1,7 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { isValidSkillsetName } from '@yolk/skillset'
-import { NotFoundError, ValidationError } from '@/lib/core/errors'
+import { NotFoundError, PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
@@ -24,7 +24,7 @@ const validateText = (field: string, value: string) => {
     : Effect.succeed(trimmed)
 }
 
-const validateCommandInput = (input: AgentCommandInput) =>
+export const validateAgentCommandInput = (input: AgentCommandInput) =>
   Effect.gen(function* () {
     const name = input.name.trim()
 
@@ -52,7 +52,7 @@ export const listAgentCommands = (input: { readonly userId: string }) =>
 
 export const createAgentCommand = (input: AgentCommandInput & { readonly userId: string }) =>
   Effect.gen(function* () {
-    const values = yield* validateCommandInput(input)
+    const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
     const [command] = yield* db
       .insert(schema.agentCommand)
@@ -60,7 +60,9 @@ export const createAgentCommand = (input: AgentCommandInput & { readonly userId:
       .returning()
 
     if (command === undefined) {
-      return yield* Effect.die(new Error('Could not create agent command'))
+      return yield* Effect.fail(
+        new PersistenceError({ message: 'Could not create agent command', entity: 'agentCommand' })
+      )
     }
 
     return command
@@ -68,7 +70,7 @@ export const createAgentCommand = (input: AgentCommandInput & { readonly userId:
 
 export const upsertAgentCommand = (input: AgentCommandInput & { readonly userId: string }) =>
   Effect.gen(function* () {
-    const values = yield* validateCommandInput(input)
+    const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
     const [command] = yield* db
       .insert(schema.agentCommand)
@@ -85,7 +87,9 @@ export const upsertAgentCommand = (input: AgentCommandInput & { readonly userId:
       .returning()
 
     if (command === undefined) {
-      return yield* Effect.die(new Error('Could not upsert agent command'))
+      return yield* Effect.fail(
+        new PersistenceError({ message: 'Could not upsert agent command', entity: 'agentCommand' })
+      )
     }
 
     return command
@@ -93,7 +97,7 @@ export const upsertAgentCommand = (input: AgentCommandInput & { readonly userId:
 
 export const updateAgentCommand = (input: AgentCommandUpdateInput & { readonly userId: string }) =>
   Effect.gen(function* () {
-    const values = yield* validateCommandInput(input)
+    const values = yield* validateAgentCommandInput(input)
     const db = yield* Db
     const [command] = yield* db
       .update(schema.agentCommand)

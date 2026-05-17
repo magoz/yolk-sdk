@@ -45,8 +45,11 @@ import {
 } from '@/lib/agents/tools/skill-manager-tool'
 import { makeStorageRagToolModule } from '@/lib/agents/tools/storage-rag-tool'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
-import { createAgentSkill, listAgentSkills, updateAgentSkill } from '@/lib/core/agent/agent-skill'
-import { upsertAgentCommand } from '@/lib/core/agent/agent-command'
+import {
+  createAgentSkillWithCommand,
+  listAgentSkills,
+  updateAgentSkillWithCommand
+} from '@/lib/core/agent/agent-skill'
 import { ensureUserRagSet } from '@/lib/core/storage/ensure-user-rag-set'
 import { Db } from '@/lib/services/db/live-layer'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
@@ -254,6 +257,10 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
   Effect.gen(function* () {
     switch (action._tag) {
       case 'List': {
+        yield* Effect.annotateCurrentSpan({
+          'tool.manage_skills.action': 'list',
+          'user.id': action.userId
+        })
         const skills = yield* listAgentSkills({ userId: action.userId })
         const data = { skills: skills.map(skillSummary) }
 
@@ -266,21 +273,29 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
         }
       }
       case 'Create': {
-        const skill = yield* createAgentSkill({
+        yield* Effect.annotateCurrentSpan({
+          'tool.manage_skills.action': 'create',
+          'user.id': action.userId,
+          'agent_skill.name': action.name,
+          'agent_skill.create_command': action.createCommand,
+          'agent_command.name': action.commandName ?? action.name
+        })
+        const skill = yield* createAgentSkillWithCommand({
           userId: action.userId,
           name: action.name,
           description: action.description,
-          content: action.content
+          content: action.content,
+          commandInput: action.createCommand
+            ? {
+                _tag: 'CreateCommand',
+                command: {
+                  name: action.commandName ?? action.name,
+                  description: action.description,
+                  template: `Use the ${action.name} skill.\n\n$ARGUMENTS`
+                }
+              }
+            : { _tag: 'SkipCommand' }
         })
-
-        if (action.createCommand) {
-          yield* upsertAgentCommand({
-            userId: action.userId,
-            name: action.commandName ?? skill.name,
-            description: skill.description,
-            template: `Use the ${skill.name} skill.\n\n$ARGUMENTS`
-          })
-        }
 
         return {
           message: `Created skill: ${skill.name}`,
@@ -289,23 +304,33 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
       }
       case 'Update': {
         const existing = yield* findSkillForUpdate({ userId: action.userId, id: action.id, name: action.name })
-        const skill = yield* updateAgentSkill({
+        const skillName = action.name ?? existing.name
+        yield* Effect.annotateCurrentSpan({
+          'tool.manage_skills.action': 'update',
+          'user.id': action.userId,
+          'agent_skill.id': existing.id,
+          'agent_skill.name': skillName,
+          'agent_skill.create_command': action.createCommand,
+          'agent_command.name': action.commandName ?? skillName
+        })
+        const skill = yield* updateAgentSkillWithCommand({
           id: existing.id,
           userId: action.userId,
-          name: action.name ?? existing.name,
+          name: skillName,
           description: action.description,
           content: action.content,
-          enabled: action.enabled ?? true
+          enabled: action.enabled ?? true,
+          commandInput: action.createCommand
+            ? {
+                _tag: 'CreateCommand',
+                command: {
+                  name: action.commandName ?? skillName,
+                  description: action.description,
+                  template: `Use the ${skillName} skill.\n\n$ARGUMENTS`
+                }
+              }
+            : { _tag: 'SkipCommand' }
         })
-
-        if (action.createCommand) {
-          yield* upsertAgentCommand({
-            userId: action.userId,
-            name: action.commandName ?? skill.name,
-            description: skill.description,
-            template: `Use the ${skill.name} skill.\n\n$ARGUMENTS`
-          })
-        }
 
         return {
           message: `Updated skill: ${skill.name}`,
@@ -314,6 +339,7 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
       }
     }
   }).pipe(
+    Effect.withSpan('tool.manageSkills'),
     Effect.provide(SkillManagerLayer),
     Effect.mapError(error =>
       error instanceof ToolError

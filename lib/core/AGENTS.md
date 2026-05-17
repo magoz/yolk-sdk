@@ -36,6 +36,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 - Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
 - Store user-authored agent skills in `agentSkill`; runtime loaders convert enabled rows into `SkillsetManifest` data.
 - Store user-authored slash commands in `agentCommand`; runtime loaders convert enabled rows into `SkillsetManifest` commands.
+- When creating/updating a skill with a matching command, use the transactional `*WithCommand` helpers so skill and command writes cannot partially succeed.
 - Refresh tokens in `getValid*Token()` helpers and persist refreshed token before returning.
 - `'use server'` files may export only async functions; move shared constants/types to non-server modules.
 
@@ -43,6 +44,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 
 - Shared domain errors live in `errors/index.ts`.
 - Domain-owned errors may live beside the domain; service integration errors stay with the service.
+- Empty DB write results are typed `PersistenceError` failures, not defects.
 - Prefer discriminated results at UI boundaries; use tagged errors inside Effect pipelines.
 
 ## Anti-Patterns
