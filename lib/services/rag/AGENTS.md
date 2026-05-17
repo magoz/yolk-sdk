@@ -26,6 +26,7 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 ## Store adapter
 
 - `DrizzleRagStoreLayer` is the app boundary for pgvector search; keep SQL/Drizzle details out of `@yolk/rag`.
+- Public `RagStore` methods in `DrizzleRagStoreLayer` use `RagStore.*` spans so package ingestion/retrieval traces include concrete DB work.
 - Preserve package `RagStoreError` values when mapping store failures; avoid double-wrapping typed not-found errors.
 - `searchChunks` filters ready documents only and uses pgvector cosine distance.
 - `searchChunksByText` filters ready documents only and uses Postgres full-text search over chunk content.

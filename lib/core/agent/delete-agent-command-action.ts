@@ -20,6 +20,10 @@ export const deleteAgentCommandAction = async (input: { readonly id: string }) =
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'agent_command.id': input.id
+      })
       yield* deleteAgentCommand({ id: input.id, userId: session.user.id })
     }).pipe(
       Effect.withSpan('action.agentCommand.delete'),

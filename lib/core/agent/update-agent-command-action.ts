@@ -20,6 +20,12 @@ export const updateAgentCommandAction = async (input: AgentCommandUpdateInput) =
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'agent_command.id': input.id,
+        'agent_command.name': input.name,
+        'agent_command.enabled': input.enabled
+      })
       yield* updateAgentCommand({ ...input, userId: session.user.id })
     }).pipe(
       Effect.withSpan('action.agentCommand.update'),

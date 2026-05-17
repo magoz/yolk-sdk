@@ -23,6 +23,11 @@ export const toggleAgentCommandAction = async (input: {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'agent_command.id': input.id,
+        'agent_command.enabled': input.enabled
+      })
       yield* setAgentCommandEnabled({ id: input.id, enabled: input.enabled, userId: session.user.id })
     }).pipe(
       Effect.withSpan('action.agentCommand.toggle'),

@@ -34,11 +34,11 @@ export const createTextStorageObjectAction = async (input: {
       Effect.provide(AppRagLayer),
       Effect.provide(AppLayer),
       Effect.scoped,
-      Effect.tapError(error => reportError(error, { operation: 'action.storage.createText' })),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
+      Effect.tapError(error => reportError(error, { operation: 'action.storage.createText' })),
       Effect.tap(() => Effect.sync(() => revalidatePath('/storage'))),
       Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() =>

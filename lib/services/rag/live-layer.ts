@@ -211,7 +211,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
         }
 
         return toRagDocument(row)
-      }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error))))
+      }).pipe(
+        Effect.withSpan('RagStore.getDocument'),
+        Effect.catch(error => Effect.fail(mapStoreError(error)))
+      )
 
     const api: RagStoreApi = {
       upsertSet: set =>
@@ -247,7 +250,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
           }
 
           return toRagSet(row)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.upsertSet'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       getSet: id =>
         Effect.gen(function* () {
@@ -256,7 +262,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
             return yield* Effect.fail(notFound('RAG set'))
           }
           return toRagSet(row)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.getSet'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       upsertDocument: input =>
         Effect.gen(function* () {
@@ -296,7 +305,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
           }
 
           return yield* getDocument(row.id)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.upsertDocument'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       markDocumentProcessing: input =>
         Effect.gen(function* () {
@@ -310,7 +322,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
               )
             )
           return yield* getDocument(input.documentId)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.markDocumentProcessing'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       replaceDocumentChunks: input =>
         Effect.gen(function* () {
@@ -343,7 +358,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
               )
             })
           )
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.replaceDocumentChunks'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       markDocumentReady: input =>
         Effect.gen(function* () {
@@ -373,7 +391,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
           }
 
           return yield* getDocument(row.id)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.markDocumentReady'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       markDocumentError: input =>
         Effect.gen(function* () {
@@ -386,7 +407,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
                 eq(dbSchema.ragDocument.ragSetId, input.ragSetId)
               )
             )
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.markDocumentError'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       deleteDocument: input =>
         Effect.gen(function* () {
@@ -398,7 +422,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
                 eq(dbSchema.ragDocument.ragSetId, input.ragSetId)
               )
             )
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.deleteDocument'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       searchChunks: input =>
         Effect.gen(function* () {
@@ -435,7 +462,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
             score: match.score,
             document: toRagDocument({ document: match.document, storage: match.storage })
           }))
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.searchChunks'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       searchChunksByText: input =>
         Effect.gen(function* () {
@@ -475,7 +505,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
             score: match.score,
             document: toRagDocument({ document: match.document, storage: match.storage })
           }))
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('RagStore.searchChunksByText'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       getContextChunks: input =>
         Effect.gen(function* () {
@@ -493,7 +526,10 @@ export const DrizzleRagStoreLayer = Layer.effect(
             .orderBy(asc(dbSchema.ragChunk.position))
 
           return rows.map(toRagChunk)
-        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error))))
+        }).pipe(
+          Effect.withSpan('RagStore.getContextChunks'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        )
     }
 
     return api
