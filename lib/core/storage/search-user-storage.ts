@@ -11,6 +11,7 @@ const maxContextChunks = 3
 export type UserStorageSearchResult = {
   readonly citation: number
   readonly source: string
+  readonly sourceId?: string
   readonly documentId: string
   readonly chunkId: string
   readonly score: number
@@ -65,6 +66,11 @@ const sourceLabel = (result: RagSearchResult) => {
 const resultText = (result: RagSearchResult) =>
   result.context?.map(chunk => chunk.content).join('\n\n') ?? result.chunk.content
 
+const metadataString = (metadata: RagSearchResult['document']['metadata'], key: string) => {
+  const value = metadata?.[key]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
 export const searchUserStorage = (input: {
   readonly userId: string
   readonly query: string
@@ -106,6 +112,7 @@ export const searchUserStorage = (input: {
       results: results.map((result, index) => ({
         citation: index + 1,
         source: sourceLabel(result),
+        sourceId: metadataString(result.document.metadata, 'storageObjectId'),
         documentId: result.document.id,
         chunkId: result.chunk.id,
         score: result.score,

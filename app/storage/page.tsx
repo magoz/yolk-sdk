@@ -135,7 +135,7 @@ async function Content() {
               Add sources, inspect indexing, and test what the agent can retrieve.
             </p>
           </div>
-          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border bg-card p-4 shadow-xs">
               <dt className="text-sm text-muted-foreground">Sources</dt>
               <dd className="mt-1 text-2xl font-semibold tabular-nums">{items.length}</dd>
@@ -149,13 +149,17 @@ async function Content() {
               <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.chunks}</dd>
             </div>
             <div className="rounded-xl border bg-card p-4 shadow-xs">
+              <dt className="text-sm text-muted-foreground">Tokens</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.tokens}</dd>
+            </div>
+            <div className="rounded-xl border bg-card p-4 shadow-xs">
               <dt className="text-sm text-muted-foreground">Errors</dt>
               <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.errors}</dd>
             </div>
           </dl>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
             <CreateTextStorageForm />
-            <StorageSearchForm />
+            <StorageSearchForm readyCount={stats.ready} />
           </div>
           <section className="space-y-3">
             <div className="flex items-end justify-between gap-3">
@@ -172,7 +176,7 @@ async function Content() {
             ) : (
               <ul className="grid gap-3">
                 {items.map(item => (
-                  <li key={item.object.id}>
+                  <li key={item.object.id} id={`source-${item.object.id}`} className="scroll-mt-6">
                     <Card size="sm">
                       <CardHeader>
                         <CardTitle>{displayTitle(item)}</CardTitle>

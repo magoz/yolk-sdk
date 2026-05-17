@@ -10,15 +10,20 @@ import type { UserStorageSearchOutput } from '@/lib/core/storage/search-user-sto
 const scoreText = (label: string, value: number | undefined) =>
   value === undefined ? undefined : `${label} ${value.toFixed(3)}`
 
-export function StorageSearchForm() {
+export function StorageSearchForm({ readyCount }: { readonly readyCount: number }) {
   const [result, setResult] = useState<UserStorageSearchOutput | undefined>()
   const [message, setMessage] = useState<string | undefined>()
   const [isPending, startTransition] = useTransition()
+  const disabled = readyCount === 0
 
   return (
     <form
       className="space-y-4 rounded-xl border bg-card p-4 text-card-foreground shadow-xs"
       action={formData => {
+        if (disabled) {
+          return
+        }
+
         const query = String(formData.get('query') ?? '')
         setMessage(undefined)
 
@@ -42,14 +47,17 @@ export function StorageSearchForm() {
             id="storage-search-query"
             name="query"
             placeholder="Ask what storage knows"
+            disabled={disabled}
             required
           />
-          <Button type="submit" disabled={isPending} className="min-h-11 sm:min-h-9">
+          <Button type="submit" disabled={disabled || isPending} className="min-h-11 sm:min-h-9">
             {isPending ? 'Searching…' : 'Search'}
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          Same hybrid retrieval used by the agent: semantic + exact keyword matches.
+          {disabled
+            ? 'Index a source before testing retrieval.'
+            : 'Same hybrid retrieval used by the agent: semantic + exact keyword matches.'}
         </p>
       </div>
 
@@ -75,7 +83,13 @@ export function StorageSearchForm() {
                 <li key={item.chunkId} className="rounded-lg border p-3">
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-medium text-foreground">Citation [{item.citation}]</span>
-                    <span>{item.source}</span>
+                    {item.sourceId ? (
+                      <a className="underline-offset-4 hover:underline" href={`#source-${item.sourceId}`}>
+                        {item.source}
+                      </a>
+                    ) : (
+                      <span>{item.source}</span>
+                    )}
                     {[scoreText('score', item.score), scoreText('vector', item.vectorScore), scoreText('text', item.textScore), scoreText('fused', item.fusedScore)]
                       .filter(value => value !== undefined)
                       .map(value => (
