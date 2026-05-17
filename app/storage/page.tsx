@@ -3,20 +3,11 @@ import { Effect } from 'effect'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from '@/components/ui/card'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import { CreateTextStorageForm } from './create-text-storage-form'
+import { CreateFileStorageForm } from './create-file-storage-form'
 import { DeleteStorageSourceButton } from './delete-storage-source-button'
-import { StorageSearchForm } from './storage-search-form'
 
 export const dynamic = 'force-dynamic'
 
@@ -87,7 +78,7 @@ const nonEmptyString = (value: string | undefined | null): value is string =>
   value !== undefined && value !== null && value.length > 0
 
 const metadataLine = (item: StorageListItem) =>
-  [item.object.sourceType, item.object.mediaType, formatBytes(item.object.byteSize)]
+  [item.object.sourceType, formatBytes(item.object.byteSize)]
     .filter(nonEmptyString)
     .join(' · ')
 
@@ -108,15 +99,6 @@ const previewText = (text: string | null) => {
   return `${trimmed.slice(0, 900)}…`
 }
 
-const storageStats = (items: ReadonlyArray<StorageListItem>) => {
-  const ready = items.filter(item => item.document?.status === 'ready').length
-  const errors = items.filter(item => item.document?.status === 'error').length
-  const chunks = items.reduce((sum, item) => sum + (item.document?.chunkCount ?? 0), 0)
-  const tokens = items.reduce((sum, item) => sum + (item.document?.tokenCount ?? 0), 0)
-
-  return { ready, errors, chunks, tokens }
-}
-
 async function Content() {
   await cookies()
 
@@ -124,48 +106,24 @@ async function Content() {
     Effect.gen(function* () {
       const session = yield* getSession()
       const items = yield* getUserStorage({ userId: session.user.id })
-      const stats = storageStats(items)
 
       return (
-        <main className="mx-auto max-w-5xl space-y-6 p-6">
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-muted-foreground">Knowledge cockpit</p>
-            <h1 className="text-3xl font-semibold tracking-tight">Storage</h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Add sources, inspect indexing, and test what the agent can retrieve.
-            </p>
+        <main className="mx-auto max-w-6xl space-y-6 p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">Storage</h1>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                Add files and manage the sources the agent can search.
+              </p>
+            </div>
+            <p className="text-sm text-muted-foreground tabular-nums">{items.length} sources</p>
           </div>
-          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="rounded-xl border bg-card p-4 shadow-xs">
-              <dt className="text-sm text-muted-foreground">Sources</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">{items.length}</dd>
-            </div>
-            <div className="rounded-xl border bg-card p-4 shadow-xs">
-              <dt className="text-sm text-muted-foreground">Ready</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.ready}</dd>
-            </div>
-            <div className="rounded-xl border bg-card p-4 shadow-xs">
-              <dt className="text-sm text-muted-foreground">Chunks</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.chunks}</dd>
-            </div>
-            <div className="rounded-xl border bg-card p-4 shadow-xs">
-              <dt className="text-sm text-muted-foreground">Tokens</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.tokens}</dd>
-            </div>
-            <div className="rounded-xl border bg-card p-4 shadow-xs">
-              <dt className="text-sm text-muted-foreground">Errors</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">{stats.errors}</dd>
-            </div>
-          </dl>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-            <CreateTextStorageForm />
-            <StorageSearchForm readyCount={stats.ready} />
-          </div>
+          <CreateFileStorageForm />
           <section className="space-y-3">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-medium">Sources</h2>
-                <p className="text-sm text-muted-foreground">Indexed files and pasted text.</p>
+                <h2 className="text-lg font-medium">Ingested sources</h2>
+                <p className="text-sm text-muted-foreground">All files currently in storage.</p>
               </div>
               <p className="text-sm text-muted-foreground tabular-nums">{items.length} total</p>
             </div>
@@ -174,72 +132,55 @@ async function Content() {
                 No sources yet.
               </p>
             ) : (
-              <ul className="grid gap-3">
+              <ul className="overflow-hidden rounded-xl border bg-card shadow-xs">
                 {items.map(item => (
-                  <li key={item.object.id} id={`source-${item.object.id}`} className="scroll-mt-6">
-                    <Card size="sm">
-                      <CardHeader>
-                        <CardTitle>{displayTitle(item)}</CardTitle>
-                        <CardDescription>{metadataLine(item)}</CardDescription>
-                        <CardAction className="flex items-center gap-2">
-                          <div
-                            className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusClassName(item.document?.status ?? 'not indexed')}`}
-                          >
-                            {item.document?.status ?? 'not indexed'}
-                          </div>
-                          <DeleteStorageSourceButton id={item.object.id} label={displayTitle(item)} />
-                        </CardAction>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
+                  <li
+                    key={item.object.id}
+                    id={`source-${item.object.id}`}
+                    className="scroll-mt-6 border-b last:border-b-0"
+                  >
+                    <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_120px_120px_170px_auto] md:items-center">
+                      <div className="min-w-0 space-y-1">
+                        <p className="truncate font-medium">{displayTitle(item)}</p>
+                        <p className="truncate text-sm text-muted-foreground">{metadataLine(item)}</p>
                         {item.document?.summary ? (
-                          <p className="text-sm leading-6 text-muted-foreground">
+                          <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
                             {item.document.summary}
                           </p>
                         ) : null}
                         {item.document?.errorMessage ? (
-                          <p className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                            {item.document.errorMessage}
+                          <p className="text-sm text-destructive">{item.document.errorMessage}</p>
+                        ) : null}
+                      </div>
+                      <div
+                        className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${statusClassName(item.document?.status ?? 'not indexed')}`}
+                      >
+                        {item.document?.status ?? 'not indexed'}
+                      </div>
+                      <p className="text-sm text-muted-foreground tabular-nums">
+                        {item.document?.chunkCount ?? 0} chunks
+                      </p>
+                      <div className="text-sm text-muted-foreground">
+                        <p>{formatDate(item.object.createdAt)}</p>
+                        {item.document?.processedAt ? <p>Processed {formatDate(item.document.processedAt)}</p> : null}
+                      </div>
+                      <DeleteStorageSourceButton id={item.object.id} label={displayTitle(item)} />
+                    </div>
+                    {previewText(item.object.textContent) || item.object.contentHash ? (
+                      <details className="border-t bg-muted/20 px-4 py-3">
+                        <summary className="cursor-pointer text-sm font-medium">Details</summary>
+                        {previewText(item.object.textContent) ? (
+                          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+                            {previewText(item.object.textContent)}
                           </p>
                         ) : null}
-                        {previewText(item.object.textContent) ? (
-                          <details className="rounded-lg border bg-muted/30 p-3">
-                            <summary className="cursor-pointer text-sm font-medium">Source preview</summary>
-                            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-                              {previewText(item.object.textContent)}
-                            </p>
-                          </details>
-                        ) : null}
-                        <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <dt className="text-muted-foreground">Chunks</dt>
-                            <dd className="font-medium tabular-nums">
-                              {item.document?.chunkCount ?? 0}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Tokens</dt>
-                            <dd className="font-medium tabular-nums">
-                              {item.document?.tokenCount ?? 0}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Created</dt>
-                            <dd className="font-medium">{formatDate(item.object.createdAt)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground">Processed</dt>
-                            <dd className="font-medium">
-                              {item.document?.processedAt ? formatDate(item.document.processedAt) : '—'}
-                            </dd>
-                          </div>
-                        </dl>
                         {item.object.contentHash ? (
-                          <p className="truncate text-xs text-muted-foreground">
+                          <p className="mt-3 truncate text-xs text-muted-foreground">
                             Hash <span className="font-mono">{item.object.contentHash}</span>
                           </p>
                         ) : null}
-                      </CardContent>
-                    </Card>
+                      </details>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -256,7 +197,7 @@ async function Content() {
         NextEffect.isNavigationError(error)
           ? Effect.fail(error)
           : reportError(error, { operation: 'page.storage' }).pipe(
-              Effect.as(<main className="mx-auto max-w-5xl p-6">Could not load storage.</main>)
+              Effect.as(<main className="mx-auto max-w-6xl p-6">Could not load storage.</main>)
             )
       )
     )

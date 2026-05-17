@@ -4,6 +4,7 @@ import { Effect } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
+import { ValidationError } from '@/lib/core/errors'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
@@ -16,20 +17,24 @@ const maxFileBytes = 2_000_000
 export const createFileStorageObjectAction = async (formData: FormData) => {
   await cookies()
 
-  const file = formData.get('file')
-  if (!(file instanceof File)) {
-    return { _tag: 'Error' as const, message: 'Choose a file' }
-  }
-
-  if (file.size > maxFileBytes) {
-    return { _tag: 'Error' as const, message: 'File must be 2MB or smaller' }
-  }
-
-  const bytes = new Uint8Array(await file.arrayBuffer())
-
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      const file = formData.get('file')
+      if (!(file instanceof File)) {
+        return yield* Effect.fail(new ValidationError({ field: 'file', message: 'Choose a file' }))
+      }
+
+      if (file.size > maxFileBytes) {
+        return yield* Effect.fail(new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' }))
+      }
+
+      const arrayBuffer = yield* Effect.tryPromise({
+        try: () => file.arrayBuffer(),
+        catch: () => new ValidationError({ field: 'file', message: 'Could not read file' })
+      })
+      const bytes = new Uint8Array(arrayBuffer)
+
       yield* Effect.annotateCurrentSpan({
         'user.id': session.user.id,
         'storage.source_type': 'file',
@@ -50,6 +55,9 @@ export const createFileStorageObjectAction = async (formData: FormData) => {
       Effect.provide(AppLayer),
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
+      Effect.catchTag('ValidationError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
       Effect.catchTag('UnsupportedFileFormatError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
