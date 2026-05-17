@@ -1,21 +1,37 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import type { ToolModule } from '@yolk/agent/tools'
+import { ToolResult } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const skillManagerToolName = 'manage_skills'
 
 const SkillManagerParams = Schema.Struct({
-  action: Schema.Union([Schema.Literal('list'), Schema.Literal('create'), Schema.Literal('update')]),
-  id: Schema.optional(Schema.String),
-  name: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
-  content: Schema.optional(Schema.String),
-  enabled: Schema.optional(Schema.Boolean),
-  createCommand: Schema.optional(Schema.Boolean),
-  commandName: Schema.optional(Schema.String)
+  action: Schema.Union([Schema.Literal('list'), Schema.Literal('create'), Schema.Literal('update')]).pipe(
+    Schema.annotate({ description: 'Action to perform.' })
+  ),
+  id: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Existing skill id for update.' })
+  ),
+  name: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Skill name, or existing skill name for update.' })
+  ),
+  description: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Short skill description.' })
+  ),
+  content: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Full reusable skill instructions.' })
+  ),
+  enabled: Schema.optional(Schema.Boolean).pipe(
+    Schema.annotate({ description: 'Whether the skill is enabled after update.' })
+  ),
+  createCommand: Schema.optional(Schema.Boolean).pipe(
+    Schema.annotate({ description: 'Whether to create or update a matching slash command. Defaults true for create/update.' })
+  ),
+  commandName: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Optional slash command name. Defaults to the skill name.' })
+  )
 })
 type SkillManagerParams = typeof SkillManagerParams.Type
 
@@ -51,54 +67,14 @@ export type SkillManagerHandler = (
   action: SkillManagerAction
 ) => Effect.Effect<SkillManagerResult, ToolError>
 
-const skillManagerParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    action: {
-      type: 'string',
-      enum: ['list', 'create', 'update'],
-      description: 'Action to perform.'
-    },
-    id: { type: 'string', description: 'Existing skill id for update.' },
-    name: { type: 'string', description: 'Skill name, or existing skill name for update.' },
-    description: { type: 'string', description: 'Short skill description.' },
-    content: { type: 'string', description: 'Full reusable skill instructions.' },
-    enabled: { type: 'boolean', description: 'Whether the skill is enabled after update.' },
-    createCommand: {
-      type: 'boolean',
-      description: 'Whether to create or update a matching slash command. Defaults true for create/update.'
-    },
-    commandName: {
-      type: 'string',
-      description: 'Optional slash command name. Defaults to the skill name.'
-    }
-  },
-  required: ['action']
-}
-
-const skillManagerToolDef = ToolDef.make({
-  name: skillManagerToolName,
-  description: [
-    'Create, update, or list reusable agent skills for the authenticated user.',
-    'Use this when the user asks to save instructions, remember a workflow, create a reusable skill, or update existing behavior.',
-    'For create/update, provide concise name, description, and full content. By default create/update also creates or updates a matching slash command.'
-  ].join(' '),
-  parameters: skillManagerParameters
-})
-
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
+const skillManagerToolDescription = [
+  'Create, update, or list reusable agent skills for the authenticated user.',
+  'Use this when the user asks to save instructions, remember a workflow, create a reusable skill, or update existing behavior.',
+  'For create/update, provide concise name, description, and full content. By default create/update also creates or updates a matching slash command.'
+].join(' ')
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: skillManagerToolName, message, cause })
-
-const decodeSkillManagerParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(SkillManagerParams)(params).pipe(
-    Effect.mapError(error =>
-      makeToolError(`Invalid skill manager arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
 
 const requiredText = (params: SkillManagerParams, key: 'name' | 'description' | 'content') => {
   const value = params[key]?.trim()
@@ -158,13 +134,15 @@ export const makeSkillManagerToolModule = (
 ): ToolModule<AgentToolContext> => ({
   id: 'skill-manager',
   tools: [
-    {
-      def: skillManagerToolDef,
+    makeTool({
+      name: skillManagerToolName,
+      description: skillManagerToolDescription,
+      parameters: SkillManagerParams,
       access: 'write',
       isEnabled: context => Effect.succeed(context.surface === 'text' && context.subagent !== true),
-      execute: ({ call, context }) =>
+      invalidParamsMessage: error => `Invalid skill manager arguments: ${error instanceof Error ? error.message : String(error)}`,
+      execute: ({ call, context, params }) =>
         Effect.gen(function* () {
-          const params = yield* decodeSkillManagerParams(call.params)
           const action = yield* paramsToAction(params, context.userId)
           const result = yield* manageSkills(action)
 
@@ -174,6 +152,6 @@ export const makeSkillManagerToolModule = (
             structuredContent: result.data
           })
         })
-    }
+    })
   ]
 })

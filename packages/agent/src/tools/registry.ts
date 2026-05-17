@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk/agent/loop'
-import type { ToolCall, ToolDef, ToolResult } from '@yolk/agent/protocol'
+import { ToolDef, type ToolCall, type ToolResult } from '@yolk/agent/protocol'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 export type ToolAccess = typeof ToolAccess.Type
@@ -19,11 +19,29 @@ export type ToolExecutionInput<Context> = {
   readonly context: Context
 }
 
+export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Context> & {
+  readonly params: Params
+}
+
 export type ToolRegistration<Context> = {
   readonly def: ToolDef
   readonly access: ToolAccess
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+}
+
+type ToolParamsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
+
+export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
+  readonly name: string
+  readonly description: string
+  readonly parameters: ParamsSchema
+  readonly access: ToolAccess
+  readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
+  readonly invalidParamsMessage?: (error: unknown) => string
+  readonly execute: (
+    input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
+  ) => Effect.Effect<ToolResult, ToolError>
 }
 
 export type ToolModule<Context> = {
@@ -72,6 +90,40 @@ const missingToolError = (name: string) =>
     message: `Tool is not configured: ${name}`,
     cause: 'not_found'
   })
+
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
+const jsonSchemaFromSchema = (schema: Schema.Top) => {
+  const document = Schema.toJsonSchemaDocument(schema)
+
+  return Object.keys(document.definitions).length > 0
+    ? { ...document.schema, $defs: document.definitions }
+    : document.schema
+}
+
+export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
+  options: MakeToolOptions<Context, ParamsSchema>
+): ToolRegistration<Context> => ({
+  def: ToolDef.make({
+    name: options.name,
+    description: options.description,
+    parameters: jsonSchemaFromSchema(options.parameters)
+  }),
+  access: options.access,
+  isEnabled: options.isEnabled,
+  execute: ({ call, context }) =>
+    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+      Effect.mapError(error =>
+        new ToolError({
+          tool: options.name,
+          message: options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${unknownToMessage(error)}`,
+          cause: 'validation'
+        })
+      ),
+      Effect.flatMap(params => options.execute({ call, context, params }))
+    )
+})
 
 const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistration<Context>>) => {
   const names = Arr.map(resolved, item => item.tool.def.name)

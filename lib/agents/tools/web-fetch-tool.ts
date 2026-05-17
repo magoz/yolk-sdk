@@ -2,8 +2,8 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, ToolResult, type ToolCall } from '@yolk/agent/protocol'
-import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
+import { ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule, type ToolRegistration } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const webFetchToolName = 'web_fetch'
@@ -14,9 +14,13 @@ const maxRedirects = 5
 
 const WebFetchFormat = Schema.Literals(['markdown', 'text', 'html'])
 const WebFetchParams = Schema.Struct({
-  url: Schema.String,
-  format: Schema.optional(WebFetchFormat),
-  timeoutSeconds: Schema.optional(Schema.Number)
+  url: Schema.String.pipe(Schema.annotate({ description: 'Fully-qualified public http(s) URL to fetch.' })),
+  format: Schema.optional(WebFetchFormat).pipe(
+    Schema.annotate({ description: 'Output format. Defaults to markdown.' })
+  ),
+  timeoutSeconds: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Optional timeout in seconds. Defaults to 30; capped at 120.' })
+  )
 })
 
 type WebFetchFormat = typeof WebFetchFormat.Type
@@ -33,36 +37,11 @@ export type WebFetchToolDependencies = {
   readonly request: (url: URL, timeoutMs: number) => Effect.Effect<WebFetchHttpResponse, ToolError>
 }
 
-const webFetchParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    url: {
-      type: 'string',
-      description: 'Fully-qualified public http(s) URL to fetch.'
-    },
-    format: {
-      type: 'string',
-      enum: ['markdown', 'text', 'html'],
-      description: 'Output format. Defaults to markdown.'
-    },
-    timeoutSeconds: {
-      type: 'number',
-      description: 'Optional timeout in seconds. Defaults to 30; capped at 120.'
-    }
-  },
-  required: ['url']
-}
-
-const webFetchToolDef = ToolDef.make({
-  name: webFetchToolName,
-  description: [
-    'Fetch and read a public web URL. Returns markdown by default, or text/html when requested.',
-    'Use this when the user provides a URL or asks about a known page.',
-    'This tool does not search the web, click links, run page JavaScript, use cookies, or access logged-in pages.'
-  ].join(' '),
-  parameters: webFetchParameters
-})
+const webFetchToolDescription = [
+  'Fetch and read a public web URL. Returns markdown by default, or text/html when requested.',
+  'Use this when the user provides a URL or asks about a known page.',
+  'This tool does not search the web, click links, run page JavaScript, use cookies, or access logged-in pages.'
+].join(' ')
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -479,11 +458,17 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
 
 export const makeWebFetchToolRegistration = (
   deps: WebFetchToolDependencies
-): ToolRegistration<AgentToolContext> => ({
-  def: webFetchToolDef,
+): ToolRegistration<AgentToolContext> => makeTool({
+  name: webFetchToolName,
+  description: webFetchToolDescription,
+  parameters: WebFetchParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  execute: ({ call }) => executeWebFetchTool(call, deps)
+  invalidParamsMessage: error => `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+  execute: ({ call, params }) =>
+    fetchWebPage(params, deps).pipe(
+      Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
+    )
 })
 
 export const makeWebFetchToolModule = (

@@ -2,8 +2,8 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { Bash } from 'just-bash/browser'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, ToolResult, type ToolCall } from '@yolk/agent/protocol'
-import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
+import { ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule, type ToolRegistration } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const justBashToolName = 'just_bash'
@@ -12,48 +12,28 @@ const maxTimeoutSeconds = 30
 const maxOutputCharacters = 20_000
 
 const JustBashParams = Schema.Struct({
-  script: Schema.String,
-  cwd: Schema.optional(Schema.String),
-  stdin: Schema.optional(Schema.String),
-  timeoutSeconds: Schema.optional(Schema.Number)
+  script: Schema.String.pipe(
+    Schema.annotate({ description: 'Bash script to run inside an isolated just-bash virtual filesystem.' })
+  ),
+  cwd: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Optional virtual working directory. Defaults to /home/user.' })
+  ),
+  stdin: Schema.optional(Schema.String).pipe(
+    Schema.annotate({ description: 'Optional stdin text passed to the script.' })
+  ),
+  timeoutSeconds: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Optional timeout in seconds. Defaults to 10; capped at 30.' })
+  )
 })
 
 type JustBashParams = typeof JustBashParams.Type
 
-const justBashParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    script: {
-      type: 'string',
-      description: 'Bash script to run inside an isolated just-bash virtual filesystem.'
-    },
-    cwd: {
-      type: 'string',
-      description: 'Optional virtual working directory. Defaults to /home/user.'
-    },
-    stdin: {
-      type: 'string',
-      description: 'Optional stdin text passed to the script.'
-    },
-    timeoutSeconds: {
-      type: 'number',
-      description: 'Optional timeout in seconds. Defaults to 10; capped at 30.'
-    }
-  },
-  required: ['script']
-}
-
-const justBashToolDef = ToolDef.make({
-  name: justBashToolName,
-  description: [
-    'Run bash in a just-bash virtual filesystem.',
-    'Use for safe text, JSON, YAML, CSV, file-processing, and curl pipelines with built-in Unix tools.',
-    'Network access is enabled but private/loopback ranges are blocked.',
-    'No host filesystem access, external binaries, persistent state, JS, or Python is available.'
-  ].join(' '),
-  parameters: justBashParameters
-})
+const justBashToolDescription = [
+  'Run bash in a just-bash virtual filesystem.',
+  'Use for safe text, JSON, YAML, CSV, file-processing, and curl pipelines with built-in Unix tools.',
+  'Network access is enabled but private/loopback ranges are blocked.',
+  'No host filesystem access, external binaries, persistent state, JS, or Python is available.'
+].join(' ')
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -153,12 +133,24 @@ export const executeJustBashTool = (call: ToolCall) =>
     })
   })
 
-const justBashTool: ToolRegistration<AgentToolContext> = {
-  def: justBashToolDef,
+const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
+  name: justBashToolName,
+  description: justBashToolDescription,
+  parameters: JustBashParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
-  execute: ({ call }) => executeJustBashTool(call)
-}
+  invalidParamsMessage: error => `Invalid just-bash arguments: ${unknownToMessage(error)}`,
+  execute: ({ call, params }) =>
+    Effect.gen(function* () {
+      const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
+      const result = yield* runWithTimeout(params, timeoutMs)
+
+      return ToolResult.make({
+        toolCallId: call.id,
+        content: formatResult(result)
+      })
+    })
+})
 
 export const justBashToolModule: ToolModule<AgentToolContext> = {
   id: 'just-bash',

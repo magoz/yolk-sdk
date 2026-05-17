@@ -25,6 +25,7 @@
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
+- `@yolk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
 - Protocol owns `SubagentStarted`/`SubagentCompleted` events and optional `createdAtMs`; loop emits these around `task` calls while preserving generic tool lifecycle as the source of truth.
 

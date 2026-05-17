@@ -1,8 +1,9 @@
 import { Effect } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import { makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
+import { makeTool as makeSchemaTool, makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
 
 type TestContext = {
   readonly enabled: boolean
@@ -100,6 +101,30 @@ describe('resolveTools', () => {
       expect(result).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ToolRegistryError', cause: 'duplicate_tool' }
+      })
+    })
+  )
+
+  it.effect('derives tool parameters from Effect Schema and decodes before execute', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'schema_echo',
+        description: 'Echo schema input.',
+        parameters: Schema.Struct({
+          text: Schema.String.pipe(Schema.annotate({ description: 'Text to echo.' }))
+        }),
+        access: 'read',
+        execute: ({ call, params }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: params.text }))
+      })
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+      const result = yield* toolSet.execute({ id: 'call_1', name: 'schema_echo', params: { text: 'hi' } })
+
+      expect(result.content).toBe('hi')
+      expect(toolSet.tools[0]?.parameters).toMatchObject({
+        type: 'object',
+        properties: { text: { type: 'string', description: 'Text to echo.' } },
+        required: ['text']
       })
     })
   )

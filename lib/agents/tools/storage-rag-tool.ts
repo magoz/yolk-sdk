@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import type { ToolModule } from '@yolk/agent/tools'
+import { ToolResult } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule } from '@yolk/agent/tools'
 import type { RagSearchResult } from '@yolk/rag/retrieval'
 import type { AgentToolContext } from './tool-context.ts'
 
@@ -18,15 +18,31 @@ const defaultSourceMaxChars = 12_000
 const maxSourceMaxChars = 40_000
 
 const StorageSearchParams = Schema.Struct({
-  queries: Schema.Array(Schema.String),
-  limit: Schema.optional(Schema.Number),
-  minScore: Schema.optional(Schema.Number),
-  contextChunks: Schema.optional(Schema.Number)
+  queries: Schema.Array(Schema.String).pipe(
+    Schema.annotate({
+      description: 'One to five targeted storage search queries. Use one item for simple searches; use multiple query rewrites for broad or high-recall searches.'
+    })
+  ),
+  limit: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Maximum chunks per query. Defaults to 8; capped at 20.' })
+  ),
+  minScore: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.' })
+  ),
+  contextChunks: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.' })
+  )
 })
 
+const StorageListSourcesParams = Schema.Struct({})
+
 const StorageGetSourceParams = Schema.Struct({
-  id: Schema.String,
-  maxChars: Schema.optional(Schema.Number)
+  id: Schema.String.pipe(
+    Schema.annotate({ description: 'Storage source ID from search citations or list_storage_sources.' })
+  ),
+  maxChars: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Maximum extracted text characters to return. Defaults to 12000; capped at 40000.' })
+  )
 })
 
 type StorageSearchParams = typeof StorageSearchParams.Type
@@ -76,79 +92,22 @@ export type StorageRagToolHandlers = {
   readonly getSource?: StorageGetSourceHandler
 }
 
-const storageSearchParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    queries: {
-      type: 'array',
-      items: { type: 'string' },
-      description:
-        'One to five targeted storage search queries. Use one item for simple searches; use multiple query rewrites for broad or high-recall searches.'
-    },
-    limit: {
-      type: 'number',
-      description: 'Maximum chunks per query. Defaults to 8; capped at 20.'
-    },
-    minScore: {
-      type: 'number',
-      description: 'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.'
-    },
-    contextChunks: {
-      type: 'number',
-      description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.'
-    }
-  },
-  required: ['queries']
-}
+const storageSearchToolDescription = [
+  'Search the authenticated user storage knowledge base with one or more queries.',
+  'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
+  'Use one query for focused searches and multiple query rewrites for broad, ambiguous, or high-recall questions.'
+].join(' ')
 
-const storageSearchToolDef = ToolDef.make({
-  name: storageSearchToolName,
-  description: [
-    'Search the authenticated user storage knowledge base with one or more queries.',
-    'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
-    'Use one query for focused searches and multiple query rewrites for broad, ambiguous, or high-recall questions.'
-  ].join(' '),
-  parameters: storageSearchParameters
-})
+const storageListSourcesToolDescription = [
+  'List the authenticated user storage sources and indexing status.',
+  'Use before searching when source names, uploaded files, or available knowledge are unclear.'
+].join(' ')
 
-const storageListSourcesToolDef = ToolDef.make({
-  name: storageListSourcesToolName,
-  description: [
-    'List the authenticated user storage sources and indexing status.',
-    'Use before searching when source names, uploaded files, or available knowledge are unclear.'
-  ].join(' '),
-  parameters: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {},
-    required: []
-  }
-})
-
-const storageGetSourceToolDef = ToolDef.make({
-  name: storageGetSourceToolName,
-  description: [
-    'Read one authenticated user storage source by ID.',
-    'Use after search_storage or list_storage_sources when you need fuller source context before answering.',
-    'Returns metadata plus extracted text capped by maxChars.'
-  ].join(' '),
-  parameters: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      id: {
-        type: 'string',
-        description: 'Storage source ID from search citations or list_storage_sources.'
-      },
-      maxChars: {
-        type: 'number',
-        description: 'Maximum extracted text characters to return. Defaults to 12000; capped at 40000.'
-      }
-    },
-    required: ['id']
-  }
-})
+const storageGetSourceToolDescription = [
+  'Read one authenticated user storage source by ID.',
+  'Use after search_storage or list_storage_sources when you need fuller source context before answering.',
+  'Returns metadata plus extracted text capped by maxChars.'
+].join(' ')
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -159,24 +118,6 @@ const makeToolError = (message: string, cause: ToolError['cause'], tool = storag
     message,
     cause
   })
-
-const decodeStorageSearchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(StorageSearchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeToolError(`Invalid storage search arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
-
-const decodeStorageGetSourceParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(StorageGetSourceParams)(params).pipe(
-    Effect.mapError(error =>
-      makeToolError(
-        `Invalid storage source read arguments: ${unknownToMessage(error)}`,
-        'validation',
-        storageGetSourceToolName
-      )
-    )
-  )
 
 const normalizeInteger = (input: {
   readonly value: number | undefined
@@ -369,24 +310,25 @@ const formatSourceDetail = (source: StorageSourceDetail) =>
     source.text
   ].filter(line => line !== undefined).join('\n')
 
-const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>['tools'][number] => ({
-  def: storageSearchToolDef,
+const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>['tools'][number] => makeTool({
+  name: storageSearchToolName,
+  description: storageSearchToolDescription,
+  parameters: StorageSearchParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
-  execute: ({ call, context }) =>
+  invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
+  execute: ({ call, context, params }) =>
     Effect.gen(function* () {
-      const params = yield* decodeStorageSearchParams(call.params).pipe(
-        Effect.flatMap(normalizeStorageSearchParams)
-      )
+      const normalizedParams = yield* normalizeStorageSearchParams(params)
       const items = yield* Effect.forEach(
-        params.queries,
+        normalizedParams.queries,
         query =>
           search({
             userId: context.userId,
             query,
-            limit: params.limit,
-            minScore: params.minScore,
-            contextChunks: params.contextChunks
+            limit: normalizedParams.limit,
+            minScore: normalizedParams.minScore,
+            contextChunks: normalizedParams.contextChunks
           }).pipe(Effect.map(results => ({ query, results }))),
         { concurrency: 'unbounded' }
       )
@@ -407,8 +349,10 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
 
 const listSourcesTool = (
   listSources: StorageListSourcesHandler
-): ToolModule<AgentToolContext>['tools'][number] => ({
-  def: storageListSourcesToolDef,
+): ToolModule<AgentToolContext>['tools'][number] => makeTool({
+  name: storageListSourcesToolName,
+  description: storageListSourcesToolDescription,
+  parameters: StorageListSourcesParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
   execute: ({ call, context }) =>
@@ -432,16 +376,21 @@ const listSourcesTool = (
     )
 })
 
-const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentToolContext>['tools'][number] => ({
-  def: storageGetSourceToolDef,
+const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentToolContext>['tools'][number] => makeTool({
+  name: storageGetSourceToolName,
+  description: storageGetSourceToolDescription,
+  parameters: StorageGetSourceParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text'),
-  execute: ({ call, context }) =>
+  invalidParamsMessage: error => `Invalid storage source read arguments: ${unknownToMessage(error)}`,
+  execute: ({ call, context, params }) =>
     Effect.gen(function* () {
-      const params = yield* decodeStorageGetSourceParams(call.params).pipe(
-        Effect.flatMap(normalizeStorageGetSourceParams)
-      )
-      const source = yield* getSource({ userId: context.userId, id: params.id, maxChars: params.maxChars })
+      const normalizedParams = yield* normalizeStorageGetSourceParams(params)
+      const source = yield* getSource({
+        userId: context.userId,
+        id: normalizedParams.id,
+        maxChars: normalizedParams.maxChars
+      })
 
       return ToolResult.make({
         toolCallId: call.id,

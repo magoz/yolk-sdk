@@ -1,15 +1,21 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, type ToolCall, type ToolResult } from '@yolk/agent/protocol'
-import type { ToolModule, ToolRegistration } from './registry.ts'
+import { ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
 
 export const taskToolName = 'task'
 
 const TaskToolParams = Schema.Struct({
-  description: Schema.String,
-  prompt: Schema.String,
-  subagent_type: Schema.String
+  description: Schema.String.pipe(Schema.annotate({ description: 'A short 3-5 word description of the task.' })),
+  prompt: Schema.String.pipe(
+    Schema.annotate({
+      description: 'The complete task instructions for the subagent, including all context it needs.'
+    })
+  ),
+  subagent_type: Schema.String.pipe(
+    Schema.annotate({ description: 'The specialized subagent type to use for this task.' })
+  )
 })
 
 export type TaskToolParams = typeof TaskToolParams.Type
@@ -30,22 +36,12 @@ export type TaskToolOptions<Context> = {
   readonly execute: (input: TaskExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
 
-const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)
-
 const taskToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
     tool: taskToolName,
     message,
     cause
   })
-
-const decodeTaskParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(TaskToolParams)(params).pipe(
-    Effect.mapError(error =>
-      taskToolError(`Invalid task arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
 
 const trimmedTaskParams = (params: TaskToolParams) => ({
   description: params.description.trim(),
@@ -101,52 +97,32 @@ const taskToolDescription = (subagents: ReadonlyArray<TaskSubagentDefinition>) =
       : `Available subagent types:\n${subagents.map(subagentDescription).join('\n')}`
   ].join('\n\n')
 
-const taskParameters = (subagents: ReadonlyArray<TaskSubagentDefinition>) => ({
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    description: {
-      type: 'string',
-      description: 'A short 3-5 word description of the task.'
-    },
-    prompt: {
-      type: 'string',
-      description:
-        'The complete task instructions for the subagent, including all context it needs.'
-    },
-    subagent_type: {
-      type: 'string',
-      description: 'The specialized subagent type to use for this task.',
-      enum: subagents.map(subagent => subagent.name)
-    }
-  },
-  required: ['description', 'prompt', 'subagent_type']
-})
-
-export const makeTaskToolDef = (subagents: ReadonlyArray<TaskSubagentDefinition>) =>
-  ToolDef.make({
-    name: taskToolName,
-    description: taskToolDescription(subagents),
-    parameters: taskParameters(subagents)
-  })
-
 export const makeTaskToolRegistration = <Context>(
   options: TaskToolOptions<Context>
-): ToolRegistration<Context> => ({
-  def: makeTaskToolDef(options.subagents),
+): ToolRegistration<Context> => makeTool({
+  name: taskToolName,
+  description: taskToolDescription(options.subagents),
+  parameters: TaskToolParams,
   access: 'read',
-  execute: ({ call, context }) =>
+  invalidParamsMessage: error => `Invalid task arguments: ${error instanceof Error ? error.message : String(error)}`,
+  execute: ({ call, context, params }) =>
     Effect.gen(function* () {
       if (call.name !== taskToolName) {
         return yield* Effect.fail(taskToolError(`Tool is not configured: ${call.name}`, 'not_found'))
       }
 
-      const params = yield* decodeTaskParams(call.params).pipe(Effect.flatMap(validateTaskParams))
-      yield* requireKnownSubagent(options.subagents, params.subagent_type)
+      const normalizedParams = yield* validateTaskParams(params)
+      yield* requireKnownSubagent(options.subagents, normalizedParams.subagent_type)
 
-      return yield* options.execute({ call, context, params })
+      return yield* options.execute({ call, context, params: normalizedParams })
     })
 })
+
+export const makeTaskToolDef = (subagents: ReadonlyArray<TaskSubagentDefinition>) =>
+  makeTaskToolRegistration({
+    subagents,
+    execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+  }).def
 
 export const makeTaskToolModule = <Context>(options: TaskToolOptions<Context>): ToolModule<Context> => ({
   id: 'task',

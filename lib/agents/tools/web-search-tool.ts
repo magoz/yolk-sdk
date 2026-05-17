@@ -2,8 +2,8 @@ import { Config, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk/agent/loop'
-import { ToolDef, ToolResult, type ToolCall } from '@yolk/agent/protocol'
-import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
+import { ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import { makeTool, type ToolModule, type ToolRegistration } from '@yolk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'
@@ -17,11 +17,21 @@ const WebSearchProvider = Schema.Literals(['exa', 'parallel'])
 const WebSearchType = Schema.Literals(['auto', 'fast', 'deep'])
 const WebSearchLiveCrawl = Schema.Literals(['fallback', 'preferred'])
 const WebSearchParams = Schema.Struct({
-  query: Schema.String,
-  numResults: Schema.optional(Schema.Number),
-  type: Schema.optional(WebSearchType),
-  livecrawl: Schema.optional(WebSearchLiveCrawl),
-  contextMaxCharacters: Schema.optional(Schema.Number)
+  query: Schema.String.pipe(Schema.annotate({ description: 'Web search query.' })),
+  numResults: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({ description: 'Number of results to return. Defaults to 8; capped at 20.' })
+  ),
+  type: Schema.optional(WebSearchType).pipe(
+    Schema.annotate({ description: 'Search depth when supported. Defaults to auto.' })
+  ),
+  livecrawl: Schema.optional(WebSearchLiveCrawl).pipe(
+    Schema.annotate({ description: 'Live crawl mode when supported. Defaults to fallback.' })
+  ),
+  contextMaxCharacters: Schema.optional(Schema.Number).pipe(
+    Schema.annotate({
+      description: 'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
+    })
+  )
 })
 
 type WebSearchProvider = typeof WebSearchProvider.Type
@@ -79,46 +89,11 @@ const McpResult = Schema.Struct({
 
 const decodeMcpResult = Schema.decodeUnknownEffect(Schema.fromJsonString(McpResult))
 
-const webSearchParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    query: {
-      type: 'string',
-      description: 'Web search query.'
-    },
-    numResults: {
-      type: 'number',
-      description: 'Number of results to return. Defaults to 8; capped at 20.'
-    },
-    type: {
-      type: 'string',
-      enum: ['auto', 'fast', 'deep'],
-      description: 'Search depth when supported. Defaults to auto.'
-    },
-    livecrawl: {
-      type: 'string',
-      enum: ['fallback', 'preferred'],
-      description: 'Live crawl mode when supported. Defaults to fallback.'
-    },
-    contextMaxCharacters: {
-      type: 'number',
-      description:
-        'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
-    }
-  },
-  required: ['query']
-}
-
-const webSearchToolDef = ToolDef.make({
-  name: webSearchToolName,
-  description: [
-    'Search the web for current information using a hosted search provider.',
-    'Use this when the user asks for recent information, current facts, or discovery across multiple websites.',
-    'Use web_fetch instead when the user gives a specific URL.'
-  ].join(' '),
-  parameters: webSearchParameters
-})
+const webSearchToolDescription = [
+  'Search the web for current information using a hosted search provider.',
+  'Use this when the user asks for recent information, current facts, or discovery across multiple websites.',
+  'Use web_fetch instead when the user gives a specific URL.'
+].join(' ')
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -423,12 +398,18 @@ export const executeWebSearchTool = (
   })
 }
 
-export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = {
-  def: webSearchToolDef,
+export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = makeTool({
+  name: webSearchToolName,
+  description: webSearchToolDescription,
+  parameters: WebSearchParams,
   access: 'read',
   isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  execute: ({ call }) => executeWebSearchTool(call)
-}
+  invalidParamsMessage: error => `Invalid web search arguments: ${unknownToMessage(error)}`,
+  execute: ({ call, params }) =>
+    searchWeb(params, liveWebSearchDependencies).pipe(
+      Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
+    )
+})
 
 export const webSearchToolModule: ToolModule<AgentToolContext> = {
   id: 'web-search',

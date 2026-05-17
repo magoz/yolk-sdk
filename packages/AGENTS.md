@@ -90,6 +90,7 @@ app -> oauth + Effect
 ## Tool Registry
 
 - Host apps define `ToolModule<Context>` and `ToolRegistration<Context>`.
+- Prefer `makeTool` for Effect-Schema-backed tools: put model-visible field descriptions on schema annotations and derive `ToolDef.parameters` from the same schema used for decoding.
 - `resolveTools(modules, context)` filters enabled tools and rejects duplicate names.
 - `makeToolExecutorLayer(toolSet)` adapts resolved tools to `ToolExecutor`.
 - Packages support route/runtime-provided tools; app-level AgentDefinition is optional host structure, not a package concern.

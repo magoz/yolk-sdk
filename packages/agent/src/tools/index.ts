@@ -1,4 +1,4 @@
-export { makeToolExecutorLayer, resolveTools, ToolAccess, ToolRegistryError } from './registry.ts'
+export { makeTool, makeToolExecutorLayer, resolveTools, ToolAccess, ToolRegistryError } from './registry.ts'
 export {
   formatTaskResult,
   makeTaskToolDef,
@@ -8,6 +8,7 @@ export {
 } from './task.ts'
 export type {
   ResolvedToolSet,
+  SchemaToolExecutionInput,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,

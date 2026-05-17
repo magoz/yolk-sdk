@@ -1,14 +1,17 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
-import type { ToolRegistration } from '@yolk/agent/tools'
-import { ToolDef, ToolResult } from '@yolk/agent/protocol'
+import { makeTool, type ToolRegistration } from '@yolk/agent/tools'
+import { ToolResult } from '@yolk/agent/protocol'
 import type { RagSearchScope } from './documents.ts'
 import type { RagRetriever } from './retrieval.ts'
 import { packRagContext } from './retrieval.ts'
 
 const RagToolParams = Schema.Struct({
-  query: Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+  query: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.annotate({ description: 'Search query for the configured knowledge index.' })
+  )
 })
 
 const isToolError = Schema.is(ToolError)
@@ -40,44 +43,24 @@ export const makeRagTool = <Context>(
 ): ToolRegistration<Context> => {
   const name = options.name ?? 'search_knowledge'
 
-  return {
-    def: ToolDef.make({
-      name,
-      description: options.description ?? 'Search the configured knowledge index.',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['query'],
-        properties: {
-          query: { type: 'string' }
-        }
-      }
-    }),
+  return makeTool({
+    name,
+    description: options.description ?? 'Search the configured knowledge index.',
+    parameters: RagToolParams,
     access: 'read',
+    invalidParamsMessage: error => error instanceof Error ? error.message : String(error),
     execute: input =>
-      Schema.decodeUnknownEffect(RagToolParams)(input.call.params).pipe(
-        Effect.mapError(
-          error =>
-            new ToolError({
-              tool: input.call.name,
-              message: error.message,
-              cause: 'validation'
-            })
+      resolveScope(options.scope, input.context).pipe(
+        Effect.flatMap(scope =>
+          retriever.retrieve({
+            scope,
+            query: input.params.query,
+            limit: options.limit,
+            minScore: options.minScore,
+            contextChunks: options.contextChunks
+          })
         ),
-        Effect.flatMap(params =>
-          resolveScope(options.scope, input.context).pipe(
-            Effect.flatMap(scope =>
-              retriever.retrieve({
-                scope,
-                query: params.query,
-                limit: options.limit,
-                minScore: options.minScore,
-                contextChunks: options.contextChunks
-              })
-            ),
-            Effect.map(results => packRagContext(params.query, results))
-          )
-        ),
+        Effect.map(results => packRagContext(input.params.query, results)),
         Effect.map(
           context =>
             ToolResult.make({
@@ -98,5 +81,5 @@ export const makeRagTool = <Context>(
           })
         })
       )
-  }
+  })
 }
