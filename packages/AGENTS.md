@@ -98,6 +98,7 @@ app -> oauth + Effect
 - Subagent execution is package-contract/app-policy split: packages own domain-free task schemas/helpers; app/runtime adapters own available subagents, prompts, models, provider layers, session mapping, and toolsets.
 - v1 subagents can use normal tools but should not receive the `task` tool recursively.
 - Task subagents emit normal tool lifecycle plus `SubagentStarted`/`SubagentCompleted` protocol events; keep subagent-specific status/timing/model data in structured content/events, not ad hoc UI parsing.
+- Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, the loop runs them concurrently within `toolConcurrency`, and dependent work should wait for the next model turn. Do not expose wrapper tools for parallelism.
 - Prefer `Effect.forEach` + `Array`/`Option` helpers over mutable loop/push collection code.
 - Prefer pure `map`/`flatMap` projections over mutable `push`/`set`/`add` helper accumulators.
 - Lock projection refactors with semantic ordering/state tests, not implementation-shape tests.
