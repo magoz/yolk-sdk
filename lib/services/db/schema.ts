@@ -145,6 +145,43 @@ export const agentSkill = pgTable(
 export type AgentSkill = typeof agentSkill.$inferSelect
 export type InsertAgentSkill = typeof agentSkill.$inferInsert
 
+export const agentCommand = pgTable(
+  'agentCommand',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    template: text('template').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+  },
+  table => [
+    uniqueIndex('agentCommand_userId_name_key').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.name.asc().nullsLast()
+    ),
+    index('agentCommand_userId_enabled_idx').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.enabled.asc().nullsLast()
+    ),
+    check('agentCommand_name_nonempty_check', sql`length(${table.name}) > 0`),
+    check('agentCommand_template_nonempty_check', sql`length(${table.template}) > 0`)
+  ]
+)
+export type AgentCommand = typeof agentCommand.$inferSelect
+export type InsertAgentCommand = typeof agentCommand.$inferInsert
+
 ////////////////////////////////////////////////////////////////////////
 // STORAGE / RAG
 ////////////////////////////////////////////////////////////////////////
@@ -306,6 +343,17 @@ export type RagChunk = typeof ragChunk.$inferSelect
 export type InsertRagChunk = typeof ragChunk.$inferInsert
 
 export const relations = defineRelations(
-  { user, session, account, verification, agentSkill, storageObject, ragSet, ragDocument, ragChunk },
+  {
+    user,
+    session,
+    account,
+    verification,
+    agentSkill,
+    agentCommand,
+    storageObject,
+    ragSet,
+    ragDocument,
+    ragChunk
+  },
   () => ({})
 )

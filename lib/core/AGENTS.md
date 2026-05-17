@@ -10,6 +10,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
 | `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
 | `agent/agent-skill.ts`      | User-owned DB skill CRUD and validation        |
+| `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth storage/action contracts           |
 | `storage/*`                  | `/storage` domain functions/actions; source ingestion + RAG indexing |
@@ -34,6 +35,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 - Keep provider/OAuth API calls in services; core composes persistence and policy.
 - Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
 - Store user-authored agent skills in `agentSkill`; runtime loaders convert enabled rows into `SkillsetManifest` data.
+- Store user-authored slash commands in `agentCommand`; runtime loaders convert enabled rows into `SkillsetManifest` commands.
 - Refresh tokens in `getValid*Token()` helpers and persist refreshed token before returning.
 - `'use server'` files may export only async functions; move shared constants/types to non-server modules.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { agentSkillRowsToManifest } from './db-source'
+import { agentRowsToManifest, agentSkillRowsToManifest } from './db-source'
 
 describe('agentSkillRowsToManifest', () => {
   it('converts enabled DB skill rows to portable skillset manifest', () => {
@@ -24,6 +24,34 @@ describe('agentSkillRowsToManifest', () => {
         }
       ],
       commands: []
+    })
+  })
+})
+
+describe('agentRowsToManifest', () => {
+  it('converts DB command rows to portable command manifest entries', () => {
+    const manifest = agentRowsToManifest([], [
+      {
+        id: 'command_1',
+        name: 'review',
+        description: 'Review current work',
+        template: 'Review: $ARGUMENTS'
+      }
+    ])
+
+    expect(manifest).toEqual({
+      version: 1,
+      skills: [],
+      commands: [
+        {
+          name: 'review',
+          description: 'Review current work',
+          template: 'Review: $ARGUMENTS',
+          hints: ['$ARGUMENTS'],
+          location: 'db:agentCommand:command_1',
+          source: 'db'
+        }
+      ]
     })
   })
 })

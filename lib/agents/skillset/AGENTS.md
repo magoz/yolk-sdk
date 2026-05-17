@@ -12,13 +12,13 @@ Node/app adapters for loading project skills and commands into the app agent run
 
 - Project directories: `.yolk`, `.opencode`, `.claude`, `.agents` where supported by source code.
 - Env/config source uses `YOLK_SKILLSET` for app-provided skill/command data.
-- DB source reads enabled `agentSkill` rows and converts them to portable `SkillsetManifest` data.
+- DB source reads enabled `agentSkill` and `agentCommand` rows and converts them to portable `SkillsetManifest` data.
 - Filesystem adapters are Node boundaries; keep raw FS here, not in packages.
 
 ## Rules
 
 - Merge sources deterministically by priority; reject duplicates inside one source.
-- Runtime priority is DB user skills, then config, then project files.
+- Runtime priority is DB user skills/commands, then config, then project files.
 - Skill tool runtime policy stays in `lib/agents/tools/skill-tool.ts`.
 - Slash command UI/transport stays in `app/agent` and `app/api/agent/commands`.
 

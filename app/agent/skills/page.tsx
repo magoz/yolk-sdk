@@ -3,10 +3,12 @@ import { Suspense } from 'react'
 import { Effect } from 'effect'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
+import { listAgentCommands } from '@/lib/core/agent/agent-command'
 import { listAgentSkills } from '@/lib/core/agent/agent-skill'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import { CommandList, CreateCommandForm } from './command-forms'
 import { CreateSkillForm, SkillList } from './skill-forms'
 
 export const dynamic = 'force-dynamic'
@@ -22,6 +24,7 @@ async function Content() {
     Effect.gen(function* () {
       const session = yield* getSession()
       const skills = yield* listAgentSkills({ userId: session.user.id })
+      const commands = yield* listAgentCommands({ userId: session.user.id })
 
       return (
         <main className="mx-auto max-w-3xl space-y-6 p-6">
@@ -29,7 +32,7 @@ async function Content() {
             <div className="space-y-2">
               <h1 className="text-2xl font-semibold tracking-tight">Agent skills</h1>
               <p className="text-sm text-muted-foreground">
-                Create reusable instructions the agent can load during a run.
+                Create reusable instructions and slash commands for agent runs.
               </p>
             </div>
             <Link
@@ -40,9 +43,14 @@ async function Content() {
             </Link>
           </div>
           <CreateSkillForm />
+          <CreateCommandForm />
           <section className="space-y-3">
             <h2 className="text-lg font-medium">Skills</h2>
             <SkillList skills={skills} />
+          </section>
+          <section className="space-y-3">
+            <h2 className="text-lg font-medium">Commands</h2>
+            <CommandList commands={commands} />
           </section>
         </main>
       )
