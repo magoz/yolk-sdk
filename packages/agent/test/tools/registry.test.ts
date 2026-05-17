@@ -128,4 +128,25 @@ describe('resolveTools', () => {
       })
     })
   )
+
+  it.effect('derives empty object parameters for no-arg tools', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'empty',
+        description: 'No args.',
+        parameters: Schema.Struct({}),
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
+      expect(toolSet.tools[0]?.parameters).toEqual({
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false
+      })
+    })
+  )
 })

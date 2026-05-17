@@ -94,12 +94,36 @@ const missingToolError = (name: string) =>
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
+const objectField = (input: unknown, key: string) =>
+  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+
+const hasJsonSchemaType = (input: unknown, type: string) => objectField(input, 'type') === type
+
+const isEmptyStructJsonSchema = (schema: unknown) => {
+  const anyOf = objectField(schema, 'anyOf')
+
+  return Array.isArray(anyOf) &&
+    anyOf.length === 2 &&
+    anyOf.some(item => hasJsonSchemaType(item, 'object')) &&
+    anyOf.some(item => hasJsonSchemaType(item, 'array'))
+}
+
+const emptyObjectJsonSchema = {
+  type: 'object',
+  properties: {},
+  required: [],
+  additionalProperties: false
+}
+
 const jsonSchemaFromSchema = (schema: Schema.Top) => {
   const document = Schema.toJsonSchemaDocument(schema)
+  const jsonSchema = isEmptyStructJsonSchema(document.schema)
+    ? emptyObjectJsonSchema
+    : document.schema
 
   return Object.keys(document.definitions).length > 0
-    ? { ...document.schema, $defs: document.definitions }
-    : document.schema
+    ? { ...jsonSchema, $defs: document.definitions }
+    : jsonSchema
 }
 
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
