@@ -59,7 +59,7 @@ describe('storage RAG tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'search_storage',
-          params: { query: ' docs ', limit: 50, minScore: 0.4, contextChunks: 9 }
+          params: { queries: [' docs '], limit: 50, minScore: 0.4, contextChunks: 9 }
         })
       )
 
@@ -85,7 +85,7 @@ describe('storage RAG tool', () => {
           ToolCall.make({
             id: 'call_1',
             name: 'search_storage',
-            params: { query: '   ' }
+            params: { queries: ['   '] }
           })
         )
         .pipe(Effect.flip)
@@ -111,13 +111,13 @@ describe('storage RAG tool', () => {
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
-          name: 'search_storage_many',
+          name: 'search_storage',
           params: { queries: ['alpha', ' beta '], limit: 2 }
         })
       )
 
       expect(calls).toEqual(['alpha', 'beta'])
-      expect(result.content).toContain('Storage multi-search results')
+      expect(result.content).toContain('Storage search results')
       expect(result.content).toContain('Storage search results for: alpha')
       expect(result.content).toContain('Storage search results for: beta')
     })
@@ -205,7 +205,7 @@ describe('storage RAG tool', () => {
         context: { surface: 'text', route: '/agent/next', userId: 'user_1', subagent: true }
       })
 
-      expect(toolSet.tools.map(tool => tool.name)).toEqual(['search_storage', 'search_storage_many'])
+      expect(toolSet.tools.map(tool => tool.name)).toEqual(['search_storage'])
     })
   })
 })

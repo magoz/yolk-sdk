@@ -7,7 +7,6 @@ import type { RagSearchResult } from '@yolk/rag/retrieval'
 import type { AgentToolContext } from './tool-context.ts'
 
 const storageSearchToolName = 'search_storage'
-const storageMultiSearchToolName = 'search_storage_many'
 const storageListSourcesToolName = 'list_storage_sources'
 const storageGetSourceToolName = 'get_storage_source'
 const defaultLimit = 8
@@ -19,13 +18,6 @@ const defaultSourceMaxChars = 12_000
 const maxSourceMaxChars = 40_000
 
 const StorageSearchParams = Schema.Struct({
-  query: Schema.String,
-  limit: Schema.optional(Schema.Number),
-  minScore: Schema.optional(Schema.Number),
-  contextChunks: Schema.optional(Schema.Number)
-})
-
-const StorageMultiSearchParams = Schema.Struct({
   queries: Schema.Array(Schema.String),
   limit: Schema.optional(Schema.Number),
   minScore: Schema.optional(Schema.Number),
@@ -38,7 +30,6 @@ const StorageGetSourceParams = Schema.Struct({
 })
 
 type StorageSearchParams = typeof StorageSearchParams.Type
-type StorageMultiSearchParams = typeof StorageMultiSearchParams.Type
 type StorageGetSourceParams = typeof StorageGetSourceParams.Type
 
 export type StorageSourceSummary = {
@@ -89,45 +80,11 @@ const storageSearchParameters = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    query: {
-      type: 'string',
-      description: 'Question or search query for the user storage knowledge base.'
-    },
-    limit: {
-      type: 'number',
-      description: 'Maximum number of matching chunks. Defaults to 8; capped at 20.'
-    },
-    minScore: {
-      type: 'number',
-      description: 'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.'
-    },
-    contextChunks: {
-      type: 'number',
-      description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.'
-    }
-  },
-  required: ['query']
-}
-
-const storageSearchToolDef = ToolDef.make({
-  name: storageSearchToolName,
-  description: [
-    'Search the authenticated user storage knowledge base.',
-    'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
-    'Use this when the user asks about notes, documents, saved text, or anything they uploaded to storage.'
-  ].join(' '),
-  parameters: storageSearchParameters
-})
-
-const storageMultiSearchParameters = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
     queries: {
       type: 'array',
       items: { type: 'string' },
       description:
-        'Two to five targeted storage search queries. Use query rewrites, exact terms, filenames, names, errors, dates, or synonyms.'
+        'One to five targeted storage search queries. Use one item for simple searches; use multiple query rewrites for broad or high-recall searches.'
     },
     limit: {
       type: 'number',
@@ -145,14 +102,14 @@ const storageMultiSearchParameters = {
   required: ['queries']
 }
 
-const storageMultiSearchToolDef = ToolDef.make({
-  name: storageMultiSearchToolName,
+const storageSearchToolDef = ToolDef.make({
+  name: storageSearchToolName,
   description: [
-    'Run multiple targeted searches over the authenticated user storage knowledge base.',
-    'Prefer this over a single search for broad, ambiguous, or high-recall questions.',
-    'Use distinct query rewrites to cover exact terms, semantic variants, filenames, and likely source titles.'
+    'Search the authenticated user storage knowledge base with one or more queries.',
+    'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
+    'Use one query for focused searches and multiple query rewrites for broad, ambiguous, or high-recall questions.'
   ].join(' '),
-  parameters: storageMultiSearchParameters
+  parameters: storageSearchParameters
 })
 
 const storageListSourcesToolDef = ToolDef.make({
@@ -210,13 +167,6 @@ const decodeStorageSearchParams = (params: unknown) =>
     )
   )
 
-const decodeStorageMultiSearchParams = (params: unknown) =>
-  Schema.decodeUnknownEffect(StorageMultiSearchParams)(params).pipe(
-    Effect.mapError(error =>
-      makeToolError(`Invalid storage multi-search arguments: ${unknownToMessage(error)}`, 'validation')
-    )
-  )
-
 const decodeStorageGetSourceParams = (params: unknown) =>
   Schema.decodeUnknownEffect(StorageGetSourceParams)(params).pipe(
     Effect.mapError(error =>
@@ -259,32 +209,6 @@ const normalizeMinScore = (value: number | undefined) => {
 }
 
 const normalizeStorageSearchParams = (params: StorageSearchParams) =>
-  Effect.gen(function* () {
-    const query = params.query.trim()
-    if (query.length === 0) {
-      return yield* Effect.fail(makeToolError('query must not be empty', 'validation'))
-    }
-
-    const limit = yield* normalizeInteger({
-      value: params.limit,
-      defaultValue: defaultLimit,
-      maxValue: maxLimit,
-      minimum: 1,
-      name: 'limit'
-    })
-    const contextChunks = yield* normalizeInteger({
-      value: params.contextChunks,
-      defaultValue: defaultContextChunks,
-      maxValue: maxContextChunks,
-      minimum: 0,
-      name: 'contextChunks'
-    })
-    const minScore = yield* normalizeMinScore(params.minScore)
-
-    return { query, limit, minScore, contextChunks }
-  })
-
-const normalizeStorageMultiSearchParams = (params: StorageMultiSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
     if (queries.length === 0) {
@@ -386,16 +310,16 @@ const structuredResult = (query: string, results: ReadonlyArray<RagSearchResult>
   }))
 })
 
-const formatMultiResults = (
+const formatSearchResults = (
   items: ReadonlyArray<{ readonly query: string; readonly results: ReadonlyArray<RagSearchResult> }>
 ) =>
   [
-    'Storage multi-search results',
+    'Storage search results',
     '',
     ...items.map(item => formatResults(item.query, item.results))
   ].join('\n\n')
 
-const structuredMultiResult = (
+const structuredSearchResult = (
   items: ReadonlyArray<{ readonly query: string; readonly results: ReadonlyArray<RagSearchResult> }>
 ) => ({
   queries: items.map(item => structuredResult(item.query, item.results))
@@ -454,37 +378,6 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
       const params = yield* decodeStorageSearchParams(call.params).pipe(
         Effect.flatMap(normalizeStorageSearchParams)
       )
-      const results = yield* search({
-        userId: context.userId,
-        query: params.query,
-        limit: params.limit,
-        minScore: params.minScore,
-        contextChunks: params.contextChunks
-      })
-
-      return ToolResult.make({
-        toolCallId: call.id,
-        content: formatResults(params.query, results),
-        structuredContent: structuredResult(params.query, results)
-      })
-    }).pipe(
-      Effect.mapError(error =>
-        error instanceof ToolError
-          ? error
-          : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
-      )
-    )
-})
-
-const multiSearchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>['tools'][number] => ({
-  def: storageMultiSearchToolDef,
-  access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text'),
-  execute: ({ call, context }) =>
-    Effect.gen(function* () {
-      const params = yield* decodeStorageMultiSearchParams(call.params).pipe(
-        Effect.flatMap(normalizeStorageMultiSearchParams)
-      )
       const items = yield* Effect.forEach(
         params.queries,
         query =>
@@ -500,18 +393,14 @@ const multiSearchTool = (search: StorageSearchHandler): ToolModule<AgentToolCont
 
       return ToolResult.make({
         toolCallId: call.id,
-        content: formatMultiResults(items),
-        structuredContent: structuredMultiResult(items)
+        content: formatSearchResults(items),
+        structuredContent: structuredSearchResult(items)
       })
     }).pipe(
       Effect.mapError(error =>
         error instanceof ToolError
           ? error
-          : makeToolError(
-              `Storage multi-search failed: ${unknownToMessage(error)}`,
-              'execution',
-              storageMultiSearchToolName
-            )
+          : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
       )
     )
 })
@@ -573,7 +462,7 @@ const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentTool
 })
 
 const storageTools = (handlers: StorageRagToolHandlers): ToolModule<AgentToolContext>['tools'] => {
-  const requiredTools = [searchTool(handlers.search), multiSearchTool(handlers.search)]
+  const requiredTools = [searchTool(handlers.search)]
   const sourceTools = [
     ...(handlers.listSources === undefined ? [] : [listSourcesTool(handlers.listSources)]),
     ...(handlers.getSource === undefined ? [] : [getSourceTool(handlers.getSource)])

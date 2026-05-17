@@ -11,7 +11,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |
 | `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
-| `search_storage` / `search_storage_many` / `list_storage_sources` / `get_storage_source` | yes | no | no | authenticated user storage RAG search and source reads |
+| `search_storage` / `list_storage_sources` / `get_storage_source` | yes | no | no | authenticated user storage RAG search and source reads |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
 | `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
 
