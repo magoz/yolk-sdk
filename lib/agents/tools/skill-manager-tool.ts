@@ -11,25 +11,25 @@ const SkillManagerParams = Schema.Struct({
   action: Schema.Union([Schema.Literal('list'), Schema.Literal('create'), Schema.Literal('update')]).pipe(
     Schema.annotate({ description: 'Action to perform.' })
   ),
-  id: Schema.optional(Schema.String).pipe(
+  id: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Existing skill id for update.' })
   ),
-  name: Schema.optional(Schema.String).pipe(
+  name: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Skill name, or existing skill name for update.' })
   ),
-  description: Schema.optional(Schema.String).pipe(
+  description: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Short skill description.' })
   ),
-  content: Schema.optional(Schema.String).pipe(
+  content: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Full reusable skill instructions.' })
   ),
-  enabled: Schema.optional(Schema.Boolean).pipe(
+  enabled: Schema.optional(Schema.NullOr(Schema.Boolean)).pipe(
     Schema.annotate({ description: 'Whether the skill is enabled after update.' })
   ),
-  createCommand: Schema.optional(Schema.Boolean).pipe(
+  createCommand: Schema.optional(Schema.NullOr(Schema.Boolean)).pipe(
     Schema.annotate({ description: 'Whether to create or update a matching slash command. Defaults true for create/update.' })
   ),
-  commandName: Schema.optional(Schema.String).pipe(
+  commandName: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Optional slash command name. Defaults to the skill name.' })
   )
 })
@@ -84,11 +84,13 @@ const requiredText = (params: SkillManagerParams, key: 'name' | 'description' | 
     : Effect.succeed(value)
 }
 
-const optionalText = (value: string | undefined) => {
+const optionalText = (value: string | null | undefined) => {
   const trimmed = value?.trim()
 
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
 }
+
+const optionalBoolean = (value: boolean | null | undefined) => value ?? undefined
 
 const paramsToAction = (params: SkillManagerParams, userId: string) =>
   Effect.gen(function* () {
@@ -121,7 +123,7 @@ const paramsToAction = (params: SkillManagerParams, userId: string) =>
           name: optionalText(params.name),
           description,
           content,
-          enabled: params.enabled,
+          enabled: optionalBoolean(params.enabled),
           createCommand: params.createCommand ?? true,
           commandName: optionalText(params.commandName)
         } satisfies SkillManagerAction
