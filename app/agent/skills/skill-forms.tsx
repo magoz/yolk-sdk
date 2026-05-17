@@ -22,6 +22,7 @@ const formValue = (formData: FormData, key: string) => String(formData.get(key) 
 export function CreateSkillForm() {
   const router = useRouter()
   const [state, setState] = useState<ActionState>({})
+  const [createCommand, setCreateCommand] = useState(true)
   const [pending, startTransition] = useTransition()
 
   return (
@@ -38,7 +39,9 @@ export function CreateSkillForm() {
               void createAgentSkillAction({
                 name: formValue(formData, 'name'),
                 description: formValue(formData, 'description'),
-                content: formValue(formData, 'content')
+                content: formValue(formData, 'content'),
+                createCommand: formData.get('createCommand') === 'on',
+                commandName: formValue(formData, 'commandName')
               }).then(result => {
                 setState({ message: result._tag === 'Success' ? 'Skill created' : result.message })
                 if (result._tag === 'Success') {
@@ -71,6 +74,36 @@ export function CreateSkillForm() {
               required
             />
           </div>
+          <label className="flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm">
+            <input
+              name="createCommand"
+              type="checkbox"
+              defaultChecked
+              checked={createCommand}
+              onChange={event => setCreateCommand(event.currentTarget.checked)}
+              className="mt-1 size-4 accent-primary"
+            />
+            <span className="grid gap-1">
+              <span className="font-medium">Create matching slash command</span>
+              <span className="text-muted-foreground">
+                Adds a command with the same name that tells the agent to use this skill.
+              </span>
+            </span>
+          </label>
+          {createCommand ? (
+            <div className="grid gap-2">
+              <Label htmlFor="new-skill-command-name">Command</Label>
+              <Input
+                id="new-skill-command-name"
+                name="commandName"
+                placeholder="review-code"
+                aria-describedby="new-skill-command-help"
+              />
+              <p id="new-skill-command-help" className="text-sm text-muted-foreground">
+                Leave blank to use the skill name.
+              </p>
+            </div>
+          ) : null}
           <div className="flex min-h-10 items-center gap-3">
             <Button type="submit" disabled={pending}>
               {pending ? 'Creating…' : 'Create skill'}
@@ -90,6 +123,7 @@ export function CreateSkillForm() {
 function SkillCard({ skill }: { readonly skill: AgentSkill }) {
   const router = useRouter()
   const [state, setState] = useState<ActionState>({})
+  const [createCommand, setCreateCommand] = useState(true)
   const [pending, startTransition] = useTransition()
 
   return (
@@ -108,7 +142,9 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
                 name: formValue(formData, 'name'),
                 description: formValue(formData, 'description'),
                 content: formValue(formData, 'content'),
-                enabled: skill.enabled
+                enabled: skill.enabled,
+                createCommand: formData.get('createCommand') === 'on',
+                commandName: formValue(formData, 'commandName')
               }).then(result => {
                 setState({ message: result._tag === 'Success' ? 'Saved' : result.message })
                 if (result._tag === 'Success') {
@@ -141,6 +177,36 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
               required
             />
           </div>
+          <label className="flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm">
+            <input
+              name="createCommand"
+              type="checkbox"
+              defaultChecked
+              checked={createCommand}
+              onChange={event => setCreateCommand(event.currentTarget.checked)}
+              className="mt-1 size-4 accent-primary"
+            />
+            <span className="grid gap-1">
+              <span className="font-medium">Create or update matching slash command</span>
+              <span className="text-muted-foreground">
+                Saves a command that tells the agent to use this skill.
+              </span>
+            </span>
+          </label>
+          {createCommand ? (
+            <div className="grid gap-2">
+              <Label htmlFor={`${skill.id}-command-name`}>Command</Label>
+              <Input
+                id={`${skill.id}-command-name`}
+                name="commandName"
+                defaultValue={skill.name}
+                aria-describedby={`${skill.id}-command-help`}
+              />
+              <p id={`${skill.id}-command-help`} className="text-sm text-muted-foreground">
+                Slash command name to create or update.
+              </p>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <Button type="submit" disabled={pending}>
               {pending ? 'Saving…' : 'Save'}

@@ -9,6 +9,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `web_fetch` | yes | yes | yes | public URL fetch only |
 | `web_search` | yes | yes | yes | Exa/Parallel MCP endpoints |
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |
+| `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
 | `search_storage` | yes | no | no | authenticated user storage RAG search |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
@@ -21,6 +22,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - `search_storage` is Next/Workflow-only; it uses app RAG adapters from route runtime wiring, not Cloudflare bootstrap.
+- `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap.
 - Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.
 - Keep tool result content model-visible and protocol-shaped.

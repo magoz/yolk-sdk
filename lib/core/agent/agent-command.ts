@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { isValidSkillsetName } from '@yolk/skillset'
 import { NotFoundError, ValidationError } from '@/lib/core/errors'
@@ -65,6 +65,31 @@ export const createAgentCommand = (input: AgentCommandInput & { readonly userId:
 
     return command
   }).pipe(Effect.withSpan('agentCommand.create'))
+
+export const upsertAgentCommand = (input: AgentCommandInput & { readonly userId: string }) =>
+  Effect.gen(function* () {
+    const values = yield* validateCommandInput(input)
+    const db = yield* Db
+    const [command] = yield* db
+      .insert(schema.agentCommand)
+      .values({ ...values, enabled: true, userId: input.userId })
+      .onConflictDoUpdate({
+        target: [schema.agentCommand.userId, schema.agentCommand.name],
+        set: {
+          description: values.description,
+          template: values.template,
+          enabled: true,
+          updatedAt: sql`CURRENT_TIMESTAMP`
+        }
+      })
+      .returning()
+
+    if (command === undefined) {
+      return yield* Effect.die(new Error('Could not upsert agent command'))
+    }
+
+    return command
+  }).pipe(Effect.withSpan('agentCommand.upsert'))
 
 export const updateAgentCommand = (input: AgentCommandUpdateInput & { readonly userId: string }) =>
   Effect.gen(function* () {

@@ -7,6 +7,7 @@ import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
+import { upsertAgentCommand } from './agent-command'
 import { createAgentSkill, type AgentSkillInput } from './agent-skill'
 
 class AgentSkillActionError extends Data.TaggedError('AgentSkillActionError')<{
@@ -14,13 +15,26 @@ class AgentSkillActionError extends Data.TaggedError('AgentSkillActionError')<{
   readonly cause?: unknown
 }> {}
 
-export const createAgentSkillAction = async (input: AgentSkillInput) => {
+export const createAgentSkillAction = async (
+  input: AgentSkillInput & { readonly createCommand?: boolean; readonly commandName?: string }
+) => {
   await cookies()
 
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
-      yield* createAgentSkill({ ...input, userId: session.user.id })
+      const skill = yield* createAgentSkill({ ...input, userId: session.user.id })
+
+      if (input.createCommand === true) {
+        const commandName = input.commandName?.trim()
+
+        yield* upsertAgentCommand({
+          userId: session.user.id,
+          name: commandName === undefined || commandName.length === 0 ? skill.name : commandName,
+          description: skill.description,
+          template: `Use the ${skill.name} skill.\n\n$ARGUMENTS`
+        })
+      }
     }).pipe(
       Effect.withSpan('action.agentSkill.create'),
       Effect.provide(AppLayer),

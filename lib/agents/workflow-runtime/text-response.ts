@@ -39,8 +39,14 @@ import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-han
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
 import { makeTextToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
+import {
+  makeSkillManagerToolModule,
+  type SkillManagerAction
+} from '@/lib/agents/tools/skill-manager-tool'
 import { makeStorageRagToolModule } from '@/lib/agents/tools/storage-rag-tool'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
+import { createAgentSkill, listAgentSkills, updateAgentSkill } from '@/lib/core/agent/agent-skill'
+import { upsertAgentCommand } from '@/lib/core/agent/agent-command'
 import { ensureUserRagSet } from '@/lib/core/storage/ensure-user-rag-set'
 import { Db } from '@/lib/services/db/live-layer'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
@@ -170,6 +176,7 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
   })
 
 const RagToolLayer = Layer.mergeAll(Db.layer, AppRagLayer.pipe(Layer.provide(Db.layer)))
+const SkillManagerLayer = Db.layer
 
 const searchStorageForAgent = (input: {
   readonly userId: string
@@ -203,6 +210,118 @@ const searchStorageForAgent = (input: {
     )
   )
 
+const skillSummary = (skill: {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly enabled: boolean
+}) => ({
+  id: skill.id,
+  name: skill.name,
+  description: skill.description,
+  enabled: skill.enabled
+})
+
+const findSkillForUpdate = (input: { readonly userId: string; readonly id?: string; readonly name?: string }) =>
+  Effect.gen(function* () {
+    if (input.id === undefined && input.name === undefined) {
+      return yield* Effect.fail(
+        new ToolError({
+          tool: 'manage_skills',
+          message: 'update requires id or name',
+          cause: 'validation'
+        })
+      )
+    }
+
+    const skills = yield* listAgentSkills({ userId: input.userId })
+    const skill = skills.find(item => item.id === input.id || item.name === input.name)
+
+    if (skill === undefined) {
+      return yield* Effect.fail(
+        new ToolError({
+          tool: 'manage_skills',
+          message: `Skill not found: ${input.id ?? input.name ?? 'unknown'}`,
+          cause: 'not_found'
+        })
+      )
+    }
+
+    return skill
+  })
+
+const manageSkillsForAgent = (action: SkillManagerAction) =>
+  Effect.gen(function* () {
+    switch (action._tag) {
+      case 'List': {
+        const skills = yield* listAgentSkills({ userId: action.userId })
+        const data = { skills: skills.map(skillSummary) }
+
+        return {
+          message:
+            skills.length === 0
+              ? 'No saved skills.'
+              : `Saved skills:\n${skills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')}`,
+          data
+        }
+      }
+      case 'Create': {
+        const skill = yield* createAgentSkill({
+          userId: action.userId,
+          name: action.name,
+          description: action.description,
+          content: action.content
+        })
+
+        if (action.createCommand) {
+          yield* upsertAgentCommand({
+            userId: action.userId,
+            name: action.commandName ?? skill.name,
+            description: skill.description,
+            template: `Use the ${skill.name} skill.\n\n$ARGUMENTS`
+          })
+        }
+
+        return {
+          message: `Created skill: ${skill.name}`,
+          data: { skill: skillSummary(skill), commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined }
+        }
+      }
+      case 'Update': {
+        const existing = yield* findSkillForUpdate({ userId: action.userId, id: action.id, name: action.name })
+        const skill = yield* updateAgentSkill({
+          id: existing.id,
+          userId: action.userId,
+          name: action.name ?? existing.name,
+          description: action.description,
+          content: action.content,
+          enabled: action.enabled ?? true
+        })
+
+        if (action.createCommand) {
+          yield* upsertAgentCommand({
+            userId: action.userId,
+            name: action.commandName ?? skill.name,
+            description: skill.description,
+            template: `Use the ${skill.name} skill.\n\n$ARGUMENTS`
+          })
+        }
+
+        return {
+          message: `Updated skill: ${skill.name}`,
+          data: { skill: skillSummary(skill), commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined }
+        }
+      }
+    }
+  }).pipe(
+    Effect.provide(SkillManagerLayer),
+    Effect.mapError(error =>
+      error instanceof ToolError
+        ? error
+        : new ToolError({ tool: 'manage_skills', message: unknownToMessage(error), cause: 'execution' })
+    )
+  )
+
 export const makeAgentTextRuntime = (
   input: AgentRouteRequest,
   userId: string,
@@ -214,6 +333,7 @@ export const makeAgentTextRuntime = (
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
     const storageToolModule = makeStorageRagToolModule(searchStorageForAgent)
+    const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
       storageToolModule
@@ -311,6 +431,7 @@ export const makeAgentTextRuntime = (
     })
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...subagentToolModules,
+      skillManagerToolModule,
       taskToolModule
     ]
     const toolSet = yield* resolveAgentToolSet({
