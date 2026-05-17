@@ -333,6 +333,10 @@ export const ragChunk = pgTable(
       foreignColumns: [ragDocument.id, ragDocument.ragSetId]
     }).onDelete('cascade'),
     index('ragChunk_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
+    index('ragChunk_content_fts_idx').using(
+      'gin',
+      sql`to_tsvector('english', ${table.content})`
+    ),
     index('ragChunk_ragSetId_idx').using('btree', table.ragSetId.asc().nullsLast()),
     unique('ragChunk_documentId_position_key').on(table.documentId, table.position),
     check('ragChunk_position_check', sql`${table.position} >= 0`),

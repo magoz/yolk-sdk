@@ -43,7 +43,7 @@ const storageSearchParameters = {
     },
     minScore: {
       type: 'number',
-      description: 'Optional cosine similarity threshold from 0 to 1.'
+      description: 'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.'
     },
     contextChunks: {
       type: 'number',
@@ -57,6 +57,7 @@ const storageSearchToolDef = ToolDef.make({
   name: storageSearchToolName,
   description: [
     'Search the authenticated user storage knowledge base.',
+    'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
     'Use this when the user asks about notes, documents, saved text, or anything they uploaded to storage.'
   ].join(' '),
   parameters: storageSearchParameters
@@ -169,8 +170,10 @@ const formatResults = (query: string, results: ReadonlyArray<RagSearchResult>) =
         `Document: ${result.document.id}`,
         `Chunk: ${result.chunk.id}`,
         `Score: ${result.score.toFixed(3)}`,
+        result.scores?.vector === undefined ? undefined : `Vector score: ${result.scores.vector.toFixed(3)}`,
+        result.scores?.text === undefined ? undefined : `Text score: ${result.scores.text.toFixed(3)}`,
         resultText(result)
-      ].join('\n')
+      ].filter(line => line !== undefined).join('\n')
     )
   ].join('\n\n')
 }
@@ -179,6 +182,7 @@ const structuredResult = (query: string, results: ReadonlyArray<RagSearchResult>
   query,
   results: results.map((result, index) => ({
     score: result.score,
+    scores: result.scores,
     citation: index + 1,
     documentId: result.document.id,
     source: sourceLabel(result),

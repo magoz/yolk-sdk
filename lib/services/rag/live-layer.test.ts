@@ -161,6 +161,11 @@ describeWithDb('DrizzleRagStoreLayer', () => {
         limit: 2,
         minScore: 0.8
       })
+      const textResults = yield* store.searchChunksByText({
+        scope: { _tag: 'RagSet', id: set.id },
+        query: 'beta after',
+        limit: 2
+      })
 
       const context = yield* store.getContextChunks({
         ragSetId: set.id,
@@ -208,6 +213,7 @@ describeWithDb('DrizzleRagStoreLayer', () => {
       expect(ready.status).toBe('ready')
       expect(ready.title).toBe('Test note')
       expect(results.map(result => result.chunk.content)).toEqual(['alpha before', 'alpha match'])
+      expect(textResults.map(result => result.chunk.content)).toEqual(['beta after'])
       expect(results.every(result => result.document.id === documentId)).toBe(true)
       expect(context.map(chunk => chunk.content)).toEqual(['alpha before', 'alpha match', 'beta after'])
       expect(listed.map(item => item.document.id)).toEqual([documentId])

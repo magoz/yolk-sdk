@@ -1,4 +1,4 @@
-import { and, asc, cosineDistance, eq, gte, inArray, lte, sql } from 'drizzle-orm'
+import { and, asc, cosineDistance, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { Config, Context, Effect, Layer, Redacted } from 'effect'
 import {
   FetchHttpClient,
@@ -428,6 +428,46 @@ export const DrizzleRagStoreLayer = Layer.effect(
               and(scopeCondition, eq(dbSchema.ragDocument.status, 'ready'), minScoreCondition)
             )
             .orderBy(asc(distance))
+            .limit(input.limit)
+
+          return matches.map(match => ({
+            chunk: toRagChunk(match.chunk),
+            score: match.score,
+            document: toRagDocument({ document: match.document, storage: match.storage })
+          }))
+        }).pipe(Effect.catch(error => Effect.fail(mapStoreError(error)))),
+
+      searchChunksByText: input =>
+        Effect.gen(function* () {
+          const scopeIds = input.scope._tag === 'RagSet' ? [input.scope.id] : [...input.scope.ids]
+          const scopeCondition =
+            scopeIds.length === 1
+              ? eq(dbSchema.ragChunk.ragSetId, scopeIds[0] ?? '')
+              : inArray(dbSchema.ragChunk.ragSetId, scopeIds)
+          const searchVector = sql`to_tsvector('english', ${dbSchema.ragChunk.content})`
+          const searchQuery = sql`websearch_to_tsquery('english', ${input.query})`
+          const score = sql<number>`ts_rank_cd(${searchVector}, ${searchQuery})`
+          const matches = yield* db
+            .select({
+              chunk: dbSchema.ragChunk,
+              document: dbSchema.ragDocument,
+              storage: dbSchema.storageObject,
+              score
+            })
+            .from(dbSchema.ragChunk)
+            .innerJoin(dbSchema.ragDocument, eq(dbSchema.ragDocument.id, dbSchema.ragChunk.documentId))
+            .innerJoin(
+              dbSchema.storageObject,
+              eq(dbSchema.storageObject.id, dbSchema.ragDocument.storageObjectId)
+            )
+            .where(
+              and(
+                scopeCondition,
+                eq(dbSchema.ragDocument.status, 'ready'),
+                sql`${searchVector} @@ ${searchQuery}`
+              )
+            )
+            .orderBy(desc(score))
             .limit(input.limit)
 
           return matches.map(match => ({

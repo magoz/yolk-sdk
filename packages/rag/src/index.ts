@@ -50,14 +50,15 @@ export { ingestRagDocument, makeIngestionPipeline } from './ingestion.ts'
 export type { IngestRagDocumentInput, RagIngestionPipeline } from './ingestion.ts'
 export { NoopRagSummarizerLive, RagSummarizer } from './summarization.ts'
 export type { RagDocumentSummary, RagSummarizerApi, SummarizeRagDocumentInput } from './summarization.ts'
-export { packRagContext, retrieveRag } from './retrieval.ts'
-export type { RagContext, RagRetriever, RagSearchInput, RagSearchResult } from './retrieval.ts'
+export { fuseRagSearchResults, packRagContext, retrieveRag } from './retrieval.ts'
+export type { RagContext, RagRetriever, RagSearchInput, RagSearchMode, RagSearchResult, RagSearchScores } from './retrieval.ts'
 export { RagStore } from './store.ts'
 export type {
   MarkRagDocumentErrorInput,
   MarkRagDocumentReadyInput,
   RagChunkSearchInput,
   RagChunkSearchResult,
+  RagChunkTextSearchInput,
   RagContextChunksInput,
   RagStoreApi,
   ReplaceRagDocumentChunksInput,

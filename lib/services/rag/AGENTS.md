@@ -4,7 +4,7 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 
 ## Role
 
-- `DrizzleRagStoreLayer`: implements `RagStore` over app Drizzle schema + pgvector.
+- `DrizzleRagStoreLayer`: implements `RagStore` over app Drizzle schema, pgvector, and Postgres full-text search.
 - `TextRagExtractorLayer`: string-only extractor for V1 `/storage` text sources; derives title/summary via `RagDocumentSummarizer`.
 - `OpenAiRagEmbedderLayer`: OpenAI embeddings via Effect `HttpClient` and `OPENAI_API_KEY`.
 - `OpenAiRagDocumentSummarizerLayer`: OpenAI chat completion title + summary generation via Effect `HttpClient` and `OPENAI_API_KEY`.
@@ -27,9 +27,12 @@ App-owned concrete adapters for the domain-free `@yolk/rag` package.
 
 - `DrizzleRagStoreLayer` is the app boundary for pgvector search; keep SQL/Drizzle details out of `@yolk/rag`.
 - Preserve package `RagStoreError` values when mapping store failures; avoid double-wrapping typed not-found errors.
-- `searchChunks` filters ready documents only; `getContextChunks` expands adjacent chunks by `(ragSetId, documentId, position)`.
+- `searchChunks` filters ready documents only and uses pgvector cosine distance.
+- `searchChunksByText` filters ready documents only and uses Postgres full-text search over chunk content.
+- `retrieveRag` defaults to hybrid retrieval: vector and text candidate searches are fused with reciprocal rank fusion before context expansion.
+- `getContextChunks` expands adjacent chunks by `(ragSetId, documentId, position)`.
 
 ## Tests
 
-- `live-layer.test.ts` covers set/doc/chunk lifecycle, vector search, context expansion, delete cleanup.
+- `live-layer.test.ts` covers set/doc/chunk lifecycle, vector search, keyword search, context expansion, delete cleanup.
 - DB adapter tests run when `.env.test` provides `DATABASE_URL`; otherwise they skip.

@@ -194,6 +194,7 @@ describe('@yolk/rag', () => {
       markDocumentError: () => Effect.void,
       deleteDocument: () => Effect.void,
       searchChunks: () => Effect.succeed([]),
+      searchChunksByText: () => Effect.succeed([]),
       getContextChunks: () => Effect.succeed([])
     } satisfies RagStoreApi
 
@@ -267,6 +268,7 @@ describe('@yolk/rag', () => {
         }),
       deleteDocument: () => Effect.void,
       searchChunks: () => Effect.succeed([]),
+      searchChunksByText: () => Effect.succeed([]),
       getContextChunks: () => Effect.succeed([])
     } satisfies RagStoreApi
 
@@ -327,6 +329,7 @@ describe('@yolk/rag', () => {
         }),
       deleteDocument: () => Effect.void,
       searchChunks: () => Effect.succeed([]),
+      searchChunksByText: () => Effect.succeed([]),
       getContextChunks: () => Effect.succeed([])
     } satisfies RagStoreApi
 
@@ -408,6 +411,7 @@ describe('@yolk/rag', () => {
         }),
       deleteDocument: () => Effect.void,
       searchChunks: () => Effect.succeed([]),
+      searchChunksByText: () => Effect.succeed([]),
       getContextChunks: () => Effect.succeed([])
     } satisfies RagStoreApi
 
@@ -491,6 +495,7 @@ describe('@yolk/rag', () => {
             document
           }
         ]),
+      searchChunksByText: () => Effect.succeed([]),
       getContextChunks: () =>
         Effect.succeed([
           {
@@ -524,12 +529,90 @@ describe('@yolk/rag', () => {
       const results = yield* retrieveRag({
         scope: { _tag: 'RagSet', id: 'set_1' },
         query: 'alpha',
+        mode: 'vector',
         contextChunks: 1
       })
       const context = packRagContext('alpha', results)
 
       expect(results[0]?.score).toBe(0.9)
       expect(context.text).toBe('before\n\nmatch')
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('fuses vector and text results with reciprocal rank fusion', () => {
+    const document: RagDocument = {
+      id: 'doc_1',
+      ragSetId: 'set_1',
+      source: { _tag: 'Text', label: 'note' },
+      status: 'ready'
+    }
+    const alphaChunk = {
+      id: 'chunk_alpha',
+      ragSetId: 'set_1',
+      documentId: 'doc_1',
+      content: 'alpha semantic match',
+      position: 0,
+      tokenCount: 3
+    }
+    const rareChunk = {
+      id: 'chunk_rare',
+      ragSetId: 'set_1',
+      documentId: 'doc_1',
+      content: 'rare exact symbol',
+      position: 1,
+      tokenCount: 3
+    }
+    const betaChunk = {
+      id: 'chunk_beta',
+      ragSetId: 'set_1',
+      documentId: 'doc_1',
+      content: 'beta text match',
+      position: 2,
+      tokenCount: 3
+    }
+    const store = {
+      upsertSet: (set: RagSet) => Effect.succeed(set),
+      getSet: () =>
+        Effect.succeed(
+          makeRagSet({ id: 'set_1', embeddingConfig: { model: 'test-embedding', dimensions: 2 } })
+        ),
+      upsertDocument: (input: { readonly document: RagDocument }) => Effect.succeed(input.document),
+      markDocumentProcessing: () => Effect.succeed(document),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () => Effect.succeed(document),
+      markDocumentError: () => Effect.void,
+      deleteDocument: () => Effect.void,
+      searchChunks: () =>
+        Effect.succeed([
+          { chunk: alphaChunk, score: 0.92, document },
+          { chunk: rareChunk, score: 0.72, document }
+        ]),
+      searchChunksByText: () =>
+        Effect.succeed([
+          { chunk: rareChunk, score: 0.44, document },
+          { chunk: betaChunk, score: 0.31, document }
+        ]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies RagStoreApi
+    const layer = Layer.mergeAll(
+      Layer.succeed(RagStore, store),
+      Layer.succeed(RagEmbedder, {
+        embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const results = yield* retrieveRag({
+        scope: { _tag: 'RagSet', id: 'set_1' },
+        query: 'rare alpha',
+        limit: 3,
+        vectorLimit: 2,
+        textLimit: 2
+      })
+
+      expect(results.map(result => result.chunk.id)).toEqual(['chunk_rare', 'chunk_alpha', 'chunk_beta'])
+      expect(results[0]?.scores).toEqual({ vector: 0.72, text: 0.44, fused: results[0]?.score })
     }).pipe(Effect.provide(layer))
   })
 
@@ -545,6 +628,7 @@ describe('@yolk/rag', () => {
         markDocumentError: () => Effect.die(new Error('unused')),
         deleteDocument: () => Effect.die(new Error('unused')),
         searchChunks: () => Effect.die(new Error('unused')),
+        searchChunksByText: () => Effect.die(new Error('unused')),
         getContextChunks: () => Effect.die(new Error('unused'))
       } satisfies RagStoreApi
       const unusedLayer = Layer.mergeAll(

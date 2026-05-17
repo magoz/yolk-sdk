@@ -36,7 +36,8 @@
 
 - `RagStore` is one lifecycle contract: sets, documents, chunk replacement, vector search, context chunks.
 - Ingestion is a sync Effect program over `RagStore | RagExtractor | RagChunker | RagEmbedder | RagSummarizer`; hosts choose queues/workflows.
-- Default chunker is sentence/token, no overlap; retrieval uses `contextChunks` for adjacent content.
+- Default chunker is sentence/token, no overlap; retrieval defaults to hybrid vector + keyword search and uses `contextChunks` for adjacent content.
+- Hybrid retrieval fuses `searchChunks` and `searchChunksByText` with reciprocal rank fusion; see `HYBRID_RETRIEVAL.md`.
 - Agent helper requires host-provided scope resolver; package never decides searchable sets.
 
 ## Effect Patterns
@@ -48,4 +49,4 @@
 
 ## Tests
 
-- Cover schema boundary validation, chunking validation, ingestion success/failure, retrieval validation/context packing, and agent tool adapter validation.
+- Cover schema boundary validation, chunking validation, ingestion success/failure, hybrid retrieval fusion, retrieval validation/context packing, and agent tool adapter validation.

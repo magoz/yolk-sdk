@@ -40,6 +40,12 @@ export type RagChunkSearchInput = {
   readonly minScore?: number
 }
 
+export type RagChunkTextSearchInput = {
+  readonly scope: RagSearchScope
+  readonly query: string
+  readonly limit: number
+}
+
 export type RagChunkSearchResult = {
   readonly chunk: RagChunk
   readonly score: number
@@ -78,6 +84,9 @@ export type RagStoreApi = {
   }) => Effect.Effect<void, RagStoreError>
   readonly searchChunks: (
     input: RagChunkSearchInput
+  ) => Effect.Effect<ReadonlyArray<RagChunkSearchResult>, RagStoreError>
+  readonly searchChunksByText: (
+    input: RagChunkTextSearchInput
   ) => Effect.Effect<ReadonlyArray<RagChunkSearchResult>, RagStoreError>
   readonly getContextChunks: (
     input: RagContextChunksInput
