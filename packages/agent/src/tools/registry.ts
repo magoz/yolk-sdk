@@ -32,6 +32,8 @@ export type ToolRegistration<Context> = {
 
 type ToolParamsSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 
+export const EmptyToolParams = Schema.Record(Schema.String, Schema.Never)
+
 export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly name: string
   readonly description: string

@@ -20,6 +20,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - No Node-only imports/deps and no raw `fetch()` in this directory.
 - Use Effect `Config`, `HttpClient`, Schema, and runtime-injected adapters.
 - Define model-visible tool parameters with Effect Schema annotations and `makeTool`; avoid duplicated hand-written JSON schemas.
+- Use `EmptyToolParams` from `@yolk/agent/tools` for no-arg tools.
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow-only; they use app RAG/DB adapters from route runtime wiring, not Cloudflare bootstrap.

@@ -2,7 +2,7 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
 import { ToolResult } from '@yolk/agent/protocol'
-import { makeTool, type ToolModule } from '@yolk/agent/tools'
+import { EmptyToolParams, makeTool, type ToolModule } from '@yolk/agent/tools'
 import type { RagSearchResult } from '@yolk/rag/retrieval'
 import type { AgentToolContext } from './tool-context.ts'
 
@@ -34,7 +34,7 @@ const StorageSearchParams = Schema.Struct({
   )
 })
 
-const StorageListSourcesParams = Schema.Struct({})
+const StorageListSourcesParams = EmptyToolParams
 
 const StorageGetSourceParams = Schema.Struct({
   id: Schema.String.pipe(

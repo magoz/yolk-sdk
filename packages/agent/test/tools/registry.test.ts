@@ -3,7 +3,7 @@ import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import { makeTool as makeSchemaTool, makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
+import { EmptyToolParams, makeTool as makeSchemaTool, makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
 
 type TestContext = {
   readonly enabled: boolean
@@ -146,6 +146,46 @@ describe('resolveTools', () => {
         properties: {},
         required: [],
         additionalProperties: false
+      })
+    })
+  )
+
+  it.effect('derives provider-safe parameters for empty tool params', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'empty_params',
+        description: 'No args.',
+        parameters: EmptyToolParams,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
+      expect(toolSet.tools[0]?.parameters).toEqual({
+        type: 'object',
+        additionalProperties: false
+      })
+      expect(toolSet.tools[0]?.parameters).not.toHaveProperty('anyOf')
+    })
+  )
+
+  it.effect('rejects unexpected parameters for empty tool params', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'empty_params',
+        description: 'No args.',
+        parameters: EmptyToolParams,
+        access: 'read',
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+      const result = yield* toolSet.execute({ id: 'call_1', name: 'empty_params', params: { extra: true } }).pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ToolError', cause: 'validation' }
       })
     })
   )

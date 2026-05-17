@@ -91,6 +91,7 @@ app -> oauth + Effect
 
 - Host apps define `ToolModule<Context>` and `ToolRegistration<Context>`.
 - Prefer `makeTool` for Effect-Schema-backed tools: put model-visible field descriptions on schema annotations and derive `ToolDef.parameters` from the same schema used for decoding.
+- Use `EmptyToolParams` for no-arg tools; it mirrors Effect AI `Tool.EmptyParams` and emits provider-safe empty object JSON Schema.
 - `resolveTools(modules, context)` filters enabled tools and rejects duplicate names.
 - `makeToolExecutorLayer(toolSet)` adapts resolved tools to `ToolExecutor`.
 - Packages support route/runtime-provided tools; app-level AgentDefinition is optional host structure, not a package concern.
