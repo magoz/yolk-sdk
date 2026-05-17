@@ -1,6 +1,7 @@
 import type { AgentRunStatus } from '@yolk/agent/client'
 import type { AgentReasoningEffort, AgentUsage } from '@yolk/agent/protocol'
 import type { ReactNode } from 'react'
+import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -225,6 +226,14 @@ export function AgentStatusPanel({
           <Badge variant={agentTextCapabilities.tools ? 'secondary' : 'outline'}>
             {agentTextCapabilities.tools ? 'enabled' : 'disabled'}
           </Badge>
+        </StatusRow>
+        <StatusRow label="Skills">
+          <Link
+            href="/agent/skills"
+            className="inline-flex min-h-11 items-center rounded-md border px-2 text-foreground transition-[background-color,color] hover:bg-muted focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            Manage
+          </Link>
         </StatusRow>
         <StatusRow label="Voice model">
           <Badge variant="outline">{openAiRealtimeModel}</Badge>
