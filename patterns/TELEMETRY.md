@@ -205,6 +205,7 @@ Both are already in `AppLayer` (`lib/layers.ts`).
 ## Rules
 
 - Every domain function ends with `Effect.withSpan` (OTel sees all errors automatically)
+- Every public package/service IO function has `Effect.withSpan` and stable low-cardinality attrs
 - Every server action has `tapError(reportError)` before error handling (Sentry alerting)
 - Pages report only unexpected errors — auth/not-found are expected flow, no Sentry
 - API route catch-all handlers call `reportError` — auth errors return HTTP codes without Sentry
@@ -214,6 +215,7 @@ Both are already in `AppLayer` (`lib/layers.ts`).
 - Never use `Sentry.captureException` directly — use `reportError`
 - Span name matches `operation` context key in `reportError`
 - `annotateCurrentSpan` for IDs and context, not for large payloads
+- Do not annotate raw prompts, file contents, request bodies, or other large/sensitive payloads
 
 ## Span Conventions
 

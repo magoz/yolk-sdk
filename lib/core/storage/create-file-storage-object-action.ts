@@ -30,6 +30,13 @@ export const createFileStorageObjectAction = async (formData: FormData) => {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'storage.source_type': 'file',
+        'storage.filename': file.name,
+        'storage.media_type': file.type,
+        'storage.byte_size': file.size
+      })
       yield* createFileStorageObject({
         userId: session.user.id,
         filename: file.name,
@@ -42,8 +49,6 @@ export const createFileStorageObjectAction = async (formData: FormData) => {
       Effect.provide(FileExtractor.layer),
       Effect.provide(AppLayer),
       Effect.scoped,
-      Effect.tap(() => Effect.sync(() => revalidatePath('/storage'))),
-      Effect.as({ _tag: 'Success' as const }),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('UnsupportedFileFormatError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
@@ -52,6 +57,8 @@ export const createFileStorageObjectAction = async (formData: FormData) => {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.storage.createFile' })),
+      Effect.tap(() => Effect.sync(() => revalidatePath('/storage'))),
+      Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() =>
         Effect.succeed({ _tag: 'Error' as const, message: 'Could not create storage file' })
       )

@@ -154,6 +154,27 @@ Using the global `Error` type:
 
 Always use `Schema.TaggedErrorClass` with a unique `_tag` for every error type.
 
+### 3.1 `Effect.die` Is for Defects Only
+
+Use `Effect.die` only for impossible programmer defects: invariant violations that mean the
+code is wrong and should crash. Do not use it for persistence anomalies, missing rows,
+validation, auth, provider failures, config failures, or user-correctable input.
+
+```typescript
+// WRONG - empty returning() is an expected persistence failure shape
+if (row === undefined) {
+  return yield* Effect.die(new Error('Could not create row'))
+}
+
+// CORRECT - typed failure reaches boundary handlers and telemetry cleanly
+if (row === undefined) {
+  return yield* Effect.fail(new PersistenceError({ message: 'Could not create row' }))
+}
+```
+
+Rule of thumb: if a server action can return a user-safe message or retry/report the failure,
+it belongs in the typed error channel, not the defect channel.
+
 ### 4. NEVER Use `{ disableValidation: true }` - It Is Banned
 
 ```typescript

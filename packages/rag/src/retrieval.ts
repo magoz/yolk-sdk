@@ -208,6 +208,13 @@ const searchTextChunks = (input: {
 export const retrieveRag = (input: RagSearchInput) =>
   Effect.gen(function* () {
     const valid = yield* validateSearchInput(input)
+    yield* Effect.annotateCurrentSpan({
+      'rag.query_length': valid.query.length,
+      'rag.limit': valid.limit,
+      'rag.mode': valid.mode,
+      'rag.context_chunks': valid.contextChunks,
+      'rag.scope_count': scopeIds(input.scope).length
+    })
     const store = yield* RagStore
     const results: ReadonlyArray<RagSearchResult> = valid.mode === 'vector'
       ? yield* searchVectorChunks({
@@ -260,4 +267,4 @@ export const retrieveRag = (input: RagSearchInput) =>
           )
         )
     )
-  })
+  }).pipe(Effect.withSpan('rag.retrieve'))

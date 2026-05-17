@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
+import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { ensureUserRagSet } from './ensure-user-rag-set'
@@ -14,7 +15,7 @@ export const createTextStorageObject = (input: {
     const trimmedContent = input.content.trim()
 
     if (trimmedContent.length === 0) {
-      return yield* Effect.die(new Error('Storage text content is empty'))
+      return yield* Effect.fail(new ValidationError({ message: 'Storage text content is empty', field: 'content' }))
     }
 
     const db = yield* Db
@@ -33,7 +34,9 @@ export const createTextStorageObject = (input: {
       .returning()
 
     if (object === undefined) {
-      return yield* Effect.die(new Error('Could not create storage object'))
+      return yield* Effect.fail(
+        new PersistenceError({ message: 'Could not create storage object', entity: 'storageObject' })
+      )
     }
 
     yield* ingestRagDocument({

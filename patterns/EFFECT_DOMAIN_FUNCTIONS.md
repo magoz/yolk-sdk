@@ -50,10 +50,15 @@ import { createId } from '@paralleldrive/cuid2'
 export const createPost = (input: { readonly title: string; readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+    const title = input.title.trim()
+
+    if (title.length === 0) {
+      return yield* Effect.fail(new ValidationError({ message: 'Title is required', field: 'title' }))
+    }
 
     const [post] = yield* db
       .insert(schema.post)
-      .values({ id: createId(), title: input.title, userId: input.userId })
+      .values({ id: createId(), title, userId: input.userId })
       .returning({ id: schema.post.id, title: schema.post.title })
 
     if (post === undefined) {
@@ -71,8 +76,11 @@ export const createPost = (input: { readonly title: string; readonly userId: str
 - No catch-all recovery. Propagate typed errors to the boundary.
 - `yield* Db`; Drizzle queries are Effects.
 - Destructure Drizzle arrays and check `undefined`.
+- Empty Drizzle `returning()` results are typed `PersistenceError` failures, never `Effect.die`.
+- User-correctable input failures are typed `ValidationError` failures, never defects or generic errors.
 - End every function with `Effect.withSpan('domain.operation')`.
 - Parse unknown input at boundaries with Schema; domain functions receive typed input.
+- If a domain operation writes multiple related rows, use a DB transaction or model a status lifecycle so partial progress is explicit.
 
 ## Error definitions
 

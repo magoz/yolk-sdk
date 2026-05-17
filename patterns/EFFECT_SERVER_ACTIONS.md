@@ -17,9 +17,12 @@ Effect.gen(function* () { ... }).pipe(
   Effect.withSpan('action.domain.verb'),
   Effect.provide(AppLayer),
   Effect.scoped,
-  Effect.tapError(error => reportError(error, { operation: 'action.domain.verb' })),
   Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
+  Effect.catchTag('ValidationError', error =>
+    Effect.succeed({ _tag: 'Error' as const, message: error.message })
+  ),
   Effect.catchTag('UnauthorizedError', () => NextEffect.redirect('/')),
+  Effect.tapError(error => reportError(error, { operation: 'action.domain.verb' })),
   Effect.tap(() => Effect.sync(() => revalidatePath('/path'))),
   Effect.as({ _tag: 'Success' as const }),
   Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Something went wrong' }))
@@ -31,9 +34,10 @@ Order matters:
 1. `withSpan` wraps the whole boundary.
 2. `provide` is one composed layer, usually `AppLayer`.
 3. `scoped` closes scoped resources.
-4. `tapError(reportError)` happens before catch handlers.
-5. `catchTag` handles expected control flow.
-6. Catch-all returns a user-safe error.
+4. `catchTag` handles expected control flow and user-correctable errors.
+5. `tapError(reportError)` reports remaining unexpected errors.
+6. `tap` / `as Success` happen after expected handlers so handled error ADTs are not remapped to success.
+7. Catch-all returns a user-safe error.
 
 ## Canonical action
 
@@ -65,9 +69,12 @@ export const updatePostAction = async (input: {
       Effect.withSpan('action.post.update'),
       Effect.provide(AppLayer),
       Effect.scoped,
-      Effect.tapError(error => reportError(error, { operation: 'action.post.update' })),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
+      Effect.catchTag('ValidationError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
       Effect.catchTag('UnauthorizedError', () => NextEffect.redirect('/')),
+      Effect.tapError(error => reportError(error, { operation: 'action.post.update' })),
       Effect.tap(() => Effect.sync(() => revalidatePath('/posts'))),
       Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() =>
@@ -93,7 +100,10 @@ Client components branch on `_tag`; never parse thrown errors in the client.
 
 - `await cookies()` at the top when auth or cookies are involved.
 - Auth check is the first `yield*` inside `Effect.gen`.
+- Annotate current span after auth with `user.id` plus affected entity ids/names.
 - Use `NextEffect.runPromise`, not `Effect.runPromise`, when redirects may happen.
 - `revalidatePath` goes in `Effect.sync` after successful mutation.
+- Put `Effect.map` / `Effect.as({ _tag: 'Success' })` after expected `catchTag`s; otherwise handled error results can be remapped to success.
+- Report unexpected errors after expected `catchTag`s when expected failures are user-correctable and should not alert.
 - Never call `redirect`, `notFound`, `revalidatePath`, or `reportError` in domain functions.
 - Never use API routes for CRUD mutations.

@@ -1,5 +1,6 @@
 import { Effect } from 'effect'
 import { ingestRagDocument } from '@yolk/rag/ingestion'
+import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
@@ -31,7 +32,9 @@ export const createFileStorageObject = (input: {
       .returning()
 
     if (object === undefined) {
-      return yield* Effect.die(new Error('Could not create storage object'))
+      return yield* Effect.fail(
+        new PersistenceError({ message: 'Could not create storage object', entity: 'storageObject' })
+      )
     }
 
     yield* ingestRagDocument({

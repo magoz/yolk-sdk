@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
+import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
@@ -50,7 +51,9 @@ export const ensureUserRagSet = (input: { readonly userId: string }) =>
       )
 
     if (afterConflict === undefined) {
-      return yield* Effect.die(new Error('Could not create storage RAG set'))
+      return yield* Effect.fail(
+        new PersistenceError({ message: 'Could not create storage RAG set', entity: 'ragSet' })
+      )
     }
 
     return afterConflict

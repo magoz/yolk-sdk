@@ -26,6 +26,11 @@ const markErrorBestEffort = (input: IngestRagDocumentInput, error: RagIngestionE
 
 export const ingestRagDocument = (input: IngestRagDocumentInput) =>
   Effect.gen(function* () {
+    yield* Effect.annotateCurrentSpan({
+      'rag.set_id': input.ragSetId,
+      'rag.document_id': input.documentId,
+      'rag.source_type': input.source.source._tag
+    })
     const store = yield* RagStore
     const extractor = yield* RagExtractor
     const chunker = yield* RagChunker
@@ -139,6 +144,7 @@ export const ingestRagDocument = (input: IngestRagDocumentInput) =>
         )
       )
   }).pipe(
+    Effect.withSpan('rag.ingestDocument'),
     Effect.catch(error => markErrorBestEffort(input, error).pipe(Effect.flatMap(() => Effect.fail(error))))
   )
 
