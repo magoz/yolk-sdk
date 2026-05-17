@@ -94,6 +94,108 @@ describe('storage RAG tool', () => {
     })
   })
 
+  it.effect('runs multiple storage queries', () => {
+    const calls: Array<string> = []
+    const toolModule = makeStorageRagToolModule(input =>
+      Effect.sync(() => {
+        calls.push(input.query)
+        return [searchResult]
+      })
+    )
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'search_storage_many',
+          params: { queries: ['alpha', ' beta '], limit: 2 }
+        })
+      )
+
+      expect(calls).toEqual(['alpha', 'beta'])
+      expect(result.content).toContain('Storage multi-search results')
+      expect(result.content).toContain('Storage search results for: alpha')
+      expect(result.content).toContain('Storage search results for: beta')
+    })
+  })
+
+  it.effect('lists storage sources when handler is provided', () => {
+    const toolModule = makeStorageRagToolModule({
+      search: () => Effect.succeed([]),
+      listSources: () =>
+        Effect.succeed([
+          {
+            id: 'source_1',
+            name: 'notes.pdf',
+            sourceType: 'file',
+            status: 'ready',
+            summary: 'Project notes',
+            chunkCount: 3,
+            tokenCount: 42,
+            createdAt: '2026-05-17T00:00:00.000Z'
+          }
+        ])
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'list_storage_sources', params: {} })
+      )
+
+      expect(result.content).toContain('Storage sources')
+      expect(result.content).toContain('Name: notes.pdf')
+      expect(result.content).toContain('Summary: Project notes')
+    })
+  })
+
+  it.effect('reads storage source detail when handler is provided', () => {
+    const toolModule = makeStorageRagToolModule({
+      search: () => Effect.succeed([]),
+      getSource: input =>
+        Effect.succeed({
+          id: input.id,
+          name: 'notes.pdf',
+          sourceType: 'file',
+          status: 'ready',
+          summary: 'Project notes',
+          chunkCount: 3,
+          tokenCount: 42,
+          createdAt: '2026-05-17T00:00:00.000Z',
+          mediaType: 'application/pdf',
+          byteSize: 123,
+          text: 'full extracted text',
+          textTruncated: false,
+          textCharacters: 19
+        })
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'get_storage_source',
+          params: { id: 'source_1', maxChars: 50_000 }
+        })
+      )
+
+      expect(result.content).toContain('Storage source: notes.pdf')
+      expect(result.content).toContain('Media type: application/pdf')
+      expect(result.content).toContain('full extracted text')
+    })
+  })
+
   it.effect('is available to subagents', () => {
     const toolModule = makeStorageRagToolModule(() => Effect.succeed([]))
 
@@ -103,7 +205,7 @@ describe('storage RAG tool', () => {
         context: { surface: 'text', route: '/agent/next', userId: 'user_1', subagent: true }
       })
 
-      expect(toolSet.tools.map(tool => tool.name)).toEqual(['search_storage'])
+      expect(toolSet.tools.map(tool => tool.name)).toEqual(['search_storage', 'search_storage_many'])
     })
   })
 })
