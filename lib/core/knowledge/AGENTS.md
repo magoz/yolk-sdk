@@ -14,6 +14,7 @@ App-owned knowledge use-cases and agent context helpers.
 - File creation clones upload bytes before extraction; PDF parsing may detach ArrayBuffers, so R2 upload must use a separate byte copy.
 - Representation indexing uses `RagChunker` + `RagEmbedder` and writes `knowledgeChunk` rows.
 - Hybrid vector + FTS search filters to authenticated user, ready objects, non-archival policy.
+- `getKnowledgeContext` traverses a chunk window around a search citation/object position for “show more/continue” flows.
 - Pinned knowledge context loading for text agents; unavailable context logs warning and proceeds.
 - Delete removes owned R2 artifacts before deleting DB rows.
 - User-owned v0: scope id maps to authenticated `userId`.

@@ -1,5 +1,6 @@
 import { Effect, Layer } from 'effect'
 import { ToolError } from '@yolk/agent/loop'
+import { getKnowledgeContext } from '@/lib/core/knowledge/get-knowledge-context'
 import { searchUserKnowledge } from '@/lib/core/knowledge/search-user-knowledge'
 import { Db } from '@/lib/services/db/live-layer'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
@@ -23,4 +24,21 @@ const searchKnowledgeForAgent = (input: {
     )
   )
 
-export const makeAppKnowledgeToolModule = () => makeKnowledgeToolModule(searchKnowledgeForAgent)
+const getKnowledgeContextForAgent = (input: {
+  readonly userId: string
+  readonly objectId: string
+  readonly chunkId?: string
+  readonly position?: number
+  readonly before: number
+  readonly after: number
+  readonly maxChars: number
+}) =>
+  getKnowledgeContext(input).pipe(
+    Effect.provide(KnowledgeToolLayer),
+    Effect.mapError(error =>
+      new ToolError({ tool: 'get_knowledge_context', message: unknownToMessage(error), cause: 'execution' })
+    )
+  )
+
+export const makeAppKnowledgeToolModule = () =>
+  makeKnowledgeToolModule({ search: searchKnowledgeForAgent, getContext: getKnowledgeContextForAgent })

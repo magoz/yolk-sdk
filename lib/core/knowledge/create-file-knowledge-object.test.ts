@@ -13,6 +13,7 @@ import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
 import { FileExtractionError } from '@/lib/services/file-extractor/errors'
 import { createFileKnowledgeObject } from './create-file-knowledge-object'
 import { deleteKnowledgeObject } from './delete-knowledge-object'
+import { getKnowledgeContext } from './get-knowledge-context'
 import { searchUserKnowledge } from './search-user-knowledge'
 
 const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
@@ -65,6 +66,7 @@ describeWithDb('createFileKnowledgeObject', () => {
         .from(schema.knowledgeChunk)
         .where(eq(schema.knowledgeChunk.objectId, object.id))
       const results = yield* searchUserKnowledge({ userId, query: 'Alpha file knowledge', limit: 4 })
+      const context = yield* getKnowledgeContext({ userId, objectId: object.id, position: 0, before: 2, after: 2 })
       const otherUserResults = yield* searchUserKnowledge({ userId: createId(), query: 'Alpha file knowledge', limit: 4 })
       yield* db
         .update(schema.knowledgeObject)
@@ -92,6 +94,9 @@ describeWithDb('createFileKnowledgeObject', () => {
       expect(chunks).toHaveLength(1)
       expect(chunks[0]?.content).toBe('Alpha file knowledge.')
       expect(results.map(result => result.object.id)).toEqual([object.id])
+      expect(context.object.id).toBe(object.id)
+      expect(context.anchor.position).toBe(0)
+      expect(context.text).toBe('Alpha file knowledge.')
       expect(otherUserResults).toEqual([])
       expect(archivalResults).toEqual([])
       expect(provenance).toHaveLength(1)

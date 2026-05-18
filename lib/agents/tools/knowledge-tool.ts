@@ -3,32 +3,61 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk/agent/loop'
 import { ToolResult } from '@yolk/agent/protocol'
 import { makeTool, type ToolModule } from '@yolk/agent/tools'
+import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 import type { AgentToolContext } from './tool-context.ts'
 
 const knowledgeSearchToolName = 'search_knowledge'
+const knowledgeContextToolName = 'get_knowledge_context'
 const defaultLimit = 8
 const maxLimit = 20
 const defaultContextChunks = 1
 const maxContextChunks = 5
 const maxQueries = 5
+const defaultBefore = 3
+const defaultAfter = 6
+const maxTraversalChunks = 20
+const defaultMaxChars = 20_000
+const maxMaxChars = 60_000
 
 const KnowledgeSearchParams = Schema.Struct({
   queries: Schema.Array(Schema.String).pipe(
     Schema.annotate({ description: 'One to five targeted knowledge search queries.' })
   ),
-  limit: Schema.optional(Schema.Number).pipe(
+  limit: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
     Schema.annotate({ description: 'Maximum chunks per query. Defaults to 8; capped at 20.' })
   ),
-  minScore: Schema.optional(Schema.Number).pipe(
+  minScore: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
     Schema.annotate({ description: 'Optional vector similarity threshold from 0 to 1.' })
   ),
-  contextChunks: Schema.optional(Schema.Number).pipe(
+  contextChunks: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
     Schema.annotate({ description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.' })
   )
 })
 
+const KnowledgeContextParams = Schema.Struct({
+  objectId: Schema.String.pipe(
+    Schema.annotate({ description: 'Knowledge object ID from search_knowledge citations.' })
+  ),
+  chunkId: Schema.optional(Schema.NullOr(Schema.String)).pipe(
+    Schema.annotate({ description: 'Optional chunk ID from search_knowledge. Use this to expand a specific citation.' })
+  ),
+  position: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
+    Schema.annotate({ description: 'Optional chunk position to anchor traversal when chunkId is unavailable. Do not pass with chunkId.' })
+  ),
+  before: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
+    Schema.annotate({ description: 'Chunks before the anchor to include. Defaults to 3; capped at 20.' })
+  ),
+  after: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
+    Schema.annotate({ description: 'Chunks after the anchor to include. Defaults to 6; capped at 20.' })
+  ),
+  maxChars: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
+    Schema.annotate({ description: 'Maximum text characters to return. Defaults to 20000; capped at 60000.' })
+  )
+})
+
 type KnowledgeSearchParams = typeof KnowledgeSearchParams.Type
+type KnowledgeContextParams = typeof KnowledgeContextParams.Type
 
 export type KnowledgeSearchHandler = (input: {
   readonly userId: string
@@ -38,6 +67,21 @@ export type KnowledgeSearchHandler = (input: {
   readonly contextChunks: number
 }) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, ToolError>
 
+export type KnowledgeContextHandler = (input: {
+  readonly userId: string
+  readonly objectId: string
+  readonly chunkId?: string
+  readonly position?: number
+  readonly before: number
+  readonly after: number
+  readonly maxChars: number
+}) => Effect.Effect<KnowledgeContextWindow, ToolError>
+
+export type KnowledgeToolHandlers = {
+  readonly search: KnowledgeSearchHandler
+  readonly getContext?: KnowledgeContextHandler
+}
+
 const isKnowledgeToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
@@ -46,8 +90,11 @@ const unknownToMessage = (error: unknown) => error instanceof Error ? error.mess
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: knowledgeSearchToolName, message, cause })
 
+const makeNamedToolError = (tool: string, message: string, cause: ToolError['cause']) =>
+  new ToolError({ tool, message, cause })
+
 const normalizeInteger = (input: {
-  readonly value: number | undefined
+  readonly value: number | null | undefined
   readonly defaultValue: number
   readonly maxValue: number
   readonly minimum: number
@@ -60,8 +107,24 @@ const normalizeInteger = (input: {
   return Effect.succeed(Math.min(value, input.maxValue))
 }
 
-const normalizeMinScore = (value: number | undefined) => {
-  if (value === undefined) {
+const normalizeNamedInteger = (input: {
+  readonly value: number | null | undefined
+  readonly defaultValue: number
+  readonly maxValue: number
+  readonly minimum: number
+  readonly name: string
+  readonly tool: string
+}) => {
+  const value = input.value ?? input.defaultValue
+  if (!Number.isInteger(value) || value < input.minimum) {
+    return Effect.fail(makeNamedToolError(input.tool, `${input.name} must be an integer >= ${input.minimum}`, 'validation'))
+  }
+
+  return Effect.succeed(Math.min(value, input.maxValue))
+}
+
+const normalizeMinScore = (value: number | null | undefined) => {
+  if (value === null || value === undefined) {
     return Effect.succeed(undefined)
   }
   if (!Number.isFinite(value) || value < 0 || value > 1) {
@@ -83,6 +146,27 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
     const contextChunks = yield* normalizeInteger({ value: params.contextChunks, defaultValue: defaultContextChunks, maxValue: maxContextChunks, minimum: 0, name: 'contextChunks' })
     const minScore = yield* normalizeMinScore(params.minScore)
     return { queries, limit, contextChunks, minScore }
+  })
+
+const normalizeContextParams = (params: KnowledgeContextParams) =>
+  Effect.gen(function* () {
+    const objectId = params.objectId.trim()
+    if (objectId.length === 0) {
+      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'objectId must not be empty', 'validation'))
+    }
+    const chunkId = params.chunkId?.trim()
+    if (chunkId !== undefined && chunkId.length === 0) {
+      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'chunkId must not be empty', 'validation'))
+    }
+    const position = params.position ?? undefined
+    if (chunkId !== undefined && position !== undefined) {
+      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'Use chunkId or position, not both', 'validation'))
+    }
+
+    const before = yield* normalizeNamedInteger({ value: params.before, defaultValue: defaultBefore, maxValue: maxTraversalChunks, minimum: 0, name: 'before', tool: knowledgeContextToolName })
+    const after = yield* normalizeNamedInteger({ value: params.after, defaultValue: defaultAfter, maxValue: maxTraversalChunks, minimum: 0, name: 'after', tool: knowledgeContextToolName })
+    const maxChars = yield* normalizeNamedInteger({ value: params.maxChars, defaultValue: defaultMaxChars, maxValue: maxMaxChars, minimum: 1, name: 'maxChars', tool: knowledgeContextToolName })
+    return { objectId, chunkId, position, before, after, maxChars }
   })
 
 const resultText = (result: KnowledgeSearchResult) => result.context.map(chunk => chunk.content).join('\n\n')
@@ -127,10 +211,46 @@ const structuredResult = (query: string, results: ReadonlyArray<KnowledgeSearchR
   }))
 })
 
-export const makeKnowledgeToolModule = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext> => ({
-  id: 'knowledge',
-  tools: [
-    makeTool({
+const formatContextWindow = (window: KnowledgeContextWindow) =>
+  [
+    `Knowledge context: ${window.object.title}`,
+    '',
+    `Object ID: ${window.object.id}`,
+    `Representation ID: ${window.representation.id}`,
+    `Anchor chunk: ${window.anchor.id}`,
+    `Anchor position: ${window.anchor.position}`,
+    `Positions: ${window.startPosition}-${window.endPosition}`,
+    `Has before: ${window.hasBefore ? 'yes' : 'no'}`,
+    `Has after: ${window.hasAfter ? 'yes' : 'no'}`,
+    window.textTruncated
+      ? `Extracted text (${window.text.length}/${window.textCharacters} chars, truncated)`
+      : `Extracted text (${window.textCharacters} chars)`,
+    window.text
+  ].join('\n')
+
+const structuredContextWindow = (window: KnowledgeContextWindow) => ({
+  objectId: window.object.id,
+  title: window.object.title,
+  representationId: window.representation.id,
+  anchorChunkId: window.anchor.id,
+  anchorPosition: window.anchor.position,
+  startPosition: window.startPosition,
+  endPosition: window.endPosition,
+  hasBefore: window.hasBefore,
+  hasAfter: window.hasAfter,
+  text: window.text,
+  textTruncated: window.textTruncated,
+  textCharacters: window.textCharacters,
+  chunks: window.chunks.map(chunk => ({
+    id: chunk.id,
+    position: chunk.position,
+    tokenCount: chunk.tokenCount,
+    content: chunk.content
+  }))
+})
+
+const searchTool = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
       name: knowledgeSearchToolName,
       description: 'Search durable user knowledge. Use this for source-backed facts, uploaded knowledge, decisions, notes, and non-pinned knowledge not already in context.',
       parameters: KnowledgeSearchParams,
@@ -161,5 +281,38 @@ export const makeKnowledgeToolModule = (search: KnowledgeSearchHandler): ToolMod
           Effect.mapError(error => error instanceof ToolError ? error : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution'))
         )
     })
-  ]
-})
+
+const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
+    name: knowledgeContextToolName,
+    description: 'Read surrounding chunks from a specific durable knowledge object. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
+    parameters: KnowledgeContextParams,
+    access: 'read',
+    isEnabled: isKnowledgeToolEnabled,
+    invalidParamsMessage: error => `Invalid knowledge context arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        const normalized = yield* normalizeContextParams(params)
+        const window = yield* getContext({ userId: context.userId, ...normalized })
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatContextWindow(window),
+          structuredContent: { context: structuredContextWindow(window) }
+        })
+      }).pipe(
+        Effect.mapError(error => error instanceof ToolError ? error : makeNamedToolError(knowledgeContextToolName, `Knowledge context read failed: ${unknownToMessage(error)}`, 'execution'))
+      )
+  })
+
+const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolContext>['tools'] => [
+  searchTool(handlers.search),
+  ...(handlers.getContext === undefined ? [] : [contextTool(handlers.getContext)])
+]
+
+export const makeKnowledgeToolModule = (
+  searchOrHandlers: KnowledgeSearchHandler | KnowledgeToolHandlers
+): ToolModule<AgentToolContext> => {
+  const handlers = typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
+  return { id: 'knowledge', tools: knowledgeTools(handlers) }
+}

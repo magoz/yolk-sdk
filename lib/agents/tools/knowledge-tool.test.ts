@@ -3,6 +3,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk/agent/protocol'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
+import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 
 const date = new Date('2026-05-18T00:00:00.000Z')
@@ -61,6 +62,20 @@ const searchResult: KnowledgeSearchResult = {
       createdAt: date
     }
   ]
+}
+
+const contextWindow: KnowledgeContextWindow = {
+  object: searchResult.object,
+  representation: searchResult.representation,
+  anchor: searchResult.chunk,
+  chunks: searchResult.context,
+  startPosition: 0,
+  endPosition: 1,
+  hasBefore: false,
+  hasAfter: true,
+  text: 'matched durable fact',
+  textTruncated: false,
+  textCharacters: 20
 }
 
 describe('knowledge tool', () => {
@@ -143,6 +158,80 @@ describe('knowledge tool', () => {
       expect(calls).toEqual(['alpha', 'beta'])
       expect(result.content).toContain('No knowledge results found for: alpha')
       expect(result.content).toContain('No knowledge results found for: beta')
+    })
+  })
+
+  it.effect('reads surrounding knowledge context', () => {
+    const calls: Array<{
+      readonly userId: string
+      readonly objectId: string
+      readonly chunkId?: string
+      readonly before: number
+      readonly after: number
+      readonly maxChars: number
+    }> = []
+    const toolModule = makeKnowledgeToolModule({
+      search: () => Effect.succeed([]),
+      getContext: input => Effect.sync(() => {
+        calls.push(input)
+        return contextWindow
+      })
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'get_knowledge_context',
+          params: { objectId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
+        })
+      )
+
+      expect(calls).toEqual([
+        { userId: 'user_1', objectId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
+      ])
+      expect(result.content).toContain('Knowledge context: Project memory')
+      expect(result.content).toContain('Has after: yes')
+      expect(result.content).toContain('matched durable fact')
+    })
+  })
+
+  it.effect('accepts null optional knowledge context params', () => {
+    const calls: Array<{
+      readonly objectId: string
+      readonly position?: number
+      readonly before: number
+      readonly after: number
+      readonly maxChars: number
+    }> = []
+    const toolModule = makeKnowledgeToolModule({
+      search: () => Effect.succeed([]),
+      getContext: input => Effect.sync(() => {
+        calls.push(input)
+        return contextWindow
+      })
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'get_knowledge_context',
+          params: { objectId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
+        })
+      )
+
+      expect(calls).toEqual([
+        { userId: 'user_1', objectId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
+      ])
     })
   })
 })
