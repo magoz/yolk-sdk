@@ -1,4 +1,5 @@
 import { Array as Arr, Data, Effect, Layer, Option } from 'effect'
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
 import { KnowledgeStore } from '@yolk/knowledge/store'
 import { AppLayer } from '@/lib/layers'
@@ -46,14 +47,15 @@ const arrayBufferFromBytes = (bytes: Uint8Array) => {
   return buffer
 }
 
-const downloadArtifact = (request: Request) =>
+const downloadArtifact =
   Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest
     const url = new URL(request.url)
     const objectId = url.searchParams.get('objectId')?.trim()
     const artifactId = url.searchParams.get('artifactId')?.trim()
 
     if (objectId === undefined || objectId.length === 0 || artifactId === undefined || artifactId.length === 0) {
-      return new Response('Missing artifact', { status: 400 })
+      return HttpServerResponse.text('Missing artifact', { status: 400 })
     }
 
     const session = yield* getSession()
@@ -70,13 +72,13 @@ const downloadArtifact = (request: Request) =>
     const bytes = yield* artifactStore.getArtifact({ storageKey: artifact.storageKey })
     const mediaType = artifact.mediaType ?? 'application/octet-stream'
 
-    return new Response(arrayBufferFromBytes(bytes), {
+    return HttpServerResponse.raw(arrayBufferFromBytes(bytes), {
       headers: responseHeaders({ filename: artifact.storageKey.split('/').at(-1) ?? artifact.id, mediaType })
     })
   }).pipe(
-    Effect.catchTag('UnauthenticatedError', () => Effect.succeed(new Response('Unauthorized', { status: 401 }))),
-    Effect.catchTag('KnowledgeArtifactNotFoundError', () => Effect.succeed(new Response('Not found', { status: 404 }))),
-    Effect.catchTag('KnowledgeStoreError', () => Effect.succeed(new Response('Not found', { status: 404 }))),
+    Effect.catchTag('UnauthenticatedError', () => Effect.succeed(HttpServerResponse.text('Unauthorized', { status: 401 }))),
+    Effect.catchTag('KnowledgeArtifactNotFoundError', () => Effect.succeed(HttpServerResponse.text('Not found', { status: 404 }))),
+    Effect.catchTag('KnowledgeStoreError', () => Effect.succeed(HttpServerResponse.text('Not found', { status: 404 }))),
     Effect.catch(error =>
       reportError(
         new KnowledgeArtifactDownloadRouteError({
@@ -84,9 +86,10 @@ const downloadArtifact = (request: Request) =>
           cause: error
         }),
         { operation: 'knowledge.artifact.download', status: 500 }
-      ).pipe(Effect.as(new Response('Internal error', { status: 500 })))
+      ).pipe(Effect.as(HttpServerResponse.text('Internal error', { status: 500 })))
     )
   )
 
-export const GET = (request: Request) =>
-  Effect.runPromise(downloadArtifact(request).pipe(Effect.provide(DownloadLayer), Effect.scoped))
+const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(downloadArtifact, DownloadLayer)
+
+export const GET = (request: Request) => effectHandler(request)

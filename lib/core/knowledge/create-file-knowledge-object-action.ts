@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -14,6 +14,13 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 import { createFileKnowledgeObject } from './create-file-knowledge-object'
 
 const maxFileBytes = 2_000_000
+
+const CreateFileKnowledgeActionLayer = Layer.mergeAll(
+  AppLayer,
+  AppRagLayer.pipe(Layer.provide(AppLayer)),
+  R2KnowledgeArtifactStoreLayer,
+  FileExtractor.layer
+)
 
 export const createFileKnowledgeObjectAction = async (formData: FormData) => {
   await cookies()
@@ -55,11 +62,10 @@ export const createFileKnowledgeObjectAction = async (formData: FormData) => {
       })
     }).pipe(
       Effect.withSpan('action.knowledge.createFile'),
-      Effect.provide(AppRagLayer),
-      Effect.provide(R2KnowledgeArtifactStoreLayer),
-      Effect.provide(FileExtractor.layer),
-      Effect.provide(AppLayer),
+      Effect.provide(CreateFileKnowledgeActionLayer),
       Effect.scoped,
+      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
+      Effect.as({ _tag: 'Success' as const }),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
@@ -80,8 +86,6 @@ export const createFileKnowledgeObjectAction = async (formData: FormData) => {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.createFile' })),
-      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
-      Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() =>
         Effect.succeed({ _tag: 'Error' as const, message: 'Could not create knowledge file' })
       )

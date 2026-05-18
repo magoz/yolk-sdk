@@ -23,13 +23,13 @@ export const updateKnowledgeContextPolicyAction = async (input: {
       Effect.withSpan('action.knowledge.updateContextPolicy'),
       Effect.provide(AppLayer),
       Effect.scoped,
+      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
+      Effect.as({ _tag: 'Success' as const }),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('NotFoundError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.updateContextPolicy' })),
-      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
-      Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge object' }))
     )
   )

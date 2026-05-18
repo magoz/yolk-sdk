@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -9,6 +9,11 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { createTextKnowledgeObject } from './create-text-knowledge-object'
+
+const CreateTextKnowledgeActionLayer = Layer.mergeAll(
+  AppLayer,
+  AppRagLayer.pipe(Layer.provide(AppLayer))
+)
 
 export const createTextKnowledgeObjectAction = async (input: {
   readonly title: string
@@ -33,9 +38,10 @@ export const createTextKnowledgeObjectAction = async (input: {
       })
     }).pipe(
       Effect.withSpan('action.knowledge.createText'),
-      Effect.provide(AppRagLayer),
-      Effect.provide(AppLayer),
+      Effect.provide(CreateTextKnowledgeActionLayer),
       Effect.scoped,
+      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
+      Effect.as({ _tag: 'Success' as const }),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
@@ -47,8 +53,6 @@ export const createTextKnowledgeObjectAction = async (input: {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.createText' })),
-      Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
-      Effect.as({ _tag: 'Success' as const }),
       Effect.catch(() =>
         Effect.succeed({ _tag: 'Error' as const, message: 'Could not create knowledge object' })
       )

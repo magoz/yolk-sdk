@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -9,6 +9,8 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { R2KnowledgeArtifactStoreLayer } from '@/lib/services/knowledge/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { deleteKnowledgeObject } from './delete-knowledge-object'
+
+const DeleteKnowledgeActionLayer = Layer.mergeAll(AppLayer, R2KnowledgeArtifactStoreLayer)
 
 export const deleteKnowledgeObjectAction = async (id: string) => {
   await cookies()
@@ -19,8 +21,7 @@ export const deleteKnowledgeObjectAction = async (id: string) => {
       yield* deleteKnowledgeObject({ userId: session.user.id, id })
     }).pipe(
       Effect.withSpan('action.knowledge.delete'),
-      Effect.provide(R2KnowledgeArtifactStoreLayer),
-      Effect.provide(AppLayer),
+      Effect.provide(DeleteKnowledgeActionLayer),
       Effect.scoped,
       Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
       Effect.as({ _tag: 'Success' as const }),

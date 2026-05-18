@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
@@ -8,6 +8,11 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { AppRagLayer } from '@/lib/services/rag/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { searchUserKnowledge } from './search-user-knowledge'
+
+const SearchKnowledgeActionLayer = Layer.mergeAll(
+  AppLayer,
+  AppRagLayer.pipe(Layer.provide(AppLayer))
+)
 
 export type KnowledgeSearchActionResult =
   | {
@@ -58,8 +63,7 @@ export const searchUserKnowledgeAction = async (input: {
       }
     }).pipe(
       Effect.withSpan('action.knowledge.search'),
-      Effect.provide(AppRagLayer),
-      Effect.provide(AppLayer),
+      Effect.provide(SearchKnowledgeActionLayer),
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error =>

@@ -1,4 +1,5 @@
 import { createId } from '@paralleldrive/cuid2'
+import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
 import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
 import { PersistenceError } from '@/lib/core/errors'
@@ -44,58 +45,70 @@ export const createFileKnowledgeObject = (input: {
       artifactId,
       kind: 'original'
     })
-    yield* artifactStore.putArtifact({
-      storageKey,
-      mediaType: input.mediaType.length > 0 ? input.mediaType : undefined,
-      bytes: input.bytes
-    })
-
-    const [artifact] = yield* db
-      .insert(schema.knowledgeArtifact)
-      .values({
-        id: artifactId,
-        objectId: object.id,
-        kind: 'original',
+    return yield* Effect.gen(function* () {
+      yield* artifactStore.putArtifact({
         storageKey,
-        mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
-        byteSize: input.bytes.byteLength,
+        mediaType: input.mediaType.length > 0 ? input.mediaType : undefined,
+        bytes: input.bytes
+      })
+
+      const [artifact] = yield* db
+        .insert(schema.knowledgeArtifact)
+        .values({
+          id: artifactId,
+          objectId: object.id,
+          kind: 'original',
+          storageKey,
+          mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
+          byteSize: input.bytes.byteLength,
+          metadata: { filename: input.filename, ...extracted.metadata }
+        })
+        .returning()
+
+      if (artifact === undefined) {
+        return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge artifact', entity: 'knowledgeArtifact' }))
+      }
+
+      const [representation] = yield* db.insert(schema.knowledgeRepresentation).values({
+        objectId: object.id,
+        artifactId: artifact.id,
+        modality: 'text',
+        status: 'pending',
+        contentText: extracted.content,
+        summary: object.summary,
+        metadata: { filename: input.filename, ...extracted.metadata }
+      }).returning()
+
+      if (representation === undefined) {
+        return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge representation', entity: 'knowledgeRepresentation' }))
+      }
+
+      yield* db.insert(schema.knowledgeProvenance).values({
+        objectId: object.id,
+        artifactId: artifact.id,
+        sourceKind: 'upload',
+        sourceLabel: input.filename,
+        observedAt: new Date(),
+        metadata: { mediaType: input.mediaType, byteSize: input.bytes.byteLength }
+      })
+
+      yield* indexKnowledgeRepresentation({
+        objectId: object.id,
+        representationId: representation.id,
+        content: extracted.content,
         metadata: { filename: input.filename, ...extracted.metadata }
       })
-      .returning()
 
-    if (artifact === undefined) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge artifact', entity: 'knowledgeArtifact' }))
-    }
-
-    const [representation] = yield* db.insert(schema.knowledgeRepresentation).values({
-      objectId: object.id,
-      artifactId: artifact.id,
-      modality: 'text',
-      status: 'pending',
-      contentText: extracted.content,
-      summary: object.summary,
-      metadata: { filename: input.filename, ...extracted.metadata }
-    }).returning()
-
-    if (representation === undefined) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge representation', entity: 'knowledgeRepresentation' }))
-    }
-
-    yield* db.insert(schema.knowledgeProvenance).values({
-      objectId: object.id,
-      artifactId: artifact.id,
-      sourceKind: 'upload',
-      sourceLabel: input.filename,
-      observedAt: new Date(),
-      metadata: { mediaType: input.mediaType, byteSize: input.bytes.byteLength }
-    })
-
-    yield* indexKnowledgeRepresentation({
-      objectId: object.id,
-      representationId: representation.id,
-      content: extracted.content,
-      metadata: { filename: input.filename, ...extracted.metadata }
-    })
-
-    return object
+      return object
+    }).pipe(
+      Effect.catch(error =>
+        Effect.all(
+          [
+            artifactStore.deleteArtifact({ storageKey }).pipe(Effect.ignore),
+            db.delete(schema.knowledgeObject).where(eq(schema.knowledgeObject.id, object.id)).pipe(Effect.ignore)
+          ],
+          { concurrency: 'unbounded' }
+        ).pipe(Effect.andThen(Effect.fail(error)))
+      )
+    )
   }).pipe(Effect.withSpan('knowledge.createFileKnowledgeObject'))
