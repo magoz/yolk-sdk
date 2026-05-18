@@ -8,8 +8,7 @@ const navItems = [
   { href: '/', label: 'Home' },
   { href: '/agent', label: 'Agent' },
   { href: '/agent/skills', label: 'Skills' },
-  { href: '/storage', label: 'Storage' },
-  { href: '/vercel-workflows', label: 'Workflows' }
+  { href: '/storage', label: 'Storage' }
 ]
 
 const hiddenPrefixes = ['/login', '/auth-error']

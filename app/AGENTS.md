@@ -10,7 +10,6 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | `(auth)/`     | Login, OTP, logout, auth error UI        |
 | `agent/`      | Text+image + voice agent playground UI   |
 | `storage/`    | Storage source ingestion/list UI         |
-| `vercel-workflows/` | Workflow architecture explainer page |
 | `.well-known/workflow/v1/` | Generated Vercel Workflow artifacts; do not hand-edit |
 | `api/`        | HTTP boundaries; see `app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
