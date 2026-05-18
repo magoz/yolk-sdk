@@ -131,7 +131,8 @@ e2e/
   ui/
     login.spec.ts                 — Public smoke tests
     agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
-    agent-voice.spec.ts           — Voice startup readiness + fake-mic Realtime transcription smoke
+    agent-voice.spec.ts           — Deterministic mocked WebRTC voice readiness smoke
+    agent-voice-live.spec.ts      — Live fake-mic Realtime transcription smoke; skips without OPENAI_API_KEY
     agent-cloudflare.spec.ts      — Direct Worker WS reconnect/persistence/conflict/fallback smoke; skips without CLOUDFLARE_AGENT_URL
 ```
 
@@ -145,7 +146,7 @@ E2E scripts set `NODE_ENV=test`, so `playwright.config.ts` loads **only** `.env.
 
 ## How It Works
 
-1. `pnpm test:e2e*` sets `NODE_ENV=test`; `playwright.config.ts` loads `.env.test`, starts Next.js via portless at `http://yolk-e2e.localhost:1355` locally, or `E2E_PORT`/default `3007` in CI or `PORTLESS=0`
+1. `pnpm test:e2e*` sets `NODE_ENV=test`; `playwright.config.ts` loads `.env.test`, starts Next.js on fixed HTTP port `E2E_PORT`/default `41773`; E2E intentionally does not use portless because Playwright webServer teardown can orphan proxy-launched `next dev`
 2. `global-setup.ts` runs:
    - Resets database via `drizzle-seed` (truncate + reseed)
    - Creates test user with deterministic ID from `test-ids.ts`
@@ -170,7 +171,7 @@ const signature = createHmac('sha256', secret).update(value).digest('base64')
 return encodeURIComponent(`${value}.${signature}`)
 ```
 
-Cookie name: `better-auth.session_token`; fixture domain and `secure` flag derive from Playwright `baseURL` so portless and fixed-port modes both work.
+Cookie name: `better-auth.session_token` for HTTP and `__Secure-better-auth.session_token` for HTTPS; fixture domain and `secure` flag derive from Playwright `baseURL`.
 
 ### Effect at Playwright boundaries
 
@@ -304,8 +305,8 @@ await expect.soft(page.getByText('Settings')).toBeVisible()
 - **Serial `beforeAll` re-runs on retry** — Playwright retries re-run `beforeAll`, causing unique constraint errors. Delete before re-creating at the top of `beforeAll`.
 - **`waitForURL` glob vs function predicate** — `waitForURL('**/login**')` waits for `load` event. Use function predicate `waitForURL(url => url.toString().includes('/login'))` — resolves on navigation match, not just `load`.
 - **Streaming ghost clicks** — clicking a button during hydration can target a DOM element about to be detached. The click appears to succeed but has no effect. Fix: `toHaveCount(1)` before clicking.
-- **Port conflicts** — E2E uses portless locally with proxy port `1355`. Override with `E2E_PORTLESS_PROXY_PORT=...`, or use `PORTLESS=0 E2E_PORT=... pnpm test:e2e` for legacy fixed-port mode.
-- **Portless in non-TTY** — e2e uses unprivileged HTTP proxy port `1355` (`PORTLESS_HTTPS=0`) so Playwright can start without sudo/trust prompts.
+- **Port conflicts** — E2E uses fixed HTTP port `E2E_PORT`/default `41773`. Override with `E2E_PORT=... pnpm test:e2e`.
+- **No portless for E2E** — do not reintroduce portless here; it can hang Playwright teardown and leave orphan `next dev` processes.
 - **`getByRole('heading')` matches multiple levels** — use `{ level: 1 }` or `{ name: '...' }` to disambiguate h1 from h2.
 - **`process.env` propagation** — `globalSetup` shares env vars with workers. Deterministic IDs in `test-ids.ts` are more reliable than env vars.
 - **Test IDs must not be substrings of each other** — e.g. `e2e-project-foo` is a prefix of `e2e-project-foobar`, breaking `url.includes()` checks. Use distinct stems.

@@ -24,6 +24,66 @@ export const ragDocumentStatus = pgEnum('RagDocumentStatus', [
   'error'
 ])
 export const ragChunkingStrategy = pgEnum('RagChunkingStrategy', ['sentence-token'])
+export const knowledgeObjectRole = pgEnum('KnowledgeObjectRole', [
+  'source',
+  'note',
+  'operating_protocol',
+  'knowledge_map',
+  'compiled_truth',
+  'decision'
+])
+export const knowledgeContextPolicy = pgEnum('KnowledgeContextPolicy', [
+  'pinned',
+  'routable',
+  'searchable',
+  'archival'
+])
+export const knowledgeLifecycleStatus = pgEnum('KnowledgeLifecycleStatus', [
+  'draft',
+  'processing',
+  'ready',
+  'error',
+  'archived',
+  'deleted'
+])
+export const knowledgeArtifactKind = pgEnum('KnowledgeArtifactKind', [
+  'original',
+  'extracted_text',
+  'thumbnail',
+  'transcript',
+  'caption',
+  'structured'
+])
+export const knowledgeRepresentationModality = pgEnum('KnowledgeRepresentationModality', [
+  'text',
+  'image',
+  'audio',
+  'video',
+  'table'
+])
+export const knowledgeRepresentationStatus = pgEnum('KnowledgeRepresentationStatus', [
+  'pending',
+  'processing',
+  'ready',
+  'error'
+])
+export const knowledgeProvenanceSourceKind = pgEnum('KnowledgeProvenanceSourceKind', [
+  'upload',
+  'user_statement',
+  'url',
+  'generated',
+  'imported',
+  'external_api'
+])
+export const knowledgeLinkType = pgEnum('KnowledgeLinkType', [
+  'cites',
+  'supports',
+  'contradicts',
+  'supersedes',
+  'mentions',
+  'derived_from',
+  'related_to'
+])
 
 ////////////////////////////////////////////////////////////////////////
 // AUTH - Better-auth expects singular model names
@@ -346,6 +406,214 @@ export const ragChunk = pgTable(
 export type RagChunk = typeof ragChunk.$inferSelect
 export type InsertRagChunk = typeof ragChunk.$inferInsert
 
+////////////////////////////////////////////////////////////////////////
+// KNOWLEDGE
+////////////////////////////////////////////////////////////////////////
+
+export const knowledgeObject = pgTable(
+  'knowledgeObject',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: knowledgeObjectRole('role').notNull(),
+    title: text('title').notNull(),
+    status: knowledgeLifecycleStatus('status').notNull().default('draft'),
+    contextPolicy: knowledgeContextPolicy('contextPolicy').notNull().default('searchable'),
+    summary: text('summary'),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+  },
+  table => [
+    index('knowledgeObject_userId_createdAt_idx').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast()
+    ),
+    index('knowledgeObject_userId_contextPolicy_idx').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.contextPolicy.asc().nullsLast()
+    ),
+    check('knowledgeObject_title_nonempty_check', sql`length(${table.title}) > 0`)
+  ]
+)
+export type KnowledgeObject = typeof knowledgeObject.$inferSelect
+export type InsertKnowledgeObject = typeof knowledgeObject.$inferInsert
+
+export const knowledgeArtifact = pgTable(
+  'knowledgeArtifact',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    objectId: text('objectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    kind: knowledgeArtifactKind('kind').notNull(),
+    storageKey: text('storageKey').notNull(),
+    mediaType: text('mediaType'),
+    byteSize: integer('byteSize'),
+    checksum: text('checksum'),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow()
+  },
+  table => [
+    index('knowledgeArtifact_objectId_idx').using('btree', table.objectId.asc().nullsLast()),
+    uniqueIndex('knowledgeArtifact_storageKey_key').using('btree', table.storageKey.asc().nullsLast()),
+    check('knowledgeArtifact_storageKey_nonempty_check', sql`length(${table.storageKey}) > 0`),
+    check('knowledgeArtifact_byteSize_check', sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
+  ]
+)
+export type KnowledgeArtifact = typeof knowledgeArtifact.$inferSelect
+export type InsertKnowledgeArtifact = typeof knowledgeArtifact.$inferInsert
+
+export const knowledgeRepresentation = pgTable(
+  'knowledgeRepresentation',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    objectId: text('objectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    artifactId: text('artifactId').references(() => knowledgeArtifact.id, { onDelete: 'set null' }),
+    modality: knowledgeRepresentationModality('modality').notNull(),
+    status: knowledgeRepresentationStatus('status').notNull().default('pending'),
+    contentText: text('contentText'),
+    summary: text('summary'),
+    model: text('model'),
+    errorMessage: text('errorMessage'),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+  },
+  table => [
+    index('knowledgeRepresentation_objectId_status_idx').using(
+      'btree',
+      table.objectId.asc().nullsLast(),
+      table.status.asc().nullsLast()
+    ),
+    index('knowledgeRepresentation_artifactId_idx').using('btree', table.artifactId.asc().nullsLast())
+  ]
+)
+export type KnowledgeRepresentation = typeof knowledgeRepresentation.$inferSelect
+export type InsertKnowledgeRepresentation = typeof knowledgeRepresentation.$inferInsert
+
+export const knowledgeChunk = pgTable(
+  'knowledgeChunk',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    objectId: text('objectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    representationId: text('representationId')
+      .notNull()
+      .references(() => knowledgeRepresentation.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    embedding: vector('embedding', { dimensions: 1536 }).notNull(),
+    position: integer('position').notNull(),
+    tokenCount: integer('tokenCount').notNull().default(0),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow()
+  },
+  table => [
+    index('knowledgeChunk_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
+    index('knowledgeChunk_content_fts_idx').using(
+      'gin',
+      sql`to_tsvector('english', ${table.content})`
+    ),
+    index('knowledgeChunk_objectId_idx').using('btree', table.objectId.asc().nullsLast()),
+    unique('knowledgeChunk_representationId_position_key').on(table.representationId, table.position),
+    check('knowledgeChunk_content_nonempty_check', sql`length(${table.content}) > 0`),
+    check('knowledgeChunk_position_check', sql`${table.position} >= 0`),
+    check('knowledgeChunk_tokenCount_check', sql`${table.tokenCount} >= 0`)
+  ]
+)
+export type KnowledgeChunk = typeof knowledgeChunk.$inferSelect
+export type InsertKnowledgeChunk = typeof knowledgeChunk.$inferInsert
+
+export const knowledgeProvenance = pgTable(
+  'knowledgeProvenance',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    objectId: text('objectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    artifactId: text('artifactId').references(() => knowledgeArtifact.id, { onDelete: 'set null' }),
+    sourceKind: knowledgeProvenanceSourceKind('sourceKind').notNull(),
+    sourceLabel: text('sourceLabel').notNull(),
+    sourceUrl: text('sourceUrl'),
+    observedAt: timestamp('observedAt'),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow()
+  },
+  table => [
+    index('knowledgeProvenance_objectId_idx').using('btree', table.objectId.asc().nullsLast()),
+    check('knowledgeProvenance_sourceLabel_nonempty_check', sql`length(${table.sourceLabel}) > 0`)
+  ]
+)
+export type KnowledgeProvenance = typeof knowledgeProvenance.$inferSelect
+export type InsertKnowledgeProvenance = typeof knowledgeProvenance.$inferInsert
+
+export const knowledgeLink = pgTable(
+  'knowledgeLink',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    fromObjectId: text('fromObjectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    toObjectId: text('toObjectId')
+      .notNull()
+      .references(() => knowledgeObject.id, { onDelete: 'cascade' }),
+    type: knowledgeLinkType('type').notNull(),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    createdAt: timestamp('createdAt').notNull().defaultNow()
+  },
+  table => [
+    index('knowledgeLink_fromObjectId_idx').using('btree', table.fromObjectId.asc().nullsLast()),
+    index('knowledgeLink_toObjectId_idx').using('btree', table.toObjectId.asc().nullsLast()),
+    unique('knowledgeLink_edge_key').on(table.fromObjectId, table.toObjectId, table.type),
+    check('knowledgeLink_no_self_link_check', sql`${table.fromObjectId} <> ${table.toObjectId}`)
+  ]
+)
+export type KnowledgeLink = typeof knowledgeLink.$inferSelect
+export type InsertKnowledgeLink = typeof knowledgeLink.$inferInsert
+
 export const relations = defineRelations(
   {
     user,
@@ -357,7 +625,13 @@ export const relations = defineRelations(
     storageObject,
     ragSet,
     ragDocument,
-    ragChunk
+    ragChunk,
+    knowledgeObject,
+    knowledgeArtifact,
+    knowledgeRepresentation,
+    knowledgeChunk,
+    knowledgeProvenance,
+    knowledgeLink
   },
   () => ({})
 )

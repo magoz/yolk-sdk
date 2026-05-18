@@ -187,39 +187,89 @@ import { deletePostAction } from '@/lib/core/post/delete-post-action'
 
 export function DeletePostButton({ postId }: { postId: string }) {
   const [isPending, startTransition] = useTransition()
+  const [message, setMessage] = useState<string | undefined>()
 
   const handleDelete = () => {
     startTransition(async () => {
       const result = await deletePostAction(postId)
 
-      if (result?._tag === 'Error') {
-        toast.error(result.message)
+      if (result._tag === 'Error') {
+        setMessage(result.message)
         return
       }
 
+      setMessage(undefined)
       toast.success('Post deleted')
     })
   }
 
   return (
     <button onClick={handleDelete} disabled={isPending}>
-      {isPending ? 'Deleting...' : 'Delete'}
+      {message ?? (isPending ? 'Deleting...' : 'Delete')}
     </button>
   )
 }
 ```
 
+Call server actions directly from event handlers. Do not pass result-returning actions to `<form action>` / `formAction`; direct calls preserve typed `{ _tag: 'Success' } | { _tag: 'Error'; message }` handling, pending state, and optimistic updates.
+
+### Optimistic Mutations
+
+Default to server-rendered lists. The server action mutates data, calls `revalidatePath`, and the refreshed RSC payload updates the list. Do not move a whole list client-side only to get optimistic behavior.
+
+Use `useOptimistic` only for small, local optimistic deltas where instant feedback materially improves UX, such as:
+
+- pending delete row disappears while the delete request is in flight
+- toggle/check state flips immediately
+- small reorder/append preview before server reconciliation
+
+Keep the source of truth server-side:
+
+- Pass server-rendered data into the smallest client island that needs interactivity.
+- Scope `useOptimistic` to the minimal UI region.
+- Let `revalidatePath` in the server action reconcile truth.
+- Use local `useState` for local-only UI affordances like inline error messages or input text, not for server-backed collection truth.
+
+```tsx
+function PostList({ posts }: { readonly posts: ReadonlyArray<Post> }) {
+  const [isPending, startTransition] = useTransition()
+  const [optimisticPosts, removeOptimisticPost] = useOptimistic(posts, (state, postId: string) =>
+    state.filter(post => post.id !== postId)
+  )
+
+  return optimisticPosts.map(post =>
+    <button
+      key={post.id}
+      disabled={isPending}
+      onClick={() => {
+        startTransition(async () => {
+          removeOptimisticPost(post.id)
+          await deletePostAction(post.id)
+        })
+      }}
+    />
+  )
+}
+```
+
+Key points:
+
+- Optimistic state updates outside `startTransition`.
+- `startTransition` wraps only the async server action.
+- `revalidatePath` stays in the server action success path; do not use `router.refresh()` for post-mutation reconciliation.
+
 ### Action Return Types
 
 Server actions should return one of:
 
-1. **Nothing** (void) - Action succeeded, page revalidated
+1. **Success object** - Action succeeded, page revalidated
 2. **Error object** - Action failed with user-facing message
-3. **Data** - Action succeeded with data to display
+3. **Success with data** - Action succeeded with data to display
 
 ```typescript
 // Success with revalidation (most common for mutations)
 Effect.tap(() => Effect.sync(() => revalidatePath('/posts')))
+Effect.as({ _tag: 'Success' as const })
 
 // Success with data return
 Effect.map(post => ({ _tag: 'Success' as const, post }))

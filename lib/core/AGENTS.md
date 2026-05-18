@@ -25,8 +25,9 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 - Add `Effect.withSpan(...)` and annotate current span with useful ids.
 - `UnauthenticatedError` redirects to `/login` via `NextEffect.redirect()`.
 - Catch expected auth/domain errors before generic reporting where possible; return safe UI messages.
-- Put `Effect.map` / `Effect.as({ _tag: 'Success' })` after expected `catchTag`s so handled error ADTs are not remapped to success.
+- Put `Effect.map` / `Effect.as({ _tag: 'Success' })` before expected `catchTag`s so handled error ADTs are not remapped to success.
 - Revalidate affected pages (`revalidatePath('/agent')`) only after successful mutation.
+- Client components call result-returning server actions directly from event handlers in `startTransition(async () => ...)`; do not pass them to `<form action>` / `formAction` unless the action is redirect-only.
 
 ## Domain Functions
 

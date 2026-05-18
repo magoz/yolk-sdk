@@ -6,6 +6,7 @@ import { AppLayer } from '@/lib/layers'
 import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -20,7 +21,7 @@ const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
   const toolSet = yield* resolveAgentToolSet({
-    modules: [...nodeVoiceToolModules, makeAppStorageRagToolModule()],
+    modules: [...nodeVoiceToolModules, makeAppKnowledgeToolModule(), makeAppStorageRagToolModule()],
     context: {
       surface: 'voice',
       route: '/agent',

@@ -45,7 +45,9 @@ const loginOtp = '123456'
 const seedLoginOtp = () =>
   Effect.gen(function* () {
     const db = yield* Db
-    yield* db.delete(schema.verification).where(eq(schema.verification.identifier, `sign-in-otp-${loginEmail}`))
+    yield* db
+      .delete(schema.verification)
+      .where(eq(schema.verification.identifier, `sign-in-otp-${loginEmail}`))
     yield* db.insert(schema.verification).values({
       id: createId(),
       identifier: `sign-in-otp-${loginEmail}`,
@@ -57,8 +59,11 @@ const seedLoginOtp = () =>
 const login = async (page: Page) => {
   await seedLoginOtp()
   await page.goto(`/login/otp?email=${encodeURIComponent(loginEmail)}`)
-  await page.getByRole('textbox').fill(loginOtp)
-  await page.waitForURL(url => url.pathname === '/', { timeout: 15_000 })
+
+  await Promise.all([
+    page.waitForURL(url => url.pathname === '/', { timeout: 15_000, waitUntil: 'commit' }),
+    page.getByRole('textbox').pressSequentially(loginOtp)
+  ])
 }
 
 const startWorkflowStreamServer = async () => {
@@ -111,8 +116,18 @@ const startWorkflowStreamServer = async () => {
 
     completionsReleased.then(() => {
       const endedAtMs = Date.now()
-      writeEvent(response, { _tag: 'ToolExecutionCompleted', call: slowCall, result: result(slowCall, startedAtMs, endedAtMs), createdAtMs: endedAtMs })
-      writeEvent(response, { _tag: 'ToolExecutionCompleted', call: fastCall, result: result(fastCall, startedAtMs, endedAtMs), createdAtMs: endedAtMs })
+      writeEvent(response, {
+        _tag: 'ToolExecutionCompleted',
+        call: slowCall,
+        result: result(slowCall, startedAtMs, endedAtMs),
+        createdAtMs: endedAtMs
+      })
+      writeEvent(response, {
+        _tag: 'ToolExecutionCompleted',
+        call: fastCall,
+        result: result(fastCall, startedAtMs, endedAtMs),
+        createdAtMs: endedAtMs
+      })
       writeEvent(response, { _tag: 'TurnEnd', turn: 1, reason: 'tool_use' })
       writeEvent(response, {
         _tag: 'AgentEnd',
@@ -156,14 +171,22 @@ test('shows same-turn workflow task subagents running concurrently', async ({ pa
     await page.getByLabel('Agent prompt').fill('run two subagents')
     await page.getByRole('button', { name: 'Send' }).click()
 
-    await expect(page.getByRole('button', { name: 'tool Task: slow task', exact: true })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: 'tool Task: fast task', exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByRole('button', { name: 'tool Task: slow task', exact: true })
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByRole('button', { name: 'tool Task: fast task', exact: true })
+    ).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('Running 3 tools')).toBeVisible()
 
     streamServer.releaseCompletions()
 
-    await expect(page.getByRole('button', { name: /Task: slow task.*\d+ms/ })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByRole('button', { name: /Task: fast task.*\d+ms/ })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: /Task: slow task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(page.getByRole('button', { name: /Task: fast task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
   } finally {
     await streamServer.close()
   }

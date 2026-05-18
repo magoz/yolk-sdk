@@ -18,19 +18,7 @@ if (missingEnv.length > 0) {
   )
 }
 
-type E2eServer =
-  | {
-      readonly kind: 'portless'
-      readonly baseURL: string
-      readonly command: string
-    }
-  | {
-      readonly kind: 'port'
-      readonly baseURL: string
-      readonly command: string
-    }
-
-const getPort = (envName: string, defaultValue: string) => {
+const getFixedPort = (envName: string, defaultValue: string) => {
   const value = process.env[envName] ?? defaultValue
   const parsed = Number.parseInt(value, 10)
 
@@ -41,48 +29,18 @@ const getPort = (envName: string, defaultValue: string) => {
   return value
 }
 
-const getPortlessName = () => {
-  const value = process.env.E2E_PORTLESS_NAME ?? 'yolk-e2e'
-
-  if (!/^[a-z0-9.-]+$/.test(value)) {
-    throw new Error(`Invalid E2E_PORTLESS_NAME for Playwright: ${value}`)
-  }
-
-  return value
-}
-
-const getE2eServer = (): E2eServer => {
-  if (process.env.CI || process.env.PORTLESS === '0') {
-    const port = getPort('E2E_PORT', '3007')
-
-    return {
-      kind: 'port',
-      baseURL: `http://localhost:${port}`,
-      command: `NODE_ENV=test pnpm next dev --port ${port}`
-    }
-  }
-
-  const name = getPortlessName()
-  const proxyPort = getPort('E2E_PORTLESS_PROXY_PORT', '1355')
-
-  return {
-    kind: 'portless',
-    baseURL: process.env.E2E_BASE_URL ?? `http://${name}.localhost:${proxyPort}`,
-    command: `NODE_ENV=test PORTLESS_HTTPS=0 PORTLESS_PORT=${proxyPort} PORTLESS_SYNC_HOSTS=0 pnpm exec portless run --name ${name} pnpm run dev:app`
-  }
-}
-
-const e2eServer = getE2eServer()
+const port = getFixedPort('E2E_PORT', '41773')
+const baseURL = `http://localhost:${port}`
 
 export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   globalTeardown: './e2e/global-teardown.ts',
 
   webServer: {
-    command: e2eServer.command,
-    url: e2eServer.baseURL,
+    command: `NODE_ENV=test pnpm next dev --port ${port}`,
+    url: baseURL,
     timeout: 120 * 1000,
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: false
   },
 
   testDir: './e2e',
@@ -92,8 +50,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: e2eServer.baseURL,
-    ignoreHTTPSErrors: e2eServer.kind === 'portless',
+    baseURL,
+    ignoreHTTPSErrors: false,
     trace: 'on-first-retry'
   },
   projects: [

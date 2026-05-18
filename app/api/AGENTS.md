@@ -14,6 +14,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 | `agent/commands/route.ts`                      | Agent command list/render        |
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
+| `knowledge/artifacts/route.ts`                 | Authenticated knowledge artifact download |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
 | `internal/cloudflare/AGENTS.md`                | Bridge auth/header/token contracts |

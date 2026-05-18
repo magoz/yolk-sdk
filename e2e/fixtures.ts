@@ -6,6 +6,7 @@ import {
   type Page,
   type APIRequestContext
 } from '@playwright/test'
+import { authSessionCookieName } from './utils/auth-cookie'
 
 type TestFixtures = {
   /** Playwright BrowserContext with better-auth session cookie injected */
@@ -38,7 +39,7 @@ export const test = base.extend<TestFixtures>({
     const context = await browser.newContext()
     await context.addCookies([
       {
-        name: 'better-auth.session_token',
+        name: authSessionCookieName(appUrl),
         value: token,
         domain: appUrl.hostname,
         path: '/',

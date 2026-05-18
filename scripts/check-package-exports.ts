@@ -42,6 +42,23 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './vector-store'
     ],
     tinyRoot: false
+  },
+  {
+    packageDir: 'packages/knowledge',
+    packageName: '@yolk/knowledge',
+    expectedExports: [
+      '.',
+      './agent',
+      './artifacts',
+      './context',
+      './errors',
+      './links',
+      './objects',
+      './provenance',
+      './representations',
+      './store'
+    ],
+    tinyRoot: false
   }
 ]
 

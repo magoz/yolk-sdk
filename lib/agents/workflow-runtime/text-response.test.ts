@@ -9,10 +9,12 @@ const taskExecuteSource = source.slice(taskToolStart, source.indexOf('const tool
 describe('makeAgentTextRuntime task tool wiring', () => {
   it('adds task tool to top-level text runtime', () => {
     expect(taskToolStart).toBeGreaterThanOrEqual(0)
+    expect(source).toContain('const knowledgeToolModule = makeAppKnowledgeToolModule()')
     expect(source).toContain('const storageToolModule = makeAppStorageRagToolModule()')
     expect(source).toContain('const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [')
     expect(source).toContain('const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [')
     expect(source).toContain('storageToolModule')
+    expect(source).toContain('knowledgeToolModule')
     expect(source).toContain('...subagentToolModules,')
     expect(source).toContain('taskToolModule')
     expect(source).toContain("name: 'general'")

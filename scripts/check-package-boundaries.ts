@@ -68,6 +68,10 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: ['@yolk/mcp', '@yolk/react', 'next', 'react', 'node:']
   },
   {
+    packageDir: 'packages/knowledge/src',
+    forbiddenImports: ['@yolk/rag', '@yolk/mcp', '@yolk/react', 'next', 'react', 'node:']
+  },
+  {
     packageDir: 'packages/react/src',
     forbiddenImports: ['next', 'node:']
   }

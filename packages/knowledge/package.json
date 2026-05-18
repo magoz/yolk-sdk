@@ -1,0 +1,59 @@
+{
+  "name": "@yolk/knowledge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./agent": {
+      "types": "./src/agent.ts",
+      "default": "./src/agent.ts"
+    },
+    "./artifacts": {
+      "types": "./src/artifacts.ts",
+      "default": "./src/artifacts.ts"
+    },
+    "./context": {
+      "types": "./src/context.ts",
+      "default": "./src/context.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "default": "./src/errors.ts"
+    },
+    "./links": {
+      "types": "./src/links.ts",
+      "default": "./src/links.ts"
+    },
+    "./objects": {
+      "types": "./src/objects.ts",
+      "default": "./src/objects.ts"
+    },
+    "./provenance": {
+      "types": "./src/provenance.ts",
+      "default": "./src/provenance.ts"
+    },
+    "./representations": {
+      "types": "./src/representations.ts",
+      "default": "./src/representations.ts"
+    },
+    "./store": {
+      "types": "./src/store.ts",
+      "default": "./src/store.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

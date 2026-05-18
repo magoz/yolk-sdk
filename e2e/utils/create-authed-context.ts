@@ -1,4 +1,5 @@
 import type { Browser, BrowserContext } from '@playwright/test'
+import { authSessionCookieName } from './auth-cookie'
 
 /**
  * Create a BrowserContext with a better-auth session cookie for the given signed token.
@@ -8,17 +9,19 @@ import type { Browser, BrowserContext } from '@playwright/test'
  */
 export async function createAuthedContext(
   browser: Browser,
-  signedToken: string
+  signedToken: string,
+  baseURL = 'http://localhost'
 ): Promise<BrowserContext> {
+  const appUrl = new URL(baseURL)
   const context = await browser.newContext()
   await context.addCookies([
     {
-      name: 'better-auth.session_token',
+      name: authSessionCookieName(appUrl),
       value: signedToken,
-      domain: 'localhost',
+      domain: appUrl.hostname,
       path: '/',
       httpOnly: true,
-      secure: false,
+      secure: appUrl.protocol === 'https:',
       sameSite: 'Lax'
     }
   ])

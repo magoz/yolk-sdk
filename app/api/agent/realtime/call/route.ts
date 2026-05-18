@@ -19,6 +19,7 @@ import {
 import { defaultVoiceAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import type { ToolDef } from '@yolk/agent/protocol'
@@ -162,7 +163,7 @@ const handler = Effect.gen(function* () {
   const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const toolSet = yield* resolveAgentToolSet({
-    modules: [...nodeVoiceToolModules, makeAppStorageRagToolModule()],
+    modules: [...nodeVoiceToolModules, makeAppKnowledgeToolModule(), makeAppStorageRagToolModule()],
     context: {
       surface: 'voice',
       route: '/agent',

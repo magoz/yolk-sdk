@@ -44,13 +44,16 @@ import {
   type SkillManagerAction
 } from '@/lib/agents/tools/skill-manager-tool'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import {
   createAgentSkillWithCommand,
   listAgentSkills,
   updateAgentSkillWithCommand
 } from '@/lib/core/agent/agent-skill'
+import { getPinnedKnowledgeContext } from '@/lib/core/knowledge/get-pinned-knowledge-context'
 import { Db } from '@/lib/services/db/live-layer'
+import { KnowledgeLayer } from '@/lib/services/knowledge/live-layer'
 
 type AgentTextRuntimeConfig = {
   readonly model: string
@@ -160,6 +163,9 @@ const appendAvailableSkills = (systemPrompt: string, skillset: MergedSkillset) =
 
   return availableSkills.length === 0 ? systemPrompt : `${systemPrompt}\n\n${availableSkills}`
 }
+
+const appendPinnedKnowledge = (systemPrompt: string, pinnedKnowledge: string) =>
+  pinnedKnowledge.trim().length === 0 ? systemPrompt : `${systemPrompt}\n\n${pinnedKnowledge}`
 
 const providerLayerForModel = (model: AgentTextModel, userId: string) =>
   Effect.gen(function* () {
@@ -322,16 +328,27 @@ export const makeAgentTextRuntime = (
     const skillset = yield* loadRuntimeSkillset({ userId })
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
+    const pinnedKnowledge = yield* getPinnedKnowledgeContext({ userId }).pipe(
+      Effect.provide(KnowledgeLayer),
+      Effect.catch(error =>
+        Effect.logWarning('Pinned knowledge unavailable', { error }).pipe(Effect.as(''))
+      )
+    )
     const storageToolModule = makeAppStorageRagToolModule()
+    const knowledgeToolModule = makeAppKnowledgeToolModule()
     const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
+      knowledgeToolModule,
       storageToolModule
     ]
     const selectedModel = input.model ?? baseConfig.model
     const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
     const providerLayer = yield* providerLayerForModel(model, userId)
-    const baseSystemPrompt = appendAvailableSkills(baseConfig.systemPrompt, skillset)
+    const baseSystemPrompt = appendPinnedKnowledge(
+      appendAvailableSkills(baseConfig.systemPrompt, skillset),
+      pinnedKnowledge
+    )
     const taskToolModule = makeTaskToolModule<AgentToolContext>({
       subagents: agentTextSubagents,
       execute: ({ call, context, params }) =>

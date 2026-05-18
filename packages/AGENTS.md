@@ -8,6 +8,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 | --------------------- | ------------------------------------------------------- | -------------------------------------------- |
 | `@yolk/agent`         | Main agent package with protocol/loop/runtime/client/tools subpaths | Effect |
 | `@yolk/rag`           | Domain-free retrieval/ingestion/chunking primitives     | `@yolk/agent/protocol`, `@yolk/agent/tools`, Effect |
+| `@yolk/knowledge`     | Domain-free knowledge objects, artifact/catalog contracts, provenance, context assembly | `@yolk/agent`, Effect |
 | `@yolk/mcp`           | MCP client/server/protocol package with explicit subpaths | `@yolk/agent/protocol`, Effect |
 | `@yolk/agent/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
 | `@yolk/agent/loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/agent/protocol`, Effect                     |
@@ -29,6 +30,7 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 ```txt
 app -> agent subpaths
 app -> rag -> agent/protocol + agent/tools
+app -> knowledge -> agent + Effect
 app -> vercel-workflows-runtime -> Effect + workflow
 app -> skillset -> Effect
 app -> voice-runtime -> agent/loop + agent/protocol
@@ -44,6 +46,7 @@ app -> oauth + Effect
 - `agent/loop` = pure model/tool loop; messages in, events out.
 - `agent` = main package; root stays tiny, feature APIs use subpaths.
 - `rag` = knowledge retrieval/indexing core; agents consume it through tool boundaries.
+- `knowledge` = agent-native knowledge object/catalog/context contracts; app owns stores and permissions.
 - `mcp` = external MCP protocol package; keep separate from agent core.
 - `agent/runtime` = server lifecycle: sessions, persistence, resume/fanout adapters.
 - `vercel-workflows-runtime` = Vercel Workflow step-loop contract; app supplies routes/auth/providers/tools.

@@ -18,7 +18,7 @@ describe('agent prompts', () => {
       `${baseAgentSystemPrompt}\n${voiceAgentSystemPromptAddendum}`
     )
     expect(defaultVoiceAgentSystemPrompt).toContain(
-      'If unsure what the user refers to, use the storage tools to proactively infer what the user is referring to.'
+      'If unsure what the user refers to, use search_knowledge for durable user knowledge and storage tools for uploaded storage sources.'
     )
     expect(defaultVoiceAgentSystemPrompt).toContain('Respond naturally for spoken conversation.')
   })
