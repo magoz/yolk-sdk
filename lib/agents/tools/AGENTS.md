@@ -11,7 +11,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |
 | `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
-| `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge search + chunk-window traversal |
+| `list_knowledge_objects` / `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge discovery, search, and chunk-window traversal |
 | `search_storage` / `list_storage_sources` / `get_storage_source` | yes | yes | no | authenticated user storage RAG search and source reads |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
 | `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
@@ -26,7 +26,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow/voice only; they use app RAG/DB adapters from route runtime wiring, not Cloudflare bootstrap.
-- Knowledge tools are Next/Workflow/voice only; use `get_knowledge_context` after search citations to expand/continue nearby chunks.
+- Knowledge tools are Next/Workflow/voice only; use `list_knowledge_objects` to discover files/objects, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
 - `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap.
 - Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.

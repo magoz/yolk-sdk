@@ -4,9 +4,11 @@ import { ToolError } from '@yolk/agent/loop'
 import { ToolResult } from '@yolk/agent/protocol'
 import { makeTool, type ToolModule } from '@yolk/agent/tools'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
+import type { KnowledgeObjectSummary } from '@/lib/core/knowledge/list-user-knowledge-objects'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 import type { AgentToolContext } from './tool-context.ts'
 
+const knowledgeListToolName = 'list_knowledge_objects'
 const knowledgeSearchToolName = 'search_knowledge'
 const knowledgeContextToolName = 'get_knowledge_context'
 const defaultLimit = 8
@@ -14,11 +16,32 @@ const maxLimit = 20
 const defaultContextChunks = 1
 const maxContextChunks = 5
 const maxQueries = 5
+const defaultListLimit = 20
+const maxListLimit = 50
 const defaultBefore = 3
 const defaultAfter = 6
 const maxTraversalChunks = 20
 const defaultMaxChars = 20_000
 const maxMaxChars = 60_000
+
+const KnowledgeContextPolicy = Schema.Union([
+  Schema.Literal('pinned'),
+  Schema.Literal('routable'),
+  Schema.Literal('searchable'),
+  Schema.Literal('archival')
+])
+
+const KnowledgeListParams = Schema.Struct({
+  query: Schema.optional(Schema.NullOr(Schema.String)).pipe(
+    Schema.annotate({ description: 'Optional title filter for knowledge objects.' })
+  ),
+  policy: Schema.optional(Schema.NullOr(KnowledgeContextPolicy)).pipe(
+    Schema.annotate({ description: 'Optional context policy filter.' })
+  ),
+  limit: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
+    Schema.annotate({ description: 'Maximum objects to return. Defaults to 20; capped at 50.' })
+  )
+})
 
 const KnowledgeSearchParams = Schema.Struct({
   queries: Schema.Array(Schema.String).pipe(
@@ -56,8 +79,16 @@ const KnowledgeContextParams = Schema.Struct({
   )
 })
 
+type KnowledgeListParams = typeof KnowledgeListParams.Type
 type KnowledgeSearchParams = typeof KnowledgeSearchParams.Type
 type KnowledgeContextParams = typeof KnowledgeContextParams.Type
+
+export type KnowledgeListHandler = (input: {
+  readonly userId: string
+  readonly query?: string
+  readonly policy?: typeof KnowledgeContextPolicy.Type
+  readonly limit: number
+}) => Effect.Effect<ReadonlyArray<KnowledgeObjectSummary>, ToolError>
 
 export type KnowledgeSearchHandler = (input: {
   readonly userId: string
@@ -78,6 +109,7 @@ export type KnowledgeContextHandler = (input: {
 }) => Effect.Effect<KnowledgeContextWindow, ToolError>
 
 export type KnowledgeToolHandlers = {
+  readonly list?: KnowledgeListHandler
   readonly search: KnowledgeSearchHandler
   readonly getContext?: KnowledgeContextHandler
 }
@@ -92,6 +124,11 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
 
 const makeNamedToolError = (tool: string, message: string, cause: ToolError['cause']) =>
   new ToolError({ tool, message, cause })
+
+const optionalText = (value: string | null | undefined) => {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
+}
 
 const normalizeInteger = (input: {
   readonly value: number | null | undefined
@@ -146,6 +183,12 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
     const contextChunks = yield* normalizeInteger({ value: params.contextChunks, defaultValue: defaultContextChunks, maxValue: maxContextChunks, minimum: 0, name: 'contextChunks' })
     const minScore = yield* normalizeMinScore(params.minScore)
     return { queries, limit, contextChunks, minScore }
+  })
+
+const normalizeListParams = (params: KnowledgeListParams) =>
+  Effect.gen(function* () {
+    const limit = yield* normalizeNamedInteger({ value: params.limit, defaultValue: defaultListLimit, maxValue: maxListLimit, minimum: 1, name: 'limit', tool: knowledgeListToolName })
+    return { query: optionalText(params.query), policy: params.policy ?? undefined, limit }
   })
 
 const normalizeContextParams = (params: KnowledgeContextParams) =>
@@ -210,6 +253,37 @@ const structuredResult = (query: string, results: ReadonlyArray<KnowledgeSearchR
     text: resultText(result)
   }))
 })
+
+const formatObjectSummaries = (objects: ReadonlyArray<KnowledgeObjectSummary>) => {
+  if (objects.length === 0) {
+    return 'No knowledge objects found.'
+  }
+
+  return [
+    'Knowledge objects',
+    '',
+    ...objects.map((object, index) =>
+      [
+        `Object [${index + 1}]`,
+        `Title: ${object.title}`,
+        `ID: ${object.id}`,
+        `Role: ${object.role}`,
+        `Status: ${object.status}`,
+        `Policy: ${object.contextPolicy}`,
+        `Representations: ${object.representationCount}`,
+        `Artifacts: ${object.artifactCount}`,
+        `Chunks: ${object.chunkCount}`,
+        `Updated: ${object.updatedAt.toISOString()}`,
+        object.summary === undefined ? undefined : `Summary: ${object.summary}`,
+        object.artifacts.length === 0
+          ? undefined
+          : `Artifact IDs: ${object.artifacts.map(artifact => artifact.id).join(', ')}`
+      ].filter(line => line !== undefined).join('\n')
+    )
+  ].join('\n\n')
+}
+
+const structuredObjectSummaries = (objects: ReadonlyArray<KnowledgeObjectSummary>) => ({ objects })
 
 const formatContextWindow = (window: KnowledgeContextWindow) =>
   [
@@ -282,6 +356,29 @@ const searchTool = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext
         )
     })
 
+const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
+    name: knowledgeListToolName,
+    description: 'List durable user knowledge objects and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge object IDs are unclear.',
+    parameters: KnowledgeListParams,
+    access: 'read',
+    isEnabled: isKnowledgeToolEnabled,
+    invalidParamsMessage: error => `Invalid knowledge listing arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        const normalized = yield* normalizeListParams(params)
+        const objects = yield* list({ userId: context.userId, ...normalized })
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatObjectSummaries(objects),
+          structuredContent: structuredObjectSummaries(objects)
+        })
+      }).pipe(
+        Effect.mapError(error => error instanceof ToolError ? error : makeNamedToolError(knowledgeListToolName, `Knowledge listing failed: ${unknownToMessage(error)}`, 'execution'))
+      )
+  })
+
 const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
     name: knowledgeContextToolName,
@@ -306,6 +403,7 @@ const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolC
   })
 
 const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolContext>['tools'] => [
+  ...(handlers.list === undefined ? [] : [listTool(handlers.list)]),
   searchTool(handlers.search),
   ...(handlers.getContext === undefined ? [] : [contextTool(handlers.getContext)])
 ]

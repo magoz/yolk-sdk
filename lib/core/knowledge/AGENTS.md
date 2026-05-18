@@ -12,6 +12,7 @@ App-owned knowledge use-cases and agent context helpers.
 
 - Manual text and file knowledge creation; file text extraction reuses `FileExtractor`.
 - File creation clones upload bytes before extraction; PDF parsing may detach ArrayBuffers, so R2 upload must use a separate byte copy.
+- `listUserKnowledgeObjects` returns object summaries for agent discovery before search/traversal.
 - Representation indexing uses `RagChunker` + `RagEmbedder` and writes `knowledgeChunk` rows.
 - Hybrid vector + FTS search filters to authenticated user, ready objects, non-archival policy.
 - `getKnowledgeContext` traverses a chunk window around a search citation/object position for “show more/continue” flows.

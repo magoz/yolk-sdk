@@ -4,6 +4,7 @@ import { ToolCall } from '@yolk/agent/protocol'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
+import type { KnowledgeObjectSummary } from '@/lib/core/knowledge/list-user-knowledge-objects'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 
 const date = new Date('2026-05-18T00:00:00.000Z')
@@ -78,7 +79,59 @@ const contextWindow: KnowledgeContextWindow = {
   textCharacters: 20
 }
 
+const objectSummary: KnowledgeObjectSummary = {
+  id: 'object_1',
+  title: 'Project memory',
+  role: 'note',
+  status: 'ready',
+  contextPolicy: 'searchable',
+  summary: 'Useful memory',
+  representationCount: 1,
+  artifactCount: 0,
+  chunkCount: 1,
+  artifacts: [],
+  createdAt: date,
+  updatedAt: date
+}
+
 describe('knowledge tool', () => {
+  it.effect('lists authenticated user knowledge objects', () => {
+    const calls: Array<{
+      readonly userId: string
+      readonly query?: string
+      readonly policy?: 'archival' | 'pinned' | 'routable' | 'searchable'
+      readonly limit: number
+    }> = []
+    const toolModule = makeKnowledgeToolModule({
+      list: input => Effect.sync(() => {
+        calls.push(input)
+        return [objectSummary]
+      }),
+      search: () => Effect.succeed([])
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'list_knowledge_objects',
+          params: { query: ' memory ', policy: 'searchable', limit: 100 }
+        })
+      )
+
+      expect(calls).toEqual([
+        { userId: 'user_1', query: 'memory', policy: 'searchable', limit: 50 }
+      ])
+      expect(result.content).toContain('Knowledge objects')
+      expect(result.content).toContain('Project memory')
+      expect(result.content).toContain('Chunks: 1')
+    })
+  })
+
   it.effect('searches authenticated user knowledge', () => {
     const calls: Array<{
       readonly userId: string
