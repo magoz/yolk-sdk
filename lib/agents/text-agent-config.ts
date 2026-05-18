@@ -1,10 +1,5 @@
 import { textImageModelCapabilities, type AgentReasoningEffort } from '@yolk/agent/protocol'
 
-export const defaultAgentSystemPrompt = [
-  'You are Yolk assistant. Be concise and practical.',
-  'You have access to tools and they run in parallel.',
-  'If unsure what the user refers to, use the storage tools to proactively infer what the user is referring to.'
-].join('\n')
 export const openAiCodexTextModel = 'gpt-5.4'
 export const anthropicClaudeTextModel = 'claude-sonnet-4-6'
 export const agentTextModel = openAiCodexTextModel

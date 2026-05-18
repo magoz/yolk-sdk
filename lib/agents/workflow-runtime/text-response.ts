@@ -22,12 +22,12 @@ import {
 } from '@yolk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
 import { runRuntime } from '@yolk/agent/runtime'
+import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,
   agentTextModel,
   agentTextModelProvider,
   agentTextReasoningEffort,
-  defaultAgentSystemPrompt,
   isAgentTextModel,
   type AgentTextModel
 } from '@/lib/agents/text-agent-config'

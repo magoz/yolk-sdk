@@ -16,6 +16,7 @@ import {
   OpenAiRealtimeTranscriptionModelSchema,
   type OpenAiRealtimeTranscriptionModel
 } from '@/lib/agents/realtime/openai-realtime'
+import { defaultVoiceAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { getSession } from '@/lib/services/auth/get-session'
@@ -36,11 +37,7 @@ class OpenAiRealtimeCallError extends Data.TaggedError('OpenAiRealtimeCallError'
 
 const openAiRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls'
 
-const realtimeInstructions = [
-  'You are Yolk voice assistant. Be concise and practical.',
-  'Use storage tools for user-uploaded or saved context when relevant.',
-  'If a tool fails, explain briefly and keep the conversation moving.'
-].join('\n')
+const realtimeInstructions = defaultVoiceAgentSystemPrompt
 
 const safetyIdentifier = (userId: string) =>
   createHash('sha256').update(`yolk:${userId}`).digest('hex')
