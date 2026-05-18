@@ -57,6 +57,45 @@ const toDateTime = (date: Date) => DateTime.fromDateUnsafe(date)
 
 const unknownToMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
 
+const propertyValue = (input: unknown, key: string) => {
+  if (typeof input !== 'object' || input === null) {
+    return undefined
+  }
+
+  return Object.getOwnPropertyDescriptor(input, key)?.value
+}
+
+const stringProperty = (input: unknown, key: string) => {
+  const value = propertyValue(input, key)
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+const numberProperty = (input: unknown, key: string) => {
+  const value = propertyValue(input, key)
+  return typeof value === 'number' ? value : undefined
+}
+
+const externalErrorMessage = (error: unknown) => {
+  const name = error instanceof Error && error.name.length > 0
+    ? error.name
+    : stringProperty(error, 'name')
+  const message = error instanceof Error
+    ? error.message
+    : stringProperty(error, 'message')
+  const metadata = propertyValue(error, '$metadata')
+  const status = numberProperty(metadata, 'httpStatusCode')
+  const details = [name, status === undefined ? undefined : `HTTP ${status}`, message]
+    .filter(detail => detail !== undefined && detail.length > 0)
+    .join(' · ')
+
+  return details.length > 0 ? details : undefined
+}
+
+const artifactIntegrationError = (message: string, cause: unknown) => {
+  const details = externalErrorMessage(cause)
+  return new KnowledgeArtifactError({ message: details === undefined ? message : `${message}: ${details}`, cause })
+}
+
 const storeError = (message: string, cause?: unknown) => new KnowledgeStoreError({ message, cause })
 const artifactError = (message: string, cause?: unknown) => new KnowledgeArtifactError({ message, cause })
 
@@ -353,7 +392,7 @@ export const R2KnowledgeArtifactStoreLayer = Layer.effect(
                 ContentType: input.mediaType
               })
             ),
-          catch: error => artifactError('Could not upload knowledge artifact', error)
+          catch: error => artifactIntegrationError('Could not upload knowledge artifact', error)
         }).pipe(
           Effect.asVoid,
           Effect.withSpan('KnowledgeArtifactStore.putArtifact'),
@@ -371,7 +410,7 @@ export const R2KnowledgeArtifactStoreLayer = Layer.effect(
             }
             return await response.Body.transformToByteArray()
           },
-          catch: error => artifactError('Could not download knowledge artifact', error)
+          catch: error => artifactIntegrationError('Could not download knowledge artifact', error)
         }).pipe(
           Effect.withSpan('KnowledgeArtifactStore.getArtifact'),
           Effect.catch(error => Effect.fail(mapArtifactError(error)))
@@ -383,7 +422,7 @@ export const R2KnowledgeArtifactStoreLayer = Layer.effect(
             client.send(
               new DeleteObjectCommand({ Bucket: config.bucketName, Key: input.storageKey })
             ),
-          catch: error => artifactError('Could not delete knowledge artifact', error)
+          catch: error => artifactIntegrationError('Could not delete knowledge artifact', error)
         }).pipe(
           Effect.asVoid,
           Effect.withSpan('KnowledgeArtifactStore.deleteArtifact'),

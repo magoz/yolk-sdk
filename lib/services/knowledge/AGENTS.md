@@ -21,3 +21,4 @@ App-owned concrete adapters for the domain-free `@yolk/knowledge` package.
 
 - V0 implements object catalog reads/writes, artifact blob IO, pinned context loading, and artifact download support.
 - R2 config: `R2_ENDPOINT`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`; optional `R2_REGION` defaults to `auto`.
+- R2 adapter surfaces safe provider diagnostics in `KnowledgeArtifactError.message` (`AccessDenied`, HTTP status, SDK message), never secrets.

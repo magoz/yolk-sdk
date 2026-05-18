@@ -104,7 +104,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `Auth`                           | Service  | `lib/services/auth/live-layer.ts`                      | Authentication (sign in/up/out, sessions)                                            |
 | `Db`                             | Service  | `lib/services/db/live-layer.ts`                        | Database (returns Drizzle client)                                                    |
 | `Email`                          | Service  | `lib/services/email/live-layer.ts`                     | Resend email sending                                                                 |
-| `FileExtractor`                  | Service  | `lib/services/file-extractor/live-layer.ts`            | Uploaded file text extraction for Storage ingestion                                   |
+| `FileExtractor`                  | Service  | `lib/services/file-extractor/live-layer.ts`            | Uploaded file text extraction for Storage and Knowledge ingestion                     |
 | `OpenAiCodexOAuth`               | Service  | `lib/services/openai-codex-oauth/live-layer.ts`        | Codex OAuth device flow + refresh                                                    |
 | `AnthropicClaudeOAuth`           | Service  | `lib/services/anthropic-oauth/live-layer.ts`           | Claude OAuth code exchange + refresh                                                 |
 | `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`                 | OpenTelemetry + Sentry span/log processing                                           |

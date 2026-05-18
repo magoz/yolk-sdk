@@ -10,6 +10,7 @@ import type { PutKnowledgeArtifactInput } from '@yolk/knowledge/artifacts'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
+import { FileExtractionError } from '@/lib/services/file-extractor/errors'
 import { createFileKnowledgeObject } from './create-file-knowledge-object'
 import { deleteKnowledgeObject } from './delete-knowledge-object'
 import { searchUserKnowledge } from './search-user-knowledge'
@@ -78,7 +79,7 @@ describeWithDb('createFileKnowledgeObject', () => {
       expect(object.title).toBe('alpha.txt')
       expect(puts).toHaveLength(1)
       expect(puts[0]?.mediaType).toBe('text/plain')
-      expect(puts[0]?.bytes).toEqual(bytes)
+      expect(Array.from(puts[0]?.bytes ?? [])).toEqual(Array.from(bytes))
       expect(puts[0]?.storageKey).toMatch(new RegExp(`^knowledge/${object.id}/original/`))
       expect(artifacts).toHaveLength(1)
       expect(artifacts[0]?.kind).toBe('original')
@@ -116,6 +117,77 @@ describeWithDb('createFileKnowledgeObject', () => {
       ),
       Effect.provide(DefaultRagChunkerLive()),
       Effect.provide(FileExtractor.layer),
+      Effect.provide(Db.layer),
+      Effect.scoped
+    )
+  }, 30_000)
+
+  it.effect('keeps upload bytes when extraction detaches its input buffer', () => {
+    const userId = createId()
+    const puts: Array<PutKnowledgeArtifactInput> = []
+
+    const cleanup = Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.delete(schema.user).where(eq(schema.user.id, userId))
+    }).pipe(Effect.catch(() => Effect.void))
+
+    return Effect.gen(function* () {
+      const db = yield* Db
+      yield* cleanup
+      yield* db.insert(schema.user).values({
+        id: userId,
+        name: 'Knowledge detached buffer test user',
+        email: `${userId}@example.test`,
+        emailVerified: true
+      })
+
+      const bytes = new Uint8Array([37, 80, 68, 70])
+      const object = yield* createFileKnowledgeObject({
+        userId,
+        filename: 'detached.pdf',
+        mediaType: 'application/pdf',
+        bytes,
+        pinned: false
+      })
+
+      const artifacts = yield* db
+        .select()
+        .from(schema.knowledgeArtifact)
+        .where(eq(schema.knowledgeArtifact.objectId, object.id))
+
+      expect(puts).toHaveLength(1)
+      expect(Array.from(puts[0]?.bytes ?? [])).toEqual([37, 80, 68, 70])
+      expect(artifacts[0]?.byteSize).toBe(4)
+    }).pipe(
+      Effect.ensuring(cleanup),
+      Effect.provide(
+        Layer.succeed(KnowledgeArtifactStore, {
+          putArtifact: input => Effect.sync(() => {
+            puts.push(input)
+          }),
+          getArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected getArtifact ${input.storageKey}` })),
+          deleteArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected deleteArtifact ${input.storageKey}` }))
+        })
+      ),
+      Effect.provide(
+        Layer.succeed(FileExtractor, {
+          extract: input => Effect.sync(() => {
+            if (input.bytes.buffer instanceof ArrayBuffer) {
+              structuredClone(input.bytes.buffer, { transfer: [input.bytes.buffer] })
+              return { content: 'Detached PDF text.', metadata: { format: 'pdf' as const, title: input.filename } }
+            }
+
+            throw new FileExtractionError({ message: 'Expected ArrayBuffer input', format: 'pdf' })
+          })
+        })
+      ),
+      Effect.provide(
+        Layer.succeed(RagEmbedder, {
+          embedTexts: texts => Effect.succeed(texts.map(() => embedding(0))),
+          embedQuery: () => Effect.succeed(embedding(0))
+        })
+      ),
+      Effect.provide(DefaultRagChunkerLive()),
       Effect.provide(Db.layer),
       Effect.scoped
     )

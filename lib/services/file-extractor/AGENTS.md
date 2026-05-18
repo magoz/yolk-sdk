@@ -1,18 +1,19 @@
 # File Extractor Service
 
-Extracts uploaded file text for `/storage` ingestion.
+Extracts uploaded file text for `/storage` and `/knowledge` ingestion.
 
 ## Scope
 
 - Supports text, markdown, CSV, JSON, PDF, DOCX, XLSX, and PPTX.
-- Returns sanitized text plus format metadata for `storageObject.metadata` and RAG document metadata.
+- Returns sanitized text plus format metadata for storage/knowledge object metadata and RAG document metadata.
 - Empty extracted content fails with `FileExtractionError`.
 - Unknown formats fail with `UnsupportedFileFormatError`.
+- PDF extraction can detach/transfer input buffers; callers that need original bytes must clone before extraction.
 
 ## Boundaries
 
 - App-local service only; do not move provider/file parsing dependencies into `@yolk/rag`.
-- Keep DB writes and RAG ingestion in `lib/core/storage/*`; this service only extracts text.
+- Keep DB writes and RAG ingestion in domain helpers (`lib/core/storage/*`, `lib/core/knowledge/*`); this service only extracts text.
 - Keep upload size and auth policy in server actions.
 
 ## Tests

@@ -19,7 +19,10 @@ export const createFileKnowledgeObject = (input: {
   Effect.gen(function* () {
     const extractor = yield* FileExtractor
     const artifactStore = yield* KnowledgeArtifactStore
-    const extracted = yield* extractor.extract(input)
+    const artifactBytes = new Uint8Array(input.bytes)
+    const extractionBytes = new Uint8Array(input.bytes)
+    const byteSize = artifactBytes.byteLength
+    const extracted = yield* extractor.extract({ ...input, bytes: extractionBytes })
     const db = yield* Db
 
     const [object] = yield* db
@@ -49,7 +52,7 @@ export const createFileKnowledgeObject = (input: {
       yield* artifactStore.putArtifact({
         storageKey,
         mediaType: input.mediaType.length > 0 ? input.mediaType : undefined,
-        bytes: input.bytes
+        bytes: artifactBytes
       })
 
       const [artifact] = yield* db
@@ -60,7 +63,7 @@ export const createFileKnowledgeObject = (input: {
           kind: 'original',
           storageKey,
           mediaType: input.mediaType.length > 0 ? input.mediaType : extracted.metadata.format,
-          byteSize: input.bytes.byteLength,
+          byteSize,
           metadata: { filename: input.filename, ...extracted.metadata }
         })
         .returning()
@@ -89,7 +92,7 @@ export const createFileKnowledgeObject = (input: {
         sourceKind: 'upload',
         sourceLabel: input.filename,
         observedAt: new Date(),
-        metadata: { mediaType: input.mediaType, byteSize: input.bytes.byteLength }
+        metadata: { mediaType: input.mediaType, byteSize }
       })
 
       yield* indexKnowledgeRepresentation({
