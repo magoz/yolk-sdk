@@ -6,10 +6,10 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image input and mic voice mode
 - Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
-- Default text prompt says tools run in parallel and tells agents to proactively use storage when user referents are unclear.
+- Default text prompt says tools run in parallel and distinguishes durable user knowledge from storage sources.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
-- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + just-bash virtual shell + skill + optional remote MCP tools from project files.
+- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + knowledge/storage search + just-bash virtual shell + skill + optional remote MCP tools from project files.
 - Next/Workflow text runtime exposes a package-owned `task` tool for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
 - Task subagents run with normal text tools but without the `task` tool, so recursive subagents are disabled in v1.
 - Task subagents stream `ToolExecution*` plus `SubagentStarted`/`SubagentCompleted`; final task results include structured subagent metadata for status, timing, model, and ids.
@@ -61,11 +61,12 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - `tools/web-fetch-tool.ts`: `web_fetch`; text/voice public URL fetch; markdown/text/html; no search/browser automation/cookies
 - `tools/web-search-tool.ts`: `web_search`; text/voice Exa/Parallel MCP web search; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER`
 - `tools/just-bash-tool.ts`: `just_bash`; text-only virtual shell with fresh per-call in-memory filesystem; script/cwd/stdin/timeout params only; curl enabled with literal private/loopback hosts denied; no host filesystem/JS/Python
+- `tools/knowledge-tool.ts`: `search_knowledge`; Next/Workflow text and voice over user-owned knowledge chunks; omitted from Cloudflare bootstrap
 - `tools/storage-rag-tool.ts`: storage source discovery + RAG search tools; Next/Workflow text and voice over app RAG/DB adapters; omitted from Cloudflare bootstrap
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
 - `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/agent/tools`; use this at new route/runtime boundaries.
-- `web_fetch`/`web_search` and storage tools are text+voice; `just_bash`, skill, and remote MCP tools are text-only.
+- `web_fetch`/`web_search`, knowledge, and storage tools are text+voice; `just_bash`, skill, and remote MCP tools are text-only.
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
@@ -116,7 +117,7 @@ MCP security:
 - Voice tool context route is `/agent`; runtime pages share voice UI
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
 - Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
-- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch`, `web_search`, and storage tools
+- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch`, `web_search`, knowledge, and storage tools
 - OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 
 ## OpenAI API-Key Provider

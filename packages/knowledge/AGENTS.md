@@ -15,6 +15,14 @@
 - No provider SDKs, database drivers, Cloudflare bindings, React, Next.js, or Node-only imports.
 - Concrete stores, artifact storage, extraction, embeddings, and permissions belong in app services.
 - `KnowledgeScope` is caller-provided routing metadata only; package never interprets user/workspace/project semantics.
+- Package owns semantics (roles, context policy, provenance, links), not retrieval/indexing implementation.
+
+## Context policy semantics
+
+- `pinned`: host may inject into model startup context.
+- `routable`: host may use for dispatch/resolver maps.
+- `searchable`: host may expose through retrieval tools.
+- `archival`: retained but normally omitted from active context/search.
 
 ## Subpaths
 
