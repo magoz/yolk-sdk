@@ -18,6 +18,7 @@ import {
   slashCommandMeta,
   type AgentCommandSummary
 } from './slash-command-model'
+import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 const imageAttachment: ImageAttachment = {
   _tag: 'Ready',
@@ -160,5 +161,14 @@ describe('agent playground', () => {
     expect(normalizeSlashSelectionIndex(3, 3)).toBe(0)
     expect(slashCommandHint(commands[0])).toBe('<path>')
     expect(slashCommandMeta(commands[0])).toBe('read · files')
+  })
+
+  it('models workflow resume busy state', () => {
+    expect(isAgentTextBusy({ isRunning: false, isWorkflowResuming: false })).toBe(false)
+    expect(isAgentTextBusy({ isRunning: true, isWorkflowResuming: false })).toBe(true)
+    expect(isAgentTextBusy({ isRunning: false, isWorkflowResuming: true })).toBe(true)
+    expect(isWorkflowResumeDisabled({ status: 'done', isTextBusy: false })).toBe(true)
+    expect(isWorkflowResumeDisabled({ status: 'error', isTextBusy: false })).toBe(false)
+    expect(isWorkflowResumeDisabled({ status: 'idle', isTextBusy: true })).toBe(true)
   })
 })

@@ -40,6 +40,7 @@ import { truncate } from './agent-format'
 import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
+import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
   | {
@@ -248,6 +249,7 @@ export function AgentPlayground({
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(null)
   const [isWorkflowResuming, setIsWorkflowResuming] = useState(false)
   const nextActivityIdRef = useRef(0)
+  const workflowResumeAbortRef = useRef<AbortController | null>(null)
 
   const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
     const id = nextActivityIdRef.current
@@ -482,9 +484,10 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
+  const isTextBusy = isAgentTextBusy({ isRunning, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
-  const submitDisabled = isRunning || isVoiceMode
-  const messageActionsDisabled = isRunning || isVoiceMode
+  const submitDisabled = isTextBusy || isVoiceMode
+  const messageActionsDisabled = isTextBusy || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
     [state.chatMessages]
@@ -496,7 +499,7 @@ export function AgentPlayground({
   const activeToolRunCount = activeToolParts.length
   const completedToolRunCount = completedToolParts.length
   const liveActivityCount = getAgentChatLiveActivityCount({
-    isTextRunning: isRunning,
+    isTextRunning: isTextBusy,
     activeToolCallCount: activeToolRunCount,
     isVoiceActive: isVoiceMode
   })
@@ -536,10 +539,10 @@ export function AgentPlayground({
                 }
               ]
             : state.chatMessages,
-        isRunning,
+        isRunning: isTextBusy,
         activeToolLabel
       }),
-    [activeToolLabel, isRunning, state.chatMessages, voiceUserDraft]
+    [activeToolLabel, isTextBusy, state.chatMessages, voiceUserDraft]
   )
 
   const handleSubmit = useCallback(() => {
@@ -649,13 +652,15 @@ export function AgentPlayground({
     }
 
     setIsWorkflowResuming(true)
+    const abortController = new AbortController()
+    workflowResumeAbortRef.current = abortController
     recordActivity({ title: 'Workflow stream resume requested', detail: workflowRunId, tone: 'neutral' })
 
     const endpoint = `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`
 
     Effect.runPromise(
       Effect.promise(async () => {
-        for await (const event of streamAgentRunEvents({ endpoint })) {
+        for await (const event of streamAgentRunEvents({ endpoint, signal: abortController.signal })) {
           applyEvent(event)
         }
       })
@@ -668,6 +673,9 @@ export function AgentPlayground({
         fail(message)
       })
       .finally(() => {
+        if (workflowResumeAbortRef.current === abortController) {
+          workflowResumeAbortRef.current = null
+        }
         setIsWorkflowResuming(false)
       })
   }, [applyEvent, fail, isRunning, isWorkflowResuming, recordActivity, runtime, state.status, workflowRunId])
@@ -675,6 +683,8 @@ export function AgentPlayground({
   const handleStop = useCallback(() => {
     const runId = workflowRunId
 
+    workflowResumeAbortRef.current?.abort('Workflow stream stopped')
+    workflowResumeAbortRef.current = null
     stop()
 
     if (runtime._tag !== 'Workflow' || runId === null) {
@@ -840,7 +850,7 @@ export function AgentPlayground({
             hasUsage={hasUsage}
             contextTokens={contextTokens}
             compaction={compaction}
-            isRunning={isRunning}
+            isRunning={isTextBusy}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
             onToggleActivity={handleActivityToggle}
@@ -856,7 +866,7 @@ export function AgentPlayground({
               toolResultCount={completedToolRunCount}
               error={state.error}
               workflowRunId={workflowRunId}
-              workflowResumeDisabled={state.status === 'done' || isRunning || isWorkflowResuming}
+              workflowResumeDisabled={isWorkflowResumeDisabled({ status: state.status, isTextBusy })}
               onResumeWorkflowRun={handleResumeWorkflowRun}
             />
           ) : null}
@@ -874,7 +884,7 @@ export function AgentPlayground({
           <AgentComposer
             input={input}
             submitDisabled={submitDisabled}
-            isRunning={isRunning}
+            isRunning={isTextBusy}
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
@@ -905,9 +915,9 @@ export function AgentPlayground({
         contextTokens={contextTokens}
         compaction={compaction}
         textModel={textModel}
-        textModelDisabled={isRunning}
+        textModelDisabled={isTextBusy}
         reasoningEffort={reasoningEffort}
-        reasoningEffortDisabled={isRunning}
+        reasoningEffortDisabled={isTextBusy}
         transcriptionModel={transcriptionModel}
         transcriptionModelDisabled={isVoiceMode}
         showInlineTools={showInlineTools}
