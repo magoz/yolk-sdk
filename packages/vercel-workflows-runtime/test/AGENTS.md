@@ -8,6 +8,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | --- | --- |
 | `workflow-loop.test.ts` | Pure contract tests with fake step callbacks |
 | `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/cancel tests |
+| `fixtures/workflow-fixture.ts` | Test-only workflow/step directive fixture; not published |
 
 ## Rules
 

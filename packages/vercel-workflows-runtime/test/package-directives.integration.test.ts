@@ -6,7 +6,7 @@ import {
   packageCancellableWorkflow,
   packageOwnedDirectiveWorkflow,
   packageStreamWorkflow
-} from '../src/workflow-fixture.ts'
+} from './fixtures/workflow-fixture.ts'
 
 const collectReadable = async (readable: ReadableStream<string>) => {
   const chunks: Array<string> = []
@@ -28,7 +28,7 @@ const collectReadable = async (readable: ReadableStream<string>) => {
 }
 
 describe('package-owned workflow directives', () => {
-  it('starts a workflow function exported from the package source', async () => {
+  it('starts a workflow function using the package runtime contract', async () => {
     const run = await start(packageOwnedDirectiveWorkflow, [
       { request: 'request-1', context: 'context-1' }
     ])
