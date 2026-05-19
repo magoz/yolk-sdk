@@ -28,6 +28,8 @@ Yolk packages should release in lockstep.
 
 Use canary releases for initial public distribution. Canary communicates fast-moving APIs and matches the AI SDK prerelease style. Reserve `alpha`/`beta` for curated stability milestones if needed later.
 
+The first public canary should be `0.0.1-canary.0`.
+
 Planned Changesets config:
 
 ```json
@@ -172,6 +174,7 @@ Rationale: lockstep versions are simpler when every workspace package is public.
    - Add Changesets fixed group.
    - Add package build/check/publint scripts.
    - Add publish dry-run script.
+   - Enter canary mode with `pnpm changeset:canary:enter` before first versioning.
 5. Add docs.
    - Root package overview.
    - Per-package README.
@@ -179,6 +182,9 @@ Rationale: lockstep versions are simpler when every workspace package is public.
    - Host-owned responsibility notes.
 6. Validate artifacts.
    - `pnpm packages:check`
+   - `pnpm packages:build`
+   - `pnpm packages:publint`
+   - `pnpm packages:smoke`
    - `pnpm tsc`
    - `pnpm lint`
    - `pnpm test:run`

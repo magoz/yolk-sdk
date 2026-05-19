@@ -2,9 +2,32 @@
   "name": "@yolk-sdk/agent",
   "version": "0.0.0",
   "private": true,
+  "description": "Protocol, loop, runtime, client, and tool primitives for building Yolk agents.",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk.git",
+    "directory": "packages/agent"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk#readme",
+  "keywords": [
+    "agent",
+    "agents",
+    "llm",
+    "tools",
+    "runtime",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
@@ -34,8 +57,57 @@
       "default": "./src/tools/index.ts"
     }
   },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.mts",
+        "import": "./dist/client/index.mjs",
+        "default": "./dist/client/index.mjs"
+      },
+      "./loop": {
+        "types": "./dist/loop/index.d.mts",
+        "import": "./dist/loop/index.mjs",
+        "default": "./dist/loop/index.mjs"
+      },
+      "./loop/testing": {
+        "types": "./dist/loop/testing/index.d.mts",
+        "import": "./dist/loop/testing/index.mjs",
+        "default": "./dist/loop/testing/index.mjs"
+      },
+      "./protocol": {
+        "types": "./dist/protocol/index.d.mts",
+        "import": "./dist/protocol/index.mjs",
+        "default": "./dist/protocol/index.mjs"
+      },
+      "./runtime": {
+        "types": "./dist/runtime/index.d.mts",
+        "import": "./dist/runtime/index.mjs",
+        "default": "./dist/runtime/index.mjs"
+      },
+      "./tools": {
+        "types": "./dist/tools/index.d.mts",
+        "import": "./dist/tools/index.mjs",
+        "default": "./dist/tools/index.mjs"
+      }
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"

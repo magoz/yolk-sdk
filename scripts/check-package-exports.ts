@@ -15,13 +15,13 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/agent',
     packageName: '@yolk-sdk/agent',
-    expectedExports: ['.', './client', './loop', './loop/testing', './protocol', './runtime', './tools'],
+    expectedExports: ['./package.json', '.', './client', './loop', './loop/testing', './protocol', './runtime', './tools'],
     tinyRoot: true
   },
   {
     packageDir: 'packages/mcp',
     packageName: '@yolk-sdk/mcp',
-    expectedExports: ['.', './client', './client/node', './protocol', './server'],
+    expectedExports: ['./package.json', '.', './client', './client/node', './protocol', './server'],
     tinyRoot: true
   },
   {
@@ -29,6 +29,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     packageName: '@yolk-sdk/rag',
     expectedExports: [
       '.',
+      './package.json',
       './agent',
       './chunking',
       './documents',
@@ -48,6 +49,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     packageName: '@yolk-sdk/knowledge',
     expectedExports: [
       '.',
+      './package.json',
       './agent',
       './artifacts',
       './context',

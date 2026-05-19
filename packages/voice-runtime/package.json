@@ -2,16 +2,57 @@
   "name": "@yolk-sdk/voice-runtime",
   "version": "0.0.0",
   "private": true,
+  "description": "Provider-neutral voice tool-call bridge for Yolk agents.",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk.git",
+    "directory": "packages/voice-runtime"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk#readme",
+  "keywords": [
+    "voice",
+    "realtime",
+    "agents",
+    "tools",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     }
   },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      }
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"

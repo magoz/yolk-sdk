@@ -2,9 +2,31 @@
   "name": "@yolk-sdk/knowledge",
   "version": "0.0.0",
   "private": true,
+  "description": "Domain-free knowledge object, artifact, provenance, and context contracts for Yolk agents.",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk.git",
+    "directory": "packages/knowledge"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk#readme",
+  "keywords": [
+    "knowledge",
+    "agents",
+    "context",
+    "provenance",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
@@ -46,8 +68,72 @@
       "default": "./src/store.ts"
     }
   },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": {
+        "types": "./dist/agent.d.mts",
+        "import": "./dist/agent.mjs",
+        "default": "./dist/agent.mjs"
+      },
+      "./artifacts": {
+        "types": "./dist/artifacts.d.mts",
+        "import": "./dist/artifacts.mjs",
+        "default": "./dist/artifacts.mjs"
+      },
+      "./context": {
+        "types": "./dist/context.d.mts",
+        "import": "./dist/context.mjs",
+        "default": "./dist/context.mjs"
+      },
+      "./errors": {
+        "types": "./dist/errors.d.mts",
+        "import": "./dist/errors.mjs",
+        "default": "./dist/errors.mjs"
+      },
+      "./links": {
+        "types": "./dist/links.d.mts",
+        "import": "./dist/links.mjs",
+        "default": "./dist/links.mjs"
+      },
+      "./objects": {
+        "types": "./dist/objects.d.mts",
+        "import": "./dist/objects.mjs",
+        "default": "./dist/objects.mjs"
+      },
+      "./provenance": {
+        "types": "./dist/provenance.d.mts",
+        "import": "./dist/provenance.mjs",
+        "default": "./dist/provenance.mjs"
+      },
+      "./representations": {
+        "types": "./dist/representations.d.mts",
+        "import": "./dist/representations.mjs",
+        "default": "./dist/representations.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
+      }
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"

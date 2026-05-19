@@ -2,9 +2,31 @@
   "name": "@yolk-sdk/mcp",
   "version": "0.0.0",
   "private": true,
+  "description": "MCP client, server, and protocol utilities for Yolk agent runtimes.",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "tools",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
@@ -26,13 +48,53 @@
       "default": "./src/server/index.ts"
     }
   },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.mts",
+        "import": "./dist/client/index.mjs",
+        "default": "./dist/client/index.mjs"
+      },
+      "./client/node": {
+        "types": "./dist/client/node.d.mts",
+        "import": "./dist/client/node.mjs",
+        "default": "./dist/client/node.mjs"
+      },
+      "./protocol": {
+        "types": "./dist/client/protocol.d.mts",
+        "import": "./dist/client/protocol.mjs",
+        "default": "./dist/client/protocol.mjs"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.mts",
+        "import": "./dist/server/index.mjs",
+        "default": "./dist/server/index.mjs"
+      }
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
     "@yolk-sdk/agent": "workspace:^",
     "effect": "catalog:"
   }

@@ -2,9 +2,31 @@
   "name": "@yolk-sdk/rag",
   "version": "0.0.0",
   "private": true,
+  "description": "Domain-free retrieval, ingestion, chunking, and agent tool primitives for Yolk.",
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk.git",
+    "directory": "packages/rag"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk#readme",
+  "keywords": [
+    "rag",
+    "retrieval",
+    "embeddings",
+    "agents",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
@@ -54,8 +76,82 @@
       "default": "./src/vector-store.ts"
     }
   },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": {
+        "types": "./dist/agent.d.mts",
+        "import": "./dist/agent.mjs",
+        "default": "./dist/agent.mjs"
+      },
+      "./chunking": {
+        "types": "./dist/chunking.d.mts",
+        "import": "./dist/chunking.mjs",
+        "default": "./dist/chunking.mjs"
+      },
+      "./documents": {
+        "types": "./dist/documents.d.mts",
+        "import": "./dist/documents.mjs",
+        "default": "./dist/documents.mjs"
+      },
+      "./embeddings": {
+        "types": "./dist/embeddings.d.mts",
+        "import": "./dist/embeddings.mjs",
+        "default": "./dist/embeddings.mjs"
+      },
+      "./errors": {
+        "types": "./dist/errors.d.mts",
+        "import": "./dist/errors.mjs",
+        "default": "./dist/errors.mjs"
+      },
+      "./extraction": {
+        "types": "./dist/extraction.d.mts",
+        "import": "./dist/extraction.mjs",
+        "default": "./dist/extraction.mjs"
+      },
+      "./ingestion": {
+        "types": "./dist/ingestion.d.mts",
+        "import": "./dist/ingestion.mjs",
+        "default": "./dist/ingestion.mjs"
+      },
+      "./retrieval": {
+        "types": "./dist/retrieval.d.mts",
+        "import": "./dist/retrieval.mjs",
+        "default": "./dist/retrieval.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
+      },
+      "./summarization": {
+        "types": "./dist/summarization.d.mts",
+        "import": "./dist/summarization.mjs",
+        "default": "./dist/summarization.mjs"
+      },
+      "./vector-store": {
+        "types": "./dist/vector-store.d.mts",
+        "import": "./dist/vector-store.mjs",
+        "default": "./dist/vector-store.mjs"
+      }
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:run": "vitest run --passWithNoTests"
