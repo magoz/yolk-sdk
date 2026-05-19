@@ -1,7 +1,7 @@
 import { Array as Arr, Data, Effect, Layer, Option } from 'effect'
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
-import { KnowledgeStore } from '@yolk/knowledge/store'
+import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
+import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
 import { AppLayer } from '@/lib/layers'
 import { getSession } from '@/lib/services/auth/get-session'
 import {

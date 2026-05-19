@@ -1,5 +1,5 @@
 import { getWritable, sleep } from 'workflow'
-import { runVercelAgentWorkflow } from '@yolk/vercel-workflows-runtime/workflow'
+import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows-runtime/workflow'
 
 type FixtureInput = {
   readonly request: unknown

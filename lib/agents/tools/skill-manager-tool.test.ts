@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/agent/protocol'
-import { resolveTools } from '@yolk/agent/tools'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
+import { resolveTools } from '@yolk-sdk/agent/tools'
 import { makeSkillManagerToolModule, type SkillManagerAction } from './skill-manager-tool'
 import type { AgentToolContext } from './tool-context'
 

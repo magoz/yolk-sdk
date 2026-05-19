@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { ToolResult } from '@yolk/agent/protocol'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { ToolError } from '../error.ts'
 import { ToolExecutor } from '../services/tool-executor.ts'
 

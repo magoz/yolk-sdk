@@ -1,6 +1,6 @@
 import { Context } from 'effect'
 import type { Stream } from 'effect'
-import type { AgentMessage, AgentReasoningEffort, ToolDef } from '@yolk/agent/protocol'
+import type { AgentMessage, AgentReasoningEffort, ToolDef } from '@yolk-sdk/agent/protocol'
 import type { LLMProviderError } from '../error.ts'
 import type { LLMEvent } from '../llm-event.ts'
 
@@ -17,4 +17,4 @@ export class LLMProvider extends Context.Service<
   {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
   }
->()('@yolk/agent/loop/LLMProvider') {}
+>()('@yolk-sdk/agent/loop/LLMProvider') {}

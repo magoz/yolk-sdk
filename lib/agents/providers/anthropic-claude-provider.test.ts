@@ -11,8 +11,8 @@ import {
   ToolDef,
   ToolResultMessage,
   UserMessage
-} from '@yolk/agent/protocol'
-import { LLMProvider } from '@yolk/agent/loop'
+} from '@yolk-sdk/agent/protocol'
+import { LLMProvider } from '@yolk-sdk/agent/loop'
 import { makeAnthropicClaudeProviderLayer } from './anthropic-claude-provider'
 
 type CapturedRequest = {

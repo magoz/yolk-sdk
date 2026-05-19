@@ -14,7 +14,7 @@ import {
   SessionSnapshot,
   UserMessage,
   zeroAgentUsage
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   appendAgentMessage,
   cancelAgentRun,

@@ -7,7 +7,7 @@ import {
   streamAgentEventStream,
   type AgentTranscript,
   type StreamAgentEventsRequest
-} from '@yolk/agent/client'
+} from '@yolk-sdk/agent/client'
 import {
   UserMessage,
   isContentEmpty,
@@ -15,7 +15,7 @@ import {
   type AgentMessage,
   type AgentReasoningEffort,
   type Content
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   hasAgentChatReasoningSummary,
   initialAgentChatState,

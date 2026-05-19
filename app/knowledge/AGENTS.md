@@ -15,5 +15,5 @@ User-facing knowledge object management UI.
 
 - UI says Knowledge.
 - `/storage` remains separate; do not merge storage sources into this UI.
-- Package concepts live in `@yolk/knowledge`; app owns user auth and persistence.
+- Package concepts live in `@yolk-sdk/knowledge`; app owns user auth and persistence.
 - CRUD stays in server actions, not API routes.

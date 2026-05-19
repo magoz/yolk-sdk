@@ -1,10 +1,10 @@
 # Headless React Agent UI
 
-`@yolk/react` is the React adapter over the domain-free agent client stack. It provides hooks and render-ready chat models only. It must not ship UI components, styling, auth flows, provider choices, or app routes.
+`@yolk-sdk/react` is the React adapter over the domain-free agent client stack. It provides hooks and render-ready chat models only. It must not ship UI components, styling, auth flows, provider choices, or app routes.
 
 ## Role
 
-- Own React lifecycle around `@yolk/agent/client` transport: submit, stream, abort, cleanup.
+- Own React lifecycle around `@yolk-sdk/agent/client` transport: submit, stream, abort, cleanup.
 - Own a headless chat render model: `AgentChatMessage` and `AgentChatPart`.
 - Convert between render model and protocol transcript via `toAgentMessages`.
 - Keep polished UI projection generic via `buildAgentChatItems`.

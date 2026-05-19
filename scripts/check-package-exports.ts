@@ -14,19 +14,19 @@ const workspaceRoot = process.cwd()
 const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/agent',
-    packageName: '@yolk/agent',
+    packageName: '@yolk-sdk/agent',
     expectedExports: ['.', './client', './loop', './loop/testing', './protocol', './runtime', './tools'],
     tinyRoot: true
   },
   {
     packageDir: 'packages/mcp',
-    packageName: '@yolk/mcp',
+    packageName: '@yolk-sdk/mcp',
     expectedExports: ['.', './client', './client/node', './protocol', './server'],
     tinyRoot: true
   },
   {
     packageDir: 'packages/rag',
-    packageName: '@yolk/rag',
+    packageName: '@yolk-sdk/rag',
     expectedExports: [
       '.',
       './agent',
@@ -45,7 +45,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   },
   {
     packageDir: 'packages/knowledge',
-    packageName: '@yolk/knowledge',
+    packageName: '@yolk-sdk/knowledge',
     expectedExports: [
       '.',
       './agent',

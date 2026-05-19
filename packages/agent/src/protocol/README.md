@@ -1,4 +1,4 @@
-# @yolk/agent/protocol
+# @yolk-sdk/agent/protocol
 
 Domain-free agent protocol types and helpers.
 

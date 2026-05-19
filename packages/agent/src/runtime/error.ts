@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
-import { agentLoopErrorToAgentError, type AgentLoopError } from '@yolk/agent/loop'
-import { AgentError } from '@yolk/agent/protocol'
+import { agentLoopErrorToAgentError, type AgentLoopError } from '@yolk-sdk/agent/loop'
+import { AgentError } from '@yolk-sdk/agent/protocol'
 
 export class SessionNotFoundError extends Schema.TaggedErrorClass<SessionNotFoundError>()(
   'SessionNotFoundError',

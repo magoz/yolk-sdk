@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk/agent/loop'
-import { ToolResult } from '@yolk/agent/protocol'
-import { makeTool, type ToolModule } from '@yolk/agent/tools'
+import { ToolError } from '@yolk-sdk/agent/loop'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const skillManagerToolName = 'manage_skills'

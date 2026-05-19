@@ -1,6 +1,6 @@
 # App Knowledge Adapters
 
-App-owned concrete adapters for the domain-free `@yolk/knowledge` package.
+App-owned concrete adapters for the domain-free `@yolk-sdk/knowledge` package.
 
 ## Role
 

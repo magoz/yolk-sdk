@@ -53,13 +53,13 @@ Users configure MCP servers for the text agent. When a configured MCP server con
 
 When this PRD is complete, the following will be true:
 
-- [x] A domain-free `@yolk/mcp/client` package exists.
+- [x] A domain-free `@yolk-sdk/mcp/client` package exists.
 - [x] Remote MCP over HTTP POST works for `initialize`, `tools/list`, and `tools/call`.
 - [x] Remote SSE responses are parsed for JSON-RPC messages.
 - [x] Local stdio MCP works with spawned command processes.
-- [x] MCP tool definitions convert to `@yolk/agent/protocol` `ToolDef`.
+- [x] MCP tool definitions convert to `@yolk-sdk/agent/protocol` `ToolDef`.
 - [x] MCP tool results convert to `ToolResult` text content.
-- [x] MCP tools plug into `@yolk/agent/tools` through app adapter code.
+- [x] MCP tools plug into `@yolk-sdk/agent/tools` through app adapter code.
 - [x] Local MCP is denied unless explicitly enabled.
 - [x] Tests cover remote, local, conversion, errors, and disabled-local policy.
 - [x] Docs capture config shape, security limits, and non-goals.
@@ -104,7 +104,7 @@ When this PRD is complete, the following will be true:
 
 ### Feature: MCP Server Package
 
-- [x] Tool-only `@yolk/mcp/server` package exists.
+- [x] Tool-only `@yolk-sdk/mcp/server` package exists.
 - [x] Server handles `initialize`, `tools/list`, and `tools/call`.
 - [x] Server supports newline JSON-RPC for stdio fixtures.
 - [x] Server supports HTTP POST via `handleHttpRequest`.
@@ -260,9 +260,9 @@ tools/call
 
 ## Documentation Requirements
 
-- [ ] `packages/AGENTS.md` documents `@yolk/mcp/client` boundaries.
+- [ ] `packages/AGENTS.md` documents `@yolk-sdk/mcp/client` boundaries.
 - [ ] `lib/agents/AGENTS.md` documents MCP config and security defaults.
-- [ ] Root `AGENTS.md` adds `@yolk/mcp/client` to capabilities/code map if needed.
+- [ ] Root `AGENTS.md` adds `@yolk-sdk/mcp/client` to capabilities/code map if needed.
 - [x] Package README or AGENTS note links `.repos/mcp-sdk` protocol reference.
 
 ---

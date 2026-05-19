@@ -4,7 +4,7 @@
 
 Generic, portable agent loop. `packages/agent/src/loop/`. Orchestrates LLM <> tool cycles. Pure Effect. No Cloudflare, no Yolk domain logic. Don't publish until second consumer exists.
 
-Terminology note: planning used “harness” as shorthand. Package name is `@yolk/agent/loop` because industry usage increasingly reserves “harness” for opinionated, batteries-included agent layers.
+Terminology note: planning used “harness” as shorthand. Package name is `@yolk-sdk/agent/loop` because industry usage increasingly reserves “harness” for opinionated, batteries-included agent layers.
 
 **Conceptual signature:**
 
@@ -280,7 +280,7 @@ interface ToolDef<Params, R> {
 
 ```typescript
 // Service interface
-class ToolExecutor extends Context.Service<ToolExecutor>()('@yolk/agent/loop/ToolExecutor') {
+class ToolExecutor extends Context.Service<ToolExecutor>()('@yolk-sdk/agent/loop/ToolExecutor') {
   readonly execute: (call: ToolCall) => Effect<ToolResult, ToolError>
 }
 
@@ -356,7 +356,7 @@ const withFileLock = (path: string, effect: Effect<A, E, R>) =>
 Minimal interface. Harness doesn't know about Anthropic, OpenAI, etc. Consumer provides the layer.
 
 ```typescript
-class LLMProvider extends Context.Service<LLMProvider>()('@yolk/agent/loop/LLMProvider') {
+class LLMProvider extends Context.Service<LLMProvider>()('@yolk-sdk/agent/loop/LLMProvider') {
   readonly stream: (request: LLMRequest) => Stream<LLMEvent, LLMError>
 }
 ```
@@ -495,7 +495,7 @@ Harness: `ContextTransformer` service. Consumer provides the layer. Harness call
 
 ```typescript
 class ContextTransformer extends Context.Service<ContextTransformer>()(
-  '@yolk/agent/loop/ContextTransformer'
+  '@yolk-sdk/agent/loop/ContextTransformer'
 ) {
   readonly transform: (messages: ReadonlyArray<AgentMessage>) => Effect<ReadonlyArray<AgentMessage>>
 }
@@ -795,11 +795,11 @@ Mic → STTProvider.transcribe() → text → run() → LLMTextDelta → TTSProv
 `STTProvider` and `TTSProvider` are optional service interfaces. Consumer provides layers (ElevenLabs, OpenAI TTS, Deepgram, etc.).
 
 ```typescript
-class STTProvider extends Context.Service<STTProvider>()('@yolk/agent/loop/STTProvider') {
+class STTProvider extends Context.Service<STTProvider>()('@yolk-sdk/agent/loop/STTProvider') {
   readonly transcribe: (audio: Stream<Uint8Array>) => Stream<TranscriptEvent>
 }
 
-class TTSProvider extends Context.Service<TTSProvider>()('@yolk/agent/loop/TTSProvider') {
+class TTSProvider extends Context.Service<TTSProvider>()('@yolk-sdk/agent/loop/TTSProvider') {
   readonly synthesize: (text: Stream<string>) => Stream<Uint8Array>
 }
 ```
@@ -832,7 +832,7 @@ Shares with text mode: `ToolExecutor`, `ToolDef`, `AgentEvent` taxonomy, error t
 
 ```typescript
 class RealtimeProvider extends Context.Service<RealtimeProvider>()(
-  '@yolk/agent/loop/RealtimeProvider'
+  '@yolk-sdk/agent/loop/RealtimeProvider'
 ) {
   readonly connect: (config: RealtimeConfig) => Effect<RealtimeConnection>
 }

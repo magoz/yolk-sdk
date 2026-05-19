@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolResult } from '@yolk/agent/protocol'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
 import {
   formatTaskResult,
   makeTaskToolModule,

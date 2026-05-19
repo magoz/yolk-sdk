@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { mergeSkillsets, type MergedSkillset, type SkillsetManifest } from '@yolk/skillset'
+import { mergeSkillsets, type MergedSkillset, type SkillsetManifest } from '@yolk-sdk/skillset'
 import { loadConfigSkillsetManifest } from './config-source'
 import { loadUserSkillsetManifest } from './db-source'
 import { loadProjectSkillset as loadProjectFileSkillset } from './file-source'

@@ -6,7 +6,7 @@ import {
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepResult
-} from '@yolk/vercel-workflows-runtime/workflow'
+} from '@yolk-sdk/vercel-workflows-runtime/workflow'
 import {
   addAgentUsage,
   AgentEnd,
@@ -21,8 +21,8 @@ import {
   UsageUpdate,
   zeroAgentUsage,
   AgentEvent
-} from '@yolk/agent/protocol'
-import { runModelTurn, runToolBatch } from '@yolk/agent/loop'
+} from '@yolk-sdk/agent/protocol'
+import { runModelTurn, runToolBatch } from '@yolk-sdk/agent/loop'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {

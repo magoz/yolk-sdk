@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/vercel-workflows-runtime",
+  "name": "@yolk-sdk/vercel-workflows-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",

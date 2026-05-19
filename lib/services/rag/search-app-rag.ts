@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { and, eq, inArray } from 'drizzle-orm'
-import { retrieveRag } from '@yolk/rag/retrieval'
-import type { RagSearchScope } from '@yolk/rag/documents'
+import { retrieveRag } from '@yolk-sdk/rag/retrieval'
+import type { RagSearchScope } from '@yolk-sdk/rag/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import {

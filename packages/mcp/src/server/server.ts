@@ -6,8 +6,8 @@ import {
   type ContentPart,
   type ToolDef,
   type ToolResult
-} from '@yolk/agent/protocol'
-import { latestMcpProtocolVersion } from '@yolk/mcp/client'
+} from '@yolk-sdk/agent/protocol'
+import { latestMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {

@@ -8,16 +8,16 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { DefaultRagChunkerLive } from '@yolk/rag/chunking'
-import { RagEmbedder } from '@yolk/rag/embeddings'
-import { RagExtractor } from '@yolk/rag/extraction'
-import { NoopRagSummarizerLive } from '@yolk/rag/summarization'
-import { RagEmbeddingError, RagExtractionError, RagStoreError } from '@yolk/rag/errors'
-import { RagStore } from '@yolk/rag/store'
+import { DefaultRagChunkerLive } from '@yolk-sdk/rag/chunking'
+import { RagEmbedder } from '@yolk-sdk/rag/embeddings'
+import { RagExtractor } from '@yolk-sdk/rag/extraction'
+import { NoopRagSummarizerLive } from '@yolk-sdk/rag/summarization'
+import { RagEmbeddingError, RagExtractionError, RagStoreError } from '@yolk-sdk/rag/errors'
+import { RagStore } from '@yolk-sdk/rag/store'
 import type {
   RagStoreApi,
   UpsertRagDocumentInput
-} from '@yolk/rag/store'
+} from '@yolk-sdk/rag/store'
 import type {
   ExtractedRagDocument,
   RagChunk,
@@ -25,7 +25,7 @@ import type {
   RagMetadata,
   RagSet,
   RagSource
-} from '@yolk/rag/documents'
+} from '@yolk-sdk/rag/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'

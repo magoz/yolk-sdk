@@ -4,7 +4,7 @@
 
 Agents without a filesystem still need durable, structured knowledge.
 
-Yolk currently has `@yolk/rag` for domain-free retrieval primitives and app-owned `/storage` code for user uploads. That split is correct, but it leaves a missing layer: agent-native knowledge semantics.
+Yolk currently has `@yolk-sdk/rag` for domain-free retrieval primitives and app-owned `/storage` code for user uploads. That split is correct, but it leaves a missing layer: agent-native knowledge semantics.
 
 RAG answers: "Which text chunks match this query?"
 
@@ -23,13 +23,13 @@ The package should make those states explicit instead of hiding them in app-spec
 
 ## North star
 
-`@yolk/knowledge` is a domain-free knowledge substrate for applications that run agents.
+`@yolk-sdk/knowledge` is a domain-free knowledge substrate for applications that run agents.
 
 It should let an app combine:
 
 - Postgres for catalog, permissions, lifecycle, graph, text search, chunks, embeddings.
 - R2 or equivalent blob storage for originals and derived artifacts.
-- `@yolk/rag` for chunking, embedding, and retrieval mechanics.
+- `@yolk-sdk/rag` for chunking, embedding, and retrieval mechanics.
 - Agent tools for typed read/write operations over knowledge objects.
 
 The agent should not need shell access or a filesystem. It should query and maintain a typed, citable, permissioned knowledge store.
@@ -49,7 +49,7 @@ Package owns semantics. App owns infrastructure and policy.
 
 ## Relationship to RAG
 
-Keep `@yolk/rag` dumb and reusable.
+Keep `@yolk-sdk/rag` dumb and reusable.
 
 ```txt
 KnowledgeObject
@@ -59,9 +59,9 @@ KnowledgeObject
   -> retrieval context
 ```
 
-`@yolk/rag` should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
+`@yolk-sdk/rag` should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
 
-`@yolk/knowledge` decides what a thing is, how authoritative it is, how it is cited, and whether it belongs in agent context.
+`@yolk-sdk/knowledge` decides what a thing is, how authoritative it is, how it is cited, and whether it belongs in agent context.
 
 ## Core model
 
@@ -136,7 +136,7 @@ Representations are what retrieval indexes. They may live inline in Postgres whe
 
 The retrieval unit derived from a representation.
 
-Chunks and embeddings live in Postgres, usually through `@yolk/rag` mechanics.
+Chunks and embeddings live in Postgres, usually through `@yolk-sdk/rag` mechanics.
 
 ### Provenance
 
@@ -325,7 +325,7 @@ This lets the agent answer questions like "find the screenshot with the pricing 
 
 ## Package boundaries
 
-`@yolk/knowledge` should not import:
+`@yolk-sdk/knowledge` should not import:
 
 - Next.js
 - React
@@ -357,21 +357,21 @@ App adapters implement:
 Keep v0 small.
 
 ```txt
-@yolk/knowledge/objects
-@yolk/knowledge/artifacts
-@yolk/knowledge/representations
-@yolk/knowledge/provenance
-@yolk/knowledge/links
-@yolk/knowledge/store
-@yolk/knowledge/context
-@yolk/knowledge/agent
+@yolk-sdk/knowledge/objects
+@yolk-sdk/knowledge/artifacts
+@yolk-sdk/knowledge/representations
+@yolk-sdk/knowledge/provenance
+@yolk-sdk/knowledge/links
+@yolk-sdk/knowledge/store
+@yolk-sdk/knowledge/context
+@yolk-sdk/knowledge/agent
 ```
 
 Avoid implementing all roles at once. Start with current `/storage` needs plus pinned context.
 
 ## Decisions for v0
 
-- Create a real package now: `@yolk/knowledge`.
+- Create a real package now: `@yolk-sdk/knowledge`.
 - Use `knowledge` naming for new app internals and UI direction.
 - Create new knowledge tables; do not adapt `storageObject` as the long-term model.
 - Use R2 now for artifacts. The app can provision/access it through Alchemy/S3-compatible infrastructure.
@@ -389,15 +389,15 @@ Create `packages/knowledge` as a domain-free package.
 Exports:
 
 ```txt
-@yolk/knowledge
-@yolk/knowledge/objects
-@yolk/knowledge/artifacts
-@yolk/knowledge/representations
-@yolk/knowledge/provenance
-@yolk/knowledge/links
-@yolk/knowledge/store
-@yolk/knowledge/context
-@yolk/knowledge/agent
+@yolk-sdk/knowledge
+@yolk-sdk/knowledge/objects
+@yolk-sdk/knowledge/artifacts
+@yolk-sdk/knowledge/representations
+@yolk-sdk/knowledge/provenance
+@yolk-sdk/knowledge/links
+@yolk-sdk/knowledge/store
+@yolk-sdk/knowledge/context
+@yolk-sdk/knowledge/agent
 ```
 
 Initial files:
@@ -476,7 +476,7 @@ Responsibilities:
 - implement `KnowledgeStore` over Drizzle/Postgres
 - implement `KnowledgeArtifactStore` over R2/S3-compatible storage
 - keep R2 key layout app-owned
-- keep Alchemy/S3 dependencies out of `@yolk/knowledge`
+- keep Alchemy/S3 dependencies out of `@yolk-sdk/knowledge`
 
 Initial R2 key convention:
 

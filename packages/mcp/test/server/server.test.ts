@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk/agent/protocol'
+import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import { McpServerError, makeMcpToolServer } from '../../src/server'
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)

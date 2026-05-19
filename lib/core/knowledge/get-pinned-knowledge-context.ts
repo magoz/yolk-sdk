@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
-import { buildKnowledgeContext, type KnowledgeContextItem } from '@yolk/knowledge/context'
-import { KnowledgeStore } from '@yolk/knowledge/store'
-import type { KnowledgeObject } from '@yolk/knowledge/objects'
-import type { KnowledgeRepresentation } from '@yolk/knowledge/representations'
+import { buildKnowledgeContext, type KnowledgeContextItem } from '@yolk-sdk/knowledge/context'
+import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
+import type { KnowledgeObject } from '@yolk-sdk/knowledge/objects'
+import type { KnowledgeRepresentation } from '@yolk-sdk/knowledge/representations'
 
 const pinnedContextObjectLimit = 12
 const pinnedContextMaxCharacters = 6000

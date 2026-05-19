@@ -15,7 +15,7 @@ import {
   openAiCodexDeviceVerificationUrl,
   openAiCodexRefreshBufferMs,
   openAiCodexTokenEndpoint
-} from '@yolk/openai'
+} from '@yolk-sdk/openai'
 import { OpenAiCodexOAuthError } from './errors'
 import {
   OpenAiCodexDeviceAuthTokenResponseSchema,

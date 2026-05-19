@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/skillset",
+  "name": "@yolk-sdk/skillset",
   "version": "0.0.0",
   "private": true,
   "type": "module",

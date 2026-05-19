@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk/oauth'
+import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk-sdk/oauth'
 
 export const anthropicClaudeProviderId = 'anthropic-claude'
 export const anthropicClaudeClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'

@@ -1,6 +1,6 @@
 import { Effect, Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { AgentError, AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk/agent/protocol'
+import { AgentError, AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   appendRuntimeSessionEventsToLog,
   InputAppended,

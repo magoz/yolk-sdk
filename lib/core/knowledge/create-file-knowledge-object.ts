@@ -1,7 +1,7 @@
 import { createId } from '@paralleldrive/cuid2'
 import { eq } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
+import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'

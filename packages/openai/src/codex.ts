@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk/oauth'
+import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk-sdk/oauth'
 
 export const openAiCodexProviderId = 'openai-codex'
 export const openAiCodexResponsesUrl = 'https://chatgpt.com/backend-api/codex/responses'

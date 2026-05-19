@@ -1,4 +1,4 @@
-import { textImageModelCapabilities, type AgentReasoningEffort } from '@yolk/agent/protocol'
+import { textImageModelCapabilities, type AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 
 export const openAiCodexTextModel = 'gpt-5.4'
 export const anthropicClaudeTextModel = 'claude-sonnet-4-6'

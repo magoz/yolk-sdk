@@ -1,18 +1,18 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Config, Context, DateTime, Effect, Layer, Option, Redacted } from 'effect'
-import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
-import { KnowledgeStore } from '@yolk/knowledge/store'
-import { KnowledgeArtifactError, KnowledgeStoreError } from '@yolk/knowledge/errors'
-import type { KnowledgeArtifact } from '@yolk/knowledge/artifacts'
-import type { KnowledgeLink } from '@yolk/knowledge/links'
+import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
+import { KnowledgeStore } from '@yolk-sdk/knowledge/store'
+import { KnowledgeArtifactError, KnowledgeStoreError } from '@yolk-sdk/knowledge/errors'
+import type { KnowledgeArtifact } from '@yolk-sdk/knowledge/artifacts'
+import type { KnowledgeLink } from '@yolk-sdk/knowledge/links'
 import type {
   KnowledgeObject,
   KnowledgeScope,
   UpdateKnowledgeObjectInput
-} from '@yolk/knowledge/objects'
-import type { KnowledgeProvenance } from '@yolk/knowledge/provenance'
-import type { KnowledgeRepresentation } from '@yolk/knowledge/representations'
+} from '@yolk-sdk/knowledge/objects'
+import type { KnowledgeProvenance } from '@yolk-sdk/knowledge/provenance'
+import type { KnowledgeRepresentation } from '@yolk-sdk/knowledge/representations'
 import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
 

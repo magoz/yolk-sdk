@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { ToolError, ToolExecutor } from '@yolk/agent/loop'
+import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
 
 export const NoToolExecutorLayer = Layer.succeed(
   ToolExecutor,

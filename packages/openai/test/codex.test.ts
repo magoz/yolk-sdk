@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OAuthAccessToken } from '@yolk/oauth'
+import { OAuthAccessToken } from '@yolk-sdk/oauth'
 import {
   makeOpenAiCodexBrokerRequest,
   openAiCodexAuthorizationHeaders,

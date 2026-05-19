@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { ToolError } from '@yolk/agent/loop'
+import { ToolError } from '@yolk-sdk/agent/loop'
 import { ensureUserRagSet } from '@/lib/core/storage/ensure-user-rag-set'
 import { getStorageObject } from '@/lib/core/storage/get-storage-object'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'

@@ -4,8 +4,8 @@ Patterns for MCP client/server transport boundaries.
 
 ## Scope
 
-- `@yolk/mcp/client`: host-executed MCP client; app owns config, auth, and policy.
-- `@yolk/mcp/server`: reusable tool-only JSON-RPC server primitives.
+- `@yolk-sdk/mcp/client`: host-executed MCP client; app owns config, auth, and policy.
+- `@yolk-sdk/mcp/server`: reusable tool-only JSON-RPC server primitives.
 - No app auth, OAuth, resources, prompts, product permissions, or provider SDKs in MCP packages.
 
 ## JSON Boundaries

@@ -8,8 +8,8 @@ import {
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
 import { isTransientError, retryPolicy } from '@/lib/services/retry'
-import { RagSummarizationError } from '@yolk/rag/errors'
-import { RagSummarizer } from '@yolk/rag/summarization'
+import { RagSummarizationError } from '@yolk-sdk/rag/errors'
+import { RagSummarizer } from '@yolk-sdk/rag/summarization'
 import { AppRagSummarizerError } from './errors'
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'

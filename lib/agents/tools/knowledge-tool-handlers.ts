@@ -1,5 +1,5 @@
 import { Effect, Layer } from 'effect'
-import { ToolError } from '@yolk/agent/loop'
+import { ToolError } from '@yolk-sdk/agent/loop'
 import { getKnowledgeContext } from '@/lib/core/knowledge/get-knowledge-context'
 import { listUserKnowledgeObjects } from '@/lib/core/knowledge/list-user-knowledge-objects'
 import { searchUserKnowledge } from '@/lib/core/knowledge/search-user-knowledge'

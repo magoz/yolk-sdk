@@ -7,14 +7,14 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { AgentEvent, AgentWebSocketServerMessage, UserInput } from '@yolk/agent/protocol'
+import { AgentEvent, AgentWebSocketServerMessage, UserInput } from '@yolk-sdk/agent/protocol'
 import type {
   AgentEvent as AgentEventType,
   AgentMessage,
   AgentReasoningEffort,
   AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
   UserMessage
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import type { AgentTranscript } from './state.ts'
 
 export class AgentTransportError extends Schema.TaggedErrorClass<AgentTransportError>()(

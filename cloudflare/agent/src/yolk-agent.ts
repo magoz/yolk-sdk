@@ -18,14 +18,14 @@ import {
   LLMProvider,
   LLMTextDelta,
   LoopConfig
-} from '@yolk/agent/loop'
-import type { ToolExecutor } from '@yolk/agent/loop'
+} from '@yolk-sdk/agent/loop'
+import type { ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
   type RuntimeSessionEventLog
-} from '@yolk/agent/runtime'
+} from '@yolk-sdk/agent/runtime'
 import {
   AgentError,
   AgentMessage,
@@ -36,9 +36,9 @@ import {
   assistantContent,
   contentText,
   type AgentEvent as AgentEventType
-} from '@yolk/agent/protocol'
-import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
-import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk/agent/tools'
+} from '@yolk-sdk/agent/protocol'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
+import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk-sdk/agent/tools'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
 import {
   agentTextModel,

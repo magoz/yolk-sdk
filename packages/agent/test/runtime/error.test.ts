@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { LLMError } from '@yolk/agent/loop'
+import { LLMError } from '@yolk-sdk/agent/loop'
 import {
   runtimeErrorToAgentError,
   SessionConflictError,

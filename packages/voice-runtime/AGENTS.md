@@ -1,6 +1,6 @@
 # Voice Runtime
 
-`@yolk/voice-runtime` bridges provider-normalized realtime voice tool calls to the generic `ToolExecutor`. Provider/WebRTC details stay in app adapters.
+`@yolk-sdk/voice-runtime` bridges provider-normalized realtime voice tool calls to the generic `ToolExecutor`. Provider/WebRTC details stay in app adapters.
 
 ## Role
 

@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AgentError, type AgentErrorCode } from '@yolk/agent/protocol'
+import { AgentError, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
 
 export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
   cause: Schema.Literals([

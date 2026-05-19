@@ -15,13 +15,13 @@ type RetiredPackage = {
 const workspaceRoot = process.cwd()
 
 const retiredPackages: ReadonlyArray<RetiredPackage> = [
-  { dir: 'packages/agent-loop', importName: '@yolk/agent-loop' },
-  { dir: 'packages/agent-runtime', importName: '@yolk/agent-runtime' },
-  { dir: 'packages/client', importName: '@yolk/client' },
-  { dir: 'packages/mcp-client', importName: '@yolk/mcp-client' },
-  { dir: 'packages/mcp-server', importName: '@yolk/mcp-server' },
-  { dir: 'packages/protocol', importName: '@yolk/protocol' },
-  { dir: 'packages/tool-registry', importName: '@yolk/tool-registry' }
+  { dir: 'packages/agent-loop', importName: '@yolk-sdk/agent-loop' },
+  { dir: 'packages/agent-runtime', importName: '@yolk-sdk/agent-runtime' },
+  { dir: 'packages/client', importName: '@yolk-sdk/client' },
+  { dir: 'packages/mcp-client', importName: '@yolk-sdk/mcp-client' },
+  { dir: 'packages/mcp-server', importName: '@yolk-sdk/mcp-server' },
+  { dir: 'packages/protocol', importName: '@yolk-sdk/protocol' },
+  { dir: 'packages/tool-registry', importName: '@yolk-sdk/tool-registry' }
 ]
 
 const retiredImports = retiredPackages.map(retiredPackage => retiredPackage.importName)
@@ -31,45 +31,45 @@ const rules: ReadonlyArray<BoundaryRule> = [
     packageDir: 'app',
     forbiddenImports: [
       ...retiredImports,
-      '@yolk/agent$',
-      '@yolk/mcp$'
+      '@yolk-sdk/agent$',
+      '@yolk-sdk/mcp$'
     ]
   },
   {
     packageDir: 'lib',
     forbiddenImports: [
       ...retiredImports,
-      '@yolk/agent$',
-      '@yolk/mcp$'
+      '@yolk-sdk/agent$',
+      '@yolk-sdk/mcp$'
     ]
   },
   {
     packageDir: 'cloudflare/agent/src',
     forbiddenImports: [
       ...retiredImports,
-      '@yolk/agent$',
-      '@yolk/mcp$'
+      '@yolk-sdk/agent$',
+      '@yolk-sdk/mcp$'
     ]
   },
   {
     packageDir: 'e2e',
     forbiddenImports: [
       ...retiredImports,
-      '@yolk/agent$',
-      '@yolk/mcp$'
+      '@yolk-sdk/agent$',
+      '@yolk-sdk/mcp$'
     ]
   },
   {
     packageDir: 'packages/agent/src',
-    forbiddenImports: ['@yolk/rag', '@yolk/mcp', '@yolk/react', 'next', 'react', 'node:']
+    forbiddenImports: ['@yolk-sdk/rag', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
   },
   {
     packageDir: 'packages/rag/src',
-    forbiddenImports: ['@yolk/mcp', '@yolk/react', 'next', 'react', 'node:']
+    forbiddenImports: ['@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
   },
   {
     packageDir: 'packages/knowledge/src',
-    forbiddenImports: ['@yolk/rag', '@yolk/mcp', '@yolk/react', 'next', 'react', 'node:']
+    forbiddenImports: ['@yolk-sdk/rag', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
   },
   {
     packageDir: 'packages/react/src',

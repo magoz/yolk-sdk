@@ -7,7 +7,7 @@ import {
   SessionEventStore,
   SessionNotFoundError,
   type RuntimeSessionEventLog
-} from '@yolk/agent/runtime'
+} from '@yolk-sdk/agent/runtime'
 
 export const runtimeEventsStorageKey = 'runtime-events'
 

@@ -4,7 +4,7 @@ Node/app adapters for loading project skills and commands into the app agent run
 
 ## Boundaries
 
-- `@yolk/skillset` owns pure parsing/rendering/merge logic.
+- `@yolk-sdk/skillset` owns pure parsing/rendering/merge logic.
 - This directory owns DB/config/filesystem source adapters for the Next app only.
 - Do not import these adapters into Cloudflare Worker/DO code.
 

@@ -1,4 +1,4 @@
-# @yolk/mcp/server
+# @yolk-sdk/mcp/server
 
 Reusable tool-only MCP server primitives.
 

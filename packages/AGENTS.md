@@ -6,24 +6,24 @@ Reusable packages. Core agent packages stay domain-free. Provider/OAuth packages
 
 | Package               | Role                                                    | Depends on                                   |
 | --------------------- | ------------------------------------------------------- | -------------------------------------------- |
-| `@yolk/agent`         | Main agent package with protocol/loop/runtime/client/tools subpaths | Effect |
-| `@yolk/rag`           | Domain-free retrieval/ingestion/chunking primitives     | `@yolk/agent/protocol`, `@yolk/agent/tools`, Effect |
-| `@yolk/knowledge`     | Domain-free knowledge objects, artifact/catalog contracts, provenance, context assembly | `@yolk/agent`, Effect |
-| `@yolk/mcp`           | MCP client/server/protocol package with explicit subpaths | `@yolk/agent/protocol`, Effect |
-| `@yolk/agent/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
-| `@yolk/agent/loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk/agent/protocol`, Effect                     |
-| `@yolk/agent/runtime` | Session load/save orchestration over agent loop         | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
-| `@yolk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect, workflow |
-| `@yolk/agent/tools` | Scoped tool modules + executor layer                    | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
-| `@yolk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
-| `@yolk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk/agent/protocol`, `@yolk/agent/loop`, Effect |
-| `@yolk/agent/client`        | Effect stream transport + generic reducer/state helpers | `@yolk/agent/protocol`, Effect                     |
-| `@yolk/react`         | Headless React hooks over client state/transport        | `@yolk/agent`, Effect                        |
-| `@yolk/mcp/client`    | MCP JSON-RPC client + protocol/tool adapters            | `@yolk/agent/protocol`, Effect                     |
-| `@yolk/mcp/server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk/agent/protocol`, `@yolk/mcp/client`, Effect |
-| `@yolk/oauth`         | Generic OAuth token broker and credential-source contracts | Effect                                    |
-| `@yolk/anthropic`     | Anthropic/Claude provider auth mechanics and reusable constants | `@yolk/oauth`, Effect               |
-| `@yolk/openai`        | OpenAI/Codex provider auth mechanics and reusable constants | `@yolk/oauth`, Effect                    |
+| `@yolk-sdk/agent`         | Main agent package with protocol/loop/runtime/client/tools subpaths | Effect |
+| `@yolk-sdk/rag`           | Domain-free retrieval/ingestion/chunking primitives     | `@yolk-sdk/agent/protocol`, `@yolk-sdk/agent/tools`, Effect |
+| `@yolk-sdk/knowledge`     | Domain-free knowledge objects, artifact/catalog contracts, provenance, context assembly | `@yolk-sdk/agent`, Effect |
+| `@yolk-sdk/mcp`           | MCP client/server/protocol package with explicit subpaths | `@yolk-sdk/agent/protocol`, Effect |
+| `@yolk-sdk/agent/protocol`      | Shared schemas, messages, tools, events                 | Effect                                       |
+| `@yolk-sdk/agent/loop`    | Stateless LLM ⇄ tool turn loop                          | `@yolk-sdk/agent/protocol`, Effect                     |
+| `@yolk-sdk/agent/runtime` | Session load/save orchestration over agent loop         | `@yolk-sdk/agent/protocol`, `@yolk-sdk/agent/loop`, Effect |
+| `@yolk-sdk/vercel-workflows-runtime` | Vercel Workflow durable model/tool step loop contract | Effect, workflow |
+| `@yolk-sdk/agent/tools` | Scoped tool modules + executor layer                    | `@yolk-sdk/agent/protocol`, `@yolk-sdk/agent/loop`, Effect |
+| `@yolk-sdk/skillset`      | Portable skill + command parsing/catalog primitives     | Effect                                       |
+| `@yolk-sdk/voice-runtime` | Provider-neutral voice tool-call bridge                 | `@yolk-sdk/agent/protocol`, `@yolk-sdk/agent/loop`, Effect |
+| `@yolk-sdk/agent/client`        | Effect stream transport + generic reducer/state helpers | `@yolk-sdk/agent/protocol`, Effect                     |
+| `@yolk-sdk/react`         | Headless React hooks over client state/transport        | `@yolk-sdk/agent`, Effect                        |
+| `@yolk-sdk/mcp/client`    | MCP JSON-RPC client + protocol/tool adapters            | `@yolk-sdk/agent/protocol`, Effect                     |
+| `@yolk-sdk/mcp/server`    | MCP JSON-RPC tool server primitives + stdio/HTTP runner | `@yolk-sdk/agent/protocol`, `@yolk-sdk/mcp/client`, Effect |
+| `@yolk-sdk/oauth`         | Generic OAuth token broker and credential-source contracts | Effect                                    |
+| `@yolk-sdk/anthropic`     | Anthropic/Claude provider auth mechanics and reusable constants | `@yolk-sdk/oauth`, Effect               |
+| `@yolk-sdk/openai`        | OpenAI/Codex provider auth mechanics and reusable constants | `@yolk-sdk/oauth`, Effect                    |
 
 ## Dependency Rule
 
@@ -62,7 +62,7 @@ app -> oauth + Effect
 - OAuth packages define contracts only; they never own refresh tokens or storage.
 - Runtime may be generic over opaque `Ctx`; it must not interpret product context.
 - Vercel Workflow runtime must keep inputs/state plain serializable and avoid app imports.
-- Import Vercel Workflow runtime APIs via `@yolk/vercel-workflows-runtime/workflow`; package root is intentionally empty.
+- Import Vercel Workflow runtime APIs via `@yolk-sdk/vercel-workflows-runtime/workflow`; package root is intentionally empty.
 - Vercel Workflow model/tool step retries are opt-in; default no retry avoids duplicate streamed chunks unless host/client de-dupe is ready.
 - `runVercelAgentWorkflow` returns terminal status; host apps still own persistence/conflict UX.
 - Agent-loop must stay stateless: no persistence, sessions, WebSockets/SSE, compaction policy, or app context.
@@ -76,9 +76,9 @@ app -> oauth + Effect
 ## Reasoning
 
 - `AgentReasoningEffort` is protocol-only request config; app chooses values, loop/provider layers pass through.
-- `@yolk/agent/runtime` threads `reasoningEffort` and `capabilities`; `/api/agent` uses `Transcript`, Cloudflare DO uses `AppendInput`.
-- `@yolk/agent/runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
-- `@yolk/agent/loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
+- `@yolk-sdk/agent/runtime` threads `reasoningEffort` and `capabilities`; `/api/agent` uses `Transcript`, Cloudflare DO uses `AppendInput`.
+- `@yolk-sdk/agent/runtime` supports stateless `Transcript` mode and append-backed `AppendInput` mode via `SessionEventStore`.
+- `@yolk-sdk/agent/loop` owns retry/usage aggregation; provider adapters classify retryable failures and normalize raw usage.
 - Compaction remains host-owned via `ContextTransformer`; future durable compaction checkpoints belong in runtime/app storage, not loop core.
 - `LLMReasoningDelta` is provider-supplied summary text only; never fabricate reasoning.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
@@ -112,17 +112,17 @@ app -> oauth + Effect
 
 ## Skillset
 
-- `@yolk/skillset` is the domain-free core for skills and commands.
+- `@yolk-sdk/skillset` is the domain-free core for skills and commands.
 - Core owns `SKILL.md` parsing, command markdown parsing, command argument rendering, manifest schemas, and deterministic merge helpers.
-- Core must not import filesystem, Next.js, Cloudflare, DB, auth, provider SDKs, `@yolk/agent/tools`, or app code.
+- Core must not import filesystem, Next.js, Cloudflare, DB, auth, provider SDKs, `@yolk-sdk/agent/tools`, or app code.
 - Host apps own source adapters: filesystem, generated bundles, KV/R2, DB, or remote packages.
 - Host apps own policy and runtime wiring: available-skills prompt injection, `skill` tool registration, and slash command UI/routes.
 - Keep v1 scoped to skills and commands; do not broaden into tools, providers, models, agents, storage, or permissions.
 
 ## MCP
 
-- `@yolk/mcp/client` is a domain-free host-executed MCP client; app decides config, auth, and policy.
-- `@yolk/mcp/server` is a reusable tool-only MCP server; keep it generic for reuse across projects.
+- `@yolk-sdk/mcp/client` is a domain-free host-executed MCP client; app decides config, auth, and policy.
+- `@yolk-sdk/mcp/server` is a reusable tool-only MCP server; keep it generic for reuse across projects.
 - Supports remote JSON-RPC over HTTP POST with JSON or SSE responses and local stdio servers.
 - MCP server v1 supports `initialize`, `tools/list`, and `tools/call`; no resources, prompts, OAuth, or app auth.
 - MCP server exposes both newline JSON-RPC (`handleLine`/stdio) and HTTP POST (`handleHttpRequest`) entrypoints.
@@ -131,7 +131,7 @@ app -> oauth + Effect
 - Local stdio uses Effect v4 process/stream APIs (`ChildProcess`, `Stdio`, `Stream`) plus `@effect/platform-node`; avoid raw `node:child_process`, `node:readline`, or direct `process.stdin/stdout/stderr`.
 - Local stdio is policy-gated, receives explicit env only, sets `extendEnv: false`, and ignores stderr to avoid secret leaks.
 - Local stdio must not inject default env; pass only `config.environment ?? {}`.
-- MCP client core local helpers require `ChildProcessSpawner`; Node convenience helpers live at `@yolk/mcp/client/node`.
+- MCP client core local helpers require `ChildProcessSpawner`; Node convenience helpers live at `@yolk-sdk/mcp/client/node`.
 - Local MCP sessions must validate `initialize` response before trusting target request response.
 - MCP server stdio runners depend on `Stdio.Stdio`; Node CLI/test fixtures provide `NodeStdio.layer` at the boundary.
 - Local stdio responses are matched by JSON-RPC id; do not assume response order.
@@ -156,7 +156,7 @@ app -> oauth + Effect
 
 ## Client Transport
 
-- Agent runtime pages use `@yolk/react` headless chat state; `@yolk/agent/client` owns lower-level protocol transport/state helpers.
+- Agent runtime pages use `@yolk-sdk/react` headless chat state; `@yolk-sdk/agent/client` owns lower-level protocol transport/state helpers.
 - `AgentTranscript` is a non-empty protocol transcript owned by the client/UI.
 - `AgentClientState.messages` stores stable protocol messages; `liveMessages` stores completed assistant turns during active runs.
 - `text`/`reasoning` are current streaming drafts only; `AssistantMessageEvent` commits a live assistant turn and clears drafts.
@@ -181,8 +181,8 @@ app -> oauth + Effect
 
 ## React
 
-- `@yolk/react` is the headless React layer for app builders.
-- It wraps `@yolk/agent/client` transport and exposes render-ready chat state.
+- `@yolk-sdk/react` is the headless React layer for app builders.
+- It wraps `@yolk-sdk/agent/client` transport and exposes render-ready chat state.
 - `chatMessages` is the primary UI model; `messages` is derived protocol replay for transport/debugging.
 - `AgentChatState.sessionEvents` records local UI/session edits: submitted/appended messages, turn deletion, regeneration, user edits.
 - `editUserMessage` replaces a user message, truncates later messages, and reruns from the edited transcript.
@@ -198,10 +198,10 @@ app -> oauth + Effect
 
 ## Test Helpers
 
-- `@yolk/agent/loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
+- `@yolk-sdk/agent/loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
 - Keep test helpers behind explicit `./testing` subpath exports; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
-- Node-specific package APIs use explicit subpath exports (for example `@yolk/mcp/client/node`) so core imports stay portable.
+- Node-specific package APIs use explicit subpath exports (for example `@yolk-sdk/mcp/client/node`) so core imports stay portable.
 - Package-internal relative imports use explicit `.ts` extensions, matching Alchemy's source style. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
 - See `patterns/PACKAGE_ARCHITECTURE.md` for package shape, boundary, and tree-shaking constraints.
@@ -212,22 +212,24 @@ app -> oauth + Effect
 - Root `packageManager` pins pnpm for reproducible installs.
 - Package tsconfigs extend `packages/tsconfig.base.json`; keep package-local configs to `outDir`, `rootDir`, and include/exclude overrides.
 - Keep package dependencies explicit in each package manifest even when versions come from catalogs.
-- Internal `@yolk/*` dependencies use `workspace:^`; pnpm links locally and publishes semver ranges later.
+- Internal `@yolk-sdk/*` dependencies use `workspace:^`; pnpm links locally and publishes semver ranges later.
 
 ## Versioning Plan
 
-- Before publishing, use Changesets fixed/lockstep versioning for all `@yolk/*` packages, mirroring Effect's `fixed` group model.
-- Bump all public `@yolk/*` package versions together, even when only one package changed.
+- Before publishing, use Changesets fixed/lockstep versioning for all public `@yolk-sdk/*` packages, mirroring Effect's `fixed` group model.
+- Bump all public `@yolk-sdk/*` package versions together, even when only one package changed.
 - Keep `updateInternalDependencies: "patch"` so internal dependency ranges stay compatible after releases.
 - Prefer compatibility simplicity over per-package version precision; protocol/runtime/client packages are tightly coupled.
+- Distribution plan lives in `patterns/PACKAGE_DISTRIBUTION.md`.
 
 ## Dist Build Plan
 
 - Keep TypeScript source exports while packages are private and APIs are still moving quickly.
 - Before the first public npm release, curate explicit public exports and remove accidental root `export *` surface.
 - During release prep, add `tsdown`, emit `dist`, switch package exports to `dist`, add `files`, `publishConfig`, `publint`, READMEs, and peer deps.
-- Publish an alpha/canary only after validating install/import behavior from a separate fixture app.
+- Publish a canary only after validating install/import behavior from a separate fixture app.
 - Add Turbo only if package/app build times, CI orchestration, or affected-only builds become painful; use pnpm recursive scripts until then.
+- Do not add Turbo for initial package distribution prep.
 
 ## Package Publishing TODOs
 
@@ -246,7 +248,7 @@ Use this order when preparing the first public alpha/canary release:
 3. **Model host-owned dependencies**
    - Add peer deps for runtime singletons and host frameworks: `effect`, `react`, and platform/runtime deps where relevant.
    - Keep dev deps pinned via catalogs for local package tests/builds.
-   - Keep internal `@yolk/*` deps as `workspace:^`.
+   - Keep internal `@yolk-sdk/*` deps as `workspace:^`.
 
 4. **Add dist build**
    - Add `tsdown` per package once publishing is imminent.
@@ -255,7 +257,7 @@ Use this order when preparing the first public alpha/canary release:
    - Keep local dev source exports only if using an Effect-style `publishConfig.exports` override.
 
 5. **Add release tooling**
-   - Add Changesets with a fixed/lockstep group for all public `@yolk/*` packages.
+   - Add Changesets with a fixed/lockstep group for all public `@yolk-sdk/*` packages.
    - Set `updateInternalDependencies: "patch"`.
    - Add root scripts for package build, package validation, versioning, and publish dry-run.
 

@@ -17,5 +17,5 @@ export type RagExtractorApi = {
 }
 
 export class RagExtractor extends Context.Service<RagExtractor, RagExtractorApi>()(
-  '@yolk/rag/RagExtractor'
+  '@yolk-sdk/rag/RagExtractor'
 ) {}

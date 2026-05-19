@@ -45,7 +45,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text runtime construction lives in `makeAgentTextResponse` / `makeAgentTextRuntime`; route wrappers keep auth/status boundaries thin.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
-- Realtime `/tool` uses `@yolk/voice-runtime`; current registry enables `web_fetch`, `web_search`, and storage for voice.
+- Realtime `/tool` uses `@yolk-sdk/voice-runtime`; current registry enables `web_fetch`, `web_search`, and storage for voice.
 - Realtime routes explicitly provide runtime-portable voice tool modules and resolve with `{ surface: 'voice', route: '/agent', userId }`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is the default DO provider path; it forwards upstream body streams with `HttpServerResponse.raw(...)`.

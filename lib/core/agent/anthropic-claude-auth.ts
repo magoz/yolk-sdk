@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { and, eq } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
-import { anthropicClaudeProviderId } from '@yolk/anthropic'
+import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { AnthropicClaudeOAuth } from '@/lib/services/anthropic-oauth/live-layer'

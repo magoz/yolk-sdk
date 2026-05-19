@@ -77,37 +77,37 @@ importers:
       '@sentry/opentelemetry':
         specifier: ^10.34.0
         version: 10.34.0(@opentelemetry/api@1.9.0)(@opentelemetry/context-async-hooks@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/core@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.39.0)
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:packages/agent
-      '@yolk/anthropic':
+      '@yolk-sdk/anthropic':
         specifier: workspace:^
         version: link:packages/anthropic
-      '@yolk/knowledge':
+      '@yolk-sdk/knowledge':
         specifier: workspace:^
         version: link:packages/knowledge
-      '@yolk/mcp':
+      '@yolk-sdk/mcp':
         specifier: workspace:^
         version: link:packages/mcp
-      '@yolk/oauth':
+      '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:packages/oauth
-      '@yolk/openai':
+      '@yolk-sdk/openai':
         specifier: workspace:^
         version: link:packages/openai
-      '@yolk/rag':
+      '@yolk-sdk/rag':
         specifier: workspace:^
         version: link:packages/rag
-      '@yolk/react':
+      '@yolk-sdk/react':
         specifier: workspace:^
         version: link:packages/react
-      '@yolk/skillset':
+      '@yolk-sdk/skillset':
         specifier: workspace:^
         version: link:packages/skillset
-      '@yolk/vercel-workflows-runtime':
+      '@yolk-sdk/vercel-workflows-runtime':
         specifier: workspace:^
         version: link:packages/vercel-workflows-runtime
-      '@yolk/voice-runtime':
+      '@yolk-sdk/voice-runtime':
         specifier: workspace:^
         version: link:packages/voice-runtime
       better-auth:
@@ -261,22 +261,22 @@ importers:
 
   cloudflare/agent:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
-      '@yolk/anthropic':
+      '@yolk-sdk/anthropic':
         specifier: workspace:^
         version: link:../../packages/anthropic
-      '@yolk/mcp':
+      '@yolk-sdk/mcp':
         specifier: workspace:^
         version: link:../../packages/mcp
-      '@yolk/oauth':
+      '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:../../packages/oauth
-      '@yolk/openai':
+      '@yolk-sdk/openai':
         specifier: workspace:^
         version: link:../../packages/openai
-      '@yolk/skillset':
+      '@yolk-sdk/skillset':
         specifier: workspace:^
         version: link:../../packages/skillset
       alchemy:
@@ -310,7 +310,7 @@ importers:
 
   packages/anthropic:
     dependencies:
-      '@yolk/oauth':
+      '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:../oauth
       effect:
@@ -319,7 +319,7 @@ importers:
 
   packages/knowledge:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
       effect:
@@ -328,7 +328,7 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
       effect:
@@ -343,7 +343,7 @@ importers:
 
   packages/openai:
     dependencies:
-      '@yolk/oauth':
+      '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:../oauth
       effect:
@@ -352,7 +352,7 @@ importers:
 
   packages/rag:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
       effect:
@@ -364,7 +364,7 @@ importers:
 
   packages/react:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
       effect:
@@ -401,7 +401,7 @@ importers:
 
   packages/voice-runtime:
     dependencies:
-      '@yolk/agent':
+      '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../agent
       effect:

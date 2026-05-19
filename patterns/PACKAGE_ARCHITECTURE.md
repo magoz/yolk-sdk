@@ -4,21 +4,21 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 
 ## Public Shape
 
-- `@yolk/agent` is the main agent package.
+- `@yolk-sdk/agent` is the main agent package.
 - Agent APIs use explicit subpaths:
-  - `@yolk/agent/protocol`
-  - `@yolk/agent/loop`
-  - `@yolk/agent/loop/testing`
-  - `@yolk/agent/runtime`
-  - `@yolk/agent/client`
-  - `@yolk/agent/tools`
-- `@yolk/mcp` is a sibling MCP package, not part of agent core.
+  - `@yolk-sdk/agent/protocol`
+  - `@yolk-sdk/agent/loop`
+  - `@yolk-sdk/agent/loop/testing`
+  - `@yolk-sdk/agent/runtime`
+  - `@yolk-sdk/agent/client`
+  - `@yolk-sdk/agent/tools`
+- `@yolk-sdk/mcp` is a sibling MCP package, not part of agent core.
 - MCP APIs use explicit subpaths:
-  - `@yolk/mcp/client`
-  - `@yolk/mcp/client/node`
-  - `@yolk/mcp/protocol`
-  - `@yolk/mcp/server`
-- `@yolk/rag` is a sibling RAG package; agent integration lives behind `@yolk/rag/agent`.
+  - `@yolk-sdk/mcp/client`
+  - `@yolk-sdk/mcp/client/node`
+  - `@yolk-sdk/mcp/protocol`
+  - `@yolk-sdk/mcp/server`
+- `@yolk-sdk/rag` is a sibling RAG package; agent integration lives behind `@yolk-sdk/rag/agent`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout
@@ -33,11 +33,11 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ## Dependency Direction
 
 ```txt
-app/lib/cloudflare/e2e -> @yolk/agent/* + @yolk/mcp/*
-@yolk/react -> @yolk/agent/client + @yolk/agent/protocol
-@yolk/rag -> @yolk/agent/protocol + @yolk/agent/tools only for agent adapter
-@yolk/mcp -> @yolk/agent/protocol only for ToolDef/ToolResult
-@yolk/agent -> no @yolk/react, @yolk/rag, @yolk/mcp, app, Next, provider SDKs
+app/lib/cloudflare/e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
+@yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
+@yolk-sdk/rag -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
+@yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
+@yolk-sdk/agent -> no @yolk-sdk/react, @yolk-sdk/rag, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
 ## Tree-Shaking Constraints
@@ -47,7 +47,7 @@ app/lib/cloudflare/e2e -> @yolk/agent/* + @yolk/mcp/*
 - Use explicit `exports`; avoid broad root barrels for feature APIs.
 - No top-level env reads, service construction, SDK clients, or network calls in packages.
 - Import types as types; ESLint enforces `@typescript-eslint/consistent-type-imports`.
-- Keep Node-specific APIs behind Node subpaths (`@yolk/mcp/client/node`).
+- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`).
 - Prefer runtime-portable Effect APIs in package code.
 
 ## Boundary Enforcement
@@ -55,8 +55,8 @@ app/lib/cloudflare/e2e -> @yolk/agent/* + @yolk/mcp/*
 - `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, and `scripts/check-package-exports.ts`.
 - Boundary script prevents app/lib/cloudflare/e2e from importing retired internal package names.
 - Boundary script prevents retired package directories from reappearing.
-- Boundary script prevents root `@yolk/agent` and `@yolk/mcp` imports in app/lib/cloudflare/e2e; use explicit subpaths.
-- Boundary script prevents `@yolk/agent` from importing `@yolk/rag`, `@yolk/mcp`, `@yolk/react`, Next, React, or Node builtins.
+- Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in app/lib/cloudflare/e2e; use explicit subpaths.
+- Boundary script prevents `@yolk-sdk/agent` from importing `@yolk-sdk/rag`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, Next, React, or Node builtins.
 - Boundary script prevents RAG from importing MCP/React/Next/Node.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 

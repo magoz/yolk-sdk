@@ -22,7 +22,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Use Effect `Config`, `HttpClient`, Schema, and runtime-injected adapters.
 - Define model-visible tool parameters with Effect Schema annotations and `makeTool`; avoid duplicated hand-written JSON schemas.
 - Optional model tool params should accept `null` as well as omission: use `Schema.optional(Schema.NullOr(...))`, then normalize `null` to `undefined` before handlers.
-- Use `EmptyToolParams` from `@yolk/agent/tools` for no-arg tools.
+- Use `EmptyToolParams` from `@yolk-sdk/agent/tools` for no-arg tools.
 - Tool modules receive context `{ surface, route, userId }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow/voice only; they use app RAG/DB adapters from route runtime wiring, not Cloudflare bootstrap.
@@ -38,7 +38,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - `web_search` chooses provider by checksum unless `YOLK_WEBSEARCH_PROVIDER` overrides.
 - `just_bash` uses a fresh in-memory virtual filesystem per call; network is enabled with literal private/loopback hosts denied; DNS rebinding checks are disabled for portable browser/Worker runtime; no host filesystem, JS, or Python.
 - Invalid/unavailable remote MCP config logs warning and omits tools.
-- Local stdio MCP is package-level only; never import `@yolk/mcp/client/node` here.
+- Local stdio MCP is package-level only; never import `@yolk-sdk/mcp/client/node` here.
 
 ## Tests
 

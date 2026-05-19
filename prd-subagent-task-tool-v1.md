@@ -12,7 +12,7 @@ Yolk's main agent currently has to perform all exploration, synthesis, and tool 
 
 ### Why now?
 
-The agent package stack was consolidated around `@yolk/agent` with explicit protocol, loop, runtime, client, and tools subpaths. The loop already supports parallel tool execution, which creates a natural foundation for a Claude Code/opencode-style `task` tool that lets the model launch parallel subagents when useful.
+The agent package stack was consolidated around `@yolk-sdk/agent` with explicit protocol, loop, runtime, client, and tools subpaths. The loop already supports parallel tool execution, which creates a natural foundation for a Claude Code/opencode-style `task` tool that lets the model launch parallel subagents when useful.
 
 ### Who is affected?
 
@@ -89,7 +89,7 @@ When this PRD is complete, the following will be true:
 
 ### Feature: Task tool contract
 
-- [ ] `@yolk/agent` exposes domain-free subagent/task types through explicit subpaths.
+- [ ] `@yolk-sdk/agent` exposes domain-free subagent/task types through explicit subpaths.
 - [ ] Task input schema includes `description`, `prompt`, and `subagent_type` using opencode/Claude Code-compatible snake_case.
 - [ ] Unknown subagent type returns a typed tool error.
 - [ ] Task result includes a model-visible task result and enough metadata for host/UI correlation.

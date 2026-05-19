@@ -19,7 +19,7 @@ import {
   type Content,
   type ContentPart,
   type ToolDef
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   LLMError,
   LLMDone,
@@ -30,8 +30,8 @@ import {
   LLMUsage,
   type LLMEvent,
   type LLMRequest
-} from '@yolk/agent/loop'
-import { openAiCodexResponsesUrl } from '@yolk/openai'
+} from '@yolk-sdk/agent/loop'
+import { openAiCodexResponsesUrl } from '@yolk-sdk/openai'
 import {
   agentTextReasoningEffort,
   agentTextReasoningSummary,

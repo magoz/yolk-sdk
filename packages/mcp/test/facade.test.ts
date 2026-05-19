@@ -1,16 +1,16 @@
 import { describe, expect, it } from '@effect/vitest'
-import { defaultMcpClientInfo } from '@yolk/mcp/client'
-import { latestMcpProtocolVersion, makeJsonRpcRequest } from '@yolk/mcp/protocol'
-import { makeMcpToolServer } from '@yolk/mcp/server'
+import { defaultMcpClientInfo } from '@yolk-sdk/mcp/client'
+import { latestMcpProtocolVersion, makeJsonRpcRequest } from '@yolk-sdk/mcp/protocol'
+import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
 
-describe('@yolk/mcp subpaths', () => {
+describe('@yolk-sdk/mcp subpaths', () => {
   it('imports every public subpath', async () => {
     const [root, client, nodeClient, protocol, server] = await Promise.all([
-      import('@yolk/mcp'),
-      import('@yolk/mcp/client'),
-      import('@yolk/mcp/client/node'),
-      import('@yolk/mcp/protocol'),
-      import('@yolk/mcp/server')
+      import('@yolk-sdk/mcp'),
+      import('@yolk-sdk/mcp/client'),
+      import('@yolk-sdk/mcp/client/node'),
+      import('@yolk-sdk/mcp/protocol'),
+      import('@yolk-sdk/mcp/server')
     ])
 
     expect(root).toBeDefined()

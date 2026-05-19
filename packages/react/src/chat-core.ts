@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, Content, UserMessage } from '@yolk/agent/protocol'
+import type { AgentEvent, AgentMessage, Content, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,

@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/oauth",
+  "name": "@yolk-sdk/oauth",
   "version": "0.0.0",
   "private": true,
   "type": "module",

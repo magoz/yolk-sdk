@@ -1,6 +1,6 @@
-# @yolk/agent/runtime
+# @yolk-sdk/agent/runtime
 
-Generic session orchestration for `@yolk/agent/loop`.
+Generic session orchestration for `@yolk-sdk/agent/loop`.
 
 ## What it provides
 

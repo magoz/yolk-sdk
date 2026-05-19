@@ -50,7 +50,7 @@ When this PRD is complete:
 
 | Metric | Current | Target | Measurement Method |
 | ------ | ------- | ------ | ------------------ |
-| Package contract coverage | 0 | Covers core Workflow lifecycle | `pnpm --filter @yolk/vercel-workflows-runtime test:run` |
+| Package contract coverage | 0 | Covers core Workflow lifecycle | `pnpm --filter @yolk-sdk/vercel-workflows-runtime test:run` |
 | App Workflow regressions | Manual smoke | Covered by fixture + app tests | `pnpm test:run` |
 | Yolk-specific imports in package | N/A | 0 | package dependency graph / lint |
 
@@ -67,7 +67,7 @@ When this PRD is complete:
 ### Package Boundary
 
 - [ ] Package does not import `app/*`, `lib/services/*`, auth, telemetry, provider adapters, or app tool catalogs.
-- [ ] Package may depend on `workflow`, Effect, `@yolk/agent/protocol`, and `@yolk/agent/loop` only when needed.
+- [ ] Package may depend on `workflow`, Effect, `@yolk-sdk/agent/protocol`, and `@yolk-sdk/agent/loop` only when needed.
 - [ ] App supplies provider/tool/runtime layers or callbacks at step boundaries.
 - [ ] App remains owner of Next route handlers and route paths.
 
@@ -114,8 +114,8 @@ When this PRD is complete:
 
 - Vercel `workflow` package.
 - Effect runtime for step internals and tests.
-- `@yolk/agent/protocol` event/message schemas.
-- `@yolk/agent/loop` model/tool step APIs.
+- `@yolk-sdk/agent/protocol` event/message schemas.
+- `@yolk-sdk/agent/loop` model/tool step APIs.
 
 ### Data Model Changes
 
@@ -161,7 +161,7 @@ When this PRD is complete:
 ## Non-Goals (v1)
 
 - Next route builders — app keeps routes.
-- React/UI helpers — existing `@yolk/react` owns headless UI state.
+- React/UI helpers — existing `@yolk-sdk/react` owns headless UI state.
 - Auth/session/provider/token refresh — app-owned.
 - Tool catalog/policy — app-owned.
 - Product transcript persistence — app/client-owned.
@@ -175,7 +175,7 @@ When this PRD is complete:
 ### Package
 
 ```txt
-@yolk/vercel-workflows-runtime
+@yolk-sdk/vercel-workflows-runtime
 ```
 
 Expected v1 surface shape, names TBD:

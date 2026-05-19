@@ -33,7 +33,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 
 - Return Effect values; do not run effects inside helpers.
 - Pull infrastructure through services (`Db`, `OpenAiCodexOAuth`, etc.).
-- Storage/RAG domain functions use app-owned `AppRagLayer` at boundaries; package `@yolk/rag` owns pipeline contracts only.
+- Storage/RAG domain functions use app-owned `AppRagLayer` at boundaries; package `@yolk-sdk/rag` owns pipeline contracts only.
 - Keep provider/OAuth API calls in services; core composes persistence and policy.
 - Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
 - Store user-authored agent skills in `agentSkill`; runtime loaders convert enabled rows into `SkillsetManifest` data.

@@ -1,4 +1,4 @@
-# @yolk/agent/client
+# @yolk-sdk/agent/client
 
 Framework-agnostic client transport and state helpers for Yolk agents.
 

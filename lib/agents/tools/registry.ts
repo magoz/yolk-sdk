@@ -7,7 +7,7 @@ import { skillToolModule } from './skill-tool.ts'
 import { justBashToolModule } from './just-bash-tool.ts'
 import { makeMcpToolModule } from './mcp-tool-module.ts'
 import { resolveAgentToolSet } from './resolve-toolset.ts'
-import type { McpRemoteServerConfig } from '@yolk/mcp/client'
+import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
 import type { AgentToolContext } from './tool-context.ts'
 
 export { resolveAgentToolSet } from './resolve-toolset.ts'

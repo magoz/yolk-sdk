@@ -6,9 +6,9 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk/agent/protocol'
-import { LLMProvider } from '@yolk/agent/loop'
-import { openAiCodexResponsesUrl } from '@yolk/openai'
+import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
+import { LLMProvider } from '@yolk-sdk/agent/loop'
+import { openAiCodexResponsesUrl } from '@yolk-sdk/openai'
 import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
 import { makeOpenAiCodexProviderLayer } from './openai-codex-provider'
 

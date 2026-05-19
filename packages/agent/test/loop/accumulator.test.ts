@@ -5,7 +5,7 @@ import {
   contentText,
   ToolCall,
   ToolResult
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import { accumulateAssistantMessage } from '../../src/loop'
 import { LLMDone, LLMProviderToolResult, LLMTextDelta, LLMToolCall } from '../../src/loop/llm-event'
 

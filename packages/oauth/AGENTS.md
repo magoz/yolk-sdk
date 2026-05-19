@@ -1,6 +1,6 @@
 # OAuth Contracts
 
-`@yolk/oauth` defines provider-neutral OAuth credential contracts for hosted token brokers and local credential sources.
+`@yolk-sdk/oauth` defines provider-neutral OAuth credential contracts for hosted token brokers and local credential sources.
 
 ## Boundaries
 

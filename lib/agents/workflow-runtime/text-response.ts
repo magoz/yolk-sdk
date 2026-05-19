@@ -1,14 +1,14 @@
 import { Clock, Config, Effect, Layer, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
-import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk/agent/loop'
+import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
   formatTaskResult,
   makeTaskToolModule,
   makeToolExecutorLayer,
   type TaskSubagentDefinition,
   type ToolModule
-} from '@yolk/agent/tools'
-import { formatAvailableSkills, type MergedSkillset } from '@yolk/skillset'
+} from '@yolk-sdk/agent/tools'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
 import {
   assistantContent,
   contentText,
@@ -19,9 +19,9 @@ import {
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
-import { runRuntime } from '@yolk/agent/runtime'
+import { runRuntime } from '@yolk-sdk/agent/runtime'
 import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,

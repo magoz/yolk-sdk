@@ -9,11 +9,11 @@ import {
   LLMTextDelta,
   LLMToolCall,
   LLMUsage
-} from '@yolk/agent/loop'
-import { UserMessage } from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/loop'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
 
-import { TokenBrokerResponse } from '@yolk/oauth'
-import { openAiCodexProviderId } from '@yolk/openai'
+import { TokenBrokerResponse } from '@yolk-sdk/oauth'
+import { openAiCodexProviderId } from '@yolk-sdk/openai'
 import {
   codexWsHeaders,
   makeCodexWsProviderLayer,

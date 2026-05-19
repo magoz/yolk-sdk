@@ -1,5 +1,5 @@
 import { Array as Arr, Option } from 'effect'
-import type { AgentToolRun } from '@yolk/agent/client'
+import type { AgentToolRun } from '@yolk-sdk/agent/client'
 import {
   AssistantAgentMessage,
   AssistantReasoningPart,
@@ -18,7 +18,7 @@ import {
   type AgentMessage,
   type AssistantPart,
   type Content
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 
 export type ChatPartState = 'streaming' | 'done'
 

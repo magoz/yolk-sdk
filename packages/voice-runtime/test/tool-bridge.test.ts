@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { TestToolExecutor } from '@yolk/agent/loop/testing'
+import { TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import { VoiceToolCallRequest, executeVoiceToolCall } from '../src'
 
 describe('executeVoiceToolCall', () => {

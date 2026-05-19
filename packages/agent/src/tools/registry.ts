@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError, ToolExecutor } from '@yolk/agent/loop'
-import { ToolDef, type ToolCall, type ToolResult } from '@yolk/agent/protocol'
+import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
+import { ToolDef, type ToolCall, type ToolResult } from '@yolk-sdk/agent/protocol'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 export type ToolAccess = typeof ToolAccess.Type

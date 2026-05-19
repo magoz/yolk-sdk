@@ -1,22 +1,22 @@
 # Agent Package
 
-`@yolk/agent` is the main package for building and running agents. Root export stays intentionally tiny; use explicit subpaths.
+`@yolk-sdk/agent` is the main package for building and running agents. Root export stays intentionally tiny; use explicit subpaths.
 
 ## Subpaths
 
 | Subpath | Source | Role |
 | --- | --- | --- |
-| `@yolk/agent/protocol` | `src/protocol` | Agent wire/message/event schemas |
-| `@yolk/agent/loop` | `src/loop` | Stateless LLM/tool loop |
-| `@yolk/agent/loop/testing` | `src/loop/testing` | Loop test helpers |
-| `@yolk/agent/runtime` | `src/runtime` | Generic runtime/session orchestration |
-| `@yolk/agent/client` | `src/client` | Client transport/state helpers |
-| `@yolk/agent/tools` | `src/tools` | Generic tool module registry |
+| `@yolk-sdk/agent/protocol` | `src/protocol` | Agent wire/message/event schemas |
+| `@yolk-sdk/agent/loop` | `src/loop` | Stateless LLM/tool loop |
+| `@yolk-sdk/agent/loop/testing` | `src/loop/testing` | Loop test helpers |
+| `@yolk-sdk/agent/runtime` | `src/runtime` | Generic runtime/session orchestration |
+| `@yolk-sdk/agent/client` | `src/client` | Client transport/state helpers |
+| `@yolk-sdk/agent/tools` | `src/tools` | Generic tool module registry |
 
 ## Boundaries
 
 - No React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
-- Do not import `@yolk/rag`, `@yolk/mcp`, `@yolk/react`, or concrete adapter packages from core agent subpaths.
+- Do not import `@yolk-sdk/rag`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, or concrete adapter packages from core agent subpaths.
 - Protocol has no package dependencies except Effect.
 - Loop depends on protocol only.
 - Runtime depends on protocol + loop only.
@@ -24,8 +24,8 @@
 - Tools depend on protocol + loop only.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
-- `@yolk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
-- `@yolk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
+- `@yolk-sdk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
+- `@yolk-sdk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
 - Use `EmptyToolParams` for no-arg `makeTool` tools instead of `Schema.Struct({})` when author intent is no parameters.
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
 - Protocol owns `SubagentStarted`/`SubagentCompleted` events and optional `createdAtMs`; loop emits these around `task` calls while preserving generic tool lifecycle as the source of truth.
@@ -33,6 +33,6 @@
 ## Tests
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, and `test/tools`.
-- Use `@yolk/agent/loop/testing` for fake providers/tool executors outside loop internals.
+- Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
 - Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.

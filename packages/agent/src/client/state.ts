@@ -4,7 +4,7 @@ import {
   type ToolCall,
   type ToolResult,
   type UserMessage
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 
 export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
 

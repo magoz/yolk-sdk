@@ -49,5 +49,5 @@ export type KnowledgeStoreApi = {
 }
 
 export class KnowledgeStore extends Context.Service<KnowledgeStore, KnowledgeStoreApi>()(
-  '@yolk/knowledge/KnowledgeStore'
+  '@yolk-sdk/knowledge/KnowledgeStore'
 ) {}

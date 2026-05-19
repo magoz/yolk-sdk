@@ -1,6 +1,6 @@
 # RAG Core
 
-`@yolk/rag` is the domain-free knowledge retrieval package. It is separate from `@yolk/agent`; agents consume RAG through tool boundaries.
+`@yolk-sdk/rag` is the domain-free knowledge retrieval package. It is separate from `@yolk-sdk/agent`; agents consume RAG through tool boundaries.
 
 ## Role
 
@@ -20,17 +20,17 @@
 
 | Subpath | Role |
 | --- | --- |
-| `@yolk/rag/documents` | Documents, chunks, metadata |
-| `@yolk/rag/chunking` | Generic chunker interfaces/helpers |
-| `@yolk/rag/embeddings` | Embedder interface and vector types |
-| `@yolk/rag/errors` | Tagged package errors |
-| `@yolk/rag/extraction` | Loaded source + extractor service contract |
-| `@yolk/rag/store` | `RagStore` set/document/chunk/search lifecycle contract |
-| `@yolk/rag/vector-store` | Legacy vector-store aliases over `RagStore` names |
-| `@yolk/rag/retrieval` | Retriever interface and context packing |
-| `@yolk/rag/ingestion` | Generic ingestion pipeline |
-| `@yolk/rag/summarization` | Optional document title/summary service contract |
-| `@yolk/rag/agent` | Agent tool adapter helpers |
+| `@yolk-sdk/rag/documents` | Documents, chunks, metadata |
+| `@yolk-sdk/rag/chunking` | Generic chunker interfaces/helpers |
+| `@yolk-sdk/rag/embeddings` | Embedder interface and vector types |
+| `@yolk-sdk/rag/errors` | Tagged package errors |
+| `@yolk-sdk/rag/extraction` | Loaded source + extractor service contract |
+| `@yolk-sdk/rag/store` | `RagStore` set/document/chunk/search lifecycle contract |
+| `@yolk-sdk/rag/vector-store` | Legacy vector-store aliases over `RagStore` names |
+| `@yolk-sdk/rag/retrieval` | Retriever interface and context packing |
+| `@yolk-sdk/rag/ingestion` | Generic ingestion pipeline |
+| `@yolk-sdk/rag/summarization` | Optional document title/summary service contract |
+| `@yolk-sdk/rag/agent` | Agent tool adapter helpers |
 
 ## Contracts
 

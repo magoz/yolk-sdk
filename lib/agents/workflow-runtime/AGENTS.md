@@ -1,6 +1,6 @@
 # App Workflow Runtime
 
-App-owned Vercel Workflow wrappers over `@yolk/vercel-workflows-runtime/workflow`.
+App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows-runtime/workflow`.
 
 ## Boundaries
 

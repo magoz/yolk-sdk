@@ -12,8 +12,8 @@ import {
   ToolDef,
   ToolResult,
   UserMessage
-} from '@yolk/agent/protocol'
-import type { AssistantAgentMessage } from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
+import type { AssistantAgentMessage } from '@yolk-sdk/agent/protocol'
 import {
   ContextTransformer,
   LLMDone,

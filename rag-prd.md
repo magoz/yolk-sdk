@@ -2,7 +2,7 @@
 
 ## Goal
 
-Define a domain-free `@yolk/rag` package for retrieval, ingestion, chunking, embedding, and search, plus the Yolk app boundary that uses it for user-facing storage.
+Define a domain-free `@yolk-sdk/rag` package for retrieval, ingestion, chunking, embedding, and search, plus the Yolk app boundary that uses it for user-facing storage.
 
 ## Principles
 
@@ -14,7 +14,7 @@ Define a domain-free `@yolk/rag` package for retrieval, ingestion, chunking, emb
 
 ## Package Scope
 
-`@yolk/rag` provides reusable RAG primitives and pipelines:
+`@yolk-sdk/rag` provides reusable RAG primitives and pipelines:
 
 - `RagSet`
 - `RagDocument`
@@ -30,7 +30,7 @@ Define a domain-free `@yolk/rag` package for retrieval, ingestion, chunking, emb
 
 ## Package Non-Goals
 
-`@yolk/rag` does not own:
+`@yolk-sdk/rag` does not own:
 
 - app ownership (`kind`, `ownerId`, user/org/project ids)
 - auth or permissions
@@ -232,22 +232,22 @@ These should be hooks/services, not provider-coupled core logic.
 ## Subpaths
 
 ```txt
-@yolk/rag
-@yolk/rag/documents
-@yolk/rag/store
-@yolk/rag/extraction
-@yolk/rag/chunking
-@yolk/rag/embeddings
-@yolk/rag/ingestion
-@yolk/rag/retrieval
-@yolk/rag/agent
+@yolk-sdk/rag
+@yolk-sdk/rag/documents
+@yolk-sdk/rag/store
+@yolk-sdk/rag/extraction
+@yolk-sdk/rag/chunking
+@yolk-sdk/rag/embeddings
+@yolk-sdk/rag/ingestion
+@yolk-sdk/rag/retrieval
+@yolk-sdk/rag/agent
 ```
 
 Root stays small. Feature APIs use explicit subpaths.
 
 ## Agent Integration
 
-`@yolk/rag/agent` provides generic helper adapters only.
+`@yolk-sdk/rag/agent` provides generic helper adapters only.
 
 The app owns:
 
@@ -320,7 +320,7 @@ The app may simplify initially, but separating `storageObject` from `ragDocument
 
 ## Decisions
 
-- Package name: `@yolk/rag`
+- Package name: `@yolk-sdk/rag`
 - Product route: `/storage`
 - Use `RagSet` in package
 - `RagSet` excludes `kind` and `ownerId`

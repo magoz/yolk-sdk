@@ -15,7 +15,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - No product transcript persistence; host app owns storage/resume policy beyond Workflow execution stream.
 - Host app supplies product route/auth/provider/tool wiring; package-owned `'use workflow'` / `'use step'` exports are allowed only with `@workflow/vitest` coverage.
 - Keep Effect runtime work out of workflow orchestration helpers; Effect may run inside host/package step callbacks.
-- Import Workflow orchestration APIs from `@yolk/vercel-workflows-runtime/workflow`; root export is intentionally empty.
+- Import Workflow orchestration APIs from `@yolk-sdk/vercel-workflows-runtime/workflow`; root export is intentionally empty.
 
 ## Design Rules
 
@@ -33,5 +33,5 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - Contract tests live under `test/`.
 - Test-local rules live in `test/AGENTS.md`.
 - Cover no-tool completion, tool continuation, tool ordering, step failure, retry policy, close failure, and max-turn guard.
-- Run `pnpm --filter @yolk/vercel-workflows-runtime test:workflow` after touching package-owned directive fixtures.
+- Run `pnpm --filter @yolk-sdk/vercel-workflows-runtime test:workflow` after touching package-owned directive fixtures.
 - Use fake step callbacks for pure contract tests; use `@workflow/vitest` for real directive transform/start behavior.

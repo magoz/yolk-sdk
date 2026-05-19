@@ -18,13 +18,13 @@ import {
   LLMUsage,
   type LLMEvent,
   type LLMRequest
-} from '@yolk/agent/loop'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/loop'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk-sdk/agent/protocol'
 import {
   streamOpenAiCodexResponse,
   toOpenAiCodexRequestBody
 } from '../../../lib/agents/providers/openai-codex-provider.ts'
-import type { TokenBrokerResponse } from '@yolk/oauth'
+import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
 
 export const codexWsUrl = 'https://chatgpt.com/backend-api/codex/responses'
 const codexWsBetaHeader = 'responses_websockets=2026-02-06'

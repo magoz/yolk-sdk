@@ -2,7 +2,7 @@ import { Duration, Effect, Option, Stream } from 'effect'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
-import type { ToolResult } from '@yolk/agent/protocol'
+import type { ToolResult } from '@yolk-sdk/agent/protocol'
 import type {
   McpClientInfo,
   McpLocalServerConfig,

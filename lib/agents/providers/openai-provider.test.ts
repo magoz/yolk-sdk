@@ -1,8 +1,8 @@
 import { Effect, Layer, Redacted, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolDef, UserMessage } from '@yolk/agent/protocol'
-import { LLMProvider } from '@yolk/agent/loop'
+import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
+import { LLMProvider } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer } from './openai-provider'
 
 type CapturedRequest = {

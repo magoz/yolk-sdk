@@ -22,7 +22,7 @@ export type RagChunkerApi = {
 }
 
 export class RagChunker extends Context.Service<RagChunker, RagChunkerApi>()(
-  '@yolk/rag/RagChunker'
+  '@yolk-sdk/rag/RagChunker'
 ) {}
 
 export const countRagChunkTokens = (text: string) => countTokens(text)

@@ -1,5 +1,5 @@
-import { anthropicClaudeRefreshBufferMs, makeAnthropicClaudeBrokerRequest } from '@yolk/anthropic'
-import type { TokenBrokerResponse } from '@yolk/oauth'
+import { anthropicClaudeRefreshBufferMs, makeAnthropicClaudeBrokerRequest } from '@yolk-sdk/anthropic'
+import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
 
 export const anthropicTokenRefreshBufferMs = anthropicClaudeRefreshBufferMs
 

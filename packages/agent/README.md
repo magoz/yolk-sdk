@@ -1,4 +1,4 @@
-# @yolk/agent
+# @yolk-sdk/agent
 
 Domain-free agent protocol, loop, runtime, client, and tool primitives.
 
@@ -7,17 +7,17 @@ Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 ## Subpaths
 
 ```ts
-import { UserMessage } from '@yolk/agent/protocol'
-import { run } from '@yolk/agent/loop'
-import { runRuntime } from '@yolk/agent/runtime'
-import { initialAgentClientState } from '@yolk/agent/client'
-import { makeTaskToolModule, resolveTools } from '@yolk/agent/tools'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { run } from '@yolk-sdk/agent/loop'
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { initialAgentClientState } from '@yolk-sdk/agent/client'
+import { makeTaskToolModule, resolveTools } from '@yolk-sdk/agent/tools'
 ```
 
 Test helpers live behind their own subpath:
 
 ```ts
-import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent/loop/testing'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 ```
 
 ## Boundaries

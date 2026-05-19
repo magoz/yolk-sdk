@@ -1,13 +1,13 @@
 # OpenAI Provider Package
 
-`@yolk/openai` owns reusable OpenAI-family mechanics for Codex/ChatGPT and future OpenAI API-key modes.
+`@yolk-sdk/openai` owns reusable OpenAI-family mechanics for Codex/ChatGPT and future OpenAI API-key modes.
 
 ## Boundaries
 
 - No app users, teams, sessions, DB, Better Auth, Vercel routes, or Cloudflare Durable Objects.
 - No refresh-token storage ownership.
 - Provider-specific token schemas, endpoints, headers, refresh/device-flow helpers, request lowering, and stream parsing belong here.
-- Hosted apps provide tokens through `@yolk/oauth` broker contracts.
+- Hosted apps provide tokens through `@yolk-sdk/oauth` broker contracts.
 - Local apps provide tokens through local credential sources.
 
 ## Public model

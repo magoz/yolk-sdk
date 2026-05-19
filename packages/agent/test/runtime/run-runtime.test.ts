@@ -5,9 +5,9 @@ import {
   AssistantTextPart,
   UserMessage,
   textOnlyModelCapabilities
-} from '@yolk/agent/protocol'
-import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk/agent/loop'
-import { FauxProvider, Reply, TestToolExecutor } from '@yolk/agent/loop/testing'
+} from '@yolk-sdk/agent/protocol'
+import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import {
   appendRuntimeSessionEventsToLog,
   InputAppended,

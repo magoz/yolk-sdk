@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/cloudflare-agent",
+  "name": "@yolk-sdk/cloudflare-agent",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,12 +13,12 @@
     "tail": "alchemy tail"
   },
   "dependencies": {
-    "@yolk/agent": "workspace:^",
-    "@yolk/anthropic": "workspace:^",
-    "@yolk/mcp": "workspace:^",
-    "@yolk/oauth": "workspace:^",
-    "@yolk/openai": "workspace:^",
-    "@yolk/skillset": "workspace:^",
+    "@yolk-sdk/agent": "workspace:^",
+    "@yolk-sdk/anthropic": "workspace:^",
+    "@yolk-sdk/mcp": "workspace:^",
+    "@yolk-sdk/oauth": "workspace:^",
+    "@yolk-sdk/openai": "workspace:^",
+    "@yolk-sdk/skillset": "workspace:^",
     "alchemy": "2.0.0-beta.36",
     "effect": "catalog:"
   },

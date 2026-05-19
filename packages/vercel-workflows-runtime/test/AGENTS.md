@@ -13,7 +13,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 
 - Pure contract tests run with default package Vitest config.
 - Directive/integration tests must be named `*.integration.test.ts`.
-- Run directive tests with `pnpm --filter @yolk/vercel-workflows-runtime test:workflow`.
+- Run directive tests with `pnpm --filter @yolk-sdk/vercel-workflows-runtime test:workflow`.
 - Assert observable workflow contract: stream chunks, replay/cancel behavior, terminal status.
 - Do not assert Vercel SDK internals.
 

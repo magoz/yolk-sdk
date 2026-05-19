@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Schema } from 'effect'
-import { SkillsetManifest } from '@yolk/skillset'
+import { SkillsetManifest } from '@yolk-sdk/skillset'
 import { generatedSkillsetManifest } from '../src/generated/skillset.ts'
 
 describe('generated skillset manifest', () => {

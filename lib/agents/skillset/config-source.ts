@@ -4,7 +4,7 @@ import {
   emptySkillsetManifest,
   SkillsetManifest,
   type SkillsetManifest as SkillsetManifestType
-} from '@yolk/skillset'
+} from '@yolk-sdk/skillset'
 
 class ConfigSkillsetError extends Schema.TaggedErrorClass<ConfigSkillsetError>()(
   'ConfigSkillsetError',

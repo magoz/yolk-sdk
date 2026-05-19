@@ -1,5 +1,5 @@
 {
-  "name": "@yolk/knowledge",
+  "name": "@yolk-sdk/knowledge",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -53,7 +53,7 @@
     "test:run": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@yolk/agent": "workspace:^",
+    "@yolk-sdk/agent": "workspace:^",
     "effect": "catalog:"
   }
 }

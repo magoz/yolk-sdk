@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { KnowledgeArtifactStore } from '@yolk/knowledge/artifacts'
+import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 

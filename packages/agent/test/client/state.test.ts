@@ -24,7 +24,7 @@ import {
   ToolInputStart,
   UserMessage,
   zeroAgentUsage
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import { markAgentAborted, markAgentError, reduceAgentEvents, submitAgentUserMessage } from '../../src/client'
 
 describe('reduceAgentEvents', () => {

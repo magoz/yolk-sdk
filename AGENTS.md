@@ -49,9 +49,9 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Email sending      | Email                                                    | Transactional email via Resend                                                                                                     |
 | Observability      | Telemetry                                                | OpenTelemetry spans + Sentry error tracking                                                                                        |
 | UI components      | shadcn/ui                                                | Base UI primitives (not Radix), see `components/ui/`                                                                               |
-| Storage/RAG        | `/storage` + `@yolk/rag` + `lib/services/rag`            | Text/file source ingestion, hybrid vector+keyword retrieval, pgvector chunks, OpenAI embeddings; app owns auth/R2/DB adapters       |
-| Knowledge          | `/knowledge` + `@yolk/knowledge`                        | User-owned knowledge objects, R2 artifacts, provenance, pinned context, and agent tools for discovery/search/traversal              |
-| Agent stack        | packages                                                 | `@yolk/agent` subpaths, `@yolk/mcp`, `@yolk/rag`, Workflow runtime, voice-runtime, React hooks                                      |
+| Storage/RAG        | `/storage` + `@yolk-sdk/rag` + `lib/services/rag`            | Text/file source ingestion, hybrid vector+keyword retrieval, pgvector chunks, OpenAI embeddings; app owns auth/R2/DB adapters       |
+| Knowledge          | `/knowledge` + `@yolk-sdk/knowledge`                        | User-owned knowledge objects, R2 artifacts, provenance, pinned context, and agent tools for discovery/search/traversal              |
+| Agent stack        | packages                                                 | `@yolk-sdk/agent` subpaths, `@yolk-sdk/mcp`, `@yolk-sdk/rag`, Workflow runtime, voice-runtime, React hooks                                      |
 | Text agent         | app/agent + app/api/agent + lib/agents                   | `/agent/next` + `/api/agent`; text+image chat UI → protocol transcript + model picker (`gpt-5.4`, Claude Sonnet 4.6)                |
 | Voice agent        | app/agent + app/api/agent/realtime + lib/agents/realtime | Mic mode inside agent runtime pages + Realtime WebRTC routes; `gpt-realtime-2` + `gpt-realtime-whisper` default + `OPENAI_API_KEY` |
 | Web/tools          | lib/agents/tools                                         | `web_fetch` public URL fetch + `web_search` direct Exa/Parallel MCP search + `just_bash` virtual shell + `skill` + remote MCP tools |
@@ -73,7 +73,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | Add tests            | `*.test.ts` beside source or `packages/*/test` | Use @effect/vitest; package tests in package dirs                                  |
 | Add E2E tests        | `e2e/`                                         | Playwright tests, fixtures, `.env.test`; see `e2e/AGENTS.md`                       |
 | Database schema      | `lib/services/db/schema.ts`                    | Drizzle ORM                                                                        |
-| Add storage/RAG app adapter | `lib/services/rag/`                       | App-owned `RagStore`, extractor, embedder layers over `@yolk/rag` contracts        |
+| Add storage/RAG app adapter | `lib/services/rag/`                       | App-owned `RagStore`, extractor, embedder layers over `@yolk-sdk/rag` contracts        |
 | Add storage feature  | `lib/core/storage/`, `app/storage/`             | Server actions + `/storage` UI for source ingestion                                |
 | Add knowledge feature | `lib/core/knowledge/`, `app/knowledge/`, `packages/knowledge/` | Agent-native knowledge objects; see local AGENTS docs                 |
 | Auth flow            | `app/(auth)/`                                  | better-auth + OTP email                                                            |
@@ -110,8 +110,8 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 | `TelemetryLayer`                 | Layer    | `lib/services/telemetry/live-layer.ts`                 | OpenTelemetry + Sentry span/log processing                                           |
 | `reportError`                    | Function | `lib/services/telemetry/report-error.ts`               | Log error + Sentry capture (boundaries only)                                         |
 | `reportWarning`                  | Function | `lib/services/telemetry/report-warning.ts`             | Log warning + Sentry warning (degraded paths)                                        |
-| `AppRagLayer`                    | Layer    | `lib/services/rag/live-layer.ts`                       | App adapters for `@yolk/rag`: Drizzle store, text extractor, OpenAI embedder         |
-| `DrizzleKnowledgeStoreLayer`     | Layer    | `lib/services/knowledge/live-layer.ts`                 | App DB adapter for `@yolk/knowledge` object/artifact catalog                         |
+| `AppRagLayer`                    | Layer    | `lib/services/rag/live-layer.ts`                       | App adapters for `@yolk-sdk/rag`: Drizzle store, text extractor, OpenAI embedder         |
+| `DrizzleKnowledgeStoreLayer`     | Layer    | `lib/services/knowledge/live-layer.ts`                 | App DB adapter for `@yolk-sdk/knowledge` object/artifact catalog                         |
 | `R2KnowledgeArtifactStoreLayer`  | Layer    | `lib/services/knowledge/live-layer.ts`                 | R2/S3-compatible blob adapter for knowledge artifacts                                |
 | `createTextStorageObject`        | Function | `lib/core/storage/create-text-storage-object.ts`       | Creates text `storageObject` and indexes it through package RAG ingestion            |
 | `createTextKnowledgeObject`      | Function | `lib/core/knowledge/create-text-knowledge-object.ts`   | Creates text knowledge object and indexes chunks                                     |
@@ -210,7 +210,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - **LSP shows stale v3 errors** - always use `pnpm tsc` for accurate type checking
 - **NextEffect.runPromise** required because Next.js redirects must be called outside try-catch
 - **Root Vitest may discover package tests** - `pnpm test:run` then also runs package tests; update scripts/docs together if this changes
-- **Workflow package APIs** - import `@yolk/vercel-workflows-runtime/workflow`; root export intentionally empty
+- **Workflow package APIs** - import `@yolk-sdk/vercel-workflows-runtime/workflow`; root export intentionally empty
 - **Workflow step retries** - opt-in only; default no retry for streamed model/tool chunks
 - **Workflow terminal status** - `runVercelAgentWorkflow` returns structured completion/failure/max-turn result
 - **Portless local dev** - `pnpm dev` runs `portless run next dev` at named `.localhost` URLs; use `pnpm dev:app` to bypass proxy
@@ -243,7 +243,7 @@ See `patterns/EFFECT_BEST_PRACTICES.md` for detailed explanations and alternativ
 - `lib/agents/skillset/AGENTS.md` - App skill/command source adapters
 - `lib/agents/mcp/AGENTS.md` - App remote MCP config source
 - `lib/services/AGENTS.md` - Effect-TS service architecture, config, observability patterns
-- `lib/services/knowledge/AGENTS.md` - App Drizzle/R2 adapters for `@yolk/knowledge`
+- `lib/services/knowledge/AGENTS.md` - App Drizzle/R2 adapters for `@yolk-sdk/knowledge`
 - `lib/services/rag/AGENTS.md` - App-owned RAG adapter boundaries
 - `packages/AGENTS.md` - Domain-free reusable agent stack boundaries
 - `packages/knowledge/AGENTS.md` - Domain-free knowledge object/artifact/context contracts

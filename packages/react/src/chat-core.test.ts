@@ -12,7 +12,7 @@ import {
   ToolInputEnd,
   ToolResult,
   UserMessage
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   getAgentChatLiveActivityCount,
   hasAgentChatReasoningSummary,

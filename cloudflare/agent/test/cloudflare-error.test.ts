@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMError } from '@yolk/agent/loop'
-import { SessionLoadError } from '@yolk/agent/runtime'
+import { LLMError } from '@yolk-sdk/agent/loop'
+import { SessionLoadError } from '@yolk-sdk/agent/runtime'
 import { cloudflareRuntimeErrorToAgentError } from '../src/cloudflare-error.ts'
 
 describe('cloudflareRuntimeErrorToAgentError', () => {

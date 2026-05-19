@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add app-owned `/storage` as the product surface for files, text, URLs, and future knowledge sources. Every supported source can be indexed through `@yolk/rag` and searched by UI or agent tools.
+Add app-owned `/storage` as the product surface for files, text, URLs, and future knowledge sources. Every supported source can be indexed through `@yolk-sdk/rag` and searched by UI or agent tools.
 
 ## Principles
 
@@ -111,7 +111,7 @@ ragChunk
 1. User creates storageObject.
 2. App resolves user's default ragSet.
 3. App builds LoadedRagSource from storageObject.
-4. App runs @yolk/rag ingestRagDocument with app layers.
+4. App runs @yolk-sdk/rag ingestRagDocument with app layers.
 5. DrizzleRagStore persists status/chunks.
 6. UI reads status from app tables.
 ```

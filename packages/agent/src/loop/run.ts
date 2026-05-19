@@ -34,7 +34,7 @@ import {
   type AgentUsage,
   type AgentModelCapabilities,
   type ToolDef
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,

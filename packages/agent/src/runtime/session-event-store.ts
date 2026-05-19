@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { AgentError, AgentMessage } from '@yolk/agent/protocol'
+import { AgentError, AgentMessage } from '@yolk-sdk/agent/protocol'
 import { SessionConflictError, SessionNotFoundError } from './error.ts'
 import type { SessionLoadError, SessionSaveError } from './error.ts'
 
@@ -71,7 +71,7 @@ export type SessionEventStoreApi = {
 }
 
 export class SessionEventStore extends Context.Service<SessionEventStore, SessionEventStoreApi>()(
-  '@yolk/agent/runtime/SessionEventStore'
+  '@yolk-sdk/agent/runtime/SessionEventStore'
 ) {}
 
 export const replayRuntimeSessionEvents = (

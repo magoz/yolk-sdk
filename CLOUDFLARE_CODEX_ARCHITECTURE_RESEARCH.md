@@ -368,11 +368,11 @@ Cloudflare:
 Create two packages first:
 
 ```txt
-@yolk/oauth
-@yolk/openai
+@yolk-sdk/oauth
+@yolk-sdk/openai
 ```
 
-`@yolk/oauth` owns shared contracts only:
+`@yolk-sdk/oauth` owns shared contracts only:
 
 - token broker request/response schemas
 - credential source interfaces
@@ -380,7 +380,7 @@ Create two packages first:
 - no provider-specific endpoints
 - no token storage ownership
 
-`@yolk/openai` owns reusable OpenAI/Codex mechanics:
+`@yolk-sdk/openai` owns reusable OpenAI/Codex mechanics:
 
 - Codex request lowering
 - Codex SSE/body parsing
@@ -402,27 +402,27 @@ Consumers:
 
 ```txt
 Cloudflare app
-  → @yolk/openai Codex provider
-  → @yolk/openai token broker client
+  → @yolk-sdk/openai Codex provider
+  → @yolk-sdk/openai token broker client
 
 Vercel app
-  → @yolk/openai Codex refresh helpers
-  → @yolk/oauth broker contract
+  → @yolk-sdk/openai Codex refresh helpers
+  → @yolk-sdk/oauth broker contract
   → app-owned Postgres token store
 
 Local CLI/app
-  → @yolk/openai Codex provider
-  → @yolk/openai local OAuth source
+  → @yolk-sdk/openai Codex provider
+  → @yolk-sdk/openai local OAuth source
 ```
 
-Do not create `@yolk/gateway` yet. The current architecture needs a token broker, not a provider gateway. Add a generic gateway package only after another provider or deployment mode needs remote provider execution.
+Do not create `@yolk-sdk/gateway` yet. The current architecture needs a token broker, not a provider gateway. Add a generic gateway package only after another provider or deployment mode needs remote provider execution.
 
 Anthropic Max / Claude subscription auth should use the same split later:
 
 ```txt
-@yolk/oauth      shared broker/local credential contracts
-@yolk/openai     OpenAI/Codex auth + provider mechanics
-@yolk/anthropic  Anthropic/Claude auth + provider mechanics
+@yolk-sdk/oauth      shared broker/local credential contracts
+@yolk-sdk/openai     OpenAI/Codex auth + provider mechanics
+@yolk-sdk/anthropic  Anthropic/Claude auth + provider mechanics
 ```
 
 The invariant:

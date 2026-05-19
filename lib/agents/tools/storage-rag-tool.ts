@@ -1,9 +1,9 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk/agent/loop'
-import { ToolResult } from '@yolk/agent/protocol'
-import { EmptyToolParams, makeTool, type ToolModule } from '@yolk/agent/tools'
-import type { RagSearchResult } from '@yolk/rag/retrieval'
+import { ToolError } from '@yolk-sdk/agent/loop'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { EmptyToolParams, makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
+import type { RagSearchResult } from '@yolk-sdk/rag/retrieval'
 import type { AgentToolContext } from './tool-context.ts'
 
 const storageSearchToolName = 'search_storage'

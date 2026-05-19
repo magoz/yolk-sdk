@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolExecutor } from '@yolk/agent/loop'
-import { ToolDef, ToolResult } from '@yolk/agent/protocol'
+import { ToolExecutor } from '@yolk-sdk/agent/loop'
+import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import { EmptyToolParams, makeTool as makeSchemaTool, makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
 
 type TestContext = {

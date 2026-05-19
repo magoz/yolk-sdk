@@ -10,7 +10,7 @@ import {
   UserMessage,
   zeroAgentUsage,
   type AgentEvent
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   useAgentChat,
   type AgentChatTransport,

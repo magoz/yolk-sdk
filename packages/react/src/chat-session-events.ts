@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AgentMessage, Content, UserMessage } from '@yolk/agent/protocol'
+import { AgentMessage, Content, UserMessage } from '@yolk-sdk/agent/protocol'
 
 export class ProtocolMessageAppended extends Schema.TaggedClass<ProtocolMessageAppended>()(
   'ProtocolMessageAppended',

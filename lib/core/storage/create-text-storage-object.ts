@@ -1,5 +1,5 @@
 import { Effect } from 'effect'
-import { ingestRagDocument } from '@yolk/rag/ingestion'
+import { ingestRagDocument } from '@yolk-sdk/rag/ingestion'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'

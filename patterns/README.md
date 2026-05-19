@@ -25,6 +25,7 @@ Architecture and convention patterns for this codebase.
 | Pattern                                                | Purpose                                                       |
 | ------------------------------------------------------ | ------------------------------------------------------------- |
 | [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Agent/MCP/RAG package shape, boundaries, tree-shaking rules   |
+| [PACKAGE_DISTRIBUTION.md](./PACKAGE_DISTRIBUTION.md)   | Package versioning, build, release, and artifact validation   |
 
 ## URL State
 

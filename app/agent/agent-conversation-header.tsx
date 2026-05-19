@@ -7,8 +7,8 @@ import {
   MicIcon,
   SlidersHorizontalIcon
 } from 'lucide-react'
-import type { AgentRunStatus } from '@yolk/agent/client'
-import type { AgentUsage } from '@yolk/agent/protocol'
+import type { AgentRunStatus } from '@yolk-sdk/agent/client'
+import type { AgentUsage } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { activityPanelId } from './agent-activity-model'

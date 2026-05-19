@@ -12,7 +12,7 @@ export type RagEmbedderApi = {
 }
 
 export class RagEmbedder extends Context.Service<RagEmbedder, RagEmbedderApi>()(
-  '@yolk/rag/RagEmbedder'
+  '@yolk-sdk/rag/RagEmbedder'
 ) {}
 
 export { RagEmbeddingError as EmbedderError } from './errors.ts'

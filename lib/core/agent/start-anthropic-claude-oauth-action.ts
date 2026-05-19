@@ -3,7 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { Effect } from 'effect'
 import { cookies } from 'next/headers'
-import { makeAnthropicClaudeAuthorizationUrl } from '@yolk/anthropic'
+import { makeAnthropicClaudeAuthorizationUrl } from '@yolk-sdk/anthropic'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { anthropicClaudeOAuthVerifierCookieName } from './anthropic-claude-oauth-cookie'

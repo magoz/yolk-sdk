@@ -1,5 +1,5 @@
 import { Effect, Layer, Ref, Stream } from 'effect'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk/agent/protocol'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk-sdk/agent/protocol'
 import { FauxExhaustedError } from '../error.ts'
 import {
   LLMDone,

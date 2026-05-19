@@ -1,22 +1,22 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { UserMessage } from '@yolk/agent/protocol'
-import { initialAgentClientState } from '@yolk/agent/client'
-import { LoopConfig } from '@yolk/agent/loop'
-import { Reply } from '@yolk/agent/loop/testing'
-import { makeInMemorySessionEventStoreLayer, SessionEventStore } from '@yolk/agent/runtime'
-import { ToolAccess } from '@yolk/agent/tools'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { initialAgentClientState } from '@yolk-sdk/agent/client'
+import { LoopConfig } from '@yolk-sdk/agent/loop'
+import { Reply } from '@yolk-sdk/agent/loop/testing'
+import { makeInMemorySessionEventStoreLayer, SessionEventStore } from '@yolk-sdk/agent/runtime'
+import { ToolAccess } from '@yolk-sdk/agent/tools'
 
-describe('@yolk/agent subpaths', () => {
+describe('@yolk-sdk/agent subpaths', () => {
   it('imports every public subpath', async () => {
     const [root, protocol, client, loop, testing, runtime, tools] = await Promise.all([
-      import('@yolk/agent'),
-      import('@yolk/agent/protocol'),
-      import('@yolk/agent/client'),
-      import('@yolk/agent/loop'),
-      import('@yolk/agent/loop/testing'),
-      import('@yolk/agent/runtime'),
-      import('@yolk/agent/tools')
+      import('@yolk-sdk/agent'),
+      import('@yolk-sdk/agent/protocol'),
+      import('@yolk-sdk/agent/client'),
+      import('@yolk-sdk/agent/loop'),
+      import('@yolk-sdk/agent/loop/testing'),
+      import('@yolk-sdk/agent/runtime'),
+      import('@yolk-sdk/agent/tools')
     ])
 
     expect(root).toBeDefined()

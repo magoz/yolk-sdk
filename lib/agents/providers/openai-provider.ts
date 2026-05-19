@@ -18,7 +18,7 @@ import {
   type Content,
   type ContentPart,
   type ToolDef
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   LLMError,
   LLMDone,
@@ -28,7 +28,7 @@ import {
   LLMUsage,
   type LLMEvent,
   type LLMRequest
-} from '@yolk/agent/loop'
+} from '@yolk-sdk/agent/loop'
 
 type OpenAiConfigShape = {
   readonly apiKey: Redacted.Redacted<string>

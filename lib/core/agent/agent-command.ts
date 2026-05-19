@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { isValidSkillsetName } from '@yolk/skillset'
+import { isValidSkillsetName } from '@yolk-sdk/skillset'
 import { NotFoundError, PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'

@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AgentUsage, ToolCall, ToolResult } from '@yolk/agent/protocol'
+import { AgentUsage, ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 
 export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('TextDelta', {
   text: Schema.String

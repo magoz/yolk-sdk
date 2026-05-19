@@ -14,7 +14,7 @@ import {
   anthropicClaudeRefreshBufferMs,
   anthropicClaudeTokenEndpoint,
   parseAnthropicClaudeAuthorizationCode
-} from '@yolk/anthropic'
+} from '@yolk-sdk/anthropic'
 import { AnthropicClaudeOAuthError } from './errors'
 import {
   AnthropicClaudeTokenResponseSchema,

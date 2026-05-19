@@ -2,14 +2,14 @@ import { Array as Arr, Effect, Option } from 'effect'
 import type { Layer } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import type { HttpClient } from 'effect/unstable/http'
-import { ToolError } from '@yolk/agent/loop'
+import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   callRemoteMcpServerTool,
   listRemoteMcpServerTools,
   sanitizeMcpName
-} from '@yolk/mcp/client'
-import type { McpRemoteServerConfig, McpResolvedTool, McpSecurityPolicy } from '@yolk/mcp/client'
-import type { ToolModule, ToolRegistration } from '@yolk/agent/tools'
+} from '@yolk-sdk/mcp/client'
+import type { McpRemoteServerConfig, McpResolvedTool, McpSecurityPolicy } from '@yolk-sdk/mcp/client'
+import type { ToolModule, ToolRegistration } from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const mcpSecurityPolicy: McpSecurityPolicy = {

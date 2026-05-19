@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk/agent/loop'
-import { ToolResult, type ToolCall } from '@yolk/agent/protocol'
+import { ToolError } from '@yolk-sdk/agent/loop'
+import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
 import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
 
 export const taskToolName = 'task'

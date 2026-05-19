@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { VoiceToolExecutionResult } from '@yolk/voice-runtime'
+import { VoiceToolExecutionResult } from '@yolk-sdk/voice-runtime'
 import { toOpenAiRealtimeToolExecutionResponse } from './tool-bridge'
 
 describe('toOpenAiRealtimeToolExecutionResponse', () => {

@@ -38,7 +38,7 @@ Keep this app-owned first.
 - App owns prompts, config, tools, auth, and policy.
 - `/api/agent` is stateless transcript mode.
 - Browser owns transcript.
-- Tools already go through `@yolk/agent/tools`.
+- Tools already go through `@yolk-sdk/agent/tools`.
 
 ## Architecture conclusion
 
@@ -154,7 +154,7 @@ packages/skillset
 Node-only helpers can live behind a subpath later:
 
 ```txt
-@yolk/skillset/node
+@yolk-sdk/skillset/node
 ```
 
 App and Cloudflare own concrete source adapters and policy.
@@ -462,7 +462,7 @@ Reads standard folders and returns normalized skillset records.
 Later, if useful, move Node helpers behind:
 
 ```txt
-@yolk/skillset/node
+@yolk-sdk/skillset/node
 ```
 
 ### Phase 3: skills runtime
@@ -535,7 +535,7 @@ Completed:
 - Manifest schema + merge helpers.
 - App filesystem source for standard project folders.
 - App config source via `YOLK_SKILLSET` manifest JSON.
-- Text-only `skill` tool via `@yolk/agent/tools`.
+- Text-only `skill` tool via `@yolk-sdk/agent/tools`.
 - `/api/agent` loads merged config + project filesystem skillset and injects `<available_skills>`.
 - `/api/agent/commands` lists commands and renders command prompt macros.
 - `/api/agent/commands` and Effect HttpClient command client have semantic tests.

@@ -1,4 +1,4 @@
-# @yolk/voice-runtime
+# @yolk-sdk/voice-runtime
 
 Provider-neutral bridge from realtime voice tool calls to Yolk tool execution.
 

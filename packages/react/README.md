@@ -1,9 +1,9 @@
-# @yolk/react
+# @yolk-sdk/react
 
 Headless React primitives for building custom agent chat UIs.
 
 ```tsx
-import { useAgentChat, buildAgentChatItems } from '@yolk/react'
+import { useAgentChat, buildAgentChatItems } from '@yolk-sdk/react'
 import { Option } from 'effect'
 
 export function Chat() {
@@ -47,8 +47,8 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 
 ## Package layering
 
-- Use `@yolk/agent/client` for framework-agnostic transport/state, including CLI clients.
-- Use `@yolk/react` for React apps that need headless chat state.
+- Use `@yolk-sdk/agent/client` for framework-agnostic transport/state, including CLI clients.
+- Use `@yolk-sdk/react` for React apps that need headless chat state.
 - Keep host-specific UI, auth, providers, and tools in the app.
 
 ## Tests

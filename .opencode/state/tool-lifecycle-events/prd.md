@@ -25,7 +25,7 @@ Reference repo review showed tool lifecycle richness as a foundational gap. The 
 
 ### Overview
 
-Define a richer provider-neutral tool lifecycle in `@yolk/agent/protocol` and package projections. The lifecycle should replace the current too-coarse called/running/completed event vocabulary with explicit states for streamed tool input, approval, denial, execution errors, provider-executed tools, and step metadata. Breaking changes are acceptable; prefer the best long-term protocol shape over compatibility shims. The model must stay domain-free and generic; app-specific approval policy, UI rendering, and provider quirks remain outside protocol.
+Define a richer provider-neutral tool lifecycle in `@yolk-sdk/agent/protocol` and package projections. The lifecycle should replace the current too-coarse called/running/completed event vocabulary with explicit states for streamed tool input, approval, denial, execution errors, provider-executed tools, and step metadata. Breaking changes are acceptable; prefer the best long-term protocol shape over compatibility shims. The model must stay domain-free and generic; app-specific approval policy, UI rendering, and provider quirks remain outside protocol.
 
 ### Resolved Design Decisions
 
@@ -152,9 +152,9 @@ When this PRD is complete, the following will be true:
 
 ### System Dependencies
 
-- `@yolk/agent/protocol` schema compatibility.
-- `@yolk/agent/client` and `@yolk/react` projection compatibility.
-- `@yolk/agent/loop` local tool execution semantics.
+- `@yolk-sdk/agent/protocol` schema compatibility.
+- `@yolk-sdk/agent/client` and `@yolk-sdk/react` projection compatibility.
+- `@yolk-sdk/agent/loop` local tool execution semantics.
 - Future append store PRD for durable persistence of lifecycle events.
 
 ### Data Model Changes

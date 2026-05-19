@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/agent/protocol'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'

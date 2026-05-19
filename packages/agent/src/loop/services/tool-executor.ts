@@ -1,6 +1,6 @@
 import { Context } from 'effect'
 import type { Effect } from 'effect'
-import type { ToolCall, ToolResult } from '@yolk/agent/protocol'
+import type { ToolCall, ToolResult } from '@yolk-sdk/agent/protocol'
 import type { ToolError } from '../error.ts'
 
 export class ToolExecutor extends Context.Service<
@@ -8,4 +8,4 @@ export class ToolExecutor extends Context.Service<
   {
     readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
   }
->()('@yolk/agent/loop/ToolExecutor') {}
+>()('@yolk-sdk/agent/loop/ToolExecutor') {}

@@ -1,4 +1,4 @@
-import type { AgentRunStatus } from '@yolk/agent/client'
+import type { AgentRunStatus } from '@yolk-sdk/agent/client'
 
 export const isAgentTextBusy = (input: {
   readonly isRunning: boolean

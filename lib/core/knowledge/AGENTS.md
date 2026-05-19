@@ -4,7 +4,7 @@ App-owned knowledge use-cases and agent context helpers.
 
 ## Role
 
-- Compose `@yolk/knowledge` contracts with app services, auth, and policy.
+- Compose `@yolk-sdk/knowledge` contracts with app services, auth, and policy.
 - Keep reusable models in `packages/knowledge`.
 - Keep DB/R2 concrete adapters in `lib/services/knowledge`.
 

@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { NodeStdio } from '@effect/platform-node'
-import { ToolDef, ToolResult } from '@yolk/agent/protocol'
-import { makeMcpToolServer, runStdioMcpServer } from '@yolk/mcp/server'
+import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 
 const server = makeMcpToolServer({
   name: 'local',

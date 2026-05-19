@@ -1,6 +1,6 @@
 # Agent Chat UI
 
-App-local conversation UI over headless `@yolk/react` chat state.
+App-local conversation UI over headless `@yolk-sdk/react` chat state.
 
 ## Boundaries
 
@@ -15,7 +15,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Workflow stop is optimistic in the UI: it aborts the browser stream and calls `run.cancel()`, but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
-- `@yolk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
+- `@yolk-sdk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - Chat text renders Markdown with `streamdown`; keep streaming-safe Markdown rendering in conversation view only.
 - `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
@@ -62,7 +62,7 @@ App-local conversation UI over headless `@yolk/react` chat state.
 - Inline tools/reasoning are optional toggles; debug/status chrome belongs in console/activity, not core chat.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
-- Text model picker is disabled while text is running; selected model is forwarded through `@yolk/react`/`@yolk/agent/client` to Next, Workflow, or Cloudflare runtimes.
+- Text model picker is disabled while text is running; selected model is forwarded through `@yolk-sdk/react`/`@yolk-sdk/agent/client` to Next, Workflow, or Cloudflare runtimes.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 

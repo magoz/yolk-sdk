@@ -7,7 +7,7 @@ import {
   ProviderToolCallPart,
   ProviderToolResultPart,
   type AssistantPart
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import type { LLMEvent } from './llm-event.ts'
 
 export const collectText = (events: ReadonlyArray<LLMEvent>) =>

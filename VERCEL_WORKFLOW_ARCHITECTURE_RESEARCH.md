@@ -585,7 +585,7 @@ Key properties:
   or user-only session files in normal history.
 
 Yolk does not need file JSONL, but the tree shape is useful for future edit/regenerate
-and branch UX. Current `@yolk/react` already has local edit/regenerate session events;
+and branch UX. Current `@yolk-sdk/react` already has local edit/regenerate session events;
 server persistence should eventually model branch parentage instead of overwriting a
 linear transcript.
 

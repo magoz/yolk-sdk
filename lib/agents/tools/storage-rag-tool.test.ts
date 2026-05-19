@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/agent/protocol'
-import type { RagSearchResult } from '@yolk/rag/retrieval'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
+import type { RagSearchResult } from '@yolk-sdk/rag/retrieval'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeStorageRagToolModule } from './storage-rag-tool'
 

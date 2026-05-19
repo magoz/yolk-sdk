@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk/agent/protocol'
-import type { Content, ContentPart } from '@yolk/agent/protocol'
+import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
 export const latestMcpProtocolVersion = '2024-11-05'

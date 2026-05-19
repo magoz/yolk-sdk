@@ -1,4 +1,4 @@
-# @yolk/agent/loop
+# @yolk-sdk/agent/loop
 
 Stateless provider-neutral LLM/tool loop.
 
@@ -8,7 +8,7 @@ Stateless provider-neutral LLM/tool loop.
 - `LLMProvider`, `ToolExecutor`, `LoopConfig`, and `ContextTransformer` Effect service contracts.
 - Assistant text/reasoning/tool-call accumulation helpers.
 - Typed loop errors.
-- `@yolk/agent/loop/testing` test helpers.
+- `@yolk-sdk/agent/loop/testing` test helpers.
 
 ## Use it when
 

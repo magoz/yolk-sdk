@@ -1,4 +1,4 @@
-# @yolk/agent/tools
+# @yolk-sdk/agent/tools
 
 Generic host tool registration and resolution.
 
@@ -7,7 +7,7 @@ Generic host tool registration and resolution.
 - `ToolModule<Context>` and `ToolRegistration<Context>` types.
 - Tool resolution from host modules and context.
 - Duplicate tool name validation.
-- Adapter from resolved tools to `@yolk/agent/loop` `ToolExecutor`.
+- Adapter from resolved tools to `@yolk-sdk/agent/loop` `ToolExecutor`.
 
 ## Use it when
 

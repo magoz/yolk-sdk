@@ -17,11 +17,11 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Cloudflare text runtime wires the same runtime-portable base tools and optional remote MCP tools passed through bootstrap.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Workflow text runtime has durable execution/streaming, but product transcript is still client-owned per turn in v1
-- Workflow durable model/tool loop contract imports from `@yolk/vercel-workflows-runtime/workflow`; app keeps route/auth/provider/tool wrappers, while package-owned directives are covered by Workflow Vitest integration tests.
+- Workflow durable model/tool loop contract imports from `@yolk-sdk/vercel-workflows-runtime/workflow`; app keeps route/auth/provider/tool wrappers, while package-owned directives are covered by Workflow Vitest integration tests.
 - Workflow text runtime exposes run id in the Activity panel; stream replay uses `GET /api/agent/workflow/:runId`; stop also calls `DELETE /api/agent/workflow/:runId`.
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
-- Text route calls stateless `@yolk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
+- Text route calls stateless `@yolk-sdk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode
 - Routes/runtime adapters provide their tool modules explicitly; do not hide tool policy in a global resolver.
 - Route streams NDJSON token events to browser, including in-band `AgentError` failures
 - Cloudflare DO streams protocol events over WS after `SessionSnapshot`; Next remains canonical OAuth refresh owner/token broker and Codex HTTP stream proxy.
@@ -65,14 +65,14 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - `tools/storage-rag-tool.ts`: storage source discovery + RAG search tools; Next/Workflow text and voice over app RAG/DB adapters; omitted from Cloudflare bootstrap
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
-- `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk/agent/tools`; use this at new route/runtime boundaries.
+- `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk-sdk/agent/tools`; use this at new route/runtime boundaries.
 - `web_fetch`/`web_search`, knowledge, and storage tools are text+voice; `just_bash`, skill, and remote MCP tools are text-only.
 - Configured MCP tools are text-only for v1; voice MCP deferred
 - No calculator tool is registered
 - `web_fetch` blocks localhost/private/reserved IPs and manually revalidates redirects before fetching
 - `web_search` calls provider MCP endpoints directly (`mcp.exa.ai`, `search.parallel.ai`); no Yolk backend proxy
 - `web_search` chooses provider by query checksum unless `YOLK_WEBSEARCH_PROVIDER` is set; execution/timeout errors fall back only without override
-- App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk/agent/tools`
+- App tool registry: `tools/registry.ts` exposes route-selectable runtime-portable tool module sets; `tools/resolve-toolset.ts` resolves caller-provided modules via `@yolk-sdk/agent/tools`
 - Cloudflare adapter imports shared text tool composition via `cloudflare/agent/src/tool-modules.ts`; parity tests cover base tools and fake remote MCP.
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - Text tool context may include `sessionId` and `subagent` for delegated task execution/policy.
@@ -89,7 +89,7 @@ Configured MCP source:
 MCP security:
 
 - Remote URLs require `https:`.
-- Local stdio MCP remains package-level only; app tools must not import `@yolk/mcp/client/node` or provide Node process services.
+- Local stdio MCP remains package-level only; app tools must not import `@yolk-sdk/mcp/client/node` or provide Node process services.
 - Invalid config or unavailable servers log warning and omit those tools.
 
 ## JSON Boundaries
@@ -117,7 +117,7 @@ MCP security:
 - Voice tool context route is `/agent`; runtime pages share voice UI
 - Browser owns WebRTC mic/audio/data channel; server owns OpenAI key and tool execution
 - Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure
-- `@yolk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch`, `web_search`, knowledge, and storage tools
+- `@yolk-sdk/voice-runtime` owns provider-neutral tool execution bridge; app voice toolset includes `web_fetch`, `web_search`, knowledge, and storage tools
 - OpenAI Realtime/WebRTC specifics stay in app-layer adapter files
 
 ## OpenAI API-Key Provider

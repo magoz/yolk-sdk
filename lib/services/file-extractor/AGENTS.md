@@ -12,7 +12,7 @@ Extracts uploaded file text for `/storage` and `/knowledge` ingestion.
 
 ## Boundaries
 
-- App-local service only; do not move provider/file parsing dependencies into `@yolk/rag`.
+- App-local service only; do not move provider/file parsing dependencies into `@yolk-sdk/rag`.
 - Keep DB writes and RAG ingestion in domain helpers (`lib/core/storage/*`, `lib/core/knowledge/*`); this service only extracts text.
 - Keep upload size and auth policy in server actions.
 

@@ -22,7 +22,7 @@ import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-han
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import type { ToolDef } from '@yolk/agent/protocol'
+import type { ToolDef } from '@yolk-sdk/agent/protocol'
 
 export const dynamic = 'force-dynamic'
 

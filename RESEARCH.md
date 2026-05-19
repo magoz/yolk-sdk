@@ -49,23 +49,23 @@ Core package boundaries decided. Product-layer details still open.
 
 Researched OpenAI Agents SDK, LangChain/LangGraph, Vercel AI SDK, MCP, AG-UI, AutoGen, Semantic Kernel, Pydantic AI, CrewAI, and Google ADK.
 
-Decision: name the low-level package `@yolk/agent/loop`.
+Decision: name the low-level package `@yolk-sdk/agent/loop`.
 
 Why:
 
 - OpenAI and LangChain use **agent loop** for the model/tool iteration we implement.
-- LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk/agent/runtime`.
+- LangGraph and Google ADK use **agent runtime** for sessions, resumability, streaming, deployment, and durable execution — matching `@yolk-sdk/agent/runtime`.
 - LangChain and Pydantic use **harness** for more opinionated, batteries-included layers with built-in tools, prompts, context engineering, subagents, or capability libraries. Our package intentionally excludes those.
-- MCP and AG-UI are protocol names for agent↔tools/data and agent↔UI boundaries. They validate keeping `@yolk/agent/protocol` separate, but do not name the loop package.
+- MCP and AG-UI are protocol names for agent↔tools/data and agent↔UI boundaries. They validate keeping `@yolk-sdk/agent/protocol` separate, but do not name the loop package.
 
 Naming map:
 
 | Industry term | Yolk package          | Notes                                                     |
 | ------------- | --------------------- | --------------------------------------------------------- |
-| Protocol      | `@yolk/agent/protocol`      | Wire/event/schema contract.                               |
-| Agent loop    | `@yolk/agent/loop`    | Stateless LLM/tool loop.                                  |
-| Agent runtime | `@yolk/agent/runtime` | Sessions, persistence, adapters, resumable runs.          |
-| Client SDK    | `@yolk/agent/client`        | Browser protocol + reducer.                               |
+| Protocol      | `@yolk-sdk/agent/protocol`      | Wire/event/schema contract.                               |
+| Agent loop    | `@yolk-sdk/agent/loop`    | Stateless LLM/tool loop.                                  |
+| Agent runtime | `@yolk-sdk/agent/runtime` | Sessions, persistence, adapters, resumable runs.          |
+| Client SDK    | `@yolk-sdk/agent/client`        | Browser protocol + reducer.                               |
 | Harness       | Reserved              | Future opinionated batteries-included package, if needed. |
 
 ### Not yet discussed
@@ -101,8 +101,8 @@ Goal: make runtime durable without app coupling.
 
 Possible package shapes:
 
-- Extend `@yolk/agent/runtime`
-- Or add `@yolk/session-store`
+- Extend `@yolk-sdk/agent/runtime`
+- Or add `@yolk-sdk/session-store`
 
 Core abstractions:
 
@@ -139,8 +139,8 @@ Goal: make tools resumable and idempotent across Workflow/DO/Node runtimes.
 
 Possible package shapes:
 
-- Extend `@yolk/agent/runtime`
-- Or add `@yolk/tool-runtime`
+- Extend `@yolk-sdk/agent/runtime`
+- Or add `@yolk-sdk/tool-runtime`
 
 Needed concepts:
 
@@ -161,8 +161,8 @@ Goal: reusable, domain-free retrieval pipeline. Do not make RAG one monolith.
 
 Possible package shapes:
 
-- `@yolk/rag`
-- Split later into `@yolk/retrieval` and `@yolk/indexing` if needed.
+- `@yolk-sdk/rag`
+- Split later into `@yolk-sdk/retrieval` and `@yolk-sdk/indexing` if needed.
 
 Core abstractions:
 
@@ -197,7 +197,7 @@ RAG is external knowledge retrieval. Memory is agent/session/user-derived facts,
 
 Possible package:
 
-- `@yolk/memory`
+- `@yolk-sdk/memory`
 
 Memory types:
 
@@ -218,7 +218,7 @@ Goal: compare runtime behavior before complexity compounds.
 
 Possible package:
 
-- `@yolk/evals`
+- `@yolk-sdk/evals`
 
 Features:
 
@@ -242,7 +242,7 @@ Goal: structured long-running work after persistence and durable tools exist.
 
 Possible package:
 
-- `@yolk/planner`
+- `@yolk-sdk/planner`
 
 Core types:
 
@@ -312,21 +312,21 @@ Clearly package-worthy.
 
 Existing examples:
 
-- `@yolk/agent/protocol`
-- `@yolk/agent/loop`
-- `@yolk/agent/runtime`
-- `@yolk/agent/client`
-- `@yolk/react`
-- `@yolk/mcp/client`
-- `@yolk/mcp/server`
-- `@yolk/vercel-workflows-runtime`
+- `@yolk-sdk/agent/protocol`
+- `@yolk-sdk/agent/loop`
+- `@yolk-sdk/agent/runtime`
+- `@yolk-sdk/agent/client`
+- `@yolk-sdk/react`
+- `@yolk-sdk/mcp/client`
+- `@yolk-sdk/mcp/server`
+- `@yolk-sdk/vercel-workflows-runtime`
 
 Possible future examples:
 
-- `@yolk/tool-runtime`
-- `@yolk/memory`
-- `@yolk/retrieval`
-- `@yolk/evals`
+- `@yolk-sdk/tool-runtime`
+- `@yolk-sdk/memory`
+- `@yolk-sdk/retrieval`
+- `@yolk-sdk/evals`
 
 These are about generic agent systems.
 
@@ -336,24 +336,24 @@ Maybe package-worthy if generic and thin.
 
 Examples:
 
-- `@yolk/session-store-postgres`
-- `@yolk/session-store-cloudflare-do`
-- `@yolk/vercel-workflow-checkpoints`
-- `@yolk/vector-store-vectorize`
-- `@yolk/vector-store-pgvector`
+- `@yolk-sdk/session-store-postgres`
+- `@yolk-sdk/session-store-cloudflare-do`
+- `@yolk-sdk/vercel-workflow-checkpoints`
+- `@yolk-sdk/vector-store-vectorize`
+- `@yolk-sdk/vector-store-pgvector`
 
 These can have specific tech opinions, but should not have product opinions.
 
 Good:
 
 ```text
-@yolk/session-store-postgres
+@yolk-sdk/session-store-postgres
 ```
 
 Bad:
 
 ```text
-@yolk/org-knowledge-postgres
+@yolk-sdk/org-knowledge-postgres
 ```
 
 #### 3. Application/business logic
@@ -380,16 +380,16 @@ Possible rule: core packages define interfaces; adapter packages implement speci
 Example:
 
 ```text
-@yolk/agent/runtime
+@yolk-sdk/agent/runtime
   defines SessionEventStore
 
-@yolk/session-store-memory
+@yolk-sdk/session-store-memory
   implements SessionEventStore
 
-@yolk/session-store-postgres
+@yolk-sdk/session-store-postgres
   implements SessionEventStore
 
-@yolk/session-store-cloudflare-do
+@yolk-sdk/session-store-cloudflare-do
   implements SessionEventStore
 ```
 
@@ -404,7 +404,7 @@ Risk: heavy deps leak into core packages. Split once dependencies get heavy.
 
 ### Retrieval/RAG boundary example
 
-Core package, maybe `@yolk/retrieval`, could contain:
+Core package, maybe `@yolk-sdk/retrieval`, could contain:
 
 - document model
 - chunker interface
@@ -425,10 +425,10 @@ App layer should contain:
 
 Adapter packages could include:
 
-- `@yolk/vector-store-pgvector`
-- `@yolk/vector-store-cloudflare-vectorize`
-- `@yolk/embedder-openai`
-- `@yolk/embedder-workers-ai`
+- `@yolk-sdk/vector-store-pgvector`
+- `@yolk-sdk/vector-store-cloudflare-vectorize`
+- `@yolk-sdk/embedder-openai`
+- `@yolk-sdk/embedder-workers-ai`
 
 ### Memory boundary example
 
@@ -635,7 +635,7 @@ This suggests a model between “one package for everything” and “many tiny 
 Possible public package shape:
 
 ```text
-@yolk/agent
+@yolk-sdk/agent
   protocol
   loop
   runtime
@@ -644,7 +644,7 @@ Possible public package shape:
   eval core
   workflow abstractions
 
-@yolk/rag
+@yolk-sdk/rag
   documents
   ingestion
   chunking
@@ -656,28 +656,28 @@ Possible public package shape:
   context packing
   agent tool adapter
 
-@yolk/react
+@yolk-sdk/react
   React bindings
 
-@yolk/vercel-workflows-runtime
+@yolk-sdk/vercel-workflows-runtime
   Vercel adapter
 
-@yolk/storage-postgres
+@yolk-sdk/storage-postgres
   Postgres persistence adapter
 
-@yolk/storage-cloudflare
+@yolk-sdk/storage-cloudflare
   DO/R2/KV/Vectorize adapters
 
-@yolk/rag-openai
+@yolk-sdk/rag-openai
   OpenAI embedder adapter
 
-@yolk/rag-workers-ai
+@yolk-sdk/rag-workers-ai
   Workers AI embedder adapter
 
-@yolk/vector-store-pgvector
+@yolk-sdk/vector-store-pgvector
   pgvector vector-store adapter
 
-@yolk/vector-store-vectorize
+@yolk-sdk/vector-store-vectorize
   Cloudflare Vectorize adapter
 ```
 
@@ -708,32 +708,32 @@ Split package when it:
 This pushes away from keeping every concept as a separate public package forever:
 
 ```text
-@yolk/agent/protocol
-@yolk/agent/loop
-@yolk/agent/runtime
-@yolk/tool-runtime
-@yolk/memory
-@yolk/evals
+@yolk-sdk/agent/protocol
+@yolk-sdk/agent/loop
+@yolk-sdk/agent/runtime
+@yolk-sdk/tool-runtime
+@yolk-sdk/memory
+@yolk-sdk/evals
 ```
 
 And toward fewer core packages with subpath exports:
 
 ```text
-@yolk/agent
-@yolk/rag
-@yolk/react
-@yolk/vercel-workflows-runtime
-@yolk/storage-*
-@yolk/rag-*
-@yolk/vector-store-*
+@yolk-sdk/agent
+@yolk-sdk/rag
+@yolk-sdk/react
+@yolk-sdk/vercel-workflows-runtime
+@yolk-sdk/storage-*
+@yolk-sdk/rag-*
+@yolk-sdk/vector-store-*
 ```
 
 Example public imports:
 
 ```ts
-import { run } from "@yolk/agent/loop"
-import { Memory } from "@yolk/agent/memory"
-import { createRetriever } from "@yolk/rag/retrieval"
+import { run } from "@yolk-sdk/agent/loop"
+import { Memory } from "@yolk-sdk/agent/memory"
+import { createRetriever } from "@yolk-sdk/rag/retrieval"
 ```
 
 Similar in spirit to:
@@ -767,40 +767,40 @@ Goal: Effect-style package architecture for Yolk: broad generic core, explicit a
 Possible eventual public packages:
 
 ```text
-@yolk/agent
-@yolk/rag
-@yolk/react
-@yolk/vercel-workflows-runtime
-@yolk/storage-postgres
-@yolk/storage-cloudflare
-@yolk/rag-openai
-@yolk/rag-workers-ai
-@yolk/vector-store-pgvector
-@yolk/vector-store-vectorize
-@yolk/mcp
+@yolk-sdk/agent
+@yolk-sdk/rag
+@yolk-sdk/react
+@yolk-sdk/vercel-workflows-runtime
+@yolk-sdk/storage-postgres
+@yolk-sdk/storage-cloudflare
+@yolk-sdk/rag-openai
+@yolk-sdk/rag-workers-ai
+@yolk-sdk/vector-store-pgvector
+@yolk-sdk/vector-store-vectorize
+@yolk-sdk/mcp
 ```
 
 Possible later packages:
 
 ```text
-@yolk/evals
-@yolk/devtools
+@yolk-sdk/evals
+@yolk-sdk/devtools
 ```
 
-### Core package: `@yolk/agent`
+### Core package: `@yolk-sdk/agent`
 
-`@yolk/agent` becomes the generic agent construction kit.
+`@yolk-sdk/agent` becomes the generic agent construction kit.
 
 Possible subpath exports:
 
 ```text
-@yolk/agent/protocol
-@yolk/agent/loop
-@yolk/agent/runtime
-@yolk/agent/tools
-@yolk/agent/memory
-@yolk/agent/evals
-@yolk/agent/workflow
+@yolk-sdk/agent/protocol
+@yolk-sdk/agent/loop
+@yolk-sdk/agent/runtime
+@yolk-sdk/agent/tools
+@yolk-sdk/agent/memory
+@yolk-sdk/agent/evals
+@yolk-sdk/agent/workflow
 ```
 
 Rules:
@@ -816,30 +816,30 @@ Rules:
 
 This is the package users install first.
 
-### Core package: `@yolk/rag`
+### Core package: `@yolk-sdk/rag`
 
-RAG is likely its own top-level package, not a subpath of `@yolk/agent`.
+RAG is likely its own top-level package, not a subpath of `@yolk-sdk/agent`.
 
 Reason: the agent only needs RAG through tool calling. The agent does not need to know retrieval is RAG-backed. RAG is a knowledge/search subsystem with useful lifecycle outside agent loops.
 
 Possible subpath exports:
 
 ```text
-@yolk/rag/documents
-@yolk/rag/ingestion
-@yolk/rag/chunking
-@yolk/rag/embeddings
-@yolk/rag/vector-store
-@yolk/rag/retrieval
-@yolk/rag/reranking
-@yolk/rag/citations
-@yolk/rag/context
-@yolk/rag/agent
+@yolk-sdk/rag/documents
+@yolk-sdk/rag/ingestion
+@yolk-sdk/rag/chunking
+@yolk-sdk/rag/embeddings
+@yolk-sdk/rag/vector-store
+@yolk-sdk/rag/retrieval
+@yolk-sdk/rag/reranking
+@yolk-sdk/rag/citations
+@yolk-sdk/rag/context
+@yolk-sdk/rag/agent
 ```
 
-`@yolk/rag/agent` can expose helpers like `makeRagTool(retriever)` so RAG owns how it is exposed to agents.
+`@yolk-sdk/rag/agent` can expose helpers like `makeRagTool(retriever)` so RAG owns how it is exposed to agents.
 
-Allowed in core `@yolk/rag`:
+Allowed in core `@yolk-sdk/rag`:
 
 - document/chunk schemas
 - ingestion pipeline abstractions
@@ -853,7 +853,7 @@ Allowed in core `@yolk/rag`:
 - agent tool adapter
 - in-memory test adapter maybe
 
-Not allowed in core `@yolk/rag`:
+Not allowed in core `@yolk-sdk/rag`:
 
 - OpenAI SDK
 - Workers AI bindings
@@ -866,60 +866,60 @@ Not allowed in core `@yolk/rag`:
 Concrete adapters stay separate:
 
 ```text
-@yolk/rag-openai
-@yolk/rag-workers-ai
-@yolk/vector-store-pgvector
-@yolk/vector-store-vectorize
+@yolk-sdk/rag-openai
+@yolk-sdk/rag-workers-ai
+@yolk-sdk/vector-store-pgvector
+@yolk-sdk/vector-store-vectorize
 ```
 
 ### Framework/runtime packages
 
-#### `@yolk/react`
+#### `@yolk-sdk/react`
 
 Headless React bindings only.
 
 Possible subpaths:
 
 ```text
-@yolk/react/chat
-@yolk/react/transport
+@yolk-sdk/react/chat
+@yolk-sdk/react/transport
 ```
 
 Depends on:
 
 ```text
-@yolk/agent
+@yolk-sdk/agent
 react
 ```
 
 No app logic.
 
-#### `@yolk/vercel-workflows-runtime`
+#### `@yolk-sdk/vercel-workflows-runtime`
 
 Vercel-specific durable runtime adapter.
 
 Depends on:
 
 ```text
-@yolk/agent
+@yolk-sdk/agent
 ```
 
 and Vercel workflow primitives.
 
 It should not define protocol or agent semantics. It implements workflow execution.
 
-#### `@yolk/mcp`
+#### `@yolk-sdk/mcp`
 
 Possible consolidation of current `mcp-client` + `mcp-server`.
 
 Subpaths:
 
 ```text
-@yolk/mcp/client
-@yolk/mcp/server
+@yolk-sdk/mcp/client
+@yolk-sdk/mcp/server
 ```
 
-Open question: does MCP belong in `@yolk/agent/mcp` or separate `@yolk/mcp`?
+Open question: does MCP belong in `@yolk-sdk/agent/mcp` or separate `@yolk-sdk/mcp`?
 
 Current bias: keep separate because MCP is an ecosystem protocol, not Yolk-agent-only.
 
@@ -928,12 +928,12 @@ Current bias: keep separate because MCP is an ecosystem protocol, not Yolk-agent
 Split by concrete tech:
 
 ```text
-@yolk/storage-postgres
-@yolk/storage-cloudflare
-@yolk/rag-openai
-@yolk/rag-workers-ai
-@yolk/vector-store-pgvector
-@yolk/vector-store-vectorize
+@yolk-sdk/storage-postgres
+@yolk-sdk/storage-cloudflare
+@yolk-sdk/rag-openai
+@yolk-sdk/rag-workers-ai
+@yolk-sdk/vector-store-pgvector
+@yolk-sdk/vector-store-vectorize
 ```
 
 These implement core interfaces:
@@ -955,9 +955,9 @@ Use one version for all public packages.
 Example:
 
 ```text
-@yolk/agent@0.4.0
-@yolk/react@0.4.0
-@yolk/storage-postgres@0.4.0
+@yolk-sdk/agent@0.4.0
+@yolk-sdk/react@0.4.0
+@yolk-sdk/storage-postgres@0.4.0
 ```
 
 Even if only one package changed, bump all public packages together.
@@ -1007,7 +1007,7 @@ packages/agent/src/client.ts
 Users import:
 
 ```ts
-import { run } from "@yolk/agent/loop"
+import { run } from "@yolk-sdk/agent/loop"
 ```
 
 Internals can still develop as separate workspace modules.
@@ -1021,7 +1021,7 @@ Options:
 - keep internal packages private workspaces
 - physically merge into `packages/agent`
 
-Public contract remains `@yolk/agent`.
+Public contract remains `@yolk-sdk/agent`.
 
 ### Aggressive tree-shaking rules
 
@@ -1057,9 +1057,9 @@ import * from "./everything"
 Good:
 
 ```text
-@yolk/agent/loop
-@yolk/agent/runtime
-@yolk/rag/retrieval
+@yolk-sdk/agent/loop
+@yolk-sdk/agent/runtime
+@yolk-sdk/rag/retrieval
 ```
 
 #### Code structure
@@ -1085,8 +1085,8 @@ export { version } from "./version"
 Feature imports:
 
 ```ts
-import { run } from "@yolk/agent/loop"
-import { makeRuntime } from "@yolk/agent/runtime"
+import { run } from "@yolk-sdk/agent/loop"
+import { makeRuntime } from "@yolk-sdk/agent/runtime"
 ```
 
 #### Type-only dependencies
@@ -1146,13 +1146,13 @@ Avoid bundling core packages into one big file unless tested.
 Document runtime support explicitly:
 
 ```text
-@yolk/agent/protocol     browser/node/worker
-@yolk/agent/loop         browser/node/worker
-@yolk/agent/runtime      node/worker
-@yolk/rag                browser/node/worker core only
-@yolk/react              browser
-@yolk/storage-postgres   node/serverless
-@yolk/storage-cloudflare worker
+@yolk-sdk/agent/protocol     browser/node/worker
+@yolk-sdk/agent/loop         browser/node/worker
+@yolk-sdk/agent/runtime      node/worker
+@yolk-sdk/rag                browser/node/worker core only
+@yolk-sdk/react              browser
+@yolk-sdk/storage-postgres   node/serverless
+@yolk-sdk/storage-cloudflare worker
 ```
 
 ### Immediate path
@@ -1164,7 +1164,7 @@ Document runtime support explicitly:
 5. Add package API curation docs.
 6. Add bundle/tree-shake tests.
 7. Add fixed-version release setup.
-8. Move new generic features into `@yolk/agent/*` public API.
+8. Move new generic features into `@yolk-sdk/agent/*` public API.
 9. Put adapters in separate packages only when real deps appear.
 
 ### Concrete short-term package set
@@ -1172,23 +1172,23 @@ Document runtime support explicitly:
 Short-term:
 
 ```text
-@yolk/agent
-@yolk/rag
-@yolk/react
-@yolk/mcp
-@yolk/vercel-workflows-runtime
+@yolk-sdk/agent
+@yolk-sdk/rag
+@yolk-sdk/react
+@yolk-sdk/mcp
+@yolk-sdk/vercel-workflows-runtime
 ```
 
 Then:
 
 ```text
-@yolk/storage-memory
-@yolk/storage-postgres
-@yolk/storage-cloudflare
-@yolk/rag-openai
-@yolk/rag-workers-ai
-@yolk/vector-store-pgvector
-@yolk/vector-store-vectorize
+@yolk-sdk/storage-memory
+@yolk-sdk/storage-postgres
+@yolk-sdk/storage-cloudflare
+@yolk-sdk/rag-openai
+@yolk-sdk/rag-workers-ai
+@yolk-sdk/vector-store-pgvector
+@yolk-sdk/vector-store-vectorize
 ```
 
 ### Design rule
@@ -1205,38 +1205,38 @@ Working bias after discussion:
 
 > Agent consumes RAG via tool boundary; RAG does not belong inside agent core.
 
-If a package can be used meaningfully without an agent, it deserves top-level identity. RAG can be used for search/indexing without agents, so `@yolk/rag` likely deserves top-level package status.
+If a package can be used meaningfully without an agent, it deserves top-level identity. RAG can be used for search/indexing without agents, so `@yolk-sdk/rag` likely deserves top-level package status.
 
 ### Main package and protocol boundary
 
 Working bias after discussion:
 
 ```text
-main package: @yolk/agent
-agent protocol: @yolk/agent/protocol
-rag: @yolk/rag
-mcp: @yolk/mcp
-react: @yolk/react
+main package: @yolk-sdk/agent
+agent protocol: @yolk-sdk/agent/protocol
+rag: @yolk-sdk/rag
+mcp: @yolk-sdk/mcp
+react: @yolk-sdk/react
 adapters: separate
 ```
 
 Mental model:
 
 ```text
-@yolk/agent = build/run agents
-@yolk/rag = knowledge retrieval
-@yolk/mcp = MCP protocol
-@yolk/react = UI bindings
+@yolk-sdk/agent = build/run agents
+@yolk-sdk/rag = knowledge retrieval
+@yolk-sdk/mcp = MCP protocol
+@yolk-sdk/react = UI bindings
 ```
 
-Effect precedent: generic protocol abstractions live in core `effect` (`effect/unstable/rpc`, `effect/unstable/http`, `effect/unstable/httpapi`, `effect/unstable/socket`), while concrete runtime/provider implementations split out. By analogy, Yolk's internal agent wire format belongs under `@yolk/agent/protocol`.
+Effect precedent: generic protocol abstractions live in core `effect` (`effect/unstable/rpc`, `effect/unstable/http`, `effect/unstable/httpapi`, `effect/unstable/socket`), while concrete runtime/provider implementations split out. By analogy, Yolk's internal agent wire format belongs under `@yolk-sdk/agent/protocol`.
 
-MCP is different because it is an external ecosystem protocol, not Yolk-agent-specific, so it deserves `@yolk/mcp`.
+MCP is different because it is an external ecosystem protocol, not Yolk-agent-specific, so it deserves `@yolk-sdk/mcp`.
 
 Rule:
 
-- internal Yolk agent wire format → `@yolk/agent/protocol`
-- external protocol standard → own package, e.g. `@yolk/mcp`
+- internal Yolk agent wire format → `@yolk-sdk/agent/protocol`
+- external protocol standard → own package, e.g. `@yolk-sdk/mcp`
 - generic non-agent protocol → maybe top-level later, not now
 
 ---

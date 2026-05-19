@@ -1,6 +1,6 @@
 # Knowledge Core
 
-`@yolk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge objects, artifacts, representations, provenance, links, store contracts, and context assembly.
+`@yolk-sdk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge objects, artifacts, representations, provenance, links, store contracts, and context assembly.
 
 ## Role
 
@@ -28,14 +28,14 @@
 
 | Subpath | Role |
 | --- | --- |
-| `@yolk/knowledge/objects` | Knowledge object schemas and roles |
-| `@yolk/knowledge/artifacts` | Artifact catalog and blob-store contract |
-| `@yolk/knowledge/representations` | Agent-readable/indexable representations |
-| `@yolk/knowledge/provenance` | Source/provenance metadata |
-| `@yolk/knowledge/links` | Typed links between objects |
-| `@yolk/knowledge/store` | Knowledge store lifecycle contract |
-| `@yolk/knowledge/context` | Pinned context assembly helpers |
-| `@yolk/knowledge/agent` | Agent-facing helper contracts |
+| `@yolk-sdk/knowledge/objects` | Knowledge object schemas and roles |
+| `@yolk-sdk/knowledge/artifacts` | Artifact catalog and blob-store contract |
+| `@yolk-sdk/knowledge/representations` | Agent-readable/indexable representations |
+| `@yolk-sdk/knowledge/provenance` | Source/provenance metadata |
+| `@yolk-sdk/knowledge/links` | Typed links between objects |
+| `@yolk-sdk/knowledge/store` | Knowledge store lifecycle contract |
+| `@yolk-sdk/knowledge/context` | Pinned context assembly helpers |
+| `@yolk-sdk/knowledge/agent` | Agent-facing helper contracts |
 
 ## Rules
 

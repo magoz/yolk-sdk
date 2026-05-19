@@ -93,4 +93,4 @@ export type RagStoreApi = {
   ) => Effect.Effect<ReadonlyArray<RagChunk>, RagStoreError>
 }
 
-export class RagStore extends Context.Service<RagStore, RagStoreApi>()('@yolk/rag/RagStore') {}
+export class RagStore extends Context.Service<RagStore, RagStoreApi>()('@yolk-sdk/rag/RagStore') {}

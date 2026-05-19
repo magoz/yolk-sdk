@@ -1,6 +1,6 @@
 import { and, asc, cosineDistance, desc, eq, gte, lte, ne, sql } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { RagEmbedder } from '@yolk/rag/embeddings'
+import { RagEmbedder } from '@yolk-sdk/rag/embeddings'
 import { ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'

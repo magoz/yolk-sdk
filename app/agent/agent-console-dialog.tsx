@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, type MouseEvent } from 'react'
 import { XIcon } from 'lucide-react'
-import type { AgentRunStatus } from '@yolk/agent/client'
-import type { AgentReasoningEffort, AgentUsage } from '@yolk/agent/protocol'
+import type { AgentRunStatus } from '@yolk-sdk/agent/client'
+import type { AgentReasoningEffort, AgentUsage } from '@yolk-sdk/agent/protocol'
 import type { AgentTextModel } from '@/lib/agents/text-agent-config'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
 import { Button } from '@/components/ui/button'

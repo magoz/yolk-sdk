@@ -20,7 +20,7 @@ export type RagSummarizerApi = {
 }
 
 export class RagSummarizer extends Context.Service<RagSummarizer, RagSummarizerApi>()(
-  '@yolk/rag/RagSummarizer'
+  '@yolk-sdk/rag/RagSummarizer'
 ) {}
 
 export const NoopRagSummarizerLive = Layer.succeed(RagSummarizer, {

@@ -8,7 +8,7 @@ export type LoopConfigShape = {
 }
 
 export class LoopConfig extends Context.Service<LoopConfig, LoopConfigShape>()(
-  '@yolk/agent/loop/LoopConfig'
+  '@yolk-sdk/agent/loop/LoopConfig'
 ) {
   static layer = (config: LoopConfigShape) => Layer.succeed(this, config)
   static defaultLayer = this.layer({

@@ -5,7 +5,7 @@ import type {
   AgentModelCapabilities,
   AgentReasoningEffort,
   ToolDef
-} from '@yolk/agent/protocol'
+} from '@yolk-sdk/agent/protocol'
 import {
   run,
   type AgentLoopError,
@@ -13,7 +13,7 @@ import {
   type LLMProvider,
   type LoopConfig,
   type ToolExecutor
-} from '@yolk/agent/loop'
+} from '@yolk-sdk/agent/loop'
 import { runtimeErrorToAgentError } from './error.ts'
 import {
   InputAppended,

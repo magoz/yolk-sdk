@@ -31,7 +31,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - Commands require auth and render command macros as prompt text; no model/provider calls here.
 - Realtime `/call` uses `OPENAI_API_KEY` and raw SDP.
-- Realtime `/tool` uses `@yolk/voice-runtime`; current voice toolset is `web_fetch` + `web_search` + storage.
+- Realtime `/tool` uses `@yolk-sdk/voice-runtime`; current voice toolset is `web_fetch` + `web_search` + storage.
 
 ## Tests
 

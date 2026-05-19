@@ -1,43 +1,43 @@
 import { Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall } from '@yolk/agent/protocol'
-import { makeRagTool } from '@yolk/rag/agent'
+import { ToolCall } from '@yolk-sdk/agent/protocol'
+import { makeRagTool } from '@yolk-sdk/rag/agent'
 import {
   defaultRagChunkingConfig,
   makeRagSet,
   RagChunkSchema,
   RagSearchScopeSchema,
   RagSetSchema
-} from '@yolk/rag/documents'
-import type { RagDocument, RagSet } from '@yolk/rag/documents'
-import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk/rag/chunking'
-import { RagEmbedder } from '@yolk/rag/embeddings'
-import { RagExtractor } from '@yolk/rag/extraction'
-import { ingestRagDocument } from '@yolk/rag/ingestion'
-import { RagSummarizer } from '@yolk/rag/summarization'
-import { packRagContext, retrieveRag } from '@yolk/rag/retrieval'
-import type { RagRetriever } from '@yolk/rag/retrieval'
+} from '@yolk-sdk/rag/documents'
+import type { RagDocument, RagSet } from '@yolk-sdk/rag/documents'
+import { RagChunker, chunkRagText, makeDefaultRagChunker } from '@yolk-sdk/rag/chunking'
+import { RagEmbedder } from '@yolk-sdk/rag/embeddings'
+import { RagExtractor } from '@yolk-sdk/rag/extraction'
+import { ingestRagDocument } from '@yolk-sdk/rag/ingestion'
+import { RagSummarizer } from '@yolk-sdk/rag/summarization'
+import { packRagContext, retrieveRag } from '@yolk-sdk/rag/retrieval'
+import type { RagRetriever } from '@yolk-sdk/rag/retrieval'
 import {
   RagChunkingError,
   RagEmbeddingError,
   RagExtractionError,
   RagRetrievalError,
   RagStoreError
-} from '@yolk/rag/errors'
-import { RagStore } from '@yolk/rag/store'
-import type { RagStoreApi } from '@yolk/rag/store'
+} from '@yolk-sdk/rag/errors'
+import { RagStore } from '@yolk-sdk/rag/store'
+import type { RagStoreApi } from '@yolk-sdk/rag/store'
 
-describe('@yolk/rag', () => {
+describe('@yolk-sdk/rag', () => {
   it('imports public foundations', async () => {
     const [root, chunking, documents, embeddings, errors, extraction, store] = await Promise.all([
-      import('@yolk/rag'),
-      import('@yolk/rag/chunking'),
-      import('@yolk/rag/documents'),
-      import('@yolk/rag/embeddings'),
-      import('@yolk/rag/errors'),
-      import('@yolk/rag/extraction'),
-      import('@yolk/rag/store')
+      import('@yolk-sdk/rag'),
+      import('@yolk-sdk/rag/chunking'),
+      import('@yolk-sdk/rag/documents'),
+      import('@yolk-sdk/rag/embeddings'),
+      import('@yolk-sdk/rag/errors'),
+      import('@yolk-sdk/rag/extraction'),
+      import('@yolk-sdk/rag/store')
     ])
 
     expect(root.RagChunker).toBeDefined()
