@@ -18,25 +18,31 @@ Reusable agent stack. Domain-free below the app layer.
 
 ## Packages
 
-```txt
-packages/
-  protocol/       shared schemas, events, wire types
-  agent-loop/     pure LLM <> tool loop
-  agent-runtime/  reusable session/runtime shell
-  tool-registry/  scoped tool registry + executor layer
-  voice-runtime/  provider-neutral voice tool bridge
-  client/         browser/client SDK
+Public packages use the `@yolk-sdk/*` scope and release in lockstep.
+
+| Package | Role |
+| --- | --- |
+| `@yolk-sdk/agent` | Protocol, loop, runtime, client, and tool primitives |
+| `@yolk-sdk/react` | Headless React chat hook/state helpers |
+| `@yolk-sdk/mcp` | MCP client/server/protocol adapters |
+| `@yolk-sdk/rag` | Retrieval, ingestion, chunking, and store contracts |
+| `@yolk-sdk/knowledge` | Knowledge object/artifact/provenance/context contracts |
+| `@yolk-sdk/oauth` | Provider-neutral OAuth credential contracts |
+| `@yolk-sdk/openai` | OpenAI/Codex auth constants and broker helpers |
+| `@yolk-sdk/anthropic` | Anthropic Claude OAuth constants and broker helpers |
+| `@yolk-sdk/vercel-workflows-runtime` | Vercel Workflow agent loop contract |
+| `@yolk-sdk/skillset` | Portable skill/command parsing and catalogs |
+| `@yolk-sdk/voice-runtime` | Realtime voice tool-call bridge |
+
+Canary install example:
+
+```bash
+pnpm add @yolk-sdk/agent@canary
 ```
 
 Dependency rule:
 
-```txt
-app -> agent-runtime -> agent-loop -> protocol
-app -> agent-loop -> protocol
-app -> tool-registry -> agent-loop -> protocol
-app -> voice-runtime -> agent-loop -> protocol
-app -> client -> protocol
-```
+See `packages/AGENTS.md` and `patterns/PACKAGE_DISTRIBUTION.md` for package boundaries, release policy, and public subpaths.
 
 No users, teams, orgs, projects, billing, or product permissions below app.
 

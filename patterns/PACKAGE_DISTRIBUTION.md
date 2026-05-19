@@ -30,11 +30,11 @@ Use canary releases for initial public distribution. Canary communicates fast-mo
 
 The first public canary should be `0.0.1-canary.0`.
 
-Planned Changesets config:
+Current Changesets config:
 
 ```json
 {
-  "fixed": [["@yolk-sdk/*"]],
+  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/react", "..."]],
   "updateInternalDependencies": "patch",
   "access": "public",
   "privatePackages": false
@@ -49,6 +49,14 @@ Rationale:
 - Docs can say: install matching `@yolk-sdk/*` versions.
 
 Keep internal dependencies as `workspace:^`; Changesets rewrites publish ranges.
+
+Use SemVer for all package versions. Before `1.0.0`, treat `0.x` as unstable: breaking changes may land in minor releases, while patch releases should stay fixes/small compatible changes when practical. After `1.0.0`, follow normal SemVer strictly: patch = compatible fix, minor = compatible feature, major = breaking change.
+
+Current release channel is `canary`. Consumers install canaries with npm dist-tag syntax:
+
+```bash
+pnpm add @yolk-sdk/agent@canary
+```
 
 ## Turbo Decision
 
@@ -72,7 +80,7 @@ Until then, prefer pnpm recursive/filter scripts.
 
 ## Publish Shape
 
-While private, packages may keep source exports:
+Packages keep source exports for local workspace/dev use:
 
 ```json
 {
@@ -89,7 +97,7 @@ For npm, keep local dev source exports but publish `dist` via `publishConfig.exp
 
 ```json
 {
-  "files": ["src/**/*.ts", "dist/**/*", "README.md", "CHANGELOG.md"],
+  "files": ["src/**/*.ts", "dist/**/*", "README.md"],
   "publishConfig": {
     "access": "public",
     "provenance": true,
@@ -120,15 +128,17 @@ Requirements:
 
 ## Dependency Policy
 
-Model host-owned singletons as peers:
+Current canary policy: keep runtime libraries in package `dependencies` unless singleton identity matters at runtime. This makes first canary installs simpler and avoids peer-resolution friction while APIs are unstable.
+
+Host-owned singletons to revisit before stable releases:
 
 - `effect`: peer for publishable packages that expose Effect services/types.
 - `react`: peer for `@yolk-sdk/react`.
 - `workflow`: peer for `@yolk-sdk/vercel-workflows-runtime` if published.
 
-Keep package-local dev deps for tests/builds. Keep platform-specific deps behind explicit subpaths.
+Current exception: `@yolk-sdk/react` keeps `react` as a peer now. Keep platform-specific deps behind explicit subpaths.
 
-## First Alpha Candidate Set
+## First Canary Package Set
 
 Publish all packages in the first public canary:
 
@@ -156,6 +166,75 @@ Rationale: lockstep versions are simpler when every workspace package is public.
 - Include source in npm tarballs: yes.
 - Publish all packages with provenance enabled.
 
+## Actual npm Publish Flow
+
+First canary/manual publish flow:
+
+```bash
+pnpm changeset:canary:enter
+pnpm changeset:version
+```
+
+Verify every public package got the same canary version. Then run full validation before publishing:
+
+```bash
+pnpm packages:build
+pnpm packages:publint
+pnpm packages:smoke
+pnpm packages:check
+pnpm cloudflare:check
+pnpm tsc
+pnpm lint
+pnpm test:run
+```
+
+After validation, remove `private: true` from public package manifests only:
+
+```txt
+packages/*/package.json
+```
+
+Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
+
+Verify `git status` is clean/understood, then publish canary only after explicit approval:
+
+```bash
+pnpm release:canary
+```
+
+Verify npm after publish:
+
+```bash
+npm view @yolk-sdk/agent version
+npm view @yolk-sdk/agent dist-tags
+```
+
+Requirements:
+
+- npm logged in as `magoz`.
+- `@yolk-sdk` org exists and `magoz` is owner.
+- package names are available or already owned by `@yolk-sdk`.
+- all public package versions are lockstep.
+- no dirty/unclear release state.
+
+Use the `/package-release` command after restarting opencode for guided release workflow.
+
+## Automation Plan
+
+Automate releases later with GitHub Actions + Changesets, mirroring Effect and MCP SDK.
+
+Recommended workflow:
+
+- trigger on push to `main`
+- use `changesets/action`
+- version command: `pnpm changeset:version && pnpm install --no-frozen-lockfile`
+- publish command: validation + canary/stable publish script
+- permissions include `contents: write`, `pull-requests: write`, and `id-token: write`
+- npm provenance/trusted publishing enabled
+- optional snapshot workflow later, AI SDK-style
+
+Manual first canary is acceptable; automate after the flow proves correct once.
+
 ## Release Prep Order
 
 1. Freeze public API surface.
@@ -163,17 +242,11 @@ Rationale: lockstep versions are simpler when every workspace package is public.
    - Keep test helpers behind `./testing`.
    - Hide or defer unstable APIs.
 2. Normalize manifests.
-   - Add description, license, repository directory, engines, keywords.
-   - Add explicit `files`.
-   - Add `publishConfig` with provenance.
+   - Done for public packages: description, license, repository directory, engines, keywords, `files`, `publishConfig`.
 3. Add build output.
-   - Add `tsdown`.
-   - Emit `dist` JS and declarations.
-   - Publish `dist` exports.
+   - Done: `tsdown` emits `dist` JS and declarations; npm exports use `publishConfig.exports`.
 4. Add release tooling.
-   - Add Changesets fixed group.
-   - Add package build/check/publint scripts.
-   - Add publish dry-run script.
+   - Done: Changesets fixed group and package build/check/publint/smoke scripts.
    - Enter canary mode with `pnpm changeset:canary:enter` before first versioning.
 5. Add docs.
    - Root package overview.
@@ -188,15 +261,12 @@ Rationale: lockstep versions are simpler when every workspace package is public.
    - `pnpm tsc`
    - `pnpm lint`
    - `pnpm test:run`
-   - `publint`
    - clean fixture install from packed tarballs
 7. Publish canary.
-   - Remove `private: true` only after artifact validation.
-   - Publish with provenance.
-   - Treat canary as feedback, not stability.
+    - Remove `private: true` only after artifact validation.
+    - Publish with provenance.
+    - Treat canary as feedback, not stability.
 
 ## Open Questions
 
-Answer before implementation:
-
-- Package renaming/import migration timing?
+- none

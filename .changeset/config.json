@@ -2,7 +2,21 @@
   "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [["@yolk-sdk/*"]],
+  "fixed": [
+    [
+      "@yolk-sdk/agent",
+      "@yolk-sdk/anthropic",
+      "@yolk-sdk/knowledge",
+      "@yolk-sdk/mcp",
+      "@yolk-sdk/oauth",
+      "@yolk-sdk/openai",
+      "@yolk-sdk/rag",
+      "@yolk-sdk/react",
+      "@yolk-sdk/skillset",
+      "@yolk-sdk/vercel-workflows-runtime",
+      "@yolk-sdk/voice-runtime"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

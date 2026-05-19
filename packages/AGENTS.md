@@ -71,7 +71,7 @@ app -> oauth + Effect
 - Client transport should work for Next UI and Chrome extension by consuming protocol events from a server endpoint; app UI may own richer parts state.
 - React package owns headless hooks only: no components, styling, auth chrome, or provider-specific UI.
 - Voice-runtime may bridge provider tool calls to `ToolExecutor`; provider/WebRTC specifics stay in app/adapters.
-- Root dev deps are shared while packages are private; add package-local dev/peer deps during publish prep.
+- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts; keep `private: true` until publish approval.
 
 ## Reasoning
 
@@ -201,6 +201,7 @@ app -> oauth + Effect
 - `@yolk-sdk/agent/loop/testing` exports `FauxProvider`, `Reply`, and `TestToolExecutor` for tests.
 - Keep test helpers behind explicit `./testing` subpath exports; do not grow the production root API casually.
 - Package exports point to TypeScript source (`src/index.ts`), not `dist`.
+- npm package exports are overridden through `publishConfig.exports` to built `dist` `.mjs` / `.d.mts` files.
 - Node-specific package APIs use explicit subpath exports (for example `@yolk-sdk/mcp/client/node`) so core imports stay portable.
 - Package-internal relative imports use explicit `.ts` extensions, matching Alchemy's source style. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` so future emit rewrites them safely; this also lets Node/Alchemy load source exports directly during deploy-time stack evaluation.
 - `pnpm packages:check` typechecks package `src`; package test files are exercised through `pnpm test:run`.
@@ -216,7 +217,7 @@ app -> oauth + Effect
 
 ## Versioning Plan
 
-- Before publishing, use Changesets fixed/lockstep versioning for all public `@yolk-sdk/*` packages, mirroring Effect's `fixed` group model.
+- Changesets fixed/lockstep versioning is configured for all public `@yolk-sdk/*` packages, mirroring Effect's `fixed` group model.
 - Bump all public `@yolk-sdk/*` package versions together, even when only one package changed.
 - Keep `updateInternalDependencies: "patch"` so internal dependency ranges stay compatible after releases.
 - Prefer compatibility simplicity over per-package version precision; protocol/runtime/client packages are tightly coupled.
@@ -224,16 +225,16 @@ app -> oauth + Effect
 
 ## Dist Build Plan
 
-- Keep TypeScript source exports while packages are private and APIs are still moving quickly.
+- Keep TypeScript source exports for local workspace/dev use while APIs are still moving quickly.
 - Before the first public npm release, curate explicit public exports and remove accidental root `export *` surface.
-- During release prep, add `tsdown`, emit `dist`, switch package exports to `dist`, add `files`, `publishConfig`, `publint`, READMEs, and peer deps.
+- npm `publishConfig.exports` points consumers at `dist`; local `exports` remain source-first.
 - Publish a canary only after validating install/import behavior from a separate fixture app.
 - Add Turbo only if package/app build times, CI orchestration, or affected-only builds become painful; use pnpm recursive scripts until then.
 - Do not add Turbo for initial package distribution prep.
 
-## Package Publishing TODOs
+## Package Publishing Checklist
 
-Use this order when preparing the first public alpha/canary release:
+Use this order when preparing the first public canary release:
 
 1. **Freeze public surface**
    - Keep root exports explicit; do not add broad `export *` barrels.
@@ -241,35 +242,28 @@ Use this order when preparing the first public alpha/canary release:
    - Move test-only helpers behind explicit `./testing` subpaths.
 
 2. **Declare package metadata**
-   - Add package `description`, `license`, `repository.directory`, `engines`, and keywords.
-   - Add `files` entries for publishable artifacts only.
-   - Add package READMEs with install/import examples.
+   - Done: package `description`, `license`, `repository.directory`, `engines`, keywords, `files`, and `publishConfig`.
+   - Keep package READMEs current with install/import examples.
 
 3. **Model host-owned dependencies**
-   - Add peer deps for runtime singletons and host frameworks: `effect`, `react`, and platform/runtime deps where relevant.
+   - Canary policy: keep Effect/runtime libraries in dependencies unless singleton identity matters; revisit peer policy before stable release.
    - Keep dev deps pinned via catalogs for local package tests/builds.
    - Keep internal `@yolk-sdk/*` deps as `workspace:^`.
 
 4. **Add dist build**
-   - Add `tsdown` per package once publishing is imminent.
-   - Emit ESM + `.d.ts` into `dist`.
-   - Switch package `exports` from `src/index.ts` to `dist` outputs.
-   - Keep local dev source exports only if using an Effect-style `publishConfig.exports` override.
+   - Done: `tsdown` emits ESM + declarations into `dist`.
+   - Keep local dev source exports and npm `publishConfig.exports` override.
 
 5. **Add release tooling**
-   - Add Changesets with a fixed/lockstep group for all public `@yolk-sdk/*` packages.
-   - Set `updateInternalDependencies: "patch"`.
-   - Add root scripts for package build, package validation, versioning, and publish dry-run.
+   - Done: Changesets fixed group, `updateInternalDependencies: "patch"`, package build/publint/smoke/check scripts.
 
 6. **Validate package artifacts**
-   - Add `publint` or equivalent export/package checks.
-   - Run `pnpm packages:check`, `pnpm tsc`, `pnpm lint`, and `pnpm test:run`.
-   - Run a local `pnpm pack`/install smoke test in a separate fixture app.
+   - Run `pnpm packages:build`, `pnpm packages:publint`, `pnpm packages:smoke`, `pnpm packages:check`, `pnpm cloudflare:check`, `pnpm tsc`, `pnpm lint`, and `pnpm test:run`.
 
-7. **Publish alpha/canary**
+7. **Publish canary**
    - Remove `private: true` only after artifact validation passes.
    - Publish with provenance if available.
-   - Treat the first alpha as API feedback, not stability commitment.
+   - Treat the first canary as API feedback, not stability commitment.
 
 ## Reference Repo Gap TODOs
 

@@ -61,6 +61,48 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './store'
     ],
     tinyRoot: false
+  },
+  {
+    packageDir: 'packages/anthropic',
+    packageName: '@yolk-sdk/anthropic',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
+  },
+  {
+    packageDir: 'packages/oauth',
+    packageName: '@yolk-sdk/oauth',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
+  },
+  {
+    packageDir: 'packages/openai',
+    packageName: '@yolk-sdk/openai',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
+  },
+  {
+    packageDir: 'packages/react',
+    packageName: '@yolk-sdk/react',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
+  },
+  {
+    packageDir: 'packages/skillset',
+    packageName: '@yolk-sdk/skillset',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
+  },
+  {
+    packageDir: 'packages/vercel-workflows-runtime',
+    packageName: '@yolk-sdk/vercel-workflows-runtime',
+    expectedExports: ['./package.json', '.', './workflow'],
+    tinyRoot: true
+  },
+  {
+    packageDir: 'packages/voice-runtime',
+    packageName: '@yolk-sdk/voice-runtime',
+    expectedExports: ['./package.json', '.'],
+    tinyRoot: false
   }
 ]
 

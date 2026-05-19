@@ -30,6 +30,8 @@ pnpm add @yolk-sdk/agent@canary
 
 ## SemVer interpretation
 
+Yes: Yolk package releases use SemVer.
+
 Before `1.0.0`:
 
 - `0.x` is unstable.
@@ -48,7 +50,7 @@ Expected `.changeset/config.json` traits:
 
 ```json
 {
-  "fixed": [["@yolk-sdk/*"]],
+  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/react", "..."]],
   "updateInternalDependencies": "patch",
   "ignore": ["@yolk-sdk/cloudflare-agent"],
   "access": "public",

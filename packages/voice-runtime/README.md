@@ -2,12 +2,48 @@
 
 Provider-neutral bridge from realtime voice tool calls to Yolk tool execution.
 
+## Install
+
+```bash
+pnpm add @yolk-sdk/voice-runtime@canary @yolk-sdk/agent@canary effect
+```
+
+Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+
 ## What it provides
 
 - Normalized voice tool call request/result types.
 - `executeVoiceToolCall` for running calls through `ToolExecutor`.
 - JSON string result envelope for realtime provider adapters.
 - Typed voice bridge errors.
+
+## Example
+
+```ts
+import { Effect } from 'effect'
+import { executeVoiceToolCall } from '@yolk-sdk/voice-runtime'
+
+const result = executeVoiceToolCall({
+  callId: 'call_1',
+  name: 'search',
+  arguments: '{"query":"hello"}'
+})
+
+// Host provides ToolExecutor.
+Effect.runPromise(result)
+```
+
+Output is a provider-safe JSON string envelope:
+
+```json
+{ "result": { "content": [{ "type": "text", "text": "..." }] } }
+```
+
+Failures use:
+
+```json
+{ "error": "..." }
+```
 
 ## Use it when
 
@@ -18,3 +54,4 @@ Provider-neutral bridge from realtime voice tool calls to Yolk tool execution.
 - No WebRTC or microphone code.
 - No OpenAI Realtime SDK imports.
 - No app tool catalogs.
+- Provider adapters convert this package's result into provider-specific realtime events.

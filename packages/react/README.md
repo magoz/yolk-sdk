@@ -2,6 +2,14 @@
 
 Headless React primitives for building custom agent chat UIs.
 
+## Install
+
+```bash
+pnpm add @yolk-sdk/react@canary @yolk-sdk/agent@canary effect react
+```
+
+Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+
 ```tsx
 import { useAgentChat, buildAgentChatItems } from '@yolk-sdk/react'
 import { Option } from 'effect'
@@ -34,6 +42,18 @@ chat.submitText('Hello')
 chat.stop()
 ```
 
+Useful fields/actions:
+
+| API | Purpose |
+| --- | --- |
+| `chat.chatMessages` | Render source of truth |
+| `chat.messages` | Protocol transcript replay |
+| `chat.submitText` / `submitMessage` | Append user message and start run |
+| `chat.stop` | Interrupt active stream fiber |
+| `chat.deleteTurn` | Remove a user/assistant turn locally |
+| `chat.regenerateFrom` | Truncate and rerun from a message |
+| `chat.editUserMessage` | Replace user content, truncate later turns, rerun |
+
 ## Custom transport
 
 ```ts
@@ -44,6 +64,13 @@ const chat = useAgentChat({
 ```
 
 The transport must yield `AgentEvent`s and accept a protocol transcript in `request.messages`.
+
+## Rendering model
+
+- `AgentChatMessage` groups parts by role/turn.
+- `AgentChatPart` covers text, reasoning, tool calls/results, and errors.
+- `buildAgentChatItems` is optional convenience projection for simple flat UIs.
+- Provider reasoning is displayed only from protocol reasoning events; never fabricate reasoning.
 
 ## Package layering
 

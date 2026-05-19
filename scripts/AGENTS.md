@@ -13,6 +13,8 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | `push-test-db.ts` | Push current Drizzle schema to `.env.test` database before Vitest |
 | `check-package-boundaries.ts` | Validate app/package import boundary rules |
 | `check-package-exports.ts` | Validate package export shape and tree-shaking smoke rules |
+| `check-package-publint.ts` | Run `publint` strict checks across public packages |
+| `smoke-package-imports.ts` | Pack public packages, install/extract into temp fixture, import every public subpath |
 
 ## Rules
 
@@ -22,6 +24,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 - Prefer Effect for orchestration, errors, config, and cleanup when scripts grow beyond simple file transforms.
 - Import centralized dotenv (`@/lib/dotenv`) for scripts that need app env loading.
 - Generated writes must be deterministic and documented in the owning app docs.
+- Release smoke scripts may create temp dirs and pack/install package tarballs only under OS temp paths.
 
 ## Anti-Patterns
 

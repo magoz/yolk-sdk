@@ -21,6 +21,58 @@ pnpm release:canary
 
 Only run `pnpm release:canary` after explicit user approval.
 
+## Actual npm push steps
+
+1. Enter canary mode and version:
+
+```bash
+pnpm changeset:canary:enter
+pnpm changeset:version
+pnpm install
+```
+
+2. Remove `private: true` from public packages only:
+
+```txt
+packages/*/package.json
+```
+
+Keep private app packages private, especially `@yolk-sdk/cloudflare-agent`.
+
+3. Validate:
+
+```bash
+pnpm packages:build
+pnpm packages:publint
+pnpm packages:smoke
+pnpm packages:check
+pnpm cloudflare:check
+pnpm tsc
+pnpm lint
+pnpm test:run
+```
+
+4. Publish:
+
+```bash
+pnpm release:canary
+```
+
+5. Verify:
+
+```bash
+npm view @yolk-sdk/agent version
+npm view @yolk-sdk/agent dist-tags
+```
+
+Preconditions:
+
+- `npm whoami` returns `magoz`.
+- `npm org ls yolk-sdk` shows `magoz` as owner.
+- publish target tag is `canary`.
+- all public versions are lockstep.
+- working tree state is understood.
+
 ## Public package gates
 
 Before publish:
