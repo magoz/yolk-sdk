@@ -93,6 +93,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | `effect-smol` | `.repos/effect` | Effect v4 source/docs |
 | `ai-sdk` | `.repos/ai` | SDK/package/examples monorepo reference |
 | `opencode` | `.repos/opencode` | Codex/OpenAI agent protocol/provider reference |
+| `executor` | `.repos/executor` | Connector/source/tool/plugin architecture reference |
 | `t3code` | `.repos/t3code` | Agent chat/product UI reference |
 | `mcp-sdk` | `.repos/mcp-sdk` | MCP protocol reference |
 | `pi-mono`, `kody`, `flue`, `clanka` | `.repos/*` | Architecture/tooling inspiration |

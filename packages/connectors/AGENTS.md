@@ -7,6 +7,7 @@
 - No DB, encryption, token storage, refresh persistence, app auth, routes, UI, or product permissions.
 - No user/team/org/workspace/project concepts; hosts own identity and lifecycle.
 - No Promise facade; public APIs are Effect-native only.
+- Do not repackage Effect HTTP/runtime adapters; expose ports and let hosts wire Effect layers.
 - Raw secrets may flow through host-provided Effect services at invocation time, but integrations store only opaque credential refs.
 - Provider modules may define vendor mechanics and schemas, not host policy.
 

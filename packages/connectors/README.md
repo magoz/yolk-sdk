@@ -10,6 +10,28 @@ pnpm add @yolk-sdk/connectors@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/connectors` | Core connector/action/integration/credential primitives |
+| `@yolk-sdk/connectors/agent` | Adapter from connector actions to `@yolk-sdk/agent/tools` modules |
+| `@yolk-sdk/connectors/figma` | Figma remote MCP auth action and OAuth constants |
+| `@yolk-sdk/connectors/google` | Gmail/Calendar actions and Google OAuth slot constants |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions |
+| `@yolk-sdk/connectors/notion` | Notion search/page actions and API token slot constants |
+| `@yolk-sdk/connectors/r2-storage` | Cloudflare R2 upload URL action with host-provided presigner |
+| `@yolk-sdk/connectors/telegram` | Telegram bot send/validate actions |
+| `@yolk-sdk/connectors/todoist` | Todoist task actions and API token slot constants |
+
+## Imports
+
+```ts
+import { defineConnector, makeIntegration } from '@yolk-sdk/connectors'
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { GoogleConnector } from '@yolk-sdk/connectors/google'
+```
+
 ## Model
 
 - **Connector**: reusable provider logic.
@@ -119,9 +141,9 @@ const result = GoogleConnector.invoke({
 })
 ```
 
-Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`.
+Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper.
 
-## Provider subpaths
+## Provider actions
 
 | Subpath | Actions |
 | --- | --- |

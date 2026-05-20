@@ -19,6 +19,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
 - `@yolk-sdk/rag` is a sibling RAG package; agent integration lives behind `@yolk-sdk/rag/agent`.
+- `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout
@@ -37,6 +38,7 @@ app/lib/cloudflare/e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 @yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
 @yolk-sdk/rag -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
+@yolk-sdk/connectors -> @yolk-sdk/agent/tools only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/agent -> no @yolk-sdk/react, @yolk-sdk/rag, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
