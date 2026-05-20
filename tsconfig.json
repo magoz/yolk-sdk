@@ -23,6 +23,8 @@
       }
     ],
     "paths": {
+      "@/components/*": ["./examples/next/components/*"],
+      "@/lib/utils": ["./examples/next/lib/utils"],
       "@/*": ["./*"]
     }
   },

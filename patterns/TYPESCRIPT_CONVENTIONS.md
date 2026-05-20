@@ -57,7 +57,6 @@ export class Auth extends Context.Service<Auth>()('@app/Auth', {
 ```typescript
 // CORRECT - use path alias
 import { Auth } from '@/lib/services/auth/live-layer'
-import { cn } from '@/lib/utils'
 
 // WRONG - relative paths for distant files
 import { Auth } from '../../../lib/services/auth/live-layer'

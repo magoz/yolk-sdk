@@ -21,7 +21,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 | `examples/next` | Private Next.js dogfood/reference app; consumes packages like users |
 | `cloudflare/agent` | Private Cloudflare Worker/Durable Object agent runtime |
 | `lib/*` | App-owned adapters/services/domain functions for the Next example |
-| `components/*` | App-owned UI components |
+| `examples/next/components/*` | App-owned UI components |
 | `scripts/*` | Repo tooling; Node CLI boundary |
 | `.repos/*` | Gitignored reference clones only; never workspace members |
 
@@ -65,7 +65,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Server actions/domain | `lib/core/*` | App-owned; see `lib/core/AGENTS.md` |
 | Services/adapters | `lib/services/*` | App-owned; see `lib/services/AGENTS.md` |
 | App agent wiring | `lib/agents/*` | Providers, tools, MCP, runtime layers |
-| UI components | `components/ui` | Base UI/shadcn; see local docs |
+| UI components | `examples/next/components/ui` | App-owned Base UI/shadcn; see local docs |
 | E2E | `e2e` | Playwright; fixed port, no portless |
 | Cloudflare app | `cloudflare/agent` | Worker/DO; explicit `.ts` relative imports |
 | Scripts | `scripts` | Node/process/console/raw JSON exceptions documented locally |
@@ -73,7 +73,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 
 ## PACKAGE BOUNDARIES
 
-- `packages/*` must not import from `examples/*`, `lib/*`, `components/*`, or `cloudflare/*`.
+- `packages/*` must not import from `examples/*`, `lib/*`, or `cloudflare/*`.
 - Packages use `@yolk-sdk/*` names and explicit subpath exports.
 - Public packages release in lockstep via Changesets fixed group.
 - `@yolk-sdk/cloudflare-agent` stays private and ignored by Changesets.

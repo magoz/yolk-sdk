@@ -32,7 +32,7 @@ export default defineConfig({
   globalTeardown: './e2e/global-teardown.ts',
 
   webServer: {
-    command: `NODE_ENV=test pnpm --filter @yolk-example/next exec next dev --port ${port}`,
+    command: `NODE_ENV=test NEXT_PUBLIC_PROJECT_URL=${baseURL} pnpm --filter @yolk-example/next exec next dev --port ${port}`,
     url: baseURL,
     timeout: 120 * 1000,
     reuseExistingServer: false

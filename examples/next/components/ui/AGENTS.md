@@ -1,6 +1,6 @@
 # UI Components
 
-Components installed from external registries, styled for this project.
+Components installed from external registries, styled for the Next example app.
 
 **Note:** This project uses **Base UI** (`@base-ui/react`) primitives instead of Radix UI with shadcn.
 
