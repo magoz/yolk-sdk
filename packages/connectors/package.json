@@ -1,0 +1,135 @@
+{
+  "name": "@yolk-sdk/connectors",
+  "version": "0.0.0",
+  "description": "Effect-native connector, integration, credential, and action primitives for Yolk hosts.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/connectors"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "connectors",
+    "integrations",
+    "agents",
+    "tools",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./agent": {
+      "types": "./src/agent.ts",
+      "default": "./src/agent.ts"
+    },
+    "./figma": {
+      "types": "./src/figma/index.ts",
+      "default": "./src/figma/index.ts"
+    },
+    "./google": {
+      "types": "./src/google/index.ts",
+      "default": "./src/google/index.ts"
+    },
+    "./linkedin-search": {
+      "types": "./src/linkedin-search/index.ts",
+      "default": "./src/linkedin-search/index.ts"
+    },
+    "./notion": {
+      "types": "./src/notion/index.ts",
+      "default": "./src/notion/index.ts"
+    },
+    "./r2-storage": {
+      "types": "./src/r2-storage/index.ts",
+      "default": "./src/r2-storage/index.ts"
+    },
+    "./telegram": {
+      "types": "./src/telegram/index.ts",
+      "default": "./src/telegram/index.ts"
+    },
+    "./todoist": {
+      "types": "./src/todoist/index.ts",
+      "default": "./src/todoist/index.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": {
+        "types": "./dist/agent.d.mts",
+        "import": "./dist/agent.mjs",
+        "default": "./dist/agent.mjs"
+      },
+      "./figma": {
+        "types": "./dist/figma/index.d.mts",
+        "import": "./dist/figma/index.mjs",
+        "default": "./dist/figma/index.mjs"
+      },
+      "./google": {
+        "types": "./dist/google/index.d.mts",
+        "import": "./dist/google/index.mjs",
+        "default": "./dist/google/index.mjs"
+      },
+      "./linkedin-search": {
+        "types": "./dist/linkedin-search/index.d.mts",
+        "import": "./dist/linkedin-search/index.mjs",
+        "default": "./dist/linkedin-search/index.mjs"
+      },
+      "./notion": {
+        "types": "./dist/notion/index.d.mts",
+        "import": "./dist/notion/index.mjs",
+        "default": "./dist/notion/index.mjs"
+      },
+      "./r2-storage": {
+        "types": "./dist/r2-storage/index.d.mts",
+        "import": "./dist/r2-storage/index.mjs",
+        "default": "./dist/r2-storage/index.mjs"
+      },
+      "./telegram": {
+        "types": "./dist/telegram/index.d.mts",
+        "import": "./dist/telegram/index.mjs",
+        "default": "./dist/telegram/index.mjs"
+      },
+      "./todoist": {
+        "types": "./dist/todoist/index.d.mts",
+        "import": "./dist/todoist/index.mjs",
+        "default": "./dist/todoist/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk-sdk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

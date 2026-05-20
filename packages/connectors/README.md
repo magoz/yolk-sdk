@@ -1,0 +1,164 @@
+# @yolk-sdk/connectors
+
+Effect-native connector primitives for hosts that bring their own auth, storage, and policy.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/connectors@canary effect
+```
+
+Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+
+## Model
+
+- **Connector**: reusable provider logic.
+- **Integration**: host-owned config that makes a connector invokable.
+- **Action**: typed operation exposed by a connector.
+- **CredentialSlot**: credential requirement declared by connector code.
+- **CredentialBinding**: integration slot-to-host-credential-ref mapping.
+- **CredentialResolver**: host Effect service that resolves refs at runtime.
+
+## Example
+
+```ts
+import { Effect, Layer, Schema } from 'effect'
+import {
+  ActionResult,
+  ApiKeyCredential,
+  CredentialResolver,
+  CredentialSlot,
+  defineAction,
+  defineConnector,
+  makeCredentialBinding,
+  makeIntegration,
+  resolveCredential
+} from '@yolk-sdk/connectors'
+
+const ApiToken = CredentialSlot.make({
+  id: 'todoist.api_token',
+  kind: 'api_key'
+})
+
+const ListTasksInput = Schema.Struct({ projectId: Schema.optional(Schema.String) })
+const ListTasksOutput = Schema.Struct({ tasks: Schema.Array(Schema.String) })
+
+const listTasks = defineAction({
+  id: 'todoist.list_tasks',
+  description: 'List Todoist tasks',
+  inputSchema: ListTasksInput,
+  outputSchema: ListTasksOutput,
+  execute: input =>
+    Effect.gen(function* () {
+      const credential = yield* resolveCredential(input.integration, ApiToken)
+
+      if (credential._tag !== 'ApiKeyCredential') {
+        return ActionResult.failure({ code: 'invalid_credential', message: 'Expected API key' })
+      }
+
+      return ActionResult.success({ tasks: [] })
+    })
+})
+
+const Todoist = defineConnector({
+  id: 'todoist',
+  actions: [listTasks]
+})
+
+const integration = makeIntegration({
+  connectorId: 'todoist',
+  credentialBindings: [
+    makeCredentialBinding({ slotId: ApiToken.id, credentialRef: 'host-credential-id' })
+  ]
+})
+
+const CredentialResolverLive = Layer.succeed(
+  CredentialResolver,
+  CredentialResolver.of({
+    resolve: () =>
+      Effect.succeed(
+        ApiKeyCredential.make({
+          _tag: 'ApiKeyCredential',
+          key: 'runtime-secret-from-host'
+        })
+      )
+  })
+)
+
+const program = Todoist.invoke({
+  integration,
+  action: 'todoist.list_tasks',
+  input: {}
+}).pipe(Effect.provide(CredentialResolverLive))
+```
+
+## Google connector
+
+```ts
+import { Effect } from 'effect'
+import {
+  makeCredentialBinding,
+  makeIntegration
+} from '@yolk-sdk/connectors'
+import { GoogleConnector, GoogleOAuthCredentialSlot } from '@yolk-sdk/connectors/google'
+
+const integration = makeIntegration({
+  connectorId: 'google',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: GoogleOAuthCredentialSlot.id,
+      credentialRef: 'google-oauth-credential'
+    })
+  ]
+})
+
+const result = GoogleConnector.invoke({
+  integration,
+  action: 'gmail.search',
+  input: { query: 'from:alice@example.com', maxResults: 10 }
+})
+```
+
+Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`.
+
+## Provider subpaths
+
+| Subpath | Actions |
+| --- | --- |
+| `@yolk-sdk/connectors/figma` | `figma.mcp_auth` |
+| `@yolk-sdk/connectors/google` | `gmail.search`, `gmail.get_message`, `calendar.list_events`, `calendar.create_event` |
+| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email` |
+| `@yolk-sdk/connectors/notion` | `notion.search`, `notion.get_page`, `notion.create_page` |
+| `@yolk-sdk/connectors/r2-storage` | `r2_storage.upload_url` |
+| `@yolk-sdk/connectors/telegram` | `telegram.send_message`, `telegram.validate` |
+| `@yolk-sdk/connectors/todoist` | `todoist.list_tasks`, `todoist.create_task`, `todoist.close_task` |
+
+R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled.
+
+## Agent adapter
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { GoogleConnector } from '@yolk-sdk/connectors/google'
+
+const toolModule = makeConnectorToolModule(GoogleConnector, {
+  integration,
+  layer: HostConnectorLayer,
+  access: action => action.includes('create') ? 'write' : 'read'
+})
+```
+
+`HostConnectorLayer` should provide `CredentialResolver`, `ConnectorHttpClient`, and any other connector dependencies.
+
+## Host responsibilities
+
+- Store, encrypt, refresh, revoke, and audit credentials.
+- Own OAuth routes, callbacks, state, and token persistence.
+- Map integrations to users, workspaces, agents, or projects outside this package.
+- Authorize action execution before invoking connectors.
+
+## Boundaries
+
+- No DB, framework, UI, app auth, or product lifecycle code.
+- No Promise facade; use Effect directly.
+- Integrations contain credential refs only, never raw secrets.

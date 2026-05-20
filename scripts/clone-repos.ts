@@ -96,6 +96,12 @@ const repos: ReadonlyArray<RepoSpec> = [
     name: 'clanka',
     repo: 'https://github.com/Effectful-Tech/clanka.git',
     branch: 'master'
+  },
+  {
+    mode: 'branch',
+    name: 'executor',
+    repo: 'https://github.com/rhyssullivan/executor.git',
+    branch: 'main'
   }
 ]
 

@@ -11,6 +11,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 | `@yolk-sdk/mcp` | MCP client/server/protocol package | `packages/mcp/AGENTS.md` |
 | `@yolk-sdk/rag` | Retrieval, ingestion, chunking contracts | `packages/rag/AGENTS.md` |
 | `@yolk-sdk/knowledge` | Knowledge object/artifact/context contracts | `packages/knowledge/AGENTS.md` |
+| `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
 | `@yolk-sdk/oauth` | Provider-neutral OAuth token contracts | `packages/oauth/AGENTS.md` |
 | `@yolk-sdk/openai` | OpenAI/Codex reusable provider mechanics | `packages/openai/AGENTS.md` |
 | `@yolk-sdk/anthropic` | Anthropic/Claude reusable provider mechanics | `packages/anthropic/AGENTS.md` |
@@ -27,6 +28,7 @@ rag -> agent/protocol + agent/tools only for agent adapter
 mcp -> agent/protocol only for ToolDef/ToolResult
 agent -> no react/rag/mcp/app/Next/provider SDKs
 provider packages -> oauth + Effect
+connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
 ```
 
 ## Rules

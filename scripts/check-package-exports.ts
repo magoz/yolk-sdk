@@ -69,6 +69,23 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     tinyRoot: false
   },
   {
+    packageDir: 'packages/connectors',
+    packageName: '@yolk-sdk/connectors',
+    expectedExports: [
+      './package.json',
+      '.',
+      './agent',
+      './figma',
+      './google',
+      './linkedin-search',
+      './notion',
+      './r2-storage',
+      './telegram',
+      './todoist'
+    ],
+    tinyRoot: false
+  },
+  {
     packageDir: 'packages/oauth',
     packageName: '@yolk-sdk/oauth',
     expectedExports: ['./package.json', '.'],

@@ -372,6 +372,15 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
 
+  packages/connectors:
+    dependencies:
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.65
+
   packages/knowledge:
     dependencies:
       '@yolk-sdk/agent':

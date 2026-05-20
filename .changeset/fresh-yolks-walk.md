@@ -1,6 +1,7 @@
 ---
 "@yolk-sdk/agent": patch
 "@yolk-sdk/anthropic": patch
+"@yolk-sdk/connectors": patch
 "@yolk-sdk/knowledge": patch
 "@yolk-sdk/mcp": patch
 "@yolk-sdk/oauth": patch

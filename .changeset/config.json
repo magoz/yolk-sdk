@@ -6,6 +6,7 @@
     [
       "@yolk-sdk/agent",
       "@yolk-sdk/anthropic",
+      "@yolk-sdk/connectors",
       "@yolk-sdk/knowledge",
       "@yolk-sdk/mcp",
       "@yolk-sdk/oauth",
