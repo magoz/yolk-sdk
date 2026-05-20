@@ -19,6 +19,7 @@ Tidy:
 - stale path references after moves
 - duplicated parent/child rules
 - docs that violate monorepo boundaries
+- project skills/commands when docs hierarchy assumptions change
 
 Do not tidy source code unless docs require tiny path/config updates.
 
@@ -66,6 +67,14 @@ Read first:
 - `examples/next/AGENTS.md`
 - `examples/next/patterns/README.md`
 - relevant nested `AGENTS.md`
+
+If package/release/docs hierarchy changed, also read relevant project skills:
+
+- `.opencode/skills/package-docs/SKILL.md`
+- `.opencode/skills/package-docs/references/*.md`
+- `.opencode/skills/package-release/SKILL.md`
+- `.opencode/skills/package-release/references/*.md`
+- `.opencode/skills/tidy/SKILL.md`
 
 Glob:
 
@@ -168,7 +177,21 @@ Keep references to literal app route paths (`/app`, `/api/...`) when they are UR
 - Delete generic advice.
 - Preserve useful project-specific gotchas.
 
-### 8. Validation
+### 8. Skill alignment
+
+When AGENTS/pattern/package hierarchy changes, update project skills that encode old assumptions.
+
+Check for stale skill guidance about:
+
+- `packages/AGENTS.md` owning dense package rules
+- root `patterns/*` owning Next-only patterns
+- old package release/Turbo/pnpm strategy
+- old app paths (`app/` vs `examples/next/app/`)
+- removed integrations or env vars
+
+Patch skills surgically. Do not rewrite unrelated skill workflows.
+
+### 9. Validation
 
 For docs-only runs:
 
