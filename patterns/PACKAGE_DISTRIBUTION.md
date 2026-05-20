@@ -6,7 +6,8 @@ Plan for publishing `packages/*` as public npm packages under the `@yolk-sdk/*` 
 
 Use the Effect repository as the primary distribution model:
 
-- pnpm workspaces, no Turbo by default.
+- pnpm workspaces for membership and version linking.
+- Turbo for task orchestration/cache/order.
 - Changesets for versioning and release notes.
 - Fixed/lockstep versions for every public package.
 - Source exports for local development.
@@ -58,25 +59,14 @@ Current release channel is `canary`. Consumers install canaries with npm dist-ta
 pnpm add @yolk-sdk/agent@canary
 ```
 
-## Turbo Decision
+## Turbo Boundary
 
-Do not add Turborepo yet.
+Turbo is present for task orchestration/cache/order only.
 
-Current pnpm scripts are enough:
-
-- package count is small.
-- no CI/CD task graph exists yet.
-- package publishing blockers are API, docs, metadata, and artifact validation, not orchestration.
-- Turbo adds config and cache invalidation surface before we need it.
-
-Reconsider Turbo when one of these is true:
-
-- package checks/builds are slow enough to hurt iteration.
-- CI needs affected-only package jobs.
-- remote caching would save real time.
-- package/app graph becomes hard to run with pnpm recursive scripts.
-
-Until then, prefer pnpm recursive/filter scripts.
+- `pnpm-workspace.yaml` owns workspace membership, catalogs, lockfile, and `workspace:^` links.
+- `turbo.json` owns task dependency order and cache outputs.
+- Package publish scripts still use pnpm filters where direct package fan-out is simpler.
+- Do not move package membership/version policy into Turbo config.
 
 ## Publish Shape
 

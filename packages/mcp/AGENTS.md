@@ -19,6 +19,17 @@
 - Client/server may use `@yolk-sdk/agent/protocol` for generic `ToolDef`/`ToolResult`; agent loop/providers remain MCP-agnostic.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 
+## Client/server rules
+
+- Remote MCP uses Effect `HttpClient`; tests inject fake clients, apps provide runtime layers.
+- Remote MCP requires `https:` by default; `http://localhost` is dev-policy gated.
+- Local stdio lives behind `@yolk-sdk/mcp/client/node`; use Effect platform process/stream APIs, not raw `node:child_process`.
+- Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id.
+- Decode wire JSON in two steps: JSON string → unknown (`Schema.UnknownFromJsonString`) → protocol schema.
+- Server maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
+- Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
+- Export normal `ToolDef`/`ToolResult`; agent loop/providers stay MCP-agnostic.
+
 ## Tests
 
 - Client transport/protocol tests live under `test/client`.

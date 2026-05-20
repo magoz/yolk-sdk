@@ -25,7 +25,7 @@ Inputs:
   - `INIT_V4_PLAN.md`
 - Keep reusable packages domain-free.
 - No users, teams, orgs, projects, billing, OAuth, knowledge-store specifics, or product permissions below app layer.
-- Do not add Turbo unless needed. Use pnpm workspaces first.
+- Historical note: template initially avoided Turbo. Current repo uses pnpm workspaces plus `turbo.json`; see root `AGENTS.md`.
 
 ## Steps
 

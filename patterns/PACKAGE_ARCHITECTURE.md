@@ -50,6 +50,15 @@ app/lib/cloudflare/e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 - Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`).
 - Prefer runtime-portable Effect APIs in package code.
 
+## Workspace Setup
+
+- Shared dependency pins live in `pnpm-workspace.yaml` catalogs; use `catalog:` for Effect-family packages, TypeScript, and Vitest.
+- Root `packageManager` pins pnpm for reproducible installs.
+- Package tsconfigs extend `packages/tsconfig.base.json`; keep package-local configs to `outDir`, `rootDir`, and include/exclude overrides.
+- Keep package dependencies explicit in each package manifest even when versions come from catalogs.
+- Internal `@yolk-sdk/*` dependencies use `workspace:^`; Changesets rewrites publish ranges.
+- Package-internal relative imports use explicit `.ts` extensions. `packages/tsconfig.base.json` enables `rewriteRelativeImportExtensions` for emit.
+
 ## Boundary Enforcement
 
 - `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, and `scripts/check-package-exports.ts`.

@@ -93,6 +93,14 @@ Move or rewrite content by boundary:
 - Cloudflare Worker/DO rules → `cloudflare/agent/AGENTS.md`
 - Reference repo notes → root `REFERENCE REPOS`, never `.repos/**` docs
 
+Before deleting large sections, create a preservation map:
+
+| Removed topic | Destination | Verified? |
+| --- | --- | --- |
+| Tool registry rules | `patterns/PACKAGE_ARCHITECTURE.md` | yes/no |
+
+If no destination exists, move/summarize the project-specific rule before deleting it.
+
 ### 4. AGENTS.md rules
 
 Root `AGENTS.md` should stay compact:
@@ -110,6 +118,8 @@ Child `AGENTS.md`:
 - never repeats parent rules except critical local reminders
 - sections: Role/Structure/Rules/Anti-patterns/Commands only as needed
 - prefer links to patterns over copying pattern text
+
+Large trims are allowed only after checking that unique terms still exist elsewhere. Grep representative removed phrases before finalizing.
 
 ### 5. Pattern placement rules
 
@@ -139,6 +149,13 @@ Always grep for moved/stale refs relevant to the run:
 - `patterns/DATA_ACCESS_PATTERNS`, `patterns/NUQS_URL_STATE`, `patterns/USABILITY_BEST_PRACTICES`
 - removed integrations like `Sentry` if recently removed
 - generated dirs: `.next`, `.turbo`, `dist`
+
+For broad docs cleanup, also grep for preservation of important package terms when touched:
+
+- `AgentReasoningEffort`, `ContentPart`, `ToolModule`, `SkillsetManifest`
+- `Local stdio`, `structuredContent`, `UnknownFromJsonString`
+- `VoiceToolCallRequest`, `AgentTranscript`, `runVercelAgentWorkflow`
+- `publishConfig.exports`, `workspace:^`, `tsdown`
 
 Keep references to literal app route paths (`/app`, `/api/...`) when they are URLs/routes, not filesystem paths.
 
@@ -177,6 +194,7 @@ Final response:
 
 - files moved/updated
 - misplaced knowledge fixed
+- large trims and where unique rules went
 - stale refs checked
 - validation run + result
 - no commit unless explicitly requested
@@ -184,6 +202,7 @@ Final response:
 ## Anti-patterns
 
 - Regenerating everything by default.
+- Deleting dense docs without a preservation map.
 - Creating AGENTS.md for every directory.
 - Duplicating root rules in children.
 - Putting Next-only rules in root `patterns/*`.

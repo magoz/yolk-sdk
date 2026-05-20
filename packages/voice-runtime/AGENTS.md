@@ -26,6 +26,7 @@
 ## Design rules
 
 - Decode and encode JSON via Effect Schema boundaries.
+- `VoiceToolCallRequest` accepts provider-normalized `{ callId, name, arguments }`.
 - Return a string envelope: `{ result }` or `{ error }`.
 - Preserve provider call ids exactly.
 - Keep failures user-safe and typed; do not leak secrets through errors.

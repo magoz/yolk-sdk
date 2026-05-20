@@ -30,6 +30,18 @@
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
 - Protocol owns `SubagentStarted`/`SubagentCompleted` events and optional `createdAtMs`; loop emits these around `task` calls while preserving generic tool lifecycle as the source of truth.
 
+## Protocol/loop rules
+
+- `AgentReasoningEffort` is protocol-only request config; app/provider layers choose and pass through values.
+- `Content = string | ContentPart[]`; use protocol helpers (`contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`) instead of app-local duplication.
+- `AgentModelCapabilities` is protocol-only; app/provider config chooses text-only vs text+image, and loop rejects unsupported input before provider calls.
+- Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
+- Provider adapters classify retryable failures and normalize raw usage; loop owns retry/usage aggregation.
+- Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
+- Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
+- `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
+- Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, loop runs them concurrently within `toolConcurrency`, and dependent work waits for the next model turn.
+
 ## Tests
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, and `test/tools`.
