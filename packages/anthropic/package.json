@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/anthropic",
   "version": "0.0.0",
-  "private": true,
   "description": "Anthropic Claude OAuth and provider mechanics for Yolk hosts.",
   "license": "MIT",
   "type": "module",

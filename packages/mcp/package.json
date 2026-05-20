@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/mcp",
   "version": "0.0.0",
-  "private": true,
   "description": "MCP client, server, and protocol utilities for Yolk agent runtimes.",
   "license": "MIT",
   "type": "module",

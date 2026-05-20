@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/skillset",
   "version": "0.0.0",
-  "private": true,
   "description": "Portable skill and slash-command parsing and catalog primitives for Yolk.",
   "license": "MIT",
   "type": "module",

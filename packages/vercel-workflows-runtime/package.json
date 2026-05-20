@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/vercel-workflows-runtime",
   "version": "0.0.0",
-  "private": true,
   "description": "Vercel Workflow orchestration primitives for Yolk agent loops.",
   "license": "MIT",
   "type": "module",

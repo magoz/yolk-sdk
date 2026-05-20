@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/oauth",
   "version": "0.0.0",
-  "private": true,
   "description": "Generic OAuth token broker and credential source contracts for Yolk hosts.",
   "license": "MIT",
   "type": "module",

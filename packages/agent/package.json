@@ -1,7 +1,6 @@
 {
   "name": "@yolk-sdk/agent",
   "version": "0.0.0",
-  "private": true,
   "description": "Protocol, loop, runtime, client, and tool primitives for building Yolk agents.",
   "license": "MIT",
   "type": "module",
