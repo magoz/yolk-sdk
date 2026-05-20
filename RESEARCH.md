@@ -40,7 +40,7 @@ Core package boundaries decided. Product-layer details still open.
 
 ### Decided but not in detailed sections
 
-- **Reusable package split** — `protocol`, `agent-loop`, `agent-runtime`, `client`, app. See `ARCHITECTURE.md`.
+- **Reusable package split** — agent protocol/loop/runtime/client live as explicit `@yolk-sdk/agent/*` subpaths; app code stays outside packages. See `patterns/PACKAGE_ARCHITECTURE.md`.
 - **No domain below app** — no users, teams, orgs, projects, billing, OAuth, or product permissions below the project-specific app layer.
 - **Harness stays pure** — generic loop only. No sessions, persistence, transport, or compaction policy.
 - **Runtime is generic** — session orchestration over opaque `Ctx`; project adapters decide what `Ctx` means.

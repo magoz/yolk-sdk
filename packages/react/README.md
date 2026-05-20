@@ -28,6 +28,12 @@ export function Chat() {
 
 No UI components, styling, auth, or provider config are included. Host apps own all rendering and policy.
 
+## Host responsibilities
+
+- Render chat UI, styling, and accessibility.
+- Provide auth, route protection, provider choice, and tool policy.
+- Choose default endpoint or inject a custom transport.
+
 ## Core API
 
 ```ts
@@ -72,7 +78,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 - `buildAgentChatItems` is optional convenience projection for simple flat UIs.
 - Provider reasoning is displayed only from protocol reasoning events; never fabricate reasoning.
 
-## Package layering
+## Boundaries
 
 - Use `@yolk-sdk/agent/client` for framework-agnostic transport/state, including CLI clients.
 - Use `@yolk-sdk/react` for React apps that need headless chat state.

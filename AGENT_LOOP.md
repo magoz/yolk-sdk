@@ -18,7 +18,7 @@ const run = (config: {
 
 Config in, event stream out. Consumer owns session persistence, transport (WebSocket, stdio, etc.), and UI. System prompt is a plain field — static for the duration of a run. Dynamic per-turn instructions go through `ContextTransformer`.
 
-This package is one layer in the reusable stack. See `ARCHITECTURE.md`.
+This package is one layer in the reusable stack. See `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ```txt
 protocol → agent-loop → agent-runtime → app

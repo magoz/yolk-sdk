@@ -60,6 +60,12 @@ import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
 
 The server is tool-only. Hosts own HTTP routes, auth, deployment, and tool policy.
 
+## Host responsibilities
+
+- Own persisted MCP server config, auth, and product tool policy.
+- Provide HTTP runtime layers and credentials for remote MCP.
+- Keep Node stdio usage behind Node-only hosts.
+
 ## Boundaries
 
 - App auth, persisted config, policy, and product tools stay outside this package.

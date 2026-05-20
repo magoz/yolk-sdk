@@ -49,6 +49,12 @@ Failures use:
 
 - A realtime provider adapter receives a tool call and needs to execute it through Yolk tools.
 
+## Host responsibilities
+
+- Normalize provider tool-call events into this package's request shape.
+- Provide `ToolExecutor` and app tool policy.
+- Convert the JSON string envelope into provider-specific realtime responses.
+
 ## Boundaries
 
 - No WebRTC or microphone code.

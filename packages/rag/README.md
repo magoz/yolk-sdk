@@ -58,6 +58,12 @@ Effect.runPromise(ingest)
 - Retrieval defaults to hybrid vector + keyword search when store adapters support both.
 - Context packing keeps adjacent chunks via `contextChunks`.
 
+## Host responsibilities
+
+- Provide `RagStore`, extraction, chunking, embedding, and optional summarization layers.
+- Choose source sync, permissions, queues/workflows, and concrete storage.
+- Decide which RAG sets are searchable for a user/session/tool call.
+
 ## Boundaries
 
 - No app users, orgs, permissions, source sync, auth, DB drivers, or provider SDKs.

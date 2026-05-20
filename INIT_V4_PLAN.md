@@ -2,7 +2,7 @@
 
 Handoff plan for applying `magoz/init` branch `v4` into this repo.
 
-Do not use this as product architecture. Product/package architecture lives in `ARCHITECTURE.md`.
+Historical plan. Do not use this as product architecture. Product/package architecture lives in `patterns/PACKAGE_ARCHITECTURE.md` and `packages/AGENTS.md`.
 
 ## Goal
 
@@ -18,8 +18,8 @@ Inputs:
 ## Constraints
 
 - Preserve existing docs:
-  - `ARCHITECTURE.md`
-  - `AGENT_LOOP.md`
+  - `patterns/PACKAGE_ARCHITECTURE.md`
+  - `packages/AGENTS.md`
   - `COMPARISON.md`
   - `RESEARCH.md`
   - `INIT_V4_PLAN.md`
@@ -165,8 +165,8 @@ If full check fails due template/env setup, at minimum verify package typecheck/
 
 After setup, update docs if actual paths differ:
 
-- `ARCHITECTURE.md`
-- `AGENT_LOOP.md`
+- `patterns/PACKAGE_ARCHITECTURE.md`
+- `packages/AGENTS.md`
 - `RESEARCH.md`
 
 ## First implementation after setup

@@ -116,4 +116,4 @@ pnpm check
 pnpm test:run
 ```
 
-See `ARCHITECTURE.md` and `AGENT_LOOP.md` for package design.
+See `packages/AGENTS.md` and `patterns/PACKAGE_ARCHITECTURE.md` for package design.
