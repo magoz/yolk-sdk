@@ -23,9 +23,11 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
    - Read existing `packages/<name>/README.md` if present.
 
 2. Keep docs public-facing.
-   - README explains what npm users need.
-   - AGENTS explains what repo agents need.
-   - Patterns explain cross-package policy.
+    - README explains what npm users need.
+    - AGENTS explains what repo agents need.
+    - Root `packages/AGENTS.md` is an index and boundary summary only.
+    - Package-local `packages/<name>/AGENTS.md` owns detailed package rules.
+    - Patterns explain cross-package architecture/distribution policy.
 
 3. For every README include:
    - one-line purpose
@@ -37,10 +39,12 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
    - package boundaries
 
 4. Update related knowledge when docs drift.
-   - Root `README.md` package list.
-   - `packages/AGENTS.md` package map and release rules.
-   - `patterns/PACKAGE_DISTRIBUTION.md` package/release policy.
-   - `scripts/AGENTS.md` if package docs/check scripts change.
+    - Root `README.md` package list.
+    - `packages/AGENTS.md` package map only when package list/roles change.
+    - `packages/<name>/AGENTS.md` for package-specific boundaries/design rules.
+    - `patterns/PACKAGE_ARCHITECTURE.md` for cross-package shape/dependency rules.
+    - `patterns/PACKAGE_DISTRIBUTION.md` package/release policy.
+    - `scripts/AGENTS.md` if package docs/check scripts change.
 
 5. Validate after edits.
 
@@ -70,6 +74,8 @@ pnpm lint
 - Do not invent exports; verify every import exists.
 - Do not duplicate long parent docs in child README files.
 - Keep package roots tiny and explicit; docs should reinforce subpath imports.
+- Do not put dense package-specific rules back into root `packages/AGENTS.md`; move them to package-local AGENTS or package architecture patterns.
+- Before deleting package docs, verify unique rules are preserved elsewhere.
 
 ## Reading Order
 

@@ -23,7 +23,7 @@ Do not require READMEs for private app packages unless useful internally.
 ## README content checklist
 
 - package name matches `package.json`
-- one-line role matches `packages/AGENTS.md`
+- one-line role matches root `README.md` and `packages/AGENTS.md`
 - install snippet uses `@canary`
 - lockstep version note included
 - public subpaths match `package.json` exports
@@ -38,8 +38,9 @@ Do not require READMEs for private app packages unless useful internally.
 Check these after package shape changes:
 
 - root `README.md` package table
-- `packages/AGENTS.md` package map, dependency rules, release notes
-- `patterns/PACKAGE_ARCHITECTURE.md` package shape
+- `packages/AGENTS.md` package map and high-level dependency direction
+- `packages/<name>/AGENTS.md` package-specific design/boundary rules
+- `patterns/PACKAGE_ARCHITECTURE.md` cross-package shape/dependency rules
 - `patterns/PACKAGE_DISTRIBUTION.md` publish/versioning policy
 - `.changeset/README.md` release flow
 - package-release skill references if release flow changed
@@ -92,3 +93,4 @@ pnpm lint
 - Subpath docs omit Node-only/runtime-specific boundaries.
 - Release docs say planned when config is already current.
 - Docs say peer deps while manifests use dependencies; document current policy or update manifests.
+- Dense package-specific rules drift into root `packages/AGENTS.md` instead of local package docs.
