@@ -40,7 +40,7 @@ Do not tidy source code unless docs require tiny path/config updates.
 | `patterns/*` | Repo-wide reusable patterns | Packages, shared Effect/TS/testing/telemetry only |
 | `examples/next/*` | Next app docs | App Router, server actions, API routes, auth, nuqs, UX |
 | `packages/*` | Public SDK docs | Domain-free package contracts and exports |
-| `lib/*` | App-owned backend docs | Services, domain actions, app agent wiring |
+| `examples/next/lib/*` | App-owned backend docs | Services, domain actions, app agent wiring |
 | `cloudflare/*` | Worker app docs | Durable Object/Worker/runtime specifics |
 | `.repos/*` | Reference only | Never index, edit, lint, or workspace |
 
@@ -98,7 +98,7 @@ Move or rewrite content by boundary:
 - Next/App Router rules in root → `examples/next/AGENTS.md`, `examples/next/app/AGENTS.md`, or `examples/next/patterns/*`
 - Package release/build/export rules → `packages/AGENTS.md` or `patterns/PACKAGE_DISTRIBUTION.md`
 - Domain-free package architecture → `patterns/PACKAGE_ARCHITECTURE.md`
-- App-owned service/domain rules → `lib/services/AGENTS.md`, `lib/core/AGENTS.md`, or local child docs
+- App-owned service/domain rules → `examples/next/lib/services/AGENTS.md`, `examples/next/lib/core/AGENTS.md`, or local child docs
 - Cloudflare Worker/DO rules → `cloudflare/agent/AGENTS.md`
 - Reference repo notes → root `REFERENCE REPOS`, never `.repos/**` docs
 

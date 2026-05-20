@@ -10,7 +10,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 - Run `pnpm test:run` before committing broad changes.
 - Run `pnpm packages:check` when touching `packages/*`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
-- Agent tools must be runtime-portable: no Node-only imports/deps in `lib/agents/tools/*`; use Effect `Config`, `HttpClient`, Schema, and Worker-safe adapters.
+- Agent tools must be runtime-portable: no Node-only imports/deps in `examples/next/lib/agents/tools/*`; use Effect `Config`, `HttpClient`, Schema, and Worker-safe adapters.
 - Never commit generated `.next`, `.turbo`, `dist`, coverage, or env files.
 
 ## MONOREPO STRATEGY
@@ -20,7 +20,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 | `packages/*` | Public `@yolk-sdk/*` SDK packages; domain-free, reusable, publishable |
 | `examples/next` | Private Next.js dogfood/reference app; consumes packages like users |
 | `cloudflare/agent` | Private Cloudflare Worker/Durable Object agent runtime |
-| `lib/*` | App-owned adapters/services/domain functions for the Next example |
+| `examples/next/lib/*` | App-owned adapters/services/domain functions for the Next example |
 | `examples/next/components/*` | App-owned UI components |
 | `scripts/*` | Repo tooling; Node CLI boundary |
 | `.repos/*` | Gitignored reference clones only; never workspace members |
@@ -51,8 +51,8 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 ## ENV BOUNDARIES
 
 - Effect app/service code uses `Config.*` inside `Effect.gen`; map config errors around the whole block.
-- Direct `process.env` only in sync framework/config boundaries: root configs, `lib/dotenv.ts`, Playwright setup/fixtures env handoff, sync SDK callbacks like `TelemetryLayer`.
-- Never add direct `dotenv.config()` outside `lib/dotenv.ts`.
+- Direct `process.env` only in sync framework/config boundaries: root configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures env handoff, sync SDK callbacks like `TelemetryLayer`.
+- Never add direct `dotenv.config()` outside `examples/next/lib/dotenv.ts`.
 
 ## WHERE TO LOOK
 
@@ -62,18 +62,18 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Package release | `patterns/PACKAGE_DISTRIBUTION.md` | Changesets + canary flow |
 | Next app/page/API | `examples/next/app` | See `examples/next/AGENTS.md` + nested docs |
 | Next patterns | `examples/next/patterns` | Pages, API routes, actions, nuqs, UX |
-| Server actions/domain | `lib/core/*` | App-owned; see `lib/core/AGENTS.md` |
-| Services/adapters | `lib/services/*` | App-owned; see `lib/services/AGENTS.md` |
-| App agent wiring | `lib/agents/*` | Providers, tools, MCP, runtime layers |
+| Server actions/domain | `examples/next/lib/core/*` | App-owned; see local docs |
+| Services/adapters | `examples/next/lib/services/*` | App-owned; see local docs |
+| App agent wiring | `examples/next/lib/agents/*` | Providers, tools, MCP, runtime layers |
 | UI components | `examples/next/components/ui` | App-owned Base UI/shadcn; see local docs |
-| E2E | `e2e` | Playwright; fixed port, no portless |
+| E2E | `examples/next/e2e` | Playwright; fixed port, no portless |
 | Cloudflare app | `cloudflare/agent` | Worker/DO; explicit `.ts` relative imports |
 | Scripts | `scripts` | Node/process/console/raw JSON exceptions documented locally |
 | Local lint rules | `eslint-local-rules` | ESLint custom rules |
 
 ## PACKAGE BOUNDARIES
 
-- `packages/*` must not import from `examples/*`, `lib/*`, or `cloudflare/*`.
+- `packages/*` must not import from `examples/*` or `cloudflare/*`.
 - Packages use `@yolk-sdk/*` names and explicit subpath exports.
 - Public packages release in lockstep via Changesets fixed group.
 - `@yolk-sdk/cloudflare-agent` stays private and ignored by Changesets.
@@ -81,9 +81,9 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 
 ## APP BOUNDARIES
 
-- CRUD mutations use server actions in `lib/core/[domain]/*-action.ts`, not API routes.
+- CRUD mutations use server actions in `examples/next/lib/core/[domain]/*-action.ts`, not API routes.
 - API routes are HTTP/webhook/streaming boundaries only.
-- App-owned tools in `lib/agents/tools/*` must stay runtime-portable.
+- App-owned tools in `examples/next/lib/agents/tools/*` must stay runtime-portable.
 - Next/Auth/UI rules live under `examples/next/*` docs, not root.
 
 ## REFERENCE REPOS
@@ -116,10 +116,10 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 - `examples/next/AGENTS.md` — Next example policy
 - `examples/next/patterns/README.md` — Next-only patterns
 - `examples/next/app/AGENTS.md` — App Router rules
-- `lib/core/AGENTS.md` — actions/domain/errors
-- `lib/services/AGENTS.md` — Effect service architecture
-- `lib/agents/AGENTS.md` — app-owned agent provider/tool wiring
+- `examples/next/lib/core/AGENTS.md` — actions/domain/errors
+- `examples/next/lib/services/AGENTS.md` — Effect service architecture
+- `examples/next/lib/agents/AGENTS.md` — app-owned agent provider/tool wiring
 - `packages/AGENTS.md` — public SDK package boundaries
 - `cloudflare/agent/AGENTS.md` — Cloudflare app rules
-- `e2e/AGENTS.md` — Playwright rules
+- `examples/next/e2e/AGENTS.md` — Playwright rules
 - `scripts/AGENTS.md` — script boundary rules

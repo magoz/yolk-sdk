@@ -13,8 +13,8 @@
   "include": [
     "alchemy.run.ts",
     "src/**/*.ts",
-    "../../lib/agents/providers/openai-codex-provider.ts",
-    "../../lib/agents/text-agent-config.ts",
-    "../../lib/services/openai-codex-oauth/schemas.ts"
+    "../../examples/next/lib/agents/providers/openai-codex-provider.ts",
+    "../../examples/next/lib/agents/text-agent-config.ts",
+    "../../examples/next/lib/services/openai-codex-oauth/schemas.ts"
   ]
 }

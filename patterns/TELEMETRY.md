@@ -187,7 +187,7 @@ Effect.gen(function* () {
 )
 ```
 
-Retry helpers from `lib/services/retry.ts`:
+Retry helpers from `examples/next/lib/services/retry.ts`:
 
 - `retryPolicy` — exponential backoff (500ms, 1s, 2s, max 3 retries, ~3.5s total)
 - `isTransientError` — checks `error.isTransient === true` or `SqlError` instance
@@ -199,7 +199,7 @@ Retry helpers from `lib/services/retry.ts`:
 - **`Logger.layer([Logger.consolePretty()])`** — routes `Effect.logError` / `Effect.logWarning` to structured console output. Without it, logs are silent.
 - **`TelemetryLayer`** — wires OpenTelemetry spans. Without it, `withSpan` is a no-op.
 
-Both are already in `AppLayer` (`lib/layers.ts`).
+Both are already in `AppLayer` (`examples/next/lib/layers.ts`).
 
 ## Rules
 

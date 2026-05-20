@@ -5,7 +5,7 @@ Domain functions are exported functions that return Effect programs. They own bu
 ## Location
 
 ```txt
-lib/core/[domain]/
+examples/next/lib/core/[domain]/
 ├── get-thing.ts
 ├── create-thing.ts
 ├── update-thing.ts

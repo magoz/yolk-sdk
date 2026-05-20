@@ -59,10 +59,10 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
 - Workflow `start/getRun` routes may use `Effect.runPromise()` + raw `Response` for Vercel Workflow streams.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
-- Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `lib/agents/realtime/*`, not route bodies.
+- Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `examples/next/lib/agents/realtime/*`, not route bodies.
 
 ## Anti-Patterns
 
-- API route for CRUD/domain mutation — use `lib/core` server action.
+- API route for CRUD/domain mutation — use `examples/next/lib/core` server action.
 - Raw `JSON.parse` for HTTP bodies — use Schema/HttpServerRequest helpers.
 - Swallowing route errors silently — report boundary failures via telemetry.

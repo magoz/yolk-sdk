@@ -45,9 +45,9 @@ import {
   agentTextModelProvider,
   isAgentTextModel,
   type AgentTextModel
-} from '../../../lib/agents/text-agent-config.ts'
-import { makeAnthropicClaudeProviderLayer } from '../../../lib/agents/providers/anthropic-claude-provider.ts'
-import { resolveAgentToolSet } from '../../../lib/agents/tools/resolve-toolset.ts'
+} from '../../../examples/next/lib/agents/text-agent-config.ts'
+import { makeAnthropicClaudeProviderLayer } from '../../../examples/next/lib/agents/providers/anthropic-claude-provider.ts'
+import { resolveAgentToolSet } from '../../../examples/next/lib/agents/tools/resolve-toolset.ts'
 import {
   isAnthropicTokenFresh,
   makeAnthropicTokenBrokerRequest,

@@ -85,7 +85,7 @@ export default async function PostsPage() {
 ### Domain Function
 
 ```typescript
-// lib/core/post/get-posts.ts
+// examples/next/lib/core/post/get-posts.ts
 import { Effect } from 'effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { Db } from '@/lib/services/db/live-layer'
@@ -120,7 +120,7 @@ See [`EFFECT_SERVER_ACTIONS.md`](./EFFECT_SERVER_ACTIONS.md) for the canonical p
 ### File Naming Convention
 
 ```
-lib/core/[domain]/
+examples/next/lib/core/[domain]/
 ├── get-posts.ts           # Read function (used in RSC)
 ├── create-post-action.ts  # Server action
 ├── update-post-action.ts  # Server action
@@ -131,7 +131,7 @@ lib/core/[domain]/
 ### Server Action Pattern
 
 ```typescript
-// lib/core/post/delete-post-action.ts
+// examples/next/lib/core/post/delete-post-action.ts
 'use server'
 
 import { Effect } from 'effect'
@@ -293,7 +293,7 @@ Use Server Actions to generate signed URLs, then upload/download directly from t
 ### Get Signed Upload URL Action
 
 ```typescript
-// lib/core/document/get-upload-url-action.ts
+// examples/next/lib/core/document/get-upload-url-action.ts
 'use server'
 
 import { Effect } from 'effect'
@@ -349,7 +349,7 @@ export const getUploadUrlAction = async (input: UploadUrlInput) => {
 ### Save File Reference Action
 
 ```typescript
-// lib/core/document/save-document-action.ts
+// examples/next/lib/core/document/save-document-action.ts
 'use server'
 
 import { Effect } from 'effect'
@@ -475,7 +475,7 @@ export function FileUpload({ folder }: { folder: string }) {
 For private files that need temporary access:
 
 ```typescript
-// lib/core/document/get-download-url-action.ts
+// examples/next/lib/core/document/get-download-url-action.ts
 'use server'
 
 import { Effect } from 'effect'
@@ -559,9 +559,9 @@ export const POST = (request: Request) => effectHandler(request)
 | Operation            | Pattern                 | Location                         |
 | -------------------- | ----------------------- | -------------------------------- |
 | Page data loading    | RSC                     | `app/*/page.tsx`                 |
-| Create/Update/Delete | Server Action           | `lib/core/[domain]/*-action.ts`  |
-| File upload          | S3 signed URL + Action  | `lib/core/[domain]/*-action.ts`  |
-| File download        | S3 signed URL + Action  | `lib/core/[domain]/*-action.ts`  |
+| Create/Update/Delete | Server Action           | `examples/next/lib/core/[domain]/*-action.ts`  |
+| File upload          | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |
+| File download        | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |
 | External webhooks    | API Route               | `app/api/webhooks/*/route.ts`    |
 | Auth callbacks       | API Route (better-auth) | `app/api/auth/[...all]/route.ts` |
 | Third-party API      | API Route               | `app/api/*/route.ts`             |

@@ -5,7 +5,7 @@ Server actions are mutation boundaries. They provide layers, handle auth redirec
 ## Location
 
 ```txt
-lib/core/[domain]/*-action.ts
+examples/next/lib/core/[domain]/*-action.ts
 ```
 
 One action per file.

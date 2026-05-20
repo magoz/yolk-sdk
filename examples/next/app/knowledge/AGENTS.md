@@ -9,7 +9,7 @@ User-facing knowledge object management UI.
 - Pinned objects are injected into text agent startup context.
 - Searchable/routable objects are available through the `search_knowledge` agent tool.
 - Original file artifacts can be downloaded through the authenticated artifact route.
-- Knowledge mutations use server actions in `lib/core/knowledge/*-action.ts`.
+- Knowledge mutations use server actions in `examples/next/lib/core/knowledge/*-action.ts`.
 
 ## Boundaries
 

@@ -2,7 +2,7 @@ import { Effect, Layer } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
-import { resolveAgentToolSet, makeTextToolModules } from '../../../lib/agents/tools/registry'
+import { resolveAgentToolSet, makeTextToolModules } from '../../../examples/next/lib/agents/tools/registry'
 import { makeCloudflareTextToolModules } from '../src/tool-modules.ts'
 import { generatedSkillsetManifest } from '../src/generated/skillset.ts'
 

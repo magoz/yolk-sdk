@@ -23,7 +23,7 @@ import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk-s
 import {
   streamOpenAiCodexResponse,
   toOpenAiCodexRequestBody
-} from '../../../lib/agents/providers/openai-codex-provider.ts'
+} from '../../../examples/next/lib/agents/providers/openai-codex-provider.ts'
 import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
 
 export const codexWsUrl = 'https://chatgpt.com/backend-api/codex/responses'

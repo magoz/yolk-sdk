@@ -41,117 +41,21 @@ importers:
 
   .:
     dependencies:
-      '@aws-sdk/client-s3':
-        specifier: ^3.1048.0
-        version: 3.1048.0
-      '@effect/opentelemetry':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.59(@opentelemetry/api@1.9.0)(@opentelemetry/resources@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-logs@0.210.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-metrics@2.2.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-base@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/sdk-trace-node@2.4.0(@opentelemetry/api@1.9.0))(@opentelemetry/semantic-conventions@1.39.0)(effect@4.0.0-beta.65)
-      '@effect/platform-node':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.65(effect@4.0.0-beta.65)(ioredis@5.10.1)
-      '@effect/sql-pg':
-        specifier: 'catalog:'
-        version: 4.0.0-beta.59(effect@4.0.0-beta.65)
-      '@neondatabase/serverless':
-        specifier: ^1.0.2
-        version: 1.0.2
-      '@opentelemetry/sdk-logs':
-        specifier: ^0.210.0
-        version: 0.210.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/sdk-trace-node':
-        specifier: ^2.4.0
-        version: 2.4.0(@opentelemetry/api@1.9.0)
-      '@paralleldrive/cuid2':
-        specifier: ^3.0.6
-        version: 3.0.6
-      '@yolk-sdk/agent':
-        specifier: workspace:^
-        version: link:packages/agent
-      '@yolk-sdk/anthropic':
-        specifier: workspace:^
-        version: link:packages/anthropic
-      '@yolk-sdk/knowledge':
-        specifier: workspace:^
-        version: link:packages/knowledge
-      '@yolk-sdk/mcp':
-        specifier: workspace:^
-        version: link:packages/mcp
       '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:packages/oauth
       '@yolk-sdk/openai':
         specifier: workspace:^
         version: link:packages/openai
-      '@yolk-sdk/rag':
-        specifier: workspace:^
-        version: link:packages/rag
-      '@yolk-sdk/react':
-        specifier: workspace:^
-        version: link:packages/react
       '@yolk-sdk/skillset':
         specifier: workspace:^
         version: link:packages/skillset
-      '@yolk-sdk/vercel-workflows-runtime':
-        specifier: workspace:^
-        version: link:packages/vercel-workflows-runtime
-      '@yolk-sdk/voice-runtime':
-        specifier: workspace:^
-        version: link:packages/voice-runtime
-      better-auth:
-        specifier: ^1.4.14
-        version: 1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4))
       drizzle-orm:
         specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6)
+        version: 1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.5)
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
-      fflate:
-        specifier: ^0.8.2
-        version: 0.8.2
-      just-bash:
-        specifier: ^3.0.0
-        version: 3.0.0
-      mammoth:
-        specifier: ^1.12.0
-        version: 1.12.0
-      next:
-        specifier: 16.1.3
-        version: 16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      nuqs:
-        specifier: ^2.8.6
-        version: 2.8.6(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react@19.2.3)
-      posthog-js:
-        specifier: ^1.327.0
-        version: 1.327.0
-      prettier:
-        specifier: ^3.8.0
-        version: 3.8.0
-      react:
-        specifier: 19.2.3
-        version: 19.2.3
-      react-dom:
-        specifier: 19.2.3
-        version: 19.2.3(react@19.2.3)
-      resend:
-        specifier: ^6.7.0
-        version: 6.7.0
-      sonner:
-        specifier: ^2.0.7
-        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      streamdown:
-        specifier: ^2.5.0
-        version: 2.5.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      unpdf:
-        specifier: ^1.6.2
-        version: 1.6.2
-      workflow:
-        specifier: ^4.2.4
-        version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(typescript@5.9.3)
-      xlsx:
-        specifier: ^0.18.5
-        version: 0.18.5
     devDependencies:
       '@changesets/cli':
         specifier: ^2.31.0
@@ -162,9 +66,6 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-beta.65(effect@4.0.0-beta.65)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4))
-      '@playwright/test':
-        specifier: ^1.57.0
-        version: 1.57.0
       '@types/node':
         specifier: ^25.0.9
         version: 25.0.9
@@ -180,15 +81,6 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
-      drizzle-kit:
-        specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1
-      drizzle-seed:
-        specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))
       eslint:
         specifier: ^9.39.2
         version: 9.39.2(jiti@2.6.1)
@@ -204,12 +96,24 @@ importers:
       knip:
         specifier: ^5.81.0
         version: 5.81.0(@types/node@25.0.9)(typescript@5.9.3)
+      next:
+        specifier: 16.1.3
+        version: 16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       portless:
         specifier: ^0.13.0
         version: 0.13.0
+      prettier:
+        specifier: ^3.8.0
+        version: 3.8.0
       publint:
         specifier: ^0.3.21
         version: 0.3.21
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
       tsdown:
         specifier: ^0.22.0
         version: 0.22.0(oxc-resolver@11.16.3)(publint@0.3.21)(tsx@4.21.0)(typescript@5.9.3)
@@ -342,7 +246,7 @@ importers:
         version: link:../../packages/voice-runtime
       better-auth:
         specifier: ^1.4.14
-        version: 1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@3.25.76))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4))
+        version: 1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -351,7 +255,7 @@ importers:
         version: 2.1.1
       drizzle-orm:
         specifier: 1.0.0-rc.1
-        version: 1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@3.25.76)
+        version: 1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6)
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
@@ -410,6 +314,9 @@ importers:
         specifier: ^0.18.5
         version: 0.18.5
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.57.0
+        version: 1.57.0
       '@tailwindcss/postcss':
         specifier: ^4.1.18
         version: 4.1.18
@@ -425,6 +332,15 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      drizzle-kit:
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1
+      drizzle-seed:
+        specifier: 1.0.0-rc.1
+        version: 1.0.0-rc.1(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))
       eslint-config-next:
         specifier: 16.1.3
         version: 16.1.3(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
@@ -434,6 +350,9 @@ importers:
       tailwindcss:
         specifier: ^4.1.18
         version: 4.1.18
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -5268,10 +5187,6 @@ packages:
 
   dompurify@3.3.1:
     resolution: {integrity: sha512-qkdCKzLNtrgPFP1Vo+98FRzJnBRGe4ffyCea9IwHB1fyxPOeNTHpLKYGd4Uk9xvNoH0ZoOjwZxNptyMwqrId1Q==}
-
-  dotenv@17.2.3:
-    resolution: {integrity: sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==}
-    engines: {node: '>=12'}
 
   dotenv@17.4.2:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
@@ -13520,30 +13435,7 @@ snapshots:
 
   before-after-hook@4.0.0: {}
 
-  better-auth@1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@3.25.76))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)):
-    dependencies:
-      '@better-auth/core': 1.4.14(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.9)(nanostores@1.1.0)
-      '@better-auth/telemetry': 1.4.14(@better-auth/core@1.4.14(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.9)(nanostores@1.1.0))
-      '@better-auth/utils': 0.3.0
-      '@better-fetch/fetch': 1.1.21
-      '@noble/ciphers': 2.1.1
-      '@noble/hashes': 2.0.1
-      better-call: 1.1.8(zod@4.3.5)
-      defu: 6.1.4
-      jose: 6.1.3
-      kysely: 0.28.9
-      nanostores: 1.1.0
-      zod: 4.3.5
-    optionalDependencies:
-      drizzle-kit: 1.0.0-rc.1
-      drizzle-orm: 1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@3.25.76)
-      next: 16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
-      pg: 8.20.0
-      react: 19.2.3
-      react-dom: 19.2.3(react@19.2.3)
-      vitest: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
-
-  better-auth@1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)):
+  better-auth@1.4.14(drizzle-kit@1.0.0-rc.1)(drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6))(next@16.1.3(@babel/core@7.28.6)(@opentelemetry/api@1.9.0)(@playwright/test@1.57.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(pg@8.20.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)):
     dependencies:
       '@better-auth/core': 1.4.14(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.9)(nanostores@1.1.0)
       '@better-auth/telemetry': 1.4.14(@better-auth/core@1.4.14(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.9)(nanostores@1.1.0))
@@ -13564,7 +13456,7 @@ snapshots:
       pg: 8.20.0
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
-      vitest: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
+      vitest: 4.0.17(@opentelemetry/api@1.9.0)(@types/node@25.6.2)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(msw@2.12.7(@types/node@25.6.2)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
   better-call@1.1.8(zod@4.3.5):
     dependencies:
@@ -14283,8 +14175,6 @@ snapshots:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
-  dotenv@17.2.3: {}
-
   dotenv@17.4.2: {}
 
   drizzle-kit@1.0.0-rc.1:
@@ -14295,7 +14185,7 @@ snapshots:
       get-tsconfig: 4.14.0
       jiti: 2.6.1
 
-  drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@3.25.76):
+  drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.5):
     optionalDependencies:
       '@cloudflare/workers-types': 4.20260510.1
       '@effect/sql-pg': 4.0.0-beta.59(effect@4.0.0-beta.65)
@@ -14306,7 +14196,7 @@ snapshots:
       effect: 4.0.0-beta.65
       pg: 8.20.0
       sql.js: 1.14.1
-      zod: 3.25.76
+      zod: 4.3.5
 
   drizzle-orm@1.0.0-rc.1(@cloudflare/workers-types@4.20260510.1)(@effect/sql-pg@4.0.0-beta.59(effect@4.0.0-beta.65))(@libsql/client@0.17.3)(@neondatabase/serverless@1.0.2)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(effect@4.0.0-beta.65)(pg@8.20.0)(sql.js@1.14.1)(zod@4.3.6):
     optionalDependencies:
@@ -14625,8 +14515,8 @@ snapshots:
       '@next/eslint-plugin-next': 16.1.3
       eslint: 9.39.2(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-react: 7.37.5(eslint@9.39.2(jiti@2.6.1))
       eslint-plugin-react-hooks: 7.0.1(eslint@9.39.2(jiti@2.6.1))
@@ -14652,7 +14542,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1)):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.3(supports-color@8.1.1)
@@ -14663,22 +14553,22 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       eslint: 9.39.2(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@9.39.2(jiti@2.6.1))
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1)):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -14689,7 +14579,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 9.39.2(jiti@2.6.1)
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1)))(eslint@9.39.2(jiti@2.6.1))
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.2(jiti@2.6.1))
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3

@@ -3,7 +3,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect } from 'effect'
 import { type MergedSkillset, type SkillsetManifest } from '@yolk-sdk/skillset'
-import { loadProjectSkillset } from '../lib/agents/skillset/project-source'
+import { loadProjectSkillset } from '../examples/next/lib/agents/skillset/project-source'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const rootDirectory = resolve(scriptDirectory, '..')

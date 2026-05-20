@@ -22,7 +22,7 @@ This document describes TypeScript configuration and coding conventions for this
 **Avoid barrel files** (index.ts re-exports). Create flat, focused modules:
 
 ```
-lib/services/
+examples/next/lib/services/
 ├── auth/
 │   ├── live-layer.ts      # Service definition
 │   └── errors.ts          # Service errors
@@ -59,7 +59,7 @@ export class Auth extends Context.Service<Auth>()('@app/Auth', {
 import { Auth } from '@/lib/services/auth/live-layer'
 
 // WRONG - relative paths for distant files
-import { Auth } from '../../../lib/services/auth/live-layer'
+import { Auth } from '../../../examples/next/lib/services/auth/live-layer'
 ```
 
 ### Package Imports: Never Use Extensions

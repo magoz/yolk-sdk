@@ -25,7 +25,10 @@
     "paths": {
       "@/components/*": ["./examples/next/components/*"],
       "@/lib/utils": ["./examples/next/lib/utils"],
-      "@/*": ["./*"]
+      "@/lib/*": ["./examples/next/lib/*"],
+      "drizzle-orm": ["./node_modules/drizzle-orm"],
+      "drizzle-orm/*": ["./node_modules/drizzle-orm/*"],
+      "@/*": ["./examples/next/*", "./*"]
     }
   },
   "include": [

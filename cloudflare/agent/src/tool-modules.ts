@@ -1,7 +1,7 @@
 import type { Layer } from 'effect'
 import type { HttpClient } from 'effect/unstable/http'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
-import { makeTextToolModules } from '../../../lib/agents/tools/registry.ts'
+import { makeTextToolModules } from '../../../examples/next/lib/agents/tools/registry.ts'
 
 export const makeCloudflareTextToolModules = (
   mcpServers: ReadonlyArray<McpRemoteServerConfig>,

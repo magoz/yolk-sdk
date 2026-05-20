@@ -46,7 +46,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Anti-Patterns
 
-- CRUD mutations in `examples/next/app/api` — use server actions in `lib/core/[domain]/*-action.ts`; see `examples/next/patterns/EFFECT_SERVER_ACTIONS.md`.
+- CRUD mutations in `examples/next/app/api` — use server actions in `examples/next/lib/core/[domain]/*-action.ts`; see `examples/next/patterns/EFFECT_SERVER_ACTIONS.md`.
 - Direct data fetch in page body — use Suspense + `Content` pattern.
 - Client component by default — isolate browser-only state to leaf components.
 - `Effect.runPromise()` in pages — use `NextEffect.runPromise()`.

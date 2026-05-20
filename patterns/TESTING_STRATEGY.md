@@ -37,7 +37,7 @@ If the answer is "nothing" or "just the implementation changed", delete the test
 **Tests are colocated with source files** using `*.test.ts` pattern:
 
 ```
-lib/core/post/
+examples/next/lib/core/post/
 ├── get-posts.ts
 ├── get-posts.test.ts        # ← Test next to implementation
 ├── create-post-action.ts
@@ -115,7 +115,7 @@ layer(createMockAuth())('post operations', it => {
 })
 ```
 
-**Location:** Colocated with source (`lib/core/post/create-post.test.ts`)
+**Location:** Colocated with source (`examples/next/lib/core/post/create-post.test.ts`)
 
 ### Integration Tests
 
@@ -137,7 +137,7 @@ layer(TestDbLayer)('database operations', it => {
 })
 ```
 
-**Location:** Colocated with source or `lib/services/*/integration.test.ts`
+**Location:** Colocated with source or `examples/next/lib/services/*/integration.test.ts`
 
 **Note:** Integration tests require additional setup (testcontainers for Postgres). See `patterns/EFFECT_TESTING.md` for details.
 
@@ -145,19 +145,19 @@ layer(TestDbLayer)('database operations', it => {
 
 **When:** Testing full user flows through the UI
 
-**Pattern:** Playwright tests in `e2e/` directory
+**Pattern:** Playwright tests in the owning app's `e2e/` directory
 
 **Example:**
 
 ```typescript
-// e2e/auth.spec.ts
+// examples/next/e2e/auth.spec.ts
 test('user can login with OTP', async ({ page }) => {
   await page.goto('/login')
   // ...
 })
 ```
 
-**Location:** `e2e/` directory (separate from unit/integration tests)
+**Location:** `examples/next/e2e/` for Next app flows (separate from unit/integration tests)
 
 **Run:** `pnpm test:e2e`
 
@@ -279,8 +279,8 @@ Key patterns from EFFECT_TESTING.md:
 
 See test files for working examples:
 
-- `lib/core/post/get-posts.test.ts` - Test variants (it.effect, it.live)
-- `lib/core/post/test-clock.test.ts` - TestClock patterns (fork, timeout, retry)
-- `lib/core/post/layer-sharing.test.ts` - Mock services with layer()
-- `lib/core/post/property-testing.test.ts` - Property-based testing
-- `lib/core/post/error-testing.test.ts` - Error handling patterns
+- `examples/next/lib/core/post/get-posts.test.ts` - Test variants (it.effect, it.live)
+- `examples/next/lib/core/post/test-clock.test.ts` - TestClock patterns (fork, timeout, retry)
+- `examples/next/lib/core/post/layer-sharing.test.ts` - Mock services with layer()
+- `examples/next/lib/core/post/property-testing.test.ts` - Property-based testing
+- `examples/next/lib/core/post/error-testing.test.ts` - Error handling patterns

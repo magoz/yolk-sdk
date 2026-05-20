@@ -83,5 +83,5 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - `.repos/ai` and `.repos/opencode` model tools as message parts; prefer that over detached tool arrays.
 - `.repos/t3code` is layout inspiration only; do not copy UI implementation.
 - Keep tests for live result visibility, row-before-draft anchoring, orphan result fallback, and status labels.
-- `lib/agents/AGENTS.md` covers server/provider/runtime wiring.
+- `examples/next/lib/agents/AGENTS.md` covers server/provider/runtime wiring.
 - `packages/AGENTS.md` covers reusable package boundaries.

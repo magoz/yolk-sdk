@@ -1,4 +1,4 @@
-import './lib/dotenv'
+import './examples/next/lib/dotenv'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'

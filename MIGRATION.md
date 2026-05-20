@@ -413,30 +413,30 @@ const value = yield * Ref.get(ref)
 | File                                     | Changes                                                          |
 | ---------------------------------------- | ---------------------------------------------------------------- |
 | `package.json`                           | Deps updated, removed `@effect/platform` and `@effect/sql`       |
-| `lib/layers.ts`                          | `.Live` → `.layer`                                               |
-| `lib/next-effect/index.ts`               | `Either` → `Result`, `catchAll` → `catch`, remove `as` assertion |
-| `lib/services/db/live-layer.ts`          | `Context.Service`, `PgDrizzle.make()`, removed `NodeServices`    |
-| `lib/services/auth/live-layer.ts`        | `Context.Service`, Config pattern                                |
-| `lib/services/email/live-layer.ts`       | `Context.Service`, Config pattern                                |
-| `lib/services/s3/live-layer.ts`          | `Context.Service`, Config pattern                                |
-| `lib/services/telegram/live-layer.ts`    | `Context.Service`, Config pattern                                |
-| `lib/services/activity/live-layer.ts`    | `Context.Service`, `Ref`, `forkDetach`, `catch`                  |
-| `lib/services/retry.ts`                  | `SqlError` import, `Schedule.both`                               |
-| `lib/schemas/email.ts`                   | Full Schema v4 rewrite                                           |
+| `examples/next/lib/layers.ts`            | `.Live` → `.layer`                                               |
+| `examples/next/lib/next-effect/index.ts` | `Either` → `Result`, `catchAll` → `catch`, remove `as` assertion |
+| `examples/next/lib/services/db/live-layer.ts` | `Context.Service`, `PgDrizzle.make()`, removed `NodeServices` |
+| `examples/next/lib/services/auth/live-layer.ts` | `Context.Service`, Config pattern                          |
+| `examples/next/lib/services/email/live-layer.ts` | `Context.Service`, Config pattern                         |
+| `examples/next/lib/services/s3/live-layer.ts` | `Context.Service`, Config pattern                            |
+| `examples/next/lib/services/telegram/live-layer.ts` | `Context.Service`, Config pattern                      |
+| `examples/next/lib/services/activity/live-layer.ts` | `Context.Service`, `Ref`, `forkDetach`, `catch`       |
+| `examples/next/lib/services/retry.ts`    | `SqlError` import, `Schedule.both`                               |
+| `examples/next/lib/schemas/email.ts`     | Full Schema v4 rewrite                                           |
 | `app/api/example/route.ts`               | HTTP modules, `toWebHandlerLayer`, `catchTag` chain              |
 | `app/api/auth/[...all]/route.ts`         | `Auth.layer`                                                     |
 | `app/page.tsx`                           | `catchTag` chain, extracted `PostList` component                 |
 | `app/(auth)/login/page.tsx`              | `catchTag` chain                                                 |
-| `lib/core/post/create-post-action.ts`    | `catchTag` chain, removed `.execute()`                           |
-| `lib/core/post/delete-post-action.ts`    | `catchTag` chain, removed `.execute()`                           |
-| `lib/core/post/get-posts.ts`             | removed `.execute()`                                             |
-| `lib/core/file/delete-file-action.ts`    | `catchTag` chain                                                 |
-| `lib/core/file/get-upload-url-action.ts` | `catchTag` chain                                                 |
-| `lib/core/post/error-testing.test.ts`    | `Effect.result`, `Cause.isFailReason`, `findDefect`              |
-| `lib/core/post/get-posts.test.ts`        | `forkChild`, `TestClock` import                                  |
-| `lib/core/post/test-clock.test.ts`       | `forkChild`, `TestClock` import                                  |
-| `lib/core/post/layer-sharing.test.ts`    | `Context.Service()()` syntax, `Effect.result`                    |
-| `lib/core/post/property-testing.test.ts` | Schema v4, `toArbitrary`, `Result` for partition                 |
-| `e2e/utils/setup.ts`                     | `Db.layer`                                                       |
-| `e2e/utils/create-test-user.ts`          | removed `.execute()`                                             |
-| `e2e/fixtures.ts`                        | `Effect.orDie`                                                   |
+| `examples/next/lib/core/post/create-post-action.ts` | `catchTag` chain, removed `.execute()`                |
+| `examples/next/lib/core/post/delete-post-action.ts` | `catchTag` chain, removed `.execute()`                |
+| `examples/next/lib/core/post/get-posts.ts` | removed `.execute()`                                          |
+| `examples/next/lib/core/file/delete-file-action.ts` | `catchTag` chain                                      |
+| `examples/next/lib/core/file/get-upload-url-action.ts` | `catchTag` chain                                  |
+| `examples/next/lib/core/post/error-testing.test.ts` | `Effect.result`, `Cause.isFailReason`, `findDefect`   |
+| `examples/next/lib/core/post/get-posts.test.ts` | `forkChild`, `TestClock` import                           |
+| `examples/next/lib/core/post/test-clock.test.ts` | `forkChild`, `TestClock` import                        |
+| `examples/next/lib/core/post/layer-sharing.test.ts` | `Context.Service()()` syntax, `Effect.result`       |
+| `examples/next/lib/core/post/property-testing.test.ts` | Schema v4, `toArbitrary`, `Result` for partition  |
+| `examples/next/e2e/utils/setup.ts`       | `Db.layer`                                                       |
+| `examples/next/e2e/utils/create-test-user.ts` | removed `.execute()`                                       |
+| `examples/next/e2e/fixtures.ts`          | `Effect.orDie`                                                   |
