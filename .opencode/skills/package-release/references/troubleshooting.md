@@ -62,8 +62,8 @@ Symptom: `changeset publish` skips package.
 
 Fix:
 
-- Remove `private: true` from public `packages/*` only after validation.
-- Keep private app packages ignored.
+- Public `packages/*` should be publishable.
+- Keep private app packages private and ignored.
 
 ## npm auth/provenance fails
 

@@ -7,7 +7,6 @@ Architecture and convention patterns for the SDK workspace.
 | Pattern                                                    | Purpose                                                                        |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [EFFECT_BEST_PRACTICES.md](./EFFECT_BEST_PRACTICES.md)     | Type safety, Schema patterns, service/layer conventions                        |
-| [EFFECT_DOMAIN_FUNCTIONS.md](./EFFECT_DOMAIN_FUNCTIONS.md) | Data queries, service composition, error definitions                           |
 | [EFFECT_TESTING.md](./EFFECT_TESTING.md)                   | Testing Effect programs, mocking services, property testing                    |
 | [MCP_TRANSPORTS.md](./MCP_TRANSPORTS.md)                   | MCP JSON-RPC, stdio, HTTP, and Effect platform transport boundaries            |
 

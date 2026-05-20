@@ -96,7 +96,7 @@ Yolk should mirror Effect + MCP SDK:
 - Keep `@yolk-sdk/*` lockstep until a deliberate versioning change.
 - Keep `dist/` generated and ignored.
 - Keep local source exports; `publishConfig.exports` points to `dist`.
-- Remove `private: true` from public packages only after artifact validation passes.
+- Public `packages/*` manifests are publishable; private apps stay private.
 - Run required checks before finishing any release-prep change.
 
 ## Reading Order

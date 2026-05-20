@@ -87,4 +87,4 @@ const toHttpResponse = (response: Response) =>
 
 ## Better-auth exception
 
-`app/api/auth/[...all]/route.ts` may use better-auth's Next handler directly. Keep it isolated.
+`examples/next/app/api/auth/[...all]/route.ts` may use better-auth's Next handler directly. Keep it isolated.

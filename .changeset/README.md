@@ -14,7 +14,7 @@ Canary release flow:
    - `pnpm tsc`
    - `pnpm lint`
    - `pnpm test:run`
-5. remove `private: true` from public `packages/*/package.json` only
+5. verify public `packages/*` are publishable and private apps stay private
 6. verify `git status` is clean/understood
 7. `pnpm release:canary`
 8. verify npm:

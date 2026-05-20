@@ -529,7 +529,7 @@ See [`EFFECT_API_ROUTES.md`](./EFFECT_API_ROUTES.md) for the canonical `HttpEffe
 ### API Route Pattern (if needed)
 
 ```typescript
-// app/api/webhooks/stripe/route.ts
+// examples/next/app/api/webhooks/stripe/route.ts
 import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import * as HttpEffect from 'effect/unstable/http/HttpEffect'
 import { Effect } from 'effect'
@@ -562,9 +562,9 @@ export const POST = (request: Request) => effectHandler(request)
 | Create/Update/Delete | Server Action           | `examples/next/lib/core/[domain]/*-action.ts`  |
 | File upload          | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |
 | File download        | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |
-| External webhooks    | API Route               | `app/api/webhooks/*/route.ts`    |
-| Auth callbacks       | API Route (better-auth) | `app/api/auth/[...all]/route.ts` |
-| Third-party API      | API Route               | `app/api/*/route.ts`             |
+| External webhooks    | API Route               | `examples/next/app/api/webhooks/*/route.ts`    |
+| Auth callbacks       | API Route (better-auth) | `examples/next/app/api/auth/[...all]/route.ts` |
+| Third-party API      | API Route               | `examples/next/app/api/*/route.ts`             |
 
 ## Key Principles
 

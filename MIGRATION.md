@@ -423,10 +423,10 @@ const value = yield * Ref.get(ref)
 | `examples/next/lib/services/activity/live-layer.ts` | `Context.Service`, `Ref`, `forkDetach`, `catch`       |
 | `examples/next/lib/services/retry.ts`    | `SqlError` import, `Schedule.both`                               |
 | `examples/next/lib/schemas/email.ts`     | Full Schema v4 rewrite                                           |
-| `app/api/example/route.ts`               | HTTP modules, `toWebHandlerLayer`, `catchTag` chain              |
-| `app/api/auth/[...all]/route.ts`         | `Auth.layer`                                                     |
-| `app/page.tsx`                           | `catchTag` chain, extracted `PostList` component                 |
-| `app/(auth)/login/page.tsx`              | `catchTag` chain                                                 |
+| `examples/next/app/api/example/route.ts` | HTTP modules, `toWebHandlerLayer`, `catchTag` chain              |
+| `examples/next/app/api/auth/[...all]/route.ts` | `Auth.layer`                                             |
+| `examples/next/app/page.tsx`             | `catchTag` chain, extracted `PostList` component                 |
+| `examples/next/app/(auth)/login/page.tsx` | `catchTag` chain                                                |
 | `examples/next/lib/core/post/create-post-action.ts` | `catchTag` chain, removed `.execute()`                |
 | `examples/next/lib/core/post/delete-post-action.ts` | `catchTag` chain, removed `.execute()`                |
 | `examples/next/lib/core/post/get-posts.ts` | removed `.execute()`                                          |

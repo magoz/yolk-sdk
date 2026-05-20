@@ -22,7 +22,7 @@ ChatGPT/Codex Responses API
 
 Cloudflare currently runs the agent runtime. Codex model calls attempt direct Worker → ChatGPT WebSocket first, then fall back to Next/Vercel when the direct open fails before any model events:
 
-- `app/api/internal/cloudflare/codex-responses/route.ts`
+- `examples/next/app/api/internal/cloudflare/codex-responses/route.ts`
 - `cloudflare/agent/src/codex-ws-provider.ts` using optional `fallback`
 - `cloudflare/agent/src/yolk-agent.ts` passing `bootstrap.codexResponsesEndpoint`
 

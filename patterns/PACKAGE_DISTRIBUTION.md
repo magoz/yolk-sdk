@@ -178,13 +178,7 @@ pnpm lint
 pnpm test:run
 ```
 
-After validation, remove `private: true` from public package manifests only:
-
-```txt
-packages/*/package.json
-```
-
-Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
+Public `packages/*` manifests are publishable. Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
 
 Verify `git status` is clean/understood, then publish canary only after explicit approval:
 
@@ -253,9 +247,9 @@ Manual first canary is acceptable; automate after the flow proves correct once.
    - `pnpm test:run`
    - clean fixture install from packed tarballs
 7. Publish canary.
-    - Remove `private: true` only after artifact validation.
-    - Publish with provenance.
-    - Treat canary as feedback, not stability.
+   - Public `packages/*` are publishable; private apps stay private.
+   - Publish with provenance.
+   - Treat canary as feedback, not stability.
 
 ## Open Questions
 

@@ -38,7 +38,7 @@ provider packages -> oauth + Effect
 - Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
 - Provider/OAuth packages may model vendor auth mechanics and wire contracts, not host storage or policy.
-- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts; keep `private: true` until publish approval.
+- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private app packages private.
 
 ## Commands
 

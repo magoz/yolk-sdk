@@ -31,13 +31,7 @@ pnpm changeset:version
 pnpm install
 ```
 
-2. Remove `private: true` from public packages only:
-
-```txt
-packages/*/package.json
-```
-
-Keep private app packages private, especially `@yolk-sdk/cloudflare-agent`.
+2. Verify public packages are publishable and private apps stay private, especially `@yolk-sdk/cloudflare-agent`.
 
 3. Validate:
 
@@ -79,7 +73,7 @@ Before publish:
 
 - public package names use `@yolk-sdk/*`
 - versions are lockstep
-- `private: true` removed from public packages
+- public `packages/*` are publishable; private apps stay private
 - `publishConfig.access` is `public`
 - `publishConfig.provenance` is `true`
 - `files` includes `dist`, `src`, README, license as intended
