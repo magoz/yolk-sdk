@@ -2,6 +2,8 @@
 
 HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations belong in server actions, not routes.
 
+See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route pattern.
+
 ## Routes
 
 | Route                                          | Role                             |
@@ -57,7 +59,7 @@ HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
 - Workflow `start/getRun` routes may use `Effect.runPromise()` + raw `Response` for Vercel Workflow streams.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
-- Browser/WebRTC specifics stay in `app/agent/use-realtime-voice.ts` and `lib/agents/realtime/*`, not route bodies.
+- Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `lib/agents/realtime/*`, not route bodies.
 
 ## Anti-Patterns
 

@@ -4,7 +4,7 @@ OpenAI Realtime/WebRTC server-side helpers and voice tool bridge glue.
 
 ## Boundaries
 
-- Browser hook owns WebRTC peer/data/audio lifecycle in `app/agent/use-realtime-voice.ts`.
+- Browser hook owns WebRTC peer/data/audio lifecycle in `examples/next/app/agent/use-realtime-voice.ts`.
 - `/api/agent/realtime/call` mints OpenAI Realtime SDP using `OPENAI_API_KEY`.
 - `/api/agent/realtime/tool` executes provider-normalized voice tool calls via `@yolk-sdk/voice-runtime`.
 - Realtime/OpenAI specifics stay app-local; package `@yolk-sdk/voice-runtime` remains provider-neutral.

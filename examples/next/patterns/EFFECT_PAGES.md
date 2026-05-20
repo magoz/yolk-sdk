@@ -170,7 +170,7 @@ Client filters use nuqs with `{ shallow: false, history: 'replace' }` so changes
 | Direct `redirect()` inside Effect                    | `NextEffect.redirect()`                                        |
 | Catch-all swallowing `NextEffect.redirect()`         | Re-fail `NextEffect.isNavigationError(error)` before reporting |
 | Missing `dynamic = 'force-dynamic'`                  | Add it to auth/dynamic pages                                   |
-| Reporting auth/not-found page redirects to Sentry    | Report only catch-all unexpected errors                        |
+| Reporting auth/not-found page redirects              | Report only catch-all unexpected errors                        |
 | Pre-resolving `searchParams` in Page before Suspense | Pass Promise to Shell                                          |
 
 ## Checklist

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from '@effect/vitest'
 
-const source = readFileSync('app/api/agent/realtime/call/route.ts', 'utf8')
+const source = readFileSync('examples/next/app/api/agent/realtime/call/route.ts', 'utf8')
 
 describe('realtime call route wiring', () => {
   it('uses the shared voice prompt', () => {

@@ -76,4 +76,4 @@
 
 ## App usage
 
-The Next app keeps component/UI concerns local under `app/agent/*` and imports `useAgentChat`, `buildAgentChatItems`, and chat item types from this package.
+The Next example keeps component/UI concerns local under `examples/next/app/agent/*` and imports `useAgentChat`, `buildAgentChatItems`, and chat item types from this package.

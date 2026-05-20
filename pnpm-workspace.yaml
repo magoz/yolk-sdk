@@ -1,5 +1,6 @@
 packages:
   - 'packages/*'
+  - 'examples/*'
   - 'cloudflare/*'
 catalog:
   '@effect/language-service': ^0.77.0
@@ -14,7 +15,6 @@ catalog:
 allowBuilds:
   '@mongodb-js/zstd': false
   '@nestjs/core': false
-  '@sentry/cli': true
   '@swc/core': true
   cbor-extract: false
   core-js: true

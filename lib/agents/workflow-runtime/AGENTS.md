@@ -25,5 +25,5 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows-runtime/work
 ## Tests
 
 - `run-agent-workflow.test.ts` guards no Effect runtime calls in `'use workflow'` body.
-- Route model tests live under `app/api/agent/workflow*`.
+- Route model tests live under `examples/next/app/api/agent/workflow*`.
 - Package directive behavior is tested in `packages/vercel-workflows-runtime` with `@workflow/vitest`.

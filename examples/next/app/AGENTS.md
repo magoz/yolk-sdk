@@ -12,41 +12,41 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | `storage/`    | Storage source ingestion/list UI         |
 | `knowledge/`  | Agent-native knowledge object management |
 | `.well-known/workflow/v1/` | Generated Vercel Workflow artifacts; do not hand-edit |
-| `api/`        | HTTP boundaries; see `app/api/AGENTS.md` |
+| `api/`        | HTTP boundaries; see `examples/next/app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
 
 ## Page Rules
 
 - Default to Server Components; add `'use client'` only for browser state/effects/events.
-- Data/session-gated pages use Suspense shell + async `Content` component.
+- Data/session-gated pages use Suspense shell + async `Content` component; see `examples/next/patterns/EFFECT_PAGES.md`.
 - Run Effect page programs with `NextEffect.runPromise()`, not `Effect.runPromise()`.
 - Protected/session-gated pages must be dynamic: `export const dynamic = 'force-dynamic'` or dynamic APIs like `cookies()`.
 - Re-fail `NextEffect.isNavigationError(error)` before catch-all fallbacks.
-- Shareable filters/search state belongs in `search-params.ts` with `nuqs/server` imports.
+- Shareable filters/search state belongs in `search-params.ts` with `nuqs/server` imports; see `examples/next/patterns/NUQS_URL_STATE.md`.
 - After deleting routes, stale `.next/dev/types/validator.ts` may reference removed pages; delete generated file if `pnpm tsc` reports a removed route.
 
 ## Auth UI
 
-- Auth pages live under `(auth)/`; better-auth handler lives in `app/api/auth/[...all]/route.ts`.
+- Auth pages live under `(auth)/`; better-auth handler lives in `examples/next/app/api/auth/[...all]/route.ts`.
 - Login redirects authenticated users via `NextEffect.redirect('/')`; OTP page renders verification form.
 - Logout uses `window.location.href = '/'`; do not replace with `router.push()` because cached layouts can stay stale.
 - Keep auth form controls accessible; E2E relies on labels/roles.
 
 ## Local Dev
 
-- `pnpm dev` runs through portless; `pnpm dev:app` runs plain Next dev.
+- `pnpm dev` runs through portless; `pnpm dev:app` runs the Next example dev server.
 - Keep `next.config.ts` `allowedDevOrigins` in sync with portless app/e2e hostnames.
 
 ## Agent UI
 
 - `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image+mic UI.
 - Voice is available inside each runtime page; no separate voice route.
-- See `app/agent/AGENTS.md` before touching chat state/rendering.
+- See `examples/next/app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.
 
 ## Anti-Patterns
 
-- CRUD mutations in `app/api` — use server actions in `lib/core/[domain]/*-action.ts`.
+- CRUD mutations in `examples/next/app/api` — use server actions in `lib/core/[domain]/*-action.ts`; see `examples/next/patterns/EFFECT_SERVER_ACTIONS.md`.
 - Direct data fetch in page body — use Suspense + `Content` pattern.
 - Client component by default — isolate browser-only state to leaf components.
 - `Effect.runPromise()` in pages — use `NextEffect.runPromise()`.

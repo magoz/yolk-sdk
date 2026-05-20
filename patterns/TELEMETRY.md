@@ -5,7 +5,6 @@ Spans, error reporting, and observability patterns. All Effect programs should b
 ## Stack
 
 - **OpenTelemetry** — spans and structured logs via `TelemetryLayer`
-- **Sentry** — error/warning capture via `reportError` / `reportWarning`
 - **Effect Logger** — structured console output via `Logger.consolePretty()`
 
 ## Spans
@@ -59,14 +58,14 @@ Dot-separated, lowercase: `post.id`, `user.email`, `result.count`. Prefix with t
 
 ## Error Reporting
 
-### Two systems, two purposes
+### Two signals, two purposes
 
-| System         | Purpose                          | Coverage                          | Mechanism                                                  |
-| -------------- | -------------------------------- | --------------------------------- | ---------------------------------------------------------- |
-| **OTel spans** | Observability — "what happened?" | Every domain function (automatic) | `Effect.withSpan` marks span as `STATUS: ERROR` on failure |
-| **Sentry**     | Alerting — "wake someone up"     | Boundaries only (selective)       | `reportError` inside `tapError` or `catch`                 |
+| Signal              | Purpose                          | Coverage                          | Mechanism                                                  |
+| ------------------- | -------------------------------- | --------------------------------- | ---------------------------------------------------------- |
+| **OTel spans**      | Observability — "what happened?" | Every domain function (automatic) | `Effect.withSpan` marks span as `STATUS: ERROR` on failure |
+| **Structured logs** | Boundary diagnostics             | Boundaries only (selective)       | `reportError` inside `tapError` or `catch`                 |
 
-**Key insight:** `withSpan` automatically captures errors in OTel. When an effect fails inside a span, `@effect/opentelemetry` records the exception and sets `status: ERROR` — zero extra code needed. Sentry requires explicit `reportError` and should only fire for errors that need human investigation.
+**Key insight:** `withSpan` automatically captures errors in OTel. When an effect fails inside a span, `@effect/opentelemetry` records the exception and sets `status: ERROR` — zero extra code needed. `reportError` adds boundary-owned structured context.
 
 ### Decision tree: where to report
 
@@ -76,21 +75,21 @@ Error occurs in domain function
   → Error propagates to caller
     │
     ├─ Caller is a SERVER ACTION
-    │   → tapError(reportError) before catchTag/catch → Sentry ✓
+    │   → tapError(reportError) before catchTag/catch → structured log ✓
     │
     ├─ Caller is a PAGE (Suspense + Content)
-    │   → Auth errors: redirect (expected flow, no Sentry)
-    │   → Catch-all: reportError inside catch → Sentry ✓
+    │   → Auth errors: redirect (expected flow, no report)
+    │   → Catch-all: reportError inside catch → structured log ✓
     │
     ├─ Caller is an API ROUTE
-    │   → catch-all handler calls reportError → Sentry ✓
-    │   → Auth errors: return HTTP 401/403 (no Sentry)
+    │   → catch-all handler calls reportError → structured log ✓
+    │   → Auth errors: return HTTP 401/403 (no report)
     │
     ├─ Caller CATCHES and RECOVERS (Effect.catch)
-    │   → Error was handled — no Sentry (use reportWarning if degraded)
+    │   → Error was handled — no report (use reportWarning if degraded)
     │
     └─ Error is UNHANDLED (bare Effect.runPromise)
-        → tapError(reportError) before runPromise → Sentry ✓
+        → tapError(reportError) before runPromise → structured log ✓
         → Error throws → Next.js error boundary renders error UI
 ```
 
@@ -102,13 +101,13 @@ Domain functions don't know caller intent. A `NotFoundError` is:
 - **A bug** in an admin batch operation (should alert)
 - **Handled** in a "check if exists" flow (caught, no alert needed)
 
-Reporting at domain level would flood Sentry with expected control flow. Only the boundary knows whether a failure is unexpected.
+Reporting at domain level would flood logs with expected control flow. Only the boundary knows whether a failure is unexpected.
 
-**The safety net:** `withSpan` gives automatic OTel coverage for ALL errors — including expected ones. You can query failed spans to find failures the boundary didn't Sentry-report. This eliminates blind spots without alert noise.
+**The safety net:** `withSpan` gives automatic OTel coverage for ALL errors — including expected ones. You can query failed spans to find failures the boundary didn't report. This eliminates blind spots without log noise.
 
 ### reportError
 
-Logs via Effect logger + captures in Sentry as error. Used at **boundaries only**:
+Logs via Effect logger. Used at **boundaries only**:
 
 ```typescript
 // Server actions: tapError before catchTag chains
@@ -133,14 +132,14 @@ reportError(error, {
 
 ### Infrastructure services: structured log only
 
-Infrastructure services (email, file storage, integrations) use `Effect.logError` — structured log, but **no Sentry**. The boundary decides severity.
+Infrastructure services (email, file storage, integrations) use `Effect.logError`. The boundary decides severity.
 
 ```typescript
-// Infrastructure: log only (callers own Sentry decision)
+// Infrastructure: log only (callers own severity decision)
 Effect.tapError(error => Effect.logError('Email send failed', { error, to }))
 ```
 
-This prevents double-reporting: if the error propagates to a boundary that also calls `reportError`, Sentry would get two events for one failure. Infrastructure logs for debugging context; boundaries report for alerting.
+This prevents double-reporting: if the error propagates to a boundary that also calls `reportError`, logs would get duplicate events for one failure. Infrastructure logs for debugging context; boundaries report user-facing failures.
 
 **Exception:** If an error is **caught before reaching any boundary** (best-effort paths with `Effect.catch`), it must self-report — no boundary will ever see it:
 
@@ -155,7 +154,7 @@ yield *
 
 ### reportWarning
 
-Same shape as `reportError` but Sentry warning level. For non-critical issues:
+Same shape as `reportError` but warning level. For non-critical issues:
 
 ```typescript
 yield *
@@ -198,7 +197,7 @@ Retry helpers from `lib/services/retry.ts`:
 `AppLayer` must include both for telemetry to work:
 
 - **`Logger.layer([Logger.consolePretty()])`** — routes `Effect.logError` / `Effect.logWarning` to structured console output. Without it, logs are silent.
-- **`TelemetryLayer`** — wires OpenTelemetry spans + Sentry error capture. Without it, `withSpan` is a no-op and Sentry never receives errors.
+- **`TelemetryLayer`** — wires OpenTelemetry spans. Without it, `withSpan` is a no-op.
 
 Both are already in `AppLayer` (`lib/layers.ts`).
 
@@ -206,13 +205,12 @@ Both are already in `AppLayer` (`lib/layers.ts`).
 
 - Every domain function ends with `Effect.withSpan` (OTel sees all errors automatically)
 - Every public package/service IO function has `Effect.withSpan` and stable low-cardinality attrs
-- Every server action has `tapError(reportError)` before error handling (Sentry alerting)
-- Pages report only unexpected errors — auth/not-found are expected flow, no Sentry
-- API route catch-all handlers call `reportError` — auth errors return HTTP codes without Sentry
-- Infrastructure services use `Effect.logError` (structured log) — never `reportError` (callers own Sentry)
+- Every server action has `tapError(reportError)` before error handling
+- Pages report only unexpected errors — auth/not-found are expected flow, no report
+- API route catch-all handlers call `reportError` — auth errors return HTTP codes without reporting
+- Infrastructure services use `Effect.logError` (structured log) — never `reportError` (callers own severity)
 - Best-effort paths that catch errors must self-report (boundary will never see them)
 - Never use `console.error` directly — use `reportError` or `Effect.logError` inside Effect
-- Never use `Sentry.captureException` directly — use `reportError`
 - Span name matches `operation` context key in `reportError`
 - `annotateCurrentSpan` for IDs and context, not for large payloads
 - Do not annotate raw prompts, file contents, request bodies, or other large/sensitive payloads

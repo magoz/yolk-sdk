@@ -18,6 +18,8 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 
 ## Server Actions
 
+See `examples/next/patterns/EFFECT_SERVER_ACTIONS.md` for the canonical Next boundary pattern.
+
 - One action per `*-action.ts` file with `'use server'`.
 - Return explicit result ADTs (`Success`/`Error`/domain states), not thrown UI errors.
 - Call `await cookies()` before `NextEffect.runPromise()` when action must be dynamic/session-bound.
@@ -52,6 +54,6 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 ## Anti-Patterns
 
 - Multiple actions in one file.
-- CRUD mutation in `app/api` instead of a server action.
+- CRUD mutation in `examples/next/app/api` instead of a server action.
 - Raw `process.env`, external HTTP, or provider SDK calls in core domain helpers.
 - `Effect.runPromise()` inside reusable domain functions.

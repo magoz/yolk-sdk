@@ -1,12 +1,7 @@
 import './lib/dotenv'
 import { defineConfig, devices } from '@playwright/test'
 
-const requiredEnv = [
-  'DATABASE_URL',
-  'BETTER_AUTH_SECRET',
-  'NEXT_PUBLIC_POSTHOG_KEY',
-  'NEXT_PUBLIC_SENTRY_DSN'
-]
+const requiredEnv = ['DATABASE_URL', 'BETTER_AUTH_SECRET', 'NEXT_PUBLIC_POSTHOG_KEY']
 
 const missingEnv = requiredEnv.filter(
   key => process.env[key] === undefined || process.env[key] === ''
@@ -37,7 +32,7 @@ export default defineConfig({
   globalTeardown: './e2e/global-teardown.ts',
 
   webServer: {
-    command: `NODE_ENV=test pnpm next dev --port ${port}`,
+    command: `NODE_ENV=test pnpm --filter @yolk-example/next exec next dev --port ${port}`,
     url: baseURL,
     timeout: 120 * 1000,
     reuseExistingServer: false

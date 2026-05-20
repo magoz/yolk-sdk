@@ -28,7 +28,7 @@ const retiredImports = retiredPackages.map(retiredPackage => retiredPackage.impo
 
 const rules: ReadonlyArray<BoundaryRule> = [
   {
-    packageDir: 'app',
+    packageDir: 'examples/next/app',
     forbiddenImports: [
       ...retiredImports,
       '@yolk-sdk/agent$',

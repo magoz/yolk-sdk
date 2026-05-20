@@ -5,7 +5,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## Current Mode
 
 - `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image input and mic voice mode
-- Agent UI is app-local/headless-ready; see `app/agent/AGENTS.md` for chat render boundaries
+- Agent UI is app-local/headless-ready; see `examples/next/app/agent/AGENTS.md` for chat render boundaries
 - Default text prompt says tools run in parallel and distinguishes durable user knowledge from storage sources.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
@@ -37,7 +37,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 Provider-local rules live in `providers/AGENTS.md`.
 
-Configured in `lib/agents/text-agent-config.ts`; selected by UI and routed in `app/api/agent/route.ts` / `cloudflare/agent/src/yolk-agent.ts`:
+Configured in `lib/agents/text-agent-config.ts`; selected by UI and routed in `examples/next/app/api/agent/route.ts` / `cloudflare/agent/src/yolk-agent.ts`:
 
 | Env                   | Values | Notes             |
 | --------------------- | ------ | ----------------- |
@@ -101,10 +101,10 @@ MCP security:
 
 ## Realtime Voice
 
-- UI: mic mode in `app/agent/playground.tsx`; no separate voice route
-- Hook: `app/agent/use-realtime-voice.ts`
-- SDP route: `app/api/agent/realtime/call/route.ts`
-- Tool route: `app/api/agent/realtime/tool/route.ts`
+- UI: mic mode in `examples/next/app/agent/playground.tsx`; no separate voice route
+- Hook: `examples/next/app/agent/use-realtime-voice.ts`
+- SDP route: `examples/next/app/api/agent/realtime/call/route.ts`
+- Tool route: `examples/next/app/api/agent/realtime/tool/route.ts`
 - `/call` mints OpenAI Realtime SDP using `OPENAI_API_KEY`; `/tool` executes provider-neutral voice tool calls
 - Adapter helpers: `realtime/openai-realtime.ts`, `realtime/tool-bridge.ts`
 - Model: `gpt-realtime-2`; voice: `marin`; reasoning effort: `low`

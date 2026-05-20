@@ -1,5 +1,4 @@
 import { NodeSdk } from '@effect/opentelemetry'
-import { SentrySpanProcessor } from '@sentry/opentelemetry'
 import { BatchLogRecordProcessor, ConsoleLogRecordExporter } from '@opentelemetry/sdk-logs'
 
 // Note: Uses process.env because NodeSdk.layer() requires a synchronous callback
@@ -20,10 +19,7 @@ export const TelemetryLayer = NodeSdk.layer(() => {
       }
     },
 
-    // Sentry receives all spans via OpenTelemetry bridge
-    spanProcessor: new SentrySpanProcessor(),
-
-    // Logs go to console (Sentry captures as breadcrumbs)
+    // Logs go to console.
     logRecordProcessor: new BatchLogRecordProcessor(new ConsoleLogRecordExporter()),
 
     // Shutdown timeout for serverless

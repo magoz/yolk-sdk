@@ -1,6 +1,6 @@
 # Patterns
 
-Architecture and convention patterns for this codebase.
+Architecture and convention patterns for the SDK workspace.
 
 ## Effect-TS
 
@@ -8,17 +8,8 @@ Architecture and convention patterns for this codebase.
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | [EFFECT_BEST_PRACTICES.md](./EFFECT_BEST_PRACTICES.md)     | Type safety, Schema patterns, service/layer conventions                        |
 | [EFFECT_DOMAIN_FUNCTIONS.md](./EFFECT_DOMAIN_FUNCTIONS.md) | Data queries, service composition, error definitions                           |
-| [EFFECT_SERVER_ACTIONS.md](./EFFECT_SERVER_ACTIONS.md)     | Server action structure, pipe ordering, error handling                         |
-| [EFFECT_PAGES.md](./EFFECT_PAGES.md)                       | Suspense + Content, streaming sections, filter-driven selective loading (nuqs) |
-| [EFFECT_API_ROUTES.md](./EFFECT_API_ROUTES.md)             | HttpEffect API routes, request schemas, response/error handling                |
 | [EFFECT_TESTING.md](./EFFECT_TESTING.md)                   | Testing Effect programs, mocking services, property testing                    |
 | [MCP_TRANSPORTS.md](./MCP_TRANSPORTS.md)                   | MCP JSON-RPC, stdio, HTTP, and Effect platform transport boundaries            |
-
-## Data Flow
-
-| Pattern                                              | Purpose                                                     |
-| ---------------------------------------------------- | ----------------------------------------------------------- |
-| [DATA_ACCESS_PATTERNS.md](./DATA_ACCESS_PATTERNS.md) | RSC for reads, server actions for mutations, S3 signed URLs |
 
 ## Packages
 
@@ -26,12 +17,6 @@ Architecture and convention patterns for this codebase.
 | ------------------------------------------------------ | ------------------------------------------------------------- |
 | [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Agent/MCP/RAG package shape, boundaries, tree-shaking rules   |
 | [PACKAGE_DISTRIBUTION.md](./PACKAGE_DISTRIBUTION.md)   | Package versioning, build, release, and artifact validation   |
-
-## URL State
-
-| Pattern                                  | Purpose                                                 |
-| ---------------------------------------- | ------------------------------------------------------- |
-| [NUQS_URL_STATE.md](./NUQS_URL_STATE.md) | nuqs import rules, search-params.ts pattern, pagination |
 
 ## Observability
 
@@ -45,4 +30,7 @@ Architecture and convention patterns for this codebase.
 | ------------------------------------------------------------ | ---------------------------------------------------- |
 | [TYPESCRIPT_CONVENTIONS.md](./TYPESCRIPT_CONVENTIONS.md)     | Code style, file naming, type safety rules           |
 | [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                 | Test philosophy, coverage targets, mock strategy     |
-| [USABILITY_BEST_PRACTICES.md](./USABILITY_BEST_PRACTICES.md) | Navigation, auth pages, empty states, loading states |
+
+## Next example
+
+Next/App Router-only patterns live in [`examples/next/patterns`](../examples/next/patterns/README.md).

@@ -81,7 +81,7 @@ const toHttpResponse = (response: Response) =>
 - Parse JSON with `HttpServerRequest.schemaBodyJson`.
 - Auth first unless the body is needed to decide auth scope.
 - Use one composed route layer in `HttpEffect.toWebHandlerLayer`.
-- Return HTTP 401/403 for auth errors without Sentry.
+- Return HTTP 401/403 for auth errors without reporting.
 - Report catch-all API errors with `reportError`.
 - Do not use API routes for ordinary CRUD.
 

@@ -142,11 +142,11 @@ E2E scripts set `NODE_ENV=test`, so `playwright.config.ts` loads **only** `.env.
 
 **Never add a direct `dotenv.config()` call** — always `import '@/lib/dotenv'` (or `import '../lib/dotenv'` from root config files). This is the single source of truth.
 
-`playwright.config.ts` fails fast if bootstrap env is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_SENTRY_DSN`. Route-specific app env can still be required by pages under test.
+`playwright.config.ts` fails fast if bootstrap env is missing: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `NEXT_PUBLIC_POSTHOG_KEY`. Route-specific app env can still be required by pages under test.
 
 ## How It Works
 
-1. `pnpm test:e2e*` sets `NODE_ENV=test`; `playwright.config.ts` loads `.env.test`, starts Next.js on fixed HTTP port `E2E_PORT`/default `41773`; E2E intentionally does not use portless because Playwright webServer teardown can orphan proxy-launched `next dev`
+1. `pnpm test:e2e*` sets `NODE_ENV=test`; `playwright.config.ts` loads `.env.test`, starts `@yolk-example/next` on fixed HTTP port `E2E_PORT`/default `41773`; E2E intentionally does not use portless because Playwright webServer teardown can orphan proxy-launched `next dev`
 2. `global-setup.ts` runs:
    - Resets database via `drizzle-seed` (truncate + reseed)
    - Creates test user with deterministic ID from `test-ids.ts`

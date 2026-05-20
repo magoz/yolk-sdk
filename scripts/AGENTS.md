@@ -11,7 +11,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | `codex-ws-smoke.ts` | Manual Codex WebSocket smoke check |
 | `setup-db.ts` | Ensure database prerequisites like pgvector before Drizzle push |
 | `push-test-db.ts` | Push current Drizzle schema to `.env.test` database before Vitest |
-| `check-package-boundaries.ts` | Validate app/package import boundary rules |
+| `check-package-boundaries.ts` | Validate example/package import boundary rules |
 | `check-package-exports.ts` | Validate package export shape and tree-shaking smoke rules |
 | `check-package-publint.ts` | Run `publint` strict checks across public packages |
 | `smoke-package-imports.ts` | Pack public packages, install/extract into temp fixture, import every public subpath |

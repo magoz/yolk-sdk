@@ -20,7 +20,7 @@ Node/app adapters for loading project skills and commands into the app agent run
 - Merge sources deterministically by priority; reject duplicates inside one source.
 - Runtime priority is DB user skills/commands, then config, then project files.
 - Skill tool runtime policy stays in `lib/agents/tools/skill-tool.ts`.
-- Slash command UI/transport stays in `app/agent` and `app/api/agent/commands`.
+- Slash command UI/transport stays in `examples/next/app/agent` and `examples/next/app/api/agent/commands`.
 
 ## Tests
 

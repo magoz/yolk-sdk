@@ -6,19 +6,21 @@ Reusable agent stack. Domain-free below the app layer.
 
 | Category  | Technology                               |
 | --------- | ---------------------------------------- |
-| App       | Next.js 16 App Router                    |
+| Example   | Next.js 16 App Router                    |
 | Language  | TypeScript 5                             |
 | Effects   | Effect-TS                                |
 | Database  | PostgreSQL via Drizzle ORM + @effect/sql |
 | Auth      | better-auth email OTP                    |
 | Email     | Resend                                   |
 | Styling   | Tailwind CSS 4                           |
-| Telemetry | Sentry + OpenTelemetry + PostHog         |
+| Telemetry | OpenTelemetry + PostHog                  |
 | Tests     | Vitest + Playwright                      |
 
 ## Packages
 
 Public packages use the `@yolk-sdk/*` scope and release in lockstep.
+
+The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 
 | Package | Role |
 | --- | --- |

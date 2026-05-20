@@ -1,9 +1,14 @@
 import type { NextConfig } from 'next'
-import { withSentryConfig } from '@sentry/nextjs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { withWorkflow } from 'workflow/next'
+
+const exampleDir = dirname(fileURLToPath(import.meta.url))
+const workspaceRoot = join(exampleDir, '../..')
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  outputFileTracingRoot: workspaceRoot,
   allowedDevOrigins: ['yolk.localhost', '*.yolk.localhost', 'yolk-e2e.localhost'],
 
   // PostHog reverse proxy to bypass ad-blockers
@@ -21,4 +26,4 @@ const nextConfig: NextConfig = {
   }
 }
 
-export default withWorkflow(withSentryConfig(nextConfig))
+export default withWorkflow(nextConfig)
