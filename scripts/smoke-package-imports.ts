@@ -17,6 +17,10 @@ const packages: ReadonlyArray<PackageShape> = [
   },
   { name: '@yolk-sdk/anthropic', exports: ['.'] },
   {
+    name: '@yolk-sdk/connectors',
+    exports: ['.', './agent', './figma', './google', './linkedin-search', './notion', './r2-storage', './telegram', './todoist']
+  },
+  {
     name: '@yolk-sdk/knowledge',
     exports: ['.', './agent', './artifacts', './context', './errors', './links', './objects', './provenance', './representations', './store']
   },
