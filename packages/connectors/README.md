@@ -40,6 +40,15 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **CredentialSlot**: credential requirement declared by connector code.
 - **CredentialBinding**: integration slot-to-host-credential-ref mapping.
 - **CredentialResolver**: host Effect service that resolves refs at runtime.
+- **ConnectorHttpClient**: host-provided HTTP port used by provider actions.
+
+## HTTP port
+
+`src/http.ts` is connector infrastructure, not a connector. It defines the typed HTTP request/response model, the `ConnectorHttpClient` Effect service, and JSON response decoding helpers.
+
+Provider connectors build `ConnectorHttpRequest` values; hosts execute them by providing a `ConnectorHttpClient` layer. This keeps connector packages portable and avoids bundling `fetch`, Node HTTP clients, or app-specific networking policy.
+
+Host adapters must preserve connector headers and body content type. Several provider actions send JSON and rely on `content-type: application/json` reaching the upstream API unchanged.
 
 ## Example
 
