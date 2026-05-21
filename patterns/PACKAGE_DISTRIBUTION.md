@@ -44,7 +44,7 @@ Current Changesets config:
 
 Rationale:
 
-- `@yolk-sdk/agent` protocol, loop, runtime, client, tools, React, MCP, and related packages are tightly coupled.
+- `@yolk-sdk/agent` protocol, loop, runtime, client, tools, React, MCP, connectors, and related packages are tightly coupled.
 - Users should not debug package version skew.
 - Early APIs will move quickly.
 - Docs can say: install matching `@yolk-sdk/*` versions.
@@ -137,6 +137,7 @@ Publish all packages in the first public canary:
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/rag`
 - `@yolk-sdk/knowledge`
+- `@yolk-sdk/connectors`
 - `@yolk-sdk/oauth`
 - `@yolk-sdk/openai`
 - `@yolk-sdk/anthropic`

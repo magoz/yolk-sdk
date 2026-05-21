@@ -36,7 +36,7 @@ Load data directly in Server Components using Effect-TS. This is the **default p
 ### Pattern (for authenticated pages)
 
 ```typescript
-// app/posts/page.tsx
+// examples/next/app/posts/page.tsx
 import { Suspense } from 'react'
 import { Effect, Layer } from 'effect'
 import { cookies } from 'next/headers'
@@ -558,7 +558,7 @@ export const POST = (request: Request) => effectHandler(request)
 
 | Operation            | Pattern                 | Location                         |
 | -------------------- | ----------------------- | -------------------------------- |
-| Page data loading    | RSC                     | `app/*/page.tsx`                 |
+| Page data loading    | RSC                     | `examples/next/app/*/page.tsx`   |
 | Create/Update/Delete | Server Action           | `examples/next/lib/core/[domain]/*-action.ts`  |
 | File upload          | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |
 | File download        | S3 signed URL + Action  | `examples/next/lib/core/[domain]/*-action.ts`  |

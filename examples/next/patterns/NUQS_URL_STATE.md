@@ -62,7 +62,7 @@ Temporary UI state (modals, dropdowns)?
 
 ## Project Setup
 
-The `NuqsAdapter` is already configured in `app/layout.tsx`:
+The `NuqsAdapter` is already configured in `examples/next/app/layout.tsx`:
 
 ```typescript
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
@@ -83,7 +83,7 @@ export default function RootLayout({ children }) {
 Each feature with URL state gets a `search-params.ts` file:
 
 ```
-app/
+examples/next/app/
 ├── (dashboard)/
 │   └── posts/
 │       ├── page.tsx              # Server component consuming params
@@ -102,7 +102,7 @@ Create a `search-params.ts` file with:
 4. `createLoader` for server-side consumption
 
 ```typescript
-// app/(dashboard)/posts/search-params.ts
+// examples/next/app/(dashboard)/posts/search-params.ts
 import { createLoader, parseAsInteger, parseAsString, parseAsStringLiteral } from 'nuqs/server'
 
 // 1. Define allowed values
@@ -140,7 +140,7 @@ export const loadSearchParams = createLoader(searchParams)
 Use `loadSearchParams` in server components to get typed, parsed values:
 
 ```typescript
-// app/(dashboard)/posts/page.tsx
+// examples/next/app/(dashboard)/posts/page.tsx
 import { Suspense } from 'react'
 import type { SearchParams } from 'nuqs/server'
 import { loadSearchParams } from './searchParams'
@@ -185,7 +185,7 @@ When search params change, use them as a Suspense key to:
 Client components use `useQueryState` hook with the same parsers:
 
 ```typescript
-// app/(dashboard)/posts/post-status-filter.tsx
+// examples/next/app/(dashboard)/posts/post-status-filter.tsx
 'use client'
 
 import { useQueryState, parseAsStringLiteral } from 'nuqs'
@@ -247,7 +247,7 @@ Always use these options for filters that affect server data:
 For search inputs, debounce the URL update to avoid excessive server requests:
 
 ```typescript
-// app/(dashboard)/posts/post-search.tsx
+// examples/next/app/(dashboard)/posts/post-search.tsx
 'use client'
 
 import { useQueryState, parseAsString } from 'nuqs'
@@ -318,7 +318,7 @@ export function PostSearch() {
 Reset multiple filters to their defaults:
 
 ```typescript
-// app/(dashboard)/posts/clear-filters-button.tsx
+// examples/next/app/(dashboard)/posts/clear-filters-button.tsx
 'use client'
 
 import { useQueryState, parseAsString, parseAsStringLiteral } from 'nuqs'

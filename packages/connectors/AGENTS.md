@@ -20,6 +20,7 @@
 | `integration` | configured invokable connector instance data |
 | `action` | typed action definitions over Effect Schema |
 | `credential` | slots, bindings, host resolver service, runtime credential values |
+| `http` | host-provided HTTP request/response port; not a connector |
 | `result` | value-level success/failure results for expected upstream failures |
 | `error` | typed package/runtime failures |
 | `figma` | Figma remote MCP auth data action and OAuth constants |
@@ -34,6 +35,7 @@
 
 - Connector = reusable implementation; Integration = host-owned config that makes a connector invokable.
 - Actions declare typed input/output schemas; action execution stays Effect-native.
+- `http.ts` is infrastructure: connectors emit typed requests; hosts provide `ConnectorHttpClient` and preserve headers/body content type.
 - Hosts provide credential resolution, storage, OAuth callbacks, refresh, auditing, and authorization.
 - Use `ActionResult.failure` for expected provider/API failures; use Effect errors for missing config, credential, validation, or transport/runtime failures.
 - Agent adapters require a host-provided Effect layer for connector dependencies; adapters must not construct HTTP or credential services themselves.

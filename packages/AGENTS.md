@@ -22,7 +22,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 ## Dependency direction
 
 ```txt
-app/lib/cloudflare/e2e -> @yolk-sdk/*
+examples/next, cloudflare/agent, e2e -> @yolk-sdk/*
 react -> agent/client + agent/protocol
 rag -> agent/protocol + agent/tools only for agent adapter
 mcp -> agent/protocol only for ToolDef/ToolResult

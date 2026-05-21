@@ -34,7 +34,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ## Dependency Direction
 
 ```txt
-app/lib/cloudflare/e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
+examples/next, cloudflare/agent, e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 @yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
 @yolk-sdk/rag -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
@@ -64,9 +64,9 @@ app/lib/cloudflare/e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 ## Boundary Enforcement
 
 - `pnpm packages:check` runs package typechecks, `scripts/check-package-boundaries.ts`, and `scripts/check-package-exports.ts`.
-- Boundary script prevents app/lib/cloudflare/e2e from importing retired internal package names.
+- Boundary script prevents example app, Cloudflare, and e2e code from importing retired internal package names.
 - Boundary script prevents retired package directories from reappearing.
-- Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in app/lib/cloudflare/e2e; use explicit subpaths.
+- Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in example app, Cloudflare, and e2e code; use explicit subpaths.
 - Boundary script prevents `@yolk-sdk/agent` from importing `@yolk-sdk/rag`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, Next, React, or Node builtins.
 - Boundary script prevents RAG from importing MCP/React/Next/Node.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.

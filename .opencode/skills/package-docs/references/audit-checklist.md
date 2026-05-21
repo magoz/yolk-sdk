@@ -11,6 +11,7 @@ Every public package should have `packages/<name>/README.md`:
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/rag`
 - `@yolk-sdk/knowledge`
+- `@yolk-sdk/connectors`
 - `@yolk-sdk/oauth`
 - `@yolk-sdk/openai`
 - `@yolk-sdk/anthropic`
