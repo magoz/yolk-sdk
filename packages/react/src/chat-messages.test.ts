@@ -234,12 +234,12 @@ describe('agent chat messages', () => {
       _tag: 'ToolCall',
       id: `tool-call-${call.id}`,
       call,
-      state: { _tag: 'QuestionAnswered', response }
+      state: { _tag: 'QuestionAnswered', response, request }
     })
     expect(toAgentMessages(answered).at(-1)).toMatchObject({
       _tag: 'ToolResult',
       toolCallId: call.id,
-      content: 'User answered the question:\n- choice: a',
+      content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.',
       structuredContent: { type: 'question_response', outcome: 'answered' }
     })
   })

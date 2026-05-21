@@ -21,8 +21,8 @@ export type ToolRunState =
   | { readonly _tag: 'ApprovalRequested'; readonly duration: ToolDuration; readonly request?: ToolApprovalRequest }
   | { readonly _tag: 'Denied'; readonly duration: ToolDuration; readonly reason: string }
   | { readonly _tag: 'QuestionRequested'; readonly duration: ToolDuration; readonly request: QuestionRequest }
-  | { readonly _tag: 'QuestionAnswered'; readonly duration: ToolDuration; readonly response: QuestionResponse }
-  | { readonly _tag: 'QuestionCancelled'; readonly duration: ToolDuration; readonly response: QuestionResponse }
+  | { readonly _tag: 'QuestionAnswered'; readonly duration: ToolDuration; readonly response: QuestionResponse; readonly request?: QuestionRequest }
+  | { readonly _tag: 'QuestionCancelled'; readonly duration: ToolDuration; readonly response: QuestionResponse; readonly request?: QuestionRequest }
   | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
   | { readonly _tag: 'Errored'; readonly duration: ToolDuration; readonly message: string }
   | {
@@ -143,11 +143,11 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   }
 
   if (state._tag === 'QuestionAnswered') {
-    return { _tag: 'QuestionAnswered', duration: { _tag: 'Unknown' }, response: state.response }
+    return { _tag: 'QuestionAnswered', duration: { _tag: 'Unknown' }, response: state.response, request: state.request }
   }
 
   if (state._tag === 'QuestionCancelled') {
-    return { _tag: 'QuestionCancelled', duration: { _tag: 'Unknown' }, response: state.response }
+    return { _tag: 'QuestionCancelled', duration: { _tag: 'Unknown' }, response: state.response, request: state.request }
   }
 
   if (state._tag === 'Errored') {

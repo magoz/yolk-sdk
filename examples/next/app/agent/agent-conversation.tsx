@@ -159,6 +159,42 @@ const toolStateHasError = (state: ToolRunState) => {
   }
 }
 
+const optionLabel = (question: QuestionPrompt, optionId: string) =>
+  question.options?.find(option => option.id === optionId)?.label ?? optionId
+
+const questionForAnswer = (
+  questions: ReadonlyArray<QuestionPrompt>,
+  answer: QuestionAnswer
+) => questions.find(question => question.id === answer.questionId)
+
+const questionAnswerLine = (
+  answer: QuestionAnswer,
+  questions: ReadonlyArray<QuestionPrompt>
+) => {
+  const question = questionForAnswer(questions, answer)
+  const prompt = question?.prompt ?? answer.questionId
+  const selected = answer.optionIds?.map(optionId =>
+    question === undefined ? optionId : optionLabel(question, optionId)
+  ) ?? []
+  const custom = answer.customAnswer?.trim()
+  const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
+
+  return values.length === 0 ? `${prompt}: answered` : `${prompt}: ${values.join(', ')}`
+}
+
+const questionAnswerPreview = (
+  response: QuestionResponse,
+  questions: ReadonlyArray<QuestionPrompt>
+) => {
+  const answers = response.answers ?? []
+
+  if (answers.length === 0) {
+    return 'answered'
+  }
+
+  return answers.map(answer => questionAnswerLine(answer, questions)).join('\n')
+}
+
 const toolStateContent = (state: ToolRunState) => {
   switch (state._tag) {
     case 'Completed':
@@ -167,7 +203,7 @@ const toolStateContent = (state: ToolRunState) => {
     case 'Denied':
       return state.reason
     case 'QuestionAnswered':
-      return 'answered'
+      return questionAnswerPreview(state.response, state.request?.questions ?? [])
     case 'QuestionCancelled':
       return state.response.reason ?? 'cancelled'
     case 'Errored':

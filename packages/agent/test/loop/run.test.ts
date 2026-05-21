@@ -433,7 +433,7 @@ describe('run', () => {
       expect(requests[1]?.messages.at(-1)).toMatchObject({
         _tag: 'ToolResult',
         toolCallId: 'call_question',
-        content: 'User answered the question:\n- Pick one: A',
+        content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.',
         structuredContent: { type: 'question_response', outcome: 'answered' }
       })
     })

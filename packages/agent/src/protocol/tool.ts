@@ -136,11 +136,15 @@ export const formatQuestionResponseContent = (
   const answers = response.answers ?? []
 
   if (answers.length === 0) {
-    return 'User answered the question, but no answer values were provided.'
+    return 'User answered the question, but no answer values were provided. Continue with this in mind.'
   }
 
-  return ['User answered the question:', ...answers.map(answer => formatQuestionAnswer(answer, questions))]
-    .join('\n')
+  const formatted = answers
+    .map(answer => formatQuestionAnswer(answer, questions).slice('- '.length))
+    .join('; ')
+  const label = answers.length === 1 ? 'question' : 'questions'
+
+  return `User has answered your ${label}: ${formatted}. Continue with the user's answers in mind.`
 }
 
 export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest])
