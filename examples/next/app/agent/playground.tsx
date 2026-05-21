@@ -914,9 +914,9 @@ export function AgentPlayground({
   }, [])
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem),linear-gradient(135deg,var(--color-background),var(--color-muted))] p-2 sm:p-4 md:p-6">
+    <main className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem),linear-gradient(135deg,var(--color-background),var(--color-muted))] p-2 sm:p-4 md:p-6">
       <audio ref={audioRef} autoPlay className="sr-only" />
-      <div className="mx-auto h-[calc(100vh-1rem)] max-w-5xl overflow-hidden rounded-[2rem] border border-foreground/10 bg-background/85 shadow-2xl shadow-foreground/10 backdrop-blur md:h-[calc(100vh-3rem)]">
+      <div className="mx-auto h-full max-w-5xl overflow-hidden rounded-[2rem] border border-foreground/10 bg-background/85 shadow-2xl shadow-foreground/10 backdrop-blur">
         <section className="flex h-full min-h-0 min-w-0 flex-col bg-card/80">
           <AgentConversationHeader
             runtimeLabel={runtime.label}
