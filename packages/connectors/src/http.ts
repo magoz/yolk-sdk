@@ -26,7 +26,9 @@ export class ConnectorHttpClient extends Context.Service<ConnectorHttpClient, Co
   '@yolk-sdk/connectors/ConnectorHttpClient'
 ) {}
 
-export const decodeJsonResponse = <A>(schema: Schema.Schema<A>, response: ConnectorHttpResponse) =>
+type JsonResponseSchema<A> = Schema.Schema<A> & { readonly DecodingServices: never }
+
+export const decodeJsonResponse = <A>(schema: JsonResponseSchema<A>, response: ConnectorHttpResponse) =>
   Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(response.body).pipe(
     Effect.mapError(error =>
       new ConnectorError({

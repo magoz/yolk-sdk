@@ -5,6 +5,8 @@ import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
   ApiKeyCredential,
+  type ConnectorAction,
+  OAuthCredential,
   ConnectorError,
   ConnectorHttpClient,
   ConnectorHttpResponse,
@@ -17,12 +19,12 @@ import {
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import { FigmaConnector } from '@yolk-sdk/connectors/figma'
-import { GoogleConnector } from '@yolk-sdk/connectors/google'
-import { LinkedInSearchConnector } from '@yolk-sdk/connectors/linkedin-search'
-import { NotionConnector } from '@yolk-sdk/connectors/notion'
+import { GoogleConnector, GoogleOAuthCredentialSlot, googleCalendarCreateEventAction } from '@yolk-sdk/connectors/google'
+import { ExaApiKeySlot, LinkedInSearchConnector, linkedInSearchAction } from '@yolk-sdk/connectors/linkedin-search'
+import { NotionApiTokenSlot, NotionConnector, notionCreatePageAction, notionSearchAction } from '@yolk-sdk/connectors/notion'
 import { R2StorageConnector } from '@yolk-sdk/connectors/r2-storage'
-import { TelegramConnector, telegramBotTokenSlotId } from '@yolk-sdk/connectors/telegram'
-import { TodoistConnector } from '@yolk-sdk/connectors/todoist'
+import { TelegramConnector, telegramBotTokenSlotId, telegramSendMessageAction } from '@yolk-sdk/connectors/telegram'
+import { TodoistApiTokenSlot, TodoistConnector, todoistCreateTaskAction } from '@yolk-sdk/connectors/todoist'
 
 const TestInput = Schema.Struct({ text: Schema.String })
 const TestOutput = Schema.Struct({ value: Schema.String })
@@ -49,6 +51,134 @@ const TestConnector = defineConnector({
 })
 
 const integration = makeIntegration({ connectorId: 'test' })
+
+type JsonRequestCase = {
+  readonly name: string
+  readonly execute: ConnectorAction<ConnectorHttpClient | CredentialResolver, ConnectorError>['execute']
+  readonly connectorId: string
+  readonly slotId: string
+  readonly credentialKind?: 'api_key' | 'oauth'
+  readonly input: unknown
+  readonly config?: Readonly<Record<string, unknown>>
+  readonly expected: {
+    readonly method: string
+    readonly url: string
+    readonly body: unknown
+  }
+}
+
+const successBody = (name: string) => {
+  switch (name) {
+    case 'Calendar create event':
+      return '{"id":"event_1","summary":"Planning"}'
+    case 'Notion search':
+      return '{"results":[],"hasMore":false}'
+    case 'Notion create page':
+      return '{"id":"page_1","object":"page"}'
+    case 'Todoist create task':
+      return '{"id":"task_1","content":"Buy milk"}'
+    case 'LinkedIn search':
+      return '{"results":[],"totalResults":0}'
+    case 'Telegram send message':
+      return '{"ok":true}'
+    default:
+      return '{}'
+  }
+}
+
+const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
+  {
+    name: 'Calendar create event',
+    execute: googleCalendarCreateEventAction.execute,
+    connectorId: 'google',
+    slotId: GoogleOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: {
+      summary: 'Planning',
+      start: { dateTime: '2026-05-21T10:00:00Z' },
+      end: { dateTime: '2026-05-21T10:30:00Z' }
+    },
+    expected: {
+      method: 'POST',
+      url: 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      body: {
+        summary: 'Planning',
+        start: { dateTime: '2026-05-21T10:00:00Z' },
+        end: { dateTime: '2026-05-21T10:30:00Z' }
+      }
+    }
+  },
+  {
+    name: 'Notion search',
+    execute: notionSearchAction.execute,
+    connectorId: 'notion',
+    slotId: NotionApiTokenSlot.id,
+    input: { query: 'roadmap', pageSize: 3 },
+    expected: {
+      method: 'POST',
+      url: 'https://api.notion.com/v1/search',
+      body: { query: 'roadmap', page_size: 3 }
+    }
+  },
+  {
+    name: 'Notion create page',
+    execute: notionCreatePageAction.execute,
+    connectorId: 'notion',
+    slotId: NotionApiTokenSlot.id,
+    input: { parentPageId: 'parent_1', title: 'New page' },
+    expected: {
+      method: 'POST',
+      url: 'https://api.notion.com/v1/pages',
+      body: {
+        parent: { page_id: 'parent_1' },
+        properties: { title: { title: [{ text: { content: 'New page' } }] } }
+      }
+    }
+  },
+  {
+    name: 'Todoist create task',
+    execute: todoistCreateTaskAction.execute,
+    connectorId: 'todoist',
+    slotId: TodoistApiTokenSlot.id,
+    input: { content: 'Buy milk', dueString: 'tomorrow' },
+    expected: {
+      method: 'POST',
+      url: 'https://api.todoist.com/rest/v2/tasks',
+      body: { content: 'Buy milk', due_string: 'tomorrow' }
+    }
+  },
+  {
+    name: 'LinkedIn search',
+    execute: linkedInSearchAction.execute,
+    connectorId: 'linkedin-search',
+    slotId: ExaApiKeySlot.id,
+    input: { query: 'founder', numResults: 2 },
+    expected: {
+      method: 'POST',
+      url: 'https://api.exa.ai/search',
+      body: {
+        query: 'founder',
+        category: 'people',
+        numResults: 2,
+        type: 'auto',
+        contents: { text: true }
+      }
+    }
+  },
+  {
+    name: 'Telegram send message',
+    execute: telegramSendMessageAction.execute,
+    connectorId: 'telegram',
+    slotId: telegramBotTokenSlotId,
+    input: { message: 'hello', disableWebPagePreview: true },
+    config: { chatId: 'chat_1' },
+    expected: {
+      method: 'POST',
+      url: 'https://api.telegram.org/botapi_token/sendMessage',
+      body: { chat_id: 'chat_1', text: 'hello', disable_web_page_preview: true }
+    }
+  }
+]
 
 describe('@yolk-sdk/connectors', () => {
   it('imports public subpaths', async () => {
@@ -188,7 +318,69 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
-  it.effect('sends Telegram messages as JSON requests', () =>
+  for (const requestCase of jsonRequestCases) {
+    it.effect(`${requestCase.name} sends a JSON request`, () =>
+      Effect.gen(function* () {
+        const requests: Array<ConnectorHttpRequest> = []
+        const integration = makeIntegration({
+          connectorId: requestCase.connectorId,
+          config: requestCase.config,
+          credentialBindings: [
+            makeCredentialBinding({
+              slotId: requestCase.slotId,
+              credentialRef: 'api-token'
+            })
+          ]
+        })
+        const CredentialResolverTest = Layer.succeed(
+          CredentialResolver,
+          CredentialResolver.of({
+            resolve: () =>
+              Effect.succeed(
+                requestCase.credentialKind === 'oauth'
+                  ? OAuthCredential.make({
+                      _tag: 'OAuthCredential',
+                      provider: requestCase.connectorId,
+                      accessToken: 'api_token',
+                      expiresAt: Date.now() + 60_000
+                    })
+                  : ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' })
+              )
+          })
+        )
+        const ConnectorHttpClientTest = Layer.succeed(
+          ConnectorHttpClient,
+          ConnectorHttpClient.of({
+            request: request => {
+              requests.push(request)
+
+              return Effect.succeed(
+                ConnectorHttpResponse.make({
+                  status: 200,
+                  headers: { 'content-type': 'application/json' },
+                  body: successBody(requestCase.name)
+                })
+              )
+            }
+          })
+        )
+
+        yield* requestCase.execute({
+          integration,
+          input: requestCase.input
+        }).pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+        expect(requests[0]).toMatchObject({
+          method: requestCase.expected.method,
+          url: requestCase.expected.url,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(requestCase.expected.body)
+        })
+      })
+    )
+  }
+
+  it.effect('adapts Telegram connector to an agent tool', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const telegramIntegration = makeIntegration({

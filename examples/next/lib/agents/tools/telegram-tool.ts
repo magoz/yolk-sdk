@@ -63,6 +63,12 @@ const responseHeaders = (headers: Readonly<Record<string, string | undefined>>) 
 const contentType = (headers: Readonly<Record<string, string>> | undefined) =>
   headers?.['content-type'] ?? headers?.['Content-Type']
 
+export const makeConnectorHttpRequest = (request: ConnectorHttpRequest) =>
+  HttpClientRequest.make(request.method)(request.url).pipe(
+    HttpClientRequest.setHeaders(request.headers ?? {}),
+    HttpClientRequest.bodyText(request.body ?? '', contentType(request.headers))
+  )
+
 const makeConnectorHttpClientLayer = Layer.effect(
   ConnectorHttpClient,
   Effect.gen(function* () {
@@ -71,10 +77,7 @@ const makeConnectorHttpClientLayer = Layer.effect(
     return ConnectorHttpClient.of({
       request: (request: ConnectorHttpRequest) =>
         Effect.gen(function* () {
-          const httpRequest = HttpClientRequest.make(request.method)(request.url).pipe(
-            HttpClientRequest.setHeaders(request.headers ?? {}),
-            HttpClientRequest.bodyText(request.body ?? '', contentType(request.headers))
-          )
+          const httpRequest = makeConnectorHttpRequest(request)
           const response = yield* http.execute(httpRequest)
           const body = yield* response.text.pipe(
             Effect.mapError(error =>

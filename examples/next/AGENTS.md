@@ -21,6 +21,11 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 
 ## Commands
 
-- Dev: `pnpm dev:app`
+- Dev: `pnpm dev:app` or root `pnpm dev` through portless
 - Typecheck: `pnpm --filter @yolk-example/next check`
 - Build: `pnpm --filter @yolk-example/next build`
+
+## Env
+
+- App env files live under `examples/next`: `.env.local`, `.env.test`, `.env.example`.
+- `examples/next/lib/dotenv.ts` loads app-local env files for scripts, Vitest, and Playwright.
