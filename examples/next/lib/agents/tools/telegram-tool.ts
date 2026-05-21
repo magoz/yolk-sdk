@@ -34,6 +34,20 @@ const unknownToMessage = (error: unknown) => error instanceof Error ? error.mess
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: telegramToolName, message, cause })
 
+const providerFailureContent = (error: {
+  readonly code: string
+  readonly message: string
+  readonly status?: number
+  readonly underlying?: unknown
+}) => {
+  const status = error.status === undefined ? '' : ` (HTTP ${error.status})`
+  const underlying = typeof error.underlying === 'string' && error.underlying.length > 0
+    ? `: ${error.underlying}`
+    : ''
+
+  return `${error.code}${status}: ${error.message}${underlying}`
+}
+
 const responseHeaders = (headers: Readonly<Record<string, string | undefined>>) => {
   const result: Record<string, string> = {}
 
@@ -46,6 +60,9 @@ const responseHeaders = (headers: Readonly<Record<string, string | undefined>>) 
   return result
 }
 
+const contentType = (headers: Readonly<Record<string, string>> | undefined) =>
+  headers?.['content-type'] ?? headers?.['Content-Type']
+
 const makeConnectorHttpClientLayer = Layer.effect(
   ConnectorHttpClient,
   Effect.gen(function* () {
@@ -56,7 +73,7 @@ const makeConnectorHttpClientLayer = Layer.effect(
         Effect.gen(function* () {
           const httpRequest = HttpClientRequest.make(request.method)(request.url).pipe(
             HttpClientRequest.setHeaders(request.headers ?? {}),
-            HttpClientRequest.bodyText(request.body ?? '')
+            HttpClientRequest.bodyText(request.body ?? '', contentType(request.headers))
           )
           const response = yield* http.execute(httpRequest)
           const body = yield* response.text.pipe(
@@ -161,7 +178,7 @@ export const makeAppTelegramToolModule = (config: TelegramToolConfig): ToolModul
                 case 'Failure':
                   return ToolResult.make({
                     toolCallId: call.id,
-                    content: `${result.error.code}: ${result.error.message}`,
+                    content: providerFailureContent(result.error),
                     isError: true,
                     structuredContent: result.error
                   })

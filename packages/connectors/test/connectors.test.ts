@@ -4,18 +4,24 @@ import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
+  ApiKeyCredential,
   ConnectorError,
+  ConnectorHttpClient,
+  ConnectorHttpResponse,
+  CredentialResolver,
   defineAction,
   defineConnector,
+  makeCredentialBinding,
   makeIntegration
 } from '@yolk-sdk/connectors'
+import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import { FigmaConnector } from '@yolk-sdk/connectors/figma'
 import { GoogleConnector } from '@yolk-sdk/connectors/google'
 import { LinkedInSearchConnector } from '@yolk-sdk/connectors/linkedin-search'
 import { NotionConnector } from '@yolk-sdk/connectors/notion'
 import { R2StorageConnector } from '@yolk-sdk/connectors/r2-storage'
-import { TelegramConnector } from '@yolk-sdk/connectors/telegram'
+import { TelegramConnector, telegramBotTokenSlotId } from '@yolk-sdk/connectors/telegram'
 import { TodoistConnector } from '@yolk-sdk/connectors/todoist'
 
 const TestInput = Schema.Struct({ text: Schema.String })
@@ -178,6 +184,65 @@ describe('@yolk-sdk/connectors', () => {
         content: 'upstream_failed: Nope',
         isError: true,
         structuredContent: { code: 'upstream_failed', message: 'Nope' }
+      })
+    })
+  )
+
+  it.effect('sends Telegram messages as JSON requests', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const telegramIntegration = makeIntegration({
+        connectorId: 'telegram',
+        config: { chatId: 'chat_1' },
+        credentialBindings: [
+          makeCredentialBinding({
+            slotId: telegramBotTokenSlotId,
+            credentialRef: 'telegram-token'
+          })
+        ]
+      })
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'bot_token' })
+            )
+        })
+      )
+      const ConnectorHttpClientTest = Layer.succeed(
+        ConnectorHttpClient,
+        ConnectorHttpClient.of({
+          request: request => {
+            requests.push(request)
+
+            return Effect.succeed(
+              ConnectorHttpResponse.make({
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+                body: '{"ok":true}'
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* TelegramConnector.invoke({
+        integration: telegramIntegration,
+        action: 'telegram.send_message',
+        input: { message: 'hello', disableWebPagePreview: true }
+      }).pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({ _tag: 'Success', value: { sent: true, chatId: 'chat_1' } })
+      expect(requests[0]).toMatchObject({
+        method: 'POST',
+        url: 'https://api.telegram.org/botbot_token/sendMessage',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: 'chat_1',
+          text: 'hello',
+          disable_web_page_preview: true
+        })
       })
     })
   )

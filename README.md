@@ -53,7 +53,7 @@ No users, teams, orgs, projects, billing, or product permissions below app.
 
 ```bash
 pnpm install
-cp .env.example .env.local
+cp examples/next/.env.example examples/next/.env.local
 pnpm dev
 ```
 
