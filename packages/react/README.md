@@ -80,6 +80,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 - `AgentChatMessage` groups parts by role/turn.
 - `AgentChatPart` covers text, reasoning, tool calls/results, and errors.
 - Tool parts expose approval requested/granted/denied, question requested/answered/cancelled, execution, completion, and error states.
+- Question answer states preserve request context when available so renderers can show selected option labels instead of only `answered`.
 - `buildAgentChatItems` is optional convenience projection for simple flat UIs.
 - Provider reasoning is displayed only from protocol reasoning events; never fabricate reasoning.
 

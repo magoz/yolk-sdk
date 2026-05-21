@@ -62,7 +62,8 @@ HITL is protocol-level, not UI-level:
 - `run` / `runRuntime` emit `ToolApprovalRequested` then `AgentAwaitingInput`.
 - Resume by passing `hitlResponses` or using client helpers like `submitToolApprovalResponse`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
-- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results.
+- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
+- Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 
 ## Host responsibilities
 
