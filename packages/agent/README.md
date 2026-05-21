@@ -40,16 +40,18 @@ import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/test
 ## Quick start
 
 ```ts
-import { Effect } from 'effect'
+import { Stream } from 'effect'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 
 const program = run({
-  messages: [{ role: 'user', content: 'Hello' }],
-  maxTurns: 4
-})
+  messages: [UserMessage.make({ content: 'Hello' })],
+  systemPrompt: 'Be helpful.',
+  tools: [],
+  model: 'gpt-5.5'
+}).pipe(Stream.runCollect)
 
-// Provide LLM provider + tool executor layers in the host app.
-Effect.runPromise(program)
+// Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
 
 ## Human-in-the-loop

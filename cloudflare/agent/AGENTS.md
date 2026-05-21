@@ -9,7 +9,7 @@ Cloudflare app for the Yolk durable agent runtime.
 - App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token broker bridge config and remote MCP server configs before direct browser WS.
 - `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
 - Current path runs Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and proxy-first Codex streaming after brokered token handoff.
-- DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new input is rejected with `conflict` while a run is active.
+- DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new user input is rejected with `conflict` while a run is active; HITL responses resume paused runs.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bootstrap-injected: Next sends the runtime `SkillsetManifest`; `src/generated/skillset.ts` remains a smoke/unbootstrapped fallback. No filesystem reads at Worker runtime.
 - Tool modules are runtime-adapter explicit. App tool modules are runtime-portable; never import Node-only code here. Remote MCP config arrives via bootstrap, not Worker env/filesystem.
@@ -44,7 +44,7 @@ Do not build these here yet unless explicitly requested:
 ## Package Holes To Close First
 
 - Cancellation/resume beyond reconnect interruption.
-- Tool approval and permission hooks.
+- Product permission policy beyond package HITL approval hooks.
 - Context provider API.
 - Compaction hook shape.
 - Protocol event completeness and stability.

@@ -7,6 +7,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - Own durable Workflow orchestration contracts over model/tool steps.
 - Keep continuation state plain serializable wire data.
 - Coordinate model-step, tool-batch-step, close, and error callbacks.
+- Carry generic awaiting-input wire data between host tool steps and Workflow hooks.
 - Provide contract tests for Workflow lifecycle without app auth/provider/tool/UI coupling.
 
 ## Boundaries
@@ -20,6 +21,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 ## Design Rules
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
+- Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
 - Keep Workflow-safe APIs behind the `./workflow` package subpath so normal imports do not accidentally couple to Workflow runtime code.
 - Preserve tool result order by original model tool-call order.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.

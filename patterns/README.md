@@ -14,6 +14,7 @@ Architecture and convention patterns for the SDK workspace.
 
 | Pattern                                                | Purpose                                                       |
 | ------------------------------------------------------ | ------------------------------------------------------------- |
+| [AGENT_HITL.md](./AGENT_HITL.md)                       | Shared approval/question pause/resume semantics               |
 | [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Agent/MCP/RAG package shape, boundaries, tree-shaking rules   |
 | [PACKAGE_DISTRIBUTION.md](./PACKAGE_DISTRIBUTION.md)   | Package versioning, build, release, and artifact validation   |
 

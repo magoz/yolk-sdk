@@ -27,6 +27,7 @@ import {
 
 - model step: produce model events/tool calls
 - tool batch step: execute requested tools
+- awaiting-input state: carry pending HITL hook data between steps
 - close step: flush/close output stream
 - terminal status: completed, step failure, close failure, or max turns exceeded
 
@@ -41,6 +42,7 @@ Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are op
 - Own Next/Vercel routes, auth, providers, tools, persistence, and telemetry.
 - Encode/decode app transcript/session state into serializable Workflow inputs.
 - Decide cancellation/resume/conflict UX.
+- Own hook tokens and response validation for HITL resume.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
 
 ## Boundaries

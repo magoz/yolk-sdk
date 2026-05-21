@@ -24,7 +24,7 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 
 | Package | Role |
 | --- | --- |
-| `@yolk-sdk/agent` | Protocol, loop, runtime, client, and tool primitives |
+| `@yolk-sdk/agent` | Protocol, loop, runtime, client, HITL, and tool primitives |
 | `@yolk-sdk/react` | Headless React chat hook/state helpers |
 | `@yolk-sdk/mcp` | MCP client/server/protocol adapters |
 | `@yolk-sdk/rag` | Retrieval, ingestion, chunking, and store contracts |

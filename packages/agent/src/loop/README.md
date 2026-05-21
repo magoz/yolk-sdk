@@ -7,6 +7,7 @@ Stateless provider-neutral LLM/tool loop.
 - `run` for executing model turns over a protocol transcript.
 - `LLMProvider`, `ToolExecutor`, `LoopConfig`, and `ContextTransformer` Effect service contracts.
 - Assistant text/reasoning/tool-call accumulation helpers.
+- HITL pauses for manual tool approvals and structured questions.
 - Typed loop errors.
 - `@yolk-sdk/agent/loop/testing` test helpers.
 

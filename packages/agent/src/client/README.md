@@ -8,6 +8,7 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - Generic client state reducer helpers.
 - Non-empty `AgentTranscript` type.
 - Tool run lifecycle state.
+- HITL response submission helpers for approvals and questions.
 - Typed transport errors.
 
 ## Use it when
