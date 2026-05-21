@@ -41,6 +41,7 @@ describe('question tool', () => {
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([questionToolName])
       expect(toolSet.tools[0]?.description).toContain('Ask the user')
+      expect(toolSet.tools[0]?.parameters).toMatchObject({ type: 'object' })
       expect(result.content).toBe('session_1:Pick one')
     })
   )

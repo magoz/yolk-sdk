@@ -101,6 +101,19 @@ const unknownToMessage = (error: unknown) =>
 const objectField = (input: unknown, key: string) =>
   input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
 
+const isObjectRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
+  input !== null && typeof input === 'object' && !Array.isArray(input)
+
+const localDefinitionName = (ref: unknown) => {
+  if (typeof ref !== 'string') {
+    return undefined
+  }
+
+  const prefix = '#/$defs/'
+
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
+}
+
 const hasJsonSchemaType = (input: unknown, type: string) => objectField(input, 'type') === type
 
 const isEmptyStructJsonSchema = (schema: unknown) => {
@@ -127,12 +140,22 @@ const emptyObjectJsonSchema = {
 
 const jsonSchemaFromSchema = (schema: Schema.Top) => {
   const document = Schema.toJsonSchemaDocument(schema)
-  const jsonSchema = isEmptyStructJsonSchema(document.schema) || isEmptyRecordJsonSchema(document.schema)
+  const definitionName = localDefinitionName(objectField(document.schema, '$ref'))
+  const localDefinition = definitionName === undefined
+    ? undefined
+    : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
+  const rootSchema = isObjectRecord(localDefinition) ? localDefinition : document.schema
+  const remainingDefinitions = definitionName === undefined
+    ? document.definitions
+    : Object.fromEntries(
+        Object.entries(document.definitions).filter(([name]) => name !== definitionName)
+      )
+  const jsonSchema = isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
     ? emptyObjectJsonSchema
-    : document.schema
+    : rootSchema
 
-  return Object.keys(document.definitions).length > 0
-    ? { ...jsonSchema, $defs: document.definitions }
+  return Object.keys(remainingDefinitions).length > 0
+    ? { ...jsonSchema, $defs: remainingDefinitions }
     : jsonSchema
 }
 
