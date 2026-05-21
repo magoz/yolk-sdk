@@ -102,6 +102,47 @@ export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('Qu
   reason: Schema.optional(Schema.String)
 }) {}
 
+const optionLabel = (question: QuestionPrompt, optionId: string) =>
+  question.options?.find(option => option.id === optionId)?.label ?? optionId
+
+const questionForAnswer = (
+  questions: ReadonlyArray<QuestionPrompt>,
+  answer: QuestionAnswer
+) => questions.find(question => question.id === answer.questionId)
+
+const formatQuestionAnswer = (
+  answer: QuestionAnswer,
+  questions: ReadonlyArray<QuestionPrompt>
+) => {
+  const question = questionForAnswer(questions, answer)
+  const prompt = question?.prompt ?? answer.questionId
+  const selected = answer.optionIds?.map(optionId =>
+    question === undefined ? optionId : optionLabel(question, optionId)
+  ) ?? []
+  const custom = answer.customAnswer?.trim()
+  const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
+
+  return values.length === 0 ? `- ${prompt}: answered` : `- ${prompt}: ${values.join(', ')}`
+}
+
+export const formatQuestionResponseContent = (
+  response: QuestionResponse,
+  questions: ReadonlyArray<QuestionPrompt> = []
+) => {
+  if (response.outcome === 'cancelled') {
+    return `Question cancelled: ${response.reason ?? 'Question cancelled'}`
+  }
+
+  const answers = response.answers ?? []
+
+  if (answers.length === 0) {
+    return 'User answered the question, but no answer values were provided.'
+  }
+
+  return ['User answered the question:', ...answers.map(answer => formatQuestionAnswer(answer, questions))]
+    .join('\n')
+}
+
 export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest])
 export type HitlRequest = typeof HitlRequest.Type
 

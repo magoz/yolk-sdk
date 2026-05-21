@@ -88,6 +88,7 @@ export {
   QuestionResponse,
   QuestionResponseOutcome,
   QuestionToolParams,
+  formatQuestionResponseContent,
   ToolApprovalDecision,
   ToolApprovalMode,
   ToolApprovalPolicy,

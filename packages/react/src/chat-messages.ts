@@ -16,6 +16,7 @@ import {
   UserMessage,
   appendTextToContent,
   contentParts,
+  formatQuestionResponseContent,
   isContentEmpty,
   type AgentEvent,
   type AgentMessage,
@@ -1192,15 +1193,11 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
           part.state._tag === 'QuestionCancelled'
         ) {
           const response = part.state.response
-          const reason = response.reason ?? 'Question cancelled'
 
           return [
             ToolResultMessage.make({
               toolCallId: response.toolCallId,
-              content:
-                response.outcome === 'answered'
-                  ? 'User answered the question.'
-                  : `Question cancelled: ${reason}`,
+              content: formatQuestionResponseContent(response),
               isError: response.outcome === 'cancelled' ? true : undefined,
               structuredContent: {
                 type: 'question_response',

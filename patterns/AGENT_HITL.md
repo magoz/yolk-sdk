@@ -20,6 +20,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Manual approval emits `ToolApprovalRequested`, ends the run with `AgentAwaitingInput`, and never dispatches the tool until approved.
 - Denied approval becomes a model-visible `ToolResultMessage` with `isError = true`.
 - `question` is a package-owned tool name. The loop intercepts it, emits `QuestionRequested`, and resumes with structured answers in `ToolResult.structuredContent`.
+- Question resume `ToolResult.content` must include selected answer values/labels, not only `answered`; providers reliably see text output.
 - HITL responses are control inputs (`ToolApprovalResponseInput`, `QuestionResponseInput`, `hitlResponses`), not user/assistant text.
 - Replay stays provider-neutral through normal assistant tool calls and tool result messages.
 - Same-turn sibling tools may yield multiple pending requests; submit responses one at a time unless a runtime adds batching later.

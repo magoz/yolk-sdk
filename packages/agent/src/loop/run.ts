@@ -29,6 +29,7 @@ import {
   ProviderToolResult,
   QuestionRequest,
   QuestionToolParams,
+  formatQuestionResponseContent,
   ToolApprovalRequest,
   ToolResultMessage,
   SubagentCompleted,
@@ -38,6 +39,7 @@ import {
   type AgentReasoningEffort,
   type HitlRequest,
   type HitlResponse,
+  type QuestionPrompt,
   type QuestionResponse,
   type ToolApprovalResponse,
   ToolResult,
@@ -517,15 +519,13 @@ const deniedToolResult = (call: ToolCall, response: ToolApprovalResponse) => {
   })
 }
 
-const questionToolResult = (response: QuestionResponse) => {
-  const reason = response.reason ?? 'Question cancelled'
-
+const questionToolResult = (
+  response: QuestionResponse,
+  questions: ReadonlyArray<QuestionPrompt>
+) => {
   return ToolResult.make({
     toolCallId: response.toolCallId,
-    content:
-      response.outcome === 'answered'
-        ? 'User answered the question.'
-        : `Question cancelled: ${reason}`,
+    content: formatQuestionResponseContent(response, questions),
     isError: response.outcome === 'cancelled' ? true : undefined,
     structuredContent: {
       type: 'question_response',
@@ -572,7 +572,7 @@ const prepareQuestionCall = (
         _tag: 'Result',
         index,
         call,
-        result: questionToolResult(response),
+        result: questionToolResult(response, decoded.success.questions),
         events: [
           response.outcome === 'answered'
             ? QuestionAnswered.make({ response })
