@@ -77,7 +77,7 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - Tool context: `{ surface, route, userId }`; add policy gates via `ToolRegistration.isEnabled`
 - Text tool context may include `sessionId` and `subagent` for delegated task execution/policy.
 - Subagent runtime/tool failures should return `ToolResult.isError = true` so parent turns and sibling tasks can continue.
-- No product permissions yet; durable transcript exists only in Cloudflare DO runtime
+- No persistent product permissions/allow-always rules yet; package HITL approval hooks support per-call host-gated approve/deny.
 
 Configured MCP source:
 

@@ -49,6 +49,7 @@
 - Provider reasoning only: display `LLMReasoningDelta` / assistant reasoning parts, never invented reasoning.
 - Text may start after reasoning in the same assistant turn: first `LLMTextDelta` must create a streaming `Text` part if only `Reasoning` is streaming. Do not wait for final `AssistantMessage`.
 - Tool parts expose input streaming, approval, denied, question, executing, completed, errored, and provider-completed states.
+- Answered/cancelled question tool states should retain the original request when available so UI/replay can resolve selected option labels.
 - Completed tool parts may carry `result.isError`; renderers can style them as tool-origin errors while preserving replay.
 - Subagent lifecycle events are protocol/activity telemetry; headless chat projections should tolerate them without duplicating tool parts.
 - Preserve ordered assistant parts when converting render messages back to protocol messages.

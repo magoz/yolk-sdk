@@ -39,6 +39,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Agent events update parts directly: text/reasoning stream as parts; tools track input, approval, execution, completion, denial, and errors.
 - Text may begin after reasoning in the same assistant turn; keep it streaming from first `LLMTextDelta`, not only final `AssistantMessage`.
 - Tool rows are anchored by `ToolCall` parts; preserve `startedAtMs`/`endedAtMs` across lifecycle events.
+- Question tool rows show original prompt/options from tool input and selected answer from HITL response; assistant recaps are normal model text, not the source of truth.
 - Task tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content.
 - Tool-origin error results (`ToolResult.isError`) render as failed tool output, distinct from transport/tool execution errors.
 - Render standalone `ToolResult` only for orphan results.

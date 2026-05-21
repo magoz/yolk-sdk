@@ -31,6 +31,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 
 - Repo-wide SDK/package patterns: `patterns/README.md`.
 - Agent HITL approval/question semantics: `patterns/AGENT_HITL.md`.
+- Provider-facing tool schema compatibility: `patterns/AI_TOOL_SCHEMAS.md`.
 - Next-only patterns: `examples/next/patterns/README.md`.
 - Patterns describe intent; code describes reality. Check code before assuming.
 
