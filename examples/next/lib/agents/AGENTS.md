@@ -9,7 +9,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Default text prompt says tools run in parallel and distinguishes durable user knowledge from storage sources.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
-- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + knowledge/storage search + just-bash virtual shell + skill + optional remote MCP tools from project files.
+- Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + knowledge/storage search + just-bash virtual shell + skill + optional remote MCP tools from project files + optional user-configured Telegram send tool from `@yolk-sdk/connectors`.
 - Next/Workflow/Cloudflare text runtimes expose the package `question` HITL tool; Next/Workflow text runtime also exposes package-owned `task` for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
 - Task subagents run with normal text tools but without the `task` tool, so recursive subagents are disabled in v1.
 - Task subagents stream `ToolExecution*` plus `SubagentStarted`/`SubagentCompleted`; final task results include structured subagent metadata for status, timing, model, and ids.
@@ -63,6 +63,7 @@ Tool-local runtime portability rules live in `tools/AGENTS.md`.
 - `tools/just-bash-tool.ts`: `just_bash`; text-only virtual shell with fresh per-call in-memory filesystem; script/cwd/stdin/timeout params only; curl enabled with literal private/loopback hosts denied; no host filesystem/JS/Python
 - `tools/knowledge-tool.ts`: `list_knowledge_objects` + `search_knowledge` + `get_knowledge_context`; Next/Workflow text and voice over user-owned knowledge chunks; omitted from Cloudflare bootstrap
 - `tools/storage-rag-tool.ts`: storage source discovery + RAG search tools; Next/Workflow text and voice over app RAG/DB adapters; omitted from Cloudflare bootstrap
+- `tools/telegram-tool.ts`: optional `telegram_send_message`; Next/Workflow text, voice, and task subagents; uses `@yolk-sdk/connectors/telegram` plus user config from `/agent/connectors`; no HITL approval gate
 - `tools/mcp-tool-module.ts`: configured remote MCP servers; text-only; tools namespaced as `<server>_<tool>`
 - `mcp/file-source.ts`: filesystem boundary for `.yolk/mcp.json` / `.opencode/mcp.json`; pass parsed configs into tool modules/bootstrap.
 - `tools/resolve-toolset.ts`: module-explicit resolver over `@yolk-sdk/agent/tools`; use this at new route/runtime boundaries.

@@ -217,6 +217,9 @@ importers:
       '@yolk-sdk/anthropic':
         specifier: workspace:^
         version: link:../../packages/anthropic
+      '@yolk-sdk/connectors':
+        specifier: workspace:^
+        version: link:../../packages/connectors
       '@yolk-sdk/knowledge':
         specifier: workspace:^
         version: link:../../packages/knowledge

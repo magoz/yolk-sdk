@@ -45,6 +45,8 @@ import {
 } from '@/lib/agents/tools/skill-manager-tool'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
+import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
+import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import {
   createAgentSkillWithCommand,
@@ -336,11 +338,16 @@ export const makeAgentTextRuntime = (
     )
     const storageToolModule = makeAppStorageRagToolModule()
     const knowledgeToolModule = makeAppKnowledgeToolModule()
+    const telegramConnectorConfig = yield* getTelegramConnectorConfig(userId)
+    const telegramToolModules = telegramConnectorConfig === undefined
+      ? []
+      : [makeAppTelegramToolModule(telegramConnectorConfig)]
     const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
       knowledgeToolModule,
-      storageToolModule
+      storageToolModule,
+      ...telegramToolModules
     ]
     const selectedModel = input.model ?? baseConfig.model
     const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel

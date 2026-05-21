@@ -30,6 +30,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/anthropic": "workspace:^",
+    "@yolk-sdk/connectors": "workspace:^",
     "@yolk-sdk/knowledge": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",
     "@yolk-sdk/oauth": "workspace:^",

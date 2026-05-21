@@ -20,6 +20,8 @@ import { defaultVoiceAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
+import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
+import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
@@ -162,8 +164,17 @@ const handler = Effect.gen(function* () {
   const sdp = yield* readSdp
   const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+  const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
+  const telegramToolModules = telegramConnectorConfig === undefined
+    ? []
+    : [makeAppTelegramToolModule(telegramConnectorConfig)]
   const toolSet = yield* resolveAgentToolSet({
-    modules: [...nodeVoiceToolModules, makeAppKnowledgeToolModule(), makeAppStorageRagToolModule()],
+    modules: [
+      ...nodeVoiceToolModules,
+      makeAppKnowledgeToolModule(),
+      makeAppStorageRagToolModule(),
+      ...telegramToolModules
+    ],
     context: {
       surface: 'voice',
       route: '/agent',

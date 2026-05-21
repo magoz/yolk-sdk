@@ -4,7 +4,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 
 ## Boundaries
 
-- `page.tsx` is a runtime chooser; runtime pages live at `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`.
+- `page.tsx` is a runtime chooser; runtime pages live at `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`; connector config lives at `/agent/connectors`.
 - `runtime-page.tsx` owns shared server bootstrap/session wiring for runtime pages.
 - `/agent/next` uses `/api/agent` NDJSON only.
 - `/agent/cloudflare` bootstraps direct Cloudflare WS only; missing env/bootstrap shows explicit error, no Next fallback; remote MCP config is loaded by Next and passed in bootstrap.

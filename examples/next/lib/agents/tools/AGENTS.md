@@ -14,6 +14,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
 | `list_knowledge_objects` / `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge discovery, search, and chunk-window traversal |
 | `search_storage` / `list_storage_sources` / `get_storage_source` | yes | yes | no | authenticated user storage RAG search and source reads |
+| `telegram_send_message` | yes | yes | no | optional Telegram connector tool; requires user config; available to task subagents |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
 | `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
 

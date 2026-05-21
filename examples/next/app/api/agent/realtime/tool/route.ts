@@ -7,6 +7,8 @@ import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/too
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
+import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
+import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -20,8 +22,17 @@ class RealtimeToolRouteError extends Data.TaggedError('RealtimeToolRouteError')<
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
+  const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
+  const telegramToolModules = telegramConnectorConfig === undefined
+    ? []
+    : [makeAppTelegramToolModule(telegramConnectorConfig)]
   const toolSet = yield* resolveAgentToolSet({
-    modules: [...nodeVoiceToolModules, makeAppKnowledgeToolModule(), makeAppStorageRagToolModule()],
+    modules: [
+      ...nodeVoiceToolModules,
+      makeAppKnowledgeToolModule(),
+      makeAppStorageRagToolModule(),
+      ...telegramToolModules
+    ],
     context: {
       surface: 'voice',
       route: '/agent',

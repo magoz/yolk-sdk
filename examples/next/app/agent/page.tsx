@@ -39,6 +39,13 @@ export default function Page() {
           </p>
         </Link>
       </div>
+
+      <Link href="/agent/connectors" className="rounded-2xl border border-foreground/10 bg-card p-5">
+        <h2 className="font-medium">Connectors</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Configure Telegram and external tools for the agent.
+        </p>
+      </Link>
     </main>
   )
 }
