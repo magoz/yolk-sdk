@@ -38,6 +38,7 @@ See `examples/next/patterns/EFFECT_SERVER_ACTIONS.md` for the canonical Next bou
 - Storage/RAG domain functions use app-owned `AppRagLayer` at boundaries; package `@yolk-sdk/rag` owns pipeline contracts only.
 - Keep provider/OAuth API calls in services; core composes persistence and policy.
 - Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
+- Store user-configured connector credentials in `agentConnector`, not Better Auth `account` rows.
 - Store user-authored agent skills in `agentSkill`; runtime loaders convert enabled rows into `SkillsetManifest` data.
 - Store user-authored slash commands in `agentCommand`; runtime loaders convert enabled rows into `SkillsetManifest` commands.
 - When creating/updating a skill with a matching command, use the transactional `*WithCommand` helpers so skill and command writes cannot partially succeed.

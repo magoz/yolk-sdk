@@ -242,6 +242,44 @@ export const agentCommand = pgTable(
 export type AgentCommand = typeof agentCommand.$inferSelect
 export type InsertAgentCommand = typeof agentCommand.$inferInsert
 
+export const agentConnector = pgTable(
+  'agentConnector',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectorId: text('connectorId').notNull(),
+    chatId: text('chatId').notNull(),
+    credentialSecret: text('credentialSecret').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    updatedAt: timestamp('updatedAt')
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date())
+  },
+  table => [
+    uniqueIndex('agentConnector_userId_connectorId_key').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.connectorId.asc().nullsLast()
+    ),
+    index('agentConnector_userId_enabled_idx').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.enabled.asc().nullsLast()
+    ),
+    check('agentConnector_connectorId_nonempty_check', sql`length(${table.connectorId}) > 0`),
+    check('agentConnector_chatId_nonempty_check', sql`length(${table.chatId}) > 0`),
+    check('agentConnector_credentialSecret_nonempty_check', sql`length(${table.credentialSecret}) > 0`)
+  ]
+)
+export type AgentConnector = typeof agentConnector.$inferSelect
+export type InsertAgentConnector = typeof agentConnector.$inferInsert
+
 ////////////////////////////////////////////////////////////////////////
 // STORAGE / RAG
 ////////////////////////////////////////////////////////////////////////
@@ -622,6 +660,7 @@ export const relations = defineRelations(
     verification,
     agentSkill,
     agentCommand,
+    agentConnector,
     storageObject,
     ragSet,
     ragDocument,

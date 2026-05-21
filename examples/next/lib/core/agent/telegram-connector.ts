@@ -39,38 +39,39 @@ const validateTelegramConnectorConfig = (input: TelegramConnectorConfig) =>
     return { botToken, chatId }
   })
 
-const selectTelegramAccount = (userId: string) =>
+const selectTelegramConnector = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const [account] = yield* db
+    const [connector] = yield* db
       .select({
-        id: schema.account.id,
-        accountId: schema.account.accountId,
-        accessToken: schema.account.accessToken
+        id: schema.agentConnector.id,
+        chatId: schema.agentConnector.chatId,
+        credentialSecret: schema.agentConnector.credentialSecret
       })
-      .from(schema.account)
+      .from(schema.agentConnector)
       .where(
         and(
-          eq(schema.account.userId, userId),
-          eq(schema.account.providerId, telegramConnectorProviderId)
+          eq(schema.agentConnector.userId, userId),
+          eq(schema.agentConnector.connectorId, telegramConnectorProviderId),
+          eq(schema.agentConnector.enabled, true)
         )
       )
       .limit(1)
 
-    return account
+    return connector
   })
 
 export const getTelegramConnectorConfig = (userId: string) =>
   Effect.gen(function* () {
-    const account = yield* selectTelegramAccount(userId)
+    const connector = yield* selectTelegramConnector(userId)
 
-    if (account === undefined || account.accessToken === null || account.accessToken.length === 0) {
+    if (connector === undefined || connector.credentialSecret.length === 0) {
       return undefined
     }
 
     return {
-      botToken: account.accessToken,
-      chatId: account.accountId
+      botToken: connector.credentialSecret,
+      chatId: connector.chatId
     }
   }).pipe(Effect.withSpan('agent.telegramConnector.getConfig'))
 
@@ -87,38 +88,39 @@ export const saveTelegramConnectorConfig = (input: TelegramConnectorConfig & { r
   Effect.gen(function* () {
     const db = yield* Db
     const config = yield* validateTelegramConnectorConfig(input)
-    const existing = yield* selectTelegramAccount(input.userId)
+    const existing = yield* selectTelegramConnector(input.userId)
 
     if (existing === undefined) {
-      yield* db.insert(schema.account).values({
+      yield* db.insert(schema.agentConnector).values({
         id: createId(),
         userId: input.userId,
-        providerId: telegramConnectorProviderId,
-        accountId: config.chatId,
-        accessToken: config.botToken
+        connectorId: telegramConnectorProviderId,
+        chatId: config.chatId,
+        credentialSecret: config.botToken
       })
       return
     }
 
     yield* db
-      .update(schema.account)
+      .update(schema.agentConnector)
       .set({
-        accountId: config.chatId,
-        accessToken: config.botToken,
+        chatId: config.chatId,
+        credentialSecret: config.botToken,
+        enabled: true,
         updatedAt: new Date()
       })
-      .where(eq(schema.account.id, existing.id))
+      .where(eq(schema.agentConnector.id, existing.id))
   }).pipe(Effect.withSpan('agent.telegramConnector.save'))
 
 export const deleteTelegramConnectorConfig = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
     yield* db
-      .delete(schema.account)
+      .delete(schema.agentConnector)
       .where(
         and(
-          eq(schema.account.userId, userId),
-          eq(schema.account.providerId, telegramConnectorProviderId)
+          eq(schema.agentConnector.userId, userId),
+          eq(schema.agentConnector.connectorId, telegramConnectorProviderId)
         )
       )
   }).pipe(Effect.withSpan('agent.telegramConnector.delete'))
