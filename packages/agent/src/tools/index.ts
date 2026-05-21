@@ -1,5 +1,11 @@
 export { EmptyToolParams, makeTool, makeToolExecutorLayer, resolveTools, ToolAccess, ToolRegistryError } from './registry.ts'
 export {
+  makeQuestionToolDef,
+  makeQuestionToolModule,
+  makeQuestionToolRegistration,
+  questionToolName
+} from './question.ts'
+export {
   formatTaskResult,
   makeTaskToolDef,
   makeTaskToolModule,
@@ -14,6 +20,7 @@ export type {
   ToolModule,
   ToolRegistration
 } from './registry.ts'
+export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 export type {
   TaskExecutionInput,
   TaskSubagentDefinition,

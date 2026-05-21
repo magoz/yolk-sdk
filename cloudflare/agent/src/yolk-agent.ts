@@ -35,7 +35,9 @@ import {
   UserMessage,
   assistantContent,
   contentText,
-  type AgentEvent as AgentEventType
+  type AgentEvent as AgentEventType,
+  type AgentReasoningEffort,
+  type HitlResponse
 } from '@yolk-sdk/agent/protocol'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
 import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk-sdk/agent/tools'
@@ -486,6 +488,66 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         )
       })
 
+      const handleHitlResponse = Effect.fnUntraced(function* (
+        socket: Cloudflare.DurableWebSocket,
+        sessionId: string,
+        input: {
+          readonly response: HitlResponse
+          readonly expectedRevision?: number
+          readonly model?: string
+          readonly reasoningEffort?: AgentReasoningEffort
+        }
+      ) {
+        const log = yield* loadLogOrEmpty(sessionId)
+        const activeRun = latestIncompleteRuntimeRun(log.events)
+
+        if (Option.isSome(activeRun)) {
+          yield* sendEvent(
+            socket,
+            AgentError.make({
+              code: 'conflict',
+              message: 'Run already active',
+              retryable: false
+            })
+          )
+          return
+        }
+
+        const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
+
+        if (resolvedToolSet._tag === 'Failure') {
+          yield* sendEvent(socket, resolvedToolSet.failure)
+          return
+        }
+
+        const toolSet = resolvedToolSet.success
+        const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
+        const skillset = skillsetFromBootstrap(bootstrap)
+        const selectedModel = input.model ?? runtimeBaseConfig.model
+        const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
+
+        yield* runRuntime(
+          {
+            _tag: 'AppendHitlResponse',
+            sessionId,
+            response: input.response,
+            runId: crypto.randomUUID(),
+            expectedRevision: input.expectedRevision
+          },
+          {
+            ...runtimeBaseConfig,
+            model,
+            systemPrompt: systemPromptWithSkills(skillset),
+            tools: toolSet.tools,
+            reasoningEffort: input.reasoningEffort
+          }
+        ).pipe(
+          Stream.runForEach(event => sendEvent(socket, event)),
+          Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
+          Effect.catch(error => sendEvent(socket, toAgentError(error)))
+        )
+      })
+
       for (const socket of yield* state.getWebSockets()) {
         const attachment = socket.deserializeAttachment<SocketAttachment>()
 
@@ -555,7 +617,12 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           }
 
           const input = decodedInput.success
-          yield* handleUserInput(socket, attachment.sessionId, input)
+          if (input._tag === 'UserInput') {
+            yield* handleUserInput(socket, attachment.sessionId, input)
+            return
+          }
+
+          yield* handleHitlResponse(socket, attachment.sessionId, input)
         }),
         webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.DurableWebSocket) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()

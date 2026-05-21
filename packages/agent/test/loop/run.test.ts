@@ -8,7 +8,11 @@ import {
   CompactionStart,
   AgentModelCapabilities,
   ImagePart,
+  QuestionAnswer,
+  QuestionResponse,
   ToolCall,
+  ToolApprovalPolicy,
+  ToolApprovalResponse,
   ToolDef,
   ToolResult,
   UserMessage
@@ -220,6 +224,218 @@ describe('run', () => {
 
       const agentEnd = events.find(event => event._tag === 'AgentEnd')
       expect(agentEnd).toMatchObject({ turns: 2 })
+    })
+  )
+
+  it.effect('pauses before manually approved tool execution', () =>
+    Effect.gen(function* () {
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        systemPrompt: 'Use tools when useful.',
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Get weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
+          })
+        ],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layer(
+              Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+            ),
+            TestToolExecutor.layer({ weather: '72F' })
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'AgentStart',
+        'TurnStart',
+        'LLMStreamStart',
+        'ToolInputEnd',
+        'LLMStreamEnd',
+        'AssistantMessage',
+        'ToolApprovalRequested',
+        'TurnEnd',
+        'AgentAwaitingInput'
+      ])
+      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+      expect(events.find(event => event._tag === 'ToolApprovalRequested')).toMatchObject({
+        request: { requestId: 'approval:call_1', toolCallId: 'call_1' }
+      })
+    })
+  )
+
+  it.effect('executes an approved tool response exactly once', () =>
+    Effect.gen(function* () {
+      const response = ToolApprovalResponse.make({
+        requestId: 'approval:call_1',
+        toolCallId: 'call_1',
+        decision: 'approved',
+        source: 'user'
+      })
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        systemPrompt: 'Use tools when useful.',
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Get weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
+          })
+        ],
+        hitlResponses: [response],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layer(
+              Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
+              Reply.text('sunny')
+            ),
+            TestToolExecutor.layer({ weather: '72F' })
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toContain('ToolApprovalGranted')
+      expect(events.map(event => event._tag)).toContain('ToolExecutionStarted')
+      expect(
+        events.flatMap(event => (event._tag === 'ToolExecutionStarted' ? [event.call.id] : []))
+      ).toEqual(['call_1'])
+      expect(events.find(event => event._tag === 'AgentEnd')).toMatchObject({ turns: 2 })
+    })
+  )
+
+  it.effect('turns denied approval into a model-visible tool result', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const response = ToolApprovalResponse.make({
+        requestId: 'approval:call_1',
+        toolCallId: 'call_1',
+        decision: 'denied',
+        source: 'user',
+        reason: 'not needed'
+      })
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'what is the weather?' })],
+        systemPrompt: 'Use tools when useful.',
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Get weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
+          })
+        ],
+        hitlResponses: [response],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({
+              responses: [
+                Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
+                Reply.text('ok')
+              ],
+              requests
+            }),
+            TestToolExecutor.layer({ weather: 'should not run' })
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toContain('ToolApprovalDenied')
+      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+      expect(requests[1]?.messages.at(-1)).toMatchObject({
+        _tag: 'ToolResult',
+        toolCallId: 'call_1',
+        isError: true,
+        content: 'Tool call denied: not needed'
+      })
+    })
+  )
+
+  it.effect('pauses and resumes structured question tool calls', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({
+        id: 'call_question',
+        name: 'question',
+        params: {
+          questions: [
+            {
+              id: 'choice',
+              prompt: 'Pick one',
+              options: [{ id: 'a', label: 'A' }],
+              allowCustom: true
+            }
+          ]
+        }
+      })
+      const pausedChunk = yield* run({
+        messages: [UserMessage.make({ content: 'ask me' })],
+        systemPrompt: 'Ask a question.',
+        tools: [ToolDef.make({ name: 'question', description: 'Ask.', parameters: {} })],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(FauxProvider.layer(Reply.toolCall(call)), TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(BaseLayer)
+          )
+        )
+      )
+
+      const paused = Array.from(pausedChunk)
+      expect(paused.map(event => event._tag)).toContain('QuestionRequested')
+      expect(paused.map(event => event._tag)).toContain('AgentAwaitingInput')
+
+      const requests: Array<LLMRequest> = []
+      const answer = QuestionResponse.make({
+        requestId: 'question:call_question',
+        toolCallId: call.id,
+        outcome: 'answered',
+        source: 'user',
+        answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+      })
+      const resumedChunk = yield* run({
+        messages: [UserMessage.make({ content: 'ask me' })],
+        systemPrompt: 'Ask a question.',
+        tools: [ToolDef.make({ name: 'question', description: 'Ask.', parameters: {} })],
+        hitlResponses: [answer],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({
+              responses: [Reply.toolCall(call), Reply.text('thanks')],
+              requests
+            }),
+            TestToolExecutor.layer({})
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const resumed = Array.from(resumedChunk)
+      expect(resumed.map(event => event._tag)).toContain('QuestionAnswered')
+      expect(requests[1]?.messages.at(-1)).toMatchObject({
+        _tag: 'ToolResult',
+        toolCallId: 'call_question',
+        content: 'User answered the question.',
+        structuredContent: { type: 'question_response', outcome: 'answered' }
+      })
     })
   )
 
@@ -698,6 +914,85 @@ describe('run', () => {
       ])
       expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
         result: { toolCallId: 'call_1', content: '72F' }
+      })
+    })
+  )
+
+  it.effect('pauses a tool batch before manual approval', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+      const created = UserMessage.make({ content: 'created' })
+      const eventsChunk = yield* runToolBatch({
+        calls: [call],
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual' })
+          })
+        ],
+        createdMessages: [created],
+        turn: 1
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(TestToolExecutor.layer({ weather: 'should not run' })),
+        Effect.provide(LoopConfig.defaultLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolApprovalRequested',
+        'AgentAwaitingInput'
+      ])
+      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+      expect(events.find(event => event._tag === 'AgentAwaitingInput')).toMatchObject({
+        requests: [{ requestId: 'approval:call_1' }],
+        messages: [created],
+        turns: 1
+      })
+    })
+  )
+
+  it.effect('turns denied tool batch approval into a synthetic completion', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+      const response = ToolApprovalResponse.make({
+        requestId: 'approval:call_1',
+        toolCallId: call.id,
+        decision: 'denied',
+        source: 'user',
+        reason: 'skip'
+      })
+      const eventsChunk = yield* runToolBatch({
+        calls: [call],
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual' })
+          })
+        ],
+        hitlResponses: [response]
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(TestToolExecutor.layer({ weather: 'should not run' })),
+        Effect.provide(LoopConfig.defaultLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolApprovalDenied',
+        'ToolExecutionCompleted'
+      ])
+      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        result: {
+          toolCallId: call.id,
+          isError: true,
+          content: 'Tool call denied: skip'
+        }
       })
     })
   )

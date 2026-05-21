@@ -19,6 +19,7 @@ export {
   TextPart
 } from './content.ts'
 export {
+  AgentAwaitingInput,
   AgentEnd,
   AgentError,
   AgentErrorCode,
@@ -33,6 +34,9 @@ export {
   LLMStreamStart,
   LLMTextDelta,
   ProviderToolResult,
+  QuestionAnswered,
+  QuestionCancelled,
+  QuestionRequested,
   SubagentCompleted,
   SubagentStarted,
   SubagentStatus,
@@ -69,9 +73,30 @@ export {
   AgentWebSocketClientMessage,
   AgentWebSocketServerMessage,
   SessionSnapshot,
+  QuestionResponseInput,
+  ToolApprovalResponseInput,
   UserInput
 } from './session.ts'
-export { ToolCall, ToolDef, ToolResult } from './tool.ts'
+export {
+  HitlRequest,
+  HitlResponse,
+  HitlResponseSource,
+  QuestionAnswer,
+  QuestionOption,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionResponse,
+  QuestionResponseOutcome,
+  QuestionToolParams,
+  ToolApprovalDecision,
+  ToolApprovalMode,
+  ToolApprovalPolicy,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall,
+  ToolDef,
+  ToolResult
+} from './tool.ts'
 export {
   addAgentUsage,
   AgentInputUsage,

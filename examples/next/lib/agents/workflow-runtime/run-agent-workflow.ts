@@ -1,4 +1,4 @@
-import { getWritable } from 'workflow'
+import { createHook, getWritable } from 'workflow'
 import { Data, Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -14,7 +14,10 @@ import {
   AgentUsage,
   AssistantMessageEvent,
   AgentMessage,
+  AgentAwaitingInput,
   ToolCall,
+  HitlRequest,
+  HitlResponse,
   ToolInputEnd,
   ToolResultMessage,
   TurnEnd,
@@ -56,6 +59,11 @@ export const addWorkflowEventId = (event: AgentEvent, eventId: string) =>
 const workflowEventId = (turn: number, eventSequence: number) =>
   `workflow:${turn}:${eventSequence}`
 
+export const agentWorkflowHitlHookToken = (input: {
+  readonly sessionId: string
+  readonly requestId: string
+}) => `agent-hitl:${input.sessionId}:${input.requestId}`
+
 const writeSequencedWorkflowEvent = (input: {
   readonly writer: WritableStreamDefaultWriter<Uint8Array>
   readonly event: AgentEvent
@@ -84,10 +92,16 @@ const decodeNonEmptyMessages = (messages: ReadonlyArray<unknown>) =>
 
 const encodeMessage = Schema.encodeUnknownEffect(AgentMessage)
 const encodeToolCall = Schema.encodeUnknownEffect(ToolCall)
+const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 
 const decodeUsageOrZero = (usage: unknown | undefined) =>
   usage === undefined ? Effect.succeed(zeroAgentUsage) : Schema.decodeUnknownEffect(AgentUsage)(usage)
+
+const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
+  responses === undefined
+    ? Effect.succeed<ReadonlyArray<HitlResponse>>([])
+    : Schema.decodeUnknownEffect(Schema.Array(HitlResponse))(responses)
 
 const decodeStepRequest = (state: SerializableWorkflowState) =>
   Effect.gen(function* () {
@@ -159,6 +173,33 @@ const workflowStepError = (error: unknown) =>
 
 const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
+
+const workflowAwaitingInput = (input: {
+  readonly request: AgentRouteRequest
+  readonly event: AgentAwaitingInput
+  readonly eventSequence: number
+}) =>
+  Effect.gen(function* () {
+    const firstRequest = input.event.requests[0]
+
+    if (firstRequest === undefined) {
+      return yield* Effect.fail(
+        new AgentWorkflowStepError({ message: 'Workflow HITL pause has no requests' })
+      )
+    }
+
+    return {
+      hookToken: agentWorkflowHitlHookToken({
+        sessionId: input.request.sessionId,
+        requestId: firstRequest.requestId
+      }),
+      requests: yield* Effect.forEach(input.event.requests, request => encodeHitlRequest(request)),
+      messages: yield* Effect.forEach(input.event.messages, message => encodeMessage(message)),
+      usage: yield* encodeUsage(input.event.usage),
+      turns: input.event.turns,
+      eventSequence: input.eventSequence
+    }
+  })
 
 export async function runAgentWorkflowModelStep(input: {
   readonly context: unknown
@@ -250,6 +291,8 @@ export async function runAgentWorkflowToolBatchStep(input: {
   readonly request: unknown
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly hitlResponses?: ReadonlyArray<unknown>
+  readonly usage?: unknown
   readonly turn?: number
   readonly eventSequence?: number
 }): Promise<VercelAgentWorkflowToolBatchStepResult> {
@@ -263,12 +306,23 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const createdMessages = yield* decodeMessages(input.createdMessages)
+      const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
+      const usage = yield* decodeUsageOrZero(input.usage)
       const userId = yield* decodeWorkflowUserId(input.context)
       const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const awaitingInput = yield* Ref.make<AgentAwaitingInput | undefined>(undefined)
       const eventSequence = yield* Ref.make(input.eventSequence ?? 0)
 
-      yield* runToolBatch({ calls }).pipe(
+      yield* runToolBatch({
+        calls,
+        tools: runtime.config.tools,
+        hitlResponses,
+        model: runtime.config.model,
+        createdMessages,
+        turn: input.turn,
+        usage
+      }).pipe(
         Stream.runForEach(event =>
           writeSequencedWorkflowEvent({
             writer,
@@ -277,6 +331,12 @@ export async function runAgentWorkflowToolBatchStep(input: {
             eventSequence
           }).pipe(
             Effect.flatMap(() => {
+              if (Schema.is(AgentAwaitingInput)(event)) {
+                return Schema.decodeUnknownEffect(AgentAwaitingInput)(event).pipe(
+                  Effect.flatMap(decoded => Ref.set(awaitingInput, decoded))
+                )
+              }
+
               if (event._tag !== 'ToolExecutionCompleted') {
                 return Effect.void
               }
@@ -305,11 +365,19 @@ export async function runAgentWorkflowToolBatchStep(input: {
 
       const messages = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
       const nextCreatedMessages = [...createdMessages, ...messages]
+      const currentAwaitingInput = yield* Ref.get(awaitingInput)
       const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
         messages: yield* Effect.forEach(messages, message => encodeMessage(message)),
         createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
+        awaitingInput: currentAwaitingInput === undefined
+          ? undefined
+          : yield* workflowAwaitingInput({
+              request,
+              event: currentAwaitingInput,
+              eventSequence: nextEventSequence
+            }),
         eventSequence: nextEventSequence
       }
     }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
@@ -377,29 +445,57 @@ export async function runAgentWorkflow(input: AgentWorkflowInput) {
       return
     }
 
-    let toolsResult: VercelAgentWorkflowToolBatchStepResult
+    let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
+    let toolHitlResponses: ReadonlyArray<unknown> = []
+    let toolEventSequence = modelResult.eventSequence ?? state.eventSequence
 
-    try {
-      toolsResult = await runAgentWorkflowToolBatchStep({
-        context: input.userId,
-        request: input.request,
-        calls: modelResult.toolCalls,
-        createdMessages: modelResult.createdMessages,
-        turn: modelResult.turn,
-        eventSequence: modelResult.eventSequence ?? state.eventSequence
-      })
-    } catch (error) {
-      await writeWorkflowErrorStep(error)
+    for (;;) {
+      let toolsResult: VercelAgentWorkflowToolBatchStepResult
+
+      try {
+        toolsResult = await runAgentWorkflowToolBatchStep({
+          context: input.userId,
+          request: input.request,
+          calls: modelResult.toolCalls,
+          createdMessages: modelResult.createdMessages,
+          hitlResponses: toolHitlResponses,
+          usage: modelResult.usage,
+          turn: modelResult.turn,
+          eventSequence: toolEventSequence
+        })
+      } catch (error) {
+        await writeWorkflowErrorStep(error)
+        return
+      }
+
+      if (toolsResult.awaitingInput === undefined) {
+        completedToolsResult = toolsResult
+        break
+      }
+
+      toolEventSequence =
+        toolsResult.awaitingInput.eventSequence ?? toolsResult.eventSequence ?? toolEventSequence
+
+      let hitlResponse: unknown
+      {
+        using hook = createHook<unknown>({ token: toolsResult.awaitingInput.hookToken })
+        hitlResponse = await hook
+      }
+      toolHitlResponses = [...toolHitlResponses, hitlResponse]
+    }
+
+    if (completedToolsResult === undefined) {
+      await writeWorkflowErrorStep(new Error('Workflow tool batch did not complete'))
       return
     }
 
     state = {
       request: input.request,
-      messages: [...modelResult.messages, ...toolsResult.messages],
-      createdMessages: toolsResult.createdMessages,
+      messages: [...modelResult.messages, ...completedToolsResult.messages],
+      createdMessages: completedToolsResult.createdMessages,
       usage: modelResult.usage,
       turn: modelResult.turn + 1,
-      eventSequence: toolsResult.eventSequence ?? modelResult.eventSequence ?? state.eventSequence
+      eventSequence: completedToolsResult.eventSequence ?? toolEventSequence
     }
   }
 

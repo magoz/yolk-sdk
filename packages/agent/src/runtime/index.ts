@@ -9,6 +9,7 @@ export type { RuntimeError } from './error.ts'
 export { runRuntime } from './run-runtime.ts'
 export type {
   AppendInputRuntimeRequest,
+  AppendHitlResponseRuntimeRequest,
   RuntimeConfig,
   RuntimeRequest,
   RuntimeTranscript,
@@ -16,10 +17,13 @@ export type {
 } from './run-runtime.ts'
 export {
   appendRuntimeSessionEventsToLog,
+  HitlResponseAppended,
   InputAppended,
   makeInMemorySessionEventStoreLayer,
   latestIncompleteRuntimeRun,
+  replayRuntimeHitlResponses,
   replayRuntimeSessionEvents,
+  RunAwaitingInput,
   RunCompleted,
   RunFailed,
   RunInterrupted,

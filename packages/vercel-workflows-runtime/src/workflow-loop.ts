@@ -32,13 +32,25 @@ export type VercelAgentWorkflowToolBatchStepInput = {
   readonly request: unknown
   readonly calls: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly hitlResponses?: ReadonlyArray<unknown>
+  readonly usage?: unknown
   readonly turn?: number
+  readonly eventSequence?: number
+}
+
+export type VercelAgentWorkflowAwaitingInput = {
+  readonly hookToken: string
+  readonly requests: ReadonlyArray<unknown>
+  readonly messages: ReadonlyArray<unknown>
+  readonly usage: unknown
+  readonly turns: number
   readonly eventSequence?: number
 }
 
 export type VercelAgentWorkflowToolBatchStepResult = {
   readonly messages: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  readonly awaitingInput?: VercelAgentWorkflowAwaitingInput
   readonly eventSequence?: number
 }
 

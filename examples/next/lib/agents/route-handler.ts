@@ -5,6 +5,7 @@ import {
   contentParts,
   AgentMessage,
   AgentReasoningEffort,
+  HitlResponse,
   type AgentEvent,
   type AgentModelCapabilities,
   type ContentPart,
@@ -110,6 +111,7 @@ export const validateAgentRouteImages = (input: AgentRouteRequest) =>
 export class AgentRouteRequest extends Schema.Class<AgentRouteRequest>('AgentRouteRequest')({
   sessionId: NonEmptyTrimmedString,
   messages: Schema.NonEmptyArray(AgentMessage),
+  hitlResponses: Schema.optional(Schema.Array(HitlResponse)),
   model: Schema.optional(Schema.String),
   reasoningEffort: Schema.optional(AgentReasoningEffort)
 }) {}
@@ -176,6 +178,7 @@ export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRou
       {
         systemPrompt: config.systemPrompt,
         tools: config.tools,
+        hitlResponses: input.hitlResponses,
         reasoningEffort: input.reasoningEffort ?? config.reasoningEffort,
         capabilities: config.capabilities,
         model: input.model ?? config.model

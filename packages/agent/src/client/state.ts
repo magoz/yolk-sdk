@@ -1,12 +1,14 @@
 import {
   type AgentEvent,
   type AgentMessage,
+  type QuestionRequest,
+  type QuestionResponse,
   type ToolCall,
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
 
-export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
+export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' | 'aborted'
 
 export type AgentToolRun =
   | {
@@ -18,6 +20,9 @@ export type AgentToolRun =
   | { readonly _tag: 'InputReady'; readonly call: ToolCall }
   | { readonly _tag: 'ApprovalRequested'; readonly call: ToolCall }
   | { readonly _tag: 'Denied'; readonly toolCallId: string; readonly reason: string }
+  | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
+  | { readonly _tag: 'QuestionAnswered'; readonly response: QuestionResponse }
+  | { readonly _tag: 'QuestionCancelled'; readonly response: QuestionResponse }
   | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
@@ -78,6 +83,11 @@ const toolRunId = (run: AgentToolRun) => {
       return run.id
     case 'Denied':
       return run.toolCallId
+    case 'QuestionRequested':
+      return run.request.toolCallId
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
+      return run.response.toolCallId
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
@@ -90,9 +100,11 @@ const toolRunId = (run: AgentToolRun) => {
 
 export const isActiveToolRun = (run: AgentToolRun) =>
   run._tag !== 'Completed' &&
-  run._tag !== 'Errored' &&
-  run._tag !== 'Denied' &&
-  run._tag !== 'ProviderCompleted'
+    run._tag !== 'Errored' &&
+    run._tag !== 'Denied' &&
+    run._tag !== 'QuestionAnswered' &&
+    run._tag !== 'QuestionCancelled' &&
+    run._tag !== 'ProviderCompleted'
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => run._tag === 'Completed')
@@ -220,6 +232,30 @@ const applyAgentEventUnchecked = (
           reason: event.reason
         })
       }
+    case 'QuestionRequested':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'QuestionRequested',
+          request: event.request
+        })
+      }
+    case 'QuestionAnswered':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'QuestionAnswered',
+          response: event.response
+        })
+      }
+    case 'QuestionCancelled':
+      return {
+        ...state,
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'QuestionCancelled',
+          response: event.response
+        })
+      }
     case 'ToolExecutionStarted':
       return {
         ...state,
@@ -279,6 +315,16 @@ const applyAgentEventUnchecked = (
         text: '',
         reasoning: '',
         toolRuns: completedToolRuns(state.toolRuns)
+      }
+    case 'AgentAwaitingInput':
+      return {
+        ...state,
+        status: 'waiting',
+        messages: [...state.messages, ...event.messages],
+        liveMessages: [],
+        text: '',
+        reasoning: '',
+        error: null
       }
     case 'AgentRetry':
     case 'CompactionEnd':

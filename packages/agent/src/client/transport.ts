@@ -7,12 +7,21 @@ import {
   type HttpClientResponse
 } from 'effect/unstable/http'
 import * as Schema from 'effect/Schema'
-import { AgentEvent, AgentWebSocketServerMessage, UserInput } from '@yolk-sdk/agent/protocol'
+import {
+  AgentEvent,
+  AgentWebSocketServerMessage,
+  QuestionResponseInput,
+  ToolApprovalResponseInput,
+  UserInput
+} from '@yolk-sdk/agent/protocol'
 import type {
   AgentEvent as AgentEventType,
   AgentMessage,
   AgentReasoningEffort,
   AgentWebSocketServerMessage as AgentWebSocketServerMessageType,
+  HitlResponse,
+  QuestionResponse,
+  ToolApprovalResponse,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import type { AgentTranscript } from './state.ts'
@@ -29,6 +38,7 @@ export type StreamAgentEventsRequest = {
   readonly endpoint?: string
   readonly sessionId: string
   readonly messages: AgentTranscript
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
   readonly model?: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
@@ -48,6 +58,14 @@ export type CancelAgentRunRequest = {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
 }
 
+export type SubmitToolApprovalResponseRequest = StreamAgentEventsRequest & {
+  readonly response: ToolApprovalResponse
+}
+
+export type SubmitQuestionResponseRequest = StreamAgentEventsRequest & {
+  readonly response: QuestionResponse
+}
+
 export type AgentHttpResponseInfo = {
   readonly status: number
   readonly headers: Readonly<Record<string, string | undefined>>
@@ -56,6 +74,7 @@ export type AgentHttpResponseInfo = {
 export type StreamCloudflareAgentEventsRequest = {
   readonly webSocketUrl: string
   readonly messages: AgentTranscript
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
   readonly model?: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly signal?: AbortSignal
@@ -155,13 +174,26 @@ const lastUserMessage = (
   return Effect.succeed(message)
 }
 
-const makeUserInputJson = (
+const makeClientInputJson = (
   request: StreamCloudflareAgentEventsRequest,
   expectedRevision: number
 ): Effect.Effect<string, AgentTransportError> =>
-  lastUserMessage(request.messages).pipe(
-    Effect.flatMap(message =>
-      encodeJsonString(
+  Effect.gen(function* () {
+    const hitlResponse = request.hitlResponses?.[0]
+
+    if (request.hitlResponses !== undefined && request.hitlResponses.length > 1) {
+      return yield* Effect.fail(
+        new AgentTransportError({
+          message: 'Cloudflare WebSocket transport supports one HITL response at a time',
+          cause: request.hitlResponses
+        })
+      )
+    }
+
+    if (hitlResponse === undefined) {
+      const message = yield* lastUserMessage(request.messages)
+
+      return yield* encodeJsonString(
         UserInput.make({
           message,
           expectedRevision,
@@ -170,8 +202,25 @@ const makeUserInputJson = (
         }),
         'Could not serialize WebSocket user input'
       )
+    }
+
+    return yield* encodeJsonString(
+      hitlResponse._tag === 'ToolApprovalResponse'
+        ? ToolApprovalResponseInput.make({
+            response: hitlResponse,
+            expectedRevision,
+            model: request.model,
+            reasoningEffort: request.reasoningEffort
+          })
+        : QuestionResponseInput.make({
+            response: hitlResponse,
+            expectedRevision,
+            model: request.model,
+            reasoningEffort: request.reasoningEffort
+          }),
+      'Could not serialize WebSocket HITL response'
     )
-  )
+  })
 
 const responseErrorMessage = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(
@@ -184,6 +233,7 @@ const makeHttpRequest = (request: StreamAgentEventsRequest) =>
     {
       sessionId: request.sessionId,
       messages: request.messages,
+      hitlResponses: request.hitlResponses,
       model: request.model,
       reasoningEffort: request.reasoningEffort
     },
@@ -277,7 +327,13 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
     Stream.splitLines,
     Stream.map(line => line.trim()),
     Stream.filter(line => line.length > 0),
-    Stream.mapEffect(parseAgentEventLine)
+    Stream.mapEffect(parseAgentEventLine),
+    Stream.takeUntil(
+      event =>
+        event._tag === 'AgentEnd' ||
+        event._tag === 'AgentError' ||
+        event._tag === 'AgentAwaitingInput'
+    )
   )
 
 const abortSignalError = (signal: AbortSignal) =>
@@ -316,6 +372,13 @@ export const streamAgentRunEventStream = (request: StreamAgentRunEventsRequest) 
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
+export const streamToolApprovalResponseEventStream = (
+  request: SubmitToolApprovalResponseRequest
+) => streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+
+export const streamQuestionResponseEventStream = (request: SubmitQuestionResponseRequest) =>
+  streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+
 const isAgentEvent = (message: AgentWebSocketServerMessageType): message is AgentEventType =>
   message._tag !== 'SessionSnapshot'
 
@@ -346,7 +409,7 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
                 if (message._tag === 'SessionSnapshot') {
                   return sentInput
                     ? Effect.void
-                    : makeUserInputJson(request, message.revision).pipe(
+                    : makeClientInputJson(request, message.revision).pipe(
                         Effect.flatMap(body => Effect.sync(() => socket.send(body))),
                         Effect.tap(() =>
                           Effect.sync(() => {
@@ -362,7 +425,11 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
 
                 return Effect.sync(() => {
                   Queue.offerUnsafe(queue, message)
-                  if (message._tag === 'AgentEnd' || message._tag === 'AgentError') {
+                  if (
+                    message._tag === 'AgentEnd' ||
+                    message._tag === 'AgentError' ||
+                    message._tag === 'AgentAwaitingInput'
+                  ) {
                     settled = true
                     endQueue()
                     socket.close(1000, 'done')
@@ -420,6 +487,22 @@ export async function* streamAgentRunEvents(
   request: StreamAgentRunEventsRequest
 ): AsyncGenerator<AgentEventType, void, void> {
   for await (const event of Stream.toAsyncIterable(streamAgentRunEventStream(request))) {
+    yield event
+  }
+}
+
+export async function* submitToolApprovalResponse(
+  request: SubmitToolApprovalResponseRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  for await (const event of Stream.toAsyncIterable(streamToolApprovalResponseEventStream(request))) {
+    yield event
+  }
+}
+
+export async function* submitQuestionResponse(
+  request: SubmitQuestionResponseRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  for await (const event of Stream.toAsyncIterable(streamQuestionResponseEventStream(request))) {
     yield event
   }
 }

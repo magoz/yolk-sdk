@@ -21,16 +21,22 @@ export {
   cancelAgentRun,
   collectAgentEvents,
   collectAgentEventsEffect,
+  streamQuestionResponseEventStream,
   streamCloudflareAgentEventStream,
   streamCloudflareAgentEvents,
   streamAgentEvents,
   streamAgentEventStream,
   streamAgentRunEvents,
-  streamAgentRunEventStream
+  streamAgentRunEventStream,
+  streamToolApprovalResponseEventStream,
+  submitQuestionResponse,
+  submitToolApprovalResponse
 } from './transport.ts'
 export type {
   AgentHttpResponseInfo,
   CancelAgentRunRequest,
+  SubmitQuestionResponseRequest,
+  SubmitToolApprovalResponseRequest,
   StreamAgentEventsRequest,
   StreamAgentRunEventsRequest,
   StreamCloudflareAgentEventsRequest

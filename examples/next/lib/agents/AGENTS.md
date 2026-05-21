@@ -10,7 +10,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes
 - Cloudflare direct-WS transport bootstraps only from `/agent/cloudflare`; missing env/bootstrap is explicit, no `/api/agent` fallback.
 - Next text runtime tools: runtime-portable public URL fetch + direct Exa/Parallel MCP web search + knowledge/storage search + just-bash virtual shell + skill + optional remote MCP tools from project files.
-- Next/Workflow text runtime exposes a package-owned `task` tool for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
+- Next/Workflow/Cloudflare text runtimes expose the package `question` HITL tool; Next/Workflow text runtime also exposes package-owned `task` for top-level subagent delegation. Built-in subagent types are `general` and `explore`.
 - Task subagents run with normal text tools but without the `task` tool, so recursive subagents are disabled in v1.
 - Task subagents stream `ToolExecution*` plus `SubagentStarted`/`SubagentCompleted`; final task results include structured subagent metadata for status, timing, model, and ids.
 - Parallel task execution requires the provider to emit multiple `task` calls in the same assistant turn; `parallel_tool_calls: true` is a hint, not a guarantee.
@@ -18,7 +18,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn
 - Workflow text runtime has durable execution/streaming, but product transcript is still client-owned per turn in v1
 - Workflow durable model/tool loop contract imports from `@yolk-sdk/vercel-workflows-runtime/workflow`; app keeps route/auth/provider/tool wrappers, while package-owned directives are covered by Workflow Vitest integration tests.
-- Workflow text runtime exposes run id in the Activity panel; stream replay uses `GET /api/agent/workflow/:runId`; stop also calls `DELETE /api/agent/workflow/:runId`.
+- Workflow text runtime exposes run id in the Activity panel; stream replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response to `POST /api/agent/workflow/:runId`; stop calls `DELETE /api/agent/workflow/:runId`.
 - Voice seeds current protocol transcript into Realtime via `conversation.item.create`
 - Text route request: `{ sessionId, messages, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`
 - Text route calls stateless `@yolk-sdk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode

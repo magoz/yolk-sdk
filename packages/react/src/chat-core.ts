@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, Content, UserMessage } from '@yolk-sdk/agent/protocol'
+import type { AgentEvent, AgentMessage, Content, HitlResponse, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
@@ -19,7 +19,7 @@ import {
   type AgentChatSessionEvent
 } from './chat-session-events.ts'
 
-export type AgentRunStatus = 'idle' | 'running' | 'done' | 'error' | 'aborted'
+export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' | 'aborted'
 
 export type AgentChatState = {
   readonly status: AgentRunStatus
@@ -49,6 +49,7 @@ export type AgentChatAction =
   | { readonly _tag: 'HydrateMessage'; readonly message: AgentMessage }
   | { readonly _tag: 'Submit'; readonly message: UserMessage }
   | { readonly _tag: 'AppendMessage'; readonly message: AgentMessage }
+  | { readonly _tag: 'SubmitHitlResponse'; readonly response: HitlResponse }
   | { readonly _tag: 'DeleteTurn'; readonly messageId: string }
   | { readonly _tag: 'RegenerateFrom'; readonly messageId: string }
   | { readonly _tag: 'EditUserMessage'; readonly messageId: string; readonly content: Content }
@@ -88,6 +89,13 @@ export const reduceAgentChatState = (
           ...state.sessionEvents,
           ProtocolMessageAppended.make({ message: action.message })
         ]
+      }
+    case 'SubmitHitlResponse':
+      return {
+        ...state,
+        status: 'running',
+        error: null,
+        seenEventIds: []
       }
     case 'DeleteTurn': {
       const next = deleteChatTurn(state.chatMessages, action.messageId)
@@ -181,6 +189,13 @@ export const reduceAgentChatState = (
             error: null,
             chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
           }, action.event)
+        case 'AgentAwaitingInput':
+          return rememberEvent({
+            ...state,
+            status: 'waiting',
+            error: null,
+            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+          }, action.event)
         case 'AssistantMessage':
         case 'AgentRetry':
         case 'CompactionEnd':
@@ -190,6 +205,9 @@ export const reduceAgentChatState = (
         case 'LLMStreamStart':
         case 'LLMTextDelta':
         case 'ProviderToolResult':
+        case 'QuestionAnswered':
+        case 'QuestionCancelled':
+        case 'QuestionRequested':
         case 'SubagentCompleted':
         case 'SubagentStarted':
         case 'ToolApprovalDenied':
@@ -236,6 +254,8 @@ export const isActiveChatToolPart = (part: AgentChatPart) =>
   part._tag === 'ToolCall' &&
   part.state._tag !== 'Completed' &&
   part.state._tag !== 'ProviderCompleted' &&
+  part.state._tag !== 'QuestionAnswered' &&
+  part.state._tag !== 'QuestionCancelled' &&
   part.state._tag !== 'Errored' &&
   part.state._tag !== 'Denied'
 export type ActiveChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>

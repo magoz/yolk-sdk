@@ -3,6 +3,20 @@ import { Content } from './content.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
+export const HitlResponseSource = Schema.Literals(['user', 'policy', 'replay'])
+export type HitlResponseSource = typeof HitlResponseSource.Type
+
+export const ToolApprovalDecision = Schema.Literals(['approved', 'denied'])
+export type ToolApprovalDecision = typeof ToolApprovalDecision.Type
+
+export const ToolApprovalMode = Schema.Literals(['manual'])
+export type ToolApprovalMode = typeof ToolApprovalMode.Type
+
+export class ToolApprovalPolicy extends Schema.Class<ToolApprovalPolicy>('ToolApprovalPolicy')({
+  mode: ToolApprovalMode,
+  reason: Schema.optional(Schema.String)
+}) {}
+
 export class ToolCall extends Schema.Class<ToolCall>('ToolCall')({
   id: NonEmptyTrimmedString,
   name: NonEmptyTrimmedString,
@@ -12,7 +26,8 @@ export class ToolCall extends Schema.Class<ToolCall>('ToolCall')({
 export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
-  parameters: Schema.Unknown
+  parameters: Schema.Unknown,
+  approval: Schema.optional(ToolApprovalPolicy)
 }) {}
 
 export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
@@ -21,3 +36,74 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   isError: Schema.optional(Schema.Boolean),
   structuredContent: Schema.optional(Schema.Unknown)
 }) {}
+
+export class ToolApprovalRequest extends Schema.TaggedClass<ToolApprovalRequest>()(
+  'ToolApprovalRequest',
+  {
+    requestId: NonEmptyTrimmedString,
+    toolCallId: NonEmptyTrimmedString,
+    call: ToolCall,
+    policy: Schema.optional(ToolApprovalPolicy)
+  }
+) {}
+
+export class ToolApprovalResponse extends Schema.TaggedClass<ToolApprovalResponse>()(
+  'ToolApprovalResponse',
+  {
+    requestId: NonEmptyTrimmedString,
+    toolCallId: NonEmptyTrimmedString,
+    decision: ToolApprovalDecision,
+    source: HitlResponseSource,
+    reason: Schema.optional(Schema.String)
+  }
+) {}
+
+export class QuestionOption extends Schema.Class<QuestionOption>('QuestionOption')({
+  id: NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
+  description: Schema.optional(Schema.String)
+}) {}
+
+export class QuestionPrompt extends Schema.Class<QuestionPrompt>('QuestionPrompt')({
+  id: NonEmptyTrimmedString,
+  prompt: NonEmptyTrimmedString,
+  options: Schema.optional(Schema.Array(QuestionOption)),
+  multiple: Schema.optional(Schema.Boolean),
+  allowCustom: Schema.optional(Schema.Boolean),
+  required: Schema.optional(Schema.Boolean)
+}) {}
+
+export class QuestionToolParams extends Schema.Class<QuestionToolParams>('QuestionToolParams')({
+  questions: Schema.NonEmptyArray(QuestionPrompt)
+}) {}
+
+export class QuestionRequest extends Schema.TaggedClass<QuestionRequest>()('QuestionRequest', {
+  requestId: NonEmptyTrimmedString,
+  toolCallId: NonEmptyTrimmedString,
+  call: ToolCall,
+  questions: Schema.NonEmptyArray(QuestionPrompt)
+}) {}
+
+export class QuestionAnswer extends Schema.Class<QuestionAnswer>('QuestionAnswer')({
+  questionId: NonEmptyTrimmedString,
+  optionIds: Schema.optional(Schema.Array(NonEmptyTrimmedString)),
+  customAnswer: Schema.optional(Schema.String)
+}) {}
+
+export const QuestionResponseOutcome = Schema.Literals(['answered', 'cancelled'])
+export type QuestionResponseOutcome = typeof QuestionResponseOutcome.Type
+
+export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('QuestionResponse', {
+  requestId: NonEmptyTrimmedString,
+  toolCallId: NonEmptyTrimmedString,
+  outcome: QuestionResponseOutcome,
+  source: HitlResponseSource,
+  answers: Schema.optional(Schema.Array(QuestionAnswer)),
+  reason: Schema.optional(Schema.String)
+}) {}
+
+export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest])
+export type HitlRequest = typeof HitlRequest.Type
+
+export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse])
+export type HitlResponse = typeof HitlResponse.Type

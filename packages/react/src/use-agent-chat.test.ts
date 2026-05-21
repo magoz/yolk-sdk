@@ -2,11 +2,16 @@ import { act, createElement, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AgentEnd,
   AgentStart,
   AssistantAgentMessage,
   AssistantTextPart,
+  HostToolCallPart,
   LLMTextDelta,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall,
   UserMessage,
   zeroAgentUsage,
   type AgentEvent
@@ -165,6 +170,60 @@ describe('useAgentChat', () => {
     await waitFor(() => hook.value.status === 'aborted')
 
     expect(hook.value.error).toBeNull()
+
+    hook.unmount()
+  })
+
+  it('submits HITL responses through the current transcript', async () => {
+    const requests: Array<AgentChatTransportRequest> = []
+    const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+    const assistant = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
+    const approvalRequest = ToolApprovalRequest.make({
+      requestId: 'approval:call_1',
+      toolCallId: call.id,
+      call
+    })
+    const approvalResponse = ToolApprovalResponse.make({
+      requestId: approvalRequest.requestId,
+      toolCallId: call.id,
+      decision: 'approved',
+      source: 'user'
+    })
+    const transport: AgentChatTransport = async function* (request) {
+      requests.push(request)
+
+      if (request.hitlResponses === undefined) {
+        yield AgentStart.make({})
+        yield AgentAwaitingInput.make({
+          requests: [approvalRequest],
+          messages: [assistant],
+          turns: 1,
+          usage: zeroAgentUsage
+        })
+        return
+      }
+
+      yield AgentStart.make({})
+      yield agentEnd('approved')
+    }
+    const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
+
+    await act(async () => {
+      hook.value.submitText('weather')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'waiting')
+
+    await act(async () => {
+      const result = hook.value.submitToolApprovalResponse(approvalResponse)
+      expect(result._tag).toBe('Submitted')
+      await tick()
+    })
+    await waitFor(() => hook.value.status === 'done')
+
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.messages).toEqual([UserMessage.make({ content: 'weather' }), assistant])
+    expect(requests[1]?.hitlResponses).toEqual([approvalResponse])
 
     hook.unmount()
   })

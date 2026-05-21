@@ -164,9 +164,10 @@ describe('agent playground', () => {
   })
 
   it('models workflow resume busy state', () => {
-    expect(isAgentTextBusy({ isRunning: false, isWorkflowResuming: false })).toBe(false)
-    expect(isAgentTextBusy({ isRunning: true, isWorkflowResuming: false })).toBe(true)
-    expect(isAgentTextBusy({ isRunning: false, isWorkflowResuming: true })).toBe(true)
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: false })).toBe(false)
+    expect(isAgentTextBusy({ isRunning: true, isWaiting: false, isWorkflowResuming: false })).toBe(true)
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: true, isWorkflowResuming: false })).toBe(true)
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: true })).toBe(true)
     expect(isWorkflowResumeDisabled({ status: 'done', isTextBusy: false })).toBe(true)
     expect(isWorkflowResumeDisabled({ status: 'error', isTextBusy: false })).toBe(false)
     expect(isWorkflowResumeDisabled({ status: 'idle', isTextBusy: true })).toBe(true)

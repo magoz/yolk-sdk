@@ -8,7 +8,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 | ---------------------------- | --------------------------------------- |
 | `route.ts`                   | Stateless text NDJSON via Next runtime  |
 | `workflow/route.ts`          | Start Vercel Workflow and stream NDJSON |
-| `workflow/[runId]/route.ts`  | Resume/cancel Workflow runs by id       |
+| `workflow/[runId]/route.ts`  | Resume/cancel Workflow runs and append HITL responses by id |
 | `commands/route.ts`          | Authenticated command list/render       |
 | `realtime/call/route.ts`     | OpenAI Realtime SDP exchange            |
 | `realtime/tool/route.ts`     | Voice tool execution bridge             |
@@ -23,7 +23,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 ## Workflow Runtime
 
 - `workflow/route.ts` calls Vercel `start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
-- `workflow/[runId]/route.ts` uses `getRun(runId)` for replay and cancellation.
+- `workflow/[runId]/route.ts` uses `getRun(runId)` for replay/cancellation and `resumeHook` for one-response HITL resume.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow route handlers may use `Effect.runPromise` + raw `Response` because `workflow/api` returns Web-native run streams.
 

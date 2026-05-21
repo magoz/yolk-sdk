@@ -52,6 +52,7 @@ describe('just_bash tool', () => {
       })
 
       expect(textTools.tools.map(tool => tool.name)).toEqual([
+        'question',
         'web_fetch',
         'web_search',
         'just_bash'

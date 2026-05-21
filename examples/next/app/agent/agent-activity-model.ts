@@ -59,6 +59,12 @@ export const activityItemFromAgentEvent = (
         detail: `${countLabel(event.turns, 'turn')} · ${countLabel(event.messages.length, 'message')}`,
         tone: 'success'
       }
+    case 'AgentAwaitingInput':
+      return {
+        title: 'Waiting for input',
+        detail: countLabel(event.requests.length, 'request'),
+        tone: 'active'
+      }
     case 'AgentError':
       return { title: 'Agent error', detail: event.message, tone: 'error' }
     case 'AgentRetry':
@@ -80,6 +86,9 @@ export const activityItemFromAgentEvent = (
     case 'LLMStreamEnd':
     case 'LLMTextDelta':
     case 'ProviderToolResult':
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
+    case 'QuestionRequested':
     case 'ToolApprovalDenied':
     case 'ToolApprovalGranted':
     case 'ToolApprovalRequested':

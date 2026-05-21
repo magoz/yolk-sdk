@@ -1,7 +1,7 @@
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
-import { ToolDef, type ToolCall, type ToolResult } from '@yolk-sdk/agent/protocol'
+import { ToolDef, type ToolApprovalPolicy, type ToolCall, type ToolResult } from '@yolk-sdk/agent/protocol'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 export type ToolAccess = typeof ToolAccess.Type
@@ -26,6 +26,7 @@ export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Conte
 export type ToolRegistration<Context> = {
   readonly def: ToolDef
   readonly access: ToolAccess
+  readonly approval?: ToolApprovalPolicy
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
@@ -39,6 +40,7 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly description: string
   readonly parameters: ParamsSchema
   readonly access: ToolAccess
+  readonly approval?: ToolApprovalPolicy
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: unknown) => string
   readonly execute: (
@@ -140,9 +142,11 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   def: ToolDef.make({
     name: options.name,
     description: options.description,
-    parameters: jsonSchemaFromSchema(options.parameters)
+    parameters: jsonSchemaFromSchema(options.parameters),
+    approval: options.approval
   }),
   access: options.access,
+  approval: options.approval,
   isEnabled: options.isEnabled,
   execute: ({ call, context }) =>
     Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(

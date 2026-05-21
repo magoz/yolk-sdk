@@ -43,6 +43,7 @@ export const textStatusVariant = (status: AgentRunStatus) => {
     case 'aborted':
     case 'idle':
     case 'running':
+    case 'waiting':
       return 'outline'
   }
 }

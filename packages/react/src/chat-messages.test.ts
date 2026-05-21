@@ -1,18 +1,27 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
   HostToolCallPart,
   ImagePart,
   ProviderToolResult,
+  QuestionAnswer,
+  QuestionAnswered,
+  QuestionOption,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionRequested,
+  QuestionResponse,
   TextPart,
   ToolCall,
   ToolInputDelta,
   ToolInputStart,
   ToolResult,
   ToolResultMessage,
-  UserMessage
+  UserMessage,
+  zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import {
   appendProtocolMessage,
@@ -189,6 +198,74 @@ describe('agent chat messages', () => {
       call,
       state: { _tag: 'ProviderCompleted', result }
     })
+  })
+
+  it('renders pending and answered question tool states', () => {
+    const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+    const request = QuestionRequest.make({
+      requestId: 'question:call_question',
+      toolCallId: call.id,
+      call,
+      questions: [
+        QuestionPrompt.make({
+          id: 'choice',
+          prompt: 'Pick one',
+          options: [QuestionOption.make({ id: 'a', label: 'A' })]
+        })
+      ]
+    })
+    const response = QuestionResponse.make({
+      requestId: request.requestId,
+      toolCallId: call.id,
+      outcome: 'answered',
+      source: 'user',
+      answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+    })
+    const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
+    const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
+
+    expect(requested[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: `tool-call-${call.id}`,
+      call,
+      state: { _tag: 'QuestionRequested', request }
+    })
+    expect(answered[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: `tool-call-${call.id}`,
+      call,
+      state: { _tag: 'QuestionAnswered', response }
+    })
+    expect(toAgentMessages(answered).at(-1)).toMatchObject({
+      _tag: 'ToolResult',
+      toolCallId: call.id,
+      content: 'User answered the question.',
+      structuredContent: { type: 'question_response', outcome: 'answered' }
+    })
+  })
+
+  it('finalizes assistant messages when awaiting input', () => {
+    const assistant = AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
+    const messages = applyAgentEventToChatMessages(
+      [],
+      AgentAwaitingInput.make({
+        requests: [
+          QuestionRequest.make({
+            requestId: 'question:call_1',
+            toolCallId: 'call_1',
+            call: ToolCall.make({ id: 'call_1', name: 'question', params: {} }),
+            questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+          })
+        ],
+        messages: [assistant],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
+    )
+
+    expect(messages[0]?.parts).toEqual([
+      { _tag: 'Text', id: 'message-0-assistant-text-0', content: 'ok', state: 'done' }
+    ])
   })
 
   it('deletes whole turns from any message in the turn', () => {

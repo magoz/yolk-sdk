@@ -7,6 +7,7 @@ export {
 } from './workflow-loop.ts'
 export type {
   SerializableWorkflowState,
+  VercelAgentWorkflowAwaitingInput,
   VercelAgentWorkflowInput,
   VercelAgentWorkflowLoopConfig,
   VercelAgentWorkflowModelStepInput,

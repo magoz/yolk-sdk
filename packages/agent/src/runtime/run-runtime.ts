@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   AgentModelCapabilities,
   AgentReasoningEffort,
+  HitlResponse,
   ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -16,8 +17,11 @@ import {
 } from '@yolk-sdk/agent/loop'
 import { runtimeErrorToAgentError } from './error.ts'
 import {
+  HitlResponseAppended,
   InputAppended,
+  replayRuntimeHitlResponses,
   replayRuntimeSessionEvents,
+  RunAwaitingInput,
   RunCompleted,
   RunFailed,
   RunStarted,
@@ -33,6 +37,7 @@ export type RuntimeTranscript = readonly [AgentMessage, ...Array<AgentMessage>]
 export type RuntimeConfig = {
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -52,7 +57,18 @@ export type AppendInputRuntimeRequest = {
   readonly expectedRevision?: SessionRevision
 }
 
-export type RuntimeRequest = TranscriptRuntimeRequest | AppendInputRuntimeRequest
+export type AppendHitlResponseRuntimeRequest = {
+  readonly _tag: 'AppendHitlResponse'
+  readonly sessionId: string
+  readonly response: HitlResponse
+  readonly runId: string
+  readonly expectedRevision?: SessionRevision
+}
+
+export type RuntimeRequest =
+  | TranscriptRuntimeRequest
+  | AppendInputRuntimeRequest
+  | AppendHitlResponseRuntimeRequest
 
 type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
 type AppendRuntimeRequirements = LoopRequirements | SessionEventStore
@@ -65,6 +81,7 @@ const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMe
   messages,
   systemPrompt: config.systemPrompt,
   tools: config.tools,
+  hitlResponses: config.hitlResponses,
   reasoningEffort: config.reasoningEffort,
   capabilities: config.capabilities,
   model: config.model
@@ -111,7 +128,7 @@ const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
 
 const appendRunFailed = (
   store: SessionEventStoreApi,
-  request: AppendInputRuntimeRequest,
+  request: AppendInputRuntimeRequest | AppendHitlResponseRuntimeRequest,
   revision: SessionRevision,
   error: AgentLoopError
 ) =>
@@ -145,7 +162,93 @@ const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config
                   events: [RunCompleted.make({ runId: request.runId, messages: event.messages })]
                 })
                 .pipe(Effect.asVoid)
-            : Effect.void
+            : event._tag === 'AgentAwaitingInput'
+              ? store
+                  .append({
+                    sessionId: request.sessionId,
+                    expectedRevision: startedLog.revision,
+                    events: [
+                      RunAwaitingInput.make({
+                        runId: request.runId,
+                        requests: event.requests,
+                        messages: event.messages
+                      })
+                    ]
+                  })
+                  .pipe(Effect.asVoid)
+              : Effect.void
+        ),
+        Stream.catchTags({
+          AbortError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          ContextTransformError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          FauxExhaustedError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          LLMError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            ),
+          ToolError: error =>
+            Stream.fromEffect(appendRunFailed(store, request, startedLog.revision, error)).pipe(
+              Stream.flatMap(() => Stream.fail(error))
+            )
+        })
+      )
+    })
+  )
+
+const makeAppendHitlResponseRuntimeStream = (
+  request: AppendHitlResponseRuntimeRequest,
+  config: RuntimeConfig
+) =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const store = yield* SessionEventStore
+      const initialLog = yield* loadAppendLogOrEmpty(store, request.sessionId)
+      const startedLog = yield* store.append({
+        sessionId: request.sessionId,
+        expectedRevision: request.expectedRevision ?? initialLog.revision,
+        events: [
+          HitlResponseAppended.make({ response: request.response }),
+          RunStarted.make({ runId: request.runId })
+        ]
+      })
+      const messages = replayRuntimeSessionEvents(initialLog.events)
+      const priorResponses = replayRuntimeHitlResponses(initialLog.events)
+      const hitlResponses = [...priorResponses, request.response]
+
+      return run(runtimeRunConfig({ ...config, hitlResponses }, messages)).pipe(
+        Stream.tap(event =>
+          event._tag === 'AgentEnd'
+            ? store
+                .append({
+                  sessionId: request.sessionId,
+                  expectedRevision: startedLog.revision,
+                  events: [RunCompleted.make({ runId: request.runId, messages: event.messages })]
+                })
+                .pipe(Effect.asVoid)
+            : event._tag === 'AgentAwaitingInput'
+              ? store
+                  .append({
+                    sessionId: request.sessionId,
+                    expectedRevision: startedLog.revision,
+                    events: [
+                      RunAwaitingInput.make({
+                        runId: request.runId,
+                        requests: event.requests,
+                        messages: event.messages
+                      })
+                    ]
+                  })
+                  .pipe(Effect.asVoid)
+              : Effect.void
         ),
         Stream.catchTags({
           AbortError: error =>
@@ -182,6 +285,10 @@ export function runRuntime(
   config: RuntimeConfig
 ): Stream.Stream<AgentEvent, RuntimeErrorUnion, AppendRuntimeRequirements>
 export function runRuntime(
+  request: AppendHitlResponseRuntimeRequest,
+  config: RuntimeConfig
+): Stream.Stream<AgentEvent, RuntimeErrorUnion, AppendRuntimeRequirements>
+export function runRuntime(
   request: RuntimeRequest,
   config: RuntimeConfig
 ): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>
@@ -194,5 +301,7 @@ export function runRuntime(
       return makeTranscriptRuntimeStream(request, config)
     case 'AppendInput':
       return makeAppendInputRuntimeStream(request, config)
+    case 'AppendHitlResponse':
+      return makeAppendHitlResponseRuntimeStream(request, config)
   }
 }

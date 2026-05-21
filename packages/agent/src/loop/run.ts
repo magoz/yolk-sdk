@@ -1,5 +1,7 @@
 import { Clock, Effect, Ref, Stream } from 'effect'
+import * as Schema from 'effect/Schema'
 import {
+  AgentAwaitingInput,
   AgentEnd,
   AgentRetry,
   AgentStart,
@@ -15,16 +17,30 @@ import {
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
+  ToolApprovalDenied,
+  ToolApprovalGranted,
+  ToolApprovalRequested,
   ToolInputEnd,
   ToolInputDelta,
   ToolInputStart,
+  QuestionAnswered,
+  QuestionCancelled,
+  QuestionRequested,
   ProviderToolResult,
+  QuestionRequest,
+  QuestionToolParams,
+  ToolApprovalRequest,
   ToolResultMessage,
   SubagentCompleted,
   SubagentStarted,
+  assistantHostToolCalls,
   type ToolCall,
   type AgentReasoningEffort,
-  type ToolResult,
+  type HitlRequest,
+  type HitlResponse,
+  type QuestionResponse,
+  type ToolApprovalResponse,
+  ToolResult,
   TurnEnd,
   TurnStart,
   zeroAgentUsage,
@@ -55,6 +71,7 @@ export type RunConfig = {
   readonly messages: ReadonlyArray<AgentMessage>
   readonly systemPrompt: string
   readonly tools: ReadonlyArray<ToolDef>
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
   readonly capabilities?: AgentModelCapabilities
@@ -66,8 +83,15 @@ export type ModelTurnConfig = RunConfig & {
 
 export type ToolBatchConfig = {
   readonly calls: ReadonlyArray<ToolCall>
+  readonly tools?: ReadonlyArray<ToolDef>
+  readonly hitlResponses?: ReadonlyArray<HitlResponse>
   readonly model?: string
+  readonly createdMessages?: ReadonlyArray<AgentMessage>
+  readonly turn?: number
+  readonly usage?: AgentUsage
 }
+
+const questionToolName = 'question'
 
 type TaskCallMetadata = {
   readonly subagentRunId: string
@@ -394,6 +418,42 @@ type IndexedToolResultMessage = {
   readonly message: AgentMessage
 }
 
+type IndexedToolCall = {
+  readonly index: number
+  readonly call: ToolCall
+}
+
+type PreparedToolCall =
+  | {
+      readonly _tag: 'Execute'
+      readonly index: number
+      readonly call: ToolCall
+      readonly events: ReadonlyArray<AgentEvent>
+    }
+  | {
+      readonly _tag: 'Result'
+      readonly index: number
+      readonly call: ToolCall
+      readonly result: ToolResult
+      readonly events: ReadonlyArray<AgentEvent>
+    }
+  | {
+      readonly _tag: 'Pending'
+      readonly request: HitlRequest
+      readonly events: ReadonlyArray<AgentEvent>
+    }
+
+type PreparedToolBatch = {
+  readonly callsToExecute: ReadonlyArray<IndexedToolCall>
+  readonly resultMessages: ReadonlyArray<IndexedToolResultMessage>
+  readonly resultEvents: ReadonlyArray<AgentEvent>
+  readonly events: ReadonlyArray<AgentEvent>
+  readonly pendingRequests: ReadonlyArray<HitlRequest>
+  readonly pendingEvents: ReadonlyArray<AgentEvent>
+}
+
+type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
+
 const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
   Math.max(1, loopConfig.toolConcurrency)
 
@@ -405,18 +465,253 @@ const toolResultMessageFromResult = (result: ToolResult) =>
     structuredContent: result.structuredContent
   })
 
+const toolDefFor = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
+  tools.find(tool => tool.name === call.name)
+
+const approvalRequired = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
+  toolDefFor(tools, call)?.approval?.mode === 'manual'
+
+const approvalRequestId = (call: ToolCall) => `approval:${call.id}`
+
+const questionRequestId = (call: ToolCall) => `question:${call.id}`
+
+const matchesApproval = (response: ToolApprovalResponse, call: ToolCall) =>
+  response.toolCallId === call.id || response.requestId === approvalRequestId(call)
+
+const matchesQuestion = (response: QuestionResponse, call: ToolCall) =>
+  response.toolCallId === call.id || response.requestId === questionRequestId(call)
+
+const approvalResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
+  responses.flatMap(response =>
+    response._tag === 'ToolApprovalResponse' && matchesApproval(response, call) ? [response] : []
+  )[0]
+
+const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
+  responses.flatMap(response =>
+    response._tag === 'QuestionResponse' && matchesQuestion(response, call) ? [response] : []
+  )[0]
+
+const toolApprovalRequest = (
+  tools: ReadonlyArray<ToolDef>,
+  call: ToolCall
+): ToolApprovalRequest =>
+  ToolApprovalRequest.make({
+    requestId: approvalRequestId(call),
+    toolCallId: call.id,
+    call,
+    policy: toolDefFor(tools, call)?.approval
+  })
+
+const deniedToolResult = (call: ToolCall, response: ToolApprovalResponse) => {
+  const reason = response.reason ?? 'Denied by user'
+
+  return ToolResult.make({
+    toolCallId: call.id,
+    content: `Tool call denied: ${reason}`,
+    isError: true,
+    structuredContent: {
+      type: 'tool_approval_denied',
+      reason,
+      source: response.source
+    }
+  })
+}
+
+const questionToolResult = (response: QuestionResponse) => {
+  const reason = response.reason ?? 'Question cancelled'
+
+  return ToolResult.make({
+    toolCallId: response.toolCallId,
+    content:
+      response.outcome === 'answered'
+        ? 'User answered the question.'
+        : `Question cancelled: ${reason}`,
+    isError: response.outcome === 'cancelled' ? true : undefined,
+    structuredContent: {
+      type: 'question_response',
+      outcome: response.outcome,
+      answers: response.answers ?? [],
+      reason: response.reason,
+      source: response.source
+    }
+  })
+}
+
+const invalidQuestionToolResult = (call: ToolCall) =>
+  ToolResult.make({
+    toolCallId: call.id,
+    content: 'Invalid question arguments.',
+    isError: true,
+    structuredContent: { type: 'question_invalid' }
+  })
+
+const prepareQuestionCall = (
+  call: ToolCall,
+  index: number,
+  responses: ReadonlyArray<HitlResponse>
+): Effect.Effect<PreparedToolCall> =>
+  Effect.gen(function* () {
+    const decoded = yield* Schema.decodeUnknownEffect(QuestionToolParams)(call.params).pipe(
+      Effect.result
+    )
+
+    if (decoded._tag === 'Failure') {
+      return {
+        _tag: 'Result',
+        index,
+        call,
+        result: invalidQuestionToolResult(call),
+        events: []
+      }
+    }
+
+    const response = questionResponseFor(responses, call)
+
+    if (response !== undefined) {
+      return {
+        _tag: 'Result',
+        index,
+        call,
+        result: questionToolResult(response),
+        events: [
+          response.outcome === 'answered'
+            ? QuestionAnswered.make({ response })
+            : QuestionCancelled.make({ response })
+        ]
+      }
+    }
+
+    const request = QuestionRequest.make({
+      requestId: questionRequestId(call),
+      toolCallId: call.id,
+      call,
+      questions: decoded.success.questions
+    })
+
+    return {
+      _tag: 'Pending',
+      request,
+      events: [QuestionRequested.make({ request })]
+    }
+  })
+
+const prepareApprovalCall = (
+  tools: ReadonlyArray<ToolDef>,
+  call: ToolCall,
+  index: number,
+  responses: ReadonlyArray<HitlResponse>
+): PreparedToolCall => {
+  if (!approvalRequired(tools, call)) {
+    return { _tag: 'Execute', index, call, events: [] }
+  }
+
+  const request = toolApprovalRequest(tools, call)
+  const response = approvalResponseFor(responses, call)
+
+  if (response === undefined) {
+    return {
+      _tag: 'Pending',
+      request,
+      events: [ToolApprovalRequested.make({ call, request })]
+    }
+  }
+
+  if (response.decision === 'denied') {
+    return {
+      _tag: 'Result',
+      index,
+      call,
+      result: deniedToolResult(call, response),
+      events: [ToolApprovalDenied.make({ toolCallId: call.id, reason: response.reason ?? 'Denied by user', response })]
+    }
+  }
+
+  return {
+    _tag: 'Execute',
+    index,
+    call,
+    events: [ToolApprovalGranted.make({ toolCallId: call.id, response })]
+  }
+}
+
+const prepareToolCall = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly responses: ReadonlyArray<HitlResponse>
+  readonly call: ToolCall
+  readonly index: number
+}): Effect.Effect<PreparedToolCall> =>
+  input.call.name === questionToolName
+    ? prepareQuestionCall(input.call, input.index, input.responses)
+    : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
+
+const prepareToolBatch = (input: {
+  readonly tools: ReadonlyArray<ToolDef>
+  readonly responses: ReadonlyArray<HitlResponse>
+  readonly calls: ReadonlyArray<ToolCall>
+}): Effect.Effect<PreparedToolBatch> =>
+  Effect.gen(function* () {
+    const prepared = yield* Effect.forEach(input.calls, (call, index) =>
+      prepareToolCall({ tools: input.tools, responses: input.responses, call, index })
+    )
+
+    return {
+      callsToExecute: prepared.flatMap(item =>
+        item._tag === 'Execute' ? [{ index: item.index, call: item.call }] : []
+      ),
+      resultMessages: prepared.flatMap(item =>
+        item._tag === 'Result'
+          ? [{ index: item.index, message: toolResultMessageFromResult(item.result) }]
+          : []
+      ),
+      resultEvents: syntheticToolCompletionEvents(prepared),
+      events: prepared.flatMap(item => (item._tag === 'Pending' ? [] : item.events)),
+      pendingRequests: prepared.flatMap(item => (item._tag === 'Pending' ? [item.request] : [])),
+      pendingEvents: prepared.flatMap(item => (item._tag === 'Pending' ? item.events : []))
+    }
+  })
+
 const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
+const syntheticToolCompletionEvents = (
+  prepared: ReadonlyArray<PreparedToolCall>
+): ReadonlyArray<AgentEvent> =>
+  prepared.flatMap(item =>
+    item._tag === 'Result'
+      ? [ToolExecutionCompleted.make({ call: item.call, result: item.result })]
+      : []
+  )
+
+const toolResultIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
+  new Set(messages.flatMap(message => (message._tag === 'ToolResult' ? [message.toolCallId] : [])))
+
+const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) => {
+  const completed = toolResultIds(messages)
+
+  return messages.flatMap(message =>
+    message._tag === 'Assistant'
+      ? assistantHostToolCalls(message).filter(call => !completed.has(call.id))
+      : []
+  )
+}
+
+const nonEmptyHitlRequests = (
+  requests: ReadonlyArray<HitlRequest>
+): NonEmptyHitlRequests | undefined => {
+  const first = requests[0]
+
+  return first === undefined ? undefined : [first, ...requests.slice(1)]
+}
+
 const parallelToolExecutionStream = (input: {
-  readonly calls: ReadonlyArray<ToolCall>
+  readonly calls: ReadonlyArray<IndexedToolCall>
   readonly executor: TurnStreamInput['executor']
   readonly loopConfig: LoopConfigShape
   readonly model: string
   readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
 }) =>
   Stream.mergeAll(
-    input.calls.map((call, index) =>
+    input.calls.map(({ call, index }) =>
       makeToolExecutionStream(input.executor, call, input.model).pipe(
         Stream.tap(event => {
           if (event._tag !== 'ToolExecutionCompleted') {
@@ -519,8 +814,47 @@ const makeAfterLlmStream = (
       }
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const prepared = yield* prepareToolBatch({
+        tools: input.config.tools,
+        responses: input.config.hitlResponses ?? [],
+        calls: completion.toolCalls
+      })
+
+      if (prepared.resultMessages.length > 0) {
+        yield* Ref.update(toolResultMessages, results => [...results, ...prepared.resultMessages])
+      }
+
+      if (prepared.pendingRequests.length > 0) {
+        const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
+
+        if (pendingRequests === undefined) {
+          return Stream.empty
+        }
+
+        const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+        if (readyResults.length > 0) {
+          yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
+        }
+
+        const messages = yield* Ref.get(input.createdMessages)
+        const usage = yield* Ref.get(input.usage)
+
+        return Stream.fromIterable([
+          ...turnEndEvents,
+          ...prepared.events,
+          ...prepared.pendingEvents,
+          TurnEnd.make({ turn: input.turn, reason: completion.stopReason }),
+          AgentAwaitingInput.make({
+            requests: pendingRequests,
+            messages,
+            turns: input.turn,
+            usage
+          })
+        ])
+      }
+
       const toolExecutionStream = parallelToolExecutionStream({
-        calls: completion.toolCalls,
+        calls: prepared.callsToExecute,
         executor: input.executor,
         loopConfig: input.loopConfig,
         model: input.config.model,
@@ -549,6 +883,7 @@ const makeAfterLlmStream = (
       )
 
       return Stream.fromIterable(turnEndEvents).pipe(
+        Stream.concat(Stream.fromIterable(prepared.events)),
         Stream.concat(toolExecutionStream),
         Stream.concat(nextTurnStream)
       )
@@ -683,6 +1018,84 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
     ]).pipe(Stream.concat(llmStream))
   })
 
+const makePendingToolResumeStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const pendingCalls = pendingHostToolCalls(input.currentMessages)
+
+      if (pendingCalls.length === 0 || (input.config.hitlResponses ?? []).length === 0) {
+        return makeTurnStream(input)
+      }
+
+      const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const prepared = yield* prepareToolBatch({
+        tools: input.config.tools,
+        responses: input.config.hitlResponses ?? [],
+        calls: pendingCalls
+      })
+
+      if (prepared.resultMessages.length > 0) {
+        yield* Ref.update(toolResultMessages, results => [...results, ...prepared.resultMessages])
+      }
+
+      if (prepared.pendingRequests.length > 0) {
+        const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
+
+        if (pendingRequests === undefined) {
+          return Stream.empty
+        }
+
+        const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+        if (readyResults.length > 0) {
+          yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
+        }
+
+        const messages = yield* Ref.get(input.createdMessages)
+        const usage = yield* Ref.get(input.usage)
+
+        return Stream.fromIterable([
+          ...prepared.events,
+          ...prepared.pendingEvents,
+          AgentAwaitingInput.make({
+            requests: pendingRequests,
+            messages,
+            turns: Math.max(0, input.turn - 1),
+            usage
+          })
+        ])
+      }
+
+      const toolExecutionStream = parallelToolExecutionStream({
+        calls: prepared.callsToExecute,
+        executor: input.executor,
+        loopConfig: input.loopConfig,
+        model: input.config.model,
+        results: toolResultMessages
+      })
+      const nextTurnStream = Stream.unwrap(
+        Ref.get(toolResultMessages).pipe(
+          Effect.flatMap(results => {
+            const orderedResults = orderedToolResultMessages(results)
+
+            return Ref.update(input.createdMessages, messages => [...messages, ...orderedResults]).pipe(
+              Effect.as(
+                makeTurnStream({
+                  ...input,
+                  currentMessages: [...input.currentMessages, ...orderedResults]
+                })
+              )
+            )
+          })
+        )
+      )
+
+      return Stream.fromIterable(prepared.events).pipe(
+        Stream.concat(toolExecutionStream),
+        Stream.concat(nextTurnStream)
+      )
+    })
+  )
+
 const unavailableToolExecutor: TurnStreamInput['executor'] = {
   execute: call =>
     Effect.fail(
@@ -751,14 +1164,41 @@ export const runToolBatch = (
       const executor = yield* ToolExecutor
       const loopConfig = yield* LoopConfig
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
-
-      return parallelToolExecutionStream({
-        calls: config.calls,
-        executor,
-        loopConfig,
-        model: config.model ?? '',
-        results: toolResultMessages
+      const prepared = yield* prepareToolBatch({
+        tools: config.tools ?? [],
+        responses: config.hitlResponses ?? [],
+        calls: config.calls
       })
+      const hasPendingRequests = prepared.pendingRequests.length > 0
+      const resultEvents = hasPendingRequests ? [] : prepared.resultEvents
+      const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
+      const awaitingEvents: ReadonlyArray<AgentEvent> = pendingRequests === undefined
+        ? []
+        : [
+            AgentAwaitingInput.make({
+              requests: pendingRequests,
+              messages: config.createdMessages ?? [],
+              turns: config.turn ?? 0,
+              usage: config.usage ?? zeroAgentUsage
+            })
+          ]
+
+      return Stream.fromIterable([
+        ...prepared.events,
+        ...resultEvents,
+        ...prepared.pendingEvents,
+        ...awaitingEvents
+      ]).pipe(
+        Stream.concat(
+          parallelToolExecutionStream({
+            calls: hasPendingRequests ? [] : prepared.callsToExecute,
+            executor,
+            loopConfig,
+            model: config.model ?? '',
+            results: toolResultMessages
+          })
+        )
+      )
     })
   )
 
@@ -780,7 +1220,7 @@ export const run = (
 
       return Stream.make(AgentStart.make({})).pipe(
         Stream.concat(
-          makeTurnStream({
+          makePendingToolResumeStream({
             config,
             contextTransformer,
             loopConfig,

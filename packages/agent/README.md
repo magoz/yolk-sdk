@@ -21,14 +21,14 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers |
 | `@yolk-sdk/agent/runtime` | Transcript or append-backed runtime orchestration |
 | `@yolk-sdk/agent/client` | HTTP/NDJSON transport and client state helpers |
-| `@yolk-sdk/agent/tools` | Tool module registry, `makeTool`, task tool contract |
+| `@yolk-sdk/agent/tools` | Tool module registry, `makeTool`, task/question tool contracts |
 
 ```ts
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import { initialAgentClientState } from '@yolk-sdk/agent/client'
-import { makeTaskToolModule, resolveTools } from '@yolk-sdk/agent/tools'
+import { makeQuestionToolModule, makeTaskToolModule, resolveTools } from '@yolk-sdk/agent/tools'
 ```
 
 Test helpers live behind their own subpath:
@@ -51,6 +51,16 @@ const program = run({
 // Provide LLM provider + tool executor layers in the host app.
 Effect.runPromise(program)
 ```
+
+## Human-in-the-loop
+
+HITL is protocol-level, not UI-level:
+
+- Add `approval: { mode: 'manual' }` to a `ToolDef` to pause before execution.
+- `run` / `runRuntime` emit `ToolApprovalRequested` then `AgentAwaitingInput`.
+- Resume by passing `hitlResponses` or using client helpers like `submitToolApprovalResponse`.
+- Denials become model-visible `ToolResult` messages with `isError = true`.
+- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results.
 
 ## Host responsibilities
 

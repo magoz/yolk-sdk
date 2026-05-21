@@ -1,6 +1,8 @@
 import { Effect } from 'effect'
 import type { Layer } from 'effect'
 import type { HttpClient } from 'effect/unstable/http'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeQuestionToolRegistration } from '@yolk-sdk/agent/tools'
 import { webFetchWorkerToolModule as webFetchToolModule } from './web-fetch-worker-tool.ts'
 import { webSearchToolModule } from './web-search-tool.ts'
 import { skillToolModule } from './skill-tool.ts'
@@ -12,7 +14,22 @@ import type { AgentToolContext } from './tool-context.ts'
 
 export { resolveAgentToolSet } from './resolve-toolset.ts'
 
+const questionToolRegistration = makeQuestionToolRegistration<AgentToolContext>({
+  execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
+})
+
+const questionToolModule = {
+  id: 'question',
+  tools: [
+    {
+      ...questionToolRegistration,
+      isEnabled: (context: AgentToolContext) => Effect.succeed(context.surface === 'text')
+    }
+  ]
+}
+
 export const nodeTextToolModules = [
+  questionToolModule,
   webFetchToolModule,
   webSearchToolModule,
   skillToolModule,

@@ -6,6 +6,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 | Tool/module | Text | Voice | Cloudflare | Notes |
 | ----------- | ---- | ----- | ---------- | ----- |
+| `question` | yes | no | yes | package HITL question tool; loop pauses/resumes before executor |
 | `web_fetch` | yes | yes | yes | public URL fetch only |
 | `web_search` | yes | yes | yes | Exa/Parallel MCP endpoints |
 | `skill` | yes | no | generated bundle only | project skill command/runtime tool |

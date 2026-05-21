@@ -12,6 +12,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Workflow runtime records `x-workflow-run-id` in Activity, can replay the durable stream by run id, and stop requests cancel the Workflow run.
 - Workflow resume is for interrupted/aborted active runs only; keep resume disabled after `done` to avoid replaying completed stream chunks into duplicate UI messages.
 - Workflow resume counts as text-busy UI state: disable submit/actions/model controls and route Stop through the resume abort controller.
+- Workflow HITL approve/question controls submit through the active run id; do not start a new Workflow run when `hitlResponses` are present.
 - Workflow stop is optimistic in the UI: it aborts the browser stream and calls `run.cancel()`, but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.

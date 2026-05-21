@@ -1,5 +1,13 @@
 import { Array as Arr, Option } from 'effect'
-import { contentText, type ToolResult, type Content, type ToolCall } from '@yolk-sdk/agent/protocol'
+import {
+  contentText,
+  type QuestionRequest,
+  type QuestionResponse,
+  type ToolApprovalRequest,
+  type ToolResult,
+  type Content,
+  type ToolCall
+} from '@yolk-sdk/agent/protocol'
 import type { AgentChatMessage, ChatToolState } from './chat-messages.ts'
 
 export type ToolDuration =
@@ -10,8 +18,11 @@ export type ToolRunState =
   | { readonly _tag: 'Running'; readonly duration: ToolDuration }
   | { readonly _tag: 'Called'; readonly duration: ToolDuration }
   | { readonly _tag: 'InputStreaming'; readonly duration: ToolDuration; readonly input: string }
-  | { readonly _tag: 'ApprovalRequested'; readonly duration: ToolDuration }
+  | { readonly _tag: 'ApprovalRequested'; readonly duration: ToolDuration; readonly request?: ToolApprovalRequest }
   | { readonly _tag: 'Denied'; readonly duration: ToolDuration; readonly reason: string }
+  | { readonly _tag: 'QuestionRequested'; readonly duration: ToolDuration; readonly request: QuestionRequest }
+  | { readonly _tag: 'QuestionAnswered'; readonly duration: ToolDuration; readonly response: QuestionResponse }
+  | { readonly _tag: 'QuestionCancelled'; readonly duration: ToolDuration; readonly response: QuestionResponse }
   | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
   | { readonly _tag: 'Errored'; readonly duration: ToolDuration; readonly message: string }
   | {
@@ -120,11 +131,23 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   }
 
   if (state._tag === 'ApprovalRequested') {
-    return { _tag: 'ApprovalRequested', duration: { _tag: 'Unknown' } }
+    return { _tag: 'ApprovalRequested', duration: { _tag: 'Unknown' }, request: state.request }
   }
 
   if (state._tag === 'Denied') {
     return { _tag: 'Denied', duration: { _tag: 'Unknown' }, reason: state.reason }
+  }
+
+  if (state._tag === 'QuestionRequested') {
+    return { _tag: 'QuestionRequested', duration: { _tag: 'Unknown' }, request: state.request }
+  }
+
+  if (state._tag === 'QuestionAnswered') {
+    return { _tag: 'QuestionAnswered', duration: { _tag: 'Unknown' }, response: state.response }
+  }
+
+  if (state._tag === 'QuestionCancelled') {
+    return { _tag: 'QuestionCancelled', duration: { _tag: 'Unknown' }, response: state.response }
   }
 
   if (state._tag === 'Errored') {

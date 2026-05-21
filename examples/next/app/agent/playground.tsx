@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Array as Arr, Effect, Option } from 'effect'
-import { UserMessage, addAgentUsage, zeroAgentUsage, type AgentEvent } from '@yolk-sdk/agent/protocol'
+import {
+  UserMessage,
+  addAgentUsage,
+  zeroAgentUsage,
+  type AgentEvent,
+  type QuestionResponse,
+  type ToolApprovalResponse
+} from '@yolk-sdk/agent/protocol'
 import {
   buildAgentChatItems,
   getActiveChatToolParts,
@@ -266,6 +273,10 @@ export function AgentPlayground({
           setContextTokens(null)
           setCompaction({ _tag: 'Idle' })
           break
+        case 'AgentAwaitingInput':
+          setUsage(event.usage)
+          setHasUsage(true)
+          break
         case 'UsageUpdate':
           setUsage(current => addAgentUsage(current, event.usage))
           setContextTokens(event.usage.input.total)
@@ -295,6 +306,9 @@ export function AgentPlayground({
         case 'LLMStreamStart':
         case 'LLMTextDelta':
         case 'ProviderToolResult':
+        case 'QuestionAnswered':
+        case 'QuestionCancelled':
+        case 'QuestionRequested':
         case 'ToolApprovalDenied':
         case 'ToolApprovalGranted':
         case 'ToolApprovalRequested':
@@ -417,6 +431,7 @@ export function AgentPlayground({
       streamCloudflareAgentEvents({
         webSocketUrl: runtime.webSocketUrl,
         messages: request.messages,
+        hitlResponses: request.hitlResponses,
         model: request.model,
         reasoningEffort: request.reasoningEffort,
         signal: request.signal
@@ -427,8 +442,26 @@ export function AgentPlayground({
       return undefined
     }
 
-    return request =>
-      streamAgentEvents({
+    return request => {
+      const hitlResponse = request.hitlResponses?.[0]
+
+      if (hitlResponse !== undefined && workflowRunId !== null) {
+        return streamAgentEvents({
+          ...request,
+          endpoint: `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`,
+          onResponse: response => {
+            const runId = response.headers['x-workflow-run-id']
+
+            recordActivity({
+              title: 'Workflow HITL resume started',
+              detail: runId ?? workflowRunId,
+              tone: 'neutral'
+            })
+          }
+        })
+      }
+
+      return streamAgentEvents({
         ...request,
         endpoint: '/api/agent/workflow',
         onResponse: response => {
@@ -442,7 +475,8 @@ export function AgentPlayground({
           recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
         }
       })
-  }, [recordActivity, runtime])
+    }
+  }, [recordActivity, runtime, workflowRunId])
   const agentTransport = cloudflareTransport ?? workflowTransport
 
   const agentChat = useAgentChat({
@@ -457,8 +491,11 @@ export function AgentPlayground({
   const {
     state,
     isRunning,
+    isWaiting,
     canSubmitContent,
     submitMessage,
+    submitToolApprovalResponse,
+    submitQuestionResponse,
     deleteTurn,
     regenerateFrom,
     editUserMessage,
@@ -484,10 +521,11 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
-  const isTextBusy = isAgentTextBusy({ isRunning, isWorkflowResuming })
+  const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const submitDisabled = isTextBusy || isVoiceMode
   const messageActionsDisabled = isTextBusy || isVoiceMode
+  const hitlActionsDisabled = isRunning || isWorkflowResuming || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
     [state.chatMessages]
@@ -510,12 +548,16 @@ export function AgentPlayground({
       return Option.none()
     }
 
-    return Option.some(
-      activeToolParts.length === 1
-        ? `Running ${firstRun.call.name}`
-        : `Running ${activeToolParts.length} tools`
-    )
-  }, [activeToolParts])
+      return Option.some(
+        isWaiting
+          ? activeToolParts.length === 1
+            ? `Waiting for ${firstRun.call.name}`
+            : `Waiting for ${activeToolParts.length} inputs`
+          : activeToolParts.length === 1
+            ? `Running ${firstRun.call.name}`
+            : `Running ${activeToolParts.length} tools`
+      )
+  }, [activeToolParts, isWaiting])
   const chatItems = useMemo(
     () =>
       buildAgentChatItems({
@@ -723,6 +765,44 @@ export function AgentPlayground({
     [editUserMessage, messageActionsDisabled, recordActivity]
   )
 
+  const handleToolApprovalResponse = useCallback(
+    (response: ToolApprovalResponse) => {
+      if (hitlActionsDisabled) {
+        return
+      }
+
+      const result = submitToolApprovalResponse(response)
+
+      if (result._tag === 'Submitted') {
+        recordActivity({
+          title: response.decision === 'approved' ? 'Tool approved' : 'Tool denied',
+          detail: response.toolCallId,
+          tone: response.decision === 'approved' ? 'success' : 'neutral'
+        })
+      }
+    },
+    [hitlActionsDisabled, recordActivity, submitToolApprovalResponse]
+  )
+
+  const handleQuestionResponse = useCallback(
+    (response: QuestionResponse) => {
+      if (hitlActionsDisabled) {
+        return
+      }
+
+      const result = submitQuestionResponse(response)
+
+      if (result._tag === 'Submitted') {
+        recordActivity({
+          title: response.outcome === 'answered' ? 'Question answered' : 'Question cancelled',
+          detail: response.toolCallId,
+          tone: response.outcome === 'answered' ? 'success' : 'neutral'
+        })
+      }
+    },
+    [hitlActionsDisabled, recordActivity, submitQuestionResponse]
+  )
+
   const handleImageAttachmentsChange = useCallback(
     (files: ReadonlyArray<File>) => {
       if (files.length === 0) {
@@ -876,9 +956,12 @@ export function AgentPlayground({
             showInlineTools={showInlineTools}
             showReasoning={showReasoning}
             actionsDisabled={messageActionsDisabled}
+            hitlDisabled={hitlActionsDisabled}
             onDeleteTurn={handleDeleteTurn}
             onEditUserMessage={handleEditUserMessage}
             onRegenerateFrom={handleRegenerateFrom}
+            onToolApprovalResponse={handleToolApprovalResponse}
+            onQuestionResponse={handleQuestionResponse}
           />
 
           <AgentComposer

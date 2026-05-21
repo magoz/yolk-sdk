@@ -55,6 +55,10 @@ Useful fields/actions:
 | `chat.chatMessages` | Render source of truth |
 | `chat.messages` | Protocol transcript replay |
 | `chat.submitText` / `submitMessage` | Append user message and start run |
+| `chat.isWaiting` | Run is paused on HITL approval/question |
+| `chat.canSubmitHitlResponse` | Guard approval/question response submission |
+| `chat.submitToolApprovalResponse` | Submit approve/deny response |
+| `chat.submitQuestionResponse` | Submit structured question answer/cancel |
 | `chat.stop` | Interrupt active stream fiber |
 | `chat.deleteTurn` | Remove a user/assistant turn locally |
 | `chat.regenerateFrom` | Truncate and rerun from a message |
@@ -75,6 +79,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 
 - `AgentChatMessage` groups parts by role/turn.
 - `AgentChatPart` covers text, reasoning, tool calls/results, and errors.
+- Tool parts expose approval requested/granted/denied, question requested/answered/cancelled, execution, completion, and error states.
 - `buildAgentChatItems` is optional convenience projection for simple flat UIs.
 - Provider reasoning is displayed only from protocol reasoning events; never fabricate reasoning.
 

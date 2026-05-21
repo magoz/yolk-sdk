@@ -16,10 +16,14 @@ import {
   WrenchIcon
 } from 'lucide-react'
 import {
+  QuestionAnswer,
+  QuestionResponse,
+  ToolApprovalResponse,
   contentParts,
   contentText,
   type Content,
   type ContentPart,
+  type QuestionPrompt,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
@@ -117,6 +121,12 @@ const toolStateLabel = (state: ToolRunState) => {
       return 'approval'
     case 'Denied':
       return 'denied'
+    case 'QuestionRequested':
+      return 'question'
+    case 'QuestionAnswered':
+      return 'answered'
+    case 'QuestionCancelled':
+      return 'cancelled'
     case 'Running':
       return 'running'
     case 'Called':
@@ -137,10 +147,13 @@ const toolStateHasError = (state: ToolRunState) => {
       return state.result.isError === true
     case 'Denied':
     case 'Errored':
+    case 'QuestionCancelled':
       return true
     case 'ApprovalRequested':
     case 'Called':
     case 'InputStreaming':
+    case 'QuestionAnswered':
+    case 'QuestionRequested':
     case 'Running':
       return false
   }
@@ -153,11 +166,16 @@ const toolStateContent = (state: ToolRunState) => {
       return contentPreview(state.result.content)
     case 'Denied':
       return state.reason
+    case 'QuestionAnswered':
+      return 'answered'
+    case 'QuestionCancelled':
+      return state.response.reason ?? 'cancelled'
     case 'Errored':
       return state.message
     case 'ApprovalRequested':
     case 'Called':
     case 'InputStreaming':
+    case 'QuestionRequested':
     case 'Running':
       return undefined
   }
@@ -194,6 +212,9 @@ const resultStructuredContent = (state: ToolRunState) => {
     case 'Denied':
     case 'Errored':
     case 'InputStreaming':
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
+    case 'QuestionRequested':
     case 'Running':
       return undefined
   }
@@ -224,14 +245,247 @@ const timestampLabel = (milliseconds: number) => new Date(milliseconds).toLocale
 
 const toolResultTitle = (name: string, isError: boolean) => (isError ? `${name} failed` : name)
 
+const approvalRequestId = (call: ToolCall, state: Extract<ToolRunState, { readonly _tag: 'ApprovalRequested' }>) =>
+  state.request?.requestId ?? `approval:${call.id}`
+
+type QuestionDraft = {
+  readonly questionId: string
+  readonly optionIds: ReadonlyArray<string>
+  readonly customAnswer: string
+}
+
+const initialQuestionDrafts = (questions: ReadonlyArray<QuestionPrompt>): ReadonlyArray<QuestionDraft> =>
+  questions.map(question => ({ questionId: question.id, optionIds: [], customAnswer: '' }))
+
+const draftForQuestion = (drafts: ReadonlyArray<QuestionDraft>, questionId: string) =>
+  drafts.find(draft => draft.questionId === questionId) ?? {
+    questionId,
+    optionIds: [],
+    customAnswer: ''
+  }
+
+const questionOptions = (question: QuestionPrompt) => question.options ?? []
+
+const questionAllowsCustom = (question: QuestionPrompt) =>
+  question.allowCustom === true || questionOptions(question).length === 0
+
+const questionRequiresAnswer = (question: QuestionPrompt) => question.required !== false
+
+const hasQuestionAnswer = (draft: QuestionDraft) =>
+  draft.optionIds.length > 0 || draft.customAnswer.trim().length > 0
+
+const canSubmitQuestionDrafts = (
+  questions: ReadonlyArray<QuestionPrompt>,
+  drafts: ReadonlyArray<QuestionDraft>
+) =>
+  drafts.some(hasQuestionAnswer) &&
+  questions.every(question =>
+    questionRequiresAnswer(question)
+      ? hasQuestionAnswer(draftForQuestion(drafts, question.id))
+      : true
+  )
+
+const answerFromDraft = (draft: QuestionDraft) => {
+  const customAnswer = draft.customAnswer.trim()
+
+  return QuestionAnswer.make({
+    questionId: draft.questionId,
+    optionIds: draft.optionIds.length > 0 ? draft.optionIds : undefined,
+    customAnswer: customAnswer.length > 0 ? customAnswer : undefined
+  })
+}
+
+function ApprovalControls({
+  call,
+  state,
+  disabled,
+  onResponse
+}: {
+  readonly call: ToolCall
+  readonly state: Extract<ToolRunState, { readonly _tag: 'ApprovalRequested' }>
+  readonly disabled: boolean
+  readonly onResponse: (response: ToolApprovalResponse) => void
+}) {
+  const requestId = approvalRequestId(call, state)
+  const handleApprove = useCallback(() => {
+    onResponse(
+      ToolApprovalResponse.make({
+        requestId,
+        toolCallId: call.id,
+        decision: 'approved',
+        source: 'user'
+      })
+    )
+  }, [call.id, onResponse, requestId])
+  const handleDeny = useCallback(() => {
+    onResponse(
+      ToolApprovalResponse.make({
+        requestId,
+        toolCallId: call.id,
+        decision: 'denied',
+        source: 'user',
+        reason: 'Denied by user'
+      })
+    )
+  }, [call.id, onResponse, requestId])
+
+  return (
+    <div className="border-t border-amber-500/15 px-3.5 py-3" role="group" aria-label={`Approve ${call.name}`}>
+      <div className="text-xs leading-5 text-muted-foreground">
+        This tool needs approval before it runs.
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" size="sm" className="min-h-11" disabled={disabled} onClick={handleApprove}>
+          Approve
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={disabled} onClick={handleDeny}>
+          Deny
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function QuestionControls({
+  state,
+  disabled,
+  onResponse
+}: {
+  readonly state: Extract<ToolRunState, { readonly _tag: 'QuestionRequested' }>
+  readonly disabled: boolean
+  readonly onResponse: (response: QuestionResponse) => void
+}) {
+  const request = state.request
+  const [drafts, setDrafts] = useState(() => initialQuestionDrafts(request.questions))
+  const canSubmit = canSubmitQuestionDrafts(request.questions, drafts)
+  const updateOption = useCallback((question: QuestionPrompt, optionId: string) => {
+    setDrafts(current =>
+      current.map(draft => {
+        if (draft.questionId !== question.id) {
+          return draft
+        }
+
+        const optionIds = question.multiple === true
+          ? draft.optionIds.includes(optionId)
+            ? draft.optionIds.filter(id => id !== optionId)
+            : [...draft.optionIds, optionId]
+          : [optionId]
+
+        return { ...draft, optionIds }
+      })
+    )
+  }, [])
+  const updateCustomAnswer = useCallback((questionId: string, value: string) => {
+    setDrafts(current =>
+      current.map(draft =>
+        draft.questionId === questionId ? { ...draft, customAnswer: value } : draft
+      )
+    )
+  }, [])
+  const handleSubmit = useCallback(() => {
+    if (!canSubmit) {
+      return
+    }
+
+    onResponse(
+      QuestionResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: 'answered',
+        source: 'user',
+        answers: drafts.filter(hasQuestionAnswer).map(answerFromDraft)
+      })
+    )
+  }, [canSubmit, drafts, onResponse, request.requestId, request.toolCallId])
+  const handleCancel = useCallback(() => {
+    onResponse(
+      QuestionResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: 'cancelled',
+        source: 'user',
+        reason: 'Cancelled by user'
+      })
+    )
+  }, [onResponse, request.requestId, request.toolCallId])
+
+  return (
+    <div className="space-y-4 border-t border-amber-500/15 px-3.5 py-3">
+      {request.questions.map(question => {
+        const draft = draftForQuestion(drafts, question.id)
+        const options = questionOptions(question)
+        const inputType = question.multiple === true ? 'checkbox' : 'radio'
+        const inputName = `${request.requestId}-${question.id}`
+
+        return (
+          <fieldset key={question.id} className="space-y-2">
+            <legend className="text-sm font-medium text-foreground">{question.prompt}</legend>
+            {options.length === 0 ? null : (
+              <div className="space-y-2">
+                {options.map(option => (
+                  <label
+                    key={option.id}
+                    className="flex min-h-11 cursor-pointer gap-3 rounded-xl border border-foreground/10 bg-background/50 px-3 py-2 text-sm text-foreground"
+                  >
+                    <input
+                      type={inputType}
+                      name={inputName}
+                      checked={draft.optionIds.includes(option.id)}
+                      disabled={disabled}
+                      onChange={() => updateOption(question, option.id)}
+                      className="mt-1"
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{option.label}</span>
+                      {option.description === undefined ? null : (
+                        <span className="block text-xs leading-5 text-muted-foreground">
+                          {option.description}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {questionAllowsCustom(question) ? (
+              <textarea
+                value={draft.customAnswer}
+                disabled={disabled}
+                onChange={event => updateCustomAnswer(question.id, event.currentTarget.value)}
+                className="min-h-24 w-full resize-none rounded-xl border border-foreground/10 bg-background/70 px-3 py-2 text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="Type custom answer…"
+                aria-label={`Custom answer for ${question.prompt}`}
+              />
+            ) : null}
+          </fieldset>
+        )
+      })}
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" className="min-h-11" disabled={disabled || !canSubmit} onClick={handleSubmit}>
+          Submit answer
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={disabled} onClick={handleCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function ToolRunCard({
   id,
   call,
-  state
+  state,
+  hitlDisabled,
+  onToolApprovalResponse,
+  onQuestionResponse
 }: {
   readonly id: string
   readonly call: ToolCall
   readonly state: ToolRunState
+  readonly hitlDisabled: boolean
+  readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
+  readonly onQuestionResponse: (response: QuestionResponse) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = state._tag === 'Running'
@@ -321,6 +575,21 @@ function ToolRunCard({
                 </>
               )}
             </div>
+          ) : null}
+          {state._tag === 'ApprovalRequested' ? (
+            <ApprovalControls
+              call={call}
+              state={state}
+              disabled={hitlDisabled}
+              onResponse={onToolApprovalResponse}
+            />
+          ) : null}
+          {state._tag === 'QuestionRequested' ? (
+            <QuestionControls
+              state={state}
+              disabled={hitlDisabled}
+              onResponse={onQuestionResponse}
+            />
           ) : null}
         </div>
       </div>
@@ -694,17 +963,23 @@ function AgentChatItemView({
   showInlineTools,
   showReasoning,
   actionsDisabled,
+  hitlDisabled,
   onDeleteTurn,
   onEditUserMessage,
-  onRegenerateFrom
+  onRegenerateFrom,
+  onToolApprovalResponse,
+  onQuestionResponse
 }: {
   readonly item: AgentChatItem
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
   readonly actionsDisabled: boolean
+  readonly hitlDisabled: boolean
   readonly onDeleteTurn: (messageId: string) => void
   readonly onEditUserMessage: (messageId: string, content: string) => void
   readonly onRegenerateFrom: (messageId: string) => void
+  readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
+  readonly onQuestionResponse: (response: QuestionResponse) => void
 }) {
   switch (item._tag) {
     case 'UserMessage':
@@ -735,7 +1010,14 @@ function AgentChatItemView({
       return showReasoning ? <ReasoningCard text={item.text} /> : null
     case 'ToolRun':
       return showInlineTools ? (
-        <ToolRunCard id={item.id} call={item.call} state={item.state} />
+        <ToolRunCard
+          id={item.id}
+          call={item.call}
+          state={item.state}
+          hitlDisabled={hitlDisabled}
+          onToolApprovalResponse={onToolApprovalResponse}
+          onQuestionResponse={onQuestionResponse}
+        />
       ) : null
     case 'ToolResult':
       return showInlineTools ? (
@@ -765,9 +1047,12 @@ type AgentConversationProps = {
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
   readonly actionsDisabled: boolean
+  readonly hitlDisabled: boolean
   readonly onDeleteTurn: (messageId: string) => void
   readonly onEditUserMessage: (messageId: string, content: string) => void
   readonly onRegenerateFrom: (messageId: string) => void
+  readonly onToolApprovalResponse: (response: ToolApprovalResponse) => void
+  readonly onQuestionResponse: (response: QuestionResponse) => void
 }
 
 export function AgentConversation({
@@ -775,9 +1060,12 @@ export function AgentConversation({
   showInlineTools,
   showReasoning,
   actionsDisabled,
+  hitlDisabled,
   onDeleteTurn,
   onEditUserMessage,
-  onRegenerateFrom
+  onRegenerateFrom,
+  onToolApprovalResponse,
+  onQuestionResponse
 }: AgentConversationProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -833,9 +1121,12 @@ export function AgentConversation({
             showInlineTools={showInlineTools}
             showReasoning={showReasoning}
             actionsDisabled={actionsDisabled}
+            hitlDisabled={hitlDisabled}
             onDeleteTurn={onDeleteTurn}
             onEditUserMessage={onEditUserMessage}
             onRegenerateFrom={onRegenerateFrom}
+            onToolApprovalResponse={onToolApprovalResponse}
+            onQuestionResponse={onQuestionResponse}
           />
         ))}
         <div ref={bottomRef} />

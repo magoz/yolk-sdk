@@ -2,7 +2,12 @@ import { Effect, Layer, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  HostToolCallPart,
   AssistantTextPart,
+  ToolCall,
+  ToolApprovalPolicy,
+  ToolApprovalResponse,
+  ToolDef,
   UserMessage,
   textOnlyModelCapabilities
 } from '@yolk-sdk/agent/protocol'
@@ -28,13 +33,14 @@ const runtimeConfig: RuntimeConfig = {
 
 const makeAgentLoopLayer = (
   requests: Array<LLMRequest> = [],
-  responses: Parameters<typeof FauxProvider.layerWithRequests>[0]['responses'] = [Reply.text('ok')]
+  responses: Parameters<typeof FauxProvider.layerWithRequests>[0]['responses'] = [Reply.text('ok')],
+  toolResults: Parameters<typeof TestToolExecutor.layer>[0] = {}
 ) =>
   Layer.mergeAll(
     ContextTransformer.identity,
     LoopConfig.defaultLayer,
     FauxProvider.layerWithRequests({ responses, requests }),
-    TestToolExecutor.layer({})
+    TestToolExecutor.layer(toolResults)
   )
 
 const getFirstRequest = (requests: ReadonlyArray<LLMRequest>) => {
@@ -136,6 +142,105 @@ describe('runRuntime', () => {
         'RunCompleted'
       ])
       expect(replayRuntimeSessionEvents(log.events)).toEqual([old, input, assistant])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect('persists pending HITL state and resumes from a response', () => {
+    const requests: Array<LLMRequest> = []
+    const input = UserMessage.make({ content: 'weather?' })
+    const tool = ToolDef.make({
+      name: 'weather',
+      description: 'Get weather.',
+      parameters: {},
+      approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
+    })
+    const config = { ...runtimeConfig, tools: [tool] }
+    const layer = Layer.mergeAll(
+      makeAgentLoopLayer(
+        requests,
+        [
+          Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
+          Reply.text('sunny')
+        ],
+        { weather: '72F' }
+      ),
+      makeInMemorySessionEventStoreLayer()
+    )
+
+    return Effect.gen(function* () {
+      const pausedChunk = yield* runRuntime(
+        {
+          _tag: 'AppendInput',
+          sessionId: 'session_1',
+          input,
+          runId: 'run_1'
+        },
+        config
+      ).pipe(Stream.runCollect)
+      const pausedEvents = Array.from(pausedChunk)
+      const store = yield* SessionEventStore
+      const pausedLog = yield* store.load('session_1')
+
+      expect(pausedEvents.map(event => event._tag)).toContain('AgentAwaitingInput')
+      expect(pausedLog.events.map(event => event.event._tag)).toEqual([
+        'InputAppended',
+        'RunStarted',
+        'RunAwaitingInput'
+      ])
+
+      const response = ToolApprovalResponse.make({
+        requestId: 'approval:call_1',
+        toolCallId: 'call_1',
+        decision: 'approved',
+        source: 'user'
+      })
+      const resumedChunk = yield* runRuntime(
+        {
+          _tag: 'AppendHitlResponse',
+          sessionId: 'session_1',
+          response,
+          runId: 'run_2',
+          expectedRevision: pausedLog.revision
+        },
+        config
+      ).pipe(Stream.runCollect)
+      const resumedEvents = Array.from(resumedChunk)
+      const resumedLog = yield* store.load('session_1')
+      const firstAssistant = AssistantAgentMessage.make({
+        parts: [
+          HostToolCallPart.make({
+            call: ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+          })
+        ]
+      })
+      const toolResult = resumedLog.events.flatMap(event =>
+        event.event._tag === 'RunCompleted'
+          ? event.event.messages.filter(message => message._tag === 'ToolResult')
+          : []
+      )[0]
+
+      expect(resumedEvents.map(event => event._tag)).toContain('ToolApprovalGranted')
+      expect(resumedEvents.map(event => event._tag)).toContain('ToolExecutionCompleted')
+      expect(resumedEvents.map(event => event._tag)).toContain('AgentEnd')
+      expect(resumedLog.events.map(event => event.event._tag)).toEqual([
+        'InputAppended',
+        'RunStarted',
+        'RunAwaitingInput',
+        'HitlResponseAppended',
+        'RunStarted',
+        'RunCompleted'
+      ])
+      expect(replayRuntimeSessionEvents(resumedLog.events)).toEqual([
+        input,
+        firstAssistant,
+        toolResult,
+        AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'sunny' })] })
+      ])
+      expect(requests[1]?.messages.map(message => message._tag)).toEqual([
+        'User',
+        'Assistant',
+        'ToolResult'
+      ])
     }).pipe(Effect.provide(layer))
   })
 

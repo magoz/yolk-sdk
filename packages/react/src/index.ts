@@ -56,6 +56,7 @@ export { useAgentChat } from './use-agent-chat.ts'
 export type {
   AgentChatDeleteTurnResult,
   AgentChatEditUserMessageResult,
+  AgentChatHitlResponseResult,
   AgentChatRegenerateResult,
   AgentChatSubmitResult,
   AgentChatTransport,

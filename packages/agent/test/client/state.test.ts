@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AgentEnd,
   AgentError,
   AgentStart,
@@ -15,6 +16,9 @@ import {
   ToolExecutionStarted,
   ToolCall,
   ProviderToolResult,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionRequested,
   ToolApprovalDenied,
   ToolApprovalRequested,
   ToolInputDelta,
@@ -109,6 +113,18 @@ describe('reduceAgentEvents', () => {
     const approval = reduceAgentEvents([AgentStart.make({}), ToolApprovalRequested.make({ call })])
     expect(approval.toolRuns).toEqual([{ _tag: 'ApprovalRequested', call }])
 
+    const questionRequest = QuestionRequest.make({
+      requestId: 'question:call_1',
+      toolCallId: call.id,
+      call,
+      questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+    })
+    const question = reduceAgentEvents([
+      AgentStart.make({}),
+      QuestionRequested.make({ request: questionRequest })
+    ])
+    expect(question.toolRuns).toEqual([{ _tag: 'QuestionRequested', request: questionRequest }])
+
     const denied = reduceAgentEvents([
       AgentStart.make({}),
       ToolApprovalRequested.make({ call }),
@@ -133,6 +149,24 @@ describe('reduceAgentEvents', () => {
       ProviderToolResult.make({ call, result })
     ])
     expect(providerCompleted.toolRuns).toEqual([{ _tag: 'ProviderCompleted', call, result }])
+  })
+
+  it('marks client state waiting on HITL input', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
+    const request = QuestionRequest.make({
+      requestId: 'question:call_1',
+      toolCallId: call.id,
+      call,
+      questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+    })
+    const message = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
+    const state = reduceAgentEvents([
+      AgentStart.make({}),
+      AgentAwaitingInput.make({ requests: [request], messages: [message], turns: 1, usage: zeroAgentUsage })
+    ])
+
+    expect(state.status).toBe('waiting')
+    expect(state.messages).toEqual([message])
   })
 
   it('stores in-band agent errors', () => {

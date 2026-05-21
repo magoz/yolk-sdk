@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
+  AgentAwaitingInput,
   AgentEnd,
   AgentError,
   AgentEvent,
@@ -32,13 +33,26 @@ import {
   ProviderToolCallPart,
   ProviderToolResult,
   ProviderToolResultPart,
+  QuestionAnswered,
+  QuestionAnswer,
+  QuestionCancelled,
+  QuestionOption,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionResponse,
+  QuestionResponseInput,
+  QuestionRequested,
   SessionSnapshot,
   SubagentCompleted,
   SubagentStarted,
   TextPart,
   ToolApprovalDenied,
   ToolApprovalGranted,
+  ToolApprovalPolicy,
   ToolApprovalRequested,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolApprovalResponseInput,
   ToolCall,
   ToolDef,
   ToolExecutionCompleted,
@@ -139,6 +153,53 @@ describe('protocol wire schemas', () => {
         isError: true,
         structuredContent: { title: 'Example Domain' }
       })
+      const approvalPolicy = ToolApprovalPolicy.make({ mode: 'manual', reason: 'write access' })
+      const approvalRequest = ToolApprovalRequest.make({
+        requestId: 'approval:call_1',
+        toolCallId: call.id,
+        call,
+        policy: approvalPolicy
+      })
+      const approvalResponse = ToolApprovalResponse.make({
+        requestId: approvalRequest.requestId,
+        toolCallId: call.id,
+        decision: 'approved',
+        source: 'user'
+      })
+      const denialResponse = ToolApprovalResponse.make({
+        requestId: approvalRequest.requestId,
+        toolCallId: call.id,
+        decision: 'denied',
+        source: 'user',
+        reason: 'not now'
+      })
+      const questionRequest = QuestionRequest.make({
+        requestId: 'question:call_1',
+        toolCallId: call.id,
+        call,
+        questions: [
+          QuestionPrompt.make({
+            id: 'choice',
+            prompt: 'Pick one',
+            options: [QuestionOption.make({ id: 'a', label: 'A' })],
+            allowCustom: true
+          })
+        ]
+      })
+      const questionResponse = QuestionResponse.make({
+        requestId: questionRequest.requestId,
+        toolCallId: call.id,
+        outcome: 'answered',
+        source: 'user',
+        answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+      })
+      const questionCancelled = QuestionResponse.make({
+        requestId: questionRequest.requestId,
+        toolCallId: call.id,
+        outcome: 'cancelled',
+        source: 'user',
+        reason: 'skip'
+      })
       const assistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'done' }), HostToolCallPart.make({ call })]
       })
@@ -146,6 +207,12 @@ describe('protocol wire schemas', () => {
         AgentStart.make({}),
         AgentError.make({ code: 'provider_error', message: 'slow down', retryable: true }),
         AgentEnd.make({ messages: [assistant], turns: 1, usage: zeroAgentUsage }),
+        AgentAwaitingInput.make({
+          requests: [approvalRequest],
+          messages: [assistant],
+          turns: 1,
+          usage: zeroAgentUsage
+        }),
         UsageUpdate.make({ usage: zeroAgentUsage }),
         AgentRetry.make({ attempt: 1, reason: 'rate_limit', delayMs: 250, message: 'retrying' }),
         CompactionStart.make({ strategy: 'summarize' }),
@@ -160,9 +227,12 @@ describe('protocol wire schemas', () => {
         ToolInputEnd.make({ call }),
         LLMStreamEnd.make({ turn: 1 }),
         AssistantMessageEvent.make({ message: assistant }),
-        ToolApprovalRequested.make({ call }),
-        ToolApprovalGranted.make({ toolCallId: call.id }),
-        ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy' }),
+        ToolApprovalRequested.make({ call, request: approvalRequest }),
+        ToolApprovalGranted.make({ toolCallId: call.id, response: approvalResponse }),
+        ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy', response: denialResponse }),
+        QuestionRequested.make({ request: questionRequest }),
+        QuestionAnswered.make({ response: questionResponse }),
+        QuestionCancelled.make({ response: questionCancelled }),
         ToolExecutionStarted.make({ call }),
         ToolExecutionCompleted.make({ call, result }),
         ToolExecutionError.make({ call, message: 'failed safely', code: 'tool_error' }),
@@ -205,6 +275,19 @@ describe('protocol wire schemas', () => {
   it.effect('round-trips session websocket envelope variants', () =>
     Effect.gen(function* () {
       const user = UserMessage.make({ content: 'hello' })
+      const approval = ToolApprovalResponse.make({
+        requestId: 'approval:call_1',
+        toolCallId: 'call_1',
+        decision: 'approved',
+        source: 'user'
+      })
+      const question = QuestionResponse.make({
+        requestId: 'question:call_1',
+        toolCallId: 'call_1',
+        outcome: 'answered',
+        source: 'user',
+        answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
+      })
       const clientMessages = [
         UserInput.make({ message: user }),
         UserInput.make({
@@ -212,7 +295,9 @@ describe('protocol wire schemas', () => {
           expectedRevision: 3,
           model: 'gpt-test',
           reasoningEffort: 'medium'
-        })
+        }),
+        ToolApprovalResponseInput.make({ response: approval, expectedRevision: 4 }),
+        QuestionResponseInput.make({ response: question, expectedRevision: 5 })
       ]
       const serverMessages = [
         SessionSnapshot.make({ revision: 3, messages: [user] }),
@@ -251,7 +336,8 @@ describe('protocol wire schemas', () => {
       const def = ToolDef.make({
         name: 'web_fetch',
         description: 'Fetch URL',
-        parameters: { type: 'object' }
+        parameters: { type: 'object' },
+        approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'network write' })
       })
       const result = ToolResult.make({
         toolCallId: call.id,

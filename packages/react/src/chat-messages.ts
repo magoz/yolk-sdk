@@ -7,6 +7,9 @@ import {
   HostToolCallPart,
   ProviderToolCallPart,
   ProviderToolResultPart,
+  type QuestionRequest,
+  type QuestionResponse,
+  type ToolApprovalRequest,
   ToolResult,
   ToolResultMessage,
   ToolCall,
@@ -25,8 +28,11 @@ export type ChatPartState = 'streaming' | 'done'
 export type ChatToolState =
   | { readonly _tag: 'Called' }
   | { readonly _tag: 'InputStreaming'; readonly input: string }
-  | { readonly _tag: 'ApprovalRequested' }
+  | { readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest }
   | { readonly _tag: 'Denied'; readonly reason: string }
+  | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
+  | { readonly _tag: 'QuestionAnswered'; readonly response: QuestionResponse }
+  | { readonly _tag: 'QuestionCancelled'; readonly response: QuestionResponse }
   | { readonly _tag: 'Running'; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
@@ -143,7 +149,11 @@ const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, st
     case 'InputStreaming':
       return run.name === undefined ? [] : [[run.id, run.name]]
     case 'Denied':
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
       return []
+    case 'QuestionRequested':
+      return [[run.request.call.id, run.request.call.name]]
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
@@ -206,6 +216,11 @@ const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] => {
       return [run.id, run]
     case 'Denied':
       return [run.toolCallId, run]
+    case 'QuestionRequested':
+      return [run.request.toolCallId, run]
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
+      return [run.response.toolCallId, run]
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
@@ -238,6 +253,18 @@ const toolStateFor = (
 
   if (run?._tag === 'Denied') {
     return { _tag: 'Denied', reason: run.reason }
+  }
+
+  if (run?._tag === 'QuestionRequested') {
+    return { _tag: 'QuestionRequested', request: run.request }
+  }
+
+  if (run?._tag === 'QuestionAnswered') {
+    return { _tag: 'QuestionAnswered', response: run.response }
+  }
+
+  if (run?._tag === 'QuestionCancelled') {
+    return { _tag: 'QuestionCancelled', response: run.response }
   }
 
   if (run?._tag === 'Completed') {
@@ -568,7 +595,13 @@ const appendAssistantReasoningDelta = (
 }
 
 const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolState => {
-  if (next._tag === 'Errored' || next._tag === 'Denied' || next._tag === 'ProviderCompleted') {
+  if (
+    next._tag === 'Errored' ||
+    next._tag === 'Denied' ||
+    next._tag === 'QuestionAnswered' ||
+    next._tag === 'QuestionCancelled' ||
+    next._tag === 'ProviderCompleted'
+  ) {
     return next
   }
 
@@ -852,7 +885,10 @@ export const applyAgentEventToChatMessages = (
     case 'ToolInputDelta':
       return appendToolInputDelta(messages, event.id, event.delta)
     case 'ToolApprovalRequested':
-      return upsertToolCallPart(messages, event.call, { _tag: 'ApprovalRequested' })
+      return upsertToolCallPart(messages, event.call, {
+        _tag: 'ApprovalRequested',
+        request: event.request
+      })
     case 'ToolApprovalGranted':
       return messages
     case 'ToolApprovalDenied':
@@ -861,6 +897,29 @@ export const applyAgentEventToChatMessages = (
         parts: message.parts.map(part =>
           part._tag === 'ToolCall' && part.call.id === event.toolCallId
             ? { ...part, state: { _tag: 'Denied', reason: event.reason } }
+          : part
+        )
+      }))
+    case 'QuestionRequested':
+      return upsertToolCallPart(messages, event.request.call, {
+        _tag: 'QuestionRequested',
+        request: event.request
+      })
+    case 'QuestionAnswered':
+      return messages.map(message => ({
+        ...message,
+        parts: message.parts.map(part =>
+          part._tag === 'ToolCall' && part.call.id === event.response.toolCallId
+            ? { ...part, state: { _tag: 'QuestionAnswered', response: event.response } }
+            : part
+        )
+      }))
+    case 'QuestionCancelled':
+      return messages.map(message => ({
+        ...message,
+        parts: message.parts.map(part =>
+          part._tag === 'ToolCall' && part.call.id === event.response.toolCallId
+            ? { ...part, state: { _tag: 'QuestionCancelled', response: event.response } }
             : part
         )
       }))
@@ -886,6 +945,8 @@ export const applyAgentEventToChatMessages = (
     case 'AgentError':
       return markChatError(messages, event.message)
     case 'AgentEnd':
+      return appendRunMessagesIfEmpty(finalizeStreamingParts(messages), event.messages)
+    case 'AgentAwaitingInput':
       return appendRunMessagesIfEmpty(finalizeStreamingParts(messages), event.messages)
     case 'AgentRetry':
     case 'CompactionEnd':
@@ -1103,17 +1164,57 @@ const collectContent = (parts: ReadonlyArray<AgentChatPart>): Content => {
 const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
   parts.flatMap(part => {
     switch (part._tag) {
-      case 'ToolCall':
-        return part.state._tag === 'Completed'
-          ? [
-              ToolResultMessage.make({
-                toolCallId: part.state.result.toolCallId,
-                content: part.state.result.content,
-                isError: part.state.result.isError,
-                structuredContent: part.state.result.structuredContent
-              })
-            ]
-          : []
+      case 'ToolCall': {
+        if (part.state._tag === 'Completed') {
+          return [
+            ToolResultMessage.make({
+              toolCallId: part.state.result.toolCallId,
+              content: part.state.result.content,
+              isError: part.state.result.isError,
+              structuredContent: part.state.result.structuredContent
+            })
+          ]
+        }
+
+        if (part.state._tag === 'Denied') {
+          return [
+            ToolResultMessage.make({
+              toolCallId: part.call.id,
+              content: `Tool call denied: ${part.state.reason}`,
+              isError: true,
+              structuredContent: { type: 'tool_approval_denied', reason: part.state.reason }
+            })
+          ]
+        }
+
+        if (
+          part.state._tag === 'QuestionAnswered' ||
+          part.state._tag === 'QuestionCancelled'
+        ) {
+          const response = part.state.response
+          const reason = response.reason ?? 'Question cancelled'
+
+          return [
+            ToolResultMessage.make({
+              toolCallId: response.toolCallId,
+              content:
+                response.outcome === 'answered'
+                  ? 'User answered the question.'
+                  : `Question cancelled: ${reason}`,
+              isError: response.outcome === 'cancelled' ? true : undefined,
+              structuredContent: {
+                type: 'question_response',
+                outcome: response.outcome,
+                answers: response.answers ?? [],
+                reason: response.reason,
+                source: response.source
+              }
+            })
+          ]
+        }
+
+        return []
+      }
       case 'ToolResult':
         return [
           ToolResultMessage.make({

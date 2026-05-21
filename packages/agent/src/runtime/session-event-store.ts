@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
-import { AgentError, AgentMessage } from '@yolk-sdk/agent/protocol'
+import { AgentError, AgentMessage, HitlRequest, HitlResponse } from '@yolk-sdk/agent/protocol'
 import { SessionConflictError, SessionNotFoundError } from './error.ts'
 import type { SessionLoadError, SessionSaveError } from './error.ts'
 
@@ -10,12 +10,25 @@ export class InputAppended extends Schema.TaggedClass<InputAppended>()('InputApp
   message: AgentMessage
 }) {}
 
+export class HitlResponseAppended extends Schema.TaggedClass<HitlResponseAppended>()(
+  'HitlResponseAppended',
+  {
+    response: HitlResponse
+  }
+) {}
+
 export class RunStarted extends Schema.TaggedClass<RunStarted>()('RunStarted', {
   runId: Schema.String
 }) {}
 
 export class RunCompleted extends Schema.TaggedClass<RunCompleted>()('RunCompleted', {
   runId: Schema.String,
+  messages: Schema.Array(AgentMessage)
+}) {}
+
+export class RunAwaitingInput extends Schema.TaggedClass<RunAwaitingInput>()('RunAwaitingInput', {
+  runId: Schema.String,
+  requests: Schema.NonEmptyArray(HitlRequest),
   messages: Schema.Array(AgentMessage)
 }) {}
 
@@ -30,8 +43,10 @@ export class RunInterrupted extends Schema.TaggedClass<RunInterrupted>()('RunInt
 
 export const RuntimeSessionEvent = Schema.Union([
   InputAppended,
+  HitlResponseAppended,
   RunStarted,
   RunCompleted,
+  RunAwaitingInput,
   RunFailed,
   RunInterrupted
 ])
@@ -82,13 +97,22 @@ export const replayRuntimeSessionEvents = (
       case 'InputAppended':
         return [stored.event.message]
       case 'RunCompleted':
+      case 'RunAwaitingInput':
         return stored.event.messages
+      case 'HitlResponseAppended':
       case 'RunFailed':
       case 'RunInterrupted':
       case 'RunStarted':
         return []
     }
   })
+
+export const replayRuntimeHitlResponses = (
+  events: ReadonlyArray<StoredRuntimeSessionEvent>
+): ReadonlyArray<HitlResponse> =>
+  events.flatMap(stored =>
+    stored.event._tag === 'HitlResponseAppended' ? [stored.event.response] : []
+  )
 
 type IncompleteRunSearch =
   | {
@@ -103,9 +127,11 @@ type IncompleteRunSearch =
 const terminalRunId = (event: RuntimeSessionEvent): Option.Option<string> => {
   switch (event._tag) {
     case 'RunCompleted':
+    case 'RunAwaitingInput':
     case 'RunFailed':
     case 'RunInterrupted':
       return Option.some(event.runId)
+    case 'HitlResponseAppended':
     case 'InputAppended':
     case 'RunStarted':
       return Option.none()

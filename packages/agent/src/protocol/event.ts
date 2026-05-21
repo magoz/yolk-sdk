@@ -1,6 +1,14 @@
 import * as Schema from 'effect/Schema'
 import { AssistantAgentMessage, AgentMessage } from './message.ts'
-import { ToolCall, ToolResult } from './tool.ts'
+import {
+  HitlRequest,
+  QuestionRequest,
+  QuestionResponse,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall,
+  ToolResult
+} from './tool.ts'
 import { AgentUsage } from './usage.ts'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
@@ -47,6 +55,17 @@ export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {
   turns: Schema.Number,
   usage: AgentUsage
 }) {}
+
+export class AgentAwaitingInput extends Schema.TaggedClass<AgentAwaitingInput>()(
+  'AgentAwaitingInput',
+  {
+    ...EventIdentity,
+    requests: Schema.NonEmptyArray(HitlRequest),
+    messages: Schema.Array(AgentMessage),
+    turns: Schema.Number,
+    usage: AgentUsage
+  }
+) {}
 
 export class UsageUpdate extends Schema.TaggedClass<UsageUpdate>()('UsageUpdate', {
   ...EventIdentity,
@@ -123,7 +142,8 @@ export class ToolApprovalRequested extends Schema.TaggedClass<ToolApprovalReques
   'ToolApprovalRequested',
   {
     ...EventIdentity,
-    call: ToolCall
+    call: ToolCall,
+    request: Schema.optional(ToolApprovalRequest)
   }
 ) {}
 
@@ -131,7 +151,8 @@ export class ToolApprovalGranted extends Schema.TaggedClass<ToolApprovalGranted>
   'ToolApprovalGranted',
   {
     ...EventIdentity,
-    toolCallId: Schema.String
+    toolCallId: Schema.String,
+    response: Schema.optional(ToolApprovalResponse)
   }
 ) {}
 
@@ -140,9 +161,25 @@ export class ToolApprovalDenied extends Schema.TaggedClass<ToolApprovalDenied>()
   {
     ...EventIdentity,
     toolCallId: Schema.String,
-    reason: Schema.String
+    reason: Schema.String,
+    response: Schema.optional(ToolApprovalResponse)
   }
 ) {}
+
+export class QuestionRequested extends Schema.TaggedClass<QuestionRequested>()('QuestionRequested', {
+  ...EventIdentity,
+  request: QuestionRequest
+}) {}
+
+export class QuestionAnswered extends Schema.TaggedClass<QuestionAnswered>()('QuestionAnswered', {
+  ...EventIdentity,
+  response: QuestionResponse
+}) {}
+
+export class QuestionCancelled extends Schema.TaggedClass<QuestionCancelled>()('QuestionCancelled', {
+  ...EventIdentity,
+  response: QuestionResponse
+}) {}
 
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
   ...EventIdentity,
@@ -218,6 +255,7 @@ export const AgentEvent = Schema.Union([
   AgentStart,
   AgentError,
   AgentEnd,
+  AgentAwaitingInput,
   UsageUpdate,
   AgentRetry,
   CompactionStart,
@@ -235,6 +273,9 @@ export const AgentEvent = Schema.Union([
   ToolApprovalRequested,
   ToolApprovalGranted,
   ToolApprovalDenied,
+  QuestionRequested,
+  QuestionAnswered,
+  QuestionCancelled,
   ToolExecutionStarted,
   ToolExecutionCompleted,
   ToolExecutionError,
