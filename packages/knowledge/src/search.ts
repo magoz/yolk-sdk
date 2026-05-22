@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import type { KnowledgeChunk, KnowledgeDocument, KnowledgeSearchScope } from './documents.ts'
 import { KnowledgeEmbedder } from './embeddings.ts'
-import { KnowledgeRetrievalError } from './errors.ts'
+import { KnowledgeSearchError } from './errors.ts'
 import { SearchIndexStore } from './search-store.ts'
 
 export type KnowledgeSearchInput = {
@@ -37,10 +37,10 @@ export type KnowledgeSearchContext = {
   readonly text: string
 }
 
-export type KnowledgeRetriever = {
-  readonly retrieve: (
+export type KnowledgeSearcher = {
+  readonly search: (
     input: KnowledgeSearchInput
-  ) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, KnowledgeRetrievalError>
+  ) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, KnowledgeSearchError>
 }
 
 const packedResultText = (result: KnowledgeSearchResult) =>
@@ -120,38 +120,38 @@ const validateSearchInput = (input: KnowledgeSearchInput) => {
   const textLimit = input.textLimit ?? defaultHybridCandidateLimit(limit)
 
   if (query.length === 0) {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Search query is empty', stage: 'embed' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Search query is empty', stage: 'embed' }))
   }
 
   if (ids.length === 0) {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Search scope is empty', stage: 'store' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Search scope is empty', stage: 'store' }))
   }
 
   if (!Number.isInteger(limit) || limit < 1) {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Search limit must be positive', stage: 'store' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Search limit must be positive', stage: 'store' }))
   }
 
   if (!Number.isInteger(vectorLimit) || vectorLimit < 1) {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Vector search limit must be positive', stage: 'store' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Vector search limit must be positive', stage: 'store' }))
   }
 
   if (!Number.isInteger(textLimit) || textLimit < 1) {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Text search limit must be positive', stage: 'store' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Text search limit must be positive', stage: 'store' }))
   }
 
   if (mode !== 'vector' && mode !== 'hybrid') {
-    return Effect.fail(new KnowledgeRetrievalError({ message: 'Search mode is invalid', stage: 'store' }))
+    return Effect.fail(new KnowledgeSearchError({ message: 'Search mode is invalid', stage: 'store' }))
   }
 
   if (!Number.isInteger(contextChunks) || contextChunks < 0) {
     return Effect.fail(
-      new KnowledgeRetrievalError({ message: 'Context chunks must be zero or positive', stage: 'store' })
+      new KnowledgeSearchError({ message: 'Context chunks must be zero or positive', stage: 'store' })
     )
   }
 
   if (input.minScore !== undefined && !Number.isFinite(input.minScore)) {
     return Effect.fail(
-      new KnowledgeRetrievalError({ message: 'Search minScore must be finite', stage: 'store' })
+      new KnowledgeSearchError({ message: 'Search minScore must be finite', stage: 'store' })
     )
   }
 
@@ -171,7 +171,7 @@ const searchVectorChunks = (input: {
       .embedQuery(input.query)
       .pipe(
         Effect.mapError(
-          error => new KnowledgeRetrievalError({ message: error.message, stage: 'embed', cause: error })
+          error => new KnowledgeSearchError({ message: error.message, stage: 'embed', cause: error })
         )
       )
 
@@ -184,7 +184,7 @@ const searchVectorChunks = (input: {
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeRetrievalError({ message: error.message, stage: 'store', cause: error })
+          error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
         )
       )
   })
@@ -200,7 +200,7 @@ const searchTextChunks = (input: {
       .searchChunksByText({ scope: input.scope, query: input.query, limit: input.limit })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeRetrievalError({ message: error.message, stage: 'store', cause: error })
+          error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
         )
       )
   })
@@ -263,8 +263,8 @@ export const searchKnowledge = (input: KnowledgeSearchInput) =>
         .pipe(
           Effect.map(context => ({ ...result, context })),
           Effect.mapError(
-            error => new KnowledgeRetrievalError({ message: error.message, stage: 'store', cause: error })
+            error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
           )
         )
     )
-  }).pipe(Effect.withSpan('knowledge_search.retrieve'))
+  }).pipe(Effect.withSpan('knowledge_search.search'))

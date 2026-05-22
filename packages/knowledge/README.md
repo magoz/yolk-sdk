@@ -1,6 +1,6 @@
 # @yolk-sdk/knowledge
 
-Domain-free knowledge record, artifact, representation, retrieval, provenance, link, store, and context contracts.
+Domain-free knowledge record, artifact, representation, search, provenance, link, store, and context contracts.
 
 ## Install
 
@@ -21,7 +21,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
 | `@yolk-sdk/knowledge/ingestion` | Generic indexing pipeline |
-| `@yolk-sdk/knowledge/retrieval` | Retriever interface, hybrid search, context packing |
+| `@yolk-sdk/knowledge/search` | Search interface, hybrid search, context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle store |
 | `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract |
@@ -38,7 +38,7 @@ import { buildKnowledgeContext, KnowledgeStore } from '@yolk-sdk/knowledge'
 import { KnowledgeRecord } from '@yolk-sdk/knowledge/records'
 import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
 import { makeDefaultKnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
-import { searchKnowledge } from '@yolk-sdk/knowledge/retrieval'
+import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 ```
 
 ## Glossary
@@ -61,7 +61,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/retrieval'
 | Chunker | Service that splits extracted text into chunks. |
 | Extractor | Service that loads source content into text/title/summary/metadata. |
 | Ingestion | Pipeline that extracts, chunks, embeds, stores chunks, and marks document status. |
-| Retrieval | Query-time search over search chunks, optionally packed into context text. |
+| Search | Query-time search over search chunks, optionally packed into context text. |
 | Hybrid search | Retrieval mode that fuses vector and text search rankings. |
 | Search scope | Caller-provided collection or collections to search. Package does not interpret tenant semantics. |
 | Search index store | Persistence contract for collections, documents, chunks, status, and search. |
@@ -76,7 +76,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/retrieval'
 | --- | --- |
 | `pinned` | Host may inject into model startup context |
 | `routable` | Host may use for routing/dispatch decisions |
-| `searchable` | Host may expose through retrieval tools |
+| `searchable` | Host may expose through search tools |
 | `archival` | Retained but normally omitted from active context/search |
 
 ## Host responsibilities
@@ -89,5 +89,5 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/retrieval'
 ## Boundaries
 
 - No app auth, DB drivers, object storage SDKs, React, Next.js, or provider SDKs.
-- Retrieval/chunking APIs are exposed as flat knowledge subpaths; concrete stores and providers remain app-owned.
+- Search/chunking APIs are exposed as flat knowledge subpaths; concrete stores and providers remain app-owned.
 - Package owns semantics and contracts only.

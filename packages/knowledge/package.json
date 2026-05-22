@@ -86,9 +86,9 @@
       "types": "./src/representations.ts",
       "default": "./src/representations.ts"
     },
-    "./retrieval": {
-      "types": "./src/retrieval.ts",
-      "default": "./src/retrieval.ts"
+    "./search": {
+      "types": "./src/search.ts",
+      "default": "./src/search.ts"
     },
     "./store": {
       "types": "./src/store.ts",
@@ -190,10 +190,10 @@
         "import": "./dist/representations.mjs",
         "default": "./dist/representations.mjs"
       },
-      "./retrieval": {
-        "types": "./dist/retrieval.d.mts",
-        "import": "./dist/retrieval.mjs",
-        "default": "./dist/retrieval.mjs"
+      "./search": {
+        "types": "./dist/search.d.mts",
+        "import": "./dist/search.mjs",
+        "default": "./dist/search.mjs"
       },
       "./store": {
         "types": "./dist/store.d.mts",

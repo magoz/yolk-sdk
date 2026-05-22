@@ -1,11 +1,11 @@
 # Knowledge Core
 
-`@yolk-sdk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge records, artifacts, representations, search/retrieval contracts, provenance, links, store contracts, and context assembly.
+`@yolk-sdk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge records, artifacts, representations, search/search contracts, provenance, links, store contracts, and context assembly.
 
 ## Role
 
 - Define knowledge record, artifact, representation, provenance, link, and context primitives.
-- Expose flat retrieval/chunking/embedding/ingestion subpaths for searchable knowledge.
+- Expose flat search/chunking/embedding/ingestion subpaths for searchable knowledge.
 - Provide store contracts for app-owned Postgres/R2 adapters.
 - Provide pure context assembly helpers for pinned/routable knowledge.
 - Expose optional agent helper types without owning app tool policy.
@@ -22,7 +22,7 @@
 
 - `pinned`: host may inject into model startup context.
 - `routable`: host may use for dispatch/resolver maps.
-- `searchable`: host may expose through retrieval tools.
+- `searchable`: host may expose through search tools.
 - `archival`: retained but normally omitted from active context/search.
 
 ## Subpaths
@@ -36,7 +36,7 @@
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
 | `@yolk-sdk/knowledge/ingestion` | Generic indexing pipeline |
-| `@yolk-sdk/knowledge/retrieval` | Retriever interface and context packing |
+| `@yolk-sdk/knowledge/search` | Search interface and context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle contract |
 | `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract |

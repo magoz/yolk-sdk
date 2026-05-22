@@ -1,6 +1,6 @@
 # App knowledge search Adapters
 
-App-owned concrete adapters for the domain-free knowledge retrieval contracts.
+App-owned concrete adapters for the domain-free knowledge search contracts.
 
 ## Role
 
@@ -8,7 +8,7 @@ App-owned concrete adapters for the domain-free knowledge retrieval contracts.
 - `TextKnowledgeExtractorLayer`: string-only extractor for V1 `/storage` text sources; derives title/summary via `KnowledgeDocumentSummarizer`.
 - `OpenAiKnowledgeEmbedderLayer`: OpenAI embeddings via Effect `HttpClient` and `OPENAI_API_KEY`.
 - `OpenAiKnowledgeDocumentSummarizerLayer`: OpenAI chat completion title + summary generation via Effect `HttpClient` and `OPENAI_API_KEY`.
-- `AppKnowledgeSearchLayer`: composed layer for storage/knowledge search ingestion and retrieval boundaries.
+- `AppKnowledgeSearchLayer`: composed layer for storage/knowledge search ingestion and search boundaries.
 
 ## Boundaries
 
@@ -26,11 +26,11 @@ App-owned concrete adapters for the domain-free knowledge retrieval contracts.
 ## Store adapter
 
 - `DrizzleSearchIndexStoreLayer` is the app boundary for pgvector search; keep SQL/Drizzle details out of `@yolk-sdk/knowledge`.
-- Public `SearchIndexStore` methods in `DrizzleSearchIndexStoreLayer` use `SearchIndexStore.*` spans so package ingestion/retrieval traces include concrete DB work.
+- Public `SearchIndexStore` methods in `DrizzleSearchIndexStoreLayer` use `SearchIndexStore.*` spans so package ingestion/search traces include concrete DB work.
 - Preserve package `SearchIndexStoreError` values when mapping store failures; avoid double-wrapping typed not-found errors.
 - `searchChunks` filters ready documents only and uses pgvector cosine distance.
 - `searchChunksByText` filters ready documents only and uses Postgres full-text search over chunk content.
-- `searchKnowledge` defaults to hybrid retrieval: vector and text candidate searches are fused with reciprocal rank fusion before context expansion.
+- `searchKnowledge` defaults to hybrid search: vector and text candidate searches are fused with reciprocal rank fusion before context expansion.
 - `getContextChunks` expands adjacent chunks by `(collectionId, documentId, position)`.
 
 ## Tests

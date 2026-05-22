@@ -70,7 +70,7 @@ HITL is protocol-level, not UI-level:
 - Choose models/providers and map provider streams into protocol events.
 - Persist sessions, transcripts, and append logs.
 - Provide tools, approval policy, auth, storage, and observability.
-- Compact context and decide memory/retrieval policy.
+- Compact context and decide memory/search policy.
 
 ## Boundaries
 

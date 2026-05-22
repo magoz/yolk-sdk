@@ -44,7 +44,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './records',
       './provenance',
       './representations',
-      './retrieval',
+      './search',
       './store',
       './summarization',
       './vector-store'

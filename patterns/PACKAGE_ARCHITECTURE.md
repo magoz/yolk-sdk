@@ -18,7 +18,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/client/node`
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
-- `@yolk-sdk/knowledge` owns knowledge retrieval/chunking/embedding contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
+- `@yolk-sdk/knowledge` owns knowledge search/chunking/embedding contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 

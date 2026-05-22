@@ -3,7 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { EmptyToolParams, makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
-import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/retrieval'
+import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
 import type { AgentToolContext } from './tool-context.ts'
 
 const storageSearchToolName = 'search_storage'
@@ -94,7 +94,7 @@ export type StorageKnowledgeSearchToolHandlers = {
 
 const storageSearchToolDescription = [
   'Search the authenticated user storage knowledge base with one or more queries.',
-  'Uses hybrid vector + keyword retrieval for semantic matches and exact terms.',
+  'Uses hybrid vector + keyword search for semantic matches and exact terms.',
   'Use one query for focused searches and multiple query rewrites for broad, ambiguous, or high-recall questions.'
 ].join(' ')
 

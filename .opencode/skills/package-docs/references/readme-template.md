@@ -69,9 +69,9 @@ Include `react` in install command.
 
 Document remote client, local stdio client, `client/node` Node-only boundary, server primitives, and HTTPS policy.
 
-### RAG
+### Knowledge search
 
-Document document/chunk/store/embedder contracts, ingestion, retrieval, context packing, and host-owned adapters.
+Document collection/document/chunk/search-store/embedder contracts, ingestion, search, context packing, and host-owned adapters.
 
 ### Knowledge
 

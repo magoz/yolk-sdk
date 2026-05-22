@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
-import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/retrieval'
+import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeStorageSearchToolModule } from './storage-search-tool'
 

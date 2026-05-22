@@ -32,7 +32,7 @@ export class KnowledgeIngestionError extends Data.TaggedError('KnowledgeIngestio
   readonly cause?: unknown
 }> {}
 
-export class KnowledgeRetrievalError extends Data.TaggedError('KnowledgeRetrievalError')<{
+export class KnowledgeSearchError extends Data.TaggedError('KnowledgeSearchError')<{
   readonly message: string
   readonly stage: 'store' | 'embed'
   readonly cause?: unknown

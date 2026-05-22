@@ -74,7 +74,7 @@ const truncateContent = (content: string) =>
 
 const buildPrompt = (input: SummarizeKnowledgeDocumentInput) =>
   [
-    'Summarize a document for a retrieval augmented generation system.',
+    'Summarize a document for a knowledge search system.',
     'Create a concise, descriptive title and a two to three paragraph summary.',
     'Prefer the actual subject over the filename. Be specific. Avoid vague marketing language.',
     '',

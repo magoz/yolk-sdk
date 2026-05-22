@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { and, eq, inArray } from 'drizzle-orm'
-import { searchKnowledge } from '@yolk-sdk/knowledge/retrieval'
+import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 import type { KnowledgeSearchScope } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'

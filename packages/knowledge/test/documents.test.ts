@@ -16,9 +16,9 @@ import {
   KnowledgeCollectionSchema
 } from '../src/documents.ts'
 import type { KnowledgeDocument, KnowledgeCollection } from '../src/documents.ts'
-import { packKnowledgeSearchContext, searchKnowledge } from '../src/retrieval.ts'
-import type { KnowledgeRetriever } from '../src/retrieval.ts'
-import { KnowledgeChunkingError, KnowledgeRetrievalError, SearchIndexStoreError } from '../src/errors.ts'
+import { packKnowledgeSearchContext, searchKnowledge } from '../src/search.ts'
+import type { KnowledgeSearcher } from '../src/search.ts'
+import { KnowledgeChunkingError, KnowledgeSearchError, SearchIndexStoreError } from '../src/errors.ts'
 import { KnowledgeSummarizer } from '../src/summarization.ts'
 import type { SearchIndexStoreApi } from '../src/search-store.ts'
 
@@ -147,7 +147,7 @@ describe('knowledge searching', () => {
     }).pipe(Effect.provide(layer))
   })
 
-  it.effect('retrieves vector matches with adjacent context', () => {
+  it.effect('searches vector matches with adjacent context', () => {
     const document: KnowledgeDocument = { id: 'doc_1', collectionId: 'set_1', source: { _tag: 'Text', label: 'note' }, status: 'ready' }
     const store = {
       upsertSet: (set: KnowledgeCollection) => Effect.succeed(set),
@@ -173,7 +173,7 @@ describe('knowledge searching', () => {
     }).pipe(Effect.provide(layer))
   })
 
-  it.effect('rejects invalid retrieval inputs before services are required', () =>
+  it.effect('rejects invalid search inputs before services are required', () =>
     Effect.gen(function* () {
       const store = {
         upsertSet: (set: KnowledgeCollection) => Effect.succeed(set),
@@ -200,16 +200,16 @@ describe('knowledge searching', () => {
         Effect.provide(layer)
       )
 
-      expect(error).toBeInstanceOf(KnowledgeRetrievalError)
+      expect(error).toBeInstanceOf(KnowledgeSearchError)
       expect(error.message).toBe('Search scope is empty')
     }))
 
-  it.effect('adapts retrieval as an agent tool', () => {
+  it.effect('adapts search as an agent tool', () => {
     const document: KnowledgeDocument = { id: 'doc_1', collectionId: 'set_1', source: { _tag: 'Text', label: 'note' }, status: 'ready' }
-    const retriever: KnowledgeRetriever = {
-      retrieve: input => Effect.succeed([{ chunk: { id: 'chunk_1', collectionId: input.scope._tag === 'KnowledgeCollection' ? input.scope.id : 'set_1', documentId: 'doc_1', content: `result for ${input.query}`, position: 0, tokenCount: 3 }, score: 0.9, document }])
+    const searcher: KnowledgeSearcher = {
+      search: input => Effect.succeed([{ chunk: { id: 'chunk_1', collectionId: input.scope._tag === 'KnowledgeCollection' ? input.scope.id : 'set_1', documentId: 'doc_1', content: `result for ${input.query}`, position: 0, tokenCount: 3 }, score: 0.9, document }])
     }
-    const tool = makeKnowledgeSearchTool<{ readonly collectionId: string }>(retriever, {
+    const tool = makeKnowledgeSearchTool<{ readonly collectionId: string }>(searcher, {
       scope: context => Effect.succeed({ _tag: 'KnowledgeCollection', id: context.collectionId })
     })
 

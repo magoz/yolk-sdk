@@ -5,8 +5,8 @@ import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeTool, type ToolRegistration } from '@yolk-sdk/agent/tools'
 import type { KnowledgeScope } from './records.ts'
 import type { KnowledgeSearchScope } from './documents.ts'
-import type { KnowledgeRetriever } from './retrieval.ts'
-import { packKnowledgeSearchContext } from './retrieval.ts'
+import type { KnowledgeSearcher } from './search.ts'
+import { packKnowledgeSearchContext } from './search.ts'
 
 export type ResolveKnowledgeScope<Context> = (context: Context) => KnowledgeScope
 
@@ -49,7 +49,7 @@ const resolveScope = <Context>(resolver: KnowledgeSearchToolScopeResolver<Contex
 }
 
 export const makeKnowledgeSearchTool = <Context>(
-  retriever: KnowledgeRetriever,
+  searcher: KnowledgeSearcher,
   options: MakeKnowledgeSearchToolOptions<Context>
 ): ToolRegistration<Context> => {
   const name = options.name ?? 'search_knowledge'
@@ -63,7 +63,7 @@ export const makeKnowledgeSearchTool = <Context>(
     execute: input =>
       resolveScope(options.scope, input.context).pipe(
         Effect.flatMap(scope =>
-          retriever.retrieve({
+          searcher.search({
             scope,
             query: input.params.query,
             limit: options.limit,

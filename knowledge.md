@@ -4,9 +4,9 @@
 
 Agents without a filesystem still need durable, structured knowledge.
 
-Yolk uses `@yolk-sdk/knowledge` for domain-free knowledge and retrieval primitives, with app-owned `/storage` code for user uploads.
+Yolk uses `@yolk-sdk/knowledge` for domain-free knowledge and search primitives, with app-owned `/storage` code for user uploads.
 
-RAG answers: "Which text chunks match this query?"
+Search answers: "Which text chunks match this query?"
 
 Knowledge answers:
 
@@ -16,8 +16,8 @@ Knowledge answers:
 - What should always be in context?
 - What is raw evidence vs current synthesis?
 - Which blob or derived artifact backs it?
-- Which objects support, contradict, supersede, or mention each other?
-- Which representation should be indexed for text, image, audio, video, or table content?
+- Which records support, contradict, supersede, or mention each other?
+- Which representation should be searchable for text, image, audio, video, or table content?
 
 The package should make those states explicit instead of hiding them in app-specific rows or prompt conventions.
 
@@ -29,7 +29,7 @@ It should let an app combine:
 
 - Postgres for catalog, permissions, lifecycle, graph, text search, chunks, embeddings.
 - R2 or equivalent blob storage for originals and derived artifacts.
-- `@yolk-sdk/knowledge/*` subpaths for chunking, embedding, and retrieval mechanics.
+- `@yolk-sdk/knowledge/*` subpaths for chunking, embedding, and search mechanics.
 - Agent tools for typed read/write operations over knowledge records.
 
 The agent should not need shell access or a filesystem. It should query and maintain a typed, citable, permissioned knowledge store.
@@ -47,19 +47,19 @@ app/storage or app/knowledge # UI
 
 Package owns semantics. App owns infrastructure and policy.
 
-## Relationship to retrieval
+## Relationship to search
 
-Keep retrieval contracts dumb and reusable inside `@yolk-sdk/knowledge`.
+Keep search contracts dumb and reusable inside `@yolk-sdk/knowledge`.
 
 ```txt
 KnowledgeRecord
   -> Representation
-  -> IndexDocument
-  -> IndexChunk
-  -> retrieval context
+  -> KnowledgeDocument
+  -> KnowledgeChunk
+  -> search context
 ```
 
-Knowledge retrieval contracts should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
+Knowledge search contracts should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
 
 `@yolk-sdk/knowledge` decides what a thing is, how authoritative it is, how it is cited, and whether it belongs in agent context.
 
@@ -90,25 +90,25 @@ decision           # durable product/org/architecture decision
 
 ### Artifact
 
-A physical blob or generated file backing an object.
+A physical blob or generated file backing a record.
 
-One object can have multiple artifacts because the same logical thing can have originals and derived files.
+One record can have multiple artifacts because the same logical thing can have originals and derived files.
 
 Examples:
 
 ```txt
-PDF object
+PDF record
   original.pdf
   extracted.txt
   thumbnail.png
 
-Image object
+Image record
   original.png
   ocr.txt
   caption.json
   thumbnail.webp
 
-Web page object
+Web page record
   original.html
   readable.md
   screenshot.png
@@ -118,7 +118,7 @@ Artifacts live in R2. Postgres stores their catalog rows.
 
 ### Representation
 
-An agent-readable or indexable view of an object/artifact.
+An agent-readable or searchable view of a record/artifact.
 
 Examples:
 
@@ -130,11 +130,11 @@ Examples:
 - table extraction
 - model-generated description
 
-Representations are what retrieval indexes. They may live inline in Postgres when small, or point to artifact blobs when large.
+Representations are what search indexes. They may live inline in Postgres when small, or point to artifact blobs when large.
 
 ### Chunk
 
-The retrieval unit derived from a representation.
+The search unit derived from a representation.
 
 Chunks and embeddings live in Postgres, usually through `@yolk-sdk/knowledge` indexing mechanics.
 
@@ -155,7 +155,7 @@ Provenance enables citations and source precedence.
 
 ### Link
 
-Typed relationship between objects.
+Typed relationship between records.
 
 Initial link types:
 
@@ -173,13 +173,13 @@ related_to
 
 Do not rely on vector search for every important thing.
 
-Some objects must be considered before the agent knows what to search for.
+Some records must be considered before the agent knows what to search for.
 
 ```txt
 pinned     # always considered for agent startup/context assembly
 routable   # included in knowledge maps/resolvers
-searchable # normal retrieval
-archival   # direct lookup only, excluded from default retrieval
+searchable # normal search
+archival   # direct lookup only, excluded from default search
 ```
 
 Examples:
@@ -196,9 +196,9 @@ This design borrows several proven ideas from GBrain, but makes them app-native 
 
 Direct inspirations:
 
-- `AGENTS.md` -> operating protocol object.
-- `llms.txt` -> knowledge map object.
-- `skills/RESOLVER.md` -> routable dispatcher object.
+- `AGENTS.md` -> operating protocol record.
+- `llms.txt` -> knowledge map record.
+- `skills/RESOLVER.md` -> routable dispatcher record.
 - Compiled truth + timeline -> synthesized current state plus evidence trail.
 - Brain-first lookup -> search knowledge before external APIs.
 - Citations/source precedence -> provenance and cited answers.
@@ -409,7 +409,7 @@ packages/knowledge/
   tsconfig.json
   src/
     index.ts
-    objects.ts
+    records.ts
     artifacts.ts
     representations.ts
     provenance.ts
@@ -459,7 +459,7 @@ knowledgeRepresentationChunk
 
 Use `userId` on `knowledgeRecord` for v0 ownership. Child tables inherit ownership through `recordId` joins.
 
-Keep embeddings/chunks in Postgres. Use pgvector + full-text indexes on `knowledgeRepresentationChunk`, mirroring current RAG mechanics but without coupling to `storageObject`.
+Keep embeddings/chunks in Postgres. Use pgvector + full-text indexes on `knowledgeRepresentationChunk`, mirroring current search mechanics but without coupling to `storageObject`.
 
 ### Phase 4 — R2 artifact adapter
 
@@ -497,7 +497,7 @@ Add app domain functions under `lib/core/knowledge/`:
 - list user knowledge records
 - get knowledge record
 - delete knowledge record
-- mark object pinned/searchable/archival
+- mark record pinned/searchable/archival
 
 Move UI direction from `/storage` to `/knowledge`. If route migration is too much for v0, keep `/storage` temporarily but use knowledge internals.
 
@@ -510,7 +510,7 @@ For text-extractable artifacts:
 3. Extract text/OCR/transcript/caption as applicable.
 4. Store derived artifacts when useful.
 5. Create chunks + embeddings in Postgres.
-6. Mark representation/object ready or error.
+6. Mark representation/record ready or error.
 
 Images are first-class:
 
@@ -527,7 +527,7 @@ Wire pinned knowledge into agent startup.
 Flow:
 
 1. Resolve authenticated user.
-2. Load `contextPolicy = pinned` objects.
+2. Load `contextPolicy = pinned` records.
 3. Prefer compact representations/summaries over full raw content.
 4. Pack into bounded context.
 5. Inject before normal user message handling.
@@ -539,7 +539,7 @@ Pinned context should include at least:
 - big vision / current product truth
 - durable decisions marked pinned
 
-Normal retrieval remains query-driven through searchable chunks.
+Normal search remains query-driven through searchable chunks.
 
 ### Phase 8 — migration from current storage
 
@@ -554,13 +554,13 @@ Do not block initial modeling on migration. Current storage can coexist until th
 - `pnpm lint` after app/package wiring.
 - `pnpm test:run` after domain/service behavior exists.
 - Add package tests for schema validation and context packing.
-- Add app service tests for object/artifact lifecycle, chunk search, and pinned context loading.
+- Add app service tests for record/artifact lifecycle, chunk search, and pinned context loading.
 
 ## Open questions
 
 - Rename UI immediately to `/knowledge`, or keep `/storage` as redirect/compat?
 - Does Postgres store extracted text inline, R2-only, or hybrid by size?
 - How strict is source precedence in v0?
-- Which objects are pinned by default?
+- Which records are pinned by default?
 - When introduce workspace/project scope?
 - Should current `/storage` data migrate immediately or after v0 stabilizes?
