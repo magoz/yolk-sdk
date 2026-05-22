@@ -130,13 +130,13 @@ Examples:
 - table extraction
 - model-generated description
 
-Representations are what search indexes. They may live inline in Postgres when small, or point to artifact blobs when large.
+Representations are what search ingests. They may live inline in Postgres when small, or point to artifact blobs when large.
 
 ### Chunk
 
 The search unit derived from a representation.
 
-Chunks and embeddings live in Postgres, usually through `@yolk-sdk/knowledge` indexing mechanics.
+Chunks and embeddings live in Postgres, usually through `@yolk-sdk/knowledge` search ingestion mechanics.
 
 ### Provenance
 
@@ -501,7 +501,7 @@ Add app domain functions under `lib/core/knowledge/`:
 
 Move UI direction from `/storage` to `/knowledge`. If route migration is too much for v0, keep `/storage` temporarily but use knowledge internals.
 
-### Phase 6 — extraction and indexing
+### Phase 6 — extraction and search ingestion
 
 For text-extractable artifacts:
 

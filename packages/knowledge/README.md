@@ -16,11 +16,11 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | --- | --- |
 | `@yolk-sdk/knowledge/records` | Knowledge record schemas and roles |
 | `@yolk-sdk/knowledge/artifacts` | Artifact catalog and blob-store contract |
-| `@yolk-sdk/knowledge/representations` | Agent-readable/indexable representations |
+| `@yolk-sdk/knowledge/representations` | Agent-readable/searchable representations |
 | `@yolk-sdk/knowledge/chunking` | Search chunker contracts and defaults |
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
-| `@yolk-sdk/knowledge/ingestion` | Generic indexing pipeline |
+| `@yolk-sdk/knowledge/ingestion` | Generic search ingestion pipeline |
 | `@yolk-sdk/knowledge/search` | Search interface, hybrid search, context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle store |
@@ -41,20 +41,31 @@ import { makeDefaultKnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 ```
 
+## Migration
+
+Search APIs use canonical search naming. Removed APIs are intentionally not backward-compatible.
+
+| Removed | Use |
+| --- | --- |
+| `@yolk-sdk/knowledge/retrieval` | `@yolk-sdk/knowledge/search` |
+| `KnowledgeRetriever` | `KnowledgeSearcher` |
+| `retrieve(input)` | `search(input)` |
+| `KnowledgeRetrievalError` | `KnowledgeSearchError` |
+
 ## Glossary
 
 | Term | Meaning |
 | --- | --- |
 | Knowledge record | Stable logical thing an agent can know about. Domain-free; hosts decide product meaning. |
 | Artifact | Stored source/blob attached to knowledge, such as a file or captured output. |
-| Representation | Agent-readable or indexable form of knowledge, usually text plus metadata. |
+| Representation | Agent-readable or searchable form of knowledge, usually text plus metadata. |
 | Provenance | Source metadata explaining where knowledge came from and how it was produced. |
 | Link | Typed relationship between knowledge records. |
 | Context | Model-ready knowledge selected for a run. Built from host policy. |
 | Context policy | Host intent for use: `pinned`, `routable`, `searchable`, or `archival`. |
 | Search index | Searchable corpus built from source documents, chunks, embeddings, and metadata. |
 | Collection | Named searchable document group with shared embedding and chunking config. |
-| Document | Source item tracked through search indexing: pending, processing, ready, or error. |
+| Document | Source item tracked through search ingestion: pending, processing, ready, or error. |
 | Source | Document origin: file ref, URL, or raw text. |
 | Chunk | Searchable slice of a document with position and token count. |
 | Embedding | Numeric vector for semantic search. Hosts provide the embedding provider. |
@@ -83,7 +94,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 - Own users, teams, permissions, routing, and product policy.
 - Implement `KnowledgeStore` and `KnowledgeArtifactStore` with app storage.
-- Own concrete extraction, embeddings, indexing, R2/S3 layout, and DB schema.
+- Own concrete extraction, embeddings, search ingestion, R2/S3 layout, and DB schema.
 - Decide which knowledge is pinned, searchable, routable, or archival.
 
 ## Boundaries

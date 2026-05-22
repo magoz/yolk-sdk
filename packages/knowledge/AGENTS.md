@@ -31,11 +31,11 @@
 | --- | --- |
 | `@yolk-sdk/knowledge/records` | Knowledge record schemas and roles |
 | `@yolk-sdk/knowledge/artifacts` | Artifact catalog and blob-store contract |
-| `@yolk-sdk/knowledge/representations` | Agent-readable/indexable representations |
+| `@yolk-sdk/knowledge/representations` | Agent-readable/searchable representations |
 | `@yolk-sdk/knowledge/chunking` | Search chunker contracts and defaults |
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
-| `@yolk-sdk/knowledge/ingestion` | Generic indexing pipeline |
+| `@yolk-sdk/knowledge/ingestion` | Generic search ingestion pipeline |
 | `@yolk-sdk/knowledge/search` | Search interface and context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle contract |

@@ -13,7 +13,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth storage/action contracts           |
-| `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search indexing |
+| `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search ingestion |
 | `errors/index.ts`            | Shared domain errors                           |
 
 ## Server Actions
