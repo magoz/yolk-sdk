@@ -14,17 +14,35 @@ import Image from 'next/image'
 import { Array as Arr, Option } from 'effect'
 import {
   ArrowUpIcon,
+  BrainIcon,
+  ChevronDownIcon,
   ImageIcon,
   LoaderCircleIcon,
   MicIcon,
+  SparklesIcon,
   PhoneOffIcon,
   SquareIcon,
   TerminalIcon,
   XIcon
 } from 'lucide-react'
+import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import {
+  agentTextModelOptions,
+  agentTextReasoningEffortOptions,
+  type AgentTextModel
+} from '@/lib/agents/text-agent-config'
 import {
   matchingSlashCommands,
   normalizeSlashSelectionIndex,
@@ -62,10 +80,16 @@ type AgentComposerProps = {
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
   readonly imageInputSupported: boolean
+  readonly textModel: AgentTextModel
+  readonly textModelDisabled: boolean
+  readonly reasoningEffort: AgentReasoningEffort
+  readonly reasoningEffortDisabled: boolean
   readonly imageAttachments: ReadonlyArray<AgentComposerAttachment>
   readonly commands: ReadonlyArray<AgentCommandSummary>
   readonly isCommandRendering: boolean
   readonly onInputChange: (value: string) => void
+  readonly onTextModelChange: (model: AgentTextModel) => void
+  readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
   readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
   readonly onRemoveImageAttachment: (id: string) => void
   readonly onRetryImageAttachment: (id: string) => void
@@ -83,10 +107,16 @@ export function AgentComposer({
   isVoiceConnecting,
   isVoiceLive,
   imageInputSupported,
+  textModel,
+  textModelDisabled,
+  reasoningEffort,
+  reasoningEffortDisabled,
   imageAttachments,
   commands,
   isCommandRendering,
   onInputChange,
+  onTextModelChange,
+  onReasoningEffortChange,
   onImageAttachmentsChange,
   onRemoveImageAttachment,
   onRetryImageAttachment,
@@ -115,6 +145,23 @@ export function AgentComposer({
     commandMatches.length
   )
   const selectedCommand = commandMatches[normalizedActiveCommandIndex]
+  const selectedTextModel = agentTextModelOptions.find(option => option.model === textModel)
+
+  const handleTextModelChange = (value: string) => {
+    const option = agentTextModelOptions.find(candidate => candidate.model === value)
+
+    if (option !== undefined) {
+      onTextModelChange(option.model)
+    }
+  }
+
+  const handleReasoningEffortChange = (value: string) => {
+    const effort = agentTextReasoningEffortOptions.find(candidate => candidate === value)
+
+    if (effort !== undefined) {
+      onReasoningEffortChange(effort)
+    }
+  }
 
   const submitSlashCommand = (command: AgentCommandSummary) => {
     Option.match(slashCommandInput(input), {
@@ -407,21 +454,73 @@ export function AgentComposer({
             </div>
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-3 px-1 pb-1">
-          <div className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-            <span
-              className={
-                isVoiceMode || isRunning
-                  ? 'size-1.5 shrink-0 rounded-full bg-primary ring-4 ring-primary/10'
-                  : 'size-1.5 shrink-0 rounded-full bg-muted-foreground/30'
-              }
-              aria-hidden
-            />
-            <span className="truncate">
-              {isCommandRendering ? 'Rendering command' : slashMenuOpen ? 'Select command' : hint}
-            </span>
+        <div className="flex flex-col gap-2 px-1 pb-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={textModelDisabled}
+                className="inline-flex min-h-11 max-w-48 items-center gap-2 rounded-full px-2.5 text-xs text-muted-foreground transition-[background-color,color] hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                aria-label="Select text model"
+              >
+                <SparklesIcon className="size-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{selectedTextModel?.label ?? textModel}</span>
+                <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel>Model</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={textModel} onValueChange={handleTextModelChange}>
+                  {agentTextModelOptions.map(option => (
+                    <DropdownMenuRadioItem key={option.model} value={option.model}>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm">{option.label}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {option.provider}
+                        </span>
+                      </span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={reasoningEffortDisabled}
+                className="inline-flex min-h-11 items-center gap-2 rounded-full px-2.5 text-xs text-muted-foreground transition-[background-color,color] hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                aria-label="Select reasoning effort"
+              >
+                <BrainIcon className="size-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{reasoningEffort}</span>
+                <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-44">
+                <DropdownMenuLabel>Reasoning</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup
+                  value={reasoningEffort}
+                  onValueChange={handleReasoningEffortChange}
+                >
+                  {agentTextReasoningEffortOptions.map(effort => (
+                    <DropdownMenuRadioItem key={effort} value={effort}>
+                      {effort}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-muted-foreground">
+              <span
+                className={
+                  isVoiceMode || isRunning
+                    ? 'size-1.5 shrink-0 rounded-full bg-primary ring-4 ring-primary/10'
+                    : 'size-1.5 shrink-0 rounded-full bg-muted-foreground/30'
+                }
+                aria-hidden
+              />
+              <span className="truncate">
+                {isCommandRendering ? 'Rendering command' : slashMenuOpen ? 'Select command' : hint}
+              </span>
+            </div>
           </div>
-
           <div className="flex shrink-0 items-center gap-2">
             <Button
               type="button"

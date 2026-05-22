@@ -972,10 +972,16 @@ export function AgentPlayground({
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
             imageInputSupported={imageInputSupported}
+            textModel={textModel}
+            textModelDisabled={isTextBusy}
+            reasoningEffort={reasoningEffort}
+            reasoningEffortDisabled={isTextBusy}
             imageAttachments={imageAttachments}
             commands={commands}
             isCommandRendering={isCommandRendering}
             onInputChange={handleInputChange}
+            onTextModelChange={setTextModel}
+            onReasoningEffortChange={setReasoningEffort}
             onImageAttachmentsChange={handleImageAttachmentsChange}
             onRemoveImageAttachment={handleRemoveImageAttachment}
             onRetryImageAttachment={handleRetryImageAttachment}

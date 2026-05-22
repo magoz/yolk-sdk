@@ -19,12 +19,12 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - `@yolk-sdk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - Chat text renders Markdown with `streamdown`; keep streaming-safe Markdown rendering in conversation view only.
-- `agent-composer.tsx` owns input UX only: textarea, image picker/dropzone/paste, multi-image preview/remove.
+- `agent-composer.tsx` owns input UX: textarea, image picker/dropzone/paste, multi-image preview/remove, text model and reasoning selectors.
 - Slash command UI stays in `agent-composer.tsx`; command route transport stays in `command-client.ts` using Effect `HttpClient`.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
-- `agent-status.tsx` owns console status controls: Codex/Claude auth, text model, text reasoning effort, Realtime transcription model, capability/status badges.
+- `agent-status.tsx` owns console status controls: Codex/Claude auth, mirrored text model/reasoning controls, Realtime transcription model, capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
 - Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render task metadata from structured content only.
 - `agent-usage-meter.tsx` formats provider-normalized token usage/context budget for header/console chrome.
