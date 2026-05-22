@@ -55,6 +55,33 @@ pnpm test:run
    - Never publish secrets or private packages.
    - Never publish from dirty or unclear working tree without confirming scope.
 
+7. After successful release prep, offer a commit/push plan.
+   - Inspect `git status` and changed files.
+   - List exact files intended for commit.
+   - Propose concise commit message.
+   - Do not commit or push without explicit user approval.
+   - Never include env files, generated `dist`, `.next`, `.turbo`, coverage, or unclear local changes.
+
+## PR Workflow
+
+- Feature PRs contain code changes and pending `.changeset/*.md` notes when public packages change.
+- Changeset notes are release memory; add them when the user-facing package change happens.
+- Release PRs contain only generated release files: package versions, changelogs, lockfile, and prerelease state.
+- Do not mix feature code into release PRs.
+- Publish only after the release PR lands on `main`.
+- After release prep passes, propose commit/push but wait for explicit approval.
+
+Typical flow:
+
+```bash
+# feature branch
+pnpm changeset
+
+# release branch from main
+pnpm changeset:version
+pnpm install
+```
+
 ## Common Commands
 
 Enter canary prerelease mode:
@@ -74,6 +101,12 @@ Publish canary:
 ```bash
 pnpm release:canary
 ```
+
+Trusted publish from GitHub:
+
+- Push release PR to `main`.
+- Run Actions → `Publish packages`.
+- Choose `canary` unless stable was explicitly approved.
 
 Exit canary prerelease mode:
 

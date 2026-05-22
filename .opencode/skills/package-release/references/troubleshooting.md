@@ -74,3 +74,15 @@ Check:
 - package availability: `npm view @yolk-sdk/agent`
 - CI OIDC permissions: `id-token: write`
 - `NPM_CONFIG_PROVENANCE=true` if using npm CLI path
+
+## Release prep includes unrelated files
+
+Cause: working tree had feature, env, generated, or local-only changes before release prep.
+
+Fix:
+
+- Stop before committing.
+- Inspect `git status` and diffs.
+- Commit only release files: package versions, changelogs, lockfile, `.changeset/pre.json`, and intentional release workflow/docs changes.
+- Never commit env files or generated outputs.
+- Ask user to approve the exact commit scope.

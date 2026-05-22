@@ -1,0 +1,62 @@
+name: Publish packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag
+        required: true
+        default: canary
+        type: choice
+        options:
+          - canary
+          - latest
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.0.9 --activate
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate
+        run: |
+          pnpm packages:build
+          pnpm packages:publint
+          pnpm packages:smoke
+          pnpm packages:check
+          pnpm cloudflare:check
+          pnpm tsc
+          pnpm lint
+          pnpm test:run
+
+      - name: Pack packages
+        run: |
+          mkdir -p .release
+          pnpm -r --filter './packages/*' pack --pack-destination "$PWD/.release"
+
+      - name: Publish tarballs
+        run: |
+          for tarball in .release/*.tgz; do
+            npm publish "$tarball" --tag "${{ inputs.tag }}" --access public
+          done

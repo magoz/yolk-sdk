@@ -61,10 +61,19 @@ Expected `.changeset/config.json` traits:
 ## Changeset rules
 
 - Add changesets for public API/runtime/package changes.
+- Add changesets in the feature PR that introduces the user-facing package change.
+- Do not version packages in feature PRs; release PRs consume pending changesets.
 - Include all public packages for first canary.
 - Use patch for canary bootstrap unless user requests otherwise.
 - Do not include private Cloudflare package.
 - Keep changeset text user-facing and concise.
+
+## Release PR rules
+
+- Release PRs are generated release bookkeeping only.
+- Include package version bumps, changelogs, lockfile updates, and prerelease state.
+- Exclude feature code and unrelated cleanup.
+- Publish only after the release PR merges to `main`.
 
 ## Channels
 

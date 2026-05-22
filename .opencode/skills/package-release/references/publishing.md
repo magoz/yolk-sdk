@@ -1,5 +1,31 @@
 # Publishing
 
+## PR workflow
+
+Feature PRs:
+
+- Include code/docs/package changes.
+- Add `.changeset/*.md` when public package behavior, API, runtime deps, exports, or release-facing docs change.
+- Do not run `pnpm changeset:version` in feature PRs.
+
+Release PRs:
+
+- Start from `main` after feature PRs merge.
+- Run `pnpm changeset:version` and `pnpm install`.
+- Include only generated release files: package versions, changelogs, lockfile, and `.changeset/pre.json` changes.
+- No feature code.
+- Merge to `main`, then publish from `main` with trusted publishing.
+
+After successful release prep:
+
+- Inspect `git status`.
+- List exact files that belong in the release PR.
+- Propose a concise commit message.
+- Ask before committing or pushing.
+- Never include env files, generated `dist`, `.next`, `.turbo`, coverage, or unrelated local changes.
+
+Release PR content should be mechanically reviewable: “these changesets became these versions/changelogs”.
+
 ## Manual canary flow
 
 Use this for first canary or local release prep.
@@ -88,14 +114,34 @@ Before publish:
 
 If either fails, fix package exports/deps before publishing.
 
+## Trusted publishing
+
+Use `.github/workflows/publish.yml` for npm trusted publishing.
+
+Configure each npm package trusted publisher:
+
+- Provider: GitHub Actions
+- Organization/user: `magoz`
+- Repository: `yolk-sdk`
+- Workflow filename: `publish.yml`
+- Allowed action: `npm publish`
+
+Workflow policy:
+
+- Manual `workflow_dispatch` only.
+- Uses `id-token: write` and npm OIDC auth.
+- Installs/builds/tests with `pnpm`.
+- Packs package artifacts with `pnpm pack`.
+- Publishes tarballs with npm CLI, because npm trusted publishing is the supported OIDC path.
+
 ## CI automation model
 
 Recommended later workflow:
 
-- Trigger on push to `main`.
-- Use `changesets/action`.
+- Trigger release PR on push to `main`.
+- Use `changesets/action` for version PRs.
 - `version`: `pnpm changeset:version && pnpm install --no-frozen-lockfile`.
-- `publish`: validation + `pnpm release:canary` or stable publish script.
+- `publish`: validation + `.github/workflows/publish.yml`.
 - Set `id-token: write` for npm trusted publishing/provenance.
 
 Reference patterns:
