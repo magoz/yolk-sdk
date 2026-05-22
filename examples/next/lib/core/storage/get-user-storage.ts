@@ -7,9 +7,9 @@ export const getUserStorage = (input: { readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
     return yield* db
-      .select({ object: schema.storageObject, document: schema.ragDocument })
+      .select({ object: schema.storageObject, document: schema.knowledgeDocument })
       .from(schema.storageObject)
-      .leftJoin(schema.ragDocument, eq(schema.ragDocument.storageObjectId, schema.storageObject.id))
+      .leftJoin(schema.knowledgeDocument, eq(schema.knowledgeDocument.storageObjectId, schema.storageObject.id))
       .where(eq(schema.storageObject.userId, input.userId))
       .orderBy(desc(schema.storageObject.createdAt))
   }).pipe(Effect.withSpan('storage.getUserStorage'))

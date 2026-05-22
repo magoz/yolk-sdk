@@ -30,7 +30,7 @@ export const updateKnowledgeContextPolicyAction = async (input: {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.updateContextPolicy' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge object' }))
+      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge record' }))
     )
   )
 }

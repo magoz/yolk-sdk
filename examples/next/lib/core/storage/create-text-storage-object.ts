@@ -1,9 +1,9 @@
 import { Effect } from 'effect'
-import { ingestRagDocument } from '@yolk-sdk/rag/ingestion'
+import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError, ValidationError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
-import { ensureUserRagSet } from './ensure-user-rag-set'
+import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
 
 export const createTextStorageObject = (input: {
   readonly userId: string
@@ -19,7 +19,7 @@ export const createTextStorageObject = (input: {
     }
 
     const db = yield* Db
-    const ragSet = yield* ensureUserRagSet({ userId: input.userId })
+    const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
     const [object] = yield* db
       .insert(schema.storageObject)
       .values({
@@ -39,8 +39,8 @@ export const createTextStorageObject = (input: {
       )
     }
 
-    yield* ingestRagDocument({
-      ragSetId: ragSet.id,
+    yield* ingestKnowledgeDocument({
+      collectionId: collection.id,
       documentId: object.id,
       source: {
         source: { _tag: 'Text', label: object.filename ?? undefined },

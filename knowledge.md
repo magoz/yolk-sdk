@@ -4,7 +4,7 @@
 
 Agents without a filesystem still need durable, structured knowledge.
 
-Yolk currently has `@yolk-sdk/rag` for domain-free retrieval primitives and app-owned `/storage` code for user uploads. That split is correct, but it leaves a missing layer: agent-native knowledge semantics.
+Yolk uses `@yolk-sdk/knowledge` for domain-free knowledge and retrieval primitives, with app-owned `/storage` code for user uploads.
 
 RAG answers: "Which text chunks match this query?"
 
@@ -29,8 +29,8 @@ It should let an app combine:
 
 - Postgres for catalog, permissions, lifecycle, graph, text search, chunks, embeddings.
 - R2 or equivalent blob storage for originals and derived artifacts.
-- `@yolk-sdk/rag` for chunking, embedding, and retrieval mechanics.
-- Agent tools for typed read/write operations over knowledge objects.
+- `@yolk-sdk/knowledge/*` subpaths for chunking, embedding, and retrieval mechanics.
+- Agent tools for typed read/write operations over knowledge records.
 
 The agent should not need shell access or a filesystem. It should query and maintain a typed, citable, permissioned knowledge store.
 
@@ -47,25 +47,25 @@ app/storage or app/knowledge # UI
 
 Package owns semantics. App owns infrastructure and policy.
 
-## Relationship to RAG
+## Relationship to retrieval
 
-Keep `@yolk-sdk/rag` dumb and reusable.
+Keep retrieval contracts dumb and reusable inside `@yolk-sdk/knowledge`.
 
 ```txt
-KnowledgeObject
+KnowledgeRecord
   -> Representation
-  -> RagDocument
-  -> RagChunk
+  -> IndexDocument
+  -> IndexChunk
   -> retrieval context
 ```
 
-`@yolk-sdk/rag` should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
+Knowledge retrieval contracts should continue to know nothing about users, permissions, R2, product roles, or operating protocols.
 
 `@yolk-sdk/knowledge` decides what a thing is, how authoritative it is, how it is cited, and whether it belongs in agent context.
 
 ## Core model
 
-### KnowledgeObject
+### KnowledgeRecord
 
 The logical thing the user and agent reason about.
 
@@ -136,7 +136,7 @@ Representations are what retrieval indexes. They may live inline in Postgres whe
 
 The retrieval unit derived from a representation.
 
-Chunks and embeddings live in Postgres, usually through `@yolk-sdk/rag` mechanics.
+Chunks and embeddings live in Postgres, usually through `@yolk-sdk/knowledge` indexing mechanics.
 
 ### Provenance
 
@@ -212,7 +212,7 @@ Assumption:
 
 ```txt
 Postgres
-  knowledge objects
+  knowledge records
   artifact catalog
   representations
   provenance
@@ -234,7 +234,7 @@ Postgres remains the queryable control plane. R2 stores bytes.
 ## Candidate tables
 
 ```txt
-knowledgeObject
+knowledgeRecord
   id
   owner scope fields (app-owned adapter concern)
   role
@@ -247,7 +247,7 @@ knowledgeObject
 
 knowledgeArtifact
   id
-  objectId
+  recordId
   kind              # original | extracted_text | thumbnail | transcript | caption | structured
   r2Key
   mediaType
@@ -257,7 +257,7 @@ knowledgeArtifact
 
 knowledgeRepresentation
   id
-  objectId
+  recordId
   artifactId?
   modality          # text | image | audio | video | table
   contentText?
@@ -266,9 +266,9 @@ knowledgeRepresentation
   status
   metadata
 
-knowledgeChunk
+knowledgeRepresentationChunk
   id
-  objectId
+  recordId
   representationId
   position
   content
@@ -278,7 +278,7 @@ knowledgeChunk
 
 knowledgeProvenance
   id
-  objectId
+  recordId
   artifactId?
   sourceKind
   sourceLabel
@@ -288,8 +288,8 @@ knowledgeProvenance
 
 knowledgeLink
   id
-  fromObjectId
-  toObjectId
+  fromRecordId
+  toRecordId
   type
   metadata
 ```
@@ -299,11 +299,11 @@ The package should define contracts and schemas. The app decides exact DB column
 ## R2 layout sketch
 
 ```txt
-knowledge/{objectId}/original/{artifactId}
-knowledge/{objectId}/derived/text/{artifactId}.txt
-knowledge/{objectId}/derived/thumb/{artifactId}.png
-knowledge/{objectId}/derived/transcript/{artifactId}.json
-knowledge/{objectId}/derived/structured/{artifactId}.json
+knowledge/{recordId}/original/{artifactId}
+knowledge/{recordId}/derived/text/{artifactId}.txt
+knowledge/{recordId}/derived/thumb/{artifactId}.png
+knowledge/{recordId}/derived/transcript/{artifactId}.json
+knowledge/{recordId}/derived/structured/{artifactId}.json
 ```
 
 The R2 layout is an adapter detail, not a package requirement.
@@ -357,7 +357,7 @@ App adapters implement:
 Keep v0 small.
 
 ```txt
-@yolk-sdk/knowledge/objects
+@yolk-sdk/knowledge/records
 @yolk-sdk/knowledge/artifacts
 @yolk-sdk/knowledge/representations
 @yolk-sdk/knowledge/provenance
@@ -390,7 +390,7 @@ Exports:
 
 ```txt
 @yolk-sdk/knowledge
-@yolk-sdk/knowledge/objects
+@yolk-sdk/knowledge/records
 @yolk-sdk/knowledge/artifacts
 @yolk-sdk/knowledge/representations
 @yolk-sdk/knowledge/provenance
@@ -426,13 +426,13 @@ Keep root exports explicit. No broad barrels.
 
 Model only stable primitives:
 
-- `KnowledgeObject`
+- `KnowledgeRecord`
 - `KnowledgeArtifact`
 - `KnowledgeRepresentation`
 - `KnowledgeProvenance`
 - `KnowledgeLink`
 - `KnowledgeContextPolicy`
-- `KnowledgeObjectRole`
+- `KnowledgeRecordRole`
 - `KnowledgeLifecycleStatus`
 - `KnowledgeStore`
 - `KnowledgeArtifactStore`
@@ -449,17 +449,17 @@ Package rules:
 Add new app tables in `lib/services/db/schema.ts`:
 
 ```txt
-knowledgeObject
+knowledgeRecord
 knowledgeArtifact
 knowledgeRepresentation
 knowledgeProvenance
 knowledgeLink
-knowledgeChunk
+knowledgeRepresentationChunk
 ```
 
-Use `userId` on `knowledgeObject` for v0 ownership. Child tables inherit ownership through `objectId` joins.
+Use `userId` on `knowledgeRecord` for v0 ownership. Child tables inherit ownership through `recordId` joins.
 
-Keep embeddings/chunks in Postgres. Use pgvector + full-text indexes on `knowledgeChunk`, mirroring current RAG mechanics but without coupling to `storageObject`.
+Keep embeddings/chunks in Postgres. Use pgvector + full-text indexes on `knowledgeRepresentationChunk`, mirroring current RAG mechanics but without coupling to `storageObject`.
 
 ### Phase 4 — R2 artifact adapter
 
@@ -481,22 +481,22 @@ Responsibilities:
 Initial R2 key convention:
 
 ```txt
-knowledge/{objectId}/original/{artifactId}
-knowledge/{objectId}/derived/text/{artifactId}.txt
-knowledge/{objectId}/derived/thumb/{artifactId}.png
-knowledge/{objectId}/derived/transcript/{artifactId}.json
-knowledge/{objectId}/derived/structured/{artifactId}.json
+knowledge/{recordId}/original/{artifactId}
+knowledge/{recordId}/derived/text/{artifactId}.txt
+knowledge/{recordId}/derived/thumb/{artifactId}.png
+knowledge/{recordId}/derived/transcript/{artifactId}.json
+knowledge/{recordId}/derived/structured/{artifactId}.json
 ```
 
 ### Phase 5 — domain functions and UI
 
 Add app domain functions under `lib/core/knowledge/`:
 
-- create text knowledge object
-- create file knowledge object
-- list user knowledge objects
-- get knowledge object
-- delete knowledge object
+- create text knowledge record
+- create file knowledge record
+- list user knowledge records
+- get knowledge record
+- delete knowledge record
 - mark object pinned/searchable/archival
 
 Move UI direction from `/storage` to `/knowledge`. If route migration is too much for v0, keep `/storage` temporarily but use knowledge internals.
@@ -543,7 +543,7 @@ Normal retrieval remains query-driven through searchable chunks.
 
 ### Phase 8 — migration from current storage
 
-After v0 works, migrate existing `storageObject`/`ragDocument` data into knowledge tables.
+After v0 works, migrate existing `storageObject`/`knowledgeDocument` data into knowledge tables.
 
 Do not block initial modeling on migration. Current storage can coexist until the knowledge path is stable.
 

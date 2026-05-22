@@ -6,7 +6,7 @@ import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
-import { AppRagLayer } from '@/lib/services/rag/live-layer'
+import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { createTextStorageObject } from './create-text-storage-object'
 
@@ -31,7 +31,7 @@ export const createTextStorageObjectAction = async (input: {
       })
     }).pipe(
       Effect.withSpan('action.storage.createText'),
-      Effect.provide(AppRagLayer),
+      Effect.provide(AppKnowledgeSearchLayer),
       Effect.provide(AppLayer),
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),

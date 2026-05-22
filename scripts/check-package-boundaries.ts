@@ -61,15 +61,11 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   {
     packageDir: 'packages/agent/src',
-    forbiddenImports: ['@yolk-sdk/rag', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
-  },
-  {
-    packageDir: 'packages/rag/src',
-    forbiddenImports: ['@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
+    forbiddenImports: ['@yolk-sdk/knowledge', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
   },
   {
     packageDir: 'packages/knowledge/src',
-    forbiddenImports: ['@yolk-sdk/rag', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
+    forbiddenImports: ['@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
   },
   {
     packageDir: 'packages/react/src',

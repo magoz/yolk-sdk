@@ -43,7 +43,7 @@ import {
   makeSkillManagerToolModule,
   type SkillManagerAction
 } from '@/lib/agents/tools/skill-manager-tool'
-import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppStorageKnowledgeSearchToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
 import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
@@ -336,7 +336,7 @@ export const makeAgentTextRuntime = (
         Effect.logWarning('Pinned knowledge unavailable', { error }).pipe(Effect.as(''))
       )
     )
-    const storageToolModule = makeAppStorageRagToolModule()
+    const storageToolModule = makeAppStorageKnowledgeSearchToolModule()
     const knowledgeToolModule = makeAppKnowledgeToolModule()
     const telegramConnectorConfig = yield* getTelegramConnectorConfig(userId)
     const telegramToolModules = telegramConnectorConfig === undefined

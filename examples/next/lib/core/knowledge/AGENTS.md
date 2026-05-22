@@ -12,9 +12,9 @@ App-owned knowledge use-cases and agent context helpers.
 
 - Manual text and file knowledge creation; file text extraction reuses `FileExtractor`.
 - File creation clones upload bytes before extraction; PDF parsing may detach ArrayBuffers, so R2 upload must use a separate byte copy.
-- `listUserKnowledgeObjects` returns object summaries for agent discovery before search/traversal.
-- Representation indexing uses `RagChunker` + `RagEmbedder` and writes `knowledgeChunk` rows.
-- Hybrid vector + FTS search filters to authenticated user, ready objects, non-archival policy.
+- `listUserKnowledgeRecords` returns object summaries for agent discovery before search/traversal.
+- Representation indexing uses `KnowledgeRepresentationChunker` + `KnowledgeEmbedder` and writes `knowledgeRepresentationChunk` rows.
+- Hybrid vector + FTS search filters to authenticated user, ready records, non-archival policy.
 - `getKnowledgeContext` traverses a chunk window around a search citation/object position for “show more/continue” flows.
 - Pinned knowledge context loading for text agents; unavailable context logs warning and proceeds.
 - Delete removes owned R2 artifacts before deleting DB rows.
@@ -31,6 +31,6 @@ App-owned knowledge use-cases and agent context helpers.
 
 - Domain helpers return Effect values; do not run effects inside helpers.
 - No provider SDKs or raw env access here.
-- Provide `AppRagLayer`, `DrizzleKnowledgeStoreLayer`, and `R2KnowledgeArtifactStoreLayer` at action/route boundaries as needed.
+- Provide `AppKnowledgeSearchLayer`, `DrizzleKnowledgeStoreLayer`, and `R2KnowledgeArtifactStoreLayer` at action/route boundaries as needed.
 - Preserve original bytes for R2 separately from extractor input; never reuse extractor-mutated buffers for artifact upload.
 - UI/server actions belong in separate `*-action.ts` files when added.

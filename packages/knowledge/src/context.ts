@@ -1,9 +1,9 @@
 import { Array as Arr } from 'effect'
-import type { KnowledgeObject } from './objects.ts'
+import type { KnowledgeRecord } from './records.ts'
 import type { KnowledgeRepresentation } from './representations.ts'
 
 export type KnowledgeContextItem = {
-  readonly object: KnowledgeObject
+  readonly record: KnowledgeRecord
   readonly representation?: KnowledgeRepresentation
 }
 
@@ -14,19 +14,19 @@ export type BuildKnowledgeContextInput = {
 
 const truncationMarker = '\n\n[truncated: pinned knowledge exceeded context budget]'
 
-const objectHeader = (object: KnowledgeObject) =>
-  `## ${object.title}\nrole: ${object.role}\nstatus: ${object.status}\ncontext: ${object.contextPolicy}`
+const recordHeader = (record: KnowledgeRecord) =>
+  `## ${record.title}\nrole: ${record.role}\nstatus: ${record.status}\ncontext: ${record.contextPolicy}`
 
 const itemBody = (item: KnowledgeContextItem) => {
   const representationText = item.representation?.summary ?? item.representation?.contentText
-  return [objectHeader(item.object), item.object.summary, representationText]
+  return [recordHeader(item.record), item.record.summary, representationText]
     .filter(section => section !== undefined && section.trim().length > 0)
     .join('\n')
 }
 
 export const buildKnowledgeContext = (input: BuildKnowledgeContextInput) => {
   const sections = Arr.map(input.items, itemBody).filter(section => section.trim().length > 0)
-  const header = '# Pinned knowledge\nUse this durable user knowledge as high-priority context. Cite knowledge objects when relevant.'
+  const header = '# Pinned knowledge\nUse this durable user knowledge as high-priority context. Cite knowledge records when relevant.'
   const body = sections.join('\n\n')
   const context = body.length === 0 ? '' : `${header}\n\n${body}`
 

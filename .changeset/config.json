@@ -11,7 +11,6 @@
       "@yolk-sdk/mcp",
       "@yolk-sdk/oauth",
       "@yolk-sdk/openai",
-      "@yolk-sdk/rag",
       "@yolk-sdk/react",
       "@yolk-sdk/skillset",
       "@yolk-sdk/vercel-workflows-runtime",

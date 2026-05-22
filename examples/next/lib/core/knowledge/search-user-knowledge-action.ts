@@ -5,20 +5,20 @@ import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
-import { AppRagLayer } from '@/lib/services/rag/live-layer'
+import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { searchUserKnowledge } from './search-user-knowledge'
 
 const SearchKnowledgeActionLayer = Layer.mergeAll(
   AppLayer,
-  AppRagLayer.pipe(Layer.provide(AppLayer))
+  AppKnowledgeSearchLayer.pipe(Layer.provide(AppLayer))
 )
 
 export type KnowledgeSearchActionResult =
   | {
       readonly _tag: 'Success'
       readonly results: ReadonlyArray<{
-        readonly objectId: string
+        readonly recordId: string
         readonly title: string
         readonly role: string
         readonly contextPolicy: string
@@ -50,10 +50,10 @@ export const searchUserKnowledgeAction = async (input: {
       return {
         _tag: 'Success' as const,
         results: results.map(result => ({
-          objectId: result.object.id,
-          title: result.object.title,
-          role: result.object.role,
-          contextPolicy: result.object.contextPolicy,
+          recordId: result.record.id,
+          title: result.record.title,
+          role: result.record.role,
+          contextPolicy: result.record.contextPolicy,
           score: result.score,
           vectorScore: result.vectorScore,
           textScore: result.textScore,
@@ -69,7 +69,7 @@ export const searchUserKnowledgeAction = async (input: {
       Effect.catchTag('ValidationError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
-      Effect.catchTag('RagEmbeddingError', error =>
+      Effect.catchTag('KnowledgeEmbeddingError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.search' })),

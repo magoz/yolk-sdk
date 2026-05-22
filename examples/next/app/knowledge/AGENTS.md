@@ -1,11 +1,11 @@
 # Knowledge UI
 
-User-facing knowledge object management UI.
+User-facing knowledge record management UI.
 
 ## Current scope
 
 - `/knowledge` is dynamic/session-gated.
-- V0 supports manual text and file knowledge objects.
+- V0 supports manual text and file knowledge records.
 - Pinned objects are injected into text agent startup context.
 - Searchable/routable objects are available through the `search_knowledge` agent tool.
 - Original file artifacts can be downloaded through the authenticated artifact route.

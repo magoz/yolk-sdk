@@ -27,8 +27,7 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | `@yolk-sdk/agent` | Protocol, loop, runtime, client, HITL, and tool primitives |
 | `@yolk-sdk/react` | Headless React chat hook/state helpers |
 | `@yolk-sdk/mcp` | MCP client/server/protocol adapters |
-| `@yolk-sdk/rag` | Retrieval, ingestion, chunking, and store contracts |
-| `@yolk-sdk/knowledge` | Knowledge object/artifact/provenance/context contracts |
+| `@yolk-sdk/knowledge` | Knowledge record/artifact/provenance/context/retrieval contracts |
 | `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives |
 | `@yolk-sdk/oauth` | Provider-neutral OAuth credential contracts |
 | `@yolk-sdk/openai` | OpenAI/Codex auth constants and broker helpers |

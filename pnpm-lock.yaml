@@ -232,9 +232,6 @@ importers:
       '@yolk-sdk/openai':
         specifier: workspace:^
         version: link:../../packages/openai
-      '@yolk-sdk/rag':
-        specifier: workspace:^
-        version: link:../../packages/rag
       '@yolk-sdk/react':
         specifier: workspace:^
         version: link:../../packages/react
@@ -392,6 +389,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
+      gpt-tokenizer:
+        specifier: ^3.4.0
+        version: 3.4.0
 
   packages/mcp:
     dependencies:
@@ -419,18 +419,6 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 4.0.0-beta.65
-
-  packages/rag:
-    dependencies:
-      '@yolk-sdk/agent':
-        specifier: workspace:^
-        version: link:../agent
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-beta.65
-      gpt-tokenizer:
-        specifier: ^3.4.0
-        version: 3.4.0
 
   packages/react:
     dependencies:

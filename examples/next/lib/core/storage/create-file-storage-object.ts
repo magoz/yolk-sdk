@@ -1,10 +1,10 @@
 import { Effect } from 'effect'
-import { ingestRagDocument } from '@yolk-sdk/rag/ingestion'
+import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
-import { ensureUserRagSet } from './ensure-user-rag-set'
+import { ensureUserKnowledgeCollection } from './ensure-user-knowledge-collection'
 
 export const createFileStorageObject = (input: {
   readonly userId: string
@@ -17,7 +17,7 @@ export const createFileStorageObject = (input: {
     const extracted = yield* extractor.extract(input)
 
     const db = yield* Db
-    const ragSet = yield* ensureUserRagSet({ userId: input.userId })
+    const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
     const [object] = yield* db
       .insert(schema.storageObject)
       .values({
@@ -37,8 +37,8 @@ export const createFileStorageObject = (input: {
       )
     }
 
-    yield* ingestRagDocument({
-      ragSetId: ragSet.id,
+    yield* ingestKnowledgeDocument({
+      collectionId: collection.id,
       documentId: object.id,
       source: {
         source: {

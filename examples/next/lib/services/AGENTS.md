@@ -218,7 +218,7 @@ export const AppLayer = Layer.mergeAll(
 )
 ```
 
-`Auth.layer` provides `Email.layer` internally for OTP delivery. Auth uses its own Neon HTTP `AuthDb` for the better-auth adapter; do not dedupe with `Db.layer` unless the adapter supports it. OAuth services are standalone because agent route/actions need them directly. `AppRagLayer` is intentionally composed at storage/RAG boundaries, not in `AppLayer`, because it requires `OPENAI_API_KEY` and package RAG services only for ingestion/retrieval. Add standalone services to `AppLayer` only when app code needs them directly.
+`Auth.layer` provides `Email.layer` internally for OTP delivery. Auth uses its own Neon HTTP `AuthDb` for the better-auth adapter; do not dedupe with `Db.layer` unless the adapter supports it. OAuth services are standalone because agent route/actions need them directly. `AppKnowledgeSearchLayer` is intentionally composed at storage/knowledge search boundaries, not in `AppLayer`, because it requires `OPENAI_API_KEY` and package knowledge search services only for ingestion/retrieval. Add standalone services to `AppLayer` only when app code needs them directly.
 
 **Note:** `Logger.consolePretty()` is required for `Effect.logError` / `Effect.logWarning` to produce output. Without it, logs are silent.
 

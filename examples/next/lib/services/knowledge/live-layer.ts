@@ -7,10 +7,10 @@ import { KnowledgeArtifactError, KnowledgeStoreError } from '@yolk-sdk/knowledge
 import type { KnowledgeArtifact } from '@yolk-sdk/knowledge/artifacts'
 import type { KnowledgeLink } from '@yolk-sdk/knowledge/links'
 import type {
-  KnowledgeObject,
+  KnowledgeRecord,
   KnowledgeScope,
-  UpdateKnowledgeObjectInput
-} from '@yolk-sdk/knowledge/objects'
+  UpdateKnowledgeRecordInput
+} from '@yolk-sdk/knowledge/records'
 import type { KnowledgeProvenance } from '@yolk-sdk/knowledge/provenance'
 import type { KnowledgeRepresentation } from '@yolk-sdk/knowledge/representations'
 import { Db } from '@/lib/services/db/live-layer'
@@ -106,27 +106,27 @@ const mapArtifactError = (error: unknown) =>
   error instanceof KnowledgeArtifactError ? error : artifactError(unknownToMessage(error), error)
 
 export const knowledgeArtifactStorageKey = (input: {
-  readonly objectId: string
+  readonly recordId: string
   readonly artifactId: string
   readonly kind: KnowledgeArtifact['kind']
   readonly extension?: string
 }) => {
   switch (input.kind) {
     case 'original':
-      return `knowledge/${input.objectId}/original/${input.artifactId}`
+      return `knowledge/${input.recordId}/original/${input.artifactId}`
     case 'extracted_text':
-      return `knowledge/${input.objectId}/derived/text/${input.artifactId}${input.extension ?? '.txt'}`
+      return `knowledge/${input.recordId}/derived/text/${input.artifactId}${input.extension ?? '.txt'}`
     case 'thumbnail':
-      return `knowledge/${input.objectId}/derived/thumb/${input.artifactId}${input.extension ?? '.png'}`
+      return `knowledge/${input.recordId}/derived/thumb/${input.artifactId}${input.extension ?? '.png'}`
     case 'transcript':
-      return `knowledge/${input.objectId}/derived/transcript/${input.artifactId}${input.extension ?? '.json'}`
+      return `knowledge/${input.recordId}/derived/transcript/${input.artifactId}${input.extension ?? '.json'}`
     case 'caption':
     case 'structured':
-      return `knowledge/${input.objectId}/derived/structured/${input.artifactId}${input.extension ?? '.json'}`
+      return `knowledge/${input.recordId}/derived/structured/${input.artifactId}${input.extension ?? '.json'}`
   }
 }
 
-const toObject = (row: typeof dbSchema.knowledgeObject.$inferSelect): KnowledgeObject => ({
+const toObject = (row: typeof dbSchema.knowledgeRecord.$inferSelect): KnowledgeRecord => ({
   id: row.id,
   role: row.role,
   title: row.title,
@@ -140,7 +140,7 @@ const toObject = (row: typeof dbSchema.knowledgeObject.$inferSelect): KnowledgeO
 
 const toArtifact = (row: typeof dbSchema.knowledgeArtifact.$inferSelect): KnowledgeArtifact => ({
   id: row.id,
-  objectId: row.objectId,
+  recordId: row.recordId,
   kind: row.kind,
   storageKey: row.storageKey,
   mediaType: row.mediaType ?? undefined,
@@ -154,7 +154,7 @@ const toRepresentation = (
   row: typeof dbSchema.knowledgeRepresentation.$inferSelect
 ): KnowledgeRepresentation => ({
   id: row.id,
-  objectId: row.objectId,
+  recordId: row.recordId,
   artifactId: row.artifactId ?? undefined,
   modality: row.modality,
   status: row.status,
@@ -169,7 +169,7 @@ const toRepresentation = (
 
 const toProvenance = (row: typeof dbSchema.knowledgeProvenance.$inferSelect): KnowledgeProvenance => ({
   id: row.id,
-  objectId: row.objectId,
+  recordId: row.recordId,
   artifactId: row.artifactId ?? undefined,
   sourceKind: row.sourceKind,
   sourceLabel: row.sourceLabel,
@@ -181,16 +181,16 @@ const toProvenance = (row: typeof dbSchema.knowledgeProvenance.$inferSelect): Kn
 
 const toLink = (row: typeof dbSchema.knowledgeLink.$inferSelect): KnowledgeLink => ({
   id: row.id,
-  fromObjectId: row.fromObjectId,
-  toObjectId: row.toObjectId,
+  fromRecordId: row.fromRecordId,
+  toRecordId: row.toRecordId,
   type: row.type,
   metadata: row.metadata,
   createdAt: toDateTime(row.createdAt)
 })
 
 const updateSet = (input: {
-  readonly existing: typeof dbSchema.knowledgeObject.$inferSelect
-  readonly update: UpdateKnowledgeObjectInput
+  readonly existing: typeof dbSchema.knowledgeRecord.$inferSelect
+  readonly update: UpdateKnowledgeRecordInput
 }) => ({
   title: input.update.title ?? input.existing.title,
   status: input.update.status ?? input.existing.status,
@@ -208,26 +208,26 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
       Effect.gen(function* () {
         const [row] = yield* db
           .select()
-          .from(dbSchema.knowledgeObject)
+          .from(dbSchema.knowledgeRecord)
           .where(
             and(
-              eq(dbSchema.knowledgeObject.id, input.id),
-              eq(dbSchema.knowledgeObject.userId, scopeUserId(input.scope))
+              eq(dbSchema.knowledgeRecord.id, input.id),
+              eq(dbSchema.knowledgeRecord.userId, scopeUserId(input.scope))
             )
           )
 
         if (row === undefined) {
-          return yield* Effect.fail(storeError('Knowledge object not found'))
+          return yield* Effect.fail(storeError('Knowledge record not found'))
         }
 
         return row
       })
 
     return {
-      createObject: input =>
+      createRecord: input =>
         Effect.gen(function* () {
           const [created] = yield* db
-            .insert(dbSchema.knowledgeObject)
+            .insert(dbSchema.knowledgeRecord)
             .values({
               userId: scopeUserId(input.scope),
               role: input.role,
@@ -239,68 +239,68 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .returning()
 
           if (created === undefined) {
-            return yield* Effect.fail(storeError('Could not create knowledge object'))
+            return yield* Effect.fail(storeError('Could not create knowledge record'))
           }
 
           return toObject(created)
-        }).pipe(Effect.withSpan('KnowledgeStore.createObject'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(Effect.withSpan('KnowledgeStore.createRecord'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
 
-      updateObject: input =>
+      updateRecord: input =>
         Effect.gen(function* () {
           const existing = yield* getScopedObject({ scope: input.scope, id: input.id })
           const [updated] = yield* db
-            .update(dbSchema.knowledgeObject)
+            .update(dbSchema.knowledgeRecord)
             .set(updateSet({ existing, update: input }))
             .where(
               and(
-                eq(dbSchema.knowledgeObject.id, input.id),
-                eq(dbSchema.knowledgeObject.userId, scopeUserId(input.scope))
+                eq(dbSchema.knowledgeRecord.id, input.id),
+                eq(dbSchema.knowledgeRecord.userId, scopeUserId(input.scope))
               )
             )
             .returning()
 
           if (updated === undefined) {
-            return yield* Effect.fail(storeError('Could not update knowledge object'))
+            return yield* Effect.fail(storeError('Could not update knowledge record'))
           }
 
           return toObject(updated)
-        }).pipe(Effect.withSpan('KnowledgeStore.updateObject'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(Effect.withSpan('KnowledgeStore.updateRecord'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
 
-      getObject: input =>
+      getRecord: input =>
         getScopedObject(input).pipe(
           Effect.map(toObject),
-          Effect.withSpan('KnowledgeStore.getObject'),
+          Effect.withSpan('KnowledgeStore.getRecord'),
           Effect.catch(error => Effect.fail(mapStoreError(error)))
         ),
 
-      listObjects: input =>
+      listRecords: input =>
         Effect.gen(function* () {
           const rows = yield* db
             .select()
-            .from(dbSchema.knowledgeObject)
-            .where(eq(dbSchema.knowledgeObject.userId, scopeUserId(input.scope)))
-            .orderBy(desc(dbSchema.knowledgeObject.createdAt))
+            .from(dbSchema.knowledgeRecord)
+            .where(eq(dbSchema.knowledgeRecord.userId, scopeUserId(input.scope)))
+            .orderBy(desc(dbSchema.knowledgeRecord.createdAt))
             .limit(input.limit)
 
-          return { objects: rows.map(toObject) }
-        }).pipe(Effect.withSpan('KnowledgeStore.listObjects'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+          return { records: rows.map(toObject) }
+        }).pipe(Effect.withSpan('KnowledgeStore.listRecords'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
 
       listPinned: input =>
         Effect.gen(function* () {
           const objects = yield* db
             .select()
-            .from(dbSchema.knowledgeObject)
+            .from(dbSchema.knowledgeRecord)
             .where(
               and(
-                eq(dbSchema.knowledgeObject.userId, scopeUserId(input.scope)),
-                eq(dbSchema.knowledgeObject.contextPolicy, 'pinned')
+                eq(dbSchema.knowledgeRecord.userId, scopeUserId(input.scope)),
+                eq(dbSchema.knowledgeRecord.contextPolicy, 'pinned')
               )
             )
-            .orderBy(desc(dbSchema.knowledgeObject.updatedAt))
+            .orderBy(desc(dbSchema.knowledgeRecord.updatedAt))
             .limit(input.limit)
 
-          const objectIds = objects.map(object => object.id)
-          const representations = objectIds.length === 0
+          const recordIds = objects.map(object => object.id)
+          const representations = recordIds.length === 0
             ? []
             : yield* db
                 .select()
@@ -308,27 +308,27 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
                 .where(
                   and(
                     eq(dbSchema.knowledgeRepresentation.status, 'ready'),
-                    inArray(dbSchema.knowledgeRepresentation.objectId, objectIds)
+                    inArray(dbSchema.knowledgeRepresentation.recordId, recordIds)
                   )
                 )
 
           return {
-            objects: objects.map(toObject),
+            records: objects.map(toObject),
             representations: representations.map(toRepresentation)
           }
         }).pipe(Effect.withSpan('KnowledgeStore.listPinned'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
 
-      deleteObject: input =>
+      deleteRecord: input =>
         Effect.gen(function* () {
           yield* db
-            .delete(dbSchema.knowledgeObject)
+            .delete(dbSchema.knowledgeRecord)
             .where(
               and(
-                eq(dbSchema.knowledgeObject.id, input.id),
-                eq(dbSchema.knowledgeObject.userId, scopeUserId(input.scope))
+                eq(dbSchema.knowledgeRecord.id, input.id),
+                eq(dbSchema.knowledgeRecord.userId, scopeUserId(input.scope))
               )
             )
-        }).pipe(Effect.withSpan('KnowledgeStore.deleteObject'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(Effect.withSpan('KnowledgeStore.deleteRecord'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
 
       listArtifacts: input =>
         Effect.gen(function* () {
@@ -336,7 +336,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           const rows = yield* db
             .select()
             .from(dbSchema.knowledgeArtifact)
-            .where(eq(dbSchema.knowledgeArtifact.objectId, input.id))
+            .where(eq(dbSchema.knowledgeArtifact.recordId, input.id))
 
           return rows.map(toArtifact)
         }).pipe(Effect.withSpan('KnowledgeStore.listArtifacts'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
@@ -347,7 +347,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           const rows = yield* db
             .select()
             .from(dbSchema.knowledgeProvenance)
-            .where(eq(dbSchema.knowledgeProvenance.objectId, input.id))
+            .where(eq(dbSchema.knowledgeProvenance.recordId, input.id))
 
           return rows.map(toProvenance)
         }).pipe(Effect.withSpan('KnowledgeStore.listProvenance'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
@@ -358,7 +358,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           const rows = yield* db
             .select()
             .from(dbSchema.knowledgeLink)
-            .where(eq(dbSchema.knowledgeLink.fromObjectId, input.id))
+            .where(eq(dbSchema.knowledgeLink.fromRecordId, input.id))
 
           return rows.map(toLink)
         }).pipe(Effect.withSpan('KnowledgeStore.listLinks'), Effect.catch(error => Effect.fail(mapStoreError(error))))

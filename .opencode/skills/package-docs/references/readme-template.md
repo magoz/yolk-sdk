@@ -75,7 +75,7 @@ Document document/chunk/store/embedder contracts, ingestion, retrieval, context 
 
 ### Knowledge
 
-Document objects, artifacts, representations, provenance, links, context policy, and app-owned stores/permissions.
+Document records, artifacts, representations, provenance, links, context policy, and app-owned stores/permissions.
 
 ### OAuth/provider packages
 

@@ -18,7 +18,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/client/node`
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
-- `@yolk-sdk/rag` is a sibling RAG package; agent integration lives behind `@yolk-sdk/rag/agent`.
+- `@yolk-sdk/knowledge` owns knowledge retrieval/chunking/embedding contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -36,10 +36,10 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ```txt
 examples/next, cloudflare/agent, e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 @yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
-@yolk-sdk/rag -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
+@yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
 @yolk-sdk/connectors -> @yolk-sdk/agent/tools only in ./agent; no app/storage/auth/UI policy
-@yolk-sdk/agent -> no @yolk-sdk/react, @yolk-sdk/rag, @yolk-sdk/mcp, app, Next, provider SDKs
+@yolk-sdk/agent -> no @yolk-sdk/knowledge, @yolk-sdk/react, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
 ## Tree-Shaking Constraints
@@ -67,8 +67,8 @@ examples/next, cloudflare/agent, e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
 - Boundary script prevents example app, Cloudflare, and e2e code from importing retired internal package names.
 - Boundary script prevents retired package directories from reappearing.
 - Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in example app, Cloudflare, and e2e code; use explicit subpaths.
-- Boundary script prevents `@yolk-sdk/agent` from importing `@yolk-sdk/rag`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, Next, React, or Node builtins.
-- Boundary script prevents RAG from importing MCP/React/Next/Node.
+- Boundary script prevents `@yolk-sdk/agent` from importing `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, Next, React, or Node builtins.
+- Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 
 ## When Adding A Package API

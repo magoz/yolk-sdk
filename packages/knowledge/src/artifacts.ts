@@ -2,7 +2,7 @@ import { Context } from 'effect'
 import type { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { KnowledgeArtifactError } from './errors.ts'
-import { KnowledgeMetadataSchema, NonEmptyTrimmedString, NonNegativeInteger } from './objects.ts'
+import { KnowledgeMetadataSchema, NonEmptyTrimmedString, NonNegativeInteger } from './records.ts'
 
 export const KnowledgeArtifactKindSchema = Schema.Literals([
   'original',
@@ -16,7 +16,7 @@ export type KnowledgeArtifactKind = Schema.Schema.Type<typeof KnowledgeArtifactK
 
 export const KnowledgeArtifactSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  objectId: NonEmptyTrimmedString,
+  recordId: NonEmptyTrimmedString,
   kind: KnowledgeArtifactKindSchema,
   storageKey: NonEmptyTrimmedString,
   mediaType: Schema.optional(NonEmptyTrimmedString),

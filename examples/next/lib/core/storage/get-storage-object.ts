@@ -11,9 +11,9 @@ export const getStorageObject = (input: {
   Effect.gen(function* () {
     const db = yield* Db
     const [row] = yield* db
-      .select({ object: schema.storageObject, document: schema.ragDocument })
+      .select({ object: schema.storageObject, document: schema.knowledgeDocument })
       .from(schema.storageObject)
-      .leftJoin(schema.ragDocument, eq(schema.ragDocument.storageObjectId, schema.storageObject.id))
+      .leftJoin(schema.knowledgeDocument, eq(schema.knowledgeDocument.storageObjectId, schema.storageObject.id))
       .where(and(eq(schema.storageObject.id, input.id), eq(schema.storageObject.userId, input.userId)))
 
     if (row === undefined) {

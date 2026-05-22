@@ -12,18 +12,18 @@ export const updateKnowledgeContextPolicy = (input: {
   Effect.gen(function* () {
     const db = yield* Db
     const [object] = yield* db
-      .update(schema.knowledgeObject)
+      .update(schema.knowledgeRecord)
       .set({ contextPolicy: input.contextPolicy, updatedAt: sql`CURRENT_TIMESTAMP` })
       .where(
         and(
-          eq(schema.knowledgeObject.id, input.id),
-          eq(schema.knowledgeObject.userId, input.userId)
+          eq(schema.knowledgeRecord.id, input.id),
+          eq(schema.knowledgeRecord.userId, input.userId)
         )
       )
       .returning()
 
     if (object === undefined) {
-      return yield* Effect.fail(new NotFoundError({ message: 'Knowledge object not found', entity: 'knowledgeObject', id: input.id }))
+      return yield* Effect.fail(new NotFoundError({ message: 'Knowledge record not found', entity: 'knowledgeRecord', id: input.id }))
     }
 
     return object

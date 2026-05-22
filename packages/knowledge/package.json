@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/knowledge",
   "version": "0.0.0",
-  "description": "Domain-free knowledge object, artifact, provenance, and context contracts for Yolk agents.",
+  "description": "Domain-free knowledge record, artifact, provenance, and context contracts for Yolk agents.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -42,17 +42,41 @@
       "types": "./src/context.ts",
       "default": "./src/context.ts"
     },
+    "./chunking": {
+      "types": "./src/chunking.ts",
+      "default": "./src/chunking.ts"
+    },
+    "./embeddings": {
+      "types": "./src/embeddings.ts",
+      "default": "./src/embeddings.ts"
+    },
     "./errors": {
       "types": "./src/errors.ts",
       "default": "./src/errors.ts"
+    },
+    "./extraction": {
+      "types": "./src/extraction.ts",
+      "default": "./src/extraction.ts"
+    },
+    "./ingestion": {
+      "types": "./src/ingestion.ts",
+      "default": "./src/ingestion.ts"
+    },
+    "./documents": {
+      "types": "./src/documents.ts",
+      "default": "./src/documents.ts"
+    },
+    "./search-store": {
+      "types": "./src/search-store.ts",
+      "default": "./src/search-store.ts"
     },
     "./links": {
       "types": "./src/links.ts",
       "default": "./src/links.ts"
     },
-    "./objects": {
-      "types": "./src/objects.ts",
-      "default": "./src/objects.ts"
+    "./records": {
+      "types": "./src/records.ts",
+      "default": "./src/records.ts"
     },
     "./provenance": {
       "types": "./src/provenance.ts",
@@ -62,9 +86,21 @@
       "types": "./src/representations.ts",
       "default": "./src/representations.ts"
     },
+    "./retrieval": {
+      "types": "./src/retrieval.ts",
+      "default": "./src/retrieval.ts"
+    },
     "./store": {
       "types": "./src/store.ts",
       "default": "./src/store.ts"
+    },
+    "./summarization": {
+      "types": "./src/summarization.ts",
+      "default": "./src/summarization.ts"
+    },
+    "./vector-store": {
+      "types": "./src/vector-store.ts",
+      "default": "./src/vector-store.ts"
     }
   },
   "files": [
@@ -99,20 +135,50 @@
         "import": "./dist/context.mjs",
         "default": "./dist/context.mjs"
       },
+      "./chunking": {
+        "types": "./dist/chunking.d.mts",
+        "import": "./dist/chunking.mjs",
+        "default": "./dist/chunking.mjs"
+      },
+      "./embeddings": {
+        "types": "./dist/embeddings.d.mts",
+        "import": "./dist/embeddings.mjs",
+        "default": "./dist/embeddings.mjs"
+      },
       "./errors": {
         "types": "./dist/errors.d.mts",
         "import": "./dist/errors.mjs",
         "default": "./dist/errors.mjs"
+      },
+      "./extraction": {
+        "types": "./dist/extraction.d.mts",
+        "import": "./dist/extraction.mjs",
+        "default": "./dist/extraction.mjs"
+      },
+      "./ingestion": {
+        "types": "./dist/ingestion.d.mts",
+        "import": "./dist/ingestion.mjs",
+        "default": "./dist/ingestion.mjs"
+      },
+      "./documents": {
+        "types": "./dist/documents.d.mts",
+        "import": "./dist/documents.mjs",
+        "default": "./dist/documents.mjs"
+      },
+      "./search-store": {
+        "types": "./dist/search-store.d.mts",
+        "import": "./dist/search-store.mjs",
+        "default": "./dist/search-store.mjs"
       },
       "./links": {
         "types": "./dist/links.d.mts",
         "import": "./dist/links.mjs",
         "default": "./dist/links.mjs"
       },
-      "./objects": {
-        "types": "./dist/objects.d.mts",
-        "import": "./dist/objects.mjs",
-        "default": "./dist/objects.mjs"
+      "./records": {
+        "types": "./dist/records.d.mts",
+        "import": "./dist/records.mjs",
+        "default": "./dist/records.mjs"
       },
       "./provenance": {
         "types": "./dist/provenance.d.mts",
@@ -124,10 +190,25 @@
         "import": "./dist/representations.mjs",
         "default": "./dist/representations.mjs"
       },
+      "./retrieval": {
+        "types": "./dist/retrieval.d.mts",
+        "import": "./dist/retrieval.mjs",
+        "default": "./dist/retrieval.mjs"
+      },
       "./store": {
         "types": "./dist/store.d.mts",
         "import": "./dist/store.mjs",
         "default": "./dist/store.mjs"
+      },
+      "./summarization": {
+        "types": "./dist/summarization.d.mts",
+        "import": "./dist/summarization.mjs",
+        "default": "./dist/summarization.mjs"
+      },
+      "./vector-store": {
+        "types": "./dist/vector-store.d.mts",
+        "import": "./dist/vector-store.mjs",
+        "default": "./dist/vector-store.mjs"
       }
     }
   },
@@ -139,6 +220,7 @@
   },
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "gpt-tokenizer": "^3.4.0"
   }
 }

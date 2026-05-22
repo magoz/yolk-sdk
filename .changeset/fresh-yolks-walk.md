@@ -6,7 +6,6 @@
 "@yolk-sdk/mcp": patch
 "@yolk-sdk/oauth": patch
 "@yolk-sdk/openai": patch
-"@yolk-sdk/rag": patch
 "@yolk-sdk/react": patch
 "@yolk-sdk/skillset": patch
 "@yolk-sdk/vercel-workflows-runtime": patch

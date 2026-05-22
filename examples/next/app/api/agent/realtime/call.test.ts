@@ -11,7 +11,7 @@ describe('realtime call route wiring', () => {
 
   it('adds knowledge, storage, and Telegram tools to the voice toolset', () => {
     expect(source).toContain("import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'")
-    expect(source).toContain("import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'")
+    expect(source).toContain("import { makeAppStorageKnowledgeSearchToolModule } from '@/lib/agents/tools/storage-tool-handlers'")
     expect(source).toContain("import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'")
     expect(source).toContain('...telegramToolModules')
   })

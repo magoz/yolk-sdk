@@ -22,15 +22,11 @@ const packages: ReadonlyArray<PackageShape> = [
   },
   {
     name: '@yolk-sdk/knowledge',
-    exports: ['.', './agent', './artifacts', './context', './errors', './links', './objects', './provenance', './representations', './store']
+    exports: ['.', './agent', './artifacts', './chunking', './context', './embeddings', './errors', './extraction', './ingestion', './search-store', './documents', './links', './records', './provenance', './representations', './retrieval', './store', './summarization', './vector-store']
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
   { name: '@yolk-sdk/oauth', exports: ['.'] },
   { name: '@yolk-sdk/openai', exports: ['.'] },
-  {
-    name: '@yolk-sdk/rag',
-    exports: ['.', './agent', './chunking', './documents', './embeddings', './errors', './extraction', './ingestion', './retrieval', './store', './summarization', './vector-store']
-  },
   { name: '@yolk-sdk/react', exports: ['.'] },
   { name: '@yolk-sdk/skillset', exports: ['.'] },
   { name: '@yolk-sdk/vercel-workflows-runtime', exports: ['.', './workflow'] },

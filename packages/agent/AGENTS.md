@@ -16,7 +16,7 @@
 ## Boundaries
 
 - No React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
-- Do not import `@yolk-sdk/rag`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, or concrete adapter packages from core agent subpaths.
+- Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, or concrete adapter packages from core agent subpaths.
 - Protocol has no package dependencies except Effect.
 - Loop depends on protocol only.
 - Runtime depends on protocol + loop only.

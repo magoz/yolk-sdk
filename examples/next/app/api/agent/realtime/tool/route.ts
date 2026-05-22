@@ -5,7 +5,7 @@ import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
 import { AppLayer } from '@/lib/layers'
 import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
-import { makeAppStorageRagToolModule } from '@/lib/agents/tools/storage-tool-handlers'
+import { makeAppStorageKnowledgeSearchToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
 import { makeAppTelegramToolModule } from '@/lib/agents/tools/telegram-tool'
 import { getTelegramConnectorConfig } from '@/lib/core/agent/telegram-connector'
@@ -30,7 +30,7 @@ const handler = Effect.gen(function* () {
     modules: [
       ...nodeVoiceToolModules,
       makeAppKnowledgeToolModule(),
-      makeAppStorageRagToolModule(),
+      makeAppStorageKnowledgeSearchToolModule(),
       ...telegramToolModules
     ],
     context: {

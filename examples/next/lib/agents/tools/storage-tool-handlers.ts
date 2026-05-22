@@ -1,18 +1,18 @@
 import { Effect, Layer } from 'effect'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { ensureUserRagSet } from '@/lib/core/storage/ensure-user-rag-set'
+import { ensureUserKnowledgeCollection } from '@/lib/core/storage/ensure-user-knowledge-collection'
 import { getStorageObject } from '@/lib/core/storage/get-storage-object'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'
 import { Db } from '@/lib/services/db/live-layer'
-import { AppRagLayer } from '@/lib/services/rag/live-layer'
-import { searchAppRag } from '@/lib/services/rag/search-app-rag'
+import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
+import { searchAppKnowledge } from '@/lib/services/knowledge-search/search-app-knowledge'
 import {
-  makeStorageRagToolModule,
+  makeStorageSearchToolModule,
   type StorageSourceDetail,
   type StorageSourceSummary
-} from './storage-rag-tool.ts'
+} from './storage-search-tool.ts'
 
-const RagToolLayer = Layer.mergeAll(Db.layer, AppRagLayer.pipe(Layer.provide(Db.layer)))
+const KnowledgeSearchToolLayer = Layer.mergeAll(Db.layer, AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer)))
 
 const storageSourceName = (source: {
   readonly filename: string | null
@@ -37,11 +37,11 @@ const searchStorageForAgent = (input: {
   readonly contextChunks: number
 }) =>
   Effect.gen(function* () {
-    const ragSet = yield* ensureUserRagSet({ userId: input.userId })
+    const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
 
-    return yield* searchAppRag({
+    return yield* searchAppKnowledge({
       userId: input.userId,
-      scope: { _tag: 'RagSet', id: ragSet.id },
+      scope: { _tag: 'KnowledgeCollection', id: collection.id },
       query: input.query,
       options: {
         limit: input.limit,
@@ -50,12 +50,12 @@ const searchStorageForAgent = (input: {
       }
     })
   }).pipe(
-    Effect.provide(RagToolLayer),
+    Effect.provide(KnowledgeSearchToolLayer),
     Effect.mapError(
       error =>
         new ToolError({
           tool: 'search_storage',
-          message: error.message,
+          message: unknownToMessage(error),
           cause: 'execution'
         })
     )
@@ -123,8 +123,8 @@ const getStorageSourceForAgent = (input: {
     )
   )
 
-export const makeAppStorageRagToolModule = () =>
-  makeStorageRagToolModule({
+export const makeAppStorageKnowledgeSearchToolModule = () =>
+  makeStorageSearchToolModule({
     search: searchStorageForAgent,
     listSources: listStorageSourcesForAgent,
     getSource: getStorageSourceForAgent

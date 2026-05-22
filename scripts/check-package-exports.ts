@@ -25,26 +25,6 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     tinyRoot: true
   },
   {
-    packageDir: 'packages/rag',
-    packageName: '@yolk-sdk/rag',
-    expectedExports: [
-      '.',
-      './package.json',
-      './agent',
-      './chunking',
-      './documents',
-      './embeddings',
-      './errors',
-      './extraction',
-      './ingestion',
-      './retrieval',
-      './store',
-      './summarization',
-      './vector-store'
-    ],
-    tinyRoot: false
-  },
-  {
     packageDir: 'packages/knowledge',
     packageName: '@yolk-sdk/knowledge',
     expectedExports: [
@@ -52,13 +32,22 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './package.json',
       './agent',
       './artifacts',
+      './chunking',
       './context',
+      './embeddings',
       './errors',
+      './extraction',
+      './ingestion',
+      './search-store',
+      './documents',
       './links',
-      './objects',
+      './records',
       './provenance',
       './representations',
-      './store'
+      './retrieval',
+      './store',
+      './summarization',
+      './vector-store'
     ],
     tinyRoot: false
   },

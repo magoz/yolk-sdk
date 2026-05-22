@@ -135,7 +135,6 @@ Publish all packages in the first public canary:
 - `@yolk-sdk/agent`
 - `@yolk-sdk/react`
 - `@yolk-sdk/mcp`
-- `@yolk-sdk/rag`
 - `@yolk-sdk/knowledge`
 - `@yolk-sdk/connectors`
 - `@yolk-sdk/oauth`

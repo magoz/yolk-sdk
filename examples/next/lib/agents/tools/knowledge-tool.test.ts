@@ -4,13 +4,13 @@ import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
-import type { KnowledgeObjectSummary } from '@/lib/core/knowledge/list-user-knowledge-objects'
+import type { KnowledgeRecordSummary } from '@/lib/core/knowledge/list-user-knowledge-records'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 
 const date = new Date('2026-05-18T00:00:00.000Z')
 
 const searchResult: KnowledgeSearchResult = {
-  object: {
+  record: {
     id: 'object_1',
     userId: 'user_1',
     role: 'note',
@@ -24,7 +24,7 @@ const searchResult: KnowledgeSearchResult = {
   },
   representation: {
     id: 'representation_1',
-    objectId: 'object_1',
+    recordId: 'object_1',
     artifactId: null,
     modality: 'text',
     status: 'ready',
@@ -38,7 +38,7 @@ const searchResult: KnowledgeSearchResult = {
   },
   chunk: {
     id: 'chunk_1',
-    objectId: 'object_1',
+    recordId: 'object_1',
     representationId: 'representation_1',
     content: 'matched durable fact',
     embedding: Array.from({ length: 1536 }, () => 0),
@@ -53,7 +53,7 @@ const searchResult: KnowledgeSearchResult = {
   context: [
     {
       id: 'chunk_1',
-      objectId: 'object_1',
+      recordId: 'object_1',
       representationId: 'representation_1',
       content: 'matched durable fact',
       embedding: Array.from({ length: 1536 }, () => 0),
@@ -66,7 +66,7 @@ const searchResult: KnowledgeSearchResult = {
 }
 
 const contextWindow: KnowledgeContextWindow = {
-  object: searchResult.object,
+  record: searchResult.record,
   representation: searchResult.representation,
   anchor: searchResult.chunk,
   chunks: searchResult.context,
@@ -79,7 +79,7 @@ const contextWindow: KnowledgeContextWindow = {
   textCharacters: 20
 }
 
-const objectSummary: KnowledgeObjectSummary = {
+const objectSummary: KnowledgeRecordSummary = {
   id: 'object_1',
   title: 'Project memory',
   role: 'note',
@@ -95,7 +95,7 @@ const objectSummary: KnowledgeObjectSummary = {
 }
 
 describe('knowledge tool', () => {
-  it.effect('lists authenticated user knowledge objects', () => {
+  it.effect('lists authenticated user knowledge records', () => {
     const calls: Array<{
       readonly userId: string
       readonly query?: string
@@ -118,7 +118,7 @@ describe('knowledge tool', () => {
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
-          name: 'list_knowledge_objects',
+          name: 'list_knowledge_records',
           params: { query: ' memory ', policy: 'searchable', limit: 100 }
         })
       )
@@ -126,7 +126,7 @@ describe('knowledge tool', () => {
       expect(calls).toEqual([
         { userId: 'user_1', query: 'memory', policy: 'searchable', limit: 50 }
       ])
-      expect(result.content).toContain('Knowledge objects')
+      expect(result.content).toContain('Knowledge records')
       expect(result.content).toContain('Project memory')
       expect(result.content).toContain('Chunks: 1')
     })
@@ -165,7 +165,7 @@ describe('knowledge tool', () => {
       ])
       expect(result.content).toContain('Knowledge search results for: memory')
       expect(result.content).toContain('Citation [1]')
-      expect(result.content).toContain('Object: Project memory')
+      expect(result.content).toContain('Record: Project memory')
       expect(result.content).toContain('matched durable fact')
     })
   })
@@ -217,7 +217,7 @@ describe('knowledge tool', () => {
   it.effect('reads surrounding knowledge context', () => {
     const calls: Array<{
       readonly userId: string
-      readonly objectId: string
+      readonly recordId: string
       readonly chunkId?: string
       readonly before: number
       readonly after: number
@@ -240,12 +240,12 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { objectId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
+          params: { recordId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', objectId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
+        { userId: 'user_1', recordId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
       ])
       expect(result.content).toContain('Knowledge context: Project memory')
       expect(result.content).toContain('Has after: yes')
@@ -255,7 +255,7 @@ describe('knowledge tool', () => {
 
   it.effect('accepts null optional knowledge context params', () => {
     const calls: Array<{
-      readonly objectId: string
+      readonly recordId: string
       readonly position?: number
       readonly before: number
       readonly after: number
@@ -278,12 +278,12 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { objectId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
+          params: { recordId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', objectId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
+        { userId: 'user_1', recordId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
       ])
     })
   })

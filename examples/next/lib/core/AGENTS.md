@@ -13,7 +13,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth storage/action contracts           |
-| `storage/*`                  | `/storage` domain functions/actions; source ingestion + RAG indexing |
+| `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search indexing |
 | `errors/index.ts`            | Shared domain errors                           |
 
 ## Server Actions
@@ -35,7 +35,7 @@ See `examples/next/patterns/EFFECT_SERVER_ACTIONS.md` for the canonical Next bou
 
 - Return Effect values; do not run effects inside helpers.
 - Pull infrastructure through services (`Db`, `OpenAiCodexOAuth`, etc.).
-- Storage/RAG domain functions use app-owned `AppRagLayer` at boundaries; package `@yolk-sdk/rag` owns pipeline contracts only.
+- Storage/knowledge search domain functions use app-owned `AppKnowledgeSearchLayer` at boundaries; `@yolk-sdk/knowledge/*` owns pipeline contracts only.
 - Keep provider/OAuth API calls in services; core composes persistence and policy.
 - Store provider OAuth tokens in Better Auth `account` rows with provider ids (`openai-codex`, `anthropic-claude`).
 - Store user-configured connector credentials in `agentConnector`, not Better Auth `account` rows.

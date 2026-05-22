@@ -21,11 +21,11 @@ test.describe('knowledge UI', () => {
     await Effect.gen(function* () {
       const db = yield* Db
       yield* db
-        .delete(schema.knowledgeObject)
+        .delete(schema.knowledgeRecord)
         .where(
           and(
-            eq(schema.knowledgeObject.userId, TEST_USER_ID),
-            eq(schema.knowledgeObject.title, title)
+            eq(schema.knowledgeRecord.userId, TEST_USER_ID),
+            eq(schema.knowledgeRecord.title, title)
           )
         )
     }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)

@@ -51,17 +51,17 @@ const downloadArtifact =
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = new URL(request.url)
-    const objectId = url.searchParams.get('objectId')?.trim()
+    const recordId = url.searchParams.get('recordId')?.trim()
     const artifactId = url.searchParams.get('artifactId')?.trim()
 
-    if (objectId === undefined || objectId.length === 0 || artifactId === undefined || artifactId.length === 0) {
+    if (recordId === undefined || recordId.length === 0 || artifactId === undefined || artifactId.length === 0) {
       return HttpServerResponse.text('Missing artifact', { status: 400 })
     }
 
     const session = yield* getSession()
     const store = yield* KnowledgeStore
     const artifactStore = yield* KnowledgeArtifactStore
-    const artifacts = yield* store.listArtifacts({ scope: { id: session.user.id }, id: objectId })
+    const artifacts = yield* store.listArtifacts({ scope: { id: session.user.id }, id: recordId })
     const artifact = yield* Option.match(
       Arr.findFirst(artifacts, item => item.id === artifactId),
       {

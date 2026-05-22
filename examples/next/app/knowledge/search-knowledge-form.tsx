@@ -21,7 +21,7 @@ export function SearchKnowledgeForm() {
     <section className="space-y-4 rounded-xl border bg-card p-5 text-card-foreground shadow-xs">
       <div>
         <h2 className="font-medium">Search knowledge</h2>
-        <p className="text-sm text-muted-foreground">Query indexed chunks before asking the agent.</p>
+        <p className="text-sm text-muted-foreground">Query search chunks before asking the agent.</p>
       </div>
       <form
         className="flex flex-col gap-3 sm:flex-row sm:items-end"
@@ -62,7 +62,7 @@ export function SearchKnowledgeForm() {
       {results.length > 0 ? (
         <ol className="space-y-3">
           {results.map(result => (
-            <li key={`${result.objectId}-${result.chunkId}`} className="rounded-lg border bg-muted/20 p-4">
+            <li key={`${result.recordId}-${result.chunkId}`} className="rounded-lg border bg-muted/20 p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{result.title}</span>
                 <span>{result.role}</span>

@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createFileKnowledgeObjectAction } from '@/lib/core/knowledge/create-file-knowledge-object-action'
+import { createFileKnowledgeRecordAction } from '@/lib/core/knowledge/create-file-knowledge-record-action'
 
 const acceptedFileTypes =
   '.txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -55,7 +55,7 @@ export function CreateFileKnowledgeForm() {
               const formData = new FormData()
               formData.append('file', file)
               formData.append('pinned', pinned ? 'true' : 'false')
-              return createFileKnowledgeObjectAction(formData)
+              return createFileKnowledgeRecordAction(formData)
             })
           ).then(results => {
             const failures = results.filter(result => result._tag === 'Error')

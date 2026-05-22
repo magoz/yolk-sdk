@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { KnowledgeMetadataSchema, NonEmptyTrimmedString } from './objects.ts'
+import { KnowledgeMetadataSchema, NonEmptyTrimmedString } from './records.ts'
 
 export const KnowledgeLinkTypeSchema = Schema.Literals([
   'cites',
@@ -14,8 +14,8 @@ export type KnowledgeLinkType = Schema.Schema.Type<typeof KnowledgeLinkTypeSchem
 
 export const KnowledgeLinkSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  fromObjectId: NonEmptyTrimmedString,
-  toObjectId: NonEmptyTrimmedString,
+  fromRecordId: NonEmptyTrimmedString,
+  toRecordId: NonEmptyTrimmedString,
   type: KnowledgeLinkTypeSchema,
   metadata: Schema.optional(KnowledgeMetadataSchema),
   createdAt: Schema.DateTimeUtc

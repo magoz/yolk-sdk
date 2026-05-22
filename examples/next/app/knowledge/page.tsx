@@ -8,7 +8,7 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { CreateFileKnowledgeForm } from './create-file-knowledge-form'
 import { CreateTextKnowledgeForm } from './create-text-knowledge-form'
-import { KnowledgeObjectList } from './knowledge-object-list'
+import { KnowledgeRecordList } from './knowledge-record-list'
 import { SearchKnowledgeForm } from './search-knowledge-form'
 
 export const dynamic = 'force-dynamic'
@@ -44,12 +44,12 @@ async function Content() {
           <section className="space-y-3">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-medium">Knowledge objects</h2>
+                <h2 className="text-lg font-medium">Knowledge records</h2>
                 <p className="text-sm text-muted-foreground">Pinned objects load into agent context.</p>
               </div>
               <p className="text-sm text-muted-foreground tabular-nums">{items.length} total</p>
             </div>
-            <KnowledgeObjectList items={items} />
+            <KnowledgeRecordList items={items} />
           </section>
         </main>
       )

@@ -7,7 +7,7 @@ App-owned concrete adapters for the domain-free `@yolk-sdk/knowledge` package.
 - `DrizzleKnowledgeStoreLayer`: implements `KnowledgeStore` over app Drizzle schema.
 - `R2KnowledgeArtifactStoreLayer`: implements `KnowledgeArtifactStore` over S3-compatible R2.
 - `knowledgeArtifactStorageKey`: app-owned key layout helper for original/derived artifacts.
-- Keep user ownership in app DB rows (`knowledgeObject.userId`).
+- Keep user ownership in app DB rows (`knowledgeRecord.userId`).
 - Keep package contracts domain-free: no users/auth/R2/provider SDKs in `packages/knowledge`.
 
 ## Boundaries

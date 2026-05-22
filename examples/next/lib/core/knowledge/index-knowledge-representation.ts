@@ -1,21 +1,21 @@
 import { Array as Arr, Effect } from 'effect'
 import { eq, sql } from 'drizzle-orm'
-import { RagChunker } from '@yolk-sdk/rag/chunking'
-import { RagEmbedder } from '@yolk-sdk/rag/embeddings'
+import { KnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
+import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
 export const indexKnowledgeRepresentation = (input: {
-  readonly objectId: string
+  readonly recordId: string
   readonly representationId: string
   readonly content: string
   readonly metadata?: Record<string, unknown>
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
-    const chunker = yield* RagChunker
-    const embedder = yield* RagEmbedder
+    const chunker = yield* KnowledgeChunker
+    const embedder = yield* KnowledgeEmbedder
 
     yield* db
       .update(schema.knowledgeRepresentation)
@@ -23,7 +23,7 @@ export const indexKnowledgeRepresentation = (input: {
       .where(eq(schema.knowledgeRepresentation.id, input.representationId))
 
     const chunks = yield* chunker.chunk({
-      ragSetId: input.objectId,
+      collectionId: input.recordId,
       documentId: input.representationId,
       content: input.content,
       metadata: input.metadata
@@ -31,21 +31,21 @@ export const indexKnowledgeRepresentation = (input: {
     const embeddings = yield* embedder.embedTexts(chunks.map(chunk => chunk.content))
 
     if (embeddings.length !== chunks.length) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Embedding count did not match chunk count', entity: 'knowledgeChunk' }))
+      return yield* Effect.fail(new PersistenceError({ message: 'Embedding count did not match chunk count', entity: 'knowledgeRepresentationChunk' }))
     }
 
     yield* db.transaction(tx =>
       Effect.gen(function* () {
         yield* tx
-          .delete(schema.knowledgeChunk)
-          .where(eq(schema.knowledgeChunk.representationId, input.representationId))
+          .delete(schema.knowledgeRepresentationChunk)
+          .where(eq(schema.knowledgeRepresentationChunk.representationId, input.representationId))
 
         const indexedChunks = Arr.zip(chunks, embeddings)
         if (indexedChunks.length > 0) {
-          yield* tx.insert(schema.knowledgeChunk).values(
+          yield* tx.insert(schema.knowledgeRepresentationChunk).values(
             indexedChunks.map(([chunk, embedding]) => ({
               id: chunk.id,
-              objectId: input.objectId,
+              recordId: input.recordId,
               representationId: input.representationId,
               content: chunk.content,
               embedding: Array.from(embedding),

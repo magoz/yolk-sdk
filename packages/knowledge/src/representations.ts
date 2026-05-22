@@ -3,7 +3,7 @@ import {
   KnowledgeMetadataSchema,
   NonEmptyTrimmedString,
   NonNegativeInteger
-} from './objects.ts'
+} from './records.ts'
 
 export const KnowledgeRepresentationModalitySchema = Schema.Literals([
   'text',
@@ -24,7 +24,7 @@ export type KnowledgeRepresentationStatus = Schema.Schema.Type<typeof KnowledgeR
 
 export const KnowledgeRepresentationSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  objectId: NonEmptyTrimmedString,
+  recordId: NonEmptyTrimmedString,
   artifactId: Schema.optional(NonEmptyTrimmedString),
   modality: KnowledgeRepresentationModalitySchema,
   status: KnowledgeRepresentationStatusSchema,
@@ -38,9 +38,9 @@ export const KnowledgeRepresentationSchema = Schema.Struct({
 })
 export type KnowledgeRepresentation = Schema.Schema.Type<typeof KnowledgeRepresentationSchema>
 
-export const KnowledgeChunkSchema = Schema.Struct({
+export const KnowledgeRepresentationChunkSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  objectId: NonEmptyTrimmedString,
+  recordId: NonEmptyTrimmedString,
   representationId: NonEmptyTrimmedString,
   content: NonEmptyTrimmedString,
   position: NonNegativeInteger,
@@ -48,4 +48,4 @@ export const KnowledgeChunkSchema = Schema.Struct({
   metadata: Schema.optional(KnowledgeMetadataSchema),
   createdAt: Schema.DateTimeUtc
 })
-export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
+export type KnowledgeRepresentationChunk = Schema.Schema.Type<typeof KnowledgeRepresentationChunkSchema>

@@ -11,10 +11,10 @@ const defaultMaxChars = 20_000
 const maxMaxChars = 60_000
 
 export type KnowledgeContextWindow = {
-  readonly object: typeof schema.knowledgeObject.$inferSelect
+  readonly record: typeof schema.knowledgeRecord.$inferSelect
   readonly representation: typeof schema.knowledgeRepresentation.$inferSelect
-  readonly chunks: ReadonlyArray<typeof schema.knowledgeChunk.$inferSelect>
-  readonly anchor: typeof schema.knowledgeChunk.$inferSelect
+  readonly chunks: ReadonlyArray<typeof schema.knowledgeRepresentationChunk.$inferSelect>
+  readonly anchor: typeof schema.knowledgeRepresentationChunk.$inferSelect
   readonly startPosition: number
   readonly endPosition: number
   readonly hasBefore: boolean
@@ -56,7 +56,7 @@ const truncateText = (text: string, maxChars: number) => {
 
 export const getKnowledgeContext = (input: {
   readonly userId: string
-  readonly objectId: string
+  readonly recordId: string
   readonly chunkId?: string
   readonly position?: number
   readonly before?: number
@@ -64,7 +64,7 @@ export const getKnowledgeContext = (input: {
   readonly maxChars?: number
 }) =>
   Effect.gen(function* () {
-    const objectId = yield* normalizeId(input.objectId, 'objectId')
+    const recordId = yield* normalizeId(input.recordId, 'recordId')
     const chunkId = input.chunkId === undefined ? undefined : yield* normalizeId(input.chunkId, 'chunkId')
     if (chunkId !== undefined && input.position !== undefined) {
       return yield* Effect.fail(new ValidationError({ field: 'position', message: 'Use chunkId or position, not both' }))
@@ -75,21 +75,21 @@ export const getKnowledgeContext = (input: {
     const maxChars = yield* normalizeInteger({ value: input.maxChars, defaultValue: defaultMaxChars, maxValue: maxMaxChars, minimum: 1, field: 'maxChars' })
     const db = yield* Db
 
-    const [object] = yield* db
+    const [record] = yield* db
       .select()
-      .from(schema.knowledgeObject)
+      .from(schema.knowledgeRecord)
       .where(
         and(
-          eq(schema.knowledgeObject.id, objectId),
-          eq(schema.knowledgeObject.userId, input.userId),
-          ne(schema.knowledgeObject.contextPolicy, 'archival'),
-          eq(schema.knowledgeObject.status, 'ready')
+          eq(schema.knowledgeRecord.id, recordId),
+          eq(schema.knowledgeRecord.userId, input.userId),
+          ne(schema.knowledgeRecord.contextPolicy, 'archival'),
+          eq(schema.knowledgeRecord.status, 'ready')
         )
       )
       .limit(1)
 
-    if (object === undefined) {
-      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeObject', id: objectId, message: 'Knowledge object not found' }))
+    if (record === undefined) {
+      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeRecord', id: recordId, message: 'Knowledge record not found' }))
     }
 
     const [representation] = yield* db
@@ -97,7 +97,7 @@ export const getKnowledgeContext = (input: {
       .from(schema.knowledgeRepresentation)
       .where(
         and(
-          eq(schema.knowledgeRepresentation.objectId, object.id),
+          eq(schema.knowledgeRepresentation.recordId, record.id),
           eq(schema.knowledgeRepresentation.status, 'ready')
         )
       )
@@ -105,66 +105,66 @@ export const getKnowledgeContext = (input: {
       .limit(1)
 
     if (representation === undefined) {
-      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeRepresentation', id: object.id, message: 'Knowledge representation not found' }))
+      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeRepresentation', id: record.id, message: 'Knowledge representation not found' }))
     }
 
     const [anchor] = chunkId === undefined
       ? yield* db
         .select()
-        .from(schema.knowledgeChunk)
+        .from(schema.knowledgeRepresentationChunk)
         .where(
           and(
-            eq(schema.knowledgeChunk.representationId, representation.id),
-            eq(schema.knowledgeChunk.position, input.position ?? 0)
+            eq(schema.knowledgeRepresentationChunk.representationId, representation.id),
+            eq(schema.knowledgeRepresentationChunk.position, input.position ?? 0)
           )
         )
         .limit(1)
       : yield* db
         .select()
-        .from(schema.knowledgeChunk)
+        .from(schema.knowledgeRepresentationChunk)
         .where(
           and(
-            eq(schema.knowledgeChunk.id, chunkId),
-            eq(schema.knowledgeChunk.representationId, representation.id)
+            eq(schema.knowledgeRepresentationChunk.id, chunkId),
+            eq(schema.knowledgeRepresentationChunk.representationId, representation.id)
           )
         )
         .limit(1)
 
     if (anchor === undefined) {
-      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeChunk', id: chunkId ?? String(input.position ?? 0), message: 'Knowledge chunk not found' }))
+      return yield* Effect.fail(new NotFoundError({ entity: 'knowledgeRepresentationChunk', id: chunkId ?? String(input.position ?? 0), message: 'Knowledge chunk not found' }))
     }
 
     const startPosition = Math.max(0, anchor.position - before)
     const endPosition = anchor.position + after
     const chunks = yield* db
       .select()
-      .from(schema.knowledgeChunk)
+      .from(schema.knowledgeRepresentationChunk)
       .where(
         and(
-          eq(schema.knowledgeChunk.representationId, representation.id),
-          gte(schema.knowledgeChunk.position, startPosition),
-          lte(schema.knowledgeChunk.position, endPosition)
+          eq(schema.knowledgeRepresentationChunk.representationId, representation.id),
+          gte(schema.knowledgeRepresentationChunk.position, startPosition),
+          lte(schema.knowledgeRepresentationChunk.position, endPosition)
         )
       )
-      .orderBy(asc(schema.knowledgeChunk.position))
+      .orderBy(asc(schema.knowledgeRepresentationChunk.position))
 
     const [previousChunk] = yield* db
-      .select({ id: schema.knowledgeChunk.id })
-      .from(schema.knowledgeChunk)
+      .select({ id: schema.knowledgeRepresentationChunk.id })
+      .from(schema.knowledgeRepresentationChunk)
       .where(
         and(
-          eq(schema.knowledgeChunk.representationId, representation.id),
-          eq(schema.knowledgeChunk.position, startPosition - 1)
+          eq(schema.knowledgeRepresentationChunk.representationId, representation.id),
+          eq(schema.knowledgeRepresentationChunk.position, startPosition - 1)
         )
       )
       .limit(1)
     const [nextChunk] = yield* db
-      .select({ id: schema.knowledgeChunk.id })
-      .from(schema.knowledgeChunk)
+      .select({ id: schema.knowledgeRepresentationChunk.id })
+      .from(schema.knowledgeRepresentationChunk)
       .where(
         and(
-          eq(schema.knowledgeChunk.representationId, representation.id),
-          eq(schema.knowledgeChunk.position, endPosition + 1)
+          eq(schema.knowledgeRepresentationChunk.representationId, representation.id),
+          eq(schema.knowledgeRepresentationChunk.position, endPosition + 1)
         )
       )
       .limit(1)
@@ -173,7 +173,7 @@ export const getKnowledgeContext = (input: {
     const truncated = truncateText(fullText, maxChars)
 
     return {
-      object,
+      record,
       representation,
       chunks,
       anchor,

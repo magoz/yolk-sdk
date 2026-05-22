@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { DateTime } from 'effect'
 import { buildKnowledgeContext } from '../src/context.ts'
-import type { KnowledgeObject } from '../src/objects.ts'
+import type { KnowledgeRecord } from '../src/records.ts'
 
 const now = DateTime.nowUnsafe()
 
-const object: KnowledgeObject = {
+const record: KnowledgeRecord = {
   id: 'knowledge_1',
   role: 'operating_protocol',
   title: 'Big vision',
@@ -18,8 +18,8 @@ const object: KnowledgeObject = {
 }
 
 describe('knowledge context', () => {
-  it('formats pinned objects for agent context', () => {
-    const context = buildKnowledgeContext({ items: [{ object }], maxCharacters: 1000 })
+  it('formats pinned records for agent context', () => {
+    const context = buildKnowledgeContext({ items: [{ record }], maxCharacters: 1000 })
 
     expect(context).toContain('# Pinned knowledge')
     expect(context).toContain('## Big vision')
@@ -27,7 +27,7 @@ describe('knowledge context', () => {
   })
 
   it('respects max character budget', () => {
-    const context = buildKnowledgeContext({ items: [{ object }], maxCharacters: 80 })
+    const context = buildKnowledgeContext({ items: [{ record }], maxCharacters: 80 })
 
     expect(context.length).toBeLessThanOrEqual(80)
     expect(context).toContain('[truncated: pinned knowledge exceeded context budget]')

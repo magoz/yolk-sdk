@@ -9,8 +9,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 | `@yolk-sdk/agent` | Protocol, loop, runtime, client, tool registry | `packages/agent/AGENTS.md` |
 | `@yolk-sdk/react` | Headless React hooks over agent client state | `packages/react/AGENTS.md` |
 | `@yolk-sdk/mcp` | MCP client/server/protocol package | `packages/mcp/AGENTS.md` |
-| `@yolk-sdk/rag` | Retrieval, ingestion, chunking contracts | `packages/rag/AGENTS.md` |
-| `@yolk-sdk/knowledge` | Knowledge object/artifact/context contracts | `packages/knowledge/AGENTS.md` |
+| `@yolk-sdk/knowledge` | Knowledge record/artifact/context/retrieval contracts | `packages/knowledge/AGENTS.md` |
 | `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
 | `@yolk-sdk/oauth` | Provider-neutral OAuth token contracts | `packages/oauth/AGENTS.md` |
 | `@yolk-sdk/openai` | OpenAI/Codex reusable provider mechanics | `packages/openai/AGENTS.md` |
@@ -24,9 +23,9 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 ```txt
 examples/next, cloudflare/agent, e2e -> @yolk-sdk/*
 react -> agent/client + agent/protocol
-rag -> agent/protocol + agent/tools only for agent adapter
+knowledge -> agent/protocol + agent/tools only for agent adapter
 mcp -> agent/protocol only for ToolDef/ToolResult
-agent -> no react/rag/mcp/app/Next/provider SDKs
+agent -> no knowledge/react/mcp/app/Next/provider SDKs
 provider packages -> oauth + Effect
 connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
 ```

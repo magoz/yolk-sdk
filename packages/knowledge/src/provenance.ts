@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { KnowledgeMetadataSchema, NonEmptyTrimmedString } from './objects.ts'
+import { KnowledgeMetadataSchema, NonEmptyTrimmedString } from './records.ts'
 
 export const KnowledgeProvenanceSourceKindSchema = Schema.Literals([
   'upload',
@@ -13,7 +13,7 @@ export type KnowledgeProvenanceSourceKind = Schema.Schema.Type<typeof KnowledgeP
 
 export const KnowledgeProvenanceSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  objectId: NonEmptyTrimmedString,
+  recordId: NonEmptyTrimmedString,
   artifactId: Schema.optional(NonEmptyTrimmedString),
   sourceKind: KnowledgeProvenanceSourceKindSchema,
   sourceLabel: NonEmptyTrimmedString,
