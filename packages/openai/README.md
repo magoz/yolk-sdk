@@ -10,6 +10,12 @@ pnpm add @yolk-sdk/openai@canary @yolk-sdk/oauth@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/openai` | OpenAI Codex OAuth constants, token schemas, broker helpers, and auth headers |
+
 ## Imports
 
 ```ts

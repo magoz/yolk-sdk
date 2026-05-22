@@ -10,6 +10,12 @@ pnpm add @yolk-sdk/skillset@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/skillset` | Skill markdown, command markdown, manifest, and merge APIs |
+
 ## Imports
 
 ```ts

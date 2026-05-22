@@ -23,6 +23,8 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/client` | HTTP/NDJSON transport and client state helpers |
 | `@yolk-sdk/agent/tools` | Tool module registry, `makeTool`, task/question tool contracts |
 
+## Imports
+
 ```ts
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'

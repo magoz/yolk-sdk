@@ -10,6 +10,12 @@ pnpm add @yolk-sdk/anthropic@canary @yolk-sdk/oauth@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/anthropic` | Anthropic Claude OAuth constants, auth URL helpers, broker helpers, and headers |
+
 ## Imports
 
 ```ts

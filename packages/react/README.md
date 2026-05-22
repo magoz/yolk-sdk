@@ -10,6 +10,14 @@ pnpm add @yolk-sdk/react@canary @yolk-sdk/agent@canary effect react
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/react` | Headless React chat hook, reducer, selectors, and render model |
+
+## Imports
+
 ```tsx
 import { useAgentChat, buildAgentChatItems } from '@yolk-sdk/react'
 import { Option } from 'effect'

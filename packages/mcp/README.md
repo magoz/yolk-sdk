@@ -21,6 +21,8 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/mcp/protocol` | JSON-RPC/MCP wire helpers |
 | `@yolk-sdk/mcp/server` | Tool-only MCP server primitives |
 
+## Imports
+
 ```ts
 import { listMcpTools } from '@yolk-sdk/mcp/client'
 import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'

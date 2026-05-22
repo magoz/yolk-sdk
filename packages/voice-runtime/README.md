@@ -10,6 +10,18 @@ pnpm add @yolk-sdk/voice-runtime@canary @yolk-sdk/agent@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/voice-runtime` | Voice tool request/result schemas and execution bridge |
+
+## Imports
+
+```ts
+import { executeVoiceToolCall } from '@yolk-sdk/voice-runtime'
+```
+
 ## What it provides
 
 - Normalized voice tool call request/result types.

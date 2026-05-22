@@ -10,7 +10,14 @@ pnpm add @yolk-sdk/vercel-workflows-runtime@canary @yolk-sdk/agent@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
-## Import
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/vercel-workflows-runtime` | Empty root export; reserved package entry |
+| `@yolk-sdk/vercel-workflows-runtime/workflow` | Workflow-safe agent loop orchestration APIs |
+
+## Imports
 
 The root export is intentionally empty. Import Workflow APIs from `./workflow`:
 

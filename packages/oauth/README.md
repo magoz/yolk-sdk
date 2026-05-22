@@ -10,6 +10,12 @@ pnpm add @yolk-sdk/oauth@canary effect
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
+## Subpaths
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/oauth` | Provider-neutral token, broker, credential-source, and error contracts |
+
 ## Imports
 
 ```ts

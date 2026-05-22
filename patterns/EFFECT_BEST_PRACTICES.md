@@ -744,6 +744,27 @@ const handleError = Match.type<AccountError>().pipe(
 
 ---
 
+## Config Pattern
+
+- `Config.*` values are yieldable; yield them directly inside `Effect.gen`.
+- Map config errors around the whole block, not on individual `Config` values.
+- Use `Config.redacted` for secrets.
+- Use `Config.option(...)` with `Option` helpers for optional env.
+
+```typescript
+Effect.gen(function* () {
+  const url = yield* Config.string('DATABASE_URL')
+  const apiKey = yield* Config.redacted('API_KEY')
+  const optional = yield* Config.option(Config.string('OPTIONAL_VAR'))
+
+  return { url, apiKey, optional } as const
+}).pipe(Effect.mapError(() => new ConfigError({ message: 'Config missing' })))
+```
+
+Do not pipe `Config.string('URL')` through `Effect.mapError`; `Config` is not an `Effect` subtype.
+
+---
+
 ## Service Pattern (Context.Service + Layer)
 
 ```typescript
