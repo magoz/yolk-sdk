@@ -62,7 +62,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 | Extractor | Service that loads source content into text/title/summary/metadata. |
 | Ingestion | Pipeline that extracts, chunks, embeds, stores chunks, and marks document status. |
 | Search | Query-time search over search chunks, optionally packed into context text. |
-| Hybrid search | Retrieval mode that fuses vector and text search rankings. |
+| Hybrid search | Search mode that fuses vector and text search rankings. |
 | Search scope | Caller-provided collection or collections to search. Package does not interpret tenant semantics. |
 | Search index store | Persistence contract for collections, documents, chunks, status, and search. |
 | Vector store | Lower-level vector persistence/search contract. |

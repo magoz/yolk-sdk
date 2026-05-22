@@ -1,6 +1,6 @@
 # Knowledge Core
 
-`@yolk-sdk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge records, artifacts, representations, search/search contracts, provenance, links, store contracts, and context assembly.
+`@yolk-sdk/knowledge` is the domain-free knowledge substrate package. It models agent-readable knowledge records, artifacts, representations, search contracts, provenance, links, store contracts, and context assembly.
 
 ## Role
 

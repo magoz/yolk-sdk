@@ -6,8 +6,8 @@ User-facing knowledge record management UI.
 
 - `/knowledge` is dynamic/session-gated.
 - V0 supports manual text and file knowledge records.
-- Pinned objects are injected into text agent startup context.
-- Searchable/routable objects are available through the `search_knowledge` agent tool.
+- Pinned records are injected into text agent startup context.
+- Searchable/routable records are available through the `search_knowledge` agent tool.
 - Original file artifacts can be downloaded through the authenticated artifact route.
 - Knowledge mutations use server actions in `examples/next/lib/core/knowledge/*-action.ts`.
 
