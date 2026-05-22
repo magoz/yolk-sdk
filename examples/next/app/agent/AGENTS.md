@@ -65,6 +65,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Token usage/context meter belongs in header/console chrome, driven by `UsageUpdate`, `AgentEnd`, and compaction lifecycle only.
 - Reasoning effort is disabled while text is running; transcription model is disabled while voice is connecting/live.
 - Text model picker is disabled while text is running; selected model is forwarded through `@yolk-sdk/react`/`@yolk-sdk/agent/client` to Next, Workflow, or Cloudflare runtimes.
+- Composer dropdown section headings use plain text elements; Base UI `DropdownMenuLabel` requires an explicit `DropdownMenuGroup` parent.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 

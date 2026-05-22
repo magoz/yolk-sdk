@@ -30,7 +30,6 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -467,7 +466,9 @@ export function AgentComposer({
                 <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>Model</DropdownMenuLabel>
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                  Model
+                </div>
                 <DropdownMenuRadioGroup value={textModel} onValueChange={handleTextModelChange}>
                   {agentTextModelOptions.map(option => (
                     <DropdownMenuRadioItem key={option.model} value={option.model}>
@@ -493,7 +494,9 @@ export function AgentComposer({
                 <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-44">
-                <DropdownMenuLabel>Reasoning</DropdownMenuLabel>
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                  Reasoning
+                </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuRadioGroup
                   value={reasoningEffort}
