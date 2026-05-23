@@ -43,6 +43,8 @@ type AnthropicTextBlock = {
   readonly text: string
 }
 
+type AnthropicSystemBlock = AnthropicTextBlock
+
 type AnthropicImageBlock = {
   readonly type: 'image'
   readonly source: {
@@ -81,10 +83,58 @@ type AnthropicTool = {
 
 type AnthropicRequestBody = {
   readonly model: string
-  readonly system: string
+  readonly system: ReadonlyArray<AnthropicSystemBlock>
   readonly messages: ReadonlyArray<AnthropicMessage>
   readonly max_tokens: number
   readonly tools?: ReadonlyArray<AnthropicTool>
+}
+
+const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+const anthropicClaudeToolPrefix = 'mcp_'
+
+// Claude subscription OAuth is fingerprinted against Claude Code tool names.
+const prefixClaudeToolName = (name: string) =>
+  `${anthropicClaudeToolPrefix}${name.charAt(0).toUpperCase()}${name.slice(1)}`
+
+const unprefixClaudeToolName = (name: string) => {
+  if (!name.startsWith(anthropicClaudeToolPrefix)) {
+    return name
+  }
+
+  const unprefixed = name.slice(anthropicClaudeToolPrefix.length)
+
+  return `${unprefixed.charAt(0).toLowerCase()}${unprefixed.slice(1)}`
+}
+
+const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
+  type: 'text',
+  text: anthropicClaudeSystemIdentity
+}
+
+// Keep app instructions out of `system[]`; Anthropic can reject/limit otherwise.
+const prependSystemPromptToFirstUserMessage = (
+  messages: ReadonlyArray<AnthropicMessage>,
+  systemPrompt: string
+): ReadonlyArray<AnthropicMessage> => {
+  if (systemPrompt.trim().length === 0) {
+    return messages
+  }
+
+  let relocated = false
+
+  return messages.map(message => {
+    if (relocated || message.role !== 'user') {
+      return message
+    }
+
+    relocated = true
+
+    if (typeof message.content === 'string') {
+      return { ...message, content: `${systemPrompt}\n\n${message.content}` }
+    }
+
+    return { ...message, content: [{ type: 'text', text: systemPrompt }, ...message.content] }
+  })
 }
 
 class AnthropicTextResponseBlock extends Schema.Class<AnthropicTextResponseBlock>(
@@ -197,7 +247,7 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
 const toolCallToAnthropicBlock = (call: ToolCall): AnthropicToolUseBlock => ({
   type: 'tool_use',
   id: call.id,
-  name: call.name,
+  name: prefixClaudeToolName(call.name),
   input: call.params
 })
 
@@ -229,7 +279,7 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
   })
 
 const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
-  name: tool.name,
+  name: prefixClaudeToolName(tool.name),
   description: tool.description,
   input_schema: tool.parameters
 })
@@ -238,10 +288,11 @@ export const toAnthropicClaudeRequestBody = (
   request: LLMRequest
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
-    const messages = yield* Effect.forEach(request.messages, toAnthropicMessage)
+    const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
+    const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
     const body = {
       model: request.model,
-      system: request.systemPrompt,
+      system: [anthropicClaudeIdentitySystemBlock],
       messages,
       max_tokens: 8192
     }
@@ -322,7 +373,11 @@ const toLlmEvents = (
         case 'tool_use':
           return Effect.succeed<LLMEvent>(
             LLMToolCall.make({
-              call: ToolCall.make({ id: block.id, name: block.name, params: block.input })
+              call: ToolCall.make({
+                id: block.id,
+                name: unprefixClaudeToolName(block.name),
+                params: block.input
+              })
             })
           )
       }
@@ -342,11 +397,11 @@ const sendAnthropicClaudeRequest = (
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request)
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize Anthropic Claude request')
-    const httpRequest = HttpClientRequest.post('https://api.anthropic.com/v1/messages').pipe(
+    const httpRequest = HttpClientRequest.post('https://api.anthropic.com/v1/messages?beta=true').pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${token.access}`,
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14',
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
         'user-agent': anthropicClaudeOAuthUserAgent,

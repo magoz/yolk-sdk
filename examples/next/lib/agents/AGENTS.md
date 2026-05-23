@@ -50,6 +50,7 @@ Reasoning:
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex request sets `reasoning.summary = 'auto'`; summaries are optional provider output.
 - Claude OAuth requests use Bearer auth with Claude Code headers/betas (`claude-code-20250219`, `oauth-2025-04-20`).
+- Claude OAuth request shape must mimic Claude Code: keep only Claude Code identity in `system[]`, move app prompt into first user message, rewrite tool names to PascalCase `mcp_` names on request, and unprefix response tool names. Anthropic can return misleading 429/usage errors when this fingerprint drifts.
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.
 
 ## Current Tools
@@ -152,6 +153,7 @@ MCP security:
 - Tokens stored in Better Auth `account` table with `providerId = 'anthropic-claude'`
 - Manual PKCE server actions live in `examples/next/lib/core/agent/*anthropic-claude*-action.ts`; verifier cookie name lives in non-`use server` module.
 - `getValidAnthropicClaudeToken()` refreshes expired tokens and persists the refreshed token before provider use
+- Provider request shape follows Claude Code OAuth fingerprinting: `system[]` contains only `You are Claude Code, Anthropic's official CLI for Claude.`, app/system instructions are prepended to the first user message, tools are sent as `mcp_<PascalCase>`, and model tool calls are unprefixed back to app tool names.
 
 Route status conventions:
 

@@ -86,12 +86,12 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       const requestBody = readCapturedBody(requests)
 
-      expect(requests[0]?.request.url).toBe('https://api.anthropic.com/v1/messages')
+      expect(requests[0]?.request.url).toBe('https://api.anthropic.com/v1/messages?beta=true')
       expect(requestBody).toMatchObject({
         model: 'claude-sonnet-4-6',
-        system: 'Be brief.',
-        messages: [{ role: 'user', content: 'hello' }],
-        tools: [{ name: 'weather', description: 'Get weather.', input_schema: {} }]
+        system: [{ type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+        messages: [{ role: 'user', content: 'Be brief.\n\nhello' }],
+        tools: [{ name: 'mcp_Weather', description: 'Get weather.', input_schema: {} }]
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done', 'Usage'])
     })
@@ -142,6 +142,7 @@ describe('AnthropicClaudeProviderLayer', () => {
           {
             role: 'user',
             content: [
+              { type: 'text', text: 'Be brief.' },
               { type: 'text', text: 'Describe this image' },
               {
                 type: 'image',
@@ -153,7 +154,7 @@ describe('AnthropicClaudeProviderLayer', () => {
             role: 'assistant',
             content: [
               { type: 'text', text: 'Need weather.' },
-              { type: 'tool_use', id: 'call_1', name: 'weather', input: { city: 'Paris' } }
+              { type: 'tool_use', id: 'call_1', name: 'mcp_Weather', input: { city: 'Paris' } }
             ]
           },
           {
@@ -180,7 +181,7 @@ describe('AnthropicClaudeProviderLayer', () => {
           {
             content: [
               { type: 'thinking', thinking: 'check tool' },
-              { type: 'tool_use', id: 'call_1', name: 'weather', input: { city: 'Paris' } }
+              { type: 'tool_use', id: 'call_1', name: 'mcp_Weather', input: { city: 'Paris' } }
             ],
             stop_reason: 'tool_use',
             usage: {
