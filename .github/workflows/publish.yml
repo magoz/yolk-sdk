@@ -60,5 +60,5 @@ jobs:
           NPM_CONFIG_PROVENANCE: false
         run: |
           for tarball in .release/*.tgz; do
-            npm publish "$tarball" --tag "${{ inputs.tag }}" --access public
+            npm publish "$tarball" --tag "${{ inputs.tag }}" --access public --provenance=false
           done

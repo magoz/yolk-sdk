@@ -48,7 +48,7 @@ See `packages/AGENTS.md` and `patterns/PACKAGE_DISTRIBUTION.md` for package boun
 
 No users, teams, orgs, projects, billing, or product permissions below app.
 
-Release note: GitHub Actions publishes through npm trusted publishing. Provenance is disabled while this repo is private because npm only supports GitHub Actions provenance for public source repositories. If the repo becomes public, remove `NPM_CONFIG_PROVENANCE: false` from `.github/workflows/publish.yml` to re-enable provenance attestations.
+Release note: GitHub Actions publishes through npm trusted publishing. Provenance is disabled while this repo is private because npm only supports GitHub Actions provenance for public source repositories. If the repo becomes public, remove `NPM_CONFIG_PROVENANCE: false` and `--provenance=false` from `.github/workflows/publish.yml` to re-enable provenance attestations.
 
 ## Setup
 
