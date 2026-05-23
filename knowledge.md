@@ -1,5 +1,7 @@
 # Knowledge package design
 
+Design note. Current package boundary lives in `packages/knowledge/AGENTS.md`; current app-owned adapters live under `examples/next/lib/*`.
+
 ## Motivation
 
 Agents without a filesystem still need durable, structured knowledge.
@@ -40,9 +42,9 @@ Start with package-shaped contracts and pure models, using the Yolk app as the f
 
 ```txt
 packages/knowledge/          # domain-free contracts, schemas, pure logic
-lib/services/knowledge/      # app adapters: Drizzle, R2, extraction, providers
-lib/core/knowledge/          # app use-cases/actions, auth and policy
-app/storage or app/knowledge # UI
+examples/next/lib/services/knowledge/ # app adapters: Drizzle, R2, extraction, providers
+examples/next/lib/core/knowledge/     # app use-cases/actions, auth and policy
+examples/next/app/storage or examples/next/app/knowledge # UI
 ```
 
 Package owns semantics. App owns infrastructure and policy.

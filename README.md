@@ -58,13 +58,14 @@ pnpm dev
 
 ## Agent smoke test
 
-Current agent mode is intentionally minimal:
+Current agent surfaces:
 
 - runtime chooser at `/agent`
-- text + mic voice mode in `/agent/next` and `/agent/cloudflare`
-- text web tools: `web_fetch`, `web_search`
+- text + mic voice mode in `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`
+- text tools: web fetch/search, knowledge/storage search, skill, virtual bash, optional remote MCP, optional Telegram, HITL question, task subagents
 - `/agent/next`: no durable persistence; browser sends full protocol transcript each turn
 - `/agent/cloudflare`: Worker/Durable Object WS runtime with append-log storage
+- `/agent/workflow`: Vercel Workflow durable run stream
 - streaming NDJSON token events
 - in-band `AgentError` events for stream failures
 - stop/cancel aborts active response streams
@@ -75,11 +76,12 @@ Text web tools:
 - `web_fetch`: fetches a specific public `http(s)` URL; markdown/text/html output; no cookies, JS, search, or logged-in browsing
 - `web_search`: calls Exa/Parallel MCP directly; no Yolk proxy; optional `EXA_API_KEY`, `PARALLEL_API_KEY`, `YOLK_WEBSEARCH_PROVIDER=exa|parallel`
 
-Provider/model are hardcoded for now:
+Text model defaults:
 
 ```txt
-provider: OpenAI Codex OAuth
-model: gpt-5.4
+default provider: OpenAI Codex OAuth
+default model: gpt-5.4
+available text models: gpt-5.4, claude-sonnet-4-6
 ```
 
 Optional prompt override:
@@ -88,9 +90,7 @@ Optional prompt override:
 AGENT_SYSTEM_PROMPT="You are Yolk assistant. Be concise."
 ```
 
-Connect OpenAI Codex from an agent runtime page. This uses ChatGPT Plus/Pro/Max OAuth device flow and the Codex backend, not an OpenAI API key. Ask prompts like `summarize https://example.com` or `what is magoz.com about?` to test web tools.
-
-Future: provider selection will become configurable again. The API-key OpenAI provider remains as tested scaffold, but `/api/agent` is Codex-only for now.
+Connect OpenAI Codex or Anthropic Claude from an agent runtime page. These use subscription OAuth flows, not provider API keys. Ask prompts like `summarize https://example.com` or `what is magoz.com about?` to test web tools.
 
 ## Voice mode smoke test
 
