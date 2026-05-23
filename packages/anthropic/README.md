@@ -49,8 +49,8 @@ const parsed = parseAnthropicClaudeAuthorizationCode(callbackUrl)
 
 ```ts
 const request = makeAnthropicClaudeBrokerRequest({
-  subject: 'opaque-host-subject',
-  minimumTtlMs: 60_000
+  subjectId: 'opaque-host-subject',
+  minTtlSeconds: 60
 })
 ```
 

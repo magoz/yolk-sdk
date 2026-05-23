@@ -39,6 +39,7 @@
 | `@yolk-sdk/knowledge/search` | Search interface and context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle contract |
+| `@yolk-sdk/knowledge/vector-store` | Compatibility aliases over search-store vector-facing types |
 | `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract |
 | `@yolk-sdk/knowledge/provenance` | Source/provenance metadata |
 | `@yolk-sdk/knowledge/links` | Typed links between records |

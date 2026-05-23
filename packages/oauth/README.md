@@ -33,10 +33,9 @@ import {
 ```ts
 import { credentialSourceFromBroker } from '@yolk-sdk/oauth'
 
-const source = credentialSourceFromBroker({
-  providerId: 'openai-codex',
-  subject: 'opaque-host-subject',
-  requestToken: request => brokerClient(request)
+const source = credentialSourceFromBroker(brokerClient, {
+  provider: 'openai-codex',
+  subjectId: 'opaque-host-subject'
 })
 ```
 

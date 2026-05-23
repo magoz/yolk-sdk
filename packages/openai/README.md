@@ -32,8 +32,8 @@ import {
 
 ```ts
 const request = makeOpenAiCodexBrokerRequest({
-  subject: 'opaque-host-subject',
-  minimumTtlMs: 60_000
+  subjectId: 'opaque-host-subject',
+  minTtlSeconds: 60
 })
 ```
 

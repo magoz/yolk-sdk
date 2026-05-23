@@ -24,6 +24,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/knowledge/search` | Search interface, hybrid search, context packing |
 | `@yolk-sdk/knowledge/documents` | Collection, document, chunk, and search scope schemas |
 | `@yolk-sdk/knowledge/search-store` | Collection/document/chunk/search lifecycle store |
+| `@yolk-sdk/knowledge/vector-store` | Compatibility aliases for vector search/store types |
 | `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract |
 | `@yolk-sdk/knowledge/provenance` | Source/provenance metadata |
 | `@yolk-sdk/knowledge/links` | Typed links between records |
@@ -76,7 +77,7 @@ Search APIs use canonical search naming. Removed APIs are intentionally not back
 | Hybrid search | Search mode that fuses vector and text search rankings. |
 | Search scope | Caller-provided collection or collections to search. Package does not interpret tenant semantics. |
 | Search index store | Persistence contract for collections, documents, chunks, status, and search. |
-| Vector store | Lower-level vector persistence/search contract. |
+| Vector store | Compatibility naming over search-store chunk search contracts. |
 | Knowledge store | Persistence contract for non-index knowledge records and context assembly. |
 | Artifact store | Persistence contract for artifact bytes/metadata. |
 | Host | App using the package; owns auth, DB, object storage, providers, permissions, and policy. |
