@@ -1,5 +1,13 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.1
+
+### Patch Changes
+
+- Prepare next canary release.
+- Updated dependencies
+  - @yolk-sdk/oauth@0.0.1-canary.1
+
 ## 0.0.1-canary.0
 
 ### Patch Changes
