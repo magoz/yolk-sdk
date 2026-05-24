@@ -415,6 +415,19 @@ Useful first properties:
 
 These worked because the fake provider, fake tool executor, and in-memory session store let the real loop/runtime run deterministically while external boundaries stayed controlled.
 
+## Session event model rollout
+
+Session event properties should stay mostly pure and exercise append-log helpers first.
+
+Useful invariants:
+
+- appended revisions are contiguous and monotonic
+- stored event IDs match `sessionId:revision`
+- replayed transcript messages match only input, completed, and awaiting events
+- replayed HITL responses match only appended HITL response events
+- latest incomplete run ignores completed, awaiting, failed, and interrupted runs
+- stale expected revisions fail and leave the in-memory log unchanged
+
 ## Test shape
 
 Prefer `@effect/vitest` for Effect programs. Use direct `fast-check` if command shrinkers are needed.
