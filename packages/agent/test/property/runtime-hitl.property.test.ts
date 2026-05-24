@@ -2,6 +2,8 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   HitlResponseSource,
+  type HitlResponse,
+  type HitlRequest,
   QuestionResponse,
   QuestionResponseOutcome,
   ToolCall,
@@ -17,7 +19,8 @@ import {
   makeInMemorySessionEventStoreLayer,
   runRuntime,
   SessionEventStore,
-  type RuntimeConfig
+  type RuntimeConfig,
+  type RuntimeSessionEventLog
 } from '../../src/runtime'
 import { propertyOptions } from './property-options'
 
@@ -61,6 +64,22 @@ const mixedFirstResponse = Schema.Struct({
 })
 
 const mixedFirstResponseArbitrary = Schema.toArbitrary(mixedFirstResponse)
+
+const stateMachineCommand = Schema.Struct({
+  kind: Schema.Literals([
+    'appendInput',
+    'validApproval',
+    'validQuestion',
+    'staleApproval',
+    'staleQuestion',
+    'duplicateLast'
+  ]),
+  decision: ToolApprovalDecision,
+  outcome: QuestionResponseOutcome,
+  source: HitlResponseSource
+})
+
+const stateMachineCommandsArbitrary = Schema.toArbitrary(Schema.Array(stateMachineCommand))
 
 const weatherTool = ToolDef.make({
   name: 'weather',
@@ -160,6 +179,46 @@ const makeMixedLayer = (requests: Array<LLMRequest>) =>
         },
         Reply.text('done')
       ],
+      requests
+    }),
+    TestToolExecutor.layer({ weather: '72F' }),
+    makeInMemorySessionEventStoreLayer()
+  )
+
+const mixedAwaitingResponse = {
+  events: [
+    LLMToolCall.make({
+      call: ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+    }),
+    LLMToolCall.make({
+      call: ToolCall.make({
+        id: 'call_question',
+        name: 'question',
+        params: {
+          questions: [
+            {
+              id: 'choice',
+              prompt: 'Pick one',
+              options: [{ id: 'a', label: 'A' }]
+            }
+          ]
+        }
+      })
+    }),
+    LLMDone.make({ stopReason: 'tool_use' })
+  ]
+}
+
+const stateMachineResponses = Array.from({ length: 96 }, (_, index) =>
+  index % 2 === 0 ? mixedAwaitingResponse : Reply.text(`done_${index}`)
+)
+
+const makeStateMachineLayer = (requests: Array<LLMRequest>) =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    LoopConfig.defaultLayer,
+    FauxProvider.layerWithRequests({
+      responses: stateMachineResponses,
       requests
     }),
     TestToolExecutor.layer({ weather: '72F' }),
@@ -310,6 +369,126 @@ const firstMixedResponse = (input: typeof mixedFirstResponse.Type) =>
 
 const secondMixedResponse = (input: typeof mixedFirstResponse.Type) =>
   input.first === 'approval' ? mixedQuestionResponse(input) : mixedApprovalResponse(input)
+
+const latestPendingRequests = (log: RuntimeSessionEventLog) => {
+  for (const stored of [...log.events].reverse()) {
+    const event = stored.event
+    switch (event._tag) {
+      case 'RunAwaitingInput':
+        return event.requests
+      case 'RunCompleted':
+      case 'RunFailed':
+      case 'RunInterrupted':
+        return []
+      case 'HitlResponseAppended':
+      case 'InputAppended':
+      case 'RunStarted':
+        break
+    }
+  }
+
+  return []
+}
+
+const requestMatchesResponseKind = (
+  request: HitlRequest,
+  kind: 'validApproval' | 'validQuestion'
+) =>
+  kind === 'validApproval'
+    ? request._tag === 'ToolApprovalRequest'
+    : request._tag === 'QuestionRequest'
+
+const responseMatchesPendingRequest = (response: HitlResponse, request: HitlRequest) => {
+  switch (response._tag) {
+    case 'ToolApprovalResponse':
+      return (
+        request._tag === 'ToolApprovalRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+    case 'QuestionResponse':
+      return (
+        request._tag === 'QuestionRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+  }
+}
+
+const responseForPendingRequest = (
+  request: HitlRequest,
+  command: typeof stateMachineCommand.Type
+): HitlResponse => {
+  switch (request._tag) {
+    case 'ToolApprovalRequest':
+      return ToolApprovalResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        decision: command.decision,
+        source: command.source
+      })
+    case 'QuestionRequest':
+      return QuestionResponse.make({
+        requestId: request.requestId,
+        toolCallId: request.toolCallId,
+        outcome: command.outcome,
+        source: command.source
+      })
+  }
+}
+
+const staleStateMachineResponse = (command: typeof stateMachineCommand.Type): HitlResponse => {
+  switch (command.kind) {
+    case 'staleApproval':
+      return ToolApprovalResponse.make({
+        requestId: 'approval:stale',
+        toolCallId: 'stale',
+        decision: command.decision,
+        source: command.source
+      })
+    case 'staleQuestion':
+      return QuestionResponse.make({
+        requestId: 'question:stale',
+        toolCallId: 'stale',
+        outcome: command.outcome,
+        source: command.source
+      })
+    case 'appendInput':
+    case 'validApproval':
+    case 'validQuestion':
+    case 'duplicateLast':
+      return ToolApprovalResponse.make({
+        requestId: 'approval:stale',
+        toolCallId: 'stale',
+        decision: command.decision,
+        source: command.source
+      })
+  }
+}
+
+const stateMachineResponse = (input: {
+  readonly command: typeof stateMachineCommand.Type
+  readonly pending: ReadonlyArray<HitlRequest>
+  readonly lastAccepted: HitlResponse | undefined
+}): HitlResponse | undefined => {
+  switch (input.command.kind) {
+    case 'validApproval': {
+      const request = input.pending.find(item => requestMatchesResponseKind(item, 'validApproval'))
+      return request === undefined ? undefined : responseForPendingRequest(request, input.command)
+    }
+    case 'validQuestion': {
+      const request = input.pending.find(item => requestMatchesResponseKind(item, 'validQuestion'))
+      return request === undefined ? undefined : responseForPendingRequest(request, input.command)
+    }
+    case 'staleApproval':
+    case 'staleQuestion':
+      return staleStateMachineResponse(input.command)
+    case 'duplicateLast':
+      return input.lastAccepted
+    case 'appendInput':
+      return undefined
+  }
+}
 
 describe('runtime HITL property tests', () => {
   it.effect.prop(
@@ -610,6 +789,84 @@ describe('runtime HITL property tests', () => {
         const completed = yield* store.load('session_1')
         expect(completed.events.map(event => event.event._tag)).toContain('RunCompleted')
       }).pipe(Effect.provide(makeMixedLayer(requests)))
+    },
+    propertyOptions
+  )
+
+  it.effect.prop(
+    'runtime command sequences only resume current pending HITL requests',
+    [stateMachineCommandsArbitrary],
+    ([generatedCommands]) => {
+      const requests: Array<LLMRequest> = []
+      const commands = generatedCommands.slice(0, 32)
+
+      return Effect.gen(function* () {
+        const store = yield* SessionEventStore
+        let runIndex = 1
+        let lastAccepted: HitlResponse | undefined
+
+        for (const command of commands) {
+          const before = yield* store.load('session_1').pipe(
+            Effect.catchTag('SessionNotFoundError', () =>
+              Effect.succeed<RuntimeSessionEventLog>({
+                sessionId: 'session_1',
+                revision: 0,
+                events: []
+              })
+            )
+          )
+
+          if (command.kind === 'appendInput') {
+            const result = yield* runRuntime(
+              {
+                _tag: 'AppendInput',
+                sessionId: 'session_1',
+                input: UserMessage.make({ content: `input_${runIndex}` }),
+                runId: `run_${runIndex}`,
+                expectedRevision: before.revision
+              },
+              mixedRuntimeConfig
+            ).pipe(Stream.runCollect, Effect.result)
+            const after = yield* store.load('session_1')
+
+            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(after.revision).toBeGreaterThan(before.revision)
+            expect(after.revision).toBe(after.events.length)
+            runIndex += 1
+          } else {
+            const pending = latestPendingRequests(before)
+            const response = stateMachineResponse({ command, pending, lastAccepted }) ??
+              staleStateMachineResponse(command)
+            const shouldAccept = pending.some(request =>
+              responseMatchesPendingRequest(response, request)
+            )
+
+            const result = yield* runRuntime(
+              {
+                _tag: 'AppendHitlResponse',
+                sessionId: 'session_1',
+                response,
+                runId: `run_${runIndex}`,
+                expectedRevision: before.revision
+              },
+              mixedRuntimeConfig
+            ).pipe(Stream.runCollect, Effect.result)
+            const after = yield* store.load('session_1').pipe(
+              Effect.catchTag('SessionNotFoundError', () => Effect.succeed(before))
+            )
+
+            if (shouldAccept) {
+              expect(result).toMatchObject({ _tag: 'Success' })
+              expect(after.revision).toBeGreaterThan(before.revision)
+              expect(after.revision).toBe(after.events.length)
+              lastAccepted = response
+              runIndex += 1
+            } else {
+              expectConflictNoMutation({ result, before, after })
+            }
+          }
+        }
+      }).pipe(Effect.provide(makeStateMachineLayer(requests)))
     },
     propertyOptions
   )
