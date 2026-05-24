@@ -40,6 +40,7 @@ export {
   SubagentCompleted,
   SubagentStarted,
   SubagentStatus,
+  makeSubagentRunId,
   ToolApprovalDenied,
   ToolApprovalGranted,
   ToolApprovalRequested,

@@ -2,20 +2,17 @@ import { Clock, Config, Effect, Layer, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
-  formatTaskResult,
-  makeTaskToolModule,
+  makeNonRecursiveTaskToolModule,
+  makeTaskToolResult,
   makeToolExecutorLayer,
+  subagentResultText,
+  taskSubagentRunId,
   type TaskSubagentDefinition,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
 import {
-  assistantContent,
-  contentText,
-  ToolResult,
   UserMessage,
-  type AgentEvent,
-  type AgentMessage,
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
@@ -101,15 +98,6 @@ const subagentPrompt = (input: {
     'You cannot launch further task subagents in v1. Use your normal tools when useful.'
   ].join('\n\n')
 
-const textFromMessages = (messages: ReadonlyArray<AgentMessage>) => {
-  const assistant = [...messages].reverse().find(message => message._tag === 'Assistant')
-
-  return assistant === undefined ? '' : contentText(assistantContent(assistant))
-}
-
-const agentEndMessages = (events: ReadonlyArray<AgentEvent>) =>
-  [...events].reverse().find(event => event._tag === 'AgentEnd')?.messages ?? []
-
 const toolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: 'task', message, cause })
 
@@ -118,39 +106,6 @@ const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
-
-const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
-  const text = textFromMessages(agentEndMessages(events)).trim()
-
-  return text.length === 0 ? 'Subagent completed without a final text response.' : text
-}
-
-const taskResult = (input: {
-  readonly callId: string
-  readonly output: string
-  readonly subagentType: string
-  readonly description: string
-  readonly subagentRunId: string
-  readonly startedAtMs: number
-  readonly endedAtMs: number
-  readonly model: string
-  readonly isError?: boolean
-}) =>
-  ToolResult.make({
-    toolCallId: input.callId,
-    content: formatTaskResult(input.output),
-    isError: input.isError,
-    structuredContent: {
-      subagent_run_id: input.subagentRunId,
-      subagent_type: input.subagentType,
-      description: input.description,
-      started_at_ms: input.startedAtMs,
-      ended_at_ms: input.endedAtMs,
-      duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
-      status: input.isError === true ? 'error' : 'completed',
-      model: input.model
-    }
-  })
 
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
@@ -372,12 +327,12 @@ export const makeAgentTextRuntime = (
       appendAvailableSkills(baseConfig.systemPrompt, skillset),
       pinnedKnowledge
     )
-    const taskToolModule = makeTaskToolModule<AgentToolContext>({
+    const taskToolModule = makeNonRecursiveTaskToolModule<AgentToolContext>({
       subagents: agentTextSubagents,
       execute: ({ call, context, params }) =>
         Effect.gen(function* () {
           const startedAtMs = yield* Clock.currentTimeMillis
-          const subagentRunId = `subagent:${call.id}`
+          const subagentRunId = taskSubagentRunId(call.id)
 
           return yield* Effect.gen(function* () {
             const subagentToolSet = yield* resolveAgentToolSet({
@@ -411,7 +366,7 @@ export const makeAgentTextRuntime = (
             const output = subagentResultText(Array.from(eventsChunk))
             const endedAtMs = yield* Clock.currentTimeMillis
 
-            return taskResult({
+            return makeTaskToolResult({
               callId: call.id,
               output,
               subagentType: params.subagent_type,
@@ -425,7 +380,7 @@ export const makeAgentTextRuntime = (
             Effect.catchTag('ToolError', error =>
               Clock.currentTimeMillis.pipe(
                 Effect.map(endedAtMs =>
-                  taskResult({
+                  makeTaskToolResult({
                     callId: call.id,
                     output: `Subagent failed: ${error.message}`,
                     subagentType: params.subagent_type,
@@ -442,7 +397,7 @@ export const makeAgentTextRuntime = (
             Effect.catch(error =>
               Clock.currentTimeMillis.pipe(
                 Effect.map(endedAtMs =>
-                  taskResult({
+                  makeTaskToolResult({
                     callId: call.id,
                     output: `Subagent failed: ${unknownToMessage(error)}`,
                     subagentType: params.subagent_type,

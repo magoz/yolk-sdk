@@ -8,6 +8,7 @@ import {
   CompactionStart,
   AgentModelCapabilities,
   ImagePart,
+  makeSubagentRunId,
   QuestionAnswer,
   QuestionResponse,
   ToolCall,
@@ -1066,12 +1067,16 @@ describe('run', () => {
       ])
       expect(events[1]).toMatchObject({
         parentToolCallId: 'call_task',
-        subagentRunId: 'subagent:call_task',
+        subagentRunId: makeSubagentRunId(call.id),
         subagentType: 'general',
         description: 'inspect bug',
         model: 'gpt-test'
       })
-      expect(events[3]).toMatchObject({ status: 'completed', summary: 'done' })
+      expect(events[3]).toMatchObject({
+        subagentRunId: makeSubagentRunId(call.id),
+        status: 'completed',
+        summary: 'done'
+      })
     })
   )
 

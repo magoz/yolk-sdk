@@ -3,7 +3,7 @@ import { describe, expect, it } from '@effect/vitest'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
 
-const taskToolStart = source.indexOf('const taskToolModule = makeTaskToolModule')
+const taskToolStart = source.indexOf('const taskToolModule = makeNonRecursiveTaskToolModule')
 const taskExecuteSource = source.slice(taskToolStart, source.indexOf('const toolModules', taskToolStart))
 
 describe('makeAgentTextRuntime task tool wiring', () => {
@@ -34,9 +34,9 @@ describe('makeAgentTextRuntime task tool wiring', () => {
   })
 
   it('adds task timing metadata to structured results', () => {
-    expect(source).toContain('subagent_run_id')
-    expect(source).toContain('started_at_ms')
-    expect(source).toContain('ended_at_ms')
-    expect(source).toContain('duration_ms')
+    expect(source).toContain('makeTaskToolResult')
+    expect(source).toContain('taskSubagentRunId')
+    expect(source).toContain('startedAtMs')
+    expect(source).toContain('endedAtMs')
   })
 })

@@ -30,7 +30,7 @@
 - Tool approval is host-enforced policy on normal tools, not a model-callable permission tool; v1 approvals are per-call, no persistent allow-always rules.
 - Use `EmptyToolParams` for no-arg `makeTool` tools instead of `Schema.Struct({})` when author intent is no parameters.
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
-- Protocol owns `SubagentStarted`/`SubagentCompleted` events and optional `createdAtMs`; loop emits these around `task` calls while preserving generic tool lifecycle as the source of truth.
+- Protocol owns `SubagentStarted`/`SubagentCompleted`, `makeSubagentRunId`, and optional `createdAtMs`; loop emits lifecycle events around `task` calls while preserving generic tool lifecycle as the source of truth.
 
 ## Protocol/loop rules
 

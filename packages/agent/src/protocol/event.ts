@@ -251,6 +251,8 @@ export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()('
   summary: Schema.optional(Schema.String)
 }) {}
 
+export const makeSubagentRunId = (parentToolCallId: string) => `subagent:${parentToolCallId}`
+
 export const AgentEvent = Schema.Union([
   AgentStart,
   AgentError,

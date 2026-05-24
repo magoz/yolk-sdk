@@ -16,7 +16,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 ## Text Runtime
 
 - Text route delegates provider/tool/prompt construction to `makeAgentTextResponse` / `makeAgentTextRuntime`.
-- Request body is `AgentRouteRequest`: non-empty `messages`, optional `model`, optional `reasoningEffort`.
+- Request body is `AgentRouteRequest`: `sessionId`, non-empty `messages`, optional `hitlResponses`, optional `model`, optional `reasoningEffort`.
 - Validate image count, MIME, base64, per-image size, and total payload before provider calls.
 - Return in-band protocol `AgentError` for runtime failures after stream starts.
 
@@ -31,7 +31,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - Commands require auth and render command macros as prompt text; no model/provider calls here.
 - Realtime `/call` uses `OPENAI_API_KEY` and raw SDP.
-- Realtime `/tool` uses `@yolk-sdk/voice-runtime`; current voice toolset is `web_fetch` + `web_search` + storage + optional Telegram.
+- Realtime `/tool` uses `@yolk-sdk/voice-runtime`; current voice toolset is `web_fetch` + `web_search` + knowledge + storage + optional Telegram.
 
 ## Tests
 

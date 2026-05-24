@@ -13,7 +13,7 @@ Cloudflare app for the Yolk durable agent runtime.
 - Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
 - Skillset support is bootstrap-injected: Next sends the runtime `SkillsetManifest`; `src/generated/skillset.ts` remains a smoke/unbootstrapped fallback. No filesystem reads at Worker runtime.
 - Tool modules are runtime-adapter explicit. App tool modules are runtime-portable; never import Node-only code here. Remote MCP config arrives via bootstrap, not Worker env/filesystem.
-- `src/tool-modules.ts` delegates to shared `makeTextToolModules`; `test/tool-modules.test.ts` locks Next/Cloudflare tool parity, including fake remote MCP.
+- `src/tool-modules.ts` delegates to shared `makeTextToolModules`; `test/tool-modules.test.ts` locks shared base text tool parity, including fake remote MCP.
 - Do not expand into full product infrastructure until package APIs are stable.
 
 ## Strategic Direction
@@ -90,7 +90,7 @@ Do not build these here yet unless explicitly requested:
 - Prefer typed protocol events over app-local render models.
 - Persist runtime append logs; replay protocol transcripts via `@yolk-sdk/agent/runtime` helpers.
 - Keep Cloudflare error mapping in `src/cloudflare-error.ts` and cover adapter-only mappings in `test/`.
-- Keep tool parity tests updated when adding/removing app text tools or changing MCP discovery.
+- Keep shared base tool parity tests updated when changing `makeTextToolModules` or MCP discovery.
 
 ## Smoke Script
 

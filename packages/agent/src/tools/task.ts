@@ -1,8 +1,16 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
+import {
+  assistantContent,
+  contentText,
+  makeSubagentRunId,
+  ToolResult,
+  type AgentEvent,
+  type AgentMessage,
+  type ToolCall
+} from '@yolk-sdk/agent/protocol'
+import { makeTool, type ToolModule, type ToolRegistration, type ToolRegistryError } from './registry.ts'
 
 export const taskToolName = 'task'
 
@@ -25,6 +33,10 @@ export type TaskSubagentDefinition = {
   readonly description: string
 }
 
+export type TaskSubagentContext = {
+  readonly subagent?: boolean
+}
+
 export type TaskExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
@@ -33,7 +45,20 @@ export type TaskExecutionInput<Context> = {
 
 export type TaskToolOptions<Context> = {
   readonly subagents: ReadonlyArray<TaskSubagentDefinition>
+  readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: TaskExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+}
+
+export type TaskToolResultInput = {
+  readonly callId: string
+  readonly output: string
+  readonly subagentType: string
+  readonly description: string
+  readonly subagentRunId: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+  readonly model: string
+  readonly isError?: boolean
 }
 
 const taskToolError = (message: string, cause: ToolError['cause']) =>
@@ -104,6 +129,7 @@ export const makeTaskToolRegistration = <Context>(
   description: taskToolDescription(options.subagents),
   parameters: TaskToolParams,
   access: 'read',
+  isEnabled: options.isEnabled,
   invalidParamsMessage: error => `Invalid task arguments: ${error instanceof Error ? error.message : String(error)}`,
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {
@@ -129,4 +155,46 @@ export const makeTaskToolModule = <Context>(options: TaskToolOptions<Context>): 
   tools: [makeTaskToolRegistration(options)]
 })
 
+export const makeNonRecursiveTaskToolModule = <Context extends TaskSubagentContext>(
+  options: TaskToolOptions<Context>
+): ToolModule<Context> => makeTaskToolModule({
+  ...options,
+  isEnabled: context => context.subagent === true
+    ? Effect.succeed(false)
+    : options.isEnabled === undefined
+      ? Effect.succeed(true)
+      : options.isEnabled(context)
+})
+
 export const formatTaskResult = (output: string) => ['<task_result>', output, '</task_result>'].join('\n')
+
+export const taskSubagentRunId = makeSubagentRunId
+
+const latestAssistantText = (messages: ReadonlyArray<AgentMessage>) => {
+  const assistant = [...messages].reverse().find(message => message._tag === 'Assistant')
+
+  return assistant === undefined ? '' : contentText(assistantContent(assistant))
+}
+
+export const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
+  const messages = [...events].reverse().find(event => event._tag === 'AgentEnd')?.messages ?? []
+  const text = latestAssistantText(messages).trim()
+
+  return text.length === 0 ? 'Subagent completed without a final text response.' : text
+}
+
+export const makeTaskToolResult = (input: TaskToolResultInput) => ToolResult.make({
+  toolCallId: input.callId,
+  content: formatTaskResult(input.output),
+  isError: input.isError,
+  structuredContent: {
+    subagent_run_id: input.subagentRunId,
+    subagent_type: input.subagentType,
+    description: input.description,
+    started_at_ms: input.startedAtMs,
+    ended_at_ms: input.endedAtMs,
+    duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
+    status: input.isError === true ? 'error' : 'completed',
+    model: input.model
+  }
+})

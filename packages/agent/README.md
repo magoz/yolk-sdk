@@ -14,23 +14,28 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/agent/protocol` | Wire messages, events, content, usage, tool schemas |
-| `@yolk-sdk/agent/loop` | Stateless LLM/tool loop |
-| `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers |
-| `@yolk-sdk/agent/runtime` | Transcript or append-backed runtime orchestration |
-| `@yolk-sdk/agent/client` | HTTP/NDJSON transport and client state helpers |
-| `@yolk-sdk/agent/tools` | Tool module registry, `makeTool`, task/question tool contracts |
+| Subpath                        | Purpose                                                        |
+| ------------------------------ | -------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`     | Wire messages, events, content, usage, tool schemas            |
+| `@yolk-sdk/agent/loop`         | Stateless LLM/tool loop                                        |
+| `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers                   |
+| `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
+| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport and client state helpers                 |
+| `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
 
 ## Imports
 
 ```ts
-import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { makeSubagentRunId, UserMessage } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import { initialAgentClientState } from '@yolk-sdk/agent/client'
-import { makeQuestionToolModule, makeTaskToolModule, resolveTools } from '@yolk-sdk/agent/tools'
+import {
+  makeNonRecursiveTaskToolModule,
+  makeTaskToolResult,
+  makeQuestionToolModule,
+  resolveTools
+} from '@yolk-sdk/agent/tools'
 ```
 
 Test helpers live behind their own subpath:
@@ -66,6 +71,23 @@ HITL is protocol-level, not UI-level:
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
+
+## Task subagents
+
+`task` is the package-owned contract for subagent delegation. The SDK provides schema,
+validation, non-recursive module wiring, subagent result extraction, and structured task result
+metadata. Host apps provide the actual nested runtime.
+
+Recommended setup:
+
+- expose `makeNonRecursiveTaskToolModule` only to the top-level agent
+- resolve subagent tools with `subagent: true`
+- omit `task` from subagent toolsets
+- include only tools that are safe for autonomous delegated work
+- use `makeSubagentRunId(call.id)` for protocol-aligned run ids
+- return `makeTaskToolResult(...)` so UI can show subagent id, type, status, model, and timing
+
+See `examples/next/lib/agents/workflow-runtime/text-response.ts` for host-owned execution wiring.
 
 ## Host responsibilities
 

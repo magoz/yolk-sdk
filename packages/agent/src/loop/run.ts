@@ -30,6 +30,7 @@ import {
   QuestionRequest,
   QuestionToolParams,
   formatQuestionResponseContent,
+  makeSubagentRunId,
   ToolApprovalRequest,
   ToolResultMessage,
   SubagentCompleted,
@@ -123,7 +124,7 @@ const taskCallMetadata = (call: ToolCall): TaskCallMetadata | undefined => {
   }
 
   return {
-    subagentRunId: `subagent:${call.id}`,
+    subagentRunId: makeSubagentRunId(call.id),
     subagentType,
     description
   }

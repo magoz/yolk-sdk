@@ -1,16 +1,27 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  AgentEnd,
+  AssistantAgentMessage,
+  AssistantTextPart,
+  makeSubagentRunId,
+  ToolResult
+} from '@yolk-sdk/agent/protocol'
 import {
   formatTaskResult,
+  makeNonRecursiveTaskToolModule,
+  makeTaskToolResult,
   makeTaskToolModule,
   resolveTools,
+  subagentResultText,
+  taskSubagentRunId,
   taskToolName,
   type TaskSubagentDefinition
 } from '../../src/tools'
 
 type TestContext = {
   readonly sessionId: string
+  readonly subagent?: boolean
 }
 
 const subagents: ReadonlyArray<TaskSubagentDefinition> = [
@@ -135,4 +146,86 @@ describe('task tool', () => {
       })
     })
   )
+
+  it.effect('can hide the task tool from subagents', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeNonRecursiveTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1', subagent: true }
+      )
+
+      expect(toolSet.tools).toEqual([])
+    })
+  )
+
+  it.effect('composes non-recursive gating with host gating', () =>
+    Effect.gen(function* () {
+      const taskModule = makeNonRecursiveTaskToolModule<TestContext>({
+        subagents,
+        isEnabled: context => Effect.succeed(context.sessionId === 'enabled_session'),
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+      })
+
+      const disabledTopLevelTools = yield* resolveTools([taskModule], { sessionId: 'disabled_session' })
+      const enabledTopLevelTools = yield* resolveTools([taskModule], { sessionId: 'enabled_session' })
+      const enabledSubagentTools = yield* resolveTools([taskModule], {
+        sessionId: 'enabled_session',
+        subagent: true
+      })
+
+      expect(disabledTopLevelTools.tools).toEqual([])
+      expect(enabledTopLevelTools.tools.map(tool => tool.name)).toEqual([taskToolName])
+      expect(enabledSubagentTools.tools).toEqual([])
+    })
+  )
+
+  it('formats structured task tool results', () => {
+    const result = makeTaskToolResult({
+      callId: 'call_1',
+      output: 'Found docs.',
+      subagentType: 'explore',
+      description: 'Find docs',
+      subagentRunId: taskSubagentRunId('call_1'),
+      startedAtMs: 100,
+      endedAtMs: 250,
+      model: 'test-model'
+    })
+
+    expect(result).toMatchObject({
+      toolCallId: 'call_1',
+      content: '<task_result>\nFound docs.\n</task_result>',
+      structuredContent: {
+        subagent_run_id: 'subagent:call_1',
+        subagent_type: 'explore',
+        description: 'Find docs',
+        duration_ms: 150,
+        status: 'completed',
+        model: 'test-model'
+      }
+    })
+    expect(taskSubagentRunId('call_1')).toBe(makeSubagentRunId('call_1'))
+  })
+
+  it('extracts final subagent assistant text', () => {
+    const text = subagentResultText([
+      AgentEnd.make({
+        messages: [
+          AssistantAgentMessage.make({
+            parts: [AssistantTextPart.make({ content: 'Done.' })]
+          })
+        ],
+        turns: 1,
+        usage: { input: { total: 0 }, output: { total: 0 } }
+      })
+    ])
+
+    expect(text).toBe('Done.')
+  })
 })
