@@ -24,6 +24,7 @@
     "next-canary-release",
     "quiet-owls-approve",
     "sharp-provider-docs",
-    "tidy-subagents-serve"
+    "tidy-subagents-serve",
+    "workflow-runtime-factory"
   ]
 }

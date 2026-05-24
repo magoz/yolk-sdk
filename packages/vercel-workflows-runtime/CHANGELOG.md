@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows-runtime
 
+## 0.0.1-canary.7
+
+### Patch Changes
+
+- Add package-owned workflow orchestration with HITL await-input resume support.
+
 ## 0.0.1-canary.6
 
 ## 0.0.1-canary.5
