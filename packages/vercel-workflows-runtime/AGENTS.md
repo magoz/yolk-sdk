@@ -28,7 +28,7 @@ Runtime primitives for Vercel Workflow-backed agent loops. Package stays Vercel-
 - Keep max-turn guard explicit and terminal.
 - Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.
 - `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `AwaitInputFailed`, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
-- Destructure Workflow callback config before invoking steps/hooks; otherwise Workflow may serialize function-bearing config as step `thisVal` across hook suspension.
+- Destructure callback config before invoking workflow steps/hooks; hook suspension may serialize functions otherwise.
 - Test observable runtime contract, not Vercel SDK implementation details.
 
 ## Tests
