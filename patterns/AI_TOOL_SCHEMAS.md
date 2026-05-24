@@ -15,3 +15,4 @@ Provider-facing JSON Schema conventions for agent/tool definitions.
 - Assert provider-facing `ToolDef.parameters` for object tools match `{ type: "object" }` at the root.
 - Add property coverage for schema families used by tools: empty params, empty structs, required fields, optional fields, nested structs, arrays, and literal fields.
 - Property invariants: root is always object, root `$ref` is never provider-facing, empty structs never leak `anyOf`, valid params decode before execution, and invalid params fail before execution.
+- Provider request-body tests should pass registry-derived `ToolDef`s through each adapter and assert the final provider field stays safe (`function.parameters`, Codex `parameters`, Anthropic `input_schema`).
