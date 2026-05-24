@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/oauth",
-  "version": "0.0.1-canary.4",
+  "version": "0.0.1-canary.5",
   "description": "Generic OAuth token broker and credential source contracts for Yolk hosts.",
   "license": "MIT",
   "type": "module",

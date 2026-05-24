@@ -1,5 +1,12 @@
 # @yolk-sdk/openai
 
+## 0.0.1-canary.5
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.0.1-canary.5
+- @yolk-sdk/oauth@0.0.1-canary.5
+
 ## 0.0.1-canary.4
 
 ### Patch Changes

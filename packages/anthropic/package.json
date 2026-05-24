@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/anthropic",
-  "version": "0.0.1-canary.4",
+  "version": "0.0.1-canary.5",
   "description": "Anthropic Claude OAuth and provider mechanics for Yolk hosts.",
   "license": "MIT",
   "type": "module",

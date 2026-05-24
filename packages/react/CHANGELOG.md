@@ -1,5 +1,11 @@
 # @yolk-sdk/react
 
+## 0.0.1-canary.5
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.0.1-canary.5
+
 ## 0.0.1-canary.4
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.5
+
+### Patch Changes
+
+- Stream Claude provider responses over SSE and preserve streamed text, reasoning, tool calls, and usage.
+  - @yolk-sdk/agent@0.0.1-canary.5
+  - @yolk-sdk/oauth@0.0.1-canary.5
+
 ## 0.0.1-canary.4
 
 ### Patch Changes

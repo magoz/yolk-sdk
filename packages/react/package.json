@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/react",
-  "version": "0.0.1-canary.4",
+  "version": "0.0.1-canary.5",
   "description": "Headless React hooks and chat state helpers for Yolk agents.",
   "license": "MIT",
   "type": "module",
