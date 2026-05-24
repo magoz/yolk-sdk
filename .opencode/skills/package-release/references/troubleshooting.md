@@ -46,15 +46,15 @@ pnpm tsc
 
 Only remove generated output, never source files.
 
-## Changesets publishes wrong tag
+## GitHub Action publishes wrong tag
 
 Check:
 
 - `.changeset/pre.json`
-- publish script tag (`--tag canary`)
+- workflow_dispatch input tag
 - current package versions
 
-If uncertain, stop and ask before publishing.
+If uncertain, stop and ask before rerunning publish.
 
 ## Package accidentally still private
 
@@ -69,11 +69,10 @@ Fix:
 
 Check:
 
-- `npm whoami`
-- org ownership: `npm org ls yolk-sdk`
 - package availability: `npm view @yolk-sdk/agent`
 - CI OIDC permissions: `id-token: write`
-- `NPM_CONFIG_PROVENANCE=true` if using npm CLI path
+- npm trusted publisher settings for `magoz/yolk-sdk`, workflow `publish.yml`
+- current workflow sets `NPM_CONFIG_PROVENANCE=false`; do not flip without updating npm/package support
 
 ## Release prep includes unrelated files
 
@@ -86,3 +85,13 @@ Fix:
 - Commit only release files: package versions, changelogs, lockfile, `.changeset/pre.json`, and intentional release workflow/docs changes.
 - Never commit env files or generated outputs.
 - Ask user to approve the exact commit scope.
+
+## Action says no new packages
+
+Cause: package versions already exist on npm, or `pnpm changeset:version` produced no bump.
+
+Fix:
+
+- Check pending `.changeset/*.md` before versioning.
+- Check package versions vs npm dist-tags.
+- Add/repair changeset release notes, run version prep again, validate, commit, push, rerun action.

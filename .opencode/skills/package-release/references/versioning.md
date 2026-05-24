@@ -16,10 +16,10 @@ All public packages share one version, even if only one package changed.
 
 Default release channel is canary.
 
-First intended version:
+Current release line:
 
 ```txt
-0.0.1-canary.0
+0.0.1-canary.x
 ```
 
 Canary install example:
@@ -63,17 +63,41 @@ Expected `.changeset/config.json` traits:
 - Add changesets for public API/runtime/package changes.
 - Add changesets in the feature PR that introduces the user-facing package change.
 - Do not version packages in feature PRs; release PRs consume pending changesets.
-- Include all public packages for first canary.
-- Use patch for canary bootstrap unless user requests otherwise.
+- Include all public packages for lockstep canaries when preparing a broad SDK release.
+- Use patch for canaries unless user requests otherwise.
 - Do not include private Cloudflare package.
 - Keep changeset text user-facing and concise.
+- Write release notes before `pnpm changeset:version`; generated changelogs inherit this text.
 
 ## Release PR rules
 
 - Release PRs are generated release bookkeeping only.
 - Include package version bumps, changelogs, lockfile updates, and prerelease state.
 - Exclude feature code and unrelated cleanup.
-- Publish only after the release PR merges to `main`.
+- Publish only via GitHub Actions after release prep lands on `main`.
+
+## Version prep commands
+
+Canary prerelease mode should already exist for canary releases. If missing and user wants canary:
+
+```bash
+pnpm changeset:canary:enter
+```
+
+Consume changesets and bump package manifests/changelogs:
+
+```bash
+pnpm changeset:version
+pnpm install --lockfile-only
+```
+
+Stable release requires explicit approval, then exit prerelease mode first:
+
+```bash
+pnpm changeset:canary:exit
+pnpm changeset:version
+pnpm install --lockfile-only
+```
 
 ## Channels
 

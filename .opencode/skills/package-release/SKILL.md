@@ -1,6 +1,6 @@
 ---
 name: package-release
-description: Manage Yolk package versioning and npm releases. Use for @yolk-sdk canary/stable releases, Changesets, artifact validation, and publish workflows.
+description: Manage Yolk package releases via GitHub Actions. Use for @yolk-sdk canary/stable version bumps, Changesets release notes, validation, and publish workflow prep.
 ---
 
 # Package Release
@@ -12,7 +12,7 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
 | File | Purpose |
 | --- | --- |
 | [references/versioning.md](./references/versioning.md) | SemVer, canary, Changesets rules |
-| [references/publishing.md](./references/publishing.md) | Manual and automated publish flow |
+| [references/publishing.md](./references/publishing.md) | GitHub Actions publish flow |
 | [references/troubleshooting.md](./references/troubleshooting.md) | Common release failures |
 
 ## Quick Start
@@ -20,7 +20,7 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
 1. Confirm release intent.
    - Canary: prerelease testing, default for now.
    - Stable: only after explicit user approval.
-   - Dry run: validate artifacts only.
+   - Dry run: validate artifacts only; never publish.
 
 2. Inspect release state.
    - Check `.changeset/config.json`.
@@ -28,12 +28,31 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
    - Check pending changesets in `.changeset/*.md`.
    - Check public package manifests in `packages/*/package.json`.
 
-3. Use fixed lockstep public package versioning.
+3. Ensure release notes exist.
+   - Add or update `.changeset/*.md` before versioning.
+   - Cover all public packages for lockstep release notes.
+   - Keep notes concise, user-facing, and accurate.
+
+4. Use fixed lockstep public package versioning.
    - Public scope: `@yolk-sdk/*` in `packages/*`.
    - Private app package: `@yolk-sdk/cloudflare-agent`, ignored by Changesets.
    - All public packages share one version.
 
-4. Validate before publish.
+5. Version locally; publish only in GitHub Actions.
+
+```bash
+pnpm changeset:version
+pnpm install --lockfile-only
+```
+
+6. Inspect generated release files.
+   - Package `package.json` versions.
+   - Package `CHANGELOG.md` release notes.
+   - `pnpm-lock.yaml` when changed.
+   - `.changeset/pre.json` and removed consumed changesets.
+   - No feature code, env files, `dist`, `.next`, `.turbo`, coverage.
+
+7. Validate before push/action.
 
 ```bash
 pnpm packages:build
@@ -46,21 +65,21 @@ pnpm lint
 pnpm test:run
 ```
 
-5. Do not publish if any validation fails.
+8. Do not proceed if validation fails.
    - Fix package manifests, exports, deps, or tests first.
    - Re-run full validation.
 
-6. Publish only after explicit user approval.
-   - Publishing is irreversible.
-   - Never publish secrets or private packages.
-   - Never publish from dirty or unclear working tree without confirming scope.
-
-7. After successful release prep, offer a commit/push plan.
+9. Commit and push release prep only after explicit approval.
    - Inspect `git status` and changed files.
    - List exact files intended for commit.
-   - Propose concise commit message.
+   - Propose concise commit message, e.g. `prepare canary release`.
    - Do not commit or push without explicit user approval.
-   - Never include env files, generated `dist`, `.next`, `.turbo`, coverage, or unclear local changes.
+
+10. Publish by GitHub Actions only.
+    - Tell user to run Actions → `Publish packages` from `main`.
+    - Use `canary` unless stable was explicitly approved.
+    - Never run local `pnpm release:canary` for normal releases.
+    - After action completes, verify npm dist-tags.
 
 ## PR Workflow
 
@@ -68,7 +87,7 @@ pnpm test:run
 - Changeset notes are release memory; add them when the user-facing package change happens.
 - Release PRs contain only generated release files: package versions, changelogs, lockfile, and prerelease state.
 - Do not mix feature code into release PRs.
-- Publish only after the release PR lands on `main`.
+- Publish only with `.github/workflows/publish.yml` after release prep lands on `main`.
 - After release prep passes, propose commit/push but wait for explicit approval.
 
 Typical flow:
@@ -79,7 +98,7 @@ pnpm changeset
 
 # release branch from main
 pnpm changeset:version
-pnpm install
+pnpm install --lockfile-only
 ```
 
 ## Common Commands
@@ -96,13 +115,7 @@ Version packages:
 pnpm changeset:version
 ```
 
-Publish canary:
-
-```bash
-pnpm release:canary
-```
-
-Trusted publish from GitHub:
+Publish from GitHub:
 
 - Push release PR to `main`.
 - Run Actions → `Publish packages`.
@@ -118,9 +131,9 @@ pnpm changeset:canary:exit
 
 Yolk should mirror Effect + MCP SDK:
 
-- Changesets release PR on `main`.
-- Build and validate before publish.
-- npm provenance/trusted publishing where available.
+- Agent prepares and validates release files locally.
+- Human triggers GitHub Actions publish from `main`.
+- GitHub Actions builds, validates, packs, and publishes tarballs.
 - Optional snapshot workflow later, inspired by AI SDK.
 
 ## Guardrails
@@ -131,6 +144,8 @@ Yolk should mirror Effect + MCP SDK:
 - Keep local source exports; `publishConfig.exports` points to `dist`.
 - Public `packages/*` manifests are publishable; private apps stay private.
 - Run required checks before finishing any release-prep change.
+- Do not publish from local machine during normal flow.
+- Remind user to restart opencode after editing this skill.
 
 ## Reading Order
 

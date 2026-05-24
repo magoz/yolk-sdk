@@ -1,20 +1,21 @@
 # Publishing
 
-## PR workflow
+## GitHub Actions first workflow
 
 Feature PRs:
 
 - Include code/docs/package changes.
 - Add `.changeset/*.md` when public package behavior, API, runtime deps, exports, or release-facing docs change.
 - Do not run `pnpm changeset:version` in feature PRs.
+- Release notes live in changesets. Make them user-facing, concise, and specific.
 
 Release PRs:
 
 - Start from `main` after feature PRs merge.
-- Run `pnpm changeset:version` and `pnpm install`.
-- Include only generated release files: package versions, changelogs, lockfile, and `.changeset/pre.json` changes.
+- Run `pnpm changeset:version` and `pnpm install --lockfile-only`.
+- Include only generated release files: package versions, changelogs, lockfile, consumed changesets, and `.changeset/pre.json` changes.
 - No feature code.
-- Merge to `main`, then publish from `main` with trusted publishing.
+- Merge/push to `main`, then user manually runs `.github/workflows/publish.yml`.
 
 After successful release prep:
 
@@ -26,42 +27,13 @@ After successful release prep:
 
 Release PR content should be mechanically reviewable: “these changesets became these versions/changelogs”.
 
-## Manual canary flow
+## Agent release-prep flow
 
-Use this for first canary or local release prep.
+Use this for canary/stable prep. This does not publish.
 
 ```bash
-pnpm changeset:canary:enter
 pnpm changeset:version
-pnpm install
-pnpm packages:build
-pnpm packages:publint
-pnpm packages:smoke
-pnpm packages:check
-pnpm cloudflare:check
-pnpm tsc
-pnpm lint
-pnpm test:run
-pnpm release:canary
-```
-
-Only run `pnpm release:canary` after explicit user approval.
-
-## Actual npm push steps
-
-1. Enter canary mode and version:
-
-```bash
-pnpm changeset:canary:enter
-pnpm changeset:version
-pnpm install
-```
-
-2. Verify public packages are publishable and private apps stay private, especially `@yolk-sdk/cloudflare-agent`.
-
-3. Validate:
-
-```bash
+pnpm install --lockfile-only
 pnpm packages:build
 pnpm packages:publint
 pnpm packages:smoke
@@ -72,26 +44,63 @@ pnpm lint
 pnpm test:run
 ```
 
-4. Publish:
+Then inspect, commit, push after explicit approval.
+
+## GitHub Actions publish steps
+
+1. Ensure release prep is on `main`.
+
+2. User opens GitHub → Actions → `Publish packages` → Run workflow.
+
+3. Select dist-tag:
+   - `canary`: default prerelease.
+   - `latest`: stable only after explicit approval.
+
+4. Workflow runs:
 
 ```bash
-pnpm release:canary
+pnpm packages:build
+pnpm packages:publint
+pnpm packages:smoke
+pnpm packages:check
+pnpm cloudflare:check
+pnpm tsc
+pnpm lint
+pnpm test:run
+pnpm -r --filter './packages/*' pack --pack-destination .release
+npm publish .release/*.tgz --tag <tag> --access public
 ```
 
-5. Verify:
+5. Verify locally after action completes:
 
 ```bash
-npm view @yolk-sdk/agent version
 npm view @yolk-sdk/agent dist-tags
+npm view @yolk-sdk/connectors dist-tags
+```
+
+Or check every public package:
+
+```bash
+node - <<'NODE'
+const { execFileSync } = require('node:child_process')
+const fs = require('node:fs')
+for (const d of fs.readdirSync('packages')) {
+  const p = `packages/${d}/package.json`
+  if (!fs.existsSync(p)) continue
+  const pkg = JSON.parse(fs.readFileSync(p, 'utf8'))
+  if (!pkg.name?.startsWith('@yolk-sdk/') || pkg.private) continue
+  const tags = execFileSync('npm', ['view', pkg.name, 'dist-tags', '--json'], { encoding: 'utf8' })
+  console.log(pkg.name, tags.trim())
+}
+NODE
 ```
 
 Preconditions:
 
-- `npm whoami` returns `magoz`.
-- `npm org ls yolk-sdk` shows `magoz` as owner.
-- publish target tag is `canary`.
+- release prep commit is on `main`.
+- publish target tag is `canary` unless stable approved.
 - all public versions are lockstep.
-- working tree state is understood.
+- working tree state was clean before release prep.
 
 ## Public package gates
 
@@ -101,7 +110,6 @@ Before publish:
 - versions are lockstep
 - public `packages/*` are publishable; private apps stay private
 - `publishConfig.access` is `public`
-- `publishConfig.provenance` is `true`
 - `files` includes `dist`, `src`, README, license as intended
 - `publishConfig.exports` points to `dist`
 - all runtime deps declared in package manifests
@@ -114,7 +122,7 @@ Before publish:
 
 If either fails, fix package exports/deps before publishing.
 
-## Trusted publishing
+## Workflow notes
 
 Use `.github/workflows/publish.yml` for npm trusted publishing.
 
@@ -126,15 +134,17 @@ Configure each npm package trusted publisher:
 - Workflow filename: `publish.yml`
 - Allowed action: `npm publish`
 
-Workflow policy:
+Current workflow policy:
 
 - Manual `workflow_dispatch` only.
-- Uses `id-token: write` and npm OIDC auth.
+- Uses `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
 - Installs/builds/tests with `pnpm`.
 - Packs package artifacts with `pnpm pack`.
 - Publishes tarballs with npm CLI, because npm trusted publishing is the supported OIDC path.
 
-## CI automation model
+Do not run local publish in normal flow. Local `pnpm release:canary` is emergency-only and requires explicit user approval.
+
+## Future automation model
 
 Recommended later workflow:
 
@@ -152,7 +162,7 @@ Reference patterns:
 
 ## Post-publish checks
 
-After publish:
+After GitHub Action publish:
 
 ```bash
 npm view @yolk-sdk/agent version
