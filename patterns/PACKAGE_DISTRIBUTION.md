@@ -1,6 +1,6 @@
 # Package Distribution
 
-Plan for publishing `packages/*` as public npm packages under the `@yolk-sdk/*` scope.
+Distribution policy for `packages/*` public npm packages under the `@yolk-sdk/*` scope.
 
 ## Reference Model
 
@@ -29,7 +29,7 @@ Yolk packages should release in lockstep.
 
 Use canary releases for initial public distribution. Canary communicates fast-moving APIs and matches the AI SDK prerelease style. Reserve `alpha`/`beta` for curated stability milestones if needed later.
 
-The first public canary should be `0.0.1-canary.0`.
+The first public canary was `0.0.1-canary.0`. Future canaries continue lockstep prerelease versions.
 
 Current Changesets config:
 
@@ -128,9 +128,9 @@ Host-owned singletons to revisit before stable releases:
 
 Current exception: `@yolk-sdk/react` keeps `react` as a peer now. Keep platform-specific deps behind explicit subpaths.
 
-## First Canary Package Set
+## Public Package Set
 
-Publish all packages in the first public canary:
+Publish all public packages together:
 
 - `@yolk-sdk/agent`
 - `@yolk-sdk/react`

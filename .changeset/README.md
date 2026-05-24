@@ -24,6 +24,6 @@ Canary release prep:
     - `npm view @yolk-sdk/agent dist-tags`
     - `git tag --list 'v*' --sort=-v:refname | head -n 1`
 
-First canary version should be `0.0.1-canary.0`.
+Canary versions stay lockstep across every public `@yolk-sdk/*` package.
 
 Use `/package-release` after restarting opencode for guided release steps.

@@ -12,4 +12,4 @@
 "@yolk-sdk/voice-runtime": patch
 ---
 
-Prepare first public canary release.
+Prepare canary release.
