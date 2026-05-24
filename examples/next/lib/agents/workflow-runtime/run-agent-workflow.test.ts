@@ -24,10 +24,10 @@ describe('runAgentWorkflow', () => {
     expect(workflowFunctionSource).toContain('writeWorkflowErrorStep')
   })
 
-  it('does not pass step functions through serializable workflow args', () => {
-    expect(workflowFunctionSource).not.toContain('runVercelAgentWorkflow')
-    expect(workflowFunctionSource).not.toContain('writeError:')
-    expect(workflowFunctionSource).not.toContain('runModelStep:')
-    expect(workflowFunctionSource).not.toContain('runToolBatchStep:')
+  it('uses package workflow orchestration with local step callbacks', () => {
+    expect(workflowFunctionSource).toContain('runVercelAgentWorkflow')
+    expect(workflowFunctionSource).toContain('runModelStep: runAgentWorkflowModelStep')
+    expect(workflowFunctionSource).toContain('runToolBatchStep: runAgentWorkflowToolBatchStep')
+    expect(workflowFunctionSource).toContain('awaitInput:')
   })
 })

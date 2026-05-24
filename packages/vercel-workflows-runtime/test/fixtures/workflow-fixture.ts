@@ -1,5 +1,9 @@
-import { getWritable, sleep } from 'workflow'
-import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows-runtime/workflow'
+import { createHook, getWritable, sleep } from 'workflow'
+import {
+  runVercelAgentWorkflow,
+  type VercelAgentWorkflowRunResult,
+  type VercelAgentWorkflowToolBatchStepInput
+} from '@yolk-sdk/vercel-workflows-runtime/workflow'
 
 type FixtureInput = {
   readonly request: unknown
@@ -19,6 +23,26 @@ export async function packageOwnedDirectiveWorkflow(input: FixtureInput): Promis
   })
 
   return 'workflow-complete'
+}
+
+export async function packageHitlDirectiveWorkflow(
+  input: FixtureInput
+): Promise<VercelAgentWorkflowRunResult> {
+  'use workflow'
+
+  return await runVercelAgentWorkflow({
+    input,
+    maxTurns: 4,
+    runModelStep: packageHitlModelStep,
+    runToolBatchStep: packageHitlToolBatchStep,
+    awaitInput: async awaitingInput => {
+      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+
+      return await hook
+    },
+    closeStream: packageCloseStep,
+    writeError: packageErrorStep
+  })
 }
 
 export async function packageStreamWorkflow(): Promise<string> {
@@ -85,6 +109,70 @@ async function packageToolBatchStep(input: {
   return {
     messages,
     createdMessages: [...input.createdMessages, ...messages]
+  }
+}
+
+async function packageHitlModelStep(input: {
+  readonly state: {
+    readonly request: unknown
+    readonly messages?: ReadonlyArray<unknown>
+    readonly createdMessages: ReadonlyArray<unknown>
+    readonly turn: number
+  }
+}) {
+  'use step'
+
+  const baseMessages = input.state.messages ?? [input.state.request]
+  const assistantMessage = `assistant-${input.state.turn}`
+
+  if (input.state.turn === 1) {
+    return {
+      done: false,
+      messages: [...baseMessages, assistantMessage],
+      createdMessages: [...input.state.createdMessages, assistantMessage],
+      toolCalls: ['approval-tool'],
+      usage: { turns: input.state.turn },
+      turn: input.state.turn
+    }
+  }
+
+  return {
+    done: true,
+    messages: [...baseMessages, assistantMessage],
+    createdMessages: [...input.state.createdMessages, assistantMessage],
+    toolCalls: [],
+    usage: { turns: input.state.turn },
+    turn: input.state.turn
+  }
+}
+
+async function packageHitlToolBatchStep(input: VercelAgentWorkflowToolBatchStepInput) {
+  'use step'
+
+  const response = input.hitlResponses?.[0]
+
+  if (response !== 'approved') {
+    return {
+      messages: [],
+      createdMessages: input.createdMessages,
+      awaitingInput: {
+        hookToken: 'package-hitl-hook',
+        requests: ['approval-request'],
+        messages: input.createdMessages,
+        usage: input.usage,
+        turns: input.turn ?? 0,
+        eventSequence: 7
+      },
+      eventSequence: 5
+    }
+  }
+
+  const messages = [`result-${String(input.calls[0])}-${String(response)}`]
+
+  return {
+    messages,
+    createdMessages: [...input.createdMessages, ...messages],
+    eventSequence: 9
   }
 }
 

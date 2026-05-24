@@ -84,6 +84,8 @@ describe('runVercelAgentWorkflow', () => {
         request: 'request-1',
         calls: ['tool-1-a', 'tool-1-b'],
         createdMessages: ['assistant-1'],
+        hitlResponses: [],
+        usage: { turns: 1 },
         turn: 1,
         eventSequence: 0
       }
@@ -123,6 +125,69 @@ describe('runVercelAgentWorkflow', () => {
     expect(result._tag).toBe('Completed')
     expect(toolInputs[0]?.eventSequence).toBe(3)
     expect(modelStates[1]?.eventSequence).toBe(5)
+  })
+
+  it('waits for HITL input and reruns tool batch with responses', async () => {
+    const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
+    const awaitedInputs: Array<unknown> = []
+    const awaitingInput = {
+      hookToken: 'hook-1',
+      requests: ['request-approval'],
+      messages: ['assistant-1'],
+      usage: { turns: 1 },
+      turns: 1,
+      eventSequence: 7
+    }
+
+    const result = await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: async input =>
+        input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input),
+      runToolBatchStep: async input => {
+        toolInputs.push(input)
+
+        return input.hitlResponses?.[0] === 'approved'
+          ? { ...toolBatchResult(input), eventSequence: 9 }
+          : { ...toolBatchResult(input), awaitingInput, eventSequence: 5 }
+      },
+      awaitInput: async input => {
+        awaitedInputs.push(input)
+
+        return 'approved'
+      },
+      closeStream: async () => undefined,
+      writeError: async () => undefined
+    })
+
+    expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
+    expect(awaitedInputs).toEqual([awaitingInput])
+    expect(toolInputs.map(input => input.hitlResponses)).toEqual([[], ['approved']])
+    expect(toolInputs.map(input => input.eventSequence)).toEqual([0, 7])
+  })
+
+  it('fails when awaiting input without handler', async () => {
+    const errors: Array<unknown> = []
+    const awaitingInput = {
+      hookToken: 'hook-1',
+      requests: ['request-approval'],
+      messages: ['assistant-1'],
+      usage: { turns: 1 },
+      turns: 1
+    }
+
+    const result = await runVercelAgentWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: async input => toolModelResult(input),
+      runToolBatchStep: async input => ({ ...toolBatchResult(input), awaitingInput }),
+      closeStream: async () => undefined,
+      writeError: async value => {
+        errors.push(value)
+      }
+    })
+
+    expect(result).toMatchObject({ _tag: 'AwaitInputFailed', turn: 1, awaitingInput })
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toContain('no awaitInput handler')
   })
 
   it('writes model step errors and stops', async () => {

@@ -2,7 +2,7 @@ import { createHook, getWritable } from 'workflow'
 import { Data, Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
-  defaultMaxWorkflowTurns,
+  runVercelAgentWorkflow,
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepResult
@@ -419,85 +419,16 @@ const decodeWorkflowUserId = (context: unknown) =>
 export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
-  let state: SerializableWorkflowState = {
-    request: input.request,
-    createdMessages: [],
-    turn: 1,
-    eventSequence: 0
-  }
+  await runVercelAgentWorkflow({
+    input: { request: input.request, context: input.userId },
+    runModelStep: runAgentWorkflowModelStep,
+    runToolBatchStep: runAgentWorkflowToolBatchStep,
+    closeStream: closeAgentWorkflowStream,
+    writeError: writeWorkflowErrorStep,
+    awaitInput: async awaitingInput => {
+      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
 
-  for (let step = 0; step < defaultMaxWorkflowTurns; step++) {
-    let modelResult: VercelAgentWorkflowModelStepResult
-
-    try {
-      modelResult = await runAgentWorkflowModelStep({ context: input.userId, state })
-    } catch (error) {
-      await writeWorkflowErrorStep(error)
-      return
+      return await hook
     }
-
-    if (modelResult.done) {
-      try {
-        await closeAgentWorkflowStream()
-      } catch (error) {
-        await writeWorkflowErrorStep(error)
-      }
-      return
-    }
-
-    let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
-    let toolHitlResponses: ReadonlyArray<unknown> = []
-    let toolEventSequence = modelResult.eventSequence ?? state.eventSequence
-
-    for (;;) {
-      let toolsResult: VercelAgentWorkflowToolBatchStepResult
-
-      try {
-        toolsResult = await runAgentWorkflowToolBatchStep({
-          context: input.userId,
-          request: input.request,
-          calls: modelResult.toolCalls,
-          createdMessages: modelResult.createdMessages,
-          hitlResponses: toolHitlResponses,
-          usage: modelResult.usage,
-          turn: modelResult.turn,
-          eventSequence: toolEventSequence
-        })
-      } catch (error) {
-        await writeWorkflowErrorStep(error)
-        return
-      }
-
-      if (toolsResult.awaitingInput === undefined) {
-        completedToolsResult = toolsResult
-        break
-      }
-
-      toolEventSequence =
-        toolsResult.awaitingInput.eventSequence ?? toolsResult.eventSequence ?? toolEventSequence
-
-      let hitlResponse: unknown
-      {
-        using hook = createHook<unknown>({ token: toolsResult.awaitingInput.hookToken })
-        hitlResponse = await hook
-      }
-      toolHitlResponses = [...toolHitlResponses, hitlResponse]
-    }
-
-    if (completedToolsResult === undefined) {
-      await writeWorkflowErrorStep(new Error('Workflow tool batch did not complete'))
-      return
-    }
-
-    state = {
-      request: input.request,
-      messages: [...modelResult.messages, ...completedToolsResult.messages],
-      createdMessages: completedToolsResult.createdMessages,
-      usage: modelResult.usage,
-      turn: modelResult.turn + 1,
-      eventSequence: completedToolsResult.eventSequence ?? toolEventSequence
-    }
-  }
-
-  await writeWorkflowErrorStep(new Error(`Vercel agent workflow exceeded max turns: ${defaultMaxWorkflowTurns}`))
+  })
 }

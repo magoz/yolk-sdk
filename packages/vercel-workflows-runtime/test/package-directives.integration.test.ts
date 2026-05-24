@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { getRun, start } from 'workflow/api'
+import { getRun, resumeHook, start } from 'workflow/api'
 import { WorkflowRunCancelledError } from 'workflow/errors'
-import { waitForSleep } from '@workflow/vitest'
+import { waitForHook, waitForSleep } from '@workflow/vitest'
 import {
   packageCancellableWorkflow,
+  packageHitlDirectiveWorkflow,
   packageOwnedDirectiveWorkflow,
   packageStreamWorkflow
 } from './fixtures/workflow-fixture.ts'
@@ -47,6 +48,24 @@ describe('package-owned workflow directives', () => {
     await expect(collectReadable(getRun(run.runId).getReadable<string>({ startIndex: 1 }))).resolves.toEqual([
       'second'
     ])
+  })
+
+  it('waits on package awaitInput hooks and resumes tool batch', async () => {
+    const run = await start(packageHitlDirectiveWorkflow, [
+      { request: 'request-1', context: 'context-1' }
+    ])
+    const hook = await waitForHook(run, { token: 'package-hitl-hook' })
+
+    await resumeHook(hook.token, 'approved')
+
+    await expect(run.returnValue).resolves.toMatchObject({
+      _tag: 'Completed',
+      state: {
+        messages: ['request-1', 'assistant-1', 'result-approval-tool-approved'],
+        eventSequence: 9
+      }
+    })
+    await expect(run.status).resolves.toBe('completed')
   })
 
   it('cancels package-owned workflow runs', async () => {
