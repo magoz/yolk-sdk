@@ -348,6 +348,9 @@ Useful invariants:
 - reconnect interruption appends `RunInterrupted` only for the latest incomplete run
 - durable revisions remain equal to event count after every generated operation
 - durable log snapshots equal the pure package model after every step
+- direct WebSocket input/HITL paths reject active-run conflicts without mutation
+- stale WebSocket `expectedRevision` values fail with conflict and leave durable state unchanged
+- duplicate or mismatched HITL responses never resume a terminal or unrelated request
 
 ### 3. Agent session/message/event model
 
