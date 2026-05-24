@@ -9,7 +9,7 @@ import type { ConnectorIntegration } from '../integration.ts'
 
 export const todoistConnectorId = 'todoist'
 export const todoistApiTokenSlotId = 'todoist.api_token'
-export const todoistApiBaseUrl = 'https://api.todoist.com/rest/v2'
+export const todoistApiBaseUrl = 'https://api.todoist.com/api/v1'
 
 export const TodoistApiTokenSlot = CredentialSlot.make({
   id: todoistApiTokenSlotId,
@@ -56,46 +56,174 @@ export class TodoistTask extends Schema.Class<TodoistTask>('TodoistTask')({
   content: Schema.String,
   description: Schema.optional(Schema.String),
   projectId: Schema.optional(Schema.String),
+  project_id: Schema.optional(Schema.String),
   sectionId: Schema.optional(Schema.String),
+  section_id: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.String),
+  parent_id: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
   priority: Schema.optional(Schema.Number),
   due: Schema.optional(Schema.Unknown),
   url: Schema.optional(Schema.String)
 }) {}
 
-export class TodoistListTasksInput extends Schema.Class<TodoistListTasksInput>('TodoistListTasksInput')({
+export class TodoistListTasksInput extends Schema.Class<TodoistListTasksInput>(
+  'TodoistListTasksInput'
+)({
   projectId: Schema.optional(Schema.String),
+  project_id: Schema.optional(Schema.String),
   sectionId: Schema.optional(Schema.String),
+  section_id: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.String),
+  parent_id: Schema.optional(Schema.String),
   label: Schema.optional(Schema.String),
-  filter: Schema.optional(Schema.String)
+  ids: Schema.optional(Schema.String),
+  filter: Schema.optional(Schema.String),
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.Number)
 }) {}
 
-export class TodoistListTasksOutput extends Schema.Class<TodoistListTasksOutput>('TodoistListTasksOutput')({
+export class TodoistListTasksOutput extends Schema.Class<TodoistListTasksOutput>(
+  'TodoistListTasksOutput'
+)({
   tasks: Schema.Array(TodoistTask)
 }) {}
 
-export class TodoistCreateTaskInput extends Schema.Class<TodoistCreateTaskInput>('TodoistCreateTaskInput')({
+export class TodoistCreateTaskInput extends Schema.Class<TodoistCreateTaskInput>(
+  'TodoistCreateTaskInput'
+)({
   content: Schema.String,
   description: Schema.optional(Schema.String),
   projectId: Schema.optional(Schema.String),
+  project_id: Schema.optional(Schema.String),
   sectionId: Schema.optional(Schema.String),
+  section_id: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.String),
+  parent_id: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
   priority: Schema.optional(Schema.Number),
   dueString: Schema.optional(Schema.String),
+  due_string: Schema.optional(Schema.String),
   dueDate: Schema.optional(Schema.String),
-  dueDatetime: Schema.optional(Schema.String)
+  due_date: Schema.optional(Schema.String),
+  dueDatetime: Schema.optional(Schema.String),
+  due_datetime: Schema.optional(Schema.String),
+  dueLang: Schema.optional(Schema.String),
+  due_lang: Schema.optional(Schema.String),
+  assigneeId: Schema.optional(Schema.String),
+  assignee_id: Schema.optional(Schema.String),
+  duration: Schema.optional(Schema.Number),
+  durationUnit: Schema.optional(Schema.String),
+  duration_unit: Schema.optional(Schema.String),
+  deadlineDate: Schema.optional(Schema.String),
+  deadline_date: Schema.optional(Schema.String)
 }) {}
 
-export class TodoistCloseTaskInput extends Schema.Class<TodoistCloseTaskInput>('TodoistCloseTaskInput')({
-  id: Schema.String
+export class TodoistCloseTaskInput extends Schema.Class<TodoistCloseTaskInput>(
+  'TodoistCloseTaskInput'
+)({
+  id: Schema.String,
+  taskId: Schema.optional(Schema.String),
+  task_id: Schema.optional(Schema.String)
 }) {}
 
-export class TodoistCloseTaskOutput extends Schema.Class<TodoistCloseTaskOutput>('TodoistCloseTaskOutput')({
+export class TodoistCloseTaskOutput extends Schema.Class<TodoistCloseTaskOutput>(
+  'TodoistCloseTaskOutput'
+)({
   id: Schema.String,
   closed: Schema.Boolean
+}) {}
+
+export class TodoistPaginationInput extends Schema.Class<TodoistPaginationInput>(
+  'TodoistPaginationInput'
+)({
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.Number)
+}) {}
+
+export class TodoistProject extends Schema.Class<TodoistProject>('TodoistProject')({
+  id: Schema.String,
+  name: Schema.String,
+  commentCount: Schema.optional(Schema.Number),
+  order: Schema.optional(Schema.Number),
+  color: Schema.optional(Schema.String),
+  isShared: Schema.optional(Schema.Boolean),
+  isFavorite: Schema.optional(Schema.Boolean),
+  url: Schema.optional(Schema.String)
+}) {}
+
+export class TodoistLabel extends Schema.Class<TodoistLabel>('TodoistLabel')({
+  id: Schema.String,
+  name: Schema.String,
+  color: Schema.optional(Schema.String),
+  order: Schema.optional(Schema.Number),
+  isFavorite: Schema.optional(Schema.Boolean)
+}) {}
+
+export class TodoistProjectIdInput extends Schema.Class<TodoistProjectIdInput>(
+  'TodoistProjectIdInput'
+)({
+  projectId: Schema.String,
+  project_id: Schema.optional(Schema.String)
+}) {}
+
+export class TodoistTaskIdInput extends Schema.Class<TodoistTaskIdInput>('TodoistTaskIdInput')({
+  taskId: Schema.String,
+  task_id: Schema.optional(Schema.String)
+}) {}
+
+export class TodoistCreateProjectInput extends Schema.Class<TodoistCreateProjectInput>(
+  'TodoistCreateProjectInput'
+)({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  parentId: Schema.optional(Schema.String),
+  parent_id: Schema.optional(Schema.String),
+  color: Schema.optional(Schema.String),
+  isFavorite: Schema.optional(Schema.Boolean),
+  is_favorite: Schema.optional(Schema.Boolean),
+  viewStyle: Schema.optional(Schema.String),
+  view_style: Schema.optional(Schema.String)
+}) {}
+
+export class TodoistUpdateProjectInput extends Schema.Class<TodoistUpdateProjectInput>(
+  'TodoistUpdateProjectInput'
+)({
+  projectId: Schema.String,
+  project_id: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  color: Schema.optional(Schema.String),
+  isFavorite: Schema.optional(Schema.Boolean),
+  is_favorite: Schema.optional(Schema.Boolean),
+  viewStyle: Schema.optional(Schema.String),
+  view_style: Schema.optional(Schema.String)
+}) {}
+
+export class TodoistUpdateTaskInput extends Schema.Class<TodoistUpdateTaskInput>(
+  'TodoistUpdateTaskInput'
+)({
+  taskId: Schema.String,
+  task_id: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Array(Schema.String)),
+  priority: Schema.optional(Schema.Number),
+  dueString: Schema.optional(Schema.String),
+  due_string: Schema.optional(Schema.String),
+  dueDate: Schema.optional(Schema.String),
+  due_date: Schema.optional(Schema.String),
+  dueDatetime: Schema.optional(Schema.String),
+  due_datetime: Schema.optional(Schema.String),
+  dueLang: Schema.optional(Schema.String),
+  due_lang: Schema.optional(Schema.String),
+  assigneeId: Schema.optional(Schema.String),
+  assignee_id: Schema.optional(Schema.String),
+  duration: Schema.optional(Schema.Number),
+  durationUnit: Schema.optional(Schema.String),
+  duration_unit: Schema.optional(Schema.String),
+  deadlineDate: Schema.optional(Schema.String),
+  deadline_date: Schema.optional(Schema.String)
 }) {}
 
 const appendSearchParam = (params: URLSearchParams, key: string, value: string | undefined) => {
@@ -103,6 +231,65 @@ const appendSearchParam = (params: URLSearchParams, key: string, value: string |
     params.set(key, value)
   }
 }
+
+const appendNumberSearchParam = (params: URLSearchParams, key: string, value: number | undefined) => {
+  if (value !== undefined) {
+    params.set(key, String(value))
+  }
+}
+
+const todoistProjectId = (input: TodoistProjectIdInput | TodoistUpdateProjectInput) =>
+  input.project_id ?? input.projectId
+
+const todoistTaskId = (input: TodoistTaskIdInput | TodoistUpdateTaskInput) =>
+  input.task_id ?? input.taskId
+
+const todoistCloseTaskId = (input: TodoistCloseTaskInput) =>
+  input.task_id ?? input.taskId ?? input.id
+
+const todoistRequest = (input: {
+  readonly token: string
+  readonly method: 'GET' | 'POST' | 'DELETE'
+  readonly path: string
+  readonly body?: unknown
+}) => {
+  const headers =
+    input.body === undefined
+      ? todoistAuthorizationHeaders(input.token)
+      : { ...todoistAuthorizationHeaders(input.token), 'content-type': 'application/json' }
+
+  return ConnectorHttpRequest.make({
+    method: input.method,
+    url: `${todoistApiBaseUrl}${input.path}`,
+    headers,
+    body: input.body === undefined ? undefined : JSON.stringify(input.body)
+  })
+}
+
+const todoistJsonAction = <A>(input: {
+  readonly integration: ConnectorIntegration
+  readonly request: (token: string) => ConnectorHttpRequest
+  readonly outputSchema: Schema.Schema<A> & { readonly DecodingServices: never }
+  readonly errorCode: string
+  readonly errorMessage: string
+}) =>
+  Effect.gen(function* () {
+    const token = yield* resolveTodoistToken(input.integration)
+    const http = yield* ConnectorHttpClient
+    const response = yield* http.request(input.request(token))
+
+    if (!isSuccessStatus(response.status)) {
+      return todoistProviderFailure({
+        code: input.errorCode,
+        message: input.errorMessage,
+        status: response.status,
+        body: response.body
+      })
+    }
+
+    const output = yield* decodeJsonResponse(input.outputSchema, response)
+    return ActionResult.success(output)
+  })
 
 export const todoistListTasksAction = defineAction({
   id: 'todoist.list_tasks',
@@ -114,11 +301,14 @@ export const todoistListTasksAction = defineAction({
       const token = yield* resolveTodoistToken(integration)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
-      appendSearchParam(params, 'project_id', input.projectId)
-      appendSearchParam(params, 'section_id', input.sectionId)
-      appendSearchParam(params, 'parent_id', input.parentId)
+      appendSearchParam(params, 'project_id', input.project_id ?? input.projectId)
+      appendSearchParam(params, 'section_id', input.section_id ?? input.sectionId)
+      appendSearchParam(params, 'parent_id', input.parent_id ?? input.parentId)
       appendSearchParam(params, 'label', input.label)
+      appendSearchParam(params, 'ids', input.ids)
       appendSearchParam(params, 'filter', input.filter)
+      appendSearchParam(params, 'cursor', input.cursor)
+      appendNumberSearchParam(params, 'limit', input.limit)
       const query = params.toString()
       const response = yield* http.request(
         ConnectorHttpRequest.make({
@@ -162,14 +352,19 @@ export const todoistCreateTaskAction = defineAction({
           body: JSON.stringify({
             content: input.content,
             description: input.description,
-            project_id: input.projectId,
-            section_id: input.sectionId,
-            parent_id: input.parentId,
+            project_id: input.project_id ?? input.projectId,
+            section_id: input.section_id ?? input.sectionId,
+            parent_id: input.parent_id ?? input.parentId,
             labels: input.labels,
             priority: input.priority,
-            due_string: input.dueString,
-            due_date: input.dueDate,
-            due_datetime: input.dueDatetime
+            due_string: input.due_string ?? input.dueString,
+            due_date: input.due_date ?? input.dueDate,
+            due_datetime: input.due_datetime ?? input.dueDatetime,
+            due_lang: input.due_lang ?? input.dueLang,
+            assignee_id: input.assignee_id ?? input.assigneeId,
+            duration: input.duration,
+            duration_unit: input.duration_unit ?? input.durationUnit,
+            deadline_date: input.deadline_date ?? input.deadlineDate
           })
         })
       )
@@ -200,7 +395,7 @@ export const todoistCloseTaskAction = defineAction({
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
-          url: `${todoistApiBaseUrl}/tasks/${encodeURIComponent(input.id)}/close`,
+          url: `${todoistApiBaseUrl}/tasks/${encodeURIComponent(todoistCloseTaskId(input))}/close`,
           headers: todoistAuthorizationHeaders(token)
         })
       )
@@ -214,11 +409,257 @@ export const todoistCloseTaskAction = defineAction({
         })
       }
 
-      return ActionResult.success(TodoistCloseTaskOutput.make({ id: input.id, closed: true }))
+      return ActionResult.success(
+        TodoistCloseTaskOutput.make({ id: todoistCloseTaskId(input), closed: true })
+      )
     })
 })
 
-export const todoistActions = [todoistListTasksAction, todoistCreateTaskAction, todoistCloseTaskAction]
+export const todoistListProjectsAction = defineAction({
+  id: 'todoist.list_projects',
+  description: 'List Todoist projects.',
+  inputSchema: TodoistPaginationInput,
+  outputSchema: Schema.Unknown,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token => {
+        const params = new URLSearchParams()
+        appendSearchParam(params, 'cursor', input.cursor)
+        appendNumberSearchParam(params, 'limit', input.limit)
+        const query = params.toString()
+        return todoistRequest({ token, method: 'GET', path: `/projects${query === '' ? '' : `?${query}`}` })
+      },
+      outputSchema: Schema.Unknown,
+      errorCode: 'todoist_list_projects_failed',
+      errorMessage: 'Todoist list projects failed'
+    })
+})
+
+export const todoistCreateProjectAction = defineAction({
+  id: 'todoist.create_project',
+  description: 'Create a Todoist project.',
+  inputSchema: TodoistCreateProjectInput,
+  outputSchema: TodoistProject,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token =>
+        todoistRequest({
+          token,
+          method: 'POST',
+          path: '/projects',
+          body: {
+            name: input.name,
+            description: input.description,
+            parent_id: input.parent_id ?? input.parentId,
+            color: input.color,
+            is_favorite: input.is_favorite ?? input.isFavorite,
+            view_style: input.view_style ?? input.viewStyle
+          }
+        }),
+      outputSchema: TodoistProject,
+      errorCode: 'todoist_create_project_failed',
+      errorMessage: 'Todoist create project failed'
+    })
+})
+
+export const todoistGetProjectAction = defineAction({
+  id: 'todoist.get_project',
+  description: 'Get a Todoist project.',
+  inputSchema: TodoistProjectIdInput,
+  outputSchema: TodoistProject,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token =>
+        todoistRequest({
+          token,
+          method: 'GET',
+          path: `/projects/${encodeURIComponent(todoistProjectId(input))}`
+        }),
+      outputSchema: TodoistProject,
+      errorCode: 'todoist_get_project_failed',
+      errorMessage: 'Todoist get project failed'
+    })
+})
+
+export const todoistUpdateProjectAction = defineAction({
+  id: 'todoist.update_project',
+  description: 'Update a Todoist project.',
+  inputSchema: TodoistUpdateProjectInput,
+  outputSchema: TodoistProject,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token =>
+        todoistRequest({
+          token,
+          method: 'POST',
+          path: `/projects/${encodeURIComponent(todoistProjectId(input))}`,
+          body: {
+            name: input.name,
+            description: input.description,
+            color: input.color,
+            is_favorite: input.is_favorite ?? input.isFavorite,
+            view_style: input.view_style ?? input.viewStyle
+          }
+        }),
+      outputSchema: TodoistProject,
+      errorCode: 'todoist_update_project_failed',
+      errorMessage: 'Todoist update project failed'
+    })
+})
+
+export const todoistDeleteProjectAction = defineAction({
+  id: 'todoist.delete_project',
+  description: 'Delete a Todoist project.',
+  inputSchema: TodoistProjectIdInput,
+  outputSchema: Schema.Struct({ deleted: Schema.Boolean, projectId: Schema.String }),
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveTodoistToken(integration)
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
+        todoistRequest({
+          token,
+          method: 'DELETE',
+          path: `/projects/${encodeURIComponent(todoistProjectId(input))}`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return todoistProviderFailure({
+          code: 'todoist_delete_project_failed',
+          message: 'Todoist delete project failed',
+          status: response.status,
+          body: response.body
+        })
+      }
+
+      return ActionResult.success({ deleted: true, projectId: todoistProjectId(input) })
+    })
+})
+
+export const todoistGetTaskAction = defineAction({
+  id: 'todoist.get_task',
+  description: 'Get a Todoist task.',
+  inputSchema: TodoistTaskIdInput,
+  outputSchema: TodoistTask,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token =>
+        todoistRequest({
+          token,
+          method: 'GET',
+          path: `/tasks/${encodeURIComponent(todoistTaskId(input))}`
+        }),
+      outputSchema: TodoistTask,
+      errorCode: 'todoist_get_task_failed',
+      errorMessage: 'Todoist get task failed'
+    })
+})
+
+export const todoistUpdateTaskAction = defineAction({
+  id: 'todoist.update_task',
+  description: 'Update a Todoist task.',
+  inputSchema: TodoistUpdateTaskInput,
+  outputSchema: TodoistTask,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token =>
+        todoistRequest({
+          token,
+          method: 'POST',
+          path: `/tasks/${encodeURIComponent(todoistTaskId(input))}`,
+          body: {
+            content: input.content,
+            description: input.description,
+            labels: input.labels,
+            priority: input.priority,
+            due_string: input.due_string ?? input.dueString,
+            due_date: input.due_date ?? input.dueDate,
+            due_datetime: input.due_datetime ?? input.dueDatetime,
+            due_lang: input.due_lang ?? input.dueLang,
+            assignee_id: input.assignee_id ?? input.assigneeId,
+            duration: input.duration,
+            duration_unit: input.duration_unit ?? input.durationUnit,
+            deadline_date: input.deadline_date ?? input.deadlineDate
+          }
+        }),
+      outputSchema: TodoistTask,
+      errorCode: 'todoist_update_task_failed',
+      errorMessage: 'Todoist update task failed'
+    })
+})
+
+export const todoistDeleteTaskAction = defineAction({
+  id: 'todoist.delete_task',
+  description: 'Delete a Todoist task.',
+  inputSchema: TodoistTaskIdInput,
+  outputSchema: Schema.Struct({ deleted: Schema.Boolean, taskId: Schema.String }),
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveTodoistToken(integration)
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
+        todoistRequest({
+          token,
+          method: 'DELETE',
+          path: `/tasks/${encodeURIComponent(todoistTaskId(input))}`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return todoistProviderFailure({
+          code: 'todoist_delete_task_failed',
+          message: 'Todoist delete task failed',
+          status: response.status,
+          body: response.body
+        })
+      }
+
+      return ActionResult.success({ deleted: true, taskId: todoistTaskId(input) })
+    })
+})
+
+export const todoistListLabelsAction = defineAction({
+  id: 'todoist.list_labels',
+  description: 'List Todoist labels.',
+  inputSchema: TodoistPaginationInput,
+  outputSchema: Schema.Unknown,
+  execute: ({ integration, input }) =>
+    todoistJsonAction({
+      integration,
+      request: token => {
+        const params = new URLSearchParams()
+        appendSearchParam(params, 'cursor', input.cursor)
+        appendNumberSearchParam(params, 'limit', input.limit)
+        const query = params.toString()
+        return todoistRequest({ token, method: 'GET', path: `/labels${query === '' ? '' : `?${query}`}` })
+      },
+      outputSchema: Schema.Unknown,
+      errorCode: 'todoist_list_labels_failed',
+      errorMessage: 'Todoist list labels failed'
+    })
+})
+
+export const todoistActions = [
+  todoistListProjectsAction,
+  todoistCreateProjectAction,
+  todoistGetProjectAction,
+  todoistUpdateProjectAction,
+  todoistDeleteProjectAction,
+  todoistListTasksAction,
+  todoistCreateTaskAction,
+  todoistGetTaskAction,
+  todoistUpdateTaskAction,
+  todoistCloseTaskAction,
+  todoistDeleteTaskAction,
+  todoistListLabelsAction
+]
 
 export const TodoistConnector = defineConnector({
   id: todoistConnectorId,

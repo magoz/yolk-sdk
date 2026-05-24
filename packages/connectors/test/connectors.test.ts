@@ -19,12 +19,33 @@ import {
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import { FigmaConnector } from '@yolk-sdk/connectors/figma'
-import { GoogleConnector, GoogleOAuthCredentialSlot, googleCalendarCreateEventAction } from '@yolk-sdk/connectors/google'
-import { ExaApiKeySlot, LinkedInSearchConnector, linkedInSearchAction } from '@yolk-sdk/connectors/linkedin-search'
-import { NotionApiTokenSlot, NotionConnector, notionCreatePageAction, notionSearchAction } from '@yolk-sdk/connectors/notion'
+import {
+  GoogleConnector,
+  GoogleOAuthCredentialSlot,
+  googleCalendarCreateEventAction
+} from '@yolk-sdk/connectors/google'
+import {
+  ExaApiKeySlot,
+  LinkedInSearchConnector,
+  linkedInSearchAction
+} from '@yolk-sdk/connectors/linkedin-search'
+import {
+  NotionApiTokenSlot,
+  NotionConnector,
+  notionCreatePageAction,
+  notionSearchAction
+} from '@yolk-sdk/connectors/notion'
 import { R2StorageConnector } from '@yolk-sdk/connectors/r2-storage'
-import { TelegramConnector, telegramBotTokenSlotId, telegramSendMessageAction } from '@yolk-sdk/connectors/telegram'
-import { TodoistApiTokenSlot, TodoistConnector, todoistCreateTaskAction } from '@yolk-sdk/connectors/todoist'
+import {
+  TelegramConnector,
+  telegramBotTokenSlotId,
+  telegramSendMessageAction
+} from '@yolk-sdk/connectors/telegram'
+import {
+  TodoistApiTokenSlot,
+  TodoistConnector,
+  todoistCreateTaskAction
+} from '@yolk-sdk/connectors/todoist'
 
 const TestInput = Schema.Struct({ text: Schema.String })
 const TestOutput = Schema.Struct({ value: Schema.String })
@@ -54,7 +75,10 @@ const integration = makeIntegration({ connectorId: 'test' })
 
 type JsonRequestCase = {
   readonly name: string
-  readonly execute: ConnectorAction<ConnectorHttpClient | CredentialResolver, ConnectorError>['execute']
+  readonly execute: ConnectorAction<
+    ConnectorHttpClient | CredentialResolver,
+    ConnectorError
+  >['execute']
   readonly connectorId: string
   readonly slotId: string
   readonly credentialKind?: 'api_key' | 'oauth'
@@ -143,7 +167,7 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
     input: { content: 'Buy milk', dueString: 'tomorrow' },
     expected: {
       method: 'POST',
-      url: 'https://api.todoist.com/rest/v2/tasks',
+      url: 'https://api.todoist.com/api/v1/tasks',
       body: { content: 'Buy milk', due_string: 'tomorrow' }
     }
   },
@@ -182,17 +206,19 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
 
 describe('@yolk-sdk/connectors', () => {
   it('imports public subpaths', async () => {
-    const [root, agent, figma, google, linkedIn, notion, r2, telegram, todoist] = await Promise.all([
-      import('@yolk-sdk/connectors'),
-      import('@yolk-sdk/connectors/agent'),
-      import('@yolk-sdk/connectors/figma'),
-      import('@yolk-sdk/connectors/google'),
-      import('@yolk-sdk/connectors/linkedin-search'),
-      import('@yolk-sdk/connectors/notion'),
-      import('@yolk-sdk/connectors/r2-storage'),
-      import('@yolk-sdk/connectors/telegram'),
-      import('@yolk-sdk/connectors/todoist')
-    ])
+    const [root, agent, figma, google, linkedIn, notion, r2, telegram, todoist] = await Promise.all(
+      [
+        import('@yolk-sdk/connectors'),
+        import('@yolk-sdk/connectors/agent'),
+        import('@yolk-sdk/connectors/figma'),
+        import('@yolk-sdk/connectors/google'),
+        import('@yolk-sdk/connectors/linkedin-search'),
+        import('@yolk-sdk/connectors/notion'),
+        import('@yolk-sdk/connectors/r2-storage'),
+        import('@yolk-sdk/connectors/telegram'),
+        import('@yolk-sdk/connectors/todoist')
+      ]
+    )
 
     expect(root.defineConnector).toBeDefined()
     expect(agent.makeConnectorToolModule).toBeDefined()
@@ -208,9 +234,27 @@ describe('@yolk-sdk/connectors', () => {
   it('exposes provider action definitions', () => {
     expect(GoogleConnector.actions.map(action => action.id)).toEqual([
       'gmail.search',
+      'gmail.list',
+      'gmail.list_drafts',
       'gmail.get_message',
+      'gmail.draft_reply',
+      'gmail.get_attachment',
+      'gmail.draft_compose',
+      'gmail.draft_update',
+      'gmail.get_thread',
+      'gmail.list_labels',
+      'gmail.modify_labels',
+      'gmail.trash',
+      'gmail.untrash',
+      'gmail.draft_delete',
+      'gmail.list_accounts',
+      'calendar.list_calendars',
       'calendar.list_events',
-      'calendar.create_event'
+      'calendar.get_event',
+      'calendar.create_event',
+      'calendar.update_event',
+      'calendar.delete_event',
+      'calendar.list_accounts'
     ])
     expect(FigmaConnector.actions.map(action => action.id)).toEqual(['figma.mcp_auth'])
     expect(LinkedInSearchConnector.actions.map(action => action.id)).toEqual([
@@ -221,7 +265,27 @@ describe('@yolk-sdk/connectors', () => {
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
       'notion.get_page',
-      'notion.create_page'
+      'notion.get_page_content',
+      'notion.create_page',
+      'notion.update_page',
+      'notion.get_database',
+      'notion.query_database',
+      'notion.create_database',
+      'notion.append_blocks',
+      'notion.update_block',
+      'notion.delete_block',
+      'notion.get_data_source',
+      'notion.query_data_source',
+      'notion.create_data_source',
+      'notion.update_data_source',
+      'notion.get_block',
+      'notion.update_database',
+      'notion.get_page_property',
+      'notion.list_users',
+      'notion.get_user',
+      'notion.get_bot_user',
+      'notion.create_comment',
+      'notion.list_comments'
     ])
     expect(R2StorageConnector.actions.map(action => action.id)).toEqual(['r2_storage.upload_url'])
     expect(TelegramConnector.actions.map(action => action.id)).toEqual([
@@ -229,9 +293,18 @@ describe('@yolk-sdk/connectors', () => {
       'telegram.validate'
     ])
     expect(TodoistConnector.actions.map(action => action.id)).toEqual([
+      'todoist.list_projects',
+      'todoist.create_project',
+      'todoist.get_project',
+      'todoist.update_project',
+      'todoist.delete_project',
       'todoist.list_tasks',
       'todoist.create_task',
-      'todoist.close_task'
+      'todoist.get_task',
+      'todoist.update_task',
+      'todoist.close_task',
+      'todoist.delete_task',
+      'todoist.list_labels'
     ])
   })
 
@@ -282,7 +355,7 @@ describe('@yolk-sdk/connectors', () => {
       const toolModule = makeConnectorToolModule(TestConnector, {
         integration,
         layer: Layer.empty,
-        access: action => action.includes('fail') ? 'write' : 'read'
+        access: action => (action.includes('fail') ? 'write' : 'read')
       })
       const toolSet = yield* resolveTools([toolModule], {})
       const result = yield* toolSet.execute({
@@ -291,7 +364,11 @@ describe('@yolk-sdk/connectors', () => {
         params: { text: 'hi' }
       })
 
-      expect(toolSet.metadata).toContainEqual({ moduleId: 'test', name: 'test.fail', access: 'write' })
+      expect(toolSet.metadata).toContainEqual({
+        moduleId: 'test',
+        name: 'test.fail',
+        access: 'write'
+      })
       expect(result).toMatchObject({
         toolCallId: 'call_1',
         content: JSON.stringify({ value: 'hi' }),
@@ -365,10 +442,12 @@ describe('@yolk-sdk/connectors', () => {
           })
         )
 
-        yield* requestCase.execute({
-          integration,
-          input: requestCase.input
-        }).pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+        yield* requestCase
+          .execute({
+            integration,
+            input: requestCase.input
+          })
+          .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
 
         expect(requests[0]).toMatchObject({
           method: requestCase.expected.method,
@@ -397,9 +476,7 @@ describe('@yolk-sdk/connectors', () => {
         CredentialResolver,
         CredentialResolver.of({
           resolve: () =>
-            Effect.succeed(
-              ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'bot_token' })
-            )
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'bot_token' }))
         })
       )
       const ConnectorHttpClientTest = Layer.succeed(
