@@ -23,10 +23,17 @@ import {
   ToolExecutionError,
   ToolExecutionStarted,
   ToolResult,
+  UserMessage,
   zeroAgentUsage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
-import { isActiveToolRun, reduceAgentEvents } from '../../src/client'
+import {
+  isActiveToolRun,
+  markAgentAborted,
+  markAgentError,
+  reduceAgentEvents,
+  submitAgentUserMessage
+} from '../../src/client'
 import { propertyOptions } from './property-options'
 
 const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
@@ -51,6 +58,19 @@ const clientEventCase = Schema.Struct({
 })
 
 const clientEventCaseArbitrary = Schema.toArbitrary(clientEventCase)
+
+const clientEventTarget = Schema.Literals(['one', 'two'])
+
+const multiClientEventCommand = Schema.Struct({
+  kind: clientEventKind,
+  target: clientEventTarget
+})
+
+const multiClientEventCase = Schema.Struct({
+  commands: Schema.Array(multiClientEventCommand)
+})
+
+const multiClientEventCaseArbitrary = Schema.toArbitrary(multiClientEventCase)
 
 const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
 
@@ -152,6 +172,100 @@ const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
     }
   })
 
+const callForTarget = (target: typeof clientEventTarget.Type) =>
+  target === 'one'
+    ? call
+    : ToolCall.make({ id: 'call_2', name: 'weather', params: { city: 'Paris' } })
+
+const approvalRequestFor = (target: typeof clientEventTarget.Type) => {
+  const targetCall = callForTarget(target)
+
+  return ToolApprovalRequest.make({
+    requestId: `approval:${targetCall.id}`,
+    toolCallId: targetCall.id,
+    call: targetCall,
+    policy: ToolApprovalPolicy.make({ mode: 'manual' })
+  })
+}
+
+const questionRequestFor = (target: typeof clientEventTarget.Type) => {
+  const targetCall = callForTarget(target)
+
+  return QuestionRequest.make({
+    requestId: `question:${targetCall.id}`,
+    toolCallId: targetCall.id,
+    call: targetCall,
+    questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+  })
+}
+
+const answeredResponseFor = (target: typeof clientEventTarget.Type) => {
+  const request = questionRequestFor(target)
+
+  return QuestionResponse.make({
+    requestId: request.requestId,
+    toolCallId: request.toolCallId,
+    outcome: 'answered',
+    source: 'user',
+    answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
+  })
+}
+
+const cancelledResponseFor = (target: typeof clientEventTarget.Type) => {
+  const request = questionRequestFor(target)
+
+  return QuestionResponse.make({
+    requestId: request.requestId,
+    toolCallId: request.toolCallId,
+    outcome: 'cancelled',
+    source: 'user',
+    reason: 'skip'
+  })
+}
+
+const toolResultFor = (target: typeof clientEventTarget.Type) =>
+  ToolResult.make({ toolCallId: callForTarget(target).id, content: 'ok' })
+
+const multiClientEvent = (
+  command: typeof multiClientEventCommand.Type,
+  index: number
+): AgentEvent => {
+  const targetCall = callForTarget(command.target)
+  const eventId = `multi_event_${index}`
+
+  switch (command.kind) {
+    case 'text':
+      return LLMTextDelta.make({ eventId, text: 'a' })
+    case 'reasoning':
+      return LLMReasoningDelta.make({ eventId, text: 'r' })
+    case 'approvalRequested':
+      return ToolApprovalRequested.make({
+        eventId,
+        call: targetCall,
+        request: approvalRequestFor(command.target)
+      })
+    case 'approvalDenied':
+      return ToolApprovalDenied.make({ eventId, toolCallId: targetCall.id, reason: 'denied' })
+    case 'questionRequested':
+      return QuestionRequested.make({ eventId, request: questionRequestFor(command.target) })
+    case 'questionAnswered':
+      return QuestionAnswered.make({ eventId, response: answeredResponseFor(command.target) })
+    case 'questionCancelled':
+      return QuestionCancelled.make({ eventId, response: cancelledResponseFor(command.target) })
+    case 'toolStarted':
+      return ToolExecutionStarted.make({ eventId, call: targetCall })
+    case 'toolCompleted':
+      return ToolExecutionCompleted.make({ eventId, call: targetCall, result: toolResultFor(command.target) })
+    case 'toolErrored':
+      return ToolExecutionError.make({ eventId, call: targetCall, message: 'failed', code: 'tool_error' })
+    case 'agentEnd':
+      return AgentEnd.make({ eventId, messages: [assistantMessage], turns: 1, usage: zeroAgentUsage })
+  }
+}
+
+const isTerminalToolRun = (run: ReturnType<typeof reduceAgentEvents>['toolRuns'][number]) =>
+  !isActiveToolRun(run)
+
 describe('client HITL property tests', () => {
   it.prop(
     'terminal HITL states are inactive and unique by tool call',
@@ -192,6 +306,54 @@ describe('client HITL property tests', () => {
 
       expect(state.text.length).toBeGreaterThanOrEqual(0)
       expect(state.reasoning.length).toBeGreaterThanOrEqual(0)
+    },
+    propertyOptions
+  )
+
+  it.prop(
+    'multi-call client event sequences keep tool runs unique and terminal runs inactive',
+    [multiClientEventCaseArbitrary],
+    ([input]) => {
+      const events = [
+        AgentStart.make({ eventId: 'multi_event_start' }),
+        ...input.commands.slice(0, 64).map(multiClientEvent)
+      ]
+      const state = reduceAgentEvents([...events, ...events])
+      const ids = toolRunIds(state.toolRuns)
+      const activeRuns = state.toolRuns.filter(isActiveToolRun)
+      const terminalRuns = state.toolRuns.filter(isTerminalToolRun)
+
+      expect(new Set(ids).size).toBe(ids.length)
+      expect(activeRuns.length).toBeLessThanOrEqual(ids.length)
+      expect(terminalRuns.every(run => !isActiveToolRun(run))).toBe(true)
+      expect(state.seenEventIds).toEqual(events.map(event => event.eventId))
+    },
+    propertyOptions
+  )
+
+  it.prop(
+    'new submissions and terminal local states prune active runs but keep completed runs',
+    [multiClientEventCaseArbitrary],
+    ([input]) => {
+      const state = reduceAgentEvents([
+        AgentStart.make({ eventId: 'reset_event_start' }),
+        ...input.commands.slice(0, 64).map(multiClientEvent)
+      ])
+      const completedBefore = state.toolRuns.filter(run => run._tag === 'Completed')
+      const submitted = submitAgentUserMessage(
+        state,
+        UserMessage.make({ content: 'next' })
+      )
+      const errored = markAgentError(state, 'failed')
+      const aborted = markAgentAborted(state)
+
+      expect(submitted.status).toBe('running')
+      expect(submitted.seenEventIds).toEqual([])
+      expect(submitted.toolRuns).toEqual(completedBefore)
+      expect(errored.status).toBe('error')
+      expect(errored.toolRuns).toEqual(completedBefore)
+      expect(aborted.status).toBe('aborted')
+      expect(aborted.toolRuns).toEqual(completedBefore)
     },
     propertyOptions
   )

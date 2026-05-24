@@ -295,6 +295,35 @@ Useful invariants:
 - at most one active run exists per generated single-call scenario
 - terminal HITL states are inactive and idempotent
 - done states clear live messages when `AgentEnd` is the terminal event under normal event ordering
+- starting a new user message clears `seenEventIds` and prunes non-completed tool runs
+- error/abort transitions prune active tool runs and preserve completed tool history
+
+### Provider stream and retry rollout
+
+Provider stream properties should exercise real loop turn handling with a scripted provider boundary.
+
+Useful invariants:
+
+- valid provider streams emit exactly one `LLMStreamEnd`, `AssistantMessage`, and `TurnEnd`
+- `LLMStreamStart` precedes provider-mapped deltas; `LLMStreamEnd` precedes `AssistantMessage`; `AssistantMessage` precedes `TurnEnd`
+- generated text/reasoning/usage/tool-call fragments map to matching client-facing event counts
+- exactly one provider `Done` event is required
+- `Done.stopReason` is derived from host tool calls: `tool_use` when any host tool call exists, otherwise `stop`
+- missing, duplicate, or wrong-reason `Done` fails with `LLMError { cause: "invalid_response" }`
+- retryable pre-emission provider failures retry up to `maxRetries`
+- non-retryable failures, `context_overflow`, and post-emission failures never retry
+
+### Cloudflare storage parity rollout
+
+Cloudflare adapter properties should keep Durable Object storage behavior matched to the package runtime append-log model.
+
+Useful invariants:
+
+- current or absent expected revisions append exactly like `appendRuntimeSessionEventsToLog`
+- stale expected revisions fail with `SessionConflictError` and do not mutate storage
+- reconnect interruption appends `RunInterrupted` only for the latest incomplete run
+- durable revisions remain equal to event count after every generated operation
+- durable log snapshots equal the pure package model after every step
 
 ### 3. Agent session/message/event model
 
