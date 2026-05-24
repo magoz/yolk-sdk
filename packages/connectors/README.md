@@ -19,10 +19,10 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/connectors/figma` | Figma remote MCP auth action and OAuth constants |
 | `@yolk-sdk/connectors/google` | Gmail/Calendar actions and Google OAuth slot constants |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions |
-| `@yolk-sdk/connectors/notion` | Notion search/page actions and API token slot constants |
+| `@yolk-sdk/connectors/notion` | Notion page/block/database/data-source/comment/user actions and API token slot constants |
 | `@yolk-sdk/connectors/r2-storage` | Cloudflare R2 upload URL action with host-provided presigner |
 | `@yolk-sdk/connectors/telegram` | Telegram bot send/validate actions |
-| `@yolk-sdk/connectors/todoist` | Todoist task actions and API token slot constants |
+| `@yolk-sdk/connectors/todoist` | Todoist project/task/label actions and API token slot constants |
 
 ## Imports
 
@@ -157,12 +157,12 @@ Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Ho
 | Subpath | Actions |
 | --- | --- |
 | `@yolk-sdk/connectors/figma` | `figma.mcp_auth` |
-| `@yolk-sdk/connectors/google` | `gmail.search`, `gmail.get_message`, `calendar.list_events`, `calendar.create_event` |
+| `@yolk-sdk/connectors/google` | Gmail search/list/message/thread/draft/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email` |
-| `@yolk-sdk/connectors/notion` | `notion.search`, `notion.get_page`, `notion.create_page` |
+| `@yolk-sdk/connectors/notion` | Notion search, page, block, database, data source, user, and comment actions |
 | `@yolk-sdk/connectors/r2-storage` | `r2_storage.upload_url` |
 | `@yolk-sdk/connectors/telegram` | `telegram.send_message`, `telegram.validate` |
-| `@yolk-sdk/connectors/todoist` | `todoist.list_tasks`, `todoist.create_task`, `todoist.close_task` |
+| `@yolk-sdk/connectors/todoist` | Todoist project, task, and label actions |
 
 R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled.
 

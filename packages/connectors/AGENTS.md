@@ -26,10 +26,10 @@
 | `figma` | Figma remote MCP auth data action and OAuth constants |
 | `google` | Gmail/Calendar actions plus Google OAuth slot constants |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions |
-| `notion` | Notion search/page actions plus API token slot constants |
+| `notion` | Notion page/block/database/data-source/comment/user actions plus API token slot constants |
 | `r2-storage` | Cloudflare R2 upload URL action with host-provided presigner |
 | `telegram` | Telegram bot send/validate actions |
-| `todoist` | Todoist task actions plus API token slot constants |
+| `todoist` | Todoist project/task/label actions plus API token slot constants |
 
 ## Design rules
 
