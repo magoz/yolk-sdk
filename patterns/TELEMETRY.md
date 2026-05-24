@@ -74,24 +74,17 @@ Error occurs in domain function
   → withSpan automatically marks OTel span as ERROR ✓ (always)
   → Error propagates to caller
     │
-    ├─ Caller is a SERVER ACTION
-    │   → tapError(reportError) before catchTag/catch → structured log ✓
-    │
-    ├─ Caller is a PAGE (Suspense + Content)
-    │   → Auth errors: redirect (expected flow, no report)
-    │   → Catch-all: reportError inside catch → structured log ✓
-    │
-    ├─ Caller is an API ROUTE
-    │   → catch-all handler calls reportError → structured log ✓
-    │   → Auth errors: return HTTP 401/403 (no report)
+    ├─ Caller is an app boundary
+    │   → boundary reports unexpected failures with structured context ✓
     │
     ├─ Caller CATCHES and RECOVERS (Effect.catch)
     │   → Error was handled — no report (use reportWarning if degraded)
     │
     └─ Error is UNHANDLED (bare Effect.runPromise)
         → tapError(reportError) before runPromise → structured log ✓
-        → Error throws → Next.js error boundary renders error UI
 ```
+
+Next-specific page/action/API placement lives in `examples/next/patterns/*`.
 
 ### Why NOT report at the domain level
 
@@ -111,11 +104,11 @@ Logs via Effect logger. Used at **boundaries only**:
 
 ```typescript
 // Server actions: tapError before catchTag chains
-Effect.tapError(error => reportError(error, { operation: 'action.post.create' }))
+Effect.tapError(error => reportError(error, { operation: 'action.domain.create' }))
 
 // Catch-all in pages/actions: report unexpected errors
 Effect.catch(error => {
-  reportError(error, { operation: 'page.posts' })
+  reportError(error, { operation: 'page.domain' })
   return Effect.succeed(<ErrorUI message="Something went wrong" />)
 })
 ```
@@ -124,8 +117,8 @@ The `context` parameter adds searchable metadata:
 
 ```typescript
 reportError(error, {
-  operation: 'action.post.delete',
-  postId: input.postId,
+  operation: 'action.domain.delete',
+  entityId: input.entityId,
   userId: session.user.id
 })
 ```
@@ -187,27 +180,22 @@ Effect.gen(function* () {
 )
 ```
 
-Retry helpers from `examples/next/lib/services/retry.ts`:
-
-- `retryPolicy` — exponential backoff (500ms, 1s, 2s, max 3 retries, ~3.5s total)
-- `isTransientError` — checks `error.isTransient === true` or `SqlError` instance
+Keep shared retry policies near the service/app layer that owns the transient error model.
 
 ## Layer Requirements
 
-`AppLayer` must include both for telemetry to work:
+Runtime layers must include both for telemetry to work:
 
 - **`Logger.layer([Logger.consolePretty()])`** — routes `Effect.logError` / `Effect.logWarning` to structured console output. Without it, logs are silent.
 - **`TelemetryLayer`** — wires OpenTelemetry spans. Without it, `withSpan` is a no-op.
 
-Both are already in `AppLayer` (`examples/next/lib/layers.ts`).
+The Next example wires both in `examples/next/lib/layers.ts`.
 
 ## Rules
 
 - Every domain function ends with `Effect.withSpan` (OTel sees all errors automatically)
 - Every public package/service IO function has `Effect.withSpan` and stable low-cardinality attrs
-- Every server action has `tapError(reportError)` before error handling
-- Pages report only unexpected errors — auth/not-found are expected flow, no report
-- API route catch-all handlers call `reportError` — auth errors return HTTP codes without reporting
+- App boundaries report unexpected failures; expected auth/not-found/control-flow errors are not log errors.
 - Infrastructure services use `Effect.logError` (structured log) — never `reportError` (callers own severity)
 - Best-effort paths that catch errors must self-report (boundary will never see them)
 - Never use `console.error` directly — use `reportError` or `Effect.logError` inside Effect
@@ -221,21 +209,21 @@ Span names use `domain.entity.action` format. Server actions prefix with `action
 
 | Span                         | Where           |
 | ---------------------------- | --------------- |
-| `post.get`                   | Domain function |
-| `post.create`                | Domain function |
-| `action.post.create`         | Server action   |
-| `action.post.delete`         | Server action   |
+| `domain.entity.get`          | Domain function |
+| `domain.entity.create`       | Domain function |
+| `action.entity.create`       | Server action   |
+| `action.entity.delete`       | Server action   |
 | `Auth.signIn`                | Service method  |
 | `Auth.getSessionFromCookies` | Service method  |
-| `Email.sendEmail`            | Service method  |
+| `Integration.call`           | Service method  |
 
 Custom attributes per span:
 
 | Span              | Attributes                              |
 | ----------------- | --------------------------------------- |
-| `action.post.*`   | `post.id`, `user.id`, `user.email`      |
+| `action.entity.*` | `entity.id`, `user.id`, `user.email`    |
 | `Auth.*`          | (none — session data is the result)     |
-| `Email.sendEmail` | `email.to`, `email.subject`, `email.id` |
+| `Integration.*`   | low-cardinality integration metadata    |
 
 ## Axiom Dashboards
 

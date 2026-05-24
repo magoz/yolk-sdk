@@ -11,9 +11,7 @@ This document describes TypeScript configuration and coding conventions for this
 
 ## File Naming
 
-- **All files use kebab-case** — `search-params.ts`, `post-list.tsx`, `live-layer.ts`
-- **Server actions** end in `-action.ts` — `delete-post-action.ts`
-- **URL state definitions** — `search-params.ts` in the route directory
+- **All files use kebab-case** — `chat-items.ts`, `claude-provider.ts`, `live-layer.ts`
 - **Service definitions** — `live-layer.ts` in the service directory
 - **Error definitions** — `errors.ts` colocated with service or domain
 
@@ -52,14 +50,14 @@ export class Auth extends Context.Service<Auth>()('@app/Auth', {
 
 ## Import Conventions
 
-### Use `@/` Path Alias for Project Imports
+### Use the narrowest valid import path
 
 ```typescript
-// CORRECT - use path alias
-import { Auth } from '@/lib/services/auth/live-layer'
+// CORRECT - app code may use the configured alias
+import { SomeService } from '@/lib/services/some-service/live-layer'
 
-// WRONG - relative paths for distant files
-import { Auth } from '../../../examples/next/lib/services/auth/live-layer'
+// CORRECT - package-internal relative imports include .ts
+import { parseAuthCode } from './claude.ts'
 ```
 
 ### Package Imports: Never Use Extensions
@@ -74,9 +72,10 @@ import * as Option from 'effect/Option'
 import * as Effect from 'effect/Effect.js'
 ```
 
-### NEVER Create index.ts Barrel Files
+### Avoid internal index.ts barrel files
 
-**This is a strict rule: NEVER create index.ts files.** Barrel files cause:
+Package public entrypoints (`packages/*/src/index.ts`) are allowed. Avoid app/internal
+`index.ts` re-export barrels; they cause:
 
 - Circular dependency issues
 - Slower build times (importing everything when you need one thing)
@@ -85,20 +84,20 @@ import * as Effect from 'effect/Effect.js'
 
 ```typescript
 // CORRECT - import from specific module
-import { Auth } from '@/lib/services/auth/live-layer'
-import { AuthError } from '@/lib/services/auth/errors'
+import { SomeService } from './live-layer'
+import { SomeServiceError } from './errors'
 
-// WRONG - NEVER do this
-import { Auth, AuthError } from '@/lib/services/auth'
-import { Auth, AuthError } from '@/lib/services/auth/index'
+// WRONG - avoid internal barrels
+import { SomeService, SomeServiceError } from './index'
 
-// WRONG - NEVER create files like this
+// WRONG - avoid app/internal files like this
 // index.ts
 export * from './live-layer'
 export * from './errors'
 ```
 
-If you see an index.ts file, delete it and update imports to point to specific modules.
+If you see an internal barrel, prefer direct module imports. Do not delete package public
+entrypoints.
 
 ---
 

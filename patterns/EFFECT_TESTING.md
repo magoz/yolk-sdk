@@ -187,8 +187,8 @@ Use `layer()` or `it.layer()` to share services across multiple tests:
 ```typescript
 import { layer, it, expect } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
-import { Auth } from '@/lib/services/auth/live-layer'
-import { Db } from '@/lib/services/db/live-layer'
+import { Auth } from './auth/live-layer'
+import { Db } from './db/live-layer'
 
 // Create a test layer
 const TestLayer = Layer.mergeAll(Auth.layer, Db.layer)
@@ -423,7 +423,7 @@ export class PgContainer extends Context.Service<PgContainer>()('test/PgContaine
 import { it, expect, layer } from '@effect/vitest'
 import { Effect } from 'effect'
 import { PgContainer } from './utils'
-import { Db } from '@/lib/services/db/live-layer'
+import { Db } from './db/live-layer'
 
 // Use layer() with 30s timeout (container startup is slow)
 layer(PgContainer.ClientLayer, { timeout: '30 seconds' })('Database Tests', it => {
@@ -532,7 +532,7 @@ declare module 'vitest' {
 // test/utils.ts
 import { Layer, Effect } from 'effect'
 import { inject } from 'vitest'
-import { Db } from '@/lib/services/db/live-layer'
+import { Db } from './db/live-layer'
 
 export const SharedDbLayer = Layer.effect(
   Db,

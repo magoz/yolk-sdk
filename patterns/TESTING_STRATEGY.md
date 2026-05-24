@@ -34,14 +34,14 @@ If the answer is "nothing" or "just the implementation changed", delete the test
 
 ### File Location
 
-**Tests are colocated with source files** using `*.test.ts` pattern:
+App tests are usually colocated with source files using `*.test.ts`. Package tests may either be
+colocated or live in package-owned `test/*` areas when that package's `AGENTS.md` says so.
 
 ```
-examples/next/lib/core/post/
-├── get-posts.ts
-├── get-posts.test.ts        # ← Test next to implementation
-├── create-post-action.ts
-└── create-post-action.test.ts
+packages/anthropic/src/claude-provider.ts
+packages/anthropic/src/claude-provider.test.ts
+
+packages/agent/test/loop/run.test.ts
 ```
 
 **Why colocated?**
@@ -115,7 +115,7 @@ layer(createMockAuth())('post operations', it => {
 })
 ```
 
-**Location:** Colocated with source (`examples/next/lib/core/post/create-post.test.ts`)
+**Location:** Colocated with source for app/service units, or package-owned `test/*` dirs when documented locally.
 
 ### Integration Tests
 
@@ -150,7 +150,6 @@ layer(TestDbLayer)('database operations', it => {
 **Example:**
 
 ```typescript
-// examples/next/e2e/auth.spec.ts
 test('user can login with OTP', async ({ page }) => {
   await page.goto('/login')
   // ...
@@ -270,17 +269,17 @@ Key patterns from EFFECT_TESTING.md:
 | Snapshot tests for UI            | Fragile, hard to maintain            | Test behavior, not markup           |
 | No error case tests              | Production errors surprise you       | Test all domain error paths         |
 | 100% coverage goal               | Wastes time on low-value tests       | Focus on high-risk code             |
-| Tests in separate `/test` dir    | Hard to find relevant tests          | Colocate with source files          |
+| Undocumented separate `/test` dir | Hard to find relevant tests          | Colocate or document package-owned test areas |
 | Skipping integration tests       | Services might not compose           | Test critical integrations          |
 | Not using TestClock              | Tests are slow and flaky             | Use `it.effect` + TestClock         |
 | Forgetting to fork before adjust | Tests hang forever                   | Always fork before TestClock.adjust |
 
 ## Examples
 
-See test files for working examples:
+See current test files for working examples:
 
-- `examples/next/lib/core/post/get-posts.test.ts` - Test variants (it.effect, it.live)
-- `examples/next/lib/core/post/test-clock.test.ts` - TestClock patterns (fork, timeout, retry)
-- `examples/next/lib/core/post/layer-sharing.test.ts` - Mock services with layer()
-- `examples/next/lib/core/post/property-testing.test.ts` - Property-based testing
-- `examples/next/lib/core/post/error-testing.test.ts` - Error handling patterns
+- `packages/anthropic/src/claude-provider.test.ts` - provider HTTP/stream fixtures
+- `packages/agent/test/property/*.test.ts` - property tests
+- `packages/agent/test/loop/error.test.ts` - error handling
+- `packages/mcp/test/client/client.test.ts` - protocol/transport fixtures
+- `examples/next/lib/core/knowledge/*.test.ts` - app-owned domain tests

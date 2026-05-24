@@ -154,8 +154,9 @@ When moving a pattern, update every link. Do not leave compatibility pointer fil
 Always grep for moved/stale refs relevant to the run:
 
 - `app/` → should usually be `examples/next/app/`
-- `patterns/EFFECT_PAGES`, `patterns/EFFECT_API_ROUTES`, `patterns/EFFECT_SERVER_ACTIONS`
-- `patterns/DATA_ACCESS_PATTERNS`, `patterns/NUQS_URL_STATE`, `patterns/USABILITY_BEST_PRACTICES`
+- stale old Next pattern paths: `patterns/EFFECT_PAGES`, `patterns/EFFECT_API_ROUTES`, `patterns/EFFECT_SERVER_ACTIONS`
+- stale old Next pattern paths: `patterns/DATA_ACCESS_PATTERNS`, `patterns/NUQS_URL_STATE`, `patterns/USABILITY_BEST_PRACTICES`
+- current Next pattern paths: `examples/next/patterns/*.md`
 - removed integrations like `Sentry` if recently removed
 - generated dirs: `.next`, `.turbo`, `dist`
 
