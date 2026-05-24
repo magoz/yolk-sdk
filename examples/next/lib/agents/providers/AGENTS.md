@@ -42,7 +42,7 @@ that exercise package-backed providers through app runtime wiring.
 - Used for Claude Pro/Max subscription access via `claude-sonnet-4-6`.
 - Does **not** use `ANTHROPIC_API_KEY`.
 - Requires per-user token from `examples/next/lib/core/agent/anthropic-claude-auth.ts`.
-- Requests use Bearer auth with Claude Code headers/betas (`claude-code-20250219`, `oauth-2025-04-20`).
+- Requests use Bearer auth with Claude Code OAuth compatibility headers from `@yolk-sdk/anthropic`.
 - Request shape must mimic Claude Code OAuth fingerprinting:
   - `system[]` contains only `You are Claude Code, Anthropic's official CLI for Claude.`
   - app/system instructions are prepended to the first user message

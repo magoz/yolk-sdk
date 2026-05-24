@@ -20,6 +20,7 @@
 ## Design rules
 
 - Keep Claude subscription auth compatible with Worker/server runtimes.
+- Claude OAuth provider requests must include Claude Code OAuth compatibility headers by default; `extraHeaders` stays last so hosts can override/gateway them.
 - Manual Claude OAuth uses PKCE; app-owned server actions store verifier outside `'use server'` modules.
 - API-key mode may be added later without changing OAuth contracts.
 - Provider layers depend on `@yolk-sdk/agent`; hosts still own token storage/refresh and app policy.

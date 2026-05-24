@@ -68,6 +68,18 @@ The provider:
 - Maps Anthropic message responses to Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.
 - Maps provider failures to typed `LLMError` causes for retry/context/rate-limit handling.
 
+Default request headers include Claude subscription OAuth compatibility headers:
+
+| Header | Default |
+| --- | --- |
+| `authorization` | Bearer access token from `token` |
+| `anthropic-version` | `2023-06-01` |
+| `anthropic-beta` | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14` |
+| `user-agent` | `claude-cli/2.1.2 (external, cli)` |
+| `x-app` | `cli` |
+
+`extraHeaders` are applied last, so hosts can add gateway headers or override defaults.
+
 Config:
 
 | Option | Purpose |
