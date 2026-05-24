@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/knowledge",
-  "version": "0.0.1-canary.2",
+  "version": "0.0.1-canary.3",
   "description": "Domain-free knowledge record, artifact, provenance, and context contracts for Yolk agents.",
   "license": "MIT",
   "type": "module",

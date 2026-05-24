@@ -19,6 +19,7 @@
   "changesets": [
     "fresh-yolks-walk",
     "next-canary-release",
-    "quiet-owls-approve"
+    "quiet-owls-approve",
+    "sharp-provider-docs"
   ]
 }

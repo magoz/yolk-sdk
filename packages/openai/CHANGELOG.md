@@ -1,5 +1,13 @@
 # @yolk-sdk/openai
 
+## 0.0.1-canary.3
+
+### Patch Changes
+
+- 6df4e4a: Add native Yolk LLM provider layers for Claude, Codex, and OpenAI Chat Completions.
+  - @yolk-sdk/agent@0.0.1-canary.3
+  - @yolk-sdk/oauth@0.0.1-canary.3
+
 ## 0.0.1-canary.2
 
 ### Patch Changes
