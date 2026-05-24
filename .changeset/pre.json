@@ -17,6 +17,8 @@
     "@yolk-sdk/voice-runtime": "0.0.0"
   },
   "changesets": [
+    "brave-hitl-rules",
+    "curvy-claude-headers",
     "fresh-yolks-walk",
     "next-canary-release",
     "quiet-owls-approve",

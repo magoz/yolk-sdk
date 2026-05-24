@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.4
+
+### Patch Changes
+
+- 992ae2c: Require exact HITL request matches before resuming runtime sessions.
+
 ## 0.0.1-canary.3
 
 ## 0.0.1-canary.2

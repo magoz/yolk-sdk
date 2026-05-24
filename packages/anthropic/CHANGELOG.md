@@ -1,5 +1,14 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.4
+
+### Patch Changes
+
+- f539363: Send Claude subscription OAuth version and beta headers by default.
+- Updated dependencies [992ae2c]
+  - @yolk-sdk/agent@0.0.1-canary.4
+  - @yolk-sdk/oauth@0.0.1-canary.4
+
 ## 0.0.1-canary.3
 
 ### Patch Changes

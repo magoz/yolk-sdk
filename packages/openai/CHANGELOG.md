@@ -1,5 +1,13 @@
 # @yolk-sdk/openai
 
+## 0.0.1-canary.4
+
+### Patch Changes
+
+- Updated dependencies [992ae2c]
+  - @yolk-sdk/agent@0.0.1-canary.4
+  - @yolk-sdk/oauth@0.0.1-canary.4
+
 ## 0.0.1-canary.3
 
 ### Patch Changes
