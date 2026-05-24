@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows-runtime
 
+## 0.0.1-canary.2
+
+### Patch Changes
+
+- 55bc6c7: Prepare next canary release.
+
 ## 0.0.1-canary.1
 
 ### Patch Changes

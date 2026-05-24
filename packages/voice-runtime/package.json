@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/voice-runtime",
-  "version": "0.0.1-canary.1",
+  "version": "0.0.1-canary.2",
   "description": "Provider-neutral voice tool-call bridge for Yolk agents.",
   "license": "MIT",
   "type": "module",
