@@ -260,6 +260,18 @@ Properties:
 - unsupported schema features fail before provider call
 - tool names/descriptions remain provider-safe
 
+### Tool registry rollout
+
+Tool registry properties should compare resolved tool sets to a tiny model of enabled registrations.
+
+Useful invariants:
+
+- duplicate enabled tool names fail resolution
+- disabled gated tools are absent from tool definitions and metadata
+- metadata preserves module id, tool name, and access for enabled tools
+- unknown or disabled tool execution fails with `not_found`
+- enabled unique tools execute with the original tool call id
+
 ### 3. Agent session/message/event model
 
 State space:
