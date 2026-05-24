@@ -21,7 +21,12 @@ const schemaVariant = Schema.Literals([
   'flatOptional',
   'nestedStruct',
   'arrayOfStruct',
-  'literalField'
+  'literalField',
+  'deepArrayStruct',
+  'optionalNestedStruct',
+  'literalArray',
+  'recordField',
+  'unionField'
 ])
 
 const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
@@ -31,6 +36,29 @@ const isJsonObject = (input: unknown): input is Readonly<Record<string, unknown>
 
 const field = (input: unknown, key: string) =>
   isJsonObject(input) ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+
+const localDefinitionName = (ref: unknown) => {
+  if (typeof ref !== 'string') return undefined
+
+  const prefix = '#/$defs/'
+
+  return ref.startsWith(prefix) ? ref.slice(prefix.length) : undefined
+}
+
+const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
+  const ref = localDefinitionName(field(input, '$ref'))
+  const current = ref === undefined ? [] : [ref]
+
+  if (Array.isArray(input)) {
+    return [...current, ...input.flatMap(collectLocalRefs)]
+  }
+
+  if (!isJsonObject(input)) {
+    return current
+  }
+
+  return [...current, ...Object.values(input).flatMap(collectLocalRefs)]
+}
 
 const providerSafeTool = (variant: typeof schemaVariant.Type) => {
   switch (variant) {
@@ -90,6 +118,63 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         access: 'read',
         execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+    case 'deepArrayStruct':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Struct({
+          groups: Schema.Array(
+            Schema.Struct({
+              id: Schema.String,
+              tags: Schema.Array(Schema.String),
+              meta: Schema.Struct({ active: Schema.Boolean })
+            })
+          )
+        }),
+        access: 'read',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+    case 'optionalNestedStruct':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Struct({
+          filter: Schema.optional(
+            Schema.Struct({ query: Schema.String, limit: Schema.optional(Schema.Number) })
+          )
+        }),
+        access: 'read',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+    case 'literalArray':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Struct({ modes: Schema.Array(Schema.Literals(['read', 'write'])) }),
+        access: 'read',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+    case 'recordField':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Struct({ labels: Schema.Record(Schema.String, Schema.String) }),
+        access: 'read',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
+    case 'unionField':
+      return makeTool({
+        name: 'schema_probe',
+        description: 'Probe schema output.',
+        parameters: Schema.Struct({
+          mode: Schema.Union([
+            Schema.Literal('auto'),
+            Schema.Struct({ type: Schema.Literal('manual'), value: Schema.String })
+          ])
+        }),
+        access: 'read',
+        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      })
   }
 }
 
@@ -99,6 +184,11 @@ const assertProviderSafeParameters = (parameters: unknown) => {
 
   const anyOf = field(parameters, 'anyOf')
   expect(Array.isArray(anyOf) && anyOf.some(item => field(item, 'type') === 'array')).toBe(false)
+
+  const definitions = field(parameters, '$defs')
+  for (const ref of collectLocalRefs(parameters)) {
+    expect(field(definitions, ref)).toBeDefined()
+  }
 }
 
 const requestForTool = (variant: typeof schemaVariant.Type) => ({
