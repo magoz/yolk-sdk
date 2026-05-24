@@ -63,6 +63,18 @@ const repos: ReadonlyArray<RepoSpec> = [
   },
   {
     mode: 'branch',
+    name: 'opencode-simulation',
+    repo: 'https://github.com/sst/opencode.git',
+    branch: 'jlongster/simulation-rebase'
+  },
+  {
+    mode: 'branch',
+    name: 'fast-check',
+    repo: 'https://github.com/dubzzz/fast-check.git',
+    branch: 'main'
+  },
+  {
+    mode: 'branch',
     name: 't3code',
     repo: 'https://github.com/pingdotgg/t3code.git',
     branch: 'main'

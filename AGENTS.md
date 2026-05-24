@@ -95,6 +95,8 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | `effect-smol` | `.repos/effect` | Effect v4 source/docs |
 | `ai-sdk` | `.repos/ai` | SDK/package/examples monorepo reference |
 | `opencode` | `.repos/opencode` | Codex/OpenAI agent protocol/provider reference |
+| `opencode-simulation` | `.repos/opencode-simulation` | opencode simulation/property testing reference |
+| `fast-check` | `.repos/fast-check` | property-based testing internals/examples |
 | `executor` | `.repos/executor` | Connector/source/tool/plugin architecture reference |
 | `t3code` | `.repos/t3code` | Agent chat/product UI reference |
 | `mcp-sdk` | `.repos/mcp-sdk` | MCP protocol reference |
