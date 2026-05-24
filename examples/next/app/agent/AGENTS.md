@@ -21,6 +21,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Chat text renders Markdown with `streamdown`; keep streaming-safe Markdown rendering in conversation view only.
 - `agent-composer.tsx` owns input UX: textarea, image picker/dropzone/paste, multi-image preview/remove, text model and reasoning selectors.
 - Slash command UI stays in `agent-composer.tsx`; command route transport stays in `command-client.ts` using Effect `HttpClient`.
+- Refresh slash command lists after completed `manage_skills` tool runs; new/updated skills may create commands mid-session.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
 - `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.

@@ -180,7 +180,9 @@ pnpm test:run
 
 Public `packages/*` manifests are publishable. Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
 
-Verify `git status` is clean/understood, then publish canary only after explicit approval:
+Verify `git status` is clean/understood. Normal publish path is GitHub Actions after merged version-prep commit, not local publish. The Action validates versions/tags, publishes with provenance, then creates `v<version>`.
+
+Local publish is emergency-only and requires explicit approval:
 
 ```bash
 pnpm release:canary
@@ -203,21 +205,19 @@ Requirements:
 
 Use the `/package-release` command after restarting opencode for guided release workflow.
 
-## Automation Plan
+## GitHub Actions Publish
 
-Automate releases later with GitHub Actions + Changesets, mirroring Effect and MCP SDK.
+`.github/workflows/publish.yml` runs manually from `main`.
 
-Recommended workflow:
+Requirements before dispatch:
 
-- trigger on push to `main`
-- use `changesets/action`
-- version command: `pnpm changeset:version && pnpm install --no-frozen-lockfile`
-- publish command: validation + canary/stable publish script
-- permissions include `contents: write`, `pull-requests: write`, and `id-token: write`
-- npm provenance/trusted publishing enabled
-- optional snapshot workflow later, AI SDK-style
+- changesets consumed by `pnpm changeset:version && pnpm install --lockfile-only`
+- every public package has same version
+- package version is not already published on npm
+- `v<version>` tag does not exist
+- validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`
 
-Manual first canary is acceptable; automate after the flow proves correct once.
+The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`.
 
 ## Release Prep Order
 

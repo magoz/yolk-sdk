@@ -257,6 +257,7 @@ export function AgentPlayground({
   const [isWorkflowResuming, setIsWorkflowResuming] = useState(false)
   const nextActivityIdRef = useRef(0)
   const workflowResumeAbortRef = useRef<AbortController | null>(null)
+  const refreshedCommandToolRunIdsRef = useRef(new Set<string>())
 
   const recordActivity = useCallback((item: Omit<AgentActivityItem, 'id'>) => {
     const id = nextActivityIdRef.current
@@ -347,16 +348,14 @@ export function AgentPlayground({
     })
   }, [recordActivity])
 
-  useEffect(() => {
+  const refreshCommands = useCallback(() => {
     let active = true
 
-    Effect.runPromise(loadAgentCommands())
+    void Effect.runPromise(loadAgentCommands())
       .then(loadedCommands => {
-        if (!active) {
-          return
+        if (active) {
+          setCommands(loadedCommands)
         }
-
-        setCommands(loadedCommands)
       })
       .catch(() => {
         if (active) {
@@ -368,6 +367,10 @@ export function AgentPlayground({
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    return refreshCommands()
+  }, [refreshCommands])
 
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
@@ -586,6 +589,25 @@ export function AgentPlayground({
       }),
     [activeToolLabel, isTextBusy, state.chatMessages, voiceUserDraft]
   )
+
+  useEffect(() => {
+    const completedManageSkillRuns = Arr.filter(
+      chatItems,
+      item =>
+        item._tag === 'ToolRun' &&
+        item.call.name === 'manage_skills' &&
+        (item.state._tag === 'Completed' || item.state._tag === 'ProviderCompleted') &&
+        !refreshedCommandToolRunIdsRef.current.has(item.id)
+    )
+
+    if (completedManageSkillRuns.length === 0) {
+      return
+    }
+
+    completedManageSkillRuns.forEach(item => refreshedCommandToolRunIdsRef.current.add(item.id))
+
+    return refreshCommands()
+  }, [chatItems, refreshCommands])
 
   const handleSubmit = useCallback(() => {
     const readyImages = readyImageAttachmentCount(imageAttachments)

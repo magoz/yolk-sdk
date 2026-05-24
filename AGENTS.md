@@ -104,7 +104,7 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 
 ## NOTES
 
-- No CI/CD; Vercel auto-deploys app.
+- No full CI; Vercel auto-deploys app. Package publish uses GitHub Actions.
 - React Compiler enabled.
 - PostHog proxied via `/ph/*`.
 - Drizzle v1 RC with Effect-native driver.

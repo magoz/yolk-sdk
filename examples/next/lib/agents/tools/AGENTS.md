@@ -29,7 +29,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow/voice only; they use app knowledge search/DB adapters from route runtime wiring, not Cloudflare bootstrap.
 - Knowledge tools are Next/Workflow/voice only; use `list_knowledge_records` to discover files/records, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
-- `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap.
+- `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap; UI refreshes slash commands after completed runs.
 - Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.
 - Keep tool result content model-visible and protocol-shaped.
