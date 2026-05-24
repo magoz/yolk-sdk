@@ -9,6 +9,7 @@ User-facing knowledge record management UI.
 - Pinned records are injected into text agent startup context.
 - Searchable/routable records are available through the `search_knowledge` agent tool.
 - Original file artifacts can be downloaded through the authenticated artifact route.
+- File upload uses server-action presigned R2 PUT URLs, then a finalize action stores artifact metadata and indexes bytes; no `FormData` upload through Next.
 - Knowledge mutations use server actions in `examples/next/lib/core/knowledge/*-action.ts`.
 
 ## Boundaries

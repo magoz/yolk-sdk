@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { S3Service } from '@effect-aws/client-s3'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { Config, Context, DateTime, Effect, Layer, Option, Redacted } from 'effect'
 import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
@@ -24,10 +24,28 @@ type R2KnowledgeArtifactStoreConfigShape = {
   readonly region: string
 }
 
+export type CreateR2PresignedUploadInput = {
+  readonly storageKey: string
+  readonly mediaType?: string
+  readonly expiresIn?: number
+}
+
+export type R2PresignedUpload = {
+  readonly uploadUrl: string
+  readonly storageKey: string
+}
+
 class R2KnowledgeArtifactStoreConfig extends Context.Service<
   R2KnowledgeArtifactStoreConfig,
   R2KnowledgeArtifactStoreConfigShape
 >()('@app/R2KnowledgeArtifactStoreConfig') {}
+
+export class R2KnowledgeUploadStore extends Context.Service<
+  R2KnowledgeUploadStore,
+  {
+    readonly createUploadUrl: (input: CreateR2PresignedUploadInput) => Effect.Effect<R2PresignedUpload, KnowledgeArtifactError>
+  }
+>()('@app/R2KnowledgeUploadStore') {}
 
 const optionString = (option: Option.Option<string>) =>
   Option.isSome(option) && option.value.trim().length > 0 ? option.value.trim() : undefined
@@ -50,6 +68,22 @@ const R2KnowledgeArtifactStoreConfigLayer = Layer.effect(
     )
   )
 )
+
+const R2S3ClientLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* R2KnowledgeArtifactStoreConfig
+
+    return S3Service.layer({
+      endpoint: config.endpoint,
+      region: config.region,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: Redacted.value(config.accessKeyId),
+        secretAccessKey: Redacted.value(config.secretAccessKey)
+      }
+    })
+  })
+).pipe(Layer.provide(R2KnowledgeArtifactStoreConfigLayer))
 
 const scopeUserId = (scope: KnowledgeScope) => scope.id
 
@@ -101,9 +135,6 @@ const artifactError = (message: string, cause?: unknown) => new KnowledgeArtifac
 
 const mapStoreError = (error: unknown) =>
   error instanceof KnowledgeStoreError ? error : storeError(unknownToMessage(error), error)
-
-const mapArtifactError = (error: unknown) =>
-  error instanceof KnowledgeArtifactError ? error : artifactError(unknownToMessage(error), error)
 
 export const knowledgeArtifactStorageKey = (input: {
   readonly recordId: string
@@ -370,66 +401,70 @@ export const R2KnowledgeArtifactStoreLayer = Layer.effect(
   KnowledgeArtifactStore,
   Effect.gen(function* () {
     const config = yield* R2KnowledgeArtifactStoreConfig
-    const client = new S3Client({
-      endpoint: config.endpoint,
-      region: config.region,
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId: Redacted.value(config.accessKeyId),
-        secretAccessKey: Redacted.value(config.secretAccessKey)
-      }
-    })
+    const client = yield* S3Service
 
     return {
       putArtifact: input =>
-        Effect.tryPromise({
-          try: () =>
-            client.send(
-              new PutObjectCommand({
-                Bucket: config.bucketName,
-                Key: input.storageKey,
-                Body: input.bytes,
-                ContentType: input.mediaType
-              })
-            ),
-          catch: error => artifactIntegrationError('Could not upload knowledge artifact', error)
+        client.putObject({
+          Bucket: config.bucketName,
+          Key: input.storageKey,
+          Body: input.bytes,
+          ContentType: input.mediaType
         }).pipe(
           Effect.asVoid,
           Effect.withSpan('KnowledgeArtifactStore.putArtifact'),
-          Effect.catch(error => Effect.fail(mapArtifactError(error)))
+          Effect.catch(error => Effect.fail(artifactIntegrationError('Could not upload knowledge artifact', error)))
         ),
 
       getArtifact: input =>
-        Effect.tryPromise({
-          try: async () => {
-            const response = await client.send(
-              new GetObjectCommand({ Bucket: config.bucketName, Key: input.storageKey })
-            )
-            if (response.Body === undefined) {
-              throw new Error('R2 object body missing')
-            }
-            return await response.Body.transformToByteArray()
-          },
-          catch: error => artifactIntegrationError('Could not download knowledge artifact', error)
+        Effect.gen(function* () {
+          const response = yield* client.getObject({ Bucket: config.bucketName, Key: input.storageKey })
+          const body = response.Body
+          if (body === undefined) {
+            return yield* Effect.fail(artifactError('R2 object body missing'))
+          }
+
+          return yield* Effect.tryPromise({
+            try: () => body.transformToByteArray(),
+            catch: error => artifactIntegrationError('Could not read knowledge artifact body', error)
+          })
         }).pipe(
           Effect.withSpan('KnowledgeArtifactStore.getArtifact'),
-          Effect.catch(error => Effect.fail(mapArtifactError(error)))
+          Effect.catch(error => Effect.fail(artifactIntegrationError('Could not download knowledge artifact', error)))
         ),
 
       deleteArtifact: input =>
-        Effect.tryPromise({
-          try: () =>
-            client.send(
-              new DeleteObjectCommand({ Bucket: config.bucketName, Key: input.storageKey })
-            ),
-          catch: error => artifactIntegrationError('Could not delete knowledge artifact', error)
-        }).pipe(
+        client.deleteObject({ Bucket: config.bucketName, Key: input.storageKey }).pipe(
           Effect.asVoid,
           Effect.withSpan('KnowledgeArtifactStore.deleteArtifact'),
-          Effect.catch(error => Effect.fail(mapArtifactError(error)))
+          Effect.catch(error => Effect.fail(artifactIntegrationError('Could not delete knowledge artifact', error)))
         )
     }
   })
-).pipe(Layer.provide(R2KnowledgeArtifactStoreConfigLayer))
+).pipe(Layer.provide(R2S3ClientLayer), Layer.provide(R2KnowledgeArtifactStoreConfigLayer))
+
+export const R2KnowledgeUploadStoreLayer = Layer.effect(
+  R2KnowledgeUploadStore,
+  Effect.gen(function* () {
+    const config = yield* R2KnowledgeArtifactStoreConfig
+    const client = yield* S3Service
+
+    return {
+      createUploadUrl: input =>
+        client.putObject(
+          {
+            Bucket: config.bucketName,
+            Key: input.storageKey,
+            ContentType: input.mediaType
+          },
+          { presigned: true, expiresIn: input.expiresIn ?? 900 }
+        ).pipe(
+          Effect.map(uploadUrl => ({ uploadUrl, storageKey: input.storageKey })),
+          Effect.withSpan('R2KnowledgeUploadStore.createUploadUrl'),
+          Effect.catch(error => Effect.fail(artifactIntegrationError('Could not create knowledge upload URL', error)))
+        )
+    }
+  })
+).pipe(Layer.provide(R2S3ClientLayer), Layer.provide(R2KnowledgeArtifactStoreConfigLayer))
 
 export const KnowledgeLayer = DrizzleKnowledgeStoreLayer.pipe(Layer.provide(Db.layer))

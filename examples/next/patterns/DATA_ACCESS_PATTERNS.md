@@ -277,9 +277,7 @@ Effect.map(post => ({ _tag: 'Success' as const, post }))
 
 ## Pattern 3: Signed URLs for File Operations
 
-> Planned pattern. Current codebase has no file storage service. Add an R2/S3 service before copying examples.
-
-Use Server Actions to generate signed URLs, then upload/download directly from the client.
+Use Server Actions to generate signed URLs, then upload/download directly from the client. Current app examples live in `/storage` and `/knowledge` and use `R2KnowledgeUploadStore` backed by `@effect-aws/client-s3`.
 
 ### File Upload Flow
 
@@ -287,49 +285,50 @@ Use Server Actions to generate signed URLs, then upload/download directly from t
 1. Client calls server action with file metadata
 2. Server action generates signed upload URL
 3. Client uploads directly to S3 using signed URL
-4. Client calls another server action to save the file reference
+4. Client calls another server action to finalize/index the uploaded object
 ```
 
 ### Get Signed Upload URL Action
 
 ```typescript
-// examples/next/lib/core/document/get-upload-url-action.ts
+// examples/next/lib/core/document/create-file-upload-url-action.ts
 'use server'
 
 import { Effect } from 'effect'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
-import { S3 } from '@/lib/services/s3/live-layer'
+import { R2KnowledgeUploadStore } from '@/lib/services/knowledge/live-layer'
 
 type UploadUrlInput = {
-  fileName: string
-  folder: string
+  filename: string
+  mediaType: string
+  byteSize: number
 }
 
-export const getUploadUrlAction = async (input: UploadUrlInput) => {
+export const createFileUploadUrlAction = async (input: UploadUrlInput) => {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
-      const s3 = yield* S3
+      const uploadStore = yield* R2KnowledgeUploadStore
 
       // Generate unique key with user context
-      const key = `${input.folder}/${session.user.id}/${Date.now()}-${input.fileName}`
+      const storageKey = `uploads/document/${session.user.id}/${crypto.randomUUID()}/${input.filename}`
 
-      const signedUrl = yield* s3.createSignedUrl(key, 300) // 5 min expiry
-      const publicUrl = s3.getUrlFromObjectKey(key)
+      const upload = yield* uploadStore.createUploadUrl({
+        storageKey,
+        mediaType: input.mediaType,
+        expiresIn: 900
+      })
 
       return {
         _tag: 'Success' as const,
-        signedUrl,
-        publicUrl,
-        key
+        upload
       }
     }).pipe(
       Effect.withSpan('action.document.getUploadUrl', {
         attributes: {
-          'file.name': input.fileName,
-          'file.folder': input.folder
+          'file.name': input.filename
         }
       }),
       Effect.provide(AppLayer),
@@ -346,10 +345,10 @@ export const getUploadUrlAction = async (input: UploadUrlInput) => {
 }
 ```
 
-### Save File Reference Action
+### Finalize Uploaded File Action
 
 ```typescript
-// examples/next/lib/core/document/save-document-action.ts
+// examples/next/lib/core/document/complete-file-upload-action.ts
 'use server'
 
 import { Effect } from 'effect'
@@ -362,20 +361,17 @@ import * as schema from '@/lib/services/db/schema'
 
 type SaveDocumentInput = {
   name: string
-  fileUrl: string
+  storageKey: string
 }
 
-export const saveDocumentAction = async (input: SaveDocumentInput) => {
+export const completeFileUploadAction = async (input: SaveDocumentInput) => {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
       const db = yield* Db
 
-      yield* db.insert(schema.document).values({
-        name: input.name,
-        fileUrl: input.fileUrl,
-        uploadedBy: session.user.id
-      })
+      // Verify input.storageKey starts with the authenticated user's upload prefix.
+      // Read object bytes from R2/S3, extract/index as needed, then persist metadata.
     }).pipe(
       Effect.withSpan('action.document.save', {
         attributes: {
@@ -405,8 +401,8 @@ export const saveDocumentAction = async (input: SaveDocumentInput) => {
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { getUploadUrlAction } from '@/lib/core/document/get-upload-url-action'
-import { saveDocumentAction } from '@/lib/core/document/save-document-action'
+import { createFileUploadUrlAction } from '@/lib/core/document/create-file-upload-url-action'
+import { completeFileUploadAction } from '@/lib/core/document/complete-file-upload-action'
 
 export function FileUpload({ folder }: { folder: string }) {
   const [isUploading, setIsUploading] = useState(false)
@@ -416,9 +412,10 @@ export function FileUpload({ folder }: { folder: string }) {
 
     try {
       // 1. Get signed URL from server
-      const urlResult = await getUploadUrlAction({
-        fileName: file.name,
-        folder
+      const urlResult = await createFileUploadUrlAction({
+        filename: file.name,
+        mediaType: file.type,
+        byteSize: file.size
       })
 
       if (urlResult._tag === 'Error') {
@@ -427,7 +424,7 @@ export function FileUpload({ folder }: { folder: string }) {
       }
 
       // 2. Upload directly to S3
-      const uploadResponse = await fetch(urlResult.signedUrl, {
+      const uploadResponse = await fetch(urlResult.upload.uploadUrl, {
         method: 'PUT',
         body: file,
         headers: {
@@ -440,10 +437,10 @@ export function FileUpload({ folder }: { folder: string }) {
         return
       }
 
-      // 3. Save file reference to database
-      const saveResult = await saveDocumentAction({
+      // 3. Finalize/index uploaded object
+      const saveResult = await completeFileUploadAction({
         name: file.name,
-        fileUrl: urlResult.publicUrl
+        storageKey: urlResult.upload.storageKey
       })
 
       if (saveResult?._tag === 'Error') {

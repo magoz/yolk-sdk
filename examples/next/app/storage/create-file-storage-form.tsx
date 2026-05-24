@@ -4,7 +4,8 @@ import { useRef, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { createFileStorageObjectAction } from '@/lib/core/storage/create-file-storage-object-action'
+import { completeFileStorageUploadAction } from '@/lib/core/storage/complete-file-storage-upload-action'
+import { createFileStorageUploadUrlAction } from '@/lib/core/storage/create-file-storage-upload-url-action'
 
 const acceptedFileTypes =
   '.txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -22,6 +23,35 @@ const formatBytes = (bytes: number) => {
 }
 
 const fileKey = (file: File) => `${file.name}-${file.size}-${file.lastModified}`
+
+const uploadFile = async (file: File) => {
+  const signed = await createFileStorageUploadUrlAction({
+    filename: file.name,
+    mediaType: file.type,
+    byteSize: file.size
+  })
+
+  if (signed._tag === 'Error') {
+    return signed
+  }
+
+  const headers = new Headers()
+  if (file.type.length > 0) {
+    headers.set('content-type', file.type)
+  }
+
+  const uploaded = await fetch(signed.upload.uploadUrl, { method: 'PUT', headers, body: file })
+  if (!uploaded.ok) {
+    return { _tag: 'Error' as const, message: 'Could not upload file' }
+  }
+
+  return await completeFileStorageUploadAction({
+    storageKey: signed.upload.storageKey,
+    filename: file.name,
+    mediaType: file.type,
+    byteSize: file.size
+  })
+}
 
 export function CreateFileStorageForm() {
   const [fileMessage, setFileMessage] = useState<string | undefined>()
@@ -50,13 +80,7 @@ export function CreateFileStorageForm() {
           }
 
           startFileTransition(() => {
-            void Promise.all(
-              files.map(file => {
-                const formData = new FormData()
-                formData.append('file', file)
-                return createFileStorageObjectAction(formData)
-              })
-            ).then(results => {
+            void Promise.all(files.map(uploadFile)).then(results => {
               const failures = results.filter(result => result._tag === 'Error')
               if (failures.length === 0) {
                 setSelectedFiles([])
