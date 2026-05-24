@@ -427,6 +427,7 @@ Useful invariants:
 - replayed HITL responses match only appended HITL response events
 - latest incomplete run ignores completed, awaiting, failed, and interrupted runs
 - stale expected revisions fail and leave the in-memory log unchanged
+- generated append sequences accept only current/no expected revisions and keep the real log equal to a small model after every step
 
 ## Test shape
 

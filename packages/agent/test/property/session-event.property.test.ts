@@ -46,6 +46,13 @@ const revisionCase = Schema.Struct({
 
 const revisionCaseArbitrary = Schema.toArbitrary(revisionCase)
 
+const appendCommand = Schema.Struct({
+  expectation: Schema.Literals(['current', 'stale', 'none']),
+  event: sessionCommand
+})
+
+const appendCommandsArbitrary = Schema.toArbitrary(Schema.Array(appendCommand))
+
 const emptyLog = (): RuntimeSessionEventLog => ({
   sessionId: 'session_1',
   revision: 0,
@@ -200,6 +207,48 @@ describe('session event property tests', () => {
         })
         expect(after).toEqual(initialLog)
       }).pipe(Effect.provide(makeInMemorySessionEventStoreLayer())),
+    propertyOptions
+  )
+
+  it.effect.prop(
+    'generated append sequences preserve revision and conflict invariants',
+    [appendCommandsArbitrary],
+    ([commands]) =>
+      Effect.gen(function* () {
+        const store = yield* SessionEventStore
+        let expectedLog = emptyLog()
+
+        for (const [index, command] of commands.entries()) {
+          const expectedRevision = command.expectation === 'none'
+            ? undefined
+            : command.expectation === 'current'
+              ? expectedLog.revision
+              : expectedLog.revision + 1
+          const events = [eventForCommand(command.event, index)]
+          const result = yield* store.append({
+            sessionId: 'session_1',
+            ...(expectedRevision === undefined ? {} : { expectedRevision }),
+            events
+          }).pipe(Effect.result)
+
+          if (command.expectation === 'stale') {
+            expect(result).toMatchObject({
+              _tag: 'Failure',
+              failure: { _tag: 'SessionConflictError', sessionId: 'session_1' }
+            })
+          } else {
+            expectedLog = appendRuntimeSessionEventsToLog(expectedLog, {
+              sessionId: 'session_1',
+              events
+            })
+            expect(result).toMatchObject({ _tag: 'Success' })
+          }
+
+          const actual = yield* store.load('session_1')
+          expect(actual).toEqual(expectedLog)
+          expect(actual.revision).toBe(actual.events.length)
+        }
+      }).pipe(Effect.provide(makeInMemorySessionEventStoreLayer([emptyLog()]))),
     propertyOptions
   )
 })
