@@ -15,6 +15,7 @@ import {
   RunInterrupted,
   RunStarted,
   SessionEventStore,
+  type RuntimeConfig,
   type RuntimeSessionEvent,
   type RuntimeSessionEventLog
 } from '@yolk-sdk/agent/runtime'
@@ -26,6 +27,9 @@ import {
   ToolApprovalRequest,
   ToolApprovalResponse,
   ToolCall,
+  ToolDef,
+  type HitlResponse,
+  type ToolApprovalResponse as ToolApprovalResponseType,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -98,6 +102,23 @@ const storageCommand = Schema.Struct({
 
 const storageCommandsArbitrary = Schema.toArbitrary(Schema.Array(storageCommand))
 
+const wsCommand = Schema.Struct({
+  kind: Schema.Literals([
+    'connect',
+    'startActive',
+    'userCurrent',
+    'userNone',
+    'userStale',
+    'hitlCurrent',
+    'hitlNone',
+    'hitlStale',
+    'hitlMismatch',
+    'hitlDuplicate'
+  ])
+})
+
+const wsCommandsArbitrary = Schema.toArbitrary(Schema.Array(wsCommand))
+
 const propertyOptions = propertyRuns()
 
 const toolCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
@@ -159,6 +180,155 @@ const interruptModelLog = (sessionId: string, log: RuntimeSessionEventLog) =>
         expectedRevision: log.revision,
         events: [RunInterrupted.make({ runId: activeRun.runId })]
       })
+  })
+
+const approvalTool = ToolDef.make({
+  name: 'weather',
+  description: 'Get weather.',
+  parameters: {},
+  approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'external lookup' })
+})
+
+const wsRuntimeConfig: RuntimeConfig = {
+  systemPrompt: 'Cloudflare websocket test agent.',
+  tools: [approvalTool],
+  model: 'faux-cloudflare'
+}
+
+const wsResponses = Array.from({ length: 192 }, (_, index) =>
+  index % 2 === 0
+    ? Reply.toolCall({
+        id: `ws_call_${index}`,
+        name: 'weather',
+        params: { city: 'Paris' }
+      })
+    : Reply.text(`ws_done_${index}`)
+)
+
+const makeWsLayer = (storage: RuntimeEventLogStorage, requests: Array<LLMRequest>) =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    LoopConfig.defaultLayer,
+    FauxProvider.layerWithRequests({ responses: wsResponses, requests }),
+    TestToolExecutor.layer({ weather: '72F' }),
+    makeDurableObjectSessionEventStoreLayer('session_1', storage)
+  )
+
+const latestApprovalRequest = (log: RuntimeSessionEventLog) => {
+  for (const stored of [...log.events].reverse()) {
+    const event = stored.event
+
+    switch (event._tag) {
+      case 'RunAwaitingInput':
+        return event.requests.find(request => request._tag === 'ToolApprovalRequest')
+      case 'RunCompleted':
+      case 'RunFailed':
+      case 'RunInterrupted':
+        return undefined
+      case 'HitlResponseAppended':
+      case 'InputAppended':
+      case 'RunStarted':
+        break
+    }
+  }
+
+  return undefined
+}
+
+const responseForApprovalRequest = (
+  request: ToolApprovalRequest
+): ToolApprovalResponseType =>
+  ToolApprovalResponse.make({
+    requestId: request.requestId,
+    toolCallId: request.toolCallId,
+    decision: 'approved',
+    source: 'user'
+  })
+
+const staleApprovalResponse = (): ToolApprovalResponseType =>
+  ToolApprovalResponse.make({
+    requestId: 'approval:stale',
+    toolCallId: 'stale',
+    decision: 'approved',
+    source: 'user'
+  })
+
+const expectedRevision = (
+  kind: typeof wsCommand.Type['kind'],
+  revision: number
+) => {
+  switch (kind) {
+    case 'userCurrent':
+    case 'hitlCurrent':
+      return revision
+    case 'userStale':
+    case 'hitlStale':
+      return revision + 1
+    case 'connect':
+    case 'startActive':
+    case 'userNone':
+    case 'hitlNone':
+    case 'hitlMismatch':
+    case 'hitlDuplicate':
+      return undefined
+  }
+}
+
+const runWsUserInput = (input: {
+  readonly storage: RuntimeEventLogStorage
+  readonly command: typeof wsCommand.Type
+  readonly index: number
+}) =>
+  Effect.gen(function* () {
+    const before = yield* loadRuntimeEventLogOrEmpty('session_1', input.storage)
+    const activeRun = latestIncompleteRuntimeRun(before.events)
+
+    if (Option.isSome(activeRun)) {
+      return yield* Effect.succeed({ mutated: false })
+    }
+
+    const revision = expectedRevision(input.command.kind, before.revision)
+    const result = yield* runRuntime(
+      {
+        _tag: 'AppendInput',
+        sessionId: 'session_1',
+        input: UserMessage.make({ content: `ws_user_${input.index}` }),
+        runId: `ws_user_run_${input.index}`,
+        ...(revision === undefined ? {} : { expectedRevision: revision })
+      },
+      wsRuntimeConfig
+    ).pipe(Stream.runCollect, Effect.result)
+
+    return { mutated: result._tag === 'Success' }
+  })
+
+const runWsHitlResponse = (input: {
+  readonly storage: RuntimeEventLogStorage
+  readonly command: typeof wsCommand.Type
+  readonly index: number
+  readonly response: HitlResponse
+}) =>
+  Effect.gen(function* () {
+    const before = yield* loadRuntimeEventLogOrEmpty('session_1', input.storage)
+    const activeRun = latestIncompleteRuntimeRun(before.events)
+
+    if (Option.isSome(activeRun)) {
+      return yield* Effect.succeed({ mutated: false })
+    }
+
+    const revision = expectedRevision(input.command.kind, before.revision)
+    const result = yield* runRuntime(
+      {
+        _tag: 'AppendHitlResponse',
+        sessionId: 'session_1',
+        response: input.response,
+        runId: `ws_hitl_run_${input.index}`,
+        ...(revision === undefined ? {} : { expectedRevision: revision })
+      },
+      wsRuntimeConfig
+    ).pipe(Stream.runCollect, Effect.result)
+
+    return { mutated: result._tag === 'Success' }
   })
 
 describe('Cloudflare session event storage', () => {
@@ -287,6 +457,93 @@ describe('Cloudflare session event storage', () => {
           expect(actual).toEqual(expectedLog)
           expect(actual.revision).toBe(actual.events.length)
         }
+      }),
+    propertyOptions
+  )
+
+  it.effect.prop(
+    'direct websocket input, reconnect, and HITL sequences preserve durable runtime invariants',
+    [wsCommandsArbitrary],
+    ([generatedCommands]) =>
+      Effect.gen(function* () {
+        const storage = yield* makeStorage()
+        const requests: Array<LLMRequest> = []
+        const commands = generatedCommands.slice(0, 64)
+        let lastAcceptedHitlResponse: HitlResponse | undefined
+
+        yield* Effect.gen(function* () {
+          for (const [index, command] of commands.entries()) {
+            const before = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
+
+            switch (command.kind) {
+              case 'connect': {
+                yield* interruptLatestIncompleteRun('session_1', storage)
+                const snapshotLog = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
+                const expectedLog = interruptModelLog('session_1', before)
+
+                expect(snapshotLog).toEqual(expectedLog)
+                expect(replayRuntimeSessionEvents(snapshotLog.events)).toEqual(
+                  replayRuntimeSessionEvents(expectedLog.events)
+                )
+                break
+              }
+              case 'startActive': {
+                const store = yield* SessionEventStore
+                const activeRun = latestIncompleteRuntimeRun(before.events)
+
+                if (Option.isNone(activeRun)) {
+                  yield* store.append({
+                    sessionId: 'session_1',
+                    expectedRevision: before.revision,
+                    events: [RunStarted.make({ runId: `ws_active_run_${index}` })]
+                  })
+                }
+                break
+              }
+              case 'userCurrent':
+              case 'userNone':
+              case 'userStale': {
+                const outcome = yield* runWsUserInput({ storage, command, index })
+                const after = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
+
+                if (!outcome.mutated) {
+                  expect(after).toEqual(before)
+                }
+                break
+              }
+              case 'hitlCurrent':
+              case 'hitlNone':
+              case 'hitlStale':
+              case 'hitlMismatch':
+              case 'hitlDuplicate': {
+                const pending = latestApprovalRequest(before)
+                const response =
+                  command.kind === 'hitlDuplicate'
+                    ? (lastAcceptedHitlResponse ?? staleApprovalResponse())
+                    : command.kind === 'hitlMismatch' || pending === undefined
+                      ? staleApprovalResponse()
+                      : responseForApprovalRequest(pending)
+                const outcome = yield* runWsHitlResponse({ storage, command, index, response })
+                const after = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
+
+                if (outcome.mutated) {
+                  lastAcceptedHitlResponse = response
+                } else {
+                  expect(after).toEqual(before)
+                }
+                break
+              }
+            }
+
+            const actual = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
+            expect(actual.revision).toBe(actual.events.length)
+
+            const incomplete = latestIncompleteRuntimeRun(actual.events)
+            if (Option.isSome(incomplete)) {
+              expect(actual.events.at(-1)?.event._tag).toBe('RunStarted')
+            }
+          }
+        }).pipe(Effect.provide(makeWsLayer(storage, requests)))
       }),
     propertyOptions
   )
