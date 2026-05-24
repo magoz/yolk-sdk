@@ -7,7 +7,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | File | Role |
 | --- | --- |
 | `workflow-loop.test.ts` | Pure contract tests with fake step callbacks |
-| `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/cancel tests |
+| `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/hook/cancel tests |
 | `fixtures/workflow-fixture.ts` | Test-only workflow/step directive fixture; not published |
 
 ## Rules
@@ -16,6 +16,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 - Directive/integration tests must be named `*.integration.test.ts`.
 - Run directive tests with `pnpm --filter @yolk-sdk/vercel-workflows-runtime test:workflow`.
 - Assert observable workflow contract: stream chunks, replay/cancel behavior, terminal status.
+- Use `waitForHook` + `resumeHook` for real `awaitInput` directive coverage.
 - Do not assert Vercel SDK internals.
 
 ## Anti-Patterns
