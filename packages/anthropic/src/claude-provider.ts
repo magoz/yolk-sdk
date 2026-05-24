@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Ref, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -87,7 +87,14 @@ type AnthropicRequestBody = {
   readonly system: ReadonlyArray<AnthropicSystemBlock>
   readonly messages: ReadonlyArray<AnthropicMessage>
   readonly max_tokens: number
+  readonly stream?: true
   readonly tools?: ReadonlyArray<AnthropicTool>
+}
+
+type AnthropicToolBlockState = {
+  readonly id: string
+  readonly name: string
+  readonly partialJson: string
 }
 
 const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -174,6 +181,15 @@ const AnthropicContentResponseBlock = Schema.Union([
 class AnthropicUsageResponse extends Schema.Class<AnthropicUsageResponse>('AnthropicUsageResponse')({
   input_tokens: Schema.Number,
   output_tokens: Schema.Number,
+  cache_read_input_tokens: Schema.optional(Schema.Number),
+  cache_creation_input_tokens: Schema.optional(Schema.Number)
+}) {}
+
+class AnthropicStreamUsageResponse extends Schema.Class<AnthropicStreamUsageResponse>(
+  'AnthropicStreamUsageResponse'
+)({
+  input_tokens: Schema.optional(Schema.Number),
+  output_tokens: Schema.optional(Schema.Number),
   cache_read_input_tokens: Schema.optional(Schema.Number),
   cache_creation_input_tokens: Schema.optional(Schema.Number)
 }) {}
@@ -291,17 +307,19 @@ const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
 
 export const toAnthropicClaudeRequestBody = (
   request: LLMRequest,
-  config?: { readonly maxTokens?: number }
+  config?: { readonly maxTokens?: number; readonly stream?: boolean }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
-    const body = {
+    const baseBody = {
       model: request.model,
       system: [anthropicClaudeIdentitySystemBlock],
       messages,
       max_tokens: config?.maxTokens ?? anthropicClaudeMaxTokens
     }
+    const body: AnthropicRequestBody =
+      config?.stream === true ? { ...baseBody, stream: true } : baseBody
 
     if (request.tools.length === 0) {
       return body
@@ -335,19 +353,68 @@ const toHttpClientLlmError =
       retryable
     })
 
-const parseAnthropicResponseJson = (
-  response: HttpClientResponse.HttpClientResponse
-): Effect.Effect<unknown, LLMError> =>
-  response.json.pipe(
+const decodeJsonString = (raw: string, message: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
     Effect.mapError(
       error =>
         new LLMError({
           cause: 'invalid_response',
-          message: `Could not parse Anthropic Claude response JSON: ${error.message}`,
+          message: `${message}: ${unknownToMessage(error)}`,
           retryable: false
         })
     )
   )
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null
+
+const field = (value: unknown, key: string) =>
+  isRecord(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined
+
+const stringField = (value: unknown, key: string) => {
+  const raw = field(value, key)
+  return typeof raw === 'string' ? raw : undefined
+}
+
+const numberField = (value: unknown, key: string) => {
+  const raw = field(value, key)
+  return typeof raw === 'number' ? raw : undefined
+}
+
+const sseDataFromBlock = (block: string) =>
+  block
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice('data:'.length).trimStart())
+    .join('\n')
+    .trim()
+
+const dataFromSseBlock = (block: string) => {
+  const data = sseDataFromBlock(block)
+
+  if (data.length === 0 || data === '[DONE]') {
+    return undefined
+  }
+
+  return data
+}
+
+const normalizeNewlines = (text: string) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+const splitCompleteSseBlocks = (buffer: string) => {
+  const blocks = buffer.split('\n\n')
+  const tail = blocks.at(-1) ?? ''
+
+  return { completeBlocks: blocks.slice(0, -1), tail }
+}
+
+const parseToolParams = (raw: string) => {
+  const trimmed = raw.trim()
+
+  if (trimmed.length === 0) return Effect.succeed({})
+
+  return decodeJsonString(trimmed, 'Invalid Anthropic Claude tool arguments JSON')
+}
 
 const toAgentUsage = (usage: AnthropicUsageResponse) =>
   AgentUsage.make({
@@ -365,6 +432,42 @@ const toAgentUsage = (usage: AnthropicUsageResponse) =>
       text: usage.output_tokens
     })
   })
+
+const toPartialAgentUsage = (usage: AnthropicStreamUsageResponse) =>
+  AgentUsage.make({
+    input: AgentInputUsage.make({
+      total: usage.input_tokens ?? 0,
+      uncached:
+        usage.input_tokens === undefined
+          ? undefined
+          : usage.input_tokens -
+            (usage.cache_read_input_tokens ?? 0) -
+            (usage.cache_creation_input_tokens ?? 0),
+      cacheRead: usage.cache_read_input_tokens,
+      cacheWrite: usage.cache_creation_input_tokens
+    }),
+    output: AgentOutputUsage.make({
+      total: usage.output_tokens ?? 0,
+      text: usage.output_tokens
+    })
+  })
+
+const usageEventFromUnknown = (usage: unknown) => {
+  const parsed = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usage)
+
+  if (parsed._tag === 'None') {
+    return []
+  }
+
+  const value = parsed.value
+  const hasUsage =
+    value.input_tokens !== undefined ||
+    value.output_tokens !== undefined ||
+    value.cache_read_input_tokens !== undefined ||
+    value.cache_creation_input_tokens !== undefined
+
+  return hasUsage ? [LLMUsage.make({ usage: toPartialAgentUsage(value) })] : []
+}
 
 const toLlmEvents = (
   response: AnthropicMessageResponse
@@ -395,17 +498,336 @@ const toLlmEvents = (
     return [...events, LLMDone.make({ stopReason }), ...usageEvent]
   })
 
+const decodeAnthropicMessageResponse = (json: unknown) =>
+  Schema.decodeUnknownEffect(AnthropicMessageResponse)(json).pipe(
+    Effect.mapError(
+      error =>
+        new LLMError({
+          cause: 'invalid_response',
+          message: `Invalid Anthropic Claude response: ${unknownToMessage(error)}`,
+          retryable: false
+        })
+    )
+  )
+
+const parseAnthropicJsonResponse = (raw: string): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const json = yield* decodeJsonString(raw, 'Could not parse Anthropic Claude response JSON')
+    const parsed = yield* decodeAnthropicMessageResponse(json)
+
+    return yield* toLlmEvents(parsed)
+  })
+
+type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
+
+type AnthropicSseState = {
+  readonly hasToolCall: boolean
+  readonly hasDone: boolean
+}
+
+type AnthropicSseStep = {
+  readonly state: AnthropicSseState
+  readonly events: ReadonlyArray<LLMEvent>
+}
+
+type AnthropicBodyState = {
+  readonly format: AnthropicBodyFormat
+  readonly buffer: string
+  readonly sse: AnthropicSseState
+}
+
+const initialSseState: AnthropicSseState = {
+  hasToolCall: false,
+  hasDone: false
+}
+
+const initialBodyState: AnthropicBodyState = {
+  format: 'undecided',
+  buffer: '',
+  sse: initialSseState
+}
+
+const classifyAnthropicBody = (buffer: string): AnthropicBodyFormat => {
+  const trimmed = buffer.trimStart()
+
+  if (trimmed.length === 0) {
+    return 'undecided'
+  }
+
+  if (trimmed.startsWith('event:') || trimmed.startsWith('data:')) {
+    return 'sse'
+  }
+
+  if ('event:'.startsWith(trimmed) || 'data:'.startsWith(trimmed)) {
+    return 'undecided'
+  }
+
+  return 'json'
+}
+
+const invalidToolUseStartError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Invalid Anthropic Claude tool_use stream block',
+    retryable: false
+  })
+
+const makeAnthropicStreamEmitter = () => {
+  const toolBlocks = new Map<number, AnthropicToolBlockState>()
+
+  return (state: AnthropicSseState, data: unknown): Effect.Effect<AnthropicSseStep, LLMError> => {
+    const type = stringField(data, 'type')
+
+    if (type === 'message_start') {
+      const message = field(data, 'message')
+      return Effect.succeed({ state, events: usageEventFromUnknown(field(message, 'usage')) })
+    }
+
+    if (type === 'content_block_start') {
+      const index = numberField(data, 'index')
+      const block = field(data, 'content_block')
+
+      if (index !== undefined && stringField(block, 'type') === 'tool_use') {
+        const id = stringField(block, 'id')
+        const name = stringField(block, 'name')
+
+        if (id === undefined || name === undefined) {
+          return Effect.fail(invalidToolUseStartError())
+        }
+
+        toolBlocks.set(index, {
+          id,
+          name: unprefixClaudeToolName(name),
+          partialJson: ''
+        })
+      }
+
+      return Effect.succeed({ state, events: [] })
+    }
+
+    if (type === 'content_block_delta') {
+      const index = numberField(data, 'index')
+      const delta = field(data, 'delta')
+      const deltaType = stringField(delta, 'type')
+      const text = stringField(delta, 'text')
+      const thinking = stringField(delta, 'thinking')
+      const partialJson = stringField(delta, 'partial_json')
+
+      if (deltaType === 'text_delta' && text !== undefined) {
+        return Effect.succeed({ state, events: [LLMTextDelta.make({ text })] })
+      }
+
+      if (deltaType === 'thinking_delta' && thinking !== undefined) {
+        return Effect.succeed({ state, events: [LLMReasoningDelta.make({ text: thinking })] })
+      }
+
+      if (index !== undefined && deltaType === 'input_json_delta' && partialJson !== undefined) {
+        const current = toolBlocks.get(index)
+        if (current !== undefined) {
+          toolBlocks.set(index, { ...current, partialJson: `${current.partialJson}${partialJson}` })
+        }
+      }
+
+      return Effect.succeed({ state, events: [] })
+    }
+
+    if (type === 'content_block_stop') {
+      const index = numberField(data, 'index')
+      const toolBlock = index === undefined ? undefined : toolBlocks.get(index)
+
+      if (toolBlock === undefined) return Effect.succeed({ state, events: [] })
+
+      return parseToolParams(toolBlock.partialJson).pipe(
+        Effect.map(params => {
+          if (index !== undefined) toolBlocks.delete(index)
+
+          return {
+            state: { ...state, hasToolCall: true },
+            events: [
+              LLMToolCall.make({
+                call: ToolCall.make({
+                  id: toolBlock.id,
+                  name: toolBlock.name,
+                  params
+                })
+              })
+            ]
+          }
+        })
+      )
+    }
+
+    if (type === 'message_delta') {
+      return Effect.succeed({ state, events: usageEventFromUnknown(field(data, 'usage')) })
+    }
+
+    if (type === 'message_stop') {
+      return Effect.succeed({
+        state: { ...state, hasDone: true },
+        events: [LLMDone.make({ stopReason: state.hasToolCall ? 'tool_use' : 'stop' })]
+      })
+    }
+
+    if (type === 'error') {
+      const error = field(data, 'error')
+      return Effect.fail(
+        new LLMError({
+          cause: 'provider_error',
+          message: stringField(error, 'message') ?? 'Anthropic Claude stream error',
+          retryable: false
+        })
+      )
+    }
+
+    return Effect.succeed({ state, events: [] })
+  }
+}
+
+const processSseData = (
+  emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
+  state: AnthropicSseState,
+  data: string
+): Effect.Effect<AnthropicSseStep, LLMError> =>
+  decodeJsonString(data, 'Could not parse Anthropic Claude stream event JSON').pipe(
+    Effect.flatMap(parsed => emitData(state, parsed))
+  )
+
+const processSseBlock = (
+  emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
+  state: AnthropicSseState,
+  block: string
+): Effect.Effect<AnthropicSseStep, LLMError> => {
+  const data = dataFromSseBlock(block)
+
+  if (data === undefined) {
+    return Effect.succeed({ state, events: [] })
+  }
+
+  return processSseData(emitData, state, data)
+}
+
+const processSseBlocks = (
+  emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
+  state: AnthropicSseState,
+  blocks: ReadonlyArray<string>
+): Effect.Effect<AnthropicSseStep, LLMError> =>
+  Effect.gen(function* () {
+    const events: Array<LLMEvent> = []
+    let currentState = state
+
+    for (const block of blocks) {
+      const step = yield* processSseBlock(emitData, currentState, block)
+      currentState = step.state
+      events.push(...step.events)
+    }
+
+    return { state: currentState, events }
+  })
+
+const processBodyChunk = (
+  emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
+  state: AnthropicBodyState,
+  chunk: string
+): Effect.Effect<AnthropicSseStep & { readonly bodyState: AnthropicBodyState }, LLMError> =>
+  Effect.gen(function* () {
+    const buffer = normalizeNewlines(`${state.buffer}${chunk}`)
+    const format = state.format === 'undecided' ? classifyAnthropicBody(buffer) : state.format
+
+    if (format !== 'sse') {
+      return {
+        state: state.sse,
+        bodyState: { ...state, format, buffer },
+        events: []
+      }
+    }
+
+    const split = splitCompleteSseBlocks(buffer)
+    const step = yield* processSseBlocks(emitData, state.sse, split.completeBlocks)
+
+    return {
+      state: step.state,
+      bodyState: { format, buffer: split.tail, sse: step.state },
+      events: step.events
+    }
+  })
+
+const finalizeBodyState = (
+  emitData: ReturnType<typeof makeAnthropicStreamEmitter>,
+  state: AnthropicBodyState
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+  Effect.gen(function* () {
+    const buffer = normalizeNewlines(state.buffer)
+    const format = state.format === 'undecided' ? classifyAnthropicBody(buffer) : state.format
+
+    if (format === 'json') {
+      return yield* parseAnthropicJsonResponse(buffer)
+    }
+
+    const events: Array<LLMEvent> = []
+    let sseState = state.sse
+
+    if (format === 'sse') {
+      const split = splitCompleteSseBlocks(buffer)
+      const step = yield* processSseBlocks(emitData, sseState, split.completeBlocks)
+      sseState = step.state
+      events.push(...step.events)
+
+      if (split.tail.trim().length > 0) {
+        const tailStep = yield* processSseBlock(emitData, sseState, split.tail)
+        sseState = tailStep.state
+        events.push(...tailStep.events)
+      }
+    }
+
+    if (!sseState.hasDone) {
+      events.push(LLMDone.make({ stopReason: sseState.hasToolCall ? 'tool_use' : 'stop' }))
+    }
+
+    return events
+  })
+
+export const streamAnthropicClaudeResponse = (
+  response: HttpClientResponse.HttpClientResponse
+): Stream.Stream<LLMEvent, LLMError> =>
+  Stream.unwrap(
+    Ref.make(initialBodyState).pipe(
+      Effect.map(bodyStateRef => {
+        const emitData = makeAnthropicStreamEmitter()
+        const chunks = response.stream.pipe(
+          Stream.mapError(toHttpClientLlmError('Could not read Anthropic Claude stream', false)),
+          Stream.decodeText,
+          Stream.mapEffect(chunk =>
+            Effect.gen(function* () {
+              const state = yield* Ref.get(bodyStateRef)
+              const step = yield* processBodyChunk(emitData, state, chunk)
+              yield* Ref.set(bodyStateRef, step.bodyState)
+              return step.events
+            })
+          ),
+          Stream.flatMap(events => Stream.fromIterable(events))
+        )
+        const finalEvents = Stream.fromEffect(
+          Ref.get(bodyStateRef).pipe(Effect.flatMap(state => finalizeBodyState(emitData, state)))
+        ).pipe(
+          Stream.flatMap(events => Stream.fromIterable(events))
+        )
+
+        return chunks.pipe(Stream.concat(finalEvents))
+      })
+    )
+  )
+
 const sendAnthropicClaudeRequest = (
   config: AnthropicClaudeProviderConfig,
   request: LLMRequest,
   client: HttpClient.HttpClient
-): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toAnthropicClaudeRequestBody(request, config)
+    const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize Anthropic Claude request')
     const httpRequest = HttpClientRequest.post(config.messagesUrl ?? anthropicClaudeMessagesUrl).pipe(
       HttpClientRequest.setHeaders({
-        accept: 'application/json',
+        accept: 'text/event-stream',
         ...anthropicClaudeAuthorizationHeaders(config.token),
         'anthropic-beta': anthropicClaudeOAuthBeta,
         'anthropic-version': anthropicClaudeVersion,
@@ -441,19 +863,7 @@ const sendAnthropicClaudeRequest = (
       )
     }
 
-    const json = yield* parseAnthropicResponseJson(response)
-    const parsed = yield* Schema.decodeUnknownEffect(AnthropicMessageResponse)(json).pipe(
-      Effect.mapError(
-        error =>
-          new LLMError({
-            cause: 'invalid_response',
-            message: `Invalid Anthropic Claude response: ${unknownToMessage(error)}`,
-            retryable: false
-          })
-      )
-    )
-
-    return yield* toLlmEvents(parsed)
+    return response
   }).pipe(Effect.withSpan('AnthropicClaudeProvider.stream'))
 
 export const makeAnthropicClaudeProviderLayer = (config: AnthropicClaudeProviderConfig) =>
@@ -465,7 +875,7 @@ export const makeAnthropicClaudeProviderLayer = (config: AnthropicClaudeProvider
       return LLMProvider.of({
         stream: request =>
           Stream.fromEffect(sendAnthropicClaudeRequest(config, request, client)).pipe(
-            Stream.flatMap(events => Stream.fromIterable(events))
+            Stream.flatMap(streamAnthropicClaudeResponse)
           )
       })
     })
