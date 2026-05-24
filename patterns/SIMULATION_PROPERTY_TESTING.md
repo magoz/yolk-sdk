@@ -284,6 +284,18 @@ Useful invariants:
 - execution failures emit start then error, and never emit completion for that failed call
 - tool errors preserve the failing tool name/cause at the stream failure boundary
 
+### Client reducer rollout
+
+Client reducer properties should tolerate defensive/out-of-order event sequences, but still enforce structural invariants.
+
+Useful invariants:
+
+- duplicate event ids are idempotent
+- tool runs stay unique by tool call id
+- at most one active run exists per generated single-call scenario
+- terminal HITL states are inactive and idempotent
+- done states clear live messages when `AgentEnd` is the terminal event under normal event ordering
+
 ### 3. Agent session/message/event model
 
 State space:
