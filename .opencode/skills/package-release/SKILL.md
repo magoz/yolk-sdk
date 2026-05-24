@@ -38,12 +38,15 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
    - Private app package: `@yolk-sdk/cloudflare-agent`, ignored by Changesets.
    - All public packages share one version.
 
-5. Version locally; publish only in GitHub Actions.
+5. Version locally; publish only in GitHub Actions. This step is mandatory before any publish action.
 
 ```bash
 pnpm changeset:version
 pnpm install --lockfile-only
 ```
+
+   - If no files change, stop: there is no new version to publish.
+   - Never tell user to run the GitHub Action until bumped versions/changelogs are committed and pushed.
 
 6. Inspect generated release files.
    - Package `package.json` versions.
@@ -51,6 +54,25 @@ pnpm install --lockfile-only
    - `pnpm-lock.yaml` when changed.
    - `.changeset/pre.json` and removed consumed changesets.
    - No feature code, env files, `dist`, `.next`, `.turbo`, coverage.
+   - Confirm package versions advanced beyond npm-published versions.
+
+```bash
+node - <<'NODE'
+const { execFileSync } = require('node:child_process')
+const fs = require('node:fs')
+for (const d of fs.readdirSync('packages')) {
+  const p = `packages/${d}/package.json`
+  if (!fs.existsSync(p)) continue
+  const pkg = JSON.parse(fs.readFileSync(p, 'utf8'))
+  if (!pkg.name?.startsWith('@yolk-sdk/') || pkg.private) continue
+  const versions = execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' })
+  if (JSON.parse(versions).includes(pkg.version)) {
+    throw new Error(`${pkg.name}@${pkg.version} already published`)
+  }
+  console.log(`${pkg.name}@${pkg.version} ok`)
+}
+NODE
+```
 
 7. Validate before push/action.
 
@@ -79,6 +101,7 @@ pnpm test:run
     - Tell user to run Actions → `Publish packages` from `main`.
     - Use `canary` unless stable was explicitly approved.
     - Never run local `pnpm release:canary` for normal releases.
+    - Before saying “run action”, confirm current `main` contains the version bump commit.
     - After action completes, verify npm dist-tags.
 
 ## PR Workflow
@@ -89,6 +112,7 @@ pnpm test:run
 - Do not mix feature code into release PRs.
 - Publish only with `.github/workflows/publish.yml` after release prep lands on `main`.
 - After release prep passes, propose commit/push but wait for explicit approval.
+- A pending changeset alone is not release prep; consumed changesets plus bumped package versions/changelogs are release prep.
 
 Typical flow:
 

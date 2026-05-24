@@ -95,3 +95,17 @@ Fix:
 - Check pending `.changeset/*.md` before versioning.
 - Check package versions vs npm dist-tags.
 - Add/repair changeset release notes, run version prep again, validate, commit, push, rerun action.
+
+## npm 403 cannot publish over existing version
+
+Cause: GitHub Action tried to publish a package version that already exists on npm.
+
+Most common cause: pushed only a `.changeset/*.md`, then ran action without `pnpm changeset:version` output committed.
+
+Fix:
+
+- Run `pnpm changeset:version && pnpm install --lockfile-only`.
+- Confirm public packages bumped to a new unpublished version.
+- Confirm changelog entries generated.
+- Validate, commit, push, rerun action.
+- Update skill/workflow if agent ever advised running action before version bump commit.

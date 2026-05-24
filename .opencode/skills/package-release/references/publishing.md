@@ -16,6 +16,7 @@ Release PRs:
 - Include only generated release files: package versions, changelogs, lockfile, consumed changesets, and `.changeset/pre.json` changes.
 - No feature code.
 - Merge/push to `main`, then user manually runs `.github/workflows/publish.yml`.
+- Do not run the action from a commit that only adds `.changeset/*.md`; it will republish the existing package version and 403.
 
 After successful release prep:
 
@@ -45,6 +46,13 @@ pnpm test:run
 ```
 
 Then inspect, commit, push after explicit approval.
+
+Before telling user to run the Action, verify with the unpublished-version check from `SKILL.md`:
+
+- public package versions changed from the previously published canary/latest
+- changelog entries were generated
+- consumed changeset ids were recorded in `.changeset/pre.json`
+- no package version to publish already exists on npm
 
 ## GitHub Actions publish steps
 
@@ -98,6 +106,7 @@ NODE
 Preconditions:
 
 - release prep commit is on `main`.
+- release prep includes package version bumps and changelog entries, not just changesets.
 - publish target tag is `canary` unless stable approved.
 - all public versions are lockstep.
 - working tree state was clean before release prep.

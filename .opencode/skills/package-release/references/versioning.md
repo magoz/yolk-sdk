@@ -91,6 +91,16 @@ pnpm changeset:version
 pnpm install --lockfile-only
 ```
 
+This command pair must run before GitHub Actions publish. A changeset file alone does not change package versions.
+
+Required generated output:
+
+- each public `packages/*/package.json` version increments lockstep
+- each public package changelog gets the release note
+- consumed changeset id appears in `.changeset/pre.json`
+
+If output does not include package version bumps, stop and do not run publish action.
+
 Stable release requires explicit approval, then exit prerelease mode first:
 
 ```bash
