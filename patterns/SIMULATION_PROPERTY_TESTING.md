@@ -10,6 +10,12 @@ This pattern is inspired by the current opencode simulation branch:
 - reset/snapshot APIs make invariants observable
 - first properties are small and boring, usually no-crash or state-safety checks
 
+It also follows the testing principles in fast-check's JavaScript testing skill:
+
+- https://github.com/dubzzz/fast-check/blob/main/skills/javascript-testing-expert/SKILL.md
+
+Use that skill as the upstream reference for property-testing discipline: tests should find bugs, document behavior, prevent regressions, and challenge assumptions without becoming random oracles.
+
 ## Terms
 
 | Term | Meaning | Question answered |
@@ -122,14 +128,31 @@ Property tests and example tests are complementary:
 
 Start each area with documenting example tests, then add property tests for invariants and edge cases.
 
+### JavaScript testing expert rules we adopt
+
+From the fast-check JavaScript testing skill, keep these rules in force:
+
+- Test through public behavior, not internals.
+- Prefer stubs/fakes at boundaries over mocks and call-count assertions.
+- Avoid network, real clocks, random values, and platform-dependent behavior in tests.
+- Keep tests focused; one property defends one behavior class.
+- Use example tests first for documentation, then properties for edge cases and invariants.
+- Do not try to replace all examples with properties; they are complementary.
+- Make sure a test fails if the behavior named by the test is removed.
+- Keep helper functions small, explicit, and single-purpose; avoid all-purpose `prepare` helpers.
+- Use realistic data in example tests when it improves readability.
+- Avoid snapshots unless the captured shape is exactly what matters.
+
 ### Generators
 
 - Do not over-constrain generated values unless the domain requires it.
 - Avoid `maxLength`, `min`, `max`, or small arrays just to make tests convenient.
 - Use domain constraints only when they are real requirements.
 - Prefer generator options or `map` over `.filter`/preconditions.
+- Prefer constructed values with known expected characteristics over arbitrary raw inputs.
 - Generate mostly meaningful states, with deliberate invalid/stale cases for safety checks.
 - Do not recreate the production algorithm inside the property assertion.
+- If a trace cap is needed for runtime cost, document that it is a test-budget cap and stress with `PROPERTY_RUNS`.
 
 Good:
 
@@ -154,6 +177,7 @@ Schema.String.pipe(Schema.maxLength(5)) // unless five chars is a real domain li
 - Prefer invariants: no execution, no mutation, no duplicate terminal state, no illegal graph shape.
 - Keep assertions focused; one property should defend one behavior class.
 - Print or preserve replay data when a failure occurs: seed, command trace, real snapshot, model snapshot.
+- Avoid asserting incidental call counts unless the count is the user-visible contract.
 
 ### Async/race properties
 
