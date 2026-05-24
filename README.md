@@ -30,8 +30,8 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | `@yolk-sdk/knowledge` | Knowledge record/artifact/provenance/context/search contracts |
 | `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives |
 | `@yolk-sdk/oauth` | Provider-neutral OAuth credential contracts |
-| `@yolk-sdk/openai` | OpenAI/Codex auth constants and broker helpers |
-| `@yolk-sdk/anthropic` | Anthropic Claude OAuth constants and broker helpers |
+| `@yolk-sdk/openai` | OpenAI/Codex reusable OAuth and agent provider mechanics |
+| `@yolk-sdk/anthropic` | Anthropic/Claude reusable OAuth and agent provider mechanics |
 | `@yolk-sdk/vercel-workflows-runtime` | Vercel Workflow agent loop contract |
 | `@yolk-sdk/skillset` | Portable skill/command parsing and catalogs |
 | `@yolk-sdk/voice-runtime` | Realtime voice tool-call bridge |

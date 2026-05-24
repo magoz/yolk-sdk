@@ -1,6 +1,6 @@
 # @yolk-sdk/openai
 
-OpenAI-family provider mechanics for Codex/ChatGPT OAuth and broker integration.
+OpenAI-family OAuth helpers and agent provider mechanics for Yolk hosts.
 
 ## Install
 
@@ -143,4 +143,5 @@ Use these headers in host-owned Codex request adapters. Prefer
 
 - No app users, sessions, DB, Better Auth, routes, or Durable Objects.
 - No OpenAI SDK dependency.
-- Provider layers have no SDK dependency and stay host-runtime agnostic.
+- Provider layers depend only on Yolk agent/OAuth contracts plus Effect HTTP.
+- Hosts own token storage, refresh, model routing, app policy, and telemetry.

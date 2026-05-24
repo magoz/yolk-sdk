@@ -1,6 +1,6 @@
 # @yolk-sdk/anthropic
 
-Anthropic Claude OAuth mechanics and broker integration primitives.
+Anthropic Claude OAuth helpers and agent provider mechanics for Yolk hosts.
 
 ## Install
 
@@ -113,4 +113,5 @@ const request = makeAnthropicClaudeBrokerRequest({
 
 - No app users, sessions, DB, Better Auth, routes, or Durable Objects.
 - No Anthropic SDK dependency.
+- Provider layers depend only on Yolk agent/OAuth contracts plus Effect HTTP.
 - API-key mode can be added later without changing OAuth or provider-layer contracts.
