@@ -14,6 +14,7 @@ Domain functions and server actions for provider subscription OAuth state.
 - `getValidOpenAiCodexToken()` refreshes expired Codex tokens and persists refreshed state before returning.
 - `getValidAnthropicClaudeToken()` refreshes expired Claude tokens and persists refreshed state before returning.
 - Core composes persistence and OAuth services; provider HTTP exchange logic stays in `examples/next/lib/services/*-oauth`.
+- Runtime adapters convert returned app token shapes to `@yolk-sdk/oauth` `OAuthAccessToken`; core still owns refresh tokens.
 
 ## Server actions
 

@@ -1,4 +1,8 @@
-import { anthropicClaudeRefreshBufferMs, makeAnthropicClaudeBrokerRequest } from '@yolk-sdk/anthropic'
+import {
+  anthropicClaudeRefreshBufferMs,
+  makeAnthropicClaudeBrokerRequest,
+  toAnthropicClaudeOAuthAccessToken
+} from '@yolk-sdk/anthropic/claude'
 import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
 
 export const anthropicTokenRefreshBufferMs = anthropicClaudeRefreshBufferMs
@@ -12,9 +16,4 @@ export const makeAnthropicTokenBrokerRequest = (userId: string) =>
 export const isAnthropicTokenFresh = (token: TokenBrokerResponse, nowMs: number) =>
   token.expiresAt > nowMs + anthropicTokenRefreshBufferMs
 
-export const anthropicTokenToProviderToken = (token: TokenBrokerResponse) => ({
-  type: 'oauth' as const,
-  access: token.accessToken,
-  refresh: '',
-  expires: token.expiresAt
-})
+export const anthropicTokenToProviderToken = toAnthropicClaudeOAuthAccessToken

@@ -15,7 +15,7 @@ const packages: ReadonlyArray<PackageShape> = [
     name: '@yolk-sdk/agent',
     exports: ['.', './client', './loop', './loop/testing', './protocol', './runtime', './tools']
   },
-  { name: '@yolk-sdk/anthropic', exports: ['.'] },
+  { name: '@yolk-sdk/anthropic', exports: ['.', './claude', './claude-provider'] },
   {
     name: '@yolk-sdk/connectors',
     exports: ['.', './agent', './figma', './google', './linkedin-search', './notion', './r2-storage', './telegram', './todoist']
@@ -26,7 +26,7 @@ const packages: ReadonlyArray<PackageShape> = [
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
   { name: '@yolk-sdk/oauth', exports: ['.'] },
-  { name: '@yolk-sdk/openai', exports: ['.'] },
+  { name: '@yolk-sdk/openai', exports: ['.', './codex', './codex-provider', './provider'] },
   { name: '@yolk-sdk/react', exports: ['.'] },
   { name: '@yolk-sdk/skillset', exports: ['.'] },
   { name: '@yolk-sdk/vercel-workflows-runtime', exports: ['.', './workflow'] },

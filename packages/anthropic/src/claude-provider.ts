@@ -29,13 +29,14 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { anthropicClaudeOAuthUserAgent } from '@yolk-sdk/anthropic'
+import { anthropicClaudeAuthorizationHeaders, anthropicClaudeOAuthUserAgent } from './claude.ts'
+import type { OAuthAccessToken } from '@yolk-sdk/oauth'
 
-type AnthropicClaudeProviderToken = {
-  readonly type: 'oauth'
-  readonly access: string
-  readonly refresh: string
-  readonly expires: number
+export type AnthropicClaudeProviderConfig = {
+  readonly token: OAuthAccessToken
+  readonly messagesUrl?: string
+  readonly maxTokens?: number
+  readonly extraHeaders?: Readonly<Record<string, string>>
 }
 
 type AnthropicTextBlock = {
@@ -106,6 +107,8 @@ const unprefixClaudeToolName = (name: string) => {
   return `${unprefixed.charAt(0).toLowerCase()}${unprefixed.slice(1)}`
 }
 
+const anthropicClaudeMessagesUrl = 'https://api.anthropic.com/v1/messages?beta=true'
+const anthropicClaudeMaxTokens = 8192
 const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   type: 'text',
   text: anthropicClaudeSystemIdentity
@@ -285,7 +288,8 @@ const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
 })
 
 export const toAnthropicClaudeRequestBody = (
-  request: LLMRequest
+  request: LLMRequest,
+  config?: { readonly maxTokens?: number }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
@@ -294,7 +298,7 @@ export const toAnthropicClaudeRequestBody = (
       model: request.model,
       system: [anthropicClaudeIdentitySystemBlock],
       messages,
-      max_tokens: 8192
+      max_tokens: config?.maxTokens ?? anthropicClaudeMaxTokens
     }
 
     if (request.tools.length === 0) {
@@ -390,22 +394,21 @@ const toLlmEvents = (
   })
 
 const sendAnthropicClaudeRequest = (
-  token: AnthropicClaudeProviderToken,
+  config: AnthropicClaudeProviderConfig,
   request: LLMRequest,
   client: HttpClient.HttpClient
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toAnthropicClaudeRequestBody(request)
+    const body = yield* toAnthropicClaudeRequestBody(request, config)
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize Anthropic Claude request')
-    const httpRequest = HttpClientRequest.post('https://api.anthropic.com/v1/messages?beta=true').pipe(
+    const httpRequest = HttpClientRequest.post(config.messagesUrl ?? anthropicClaudeMessagesUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
-        authorization: `Bearer ${token.access}`,
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14',
-        'anthropic-version': '2023-06-01',
+        ...anthropicClaudeAuthorizationHeaders(config.token),
         'content-type': 'application/json',
         'user-agent': anthropicClaudeOAuthUserAgent,
-        'x-app': 'cli'
+        'x-app': 'cli',
+        ...config.extraHeaders
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
@@ -449,7 +452,7 @@ const sendAnthropicClaudeRequest = (
     return yield* toLlmEvents(parsed)
   }).pipe(Effect.withSpan('AnthropicClaudeProvider.stream'))
 
-export const makeAnthropicClaudeProviderLayer = (config: { readonly token: AnthropicClaudeProviderToken }) =>
+export const makeAnthropicClaudeProviderLayer = (config: AnthropicClaudeProviderConfig) =>
   Layer.effect(
     LLMProvider,
     Effect.gen(function* () {
@@ -457,7 +460,7 @@ export const makeAnthropicClaudeProviderLayer = (config: { readonly token: Anthr
 
       return LLMProvider.of({
         stream: request =>
-          Stream.fromEffect(sendAnthropicClaudeRequest(config.token, request, client)).pipe(
+          Stream.fromEffect(sendAnthropicClaudeRequest(config, request, client)).pipe(
             Stream.flatMap(events => Stream.fromIterable(events))
           )
       })

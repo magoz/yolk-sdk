@@ -26,6 +26,7 @@ Primary work should stay in reusable packages first:
 - `@yolk-sdk/agent/client`
 - `@yolk-sdk/agent/tools`
 - `@yolk-sdk/mcp`
+- `@yolk-sdk/openai` / `@yolk-sdk/anthropic` for reusable provider adapters
 
 Cloudflare should remain a thin runtime adapter; policy, auth, token refresh, and tools stay app-owned until stable.
 
@@ -76,7 +77,7 @@ Do not build these here yet unless explicitly requested:
 - Use `pnpm cloudflare-agent:deploy:adopt` for pinned non-interactive deploys; it passes Alchemy `--adopt --force --yes`.
 - Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
-- Keep `@yolk-sdk/*` packages provider/runtime-neutral.
+- Keep agent/MCP packages provider-neutral; provider packages stay host-runtime agnostic.
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.

@@ -8,7 +8,7 @@ import {
   HttpServerResponse
 } from 'effect/unstable/http'
 import { AppLayer } from '@/lib/layers'
-import { openAiCodexResponsesUrl } from '@yolk-sdk/openai'
+import { openAiCodexResponsesUrl } from '@yolk-sdk/openai/codex'
 import { forwardedHeaders } from './route-model'
 
 export const dynamic = 'force-dynamic'

@@ -37,6 +37,8 @@ export const toOAuthAccessToken = (token: OpenAiCodexTokenBrokerResponse) =>
     accountId: token.accountId
   })
 
+export const toOpenAiCodexOAuthAccessToken = toOAuthAccessToken
+
 export const makeOpenAiCodexBrokerRequest = (input: {
   readonly subjectId: string
   readonly minTtlSeconds?: number

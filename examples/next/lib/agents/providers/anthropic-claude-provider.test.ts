@@ -13,7 +13,9 @@ import {
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { makeAnthropicClaudeProviderLayer } from './anthropic-claude-provider'
+import { OAuthAccessToken } from '@yolk-sdk/oauth'
+import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
@@ -21,7 +23,11 @@ type CapturedRequest = {
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
   makeAnthropicClaudeProviderLayer({
-    token: { type: 'oauth', access: 'test-token', refresh: '', expires: 9_999 }
+    token: new OAuthAccessToken({
+      provider: anthropicClaudeProviderId,
+      accessToken: 'test-token',
+      expiresAt: 9_999
+    })
   }).pipe(Layer.provide(httpClientLayer))
 
 const makeHttpClientLayer = (

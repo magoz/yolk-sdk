@@ -13,7 +13,7 @@ import {
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 
 import { TokenBrokerResponse } from '@yolk-sdk/oauth'
-import { openAiCodexProviderId } from '@yolk-sdk/openai'
+import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
 import {
   codexWsHeaders,
   makeCodexWsProviderLayer,

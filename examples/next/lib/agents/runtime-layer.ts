@@ -1,7 +1,7 @@
 import { Layer } from 'effect'
 import { LoopConfig, type LLMProvider, type ToolExecutor } from '@yolk-sdk/agent/loop'
 import { NoToolExecutorLayer } from './no-tool-executor-layer'
-import { OpenAiProviderLayer } from './providers/openai-provider'
+import { OpenAiProviderLayer } from '@yolk-sdk/openai/provider'
 import { AgentContextTransformerLayer } from './context-transformer'
 
 export const makeAgentRuntimeLayerWithTools = <

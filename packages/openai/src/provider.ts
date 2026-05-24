@@ -30,7 +30,10 @@ import {
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
 
-type OpenAiConfigShape = {
+export type OpenAiProviderConfig = {
+  readonly chatCompletionsUrl?: string
+  readonly maxCompletionTokens?: number
+  readonly extraHeaders?: Readonly<Record<string, string>>
   readonly apiKey: Redacted.Redacted<string>
 }
 
@@ -134,7 +137,7 @@ class OpenAiChatCompletionResponse extends Schema.Class<OpenAiChatCompletionResp
   usage: Schema.optional(OpenAiUsageResponse)
 }) {}
 
-class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiConfigShape>()(
+class OpenAiConfig extends Context.Service<OpenAiConfig, OpenAiProviderConfig>()(
   '@app/OpenAiConfig'
 ) {}
 
@@ -287,7 +290,8 @@ const toOpenAiTool = (tool: ToolDef): OpenAiTool => ({
 })
 
 export const toOpenAiRequestBody = (
-  request: LLMRequest
+  request: LLMRequest,
+  config?: { readonly maxCompletionTokens?: number }
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
@@ -297,7 +301,7 @@ export const toOpenAiRequestBody = (
     const body = {
       model: request.model,
       messages,
-      max_completion_tokens: 4096
+      max_completion_tokens: config?.maxCompletionTokens ?? 4096
     }
 
     if (request.tools.length === 0) {
@@ -392,19 +396,20 @@ const parseOpenAiResponseJson = (
   )
 
 const sendOpenAiRequest = (
-  config: OpenAiConfigShape,
+  config: OpenAiProviderConfig,
   request: LLMRequest,
   client: HttpClient.HttpClient
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiRequestBody(request)
+    const body = yield* toOpenAiRequestBody(request, config)
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI request')
 
-    const httpRequest = HttpClientRequest.post('https://api.openai.com/v1/chat/completions').pipe(
+    const httpRequest = HttpClientRequest.post(config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions').pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
+        ...config.extraHeaders
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
@@ -465,7 +470,7 @@ const sendOpenAiRequest = (
     return [...events, LLMUsage.make({ usage: toAgentUsage(parsed.usage) })]
   }).pipe(Effect.withSpan('OpenAiProvider.stream'))
 
-export const makeOpenAiProviderLayer = (config: OpenAiConfigShape) =>
+export const makeOpenAiProviderLayer = (config: OpenAiProviderConfig) =>
   Layer.effect(
     LLMProvider,
     Effect.gen(function* () {

@@ -1,6 +1,6 @@
 # OpenAI Provider Package
 
-`@yolk-sdk/openai` owns reusable OpenAI-family mechanics for Codex/ChatGPT and future OpenAI API-key modes.
+`@yolk-sdk/openai` owns reusable OpenAI-family mechanics for Codex/ChatGPT OAuth and OpenAI API-key provider mode.
 
 ## Boundaries
 
@@ -15,9 +15,12 @@
 | Export area | Purpose |
 | ----------- | ------- |
 | `codex` | Codex constants, token schemas, broker helpers, headers |
+| `codex-provider` | Codex `LLMProvider` layer, request lowering, SSE/JSON stream parsing, usage mapping |
+| `provider` | OpenAI API-key Chat Completions `LLMProvider` layer |
 
 ## Design rules
 
 - Keep Codex direct execution compatible with Worker runtimes.
 - Keep gateway/server execution out until a real provider-gateway package is needed.
-- API-key mode may be added later without changing OAuth contracts.
+- API-key provider mode stays separate from Codex OAuth contracts.
+- Provider layers depend on `@yolk-sdk/agent`; hosts still own token storage/refresh and app policy.

@@ -1,27 +1,28 @@
-# Agent Providers
+# Provider Regression Tests
 
-App-owned provider adapters from protocol requests to vendor APIs.
+Provider adapters live in public packages. This directory keeps Next-owned integration regressions
+that exercise package-backed providers through app runtime wiring.
 
 ## Providers
 
-| File | Role |
+| Package subpath | Role |
 | ---- | ---- |
-| `openai-codex-provider.ts` | Active ChatGPT Codex OAuth provider (`gpt-5.4`) |
-| `anthropic-claude-provider.ts` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
-| `openai-provider.ts` | Dormant API-key Chat Completions scaffold |
+| `@yolk-sdk/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.4`) |
+| `@yolk-sdk/anthropic/claude-provider` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
+| `@yolk-sdk/openai/provider` | Dormant API-key Chat Completions scaffold |
 
 ## Model policy
 
 - Text model/reasoning/capabilities live in `examples/next/lib/agents/text-agent-config.ts`.
 - Active text providers: Codex OAuth (`gpt-5.4`) and Anthropic Claude OAuth (`claude-sonnet-4-6`).
-- Provider choice is app boundary policy; providers implement `LLMProvider` only.
+- Provider choice is app boundary policy; package providers implement `LLMProvider` only.
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex requests set `reasoning.summary = 'auto'`; summaries are optional provider output.
 
 ## Boundaries
 
 - Providers implement `LLMProvider`; they do not choose model policy or tools.
-- Token lookup/refresh stays in `examples/next/lib/core/agent/*-auth.ts`; providers receive valid access tokens via runtime wiring.
+- Token lookup/refresh stays in `examples/next/lib/core/agent/*-auth.ts`; runtime wiring converts app token rows to `OAuthAccessToken` for package providers.
 - Use Effect `HttpClient`; tests inject fake clients.
 - Normalize all usage into protocol `AgentUsage`.
 - Mark retryability at provider boundary; loop owns retry policy.
@@ -59,7 +60,6 @@ App-owned provider adapters from protocol requests to vendor APIs.
 
 ## Tests
 
-- Keep vendor event-shape regressions near provider implementation.
-- Cover request lowering, images, tool calls, reasoning deltas, usage, empty responses, cancellation.
-- Anthropic Claude provider tests cover multimodal/tool transcript lowering, thinking/tool-use response events, cache usage normalization, and retryable rate-limit errors.
-- OpenAI Codex provider tests cover malformed SSE JSON, invalid tool-call arguments, and provider-emitted SSE error events.
+- Package unit tests live beside provider implementations under `packages/openai` and `packages/anthropic`.
+- App regression tests here cover package providers through Next-style HTTP layers and runtime assumptions.
+- Keep coverage for images, tool calls, reasoning deltas, usage, empty responses, cancellation, malformed SSE JSON, invalid tool-call arguments, and provider-emitted SSE errors.

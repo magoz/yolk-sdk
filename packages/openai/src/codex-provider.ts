@@ -31,18 +31,17 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { openAiCodexResponsesUrl } from '@yolk-sdk/openai'
-import {
-  agentTextReasoningEffort,
-  agentTextReasoningSummary,
-  type AgentTextReasoningSummary
-} from '../text-agent-config.ts'
-import type { OpenAiCodexOAuthToken } from '../../services/openai-codex-oauth/schemas.ts'
+import { openAiCodexAuthorizationHeaders, openAiCodexResponsesUrl } from './codex.ts'
+import type { OAuthAccessToken } from '@yolk-sdk/oauth'
 
-type OpenAiCodexConfigShape = {
-  readonly token: OpenAiCodexOAuthToken
+export type OpenAiCodexReasoningSummary = 'auto' | 'concise' | 'detailed'
+
+export type OpenAiCodexProviderConfig = {
+  readonly token: OAuthAccessToken
   readonly responsesUrl?: string
   readonly extraHeaders?: Readonly<Record<string, string>>
+  readonly defaultReasoningEffort?: AgentReasoningEffort
+  readonly reasoningSummary?: OpenAiCodexReasoningSummary
 }
 
 type OpenAiCodexMessageInput = {
@@ -103,7 +102,7 @@ type OpenAiCodexRequestBody = {
   readonly stream: true
   readonly reasoning: {
     readonly effort: AgentReasoningEffort
-    readonly summary: AgentTextReasoningSummary
+    readonly summary: OpenAiCodexReasoningSummary
   }
   readonly tools?: ReadonlyArray<OpenAiCodexTool>
   readonly parallel_tool_calls?: true
@@ -327,7 +326,11 @@ const toOpenAiCodexTool = (tool: ToolDef): OpenAiCodexTool => ({
 })
 
 export const toOpenAiCodexRequestBody = (
-  request: LLMRequest
+  request: LLMRequest,
+  config?: {
+    readonly defaultReasoningEffort?: AgentReasoningEffort
+    readonly reasoningSummary?: OpenAiCodexReasoningSummary
+  }
 ): Effect.Effect<OpenAiCodexRequestBody, LLMError> =>
   Effect.gen(function* () {
     const input = Arr.flatten(yield* Effect.forEach(request.messages, messageToCodexInput))
@@ -339,8 +342,8 @@ export const toOpenAiCodexRequestBody = (
       store: false,
       stream: true,
       reasoning: {
-        effort: request.reasoningEffort ?? agentTextReasoningEffort,
-        summary: agentTextReasoningSummary
+        effort: request.reasoningEffort ?? config?.defaultReasoningEffort ?? 'low',
+        summary: config?.reasoningSummary ?? 'auto'
       }
     }
 
@@ -912,24 +915,19 @@ export const streamOpenAiCodexResponse = (
   )
 
 const sendOpenAiCodexRequest = (
-  config: OpenAiCodexConfigShape,
+  config: OpenAiCodexProviderConfig,
   request: LLMRequest,
   client: HttpClient.HttpClient
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiCodexRequestBody(request)
+    const body = yield* toOpenAiCodexRequestBody(request, config)
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI Codex request')
 
     const headers: Record<string, string> = {
-      ...config.extraHeaders,
       accept: 'application/json',
-      authorization: `Bearer ${config.token.access}`,
+      ...openAiCodexAuthorizationHeaders(config.token),
       'content-type': 'application/json',
-      originator: 'opencode'
-    }
-
-    if (config.token.accountId !== undefined) {
-      headers['ChatGPT-Account-Id'] = config.token.accountId
+      ...config.extraHeaders
     }
 
     const httpRequest = HttpClientRequest.post(config.responsesUrl ?? openAiCodexResponsesUrl).pipe(
@@ -964,7 +962,7 @@ const sendOpenAiCodexRequest = (
     return response
   }).pipe(Effect.withSpan('OpenAiCodexProvider.stream'))
 
-export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexConfigShape) =>
+export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) =>
   Layer.effect(LLMProvider)(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient

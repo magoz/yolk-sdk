@@ -33,8 +33,11 @@ import {
 } from '@/lib/agents/text-agent-config'
 import { getValidAnthropicClaudeToken } from '@/lib/core/agent/anthropic-claude-auth'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
-import { makeAnthropicClaudeProviderLayer } from '@/lib/agents/providers/anthropic-claude-provider'
-import { makeOpenAiCodexProviderLayer } from '@/lib/agents/providers/openai-codex-provider'
+import { OAuthAccessToken } from '@yolk-sdk/oauth'
+import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
+import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/openai/codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'
@@ -174,11 +177,24 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
     switch (agentTextModelProvider(model)) {
       case 'anthropic-claude': {
         const token = yield* getValidAnthropicClaudeToken(userId)
-        return makeAnthropicClaudeProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
+        return makeAnthropicClaudeProviderLayer({
+          token: new OAuthAccessToken({
+            provider: anthropicClaudeProviderId,
+            accessToken: token.access,
+            expiresAt: token.expires
+          })
+        }).pipe(Layer.provide(FetchHttpClient.layer))
       }
       case 'openai-codex': {
         const token = yield* getValidOpenAiCodexToken(userId)
-        return makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(FetchHttpClient.layer))
+        return makeOpenAiCodexProviderLayer({
+          token: new OAuthAccessToken({
+            provider: openAiCodexProviderId,
+            accessToken: token.access,
+            expiresAt: token.expires,
+            accountId: token.accountId
+          })
+        }).pipe(Layer.provide(FetchHttpClient.layer))
       }
     }
   })

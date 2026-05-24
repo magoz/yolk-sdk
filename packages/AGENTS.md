@@ -1,6 +1,6 @@
 # Packages
 
-Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy, storage, auth, prompts, providers, and UI.
+Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy, storage, auth, prompts, provider selection, and UI.
 
 ## Package map
 
@@ -12,8 +12,8 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 | `@yolk-sdk/knowledge` | Knowledge record/artifact/context/search contracts | `packages/knowledge/AGENTS.md` |
 | `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
 | `@yolk-sdk/oauth` | Provider-neutral OAuth token contracts | `packages/oauth/AGENTS.md` |
-| `@yolk-sdk/openai` | OpenAI/Codex reusable provider mechanics | `packages/openai/AGENTS.md` |
-| `@yolk-sdk/anthropic` | Anthropic/Claude reusable provider mechanics | `packages/anthropic/AGENTS.md` |
+| `@yolk-sdk/openai` | OpenAI/Codex reusable OAuth and agent provider mechanics | `packages/openai/AGENTS.md` |
+| `@yolk-sdk/anthropic` | Anthropic/Claude reusable OAuth and agent provider mechanics | `packages/anthropic/AGENTS.md` |
 | `@yolk-sdk/skillset` | Portable skill + command parsing/catalog | `packages/skillset/AGENTS.md` |
 | `@yolk-sdk/voice-runtime` | Provider-neutral voice tool-call bridge | `packages/voice-runtime/AGENTS.md` |
 | `@yolk-sdk/vercel-workflows-runtime` | Vercel Workflow agent loop contract | `packages/vercel-workflows-runtime/AGENTS.md` |
@@ -26,7 +26,7 @@ react -> agent/client + agent/protocol
 knowledge -> agent/protocol + agent/tools only for agent adapter
 mcp -> agent/protocol only for ToolDef/ToolResult
 agent -> no knowledge/react/mcp/app/Next/provider SDKs
-provider packages -> oauth + Effect
+provider packages -> oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
 ```
 
@@ -38,7 +38,7 @@ connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
 - Use source exports for workspace dev; npm `publishConfig.exports` points to `dist`.
 - Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
-- Provider/OAuth packages may model vendor auth mechanics and wire contracts, not host storage or policy.
+- Provider/OAuth packages may model vendor auth mechanics, wire contracts, and agent provider adapters, not host storage or policy.
 - Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private app packages private.
 
 ## Commands

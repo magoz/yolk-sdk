@@ -54,7 +54,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/anthropic',
     packageName: '@yolk-sdk/anthropic',
-    expectedExports: ['./package.json', '.'],
+    expectedExports: ['./package.json', '.', './claude', './claude-provider'],
     tinyRoot: false
   },
   {
@@ -83,7 +83,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/openai',
     packageName: '@yolk-sdk/openai',
-    expectedExports: ['./package.json', '.'],
+    expectedExports: ['./package.json', '.', './codex', './codex-provider', './provider'],
     tinyRoot: false
   },
   {

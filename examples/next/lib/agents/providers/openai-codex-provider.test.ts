@@ -8,21 +8,20 @@ import {
 import { describe, expect, it } from '@effect/vitest'
 import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { openAiCodexResponsesUrl } from '@yolk-sdk/openai'
-import type { OpenAiCodexOAuthToken } from '@/lib/services/openai-codex-oauth/schemas'
-import { makeOpenAiCodexProviderLayer } from './openai-codex-provider'
+import { OAuthAccessToken } from '@yolk-sdk/oauth'
+import { openAiCodexProviderId, openAiCodexResponsesUrl } from '@yolk-sdk/openai/codex'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/openai/codex-provider'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
 }
 
-const token: OpenAiCodexOAuthToken = {
-  type: 'oauth',
-  refresh: 'refresh-token',
-  access: 'access-token',
-  expires: Date.now() + 60_000,
+const token = new OAuthAccessToken({
+  provider: openAiCodexProviderId,
+  accessToken: 'access-token',
+  expiresAt: Date.now() + 60_000,
   accountId: 'acct_test'
-}
+})
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
   makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(httpClientLayer))

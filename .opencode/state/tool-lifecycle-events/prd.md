@@ -148,7 +148,7 @@ When this PRD is complete, the following will be true:
 - `packages/agent/src/client/state.ts` — generic reducer state changes.
 - `packages/react/src/chat-messages.ts` — headless UI state changes.
 - `packages/agent/src/loop/run.ts` — local execution compatibility path.
-- `lib/agents/providers/openai-provider.ts` and `lib/agents/providers/openai-codex-provider.ts` — provider adapter normalization later.
+- `@yolk-sdk/openai/provider` and `@yolk-sdk/openai/codex-provider` — provider adapter normalization later.
 
 ### System Dependencies
 

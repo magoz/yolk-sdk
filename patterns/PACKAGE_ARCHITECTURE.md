@@ -20,6 +20,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/server`
 - `@yolk-sdk/knowledge` owns knowledge search/chunking/embedding/vector-store contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
+- `@yolk-sdk/openai` and `@yolk-sdk/anthropic` own reusable provider mechanics behind explicit OAuth/provider subpaths.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout
@@ -34,11 +35,12 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ## Dependency Direction
 
 ```txt
-examples/next, cloudflare/agent, e2e -> @yolk-sdk/agent/* + @yolk-sdk/mcp/*
+examples/next, cloudflare/agent, e2e -> @yolk-sdk/* public subpaths
 @yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
 @yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
 @yolk-sdk/connectors -> @yolk-sdk/agent/tools only in ./agent; no app/storage/auth/UI policy
+@yolk-sdk/openai, @yolk-sdk/anthropic -> @yolk-sdk/oauth + @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent -> no @yolk-sdk/knowledge, @yolk-sdk/react, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 

@@ -41,6 +41,7 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
 import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk-sdk/agent/tools'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
 import {
   agentTextModel,
@@ -48,7 +49,6 @@ import {
   isAgentTextModel,
   type AgentTextModel
 } from '../../../examples/next/lib/agents/text-agent-config.ts'
-import { makeAnthropicClaudeProviderLayer } from '../../../examples/next/lib/agents/providers/anthropic-claude-provider.ts'
 import { resolveAgentToolSet } from '../../../examples/next/lib/agents/tools/resolve-toolset.ts'
 import {
   isAnthropicTokenFresh,

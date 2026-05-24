@@ -66,7 +66,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Next patterns | `examples/next/patterns` | Pages, API routes, actions, nuqs, UX |
 | Server actions/domain | `examples/next/lib/core/*` | App-owned; see local docs |
 | Services/adapters | `examples/next/lib/services/*` | App-owned; see local docs |
-| App agent wiring | `examples/next/lib/agents/*` | Providers, tools, MCP, runtime layers |
+| App agent wiring | `examples/next/lib/agents/*` | Provider selection, tools, MCP, runtime layers |
 | UI components | `examples/next/components/ui` | App-owned Base UI/shadcn; see local docs |
 | E2E | `examples/next/e2e` | Playwright; fixed port, no portless |
 | Cloudflare app | `cloudflare/agent` | Worker/DO; explicit `.ts` relative imports |
@@ -121,7 +121,7 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 - `examples/next/app/AGENTS.md` — App Router rules
 - `examples/next/lib/core/AGENTS.md` — actions/domain/errors
 - `examples/next/lib/services/AGENTS.md` — Effect service architecture
-- `examples/next/lib/agents/AGENTS.md` — app-owned agent provider/tool wiring
+- `examples/next/lib/agents/AGENTS.md` — app agent provider selection/tool wiring
 - `packages/AGENTS.md` — public SDK package boundaries
 - `cloudflare/agent/AGENTS.md` — Cloudflare app rules
 - `examples/next/e2e/AGENTS.md` — Playwright rules

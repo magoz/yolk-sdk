@@ -5,7 +5,7 @@ Anthropic Claude OAuth mechanics and broker integration primitives.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/anthropic@canary @yolk-sdk/oauth@canary effect
+pnpm add @yolk-sdk/anthropic@canary @yolk-sdk/agent@canary @yolk-sdk/oauth@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
@@ -14,7 +14,9 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 | Subpath | Purpose |
 | --- | --- |
-| `@yolk-sdk/anthropic` | Anthropic Claude OAuth constants, auth URL helpers, broker helpers, and headers |
+| `@yolk-sdk/anthropic` | Convenience root for Claude OAuth helpers |
+| `@yolk-sdk/anthropic/claude` | Claude OAuth constants, auth URL helpers, broker helpers, and headers |
+| `@yolk-sdk/anthropic/claude-provider` | Claude `LLMProvider` layer, request lowering, response/usage mapping |
 
 ## Imports
 
@@ -25,8 +27,55 @@ import {
   makeAnthropicClaudeAuthorizationUrl,
   makeAnthropicClaudeBrokerRequest,
   parseAnthropicClaudeAuthorizationCode
-} from '@yolk-sdk/anthropic'
+} from '@yolk-sdk/anthropic/claude'
+
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
 ```
+
+## Claude provider layer
+
+Use `makeAnthropicClaudeProviderLayer` with `@yolk-sdk/agent/loop` when a host already owns
+credential lookup and refresh.
+
+```ts
+import { FetchHttpClient } from 'effect/unstable/http'
+import { Layer, Stream } from 'effect'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
+import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
+
+const providerLayer = makeAnthropicClaudeProviderLayer({ token }).pipe(
+  Layer.provide(FetchHttpClient.layer)
+)
+
+const runtimeLayer = Layer.mergeAll(
+  ContextTransformer.identity,
+  LoopConfig.defaultLayer,
+  providerLayer
+)
+
+const events = run({
+  messages,
+  systemPrompt,
+  tools,
+  model: 'claude-sonnet-4-6'
+}).pipe(Stream.provide(runtimeLayer))
+```
+
+The provider:
+
+- Lowers Yolk `LLMRequest` messages/tools/images to Anthropic Messages API input.
+- Preserves Claude subscription OAuth headers and Claude Code-compatible tool naming.
+- Maps Anthropic message responses to Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.
+- Maps provider failures to typed `LLMError` causes for retry/context/rate-limit handling.
+
+Config:
+
+| Option | Purpose |
+| --- | --- |
+| `token` | Required `OAuthAccessToken` from `@yolk-sdk/oauth` |
+| `messagesUrl` | Optional Messages API override for tests/gateways |
+| `maxTokens` | Optional output token limit override |
+| `extraHeaders` | Optional host/gateway headers |
 
 ## OAuth URL
 
@@ -58,10 +107,10 @@ const request = makeAnthropicClaudeBrokerRequest({
 
 - Own OAuth verifier/state storage, callback handling, and refresh-token storage.
 - Provide hosted or local credential sources through `@yolk-sdk/oauth`.
-- Own provider requests, telemetry, and product permissions.
+- Own token lookup/refresh, telemetry, and product permissions.
 
 ## Boundaries
 
 - No app users, sessions, DB, Better Auth, routes, or Durable Objects.
 - No Anthropic SDK dependency.
-- API-key mode can be added later without changing OAuth contracts.
+- API-key mode can be added later without changing OAuth or provider-layer contracts.

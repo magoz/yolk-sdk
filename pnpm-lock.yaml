@@ -365,6 +365,9 @@ importers:
 
   packages/anthropic:
     dependencies:
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
       '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:../oauth
@@ -413,6 +416,9 @@ importers:
 
   packages/openai:
     dependencies:
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
       '@yolk-sdk/oauth':
         specifier: workspace:^
         version: link:../oauth

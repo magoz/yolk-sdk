@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { TokenBrokerResponse } from '@yolk-sdk/oauth'
-import { anthropicClaudeProviderId, anthropicClaudeRefreshBufferMs } from '@yolk-sdk/anthropic'
+import { OAuthAccessToken, TokenBrokerResponse } from '@yolk-sdk/oauth'
+import { anthropicClaudeProviderId, anthropicClaudeRefreshBufferMs } from '@yolk-sdk/anthropic/claude'
 import {
   anthropicTokenRefreshBufferMs,
   anthropicTokenToProviderToken,
@@ -42,10 +42,11 @@ describe('Cloudflare Anthropic token broker helpers', () => {
     })
 
     expect(anthropicTokenToProviderToken(brokerToken)).toEqual({
-      type: 'oauth',
-      access: 'access',
-      refresh: '',
-      expires: 123
+      ...new OAuthAccessToken({
+        provider: anthropicClaudeProviderId,
+        accessToken: 'access',
+        expiresAt: 123
+      })
     })
   })
 })
