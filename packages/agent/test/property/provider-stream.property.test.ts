@@ -12,6 +12,8 @@ import {
 import {
   ContextTransformer,
   LLMDone,
+  LLMError,
+  LLMProvider,
   LLMProviderToolResult,
   LLMReasoningDelta,
   LLMTextDelta,
@@ -49,6 +51,21 @@ const invalidProviderCase = Schema.Struct({
 })
 
 const invalidProviderCaseArbitrary = Schema.toArbitrary(invalidProviderCase)
+
+const retryableFailureCase = Schema.Struct({
+  failuresBeforeSuccess: Schema.Literals([0, 1, 2, 3, 4]),
+  cause: Schema.Literals(['provider_error', 'rate_limit'])
+})
+
+const retryableFailureCaseArbitrary = Schema.toArbitrary(retryableFailureCase)
+
+const nonRetryableFailureCase = Schema.Struct({
+  cause: Schema.Literals(['provider_error', 'context_overflow']),
+  retryable: Schema.Boolean,
+  emitsBeforeFailure: Schema.Boolean
+})
+
+const nonRetryableFailureCaseArbitrary = Schema.toArbitrary(nonRetryableFailureCase)
 
 const weatherCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 
@@ -132,10 +149,81 @@ const makeLayer = (events: ReadonlyArray<LLMEvent>, requests: Array<LLMRequest>)
     FauxProvider.layerWithRequests({ responses: [{ events }], requests })
   )
 
-const collectModelTurnEvents = (
-  events: ReadonlyArray<LLMEvent>,
-  requests: Array<LLMRequest>
-) =>
+const retryLoopConfig = LoopConfig.layer({
+  maxTurns: 1,
+  maxRetries: 2,
+  retryBaseDelayMs: 0,
+  toolConcurrency: 1
+})
+
+const retrySuccessEvents: ReadonlyArray<LLMEvent> = [
+  LLMTextDelta.make({ text: 'ok' }),
+  LLMDone.make({ stopReason: 'stop' })
+]
+
+const makeRetryableLayer = (input: {
+  readonly requests: Array<LLMRequest>
+  readonly failuresBeforeSuccess: number
+  readonly cause: typeof retryableFailureCase.Type.cause
+}) => {
+  let attempts = 0
+
+  return Layer.mergeAll(
+    ContextTransformer.identity,
+    retryLoopConfig,
+    Layer.succeed(
+      LLMProvider,
+      LLMProvider.of({
+        stream: request => {
+          input.requests.push(request)
+          attempts += 1
+
+          return attempts <= input.failuresBeforeSuccess
+            ? Stream.fail(
+                new LLMError({
+                  cause: input.cause,
+                  message: 'retryable failure',
+                  retryable: true
+                })
+              )
+            : Stream.fromIterable(retrySuccessEvents)
+        }
+      })
+    )
+  )
+}
+
+const makeNonRetryableLayer = (input: {
+  readonly requests: Array<LLMRequest>
+  readonly cause: typeof nonRetryableFailureCase.Type.cause
+  readonly retryable: boolean
+  readonly emitsBeforeFailure: boolean
+}) =>
+  Layer.mergeAll(
+    ContextTransformer.identity,
+    retryLoopConfig,
+    Layer.succeed(
+      LLMProvider,
+      LLMProvider.of({
+        stream: request => {
+          input.requests.push(request)
+          const failure = Stream.fail(
+            new LLMError({
+              cause: input.cause,
+              message: 'terminal failure',
+              retryable: input.retryable
+            })
+          )
+
+          return input.emitsBeforeFailure
+            ? Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(Stream.concat(failure))
+            : failure
+        }
+      })
+    )
+  )
+
+const collectModelTurnEventsWithLayer = () =>
   Effect.gen(function* () {
     const collected: Array<AgentEvent> = []
 
@@ -152,10 +240,18 @@ const collectModelTurnEvents = (
     )
 
     return collected
-  }).pipe(Effect.provide(makeLayer(events, requests)))
+  })
+
+const collectModelTurnEvents = (
+  events: ReadonlyArray<LLMEvent>,
+  requests: Array<LLMRequest>
+) => collectModelTurnEventsWithLayer().pipe(Effect.provide(makeLayer(events, requests)))
 
 const countTag = (events: ReadonlyArray<AgentEvent>, tag: AgentEvent['_tag']) =>
   events.filter(event => event._tag === tag).length
+
+const collectRetryRun = <R>(layer: Layer.Layer<R>) =>
+  collectModelTurnEventsWithLayer().pipe(Effect.provide(layer))
 
 describe('provider stream property tests', () => {
   it.effect.prop(
@@ -208,6 +304,74 @@ describe('provider stream property tests', () => {
         expect(result).toMatchObject({
           _tag: 'Failure',
           failure: { _tag: 'LLMError', cause: 'invalid_response' }
+        })
+      })
+    },
+    propertyOptions
+  )
+
+  it.effect.prop(
+    'retryable pre-emission provider failures retry until success or max retries',
+    [retryableFailureCaseArbitrary],
+    ([input]) => {
+      const requests: Array<LLMRequest> = []
+      const expectedRetries = Math.min(input.failuresBeforeSuccess, 2)
+      const shouldSucceed = input.failuresBeforeSuccess <= 2
+
+      return Effect.gen(function* () {
+        const result = yield* collectRetryRun(
+          makeRetryableLayer({
+            requests,
+            failuresBeforeSuccess: input.failuresBeforeSuccess,
+            cause: input.cause
+          })
+        ).pipe(Effect.result)
+
+        expect(requests).toHaveLength(shouldSucceed ? input.failuresBeforeSuccess + 1 : 3)
+
+        if (shouldSucceed) {
+          expect(result).toMatchObject({ _tag: 'Success' })
+          if (result._tag === 'Success') {
+            expect(countTag(result.success, 'AgentRetry')).toBe(expectedRetries)
+            expect(countTag(result.success, 'TurnEnd')).toBe(1)
+          }
+        } else {
+          expect(result).toMatchObject({
+            _tag: 'Failure',
+            failure: { _tag: 'LLMError', cause: input.cause }
+          })
+        }
+      })
+    },
+    propertyOptions
+  )
+
+  it.effect.prop(
+    'non-retryable or post-emission provider failures do not retry',
+    [nonRetryableFailureCaseArbitrary],
+    ([input]) => {
+      const requests: Array<LLMRequest> = []
+      const retryable = input.cause === 'context_overflow' ? true : input.retryable
+
+      return Effect.gen(function* () {
+        const result = yield* collectRetryRun(
+          makeNonRetryableLayer({
+            requests,
+            cause: input.cause,
+            retryable,
+            emitsBeforeFailure: input.emitsBeforeFailure
+          })
+        ).pipe(Effect.result)
+
+        if (retryable && input.cause !== 'context_overflow' && !input.emitsBeforeFailure) {
+          expect(requests).toHaveLength(3)
+        } else {
+          expect(requests).toHaveLength(1)
+        }
+
+        expect(result).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'LLMError', cause: input.cause }
         })
       })
     },
