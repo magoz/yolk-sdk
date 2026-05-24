@@ -13,3 +13,5 @@ Provider-facing JSON Schema conventions for agent/tool definitions.
 
 - Add regression coverage at the tool registry boundary, not each provider adapter.
 - Assert provider-facing `ToolDef.parameters` for object tools match `{ type: "object" }` at the root.
+- Add property coverage for schema families used by tools: empty params, empty structs, required fields, optional fields, nested structs, arrays, and literal fields.
+- Property invariants: root is always object, root `$ref` is never provider-facing, empty structs never leak `anyOf`, valid params decode before execution, and invalid params fail before execution.
