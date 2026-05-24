@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/openai",
-  "version": "0.0.1-canary.5",
+  "version": "0.0.1-canary.6",
   "description": "OpenAI and Codex OAuth and provider mechanics for Yolk hosts.",
   "license": "MIT",
   "type": "module",

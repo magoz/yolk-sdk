@@ -1,5 +1,12 @@
 # @yolk-sdk/voice-runtime
 
+## 0.0.1-canary.6
+
+### Patch Changes
+
+- Updated dependencies
+  - @yolk-sdk/agent@0.0.1-canary.6
+
 ## 0.0.1-canary.5
 
 ### Patch Changes

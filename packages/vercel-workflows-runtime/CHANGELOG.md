@@ -1,5 +1,7 @@
 # @yolk-sdk/vercel-workflows-runtime
 
+## 0.0.1-canary.6
+
 ## 0.0.1-canary.5
 
 ## 0.0.1-canary.4

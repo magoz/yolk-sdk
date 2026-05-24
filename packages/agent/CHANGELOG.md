@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.6
+
+### Patch Changes
+
+- Add package-owned task subagent helpers for non-recursive tool exposure, result formatting, and protocol-aligned subagent run ids.
+
 ## 0.0.1-canary.5
 
 ## 0.0.1-canary.4
