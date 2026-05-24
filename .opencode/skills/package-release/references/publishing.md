@@ -165,7 +165,7 @@ Recommended later workflow:
 
 - Trigger release PR on push to `main`.
 - Use `changesets/action` for version PRs.
-- `version`: `pnpm changeset:version && pnpm install --no-frozen-lockfile`.
+- `version`: `pnpm changeset:version && pnpm install --lockfile-only`.
 - `publish`: validation + `.github/workflows/publish.yml`.
 - Set `id-token: write` for npm trusted publishing/provenance.
 

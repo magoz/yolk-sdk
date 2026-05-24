@@ -154,15 +154,16 @@ Rationale: lockstep versions are simpler when every workspace package is public.
 - Node engine: `>=22`.
 - Prerelease npm tag: `canary`.
 - Include source in npm tarballs: yes.
-- Publish all packages with provenance enabled.
+- Package manifests keep provenance-ready metadata; workflow disables provenance while the repo is private.
 
-## Actual npm Publish Flow
+## Actual npm Release Prep
 
-First canary/manual publish flow:
+Canary prep flow:
 
 ```bash
 pnpm changeset:canary:enter
 pnpm changeset:version
+pnpm install --lockfile-only
 ```
 
 Verify every public package got the same canary version. Then run full validation before publishing:
@@ -180,7 +181,7 @@ pnpm test:run
 
 Public `packages/*` manifests are publishable. Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
 
-Verify `git status` is clean/understood. Normal publish path is GitHub Actions after merged version-prep commit, not local publish. The Action validates versions/tags, publishes with provenance, then creates `v<version>`.
+Verify `git status` is clean/understood. Normal publish path is GitHub Actions after merged version-prep commit, not local publish. The Action validates versions/tags, publishes with npm CLI, then creates `v<version>`.
 
 Local publish is emergency-only and requires explicit approval:
 
@@ -217,7 +218,7 @@ Requirements before dispatch:
 - `v<version>` tag does not exist
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`
 
-The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`.
+The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. Provenance is disabled while the repo is private; re-enable it when source is public.
 
 ## Release Prep Order
 
@@ -246,9 +247,9 @@ The Action publishes canaries with npm tag `canary` and stable versions with `la
    - `pnpm lint`
    - `pnpm test:run`
    - clean fixture install from packed tarballs
-7. Publish canary.
+7. Publish canary via GitHub Actions.
    - Public `packages/*` are publishable; private apps stay private.
-   - Publish with provenance.
+   - Keep provenance disabled while repo source is private.
    - Treat canary as feedback, not stability.
 
 ## Open Questions
