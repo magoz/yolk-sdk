@@ -92,6 +92,8 @@ type AnthropicRequestBody = {
 
 const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
 const anthropicClaudeToolPrefix = 'mcp_'
+const anthropicClaudeVersion = '2023-06-01'
+const anthropicClaudeOAuthBeta = 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14'
 
 // Claude subscription OAuth is fingerprinted against Claude Code tool names.
 const prefixClaudeToolName = (name: string) =>
@@ -405,6 +407,8 @@ const sendAnthropicClaudeRequest = (
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         ...anthropicClaudeAuthorizationHeaders(config.token),
+        'anthropic-beta': anthropicClaudeOAuthBeta,
+        'anthropic-version': anthropicClaudeVersion,
         'content-type': 'application/json',
         'user-agent': anthropicClaudeOAuthUserAgent,
         'x-app': 'cli',
