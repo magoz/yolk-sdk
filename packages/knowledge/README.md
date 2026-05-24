@@ -19,6 +19,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/knowledge/representations` | Agent-readable/searchable representations |
 | `@yolk-sdk/knowledge/chunking` | Search chunker contracts and defaults |
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
+| `@yolk-sdk/knowledge/errors` | Shared knowledge error types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
 | `@yolk-sdk/knowledge/ingestion` | Generic search ingestion pipeline |
 | `@yolk-sdk/knowledge/search` | Search interface, hybrid search, context packing |
@@ -44,11 +45,11 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 ## Migration
 
-Search APIs use canonical search naming. Removed APIs are intentionally not backward-compatible.
+Search APIs use canonical search naming. Removed retrieval APIs are intentionally not backward-compatible.
 
 | Removed | Use |
 | --- | --- |
-| `@yolk-sdk/knowledge/retrieval` | `@yolk-sdk/knowledge/search` |
+| Retrieval subpath | `@yolk-sdk/knowledge/search` |
 | `KnowledgeRetriever` | `KnowledgeSearcher` |
 | `retrieve(input)` | `search(input)` |
 | `KnowledgeRetrievalError` | `KnowledgeSearchError` |

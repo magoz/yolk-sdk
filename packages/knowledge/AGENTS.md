@@ -34,6 +34,7 @@
 | `@yolk-sdk/knowledge/representations` | Agent-readable/searchable representations |
 | `@yolk-sdk/knowledge/chunking` | Search chunker contracts and defaults |
 | `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
+| `@yolk-sdk/knowledge/errors` | Shared knowledge error types |
 | `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
 | `@yolk-sdk/knowledge/ingestion` | Generic search ingestion pipeline |
 | `@yolk-sdk/knowledge/search` | Search interface and context packing |

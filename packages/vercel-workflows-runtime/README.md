@@ -5,7 +5,7 @@ Vercel Workflow-specific contracts for durable agent model/tool step loops.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/vercel-workflows-runtime@canary @yolk-sdk/agent@canary effect workflow
+pnpm add @yolk-sdk/vercel-workflows-runtime@canary effect workflow
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
