@@ -37,7 +37,7 @@ import {
 - awaiting-input state: carry pending HITL hook data, wait through `awaitInput`, then rerun the
   same tool batch with accumulated responses
 - close step: flush/close output stream
-- terminal status: completed, step failure, close failure, or max turns exceeded
+- terminal status: completed, step failure, await-input failure, close failure, or max turns exceeded
 
 Continuation state stays plain serializable data for Workflow persistence.
 
