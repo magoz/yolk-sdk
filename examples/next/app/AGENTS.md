@@ -22,7 +22,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 - Run Effect page programs with `NextEffect.runPromise()`, not `Effect.runPromise()`.
 - Protected/session-gated pages must be dynamic: `export const dynamic = 'force-dynamic'` or dynamic APIs like `cookies()`.
 - Re-fail `NextEffect.isNavigationError(error)` before catch-all fallbacks.
-- Shareable filters/search state belongs in `search-params.ts` with `nuqs/server` imports; see `examples/next/patterns/NUQS_URL_STATE.md`.
+- Route-level shareable filters/search state belongs in local `search-params.ts` with `nuqs/server` imports; see `examples/next/patterns/NUQS_URL_STATE.md`.
 - After deleting routes, stale `.next/dev/types/validator.ts` may reference removed pages; delete generated file if `pnpm tsc` reports a removed route.
 
 ## Auth UI
@@ -35,7 +35,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 ## Local Dev
 
 - `pnpm dev` runs through portless; `pnpm dev:app` runs the Next example dev server.
-- Keep `next.config.ts` `allowedDevOrigins` in sync with portless app/e2e hostnames.
+- Keep `examples/next/next.config.ts` `allowedDevOrigins` in sync with portless app/e2e hostnames.
 
 ## Agent UI
 

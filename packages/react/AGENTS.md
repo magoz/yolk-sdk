@@ -62,7 +62,7 @@
 - `regenerateFrom` truncates from a selected message and starts a new run.
 - `editUserMessage` replaces user content, truncates later messages, records an edit event, then starts a new run.
 - `editUserMessage` accepts protocol `Content`; host UIs decide whether to expose text-only or multimodal edits.
-- `chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
+- `src/chat-session-events.ts` events are UI/session audit records, not runtime persistence events.
 - Transport can be injected; default uses `streamAgentEventStream`; async iterable transport stays injection-compatible.
 - Reducer de-dupes streamed events by optional protocol `eventId`; duplicate replay should not duplicate text/tool/UI state.
 - Retain `Effect.runFork` fibers and interrupt on `stop`/unmount; abort signals alone are not enough.
@@ -72,8 +72,8 @@
 - Keep hook lifecycle tests in `src/use-agent-chat.test.ts`.
 - Cover injected transport requests, streamed events, blank submit guards, and abort cleanup.
 - Cover delete/regenerate/edit behavior and session event emission in `src/use-agent-chat.test.ts`.
-- Keep session event schema coverage near `chat-session-events.ts` or reducer tests.
-- Keep render model tests next to their modules: `chat-core.test.ts`, `chat-messages.test.ts`, `chat-items.test.ts`.
+- Keep session event schema coverage near `src/chat-session-events.ts` or reducer tests.
+- Keep render model tests next to their modules: `src/chat-core.test.ts`, `src/chat-messages.test.ts`, `src/chat-items.test.ts`.
 - Test package behavior here, not through the example app.
 
 ## App usage

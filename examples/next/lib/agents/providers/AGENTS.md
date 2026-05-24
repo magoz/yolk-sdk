@@ -43,10 +43,12 @@ that exercise package-backed providers through app runtime wiring.
 - Does **not** use `ANTHROPIC_API_KEY`.
 - Requires per-user token from `examples/next/lib/core/agent/anthropic-claude-auth.ts`.
 - Requests use Bearer auth with Claude Code OAuth compatibility headers from `@yolk-sdk/anthropic`.
+- Requests set `stream: true` and parse SSE/JSON by body shape; content-type may be misleading behind gateways.
 - Request shape must mimic Claude Code OAuth fingerprinting:
   - `system[]` contains only `You are Claude Code, Anthropic's official CLI for Claude.`
   - app/system instructions are prepended to the first user message
   - tools are sent as PascalCase `mcp_` names (`weather` → `mcp_Weather`)
+  - tool input JSON arrives as partial SSE deltas; concatenate before decoding
   - model tool calls are unprefixed back to app tool names
 - Anthropic can return misleading 429/usage errors when this fingerprint drifts.
 
