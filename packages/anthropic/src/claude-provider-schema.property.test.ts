@@ -59,123 +59,65 @@ const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
   return [...current, ...Object.values(input).flatMap(collectLocalRefs)]
 }
 
-const providerSafeTool = (variant: typeof schemaVariant.Type) => {
+const schemaParameters = (variant: typeof schemaVariant.Type) => {
   switch (variant) {
     case 'emptyParams':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: EmptyToolParams,
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return EmptyToolParams
     case 'emptyStruct':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({}),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({})
     case 'flatRequired':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ text: Schema.String, count: Schema.Number }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ text: Schema.String, count: Schema.Number })
     case 'flatOptional':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ text: Schema.String, note: Schema.optional(Schema.String) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ text: Schema.String, note: Schema.optional(Schema.String) })
     case 'nestedStruct':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ child: Schema.Struct({ id: Schema.String, active: Schema.Boolean }) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ child: Schema.Struct({ id: Schema.String, active: Schema.Boolean }) })
     case 'arrayOfStruct':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) })
     case 'literalField':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ mode: Schema.Literals(['read', 'write']) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ mode: Schema.Literals(['read', 'write']) })
     case 'deepArrayStruct':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({
-          groups: Schema.Array(
-            Schema.Struct({
-              id: Schema.String,
-              tags: Schema.Array(Schema.String),
-              meta: Schema.Struct({ active: Schema.Boolean })
-            })
-          )
-        }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      return Schema.Struct({
+        groups: Schema.Array(
+          Schema.Struct({
+            id: Schema.String,
+            tags: Schema.Array(Schema.String),
+            meta: Schema.Struct({ active: Schema.Boolean })
+          })
+        )
       })
     case 'optionalNestedStruct':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({
-          filter: Schema.optional(
-            Schema.Struct({ query: Schema.String, limit: Schema.optional(Schema.Number) })
-          )
-        }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      return Schema.Struct({
+        filter: Schema.optional(
+          Schema.Struct({ query: Schema.String, limit: Schema.optional(Schema.Number) })
+        )
       })
     case 'literalArray':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ modes: Schema.Array(Schema.Literals(['read', 'write'])) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ modes: Schema.Array(Schema.Literals(['read', 'write'])) })
     case 'recordField':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({ labels: Schema.Record(Schema.String, Schema.String) }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
-      })
+      return Schema.Struct({ labels: Schema.Record(Schema.String, Schema.String) })
     case 'unionField':
-      return makeTool({
-        name: 'schema_probe',
-        description: 'Probe schema output.',
-        parameters: Schema.Struct({
-          mode: Schema.Union([
-            Schema.Literal('auto'),
-            Schema.Struct({ type: Schema.Literal('manual'), value: Schema.String })
-          ])
-        }),
-        access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+      return Schema.Struct({
+        mode: Schema.Union([
+          Schema.Literal('auto'),
+          Schema.Struct({ type: Schema.Literal('manual'), value: Schema.String })
+        ])
       })
   }
 }
+
+const schemaProbeTool = <ParamsSchema extends Schema.Schema<unknown> & { readonly DecodingServices: never }>(
+  parameters: ParamsSchema
+) =>
+  makeTool({
+    name: 'schema_probe',
+    description: 'Probe schema output.',
+    parameters,
+    access: 'read',
+    execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+  })
+
+const providerSafeTool = (variant: typeof schemaVariant.Type) =>
+  schemaProbeTool(schemaParameters(variant))
 
 const assertProviderSafeParameters = (parameters: unknown) => {
   expect(field(parameters, 'type')).toBe('object')

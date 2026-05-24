@@ -407,6 +407,46 @@ describe('Cloudflare session event storage', () => {
     })
   )
 
+  it.effect('rejects stale HITL revision without mutating durable log', () =>
+    Effect.gen(function* () {
+      const sessionId = 'session_1'
+      const before = appendRuntimeSessionEventsToLog(emptyRuntimeEventLog(sessionId), {
+        sessionId,
+        events: [
+          InputAppended.make({ message: UserMessage.make({ content: 'approve weather' }) }),
+          RunAwaitingInput.make({
+            runId: 'run_1',
+            requests: [approvalRequest],
+            messages: [assistantMessage(1)]
+          })
+        ]
+      })
+      const storage = yield* makeStorage(before)
+      const requests: Array<LLMRequest> = []
+      const result = yield* runRuntime(
+        {
+          _tag: 'AppendHitlResponse',
+          sessionId,
+          response: approvalResponse,
+          runId: 'run_2',
+          expectedRevision: before.revision + 1
+        },
+        wsRuntimeConfig
+      ).pipe(
+        Stream.runCollect,
+        Effect.provide(makeWsLayer(storage, requests)),
+        Effect.result
+      )
+      const after = yield* loadRuntimeEventLogOrEmpty(sessionId, storage)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'SessionConflictError', sessionId }
+      })
+      expect(after).toEqual(before)
+    })
+  )
+
   it.effect.prop(
     'durable storage append and interrupt semantics match runtime event log model',
     [storageCommandsArbitrary],
@@ -415,6 +455,7 @@ describe('Cloudflare session event storage', () => {
         const sessionId = 'session_1'
         const storage = yield* makeStorage()
         const storeLayer = makeDurableObjectSessionEventStoreLayer(sessionId, storage)
+        // Cap generated traces so regular test runs stay cheap; stress with PROPERTY_RUNS.
         const commands = generatedCommands.slice(0, 64)
         let expectedLog = emptyRuntimeEventLog(sessionId)
 
@@ -468,6 +509,7 @@ describe('Cloudflare session event storage', () => {
       Effect.gen(function* () {
         const storage = yield* makeStorage()
         const requests: Array<LLMRequest> = []
+        // Cap generated traces so regular test runs stay cheap; stress with PROPERTY_RUNS.
         const commands = generatedCommands.slice(0, 64)
         let lastAcceptedHitlResponse: HitlResponse | undefined
 
