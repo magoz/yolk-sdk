@@ -272,6 +272,18 @@ Useful invariants:
 - unknown or disabled tool execution fails with `not_found`
 - enabled unique tools execute with the original tool call id
 
+### Tool batch rollout
+
+Loop tool batch properties should focus on lifecycle pairing and call/result identity.
+
+Useful invariants:
+
+- successful batches emit one start and one completion for every call
+- completion result `toolCallId` matches the original call id
+- completion content matches executor output for that tool
+- execution failures emit start then error, and never emit completion for that failed call
+- tool errors preserve the failing tool name/cause at the stream failure boundary
+
 ### 3. Agent session/message/event model
 
 State space:
