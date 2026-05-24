@@ -109,3 +109,14 @@ Fix:
 - Confirm changelog entries generated.
 - Validate, commit, push, rerun action.
 - Update skill/workflow if agent ever advised running action before version bump commit.
+
+## Publish succeeded but tag failed
+
+Cause: workflow could not write tags or tag already exists.
+
+Fix:
+
+- Check `contents: write` in `.github/workflows/publish.yml`.
+- Check whether `v<version>` already exists.
+- If publish succeeded and tag is missing, create the tag on the published commit and push it.
+- Do not rerun publish just to create a tag.

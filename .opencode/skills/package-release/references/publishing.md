@@ -75,8 +75,10 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+verify unpublished package versions
 pnpm -r --filter './packages/*' pack --pack-destination .release
 npm publish .release/*.tgz --tag <tag> --access public
+git tag -a v<version> && git push origin v<version>
 ```
 
 5. Verify locally after action completes:
@@ -84,6 +86,8 @@ npm publish .release/*.tgz --tag <tag> --access public
 ```bash
 npm view @yolk-sdk/agent dist-tags
 npm view @yolk-sdk/connectors dist-tags
+git fetch --tags
+git tag --list 'v*' --sort=-v:refname | head -n 5
 ```
 
 Or check every public package:
@@ -146,13 +150,15 @@ Configure each npm package trusted publisher:
 Current workflow policy:
 
 - Manual `workflow_dispatch` only.
-- Uses `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
+- Uses `contents: write` for git tags and `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
 - Installs/builds/tests with `pnpm`.
+- Fails before publish if package versions already exist on npm.
+- Fails before publish if `v<version>` already exists.
 - Packs package artifacts with `pnpm pack`.
 - Publishes tarballs with npm CLI, because npm trusted publishing is the supported OIDC path.
+- Tags the published commit as `v<version>` after successful publish.
 
 Do not run local publish in normal flow. Local `pnpm release:canary` is emergency-only and requires explicit user approval.
-
 ## Future automation model
 
 Recommended later workflow:
@@ -176,6 +182,8 @@ After GitHub Action publish:
 ```bash
 npm view @yolk-sdk/agent version
 npm view @yolk-sdk/agent dist-tags
+git fetch --tags
+git tag --list 'v*' --sort=-v:refname | head -n 1
 ```
 
 Optionally run a clean external install fixture with `@canary`.

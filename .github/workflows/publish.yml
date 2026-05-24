@@ -13,7 +13,7 @@ on:
           - latest
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -50,6 +50,48 @@ jobs:
           pnpm lint
           pnpm test:run
 
+      - name: Verify release version
+        id: release-version
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process')
+          const fs = require('node:fs')
+
+          const packages = fs.readdirSync('packages', { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .flatMap((entry) => {
+              const path = `packages/${entry.name}/package.json`
+              if (!fs.existsSync(path)) return []
+              const pkg = JSON.parse(fs.readFileSync(path, 'utf8'))
+              return pkg.name?.startsWith('@yolk-sdk/') && pkg.private !== true ? [pkg] : []
+            })
+
+          const versions = [...new Set(packages.map((pkg) => pkg.version))]
+          if (versions.length !== 1) {
+            throw new Error(`Public package versions are not lockstep: ${versions.join(', ')}`)
+          }
+
+          for (const pkg of packages) {
+            let published = []
+            try {
+              published = JSON.parse(execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' }))
+            } catch (error) {
+              published = []
+            }
+            if (published.includes(pkg.version)) {
+              throw new Error(`${pkg.name}@${pkg.version} already exists on npm; run changeset version first`)
+            }
+          }
+
+          const tag = `v${versions[0]}`
+          const refs = execFileSync('git', ['ls-remote', '--tags', 'origin', tag], { encoding: 'utf8' }).trim()
+          if (refs.length > 0) {
+            throw new Error(`${tag} already exists`)
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${versions[0]}\n`)
+          NODE
+
       - name: Pack packages
         run: |
           mkdir -p .release
@@ -62,3 +104,12 @@ jobs:
           for tarball in .release/*.tgz; do
             npm publish "$tarball" --tag "${{ inputs.tag }}" --access public --provenance=false
           done
+
+      - name: Tag published version
+        run: |
+          version="${{ steps.release-version.outputs.version }}"
+          tag="v${version}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "$tag"
+          git push origin "$tag"

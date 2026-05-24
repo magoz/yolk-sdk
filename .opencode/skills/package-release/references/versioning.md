@@ -69,6 +69,23 @@ Expected `.changeset/config.json` traits:
 - Keep changeset text user-facing and concise.
 - Write release notes before `pnpm changeset:version`; generated changelogs inherit this text.
 
+## Release-note source
+
+Prefer writing changeset notes from git history since last release tag:
+
+```bash
+git fetch --tags
+base=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+if [ -n "$base" ]; then
+  git log --oneline "${base}..HEAD"
+  git diff --stat "${base}..HEAD" -- packages
+else
+  git log --oneline -20
+fi
+```
+
+If no tags exist yet, use the previous `prepare canary release` commit as base and note that tags start after next publish.
+
 ## Release PR rules
 
 - Release PRs are generated release bookkeeping only.
@@ -100,6 +117,8 @@ Required generated output:
 - consumed changeset id appears in `.changeset/pre.json`
 
 If output does not include package version bumps, stop and do not run publish action.
+
+After GitHub Action publish, expect tag `v<version>` for future release-note diffs.
 
 Stable release requires explicit approval, then exit prerelease mode first:
 

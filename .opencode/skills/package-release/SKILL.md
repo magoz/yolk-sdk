@@ -32,6 +32,18 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
    - Add or update `.changeset/*.md` before versioning.
    - Cover all public packages for lockstep release notes.
    - Keep notes concise, user-facing, and accurate.
+   - If writing notes from repo history, compare from latest release tag.
+
+```bash
+git fetch --tags
+base=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+if [ -n "$base" ]; then
+  git log --oneline "${base}..HEAD"
+  git diff --stat "${base}..HEAD" -- packages
+else
+  git log --oneline -20
+fi
+```
 
 4. Use fixed lockstep public package versioning.
    - Public scope: `@yolk-sdk/*` in `packages/*`.
@@ -55,6 +67,7 @@ pnpm install --lockfile-only
    - `.changeset/pre.json` and removed consumed changesets.
    - No feature code, env files, `dist`, `.next`, `.turbo`, coverage.
    - Confirm package versions advanced beyond npm-published versions.
+   - Confirm `v<version>` tag does not already exist.
 
 ```bash
 node - <<'NODE'
@@ -102,7 +115,7 @@ pnpm test:run
     - Use `canary` unless stable was explicitly approved.
     - Never run local `pnpm release:canary` for normal releases.
     - Before saying “run action”, confirm current `main` contains the version bump commit.
-    - After action completes, verify npm dist-tags.
+    - After action completes, verify npm dist-tags and new `v<version>` git tag.
 
 ## PR Workflow
 
@@ -157,7 +170,7 @@ Yolk should mirror Effect + MCP SDK:
 
 - Agent prepares and validates release files locally.
 - Human triggers GitHub Actions publish from `main`.
-- GitHub Actions builds, validates, packs, and publishes tarballs.
+- GitHub Actions builds, validates, checks unpublished versions, packs, publishes tarballs, then tags `v<version>`.
 - Optional snapshot workflow later, inspired by AI SDK.
 
 ## Guardrails
