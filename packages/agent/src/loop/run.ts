@@ -478,10 +478,10 @@ const approvalRequestId = (call: ToolCall) => `approval:${call.id}`
 const questionRequestId = (call: ToolCall) => `question:${call.id}`
 
 const matchesApproval = (response: ToolApprovalResponse, call: ToolCall) =>
-  response.toolCallId === call.id || response.requestId === approvalRequestId(call)
+  response.toolCallId === call.id && response.requestId === approvalRequestId(call)
 
 const matchesQuestion = (response: QuestionResponse, call: ToolCall) =>
-  response.toolCallId === call.id || response.requestId === questionRequestId(call)
+  response.toolCallId === call.id && response.requestId === questionRequestId(call)
 
 const approvalResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
   responses.flatMap(response =>

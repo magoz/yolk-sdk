@@ -29,7 +29,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - Agent internals live under `packages/agent/src/*`, not separate workspace packages.
 - MCP internals live under `packages/mcp/src/*`, not separate workspace packages.
 - Area tests mirror source layout:
-  - `packages/agent/test/{protocol,loop,runtime,client,tools}`
+  - `packages/agent/test/{protocol,loop,runtime,client,tools,property}`
   - `packages/mcp/test/{client,server}`
 
 ## Dependency Direction

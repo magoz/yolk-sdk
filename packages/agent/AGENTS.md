@@ -48,7 +48,7 @@
 
 ## Tests
 
-- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, and `test/tools`.
+- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/tools`, and `test/property`.
 - Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
 - Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.

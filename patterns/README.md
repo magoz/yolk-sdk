@@ -9,6 +9,7 @@ Architecture and convention patterns for the SDK workspace.
 | [EFFECT_BEST_PRACTICES.md](./EFFECT_BEST_PRACTICES.md)     | Type safety, Schema patterns, service/layer conventions                        |
 | [EFFECT_TESTING.md](./EFFECT_TESTING.md)                   | Testing Effect programs, mocking services, property testing                    |
 | [MCP_TRANSPORTS.md](./MCP_TRANSPORTS.md)                   | MCP JSON-RPC, stdio, HTTP, and Effect platform transport boundaries            |
+| [SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md) | Deterministic simulation seams, property tests, and rollout plan               |
 
 ## Packages
 

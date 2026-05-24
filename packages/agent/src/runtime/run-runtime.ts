@@ -5,6 +5,7 @@ import type {
   AgentModelCapabilities,
   AgentReasoningEffort,
   HitlResponse,
+  HitlRequest,
   ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -15,7 +16,7 @@ import {
   type LoopConfig,
   type ToolExecutor
 } from '@yolk-sdk/agent/loop'
-import { runtimeErrorToAgentError } from './error.ts'
+import { runtimeErrorToAgentError, SessionConflictError } from './error.ts'
 import {
   HitlResponseAppended,
   InputAppended,
@@ -126,6 +127,58 @@ const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
       )
     )
 
+const latestAwaitingRequests = (
+  log: RuntimeSessionEventLog
+): ReadonlyArray<HitlRequest> =>
+  log.events.reduceRight<ReadonlyArray<HitlRequest> | undefined>((found, stored) => {
+    if (found !== undefined) return found
+    switch (stored.event._tag) {
+      case 'RunAwaitingInput':
+        return stored.event.requests
+      case 'RunCompleted':
+      case 'RunFailed':
+      case 'RunInterrupted':
+        return []
+      case 'HitlResponseAppended':
+      case 'InputAppended':
+      case 'RunStarted':
+        return undefined
+    }
+  }, undefined) ?? []
+
+const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) => {
+  switch (response._tag) {
+    case 'ToolApprovalResponse':
+      return (
+        request._tag === 'ToolApprovalRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+    case 'QuestionResponse':
+      return (
+        request._tag === 'QuestionRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+  }
+}
+
+const validateHitlResponse = (
+  request: AppendHitlResponseRuntimeRequest,
+  log: RuntimeSessionEventLog
+) => {
+  if (latestAwaitingRequests(log).some(item => hitlResponseMatchesRequest(request.response, item))) {
+    return Effect.void
+  }
+
+  return Effect.fail(
+    new SessionConflictError({
+      sessionId: request.sessionId,
+      message: `HITL response does not match pending requests: ${request.response.requestId}`
+    })
+  )
+}
+
 const appendRunFailed = (
   store: SessionEventStoreApi,
   request: AppendInputRuntimeRequest | AppendHitlResponseRuntimeRequest,
@@ -212,6 +265,7 @@ const makeAppendHitlResponseRuntimeStream = (
     Effect.gen(function* () {
       const store = yield* SessionEventStore
       const initialLog = yield* loadAppendLogOrEmpty(store, request.sessionId)
+      yield* validateHitlResponse(request, initialLog)
       const startedLog = yield* store.append({
         sessionId: request.sessionId,
         expectedRevision: request.expectedRevision ?? initialLog.revision,
