@@ -22,6 +22,7 @@
 - Keep Claude subscription auth compatible with Worker/server runtimes.
 - Claude OAuth provider requests must include Claude Code OAuth compatibility headers by default; `extraHeaders` stays last so hosts can override/gateway them.
 - Claude provider streams by default but accepts SSE or JSON bodies by body shape; do not rely on content-type.
+- Claude provider lowers PDF `DocumentPart` to Anthropic `document` blocks; non-PDF documents fail explicitly.
 - Manual Claude OAuth uses PKCE; app-owned server actions store verifier outside `'use server'` modules.
 - API-key mode may be added later without changing OAuth contracts.
 - Provider layers depend on `@yolk-sdk/agent`; hosts still own token storage/refresh and app policy.

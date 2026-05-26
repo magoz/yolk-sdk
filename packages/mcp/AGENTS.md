@@ -28,6 +28,7 @@
 - Decode wire JSON in two steps: JSON string → unknown (`Schema.UnknownFromJsonString`) → protocol schema.
 - Server maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
+- Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
 - Export normal `ToolDef`/`ToolResult`; agent loop/providers stay MCP-agnostic.
 
 ## Tests

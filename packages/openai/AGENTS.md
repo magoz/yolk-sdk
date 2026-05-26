@@ -7,6 +7,7 @@
 - No app users, teams, sessions, DB, Better Auth, Vercel routes, or Cloudflare Durable Objects.
 - No refresh-token storage ownership.
 - Provider-specific token schemas, endpoints, headers, device-flow constants, broker helpers, request lowering, and stream parsing belong here.
+- Codex provider lowers protocol `DocumentPart` to Responses `input_file`; OpenAI API-key chat provider still rejects documents explicitly.
 - Hosted apps provide tokens through `@yolk-sdk/oauth` broker contracts.
 - Local apps provide tokens through local credential sources.
 

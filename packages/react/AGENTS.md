@@ -53,6 +53,7 @@
 - Completed tool parts may carry `result.isError`; renderers can style them as tool-origin errors while preserving replay.
 - Subagent lifecycle events are protocol/activity telemetry; headless chat projections should tolerate them without duplicating tool parts.
 - Preserve ordered assistant parts when converting render messages back to protocol messages.
+- Preserve ordered multimodal user content (text/images/documents) when projecting/replaying messages.
 - Preserve timing when tool result/completion events arrive in different order.
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
