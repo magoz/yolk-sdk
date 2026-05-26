@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.8
+
+### Patch Changes
+
+- 76d5c21: Add document chat content parts with provider lowering.
+
 ## 0.0.1-canary.7
 
 ## 0.0.1-canary.6

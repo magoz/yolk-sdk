@@ -1,5 +1,14 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.8
+
+### Patch Changes
+
+- 76d5c21: Add document chat content parts with provider lowering.
+- Updated dependencies [76d5c21]
+  - @yolk-sdk/agent@0.0.1-canary.8
+  - @yolk-sdk/oauth@0.0.1-canary.8
+
 ## 0.0.1-canary.7
 
 ### Patch Changes
