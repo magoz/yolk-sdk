@@ -1,5 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ImagePart, TextPart } from '@yolk-sdk/agent/protocol'
+import {
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
+  DocumentPart,
+  ImagePart,
+  TextPart
+} from '@yolk-sdk/agent/protocol'
 import { agentTextContextBudget, contextBudgetStatus } from '@/lib/agents/context-budget'
 import {
   formatContextPercent,
@@ -8,7 +15,7 @@ import {
   formatUsageSummary,
   totalAgentUsageTokens
 } from './agent-usage-meter'
-import { contentFromInput, type ImageAttachment } from './image-attachment-content'
+import { contentFromInput, type AgentAttachment } from './attachment-content'
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
 import {
   matchingSlashCommands,
@@ -20,8 +27,9 @@ import {
 } from './slash-command-model'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
-const imageAttachment: ImageAttachment = {
+const imageAttachment: AgentAttachment = {
   _tag: 'Ready',
+  kind: 'image',
   id: 'image-1',
   name: 'image.png',
   mimeType: 'image/png',
@@ -29,8 +37,9 @@ const imageAttachment: ImageAttachment = {
   data: 'abc'
 }
 
-const secondImageAttachment: ImageAttachment = {
+const secondImageAttachment: AgentAttachment = {
   _tag: 'Ready',
+  kind: 'image',
   id: 'image-2',
   name: 'image-2.png',
   mimeType: 'image/png',
@@ -38,8 +47,18 @@ const secondImageAttachment: ImageAttachment = {
   data: 'def'
 }
 
-const failedImageAttachment: ImageAttachment = {
+const documentAttachment: AgentAttachment = {
+  _tag: 'Ready',
+  kind: 'document',
+  id: 'document-1',
+  name: 'brief.pdf',
+  mimeType: 'application/pdf',
+  data: 'cGRm'
+}
+
+const failedImageAttachment: AgentAttachment = {
   _tag: 'Failed',
+  kind: 'image',
   id: 'image-failed',
   name: 'bad.txt',
   mimeType: 'text/plain',
@@ -95,6 +114,13 @@ describe('agent playground', () => {
     expect(contentFromInput(' describe ', [failedImageAttachment, imageAttachment])).toEqual([
       TextPart.make({ text: 'describe' }),
       ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+    ])
+  })
+
+  it('builds PDF submit content', () => {
+    expect(contentFromInput(' summarize ', [documentAttachment])).toEqual([
+      TextPart.make({ text: 'summarize' }),
+      DocumentPart.make({ data: 'cGRm', mimeType: 'application/pdf', filename: 'brief.pdf' })
     ])
   })
 

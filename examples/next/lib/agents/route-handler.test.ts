@@ -8,6 +8,7 @@ import {
   assistantContent,
   AgentContentCapabilities,
   AgentModelCapabilities,
+  DocumentPart,
   ImagePart,
   ToolDef,
   UserMessage,
@@ -127,7 +128,7 @@ const makeFailingToolLayer = () =>
   )
 
 const noToolReasoningCapabilities = AgentModelCapabilities.make({
-  input: AgentContentCapabilities.make({ text: true, image: false, audio: false }),
+  input: AgentContentCapabilities.make({ text: true, image: false, document: false, audio: false }),
   tools: false,
   reasoning: false
 })
@@ -510,6 +511,156 @@ describe('makeAgentPostResponse', () => {
       expect(result).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'AgentImageLimitError', message: 'Image payload is too large.' }
+      })
+    })
+  )
+
+  it.effect('accepts PDF document payloads', () =>
+    Effect.gen(function* () {
+      const response = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                DocumentPart.make({
+                  data: 'cGRm',
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()))
+      const body = yield* Effect.promise(() => response.text())
+      const events = yield* decodeEvents(body)
+
+      expect(response.status).toBe(200)
+      expect(events.map(event => event._tag)).toContain('AgentEnd')
+    })
+  )
+
+  it.effect('rejects too many documents before provider execution', () =>
+    Effect.gen(function* () {
+      const document = DocumentPart.make({
+        data: 'cGRm',
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      })
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [document, document, document, document, document]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentDocumentLimitError', message: 'Attach up to 4 PDFs.' }
+      })
+    })
+  )
+
+  it.effect('rejects unsupported document MIME types', () =>
+    Effect.gen(function* () {
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                DocumentPart.make({ data: 'eGxz', mimeType: 'text/plain', filename: 'brief.txt' })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentDocumentLimitError', message: 'Unsupported document type: text/plain' }
+      })
+    })
+  )
+
+  it.effect('rejects invalid document base64', () =>
+    Effect.gen(function* () {
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                DocumentPart.make({ data: 'abc', mimeType: 'application/pdf', filename: 'brief.pdf' })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentDocumentLimitError', message: 'Invalid document data.' }
+      })
+    })
+  )
+
+  it.effect('rejects oversized document payloads', () =>
+    Effect.gen(function* () {
+      const documentData = 'a'.repeat(15 * 1024 * 1024)
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [
+            UserMessage.make({
+              content: [
+                DocumentPart.make({
+                  data: documentData,
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
+              ]
+            })
+          ]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentDocumentLimitError', message: 'Document is too large.' }
+      })
+    })
+  )
+
+  it.effect('rejects oversized total document payloads', () =>
+    Effect.gen(function* () {
+      const documentData = 'a'.repeat(8 * 1024 * 1024)
+      const document = DocumentPart.make({
+        data: documentData,
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      })
+      const result = yield* makeAgentPostResponse(
+        AgentRouteRequest.make({
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: [document, document, document, document] })]
+        }),
+        config
+      ).pipe(Effect.provide(makeLayer()), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'AgentDocumentLimitError', message: 'Document payload is too large.' }
       })
     })
   )

@@ -16,6 +16,7 @@ import {
   ArrowUpIcon,
   BrainIcon,
   ChevronDownIcon,
+  FileTextIcon,
   ImageIcon,
   LoaderCircleIcon,
   MicIcon,
@@ -51,16 +52,26 @@ import {
   type AgentCommandSummary
 } from './slash-command-model'
 
-export type AgentComposerImageAttachment = {
+export type AgentComposerReadyImageAttachment = {
   readonly _tag: 'Ready'
+  readonly kind: 'image'
   readonly id: string
   readonly name: string
   readonly mimeType: string
   readonly previewUrl: string
 }
 
-export type AgentComposerFailedImageAttachment = {
+export type AgentComposerReadyDocumentAttachment = {
+  readonly _tag: 'Ready'
+  readonly kind: 'document'
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+}
+
+export type AgentComposerFailedAttachment = {
   readonly _tag: 'Failed'
+  readonly kind: 'image' | 'document'
   readonly id: string
   readonly name: string
   readonly mimeType: string
@@ -68,8 +79,9 @@ export type AgentComposerFailedImageAttachment = {
 }
 
 export type AgentComposerAttachment =
-  | AgentComposerImageAttachment
-  | AgentComposerFailedImageAttachment
+  | AgentComposerReadyImageAttachment
+  | AgentComposerReadyDocumentAttachment
+  | AgentComposerFailedAttachment
 
 type AgentComposerProps = {
   readonly input: string
@@ -79,19 +91,20 @@ type AgentComposerProps = {
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
   readonly imageInputSupported: boolean
+  readonly documentInputSupported: boolean
   readonly textModel: AgentTextModel
   readonly textModelDisabled: boolean
   readonly reasoningEffort: AgentReasoningEffort
   readonly reasoningEffortDisabled: boolean
-  readonly imageAttachments: ReadonlyArray<AgentComposerAttachment>
+  readonly attachments: ReadonlyArray<AgentComposerAttachment>
   readonly commands: ReadonlyArray<AgentCommandSummary>
   readonly isCommandRendering: boolean
   readonly onInputChange: (value: string) => void
   readonly onTextModelChange: (model: AgentTextModel) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
-  readonly onImageAttachmentsChange: (files: ReadonlyArray<File>) => void
-  readonly onRemoveImageAttachment: (id: string) => void
-  readonly onRetryImageAttachment: (id: string) => void
+  readonly onAttachmentsChange: (files: ReadonlyArray<File>) => void
+  readonly onRemoveAttachment: (id: string) => void
+  readonly onRetryAttachment: (id: string) => void
   readonly onSlashCommandSubmit: (command: string, argumentsText: string) => void
   readonly onSubmit: () => void
   readonly onStop: () => void
@@ -106,19 +119,20 @@ export function AgentComposer({
   isVoiceConnecting,
   isVoiceLive,
   imageInputSupported,
+  documentInputSupported,
   textModel,
   textModelDisabled,
   reasoningEffort,
   reasoningEffortDisabled,
-  imageAttachments,
+  attachments,
   commands,
   isCommandRendering,
   onInputChange,
   onTextModelChange,
   onReasoningEffortChange,
-  onImageAttachmentsChange,
-  onRemoveImageAttachment,
-  onRetryImageAttachment,
+  onAttachmentsChange,
+  onRemoveAttachment,
+  onRetryAttachment,
   onSlashCommandSubmit,
   onSubmit,
   onStop,
@@ -129,11 +143,12 @@ export function AgentComposer({
   const [dragDepth, setDragDepth] = useState(0)
   const [activeCommandIndex, setActiveCommandIndex] = useState(0)
   const [dismissedSlashInput, setDismissedSlashInput] = useState('')
-  const dropDisabled = isRunning || isVoiceMode || !imageInputSupported
+  const attachmentInputSupported = imageInputSupported || documentInputSupported
+  const dropDisabled = isRunning || isVoiceMode || !attachmentInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
-  const hasAttachments = imageAttachments.length > 0
+  const hasAttachments = attachments.length > 0
   const hasReadyAttachments = Option.isSome(
-    Arr.findFirst(imageAttachments, imageAttachment => imageAttachment._tag === 'Ready')
+    Arr.findFirst(attachments, attachment => attachment._tag === 'Ready')
   )
   const commandMatches = matchingSlashCommands(input, commands)
   const hasSlashInput = Option.isSome(slashCommandInput(input))
@@ -145,6 +160,16 @@ export function AgentComposer({
   )
   const selectedCommand = commandMatches[normalizedActiveCommandIndex]
   const selectedTextModel = agentTextModelOptions.find(option => option.model === textModel)
+  const acceptedFileTypes = [
+    imageInputSupported ? 'image/png,image/jpeg,image/webp,image/gif' : '',
+    documentInputSupported ? 'application/pdf' : ''
+  ]
+    .filter(value => value.length > 0)
+    .join(',')
+
+  const isSupportedPasteFile = (file: File) =>
+    (imageInputSupported && file.type.startsWith('image/')) ||
+    (documentInputSupported && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')))
 
   const handleTextModelChange = (value: string) => {
     const option = agentTextModelOptions.find(candidate => candidate.model === value)
@@ -220,7 +245,7 @@ export function AgentComposer({
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    onImageAttachmentsChange(Array.from(event.target.files ?? []))
+    onAttachmentsChange(Array.from(event.target.files ?? []))
     event.target.value = ''
   }
 
@@ -235,16 +260,14 @@ export function AgentComposer({
       return
     }
 
-    const imageFiles = Array.from(event.clipboardData.files).filter(file =>
-      file.type.startsWith('image/')
-    )
+    const pastedFiles = Array.from(event.clipboardData.files).filter(isSupportedPasteFile)
 
-    if (imageFiles.length === 0) {
+    if (pastedFiles.length === 0) {
       return
     }
 
     event.preventDefault()
-    onImageAttachmentsChange(imageFiles)
+    onAttachmentsChange(pastedFiles)
   }
 
   const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
@@ -280,15 +303,15 @@ export function AgentComposer({
       return
     }
 
-    onImageAttachmentsChange(Array.from(event.dataTransfer.files))
+    onAttachmentsChange(Array.from(event.dataTransfer.files))
   }
 
   const hint = isVoiceMode
     ? 'Voice mode active'
     : isRunning
       ? 'Streaming response'
-      : imageInputSupported
-        ? 'Enter to send · Shift Enter newline · paste images'
+      : attachmentInputSupported
+        ? 'Enter to send · Shift Enter newline · attach PDFs/images'
         : 'Enter to send · Shift Enter newline'
 
   useEffect(() => {
@@ -311,13 +334,13 @@ export function AgentComposer({
       >
         {isDropActive ? (
           <div className="pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-[1.15rem] border border-dashed border-primary/60 bg-background/80 text-sm font-medium text-primary backdrop-blur-sm">
-            Drop image to attach
+            Drop files to attach
           </div>
         ) : null}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept={acceptedFileTypes}
           multiple
           onChange={handleFileChange}
           className="sr-only"
@@ -326,67 +349,73 @@ export function AgentComposer({
         />
         {hasAttachments ? (
           <div className="flex flex-wrap gap-2 px-2 pt-2">
-            {imageAttachments.map(imageAttachment => (
+            {attachments.map(attachment => (
               <div
-                key={imageAttachment.id}
+                key={attachment.id}
                 className={cn(
                   'inline-flex max-w-full items-center gap-2 rounded-2xl border p-1.5 pr-2 text-xs text-muted-foreground',
-                  imageAttachment._tag === 'Failed'
+                  attachment._tag === 'Failed'
                     ? 'border-destructive/25 bg-destructive/5'
                     : 'border-foreground/10 bg-muted/50'
                 )}
               >
-                {imageAttachment._tag === 'Ready' ? (
+                {attachment._tag === 'Ready' && attachment.kind === 'image' ? (
                   <Image
-                    src={imageAttachment.previewUrl}
+                    src={attachment.previewUrl}
                     alt="Attached image preview"
                     width={48}
                     height={48}
                     unoptimized
                     className="size-12 rounded-xl object-cover"
                   />
+                ) : attachment._tag === 'Ready' && attachment.kind === 'document' ? (
+                  <div className="grid size-12 place-items-center rounded-xl bg-primary/10 text-primary">
+                    <FileTextIcon className="size-5" aria-hidden />
+                  </div>
                 ) : (
                   <div className="grid size-12 place-items-center rounded-xl bg-destructive/10 text-destructive">
-                    <ImageIcon className="size-5" aria-hidden />
+                    {attachment.kind === 'image' ? (
+                      <ImageIcon className="size-5" aria-hidden />
+                    ) : (
+                      <FileTextIcon className="size-5" aria-hidden />
+                    )}
                   </div>
                 )}
                 <div className="min-w-0">
                   <div className="max-w-36 truncate font-medium text-foreground">
-                    {imageAttachment.name}
+                    {attachment.name}
                   </div>
                   <div
                     className={cn(
                       'max-w-48 truncate',
-                      imageAttachment._tag === 'Failed' ? 'text-destructive' : undefined
+                      attachment._tag === 'Failed' ? 'text-destructive' : undefined
                     )}
                   >
-                    {imageAttachment._tag === 'Failed'
-                      ? imageAttachment.reason
-                      : imageAttachment.mimeType}
+                    {attachment._tag === 'Failed' ? attachment.reason : attachment.mimeType}
                   </div>
                 </div>
-                {imageAttachment._tag === 'Failed' ? (
+                {attachment._tag === 'Failed' ? (
                   <Button
                     type="button"
                     size="sm"
                     variant="ghost"
-                    onClick={() => onRetryImageAttachment(imageAttachment.id)}
+                    onClick={() => onRetryAttachment(attachment.id)}
                     disabled={dropDisabled}
                     className="h-8 rounded-full px-2 text-xs"
                   >
                     Retry
-                    <span className="sr-only"> {imageAttachment.name}</span>
+                    <span className="sr-only"> {attachment.name}</span>
                   </Button>
                 ) : null}
                 <Button
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  onClick={() => onRemoveImageAttachment(imageAttachment.id)}
+                  onClick={() => onRemoveAttachment(attachment.id)}
                   className="ml-1 rounded-full"
                 >
                   <XIcon />
-                  <span className="sr-only">Remove image {imageAttachment.name}</span>
+                  <span className="sr-only">Remove attachment {attachment.name}</span>
                 </Button>
               </div>
             ))}
@@ -531,11 +560,11 @@ export function AgentComposer({
               variant="outline"
               onClick={handleAttachClick}
               disabled={dropDisabled}
-              title={imageInputSupported ? 'Attach image' : 'Current model does not support images'}
+              title={attachmentInputSupported ? 'Attach files' : 'Current model does not support attachments'}
               className="size-10 rounded-full"
             >
               <ImageIcon />
-              <span className="sr-only">Attach image</span>
+              <span className="sr-only">Attach files</span>
             </Button>
             <Button
               type="button"

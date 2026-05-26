@@ -1,6 +1,7 @@
 export {
   AgentContentCapabilities,
   AgentModelCapabilities,
+  textImageDocumentModelCapabilities,
   textImageModelCapabilities,
   textOnlyModelCapabilities
 } from './capability.ts'
@@ -14,6 +15,7 @@ export {
   contentPartText,
   contentPreview,
   contentText,
+  DocumentPart,
   ImagePart,
   isContentEmpty,
   TextPart

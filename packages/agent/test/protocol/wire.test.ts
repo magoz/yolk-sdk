@@ -24,6 +24,7 @@ import {
   CompactionStart,
   Content,
   ContentPart,
+  DocumentPart,
   ImagePart,
   LLMReasoningDelta,
   LLMStreamEnd,
@@ -70,6 +71,7 @@ import {
   UserMessage,
   addAgentUsage,
   textImageModelCapabilities,
+  textImageDocumentModelCapabilities,
   textOnlyModelCapabilities,
   zeroAgentUsage,
   type AgentEvent as AgentEventType,
@@ -112,6 +114,7 @@ describe('protocol wire schemas', () => {
           content: [
             TextPart.make({ text: 'describe' }),
             ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+            DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
             AudioPart.make({ data: 'def', format: 'wav' })
           ]
         }),
@@ -347,10 +350,11 @@ describe('protocol wire schemas', () => {
       })
       const content = [
         TextPart.make({ text: 'hi' }),
+        DocumentPart.make({ data: 'abc=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
         AudioPart.make({ data: 'abc', format: 'mp3' })
       ]
       const capabilities = AgentModelCapabilities.make({
-        input: AgentContentCapabilities.make({ text: true, image: true, audio: false }),
+        input: AgentContentCapabilities.make({ text: true, image: true, document: true, audio: false }),
         tools: true,
         reasoning: true
       })
@@ -374,6 +378,7 @@ describe('protocol wire schemas', () => {
       expect(yield* Schema.decodeUnknownEffect(AgentUsage)(usage)).toEqual(usage)
       expect(textOnlyModelCapabilities.input.image).toBe(false)
       expect(textImageModelCapabilities.input.image).toBe(true)
+      expect(textImageDocumentModelCapabilities.input.document).toBe(true)
     })
   )
 

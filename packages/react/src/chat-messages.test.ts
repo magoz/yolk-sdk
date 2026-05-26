@@ -4,6 +4,7 @@ import {
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
+  DocumentPart,
   HostToolCallPart,
   ImagePart,
   ProviderToolResult,
@@ -48,7 +49,8 @@ describe('agent chat messages', () => {
             id: 'message-0-user-content',
             content: [
               TextPart.make({ text: 'describe this' }),
-              ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+              ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+              DocumentPart.make({ data: 'def=', mimeType: 'application/pdf', filename: 'brief.pdf' })
             ],
             state: 'done'
           }
@@ -61,7 +63,8 @@ describe('agent chat messages', () => {
         _tag: 'User',
         content: [
           TextPart.make({ text: 'describe this' }),
-          ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+          ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+          DocumentPart.make({ data: 'def=', mimeType: 'application/pdf', filename: 'brief.pdf' })
         ]
       }
     ])

@@ -191,6 +191,10 @@ const validateContent = (message: AgentMessage, capabilities: AgentModelCapabili
         return capabilities.input.image
           ? Effect.void
           : Effect.fail(unsupportedInputError('Image input is not supported by this model'))
+      case 'Document':
+        return capabilities.input.document
+          ? Effect.void
+          : Effect.fail(unsupportedInputError('Document input is not supported by this model'))
       case 'Audio':
         return capabilities.input.audio
           ? Effect.void

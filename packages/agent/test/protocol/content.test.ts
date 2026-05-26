@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
+  DocumentPart,
   ImagePart,
   TextPart,
   appendTextToContent,
@@ -15,6 +16,7 @@ describe('content helpers', () => {
     const content = [
       TextPart.make({ text: 'hello ' }),
       ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+      DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
       TextPart.make({ text: 'world' }),
       AudioPart.make({ data: 'def', format: 'wav' })
     ]
@@ -26,16 +28,18 @@ describe('content helpers', () => {
     const content = [
       TextPart.make({ text: 'look' }),
       ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+      DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
       AudioPart.make({ data: 'def', format: 'mp3' })
     ]
 
-    expect(contentPreview(content)).toBe('look, Image, Audio')
+    expect(contentPreview(content)).toBe('look, Image, Document: brief.pdf, Audio')
   })
 
   it('treats media parts as non-empty content', () => {
     expect(isContentEmpty('')).toBe(true)
     expect(isContentEmpty([TextPart.make({ text: '' })])).toBe(true)
     expect(isContentEmpty([ImagePart.make({ data: 'abc', mimeType: 'image/png' })])).toBe(false)
+    expect(isContentEmpty([DocumentPart.make({ data: 'abc=', mimeType: 'application/pdf', filename: 'brief.pdf' })])).toBe(false)
   })
 
   it('normalizes string content to text parts', () => {

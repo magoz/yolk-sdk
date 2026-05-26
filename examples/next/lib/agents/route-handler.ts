@@ -9,6 +9,7 @@ import {
   type AgentEvent,
   type AgentModelCapabilities,
   type ContentPart,
+  type DocumentPart,
   type ImagePart,
   type AgentReasoningEffort as AgentReasoningEffortType,
   type ToolDef
@@ -30,20 +31,34 @@ export class AgentImageLimitError extends Schema.TaggedErrorClass<AgentImageLimi
   }
 ) {}
 
+export class AgentDocumentLimitError extends Schema.TaggedErrorClass<AgentDocumentLimitError>()(
+  'AgentDocumentLimitError',
+  {
+    message: Schema.String
+  }
+) {}
+
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 const maxImageCount = 4
 const maxImageBase64Chars = 5 * 1024 * 1024
 const maxTotalImageBase64Chars = 12 * 1024 * 1024
+const maxDocumentCount = 4
+const maxDocumentBase64Chars = 14 * 1024 * 1024
+const maxTotalDocumentBase64Chars = 28 * 1024 * 1024
 const allowedImageMimeTypes: ReadonlyArray<string> = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif'
 ]
+const allowedDocumentMimeTypes: ReadonlyArray<string> = ['application/pdf']
 
 const isAllowedImageMimeType = (mimeType: string) =>
   allowedImageMimeTypes.some(allowedMimeType => allowedMimeType === mimeType)
+
+const isAllowedDocumentMimeType = (mimeType: string) =>
+  allowedDocumentMimeTypes.some(allowedMimeType => allowedMimeType === mimeType)
 
 const isValidBase64 = (data: string) =>
   data.length > 0 && data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data)
@@ -59,9 +74,19 @@ const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> 
 }
 
 const requestImageParts = (input: AgentRouteRequest) =>
-  Arr.filter(Arr.flatMap(input.messages, messageContentParts), part => part._tag === 'Image')
+  Arr.filter(
+    Arr.flatMap(input.messages, messageContentParts),
+    (part): part is ImagePart => part._tag === 'Image'
+  )
+
+const requestDocumentParts = (input: AgentRouteRequest) =>
+  Arr.filter(
+    Arr.flatMap(input.messages, messageContentParts),
+    (part): part is DocumentPart => part._tag === 'Document'
+  )
 
 const imageLimitError = (message: string) => new AgentImageLimitError({ message })
+const documentLimitError = (message: string) => new AgentDocumentLimitError({ message })
 
 const imagePartLimitError = (image: ImagePart) => {
   if (!isAllowedImageMimeType(image.mimeType)) {
@@ -77,6 +102,22 @@ const imagePartLimitError = (image: ImagePart) => {
   }
 
   return Option.none<AgentImageLimitError>()
+}
+
+const documentPartLimitError = (document: DocumentPart) => {
+  if (!isAllowedDocumentMimeType(document.mimeType)) {
+    return Option.some(documentLimitError(`Unsupported document type: ${document.mimeType}`))
+  }
+
+  if (document.data.length > maxDocumentBase64Chars) {
+    return Option.some(documentLimitError('Document is too large.'))
+  }
+
+  if (!isValidBase64(document.data)) {
+    return Option.some(documentLimitError('Invalid document data.'))
+  }
+
+  return Option.none<AgentDocumentLimitError>()
 }
 
 export const validateAgentRouteImages = (input: AgentRouteRequest) =>
@@ -101,6 +142,39 @@ export const validateAgentRouteImages = (input: AgentRouteRequest) =>
 
     return yield* Option.match(
       Arr.findFirst(imageErrors, () => true),
+      {
+        onNone: () => Effect.void,
+        onSome: Effect.fail
+      }
+    )
+  })
+
+export const validateAgentRouteDocuments = (input: AgentRouteRequest) =>
+  Effect.gen(function* () {
+    const documents = requestDocumentParts(input)
+    const totalBase64Chars = Arr.reduce(
+      documents,
+      0,
+      (total, document) => total + document.data.length
+    )
+
+    if (documents.length > maxDocumentCount) {
+      return yield* Effect.fail(documentLimitError(`Attach up to ${maxDocumentCount} PDFs.`))
+    }
+
+    if (totalBase64Chars > maxTotalDocumentBase64Chars) {
+      return yield* Effect.fail(documentLimitError('Document payload is too large.'))
+    }
+
+    const documentErrors = Arr.flatMap(documents, document =>
+      Option.match(documentPartLimitError(document), {
+        onNone: () => [],
+        onSome: error => [error]
+      })
+    )
+
+    return yield* Option.match(
+      Arr.findFirst(documentErrors, () => true),
       {
         onNone: () => Effect.void,
         onSome: Effect.fail
@@ -168,6 +242,7 @@ export const encodeAgentNdjsonEvent = (event: AgentEvent) =>
 export const makeAgentPostResponse = (input: AgentRouteRequest, config: AgentRouteConfig) =>
   Effect.gen(function* () {
     yield* validateAgentRouteImages(input)
+    yield* validateAgentRouteDocuments(input)
 
     const body = yield* runRuntime(
       {

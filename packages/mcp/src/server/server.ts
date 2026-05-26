@@ -142,12 +142,24 @@ const protocolErrorCode = (error: McpServerError) => {
 const protocolErrorResponse = (id: string | number | null, error: McpServerError) =>
   errorResponse(id, protocolErrorCode(error), error.message)
 
+const documentResourceUri = (filename: string) => `file:///${encodeURIComponent(filename)}`
+
 const mcpContentBlockFromPart = (part: ContentPart) => {
   switch (part._tag) {
     case 'Text':
       return { type: 'text', text: part.text }
     case 'Image':
       return { type: 'image', data: part.data, mimeType: part.mimeType }
+    case 'Document':
+      return {
+        type: 'resource',
+        resource: {
+          uri: documentResourceUri(part.filename),
+          name: part.title ?? part.filename,
+          mimeType: part.mimeType,
+          blob: part.data
+        }
+      }
     case 'Audio':
       return { type: 'audio', data: part.data, mimeType: `audio/${part.format}` }
   }

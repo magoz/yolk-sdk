@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
-import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import { AudioPart, DocumentPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
 import { McpServerError, makeMcpToolServer } from '../../src/server'
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
@@ -42,6 +42,7 @@ const richResultServer = makeMcpToolServer({
             content: [
               TextPart.make({ text: 'hello' }),
               ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+              DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief v1.pdf' }),
               AudioPart.make({ data: 'def', format: 'mp3' })
             ],
             isError: true,
@@ -213,6 +214,15 @@ describe('MCP tool server', () => {
           content: [
             { type: 'text', text: 'hello' },
             { type: 'image', data: 'abc', mimeType: 'image/png' },
+            {
+              type: 'resource',
+              resource: {
+                uri: 'file:///brief%20v1.pdf',
+                name: 'brief v1.pdf',
+                mimeType: 'application/pdf',
+                blob: 'ghi='
+              }
+            },
             { type: 'audio', data: 'def', mimeType: 'audio/mp3' }
           ],
           isError: true,

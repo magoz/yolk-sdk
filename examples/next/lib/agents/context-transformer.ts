@@ -33,6 +33,7 @@ const estimateContentTokens = (content: Content) => {
       case 'Text':
         return total + estimateTextTokens(part.text)
       case 'Image':
+      case 'Document':
       case 'Audio':
         return total + mediaPartApproxTokens
     }

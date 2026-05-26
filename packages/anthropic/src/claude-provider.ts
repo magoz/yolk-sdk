@@ -55,6 +55,16 @@ type AnthropicImageBlock = {
   }
 }
 
+type AnthropicDocumentBlock = {
+  readonly type: 'document'
+  readonly source: {
+    readonly type: 'base64'
+    readonly media_type: 'application/pdf'
+    readonly data: string
+  }
+  readonly title?: string
+}
+
 type AnthropicToolUseBlock = {
   readonly type: 'tool_use'
   readonly id: string
@@ -69,7 +79,7 @@ type AnthropicToolResultBlock = {
   readonly is_error?: boolean
 }
 
-type AnthropicUserBlock = AnthropicTextBlock | AnthropicImageBlock | AnthropicToolResultBlock
+type AnthropicUserBlock = AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock | AnthropicToolResultBlock
 type AnthropicAssistantBlock = AnthropicTextBlock | AnthropicToolUseBlock
 
 type AnthropicMessage =
@@ -237,6 +247,18 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
           data: part.data
         }
       })
+    case 'Document':
+      return part.mimeType === 'application/pdf'
+        ? Effect.succeed({
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: part.data
+            },
+            title: part.title ?? part.filename
+          })
+        : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio'))
   }
@@ -253,6 +275,8 @@ const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<stri
       return Effect.succeed(part.text)
     case 'Image':
       return Effect.fail(unsupportedContentError(`${owner} image`))
+    case 'Document':
+      return Effect.fail(unsupportedContentError(`${owner} document`))
     case 'Audio':
       return Effect.fail(unsupportedContentError(`${owner} audio`))
   }

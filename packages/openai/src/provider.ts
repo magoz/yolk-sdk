@@ -203,6 +203,8 @@ const contentPartToUserPart = (
         type: 'image_url',
         image_url: { url: `data:${part.mimeType};base64,${part.data}` }
       })
+    case 'Document':
+      return Effect.fail(unsupportedContentError('Document'))
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio'))
   }
@@ -219,6 +221,8 @@ const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<stri
       return Effect.succeed(part.text)
     case 'Image':
       return Effect.fail(unsupportedContentError(`${owner} image`))
+    case 'Document':
+      return Effect.fail(unsupportedContentError(`${owner} document`))
     case 'Audio':
       return Effect.fail(unsupportedContentError(`${owner} audio`))
   }

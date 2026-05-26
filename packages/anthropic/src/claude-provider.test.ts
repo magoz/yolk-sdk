@@ -3,6 +3,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstab
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  DocumentPart,
   HostToolCallPart,
   ImagePart,
   TextPart,
@@ -155,7 +156,12 @@ describe('Anthropic Claude provider', () => {
             UserMessage.make({
               content: [
                 TextPart.make({ text: 'inspect' }),
-                ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+                ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+                DocumentPart.make({
+                  data: 'JVBERi0=',
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
               ]
             }),
             AssistantAgentMessage.make({
@@ -190,6 +196,11 @@ describe('Anthropic Claude provider', () => {
               {
                 type: 'image',
                 source: { type: 'base64', media_type: 'image/png', data: 'abc' }
+              },
+              {
+                type: 'document',
+                source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' },
+                title: 'brief.pdf'
               }
             ]
           },

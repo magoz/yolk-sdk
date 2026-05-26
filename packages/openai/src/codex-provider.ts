@@ -59,6 +59,12 @@ type OpenAiCodexInputImagePart = {
   readonly image_url: string
 }
 
+type OpenAiCodexInputFilePart = {
+  readonly type: 'input_file'
+  readonly filename: string
+  readonly file_data: string
+}
+
 type OpenAiCodexOutputTextPart = {
   readonly type: 'output_text'
   readonly text: string
@@ -67,6 +73,7 @@ type OpenAiCodexOutputTextPart = {
 type OpenAiCodexInputContentPart =
   | OpenAiCodexInputTextPart
   | OpenAiCodexInputImagePart
+  | OpenAiCodexInputFilePart
   | OpenAiCodexOutputTextPart
 
 type OpenAiCodexFunctionCallInput = {
@@ -225,6 +232,8 @@ const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<stri
       return Effect.succeed(part.text)
     case 'Image':
       return Effect.fail(unsupportedContentError(`${owner} image`))
+    case 'Document':
+      return Effect.fail(unsupportedContentError(`${owner} document`))
     case 'Audio':
       return Effect.fail(unsupportedContentError(`${owner} audio`))
   }
@@ -239,7 +248,7 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
 
 const userPartToCodexInputPart = (
   part: ContentPart
-): Effect.Effect<OpenAiCodexInputTextPart | OpenAiCodexInputImagePart, LLMError> => {
+): Effect.Effect<OpenAiCodexInputTextPart | OpenAiCodexInputImagePart | OpenAiCodexInputFilePart, LLMError> => {
   switch (part._tag) {
     case 'Text':
       return Effect.succeed({ type: 'input_text', text: part.text })
@@ -247,6 +256,12 @@ const userPartToCodexInputPart = (
       return Effect.succeed({
         type: 'input_image',
         image_url: `data:${part.mimeType};base64,${part.data}`
+      })
+    case 'Document':
+      return Effect.succeed({
+        type: 'input_file',
+        filename: part.filename,
+        file_data: `data:${part.mimeType};base64,${part.data}`
       })
     case 'Audio':
       return Effect.fail(unsupportedContentError('User audio'))

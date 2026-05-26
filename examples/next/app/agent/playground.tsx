@@ -36,10 +36,12 @@ import { AgentComposer } from './agent-composer'
 import { loadAgentCommands, renderAgentCommand } from './command-client'
 import {
   contentFromInput,
-  isFailedImageAttachment,
+  isFailedAttachment,
+  isReadyAttachment,
+  isReadyDocumentAttachment,
   isReadyImageAttachment,
-  type ImageAttachment
-} from './image-attachment-content'
+  type AgentAttachment
+} from './attachment-content'
 import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
@@ -75,14 +77,22 @@ type AgentPlaygroundProps = {
 }
 
 const maxImageAttachments = 4
+const maxDocumentAttachments = 4
 const maxSourceImageBytes = 15 * 1024 * 1024
 const maxEncodedImageBytes = 5 * 1024 * 1024
+const maxSourceDocumentBytes = 10 * 1024 * 1024
+const maxEncodedDocumentBytes = 14 * 1024 * 1024
 const maxImageEdgePixels = 1600
 
 const imageOutputType = (mimeType: string) =>
   mimeType === 'image/png' ? 'image/png' : 'image/jpeg'
 
-const imageAttachmentId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`
+const attachmentId = (file: File) => `${file.name}-${file.size}-${file.lastModified}`
+
+const documentMimeTypeForFile = (file: File) =>
+  file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    ? 'application/pdf'
+    : file.type
 
 const blobToDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
@@ -146,13 +156,14 @@ const base64FromDataUrl = (dataUrl: string) => {
   return separatorIndex === -1 ? '' : dataUrl.slice(separatorIndex + 1)
 }
 
-const readyImageAttachmentFromFile = async (file: File): Promise<ImageAttachment> => {
+const readyImageAttachmentFromFile = async (file: File): Promise<AgentAttachment> => {
   const blob = await compressedImageBlob(file)
   const previewUrl = await blobToDataUrl(blob)
 
   return {
     _tag: 'Ready',
-    id: imageAttachmentId(file),
+    kind: 'image',
+    id: attachmentId(file),
     name: file.name,
     mimeType: blob.type.length > 0 ? blob.type : file.type,
     previewUrl,
@@ -160,72 +171,150 @@ const readyImageAttachmentFromFile = async (file: File): Promise<ImageAttachment
   }
 }
 
-const failedImageAttachmentFromFile = (file: File, reason: string): ImageAttachment => ({
+const readyDocumentAttachmentFromFile = async (file: File): Promise<AgentAttachment> => {
+  const dataUrl = await blobToDataUrl(file)
+
+  return {
+    _tag: 'Ready',
+    kind: 'document',
+    id: attachmentId(file),
+    name: file.name,
+    mimeType: documentMimeTypeForFile(file),
+    data: base64FromDataUrl(dataUrl)
+  }
+}
+
+const failedAttachmentFromFile = (file: File, reason: string): AgentAttachment => ({
   _tag: 'Failed',
-  id: imageAttachmentId(file),
+  kind: file.type.startsWith('image/') ? 'image' : 'document',
+  id: attachmentId(file),
   name: file.name,
   mimeType: file.type.length > 0 ? file.type : 'unknown',
   reason,
   file
 })
 
-const readyImageAttachmentCount = (attachments: ReadonlyArray<ImageAttachment>) =>
+const readyImageAttachmentCount = (attachments: ReadonlyArray<AgentAttachment>) =>
   Arr.filter(attachments, isReadyImageAttachment).length
 
-const attachmentReadyLabel = (count: number) => `${count} image${count === 1 ? '' : 's'}`
+const readyDocumentAttachmentCount = (attachments: ReadonlyArray<AgentAttachment>) =>
+  Arr.filter(attachments, isReadyDocumentAttachment).length
+
+const readyAttachmentCount = (attachments: ReadonlyArray<AgentAttachment>) =>
+  Arr.filter(attachments, isReadyAttachment).length
+
+const attachmentReadyLabel = (count: number) =>
+  `${count} attachment${count === 1 ? '' : 's'}`
 
 const sourceImageCanBeReady = (file: File) =>
   file.type.startsWith('image/') && file.size <= maxSourceImageBytes
 
-const readyCandidateCountBefore = (files: ReadonlyArray<File>, index: number) =>
+const sourceDocumentCanBeReady = (file: File) =>
+  documentMimeTypeForFile(file) === 'application/pdf' && file.size <= maxSourceDocumentBytes
+
+const readyImageCandidateCountBefore = (files: ReadonlyArray<File>, index: number) =>
   Arr.filter(Arr.take(files, index), sourceImageCanBeReady).length
+
+const readyDocumentCandidateCountBefore = (files: ReadonlyArray<File>, index: number) =>
+  Arr.filter(Arr.take(files, index), sourceDocumentCanBeReady).length
 
 const processImageFile = async (
   file: File,
   readySlotAvailable: boolean
-): Promise<ImageAttachment> => {
+): Promise<AgentAttachment> => {
   if (!file.type.startsWith('image/')) {
-    return failedImageAttachmentFromFile(file, 'Unsupported file type.')
+    return failedAttachmentFromFile(file, 'Unsupported file type.')
   }
 
   if (file.size > maxSourceImageBytes) {
-    return failedImageAttachmentFromFile(file, 'Image must be 15MB or smaller.')
+    return failedAttachmentFromFile(file, 'Image must be 15MB or smaller.')
   }
 
   if (!readySlotAvailable) {
-    return failedImageAttachmentFromFile(file, `Attach up to ${maxImageAttachments} images.`)
+    return failedAttachmentFromFile(file, `Attach up to ${maxImageAttachments} images.`)
   }
 
   try {
     const attachment = await readyImageAttachmentFromFile(file)
 
     if (attachment._tag === 'Ready' && attachment.data.length === 0) {
-      return failedImageAttachmentFromFile(file, 'Could not decode image.')
+      return failedAttachmentFromFile(file, 'Could not decode image.')
     }
 
     if (attachment._tag === 'Ready' && attachment.data.length > maxEncodedImageBytes) {
-      return failedImageAttachmentFromFile(file, 'Compressed image is still too large.')
+      return failedAttachmentFromFile(file, 'Compressed image is still too large.')
     }
 
     return attachment
   } catch {
-    return failedImageAttachmentFromFile(file, 'Could not read image.')
+    return failedAttachmentFromFile(file, 'Could not read image.')
   }
 }
 
-const processImageFiles = (
-  files: ReadonlyArray<File>,
-  currentAttachments: ReadonlyArray<ImageAttachment>
-) => {
-  const currentReadyCount = readyImageAttachmentCount(currentAttachments)
+const processDocumentFile = async (
+  file: File,
+  readySlotAvailable: boolean
+): Promise<AgentAttachment> => {
+  if (documentMimeTypeForFile(file) !== 'application/pdf') {
+    return failedAttachmentFromFile(file, 'Unsupported file type.')
+  }
 
+  if (file.size > maxSourceDocumentBytes) {
+    return failedAttachmentFromFile(file, 'PDF must be 10MB or smaller.')
+  }
+
+  if (!readySlotAvailable) {
+    return failedAttachmentFromFile(file, `Attach up to ${maxDocumentAttachments} PDFs.`)
+  }
+
+  try {
+    const attachment = await readyDocumentAttachmentFromFile(file)
+
+    if (attachment._tag === 'Ready' && attachment.data.length === 0) {
+      return failedAttachmentFromFile(file, 'Could not decode PDF.')
+    }
+
+    if (attachment._tag === 'Ready' && attachment.data.length > maxEncodedDocumentBytes) {
+      return failedAttachmentFromFile(file, 'PDF is too large.')
+    }
+
+    return attachment
+  } catch {
+    return failedAttachmentFromFile(file, 'Could not read PDF.')
+  }
+}
+
+const processAttachmentFile = (
+  file: File,
+  files: ReadonlyArray<File>,
+  index: number,
+  currentAttachments: ReadonlyArray<AgentAttachment>
+) => {
+  const currentReadyImageCount = readyImageAttachmentCount(currentAttachments)
+  const currentReadyDocumentCount = readyDocumentAttachmentCount(currentAttachments)
+  const readyImageSlotAvailable =
+    sourceImageCanBeReady(file) &&
+    currentReadyImageCount + readyImageCandidateCountBefore(files, index) < maxImageAttachments
+  const readyDocumentSlotAvailable =
+    sourceDocumentCanBeReady(file) &&
+    currentReadyDocumentCount + readyDocumentCandidateCountBefore(files, index) <
+      maxDocumentAttachments
+
+  if (file.type.startsWith('image/')) {
+    return processImageFile(file, readyImageSlotAvailable)
+  }
+
+  return processDocumentFile(file, readyDocumentSlotAvailable)
+}
+
+const processAttachmentFiles = (
+  files: ReadonlyArray<File>,
+  currentAttachments: ReadonlyArray<AgentAttachment>
+) => {
   return Promise.all(
-    Arr.map(files, (file, index) => {
-      const readySlotAvailable =
-        sourceImageCanBeReady(file) &&
-        currentReadyCount + readyCandidateCountBefore(files, index) < maxImageAttachments
-      return processImageFile(file, readySlotAvailable)
-    })
+    Arr.map(files, (file, index) =>
+      processAttachmentFile(file, files, index, currentAttachments)
+    )
   )
 }
 
@@ -236,7 +325,7 @@ export function AgentPlayground({
   runtime
 }: AgentPlaygroundProps) {
   const [input, setInput] = useState('')
-  const [imageAttachments, setImageAttachments] = useState<ReadonlyArray<ImageAttachment>>([])
+  const [attachments, setAttachments] = useState<ReadonlyArray<AgentAttachment>>([])
   const [activityVisible, setActivityVisible] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [showInlineTools, setShowInlineTools] = useState(true)
@@ -526,6 +615,7 @@ export function AgentPlayground({
   const isVoiceMode = isVoiceConnecting || isVoiceLive
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
+  const documentInputSupported = agentTextCapabilities.input.document
   const submitDisabled = isTextBusy || isVoiceMode
   const messageActionsDisabled = isTextBusy || isVoiceMode
   const hitlActionsDisabled = isRunning || isWorkflowResuming || isVoiceMode
@@ -610,25 +700,25 @@ export function AgentPlayground({
   }, [chatItems, refreshCommands])
 
   const handleSubmit = useCallback(() => {
-    const readyImages = readyImageAttachmentCount(imageAttachments)
-    const content = contentFromInput(input, imageAttachments)
+    const readyAttachments = readyAttachmentCount(attachments)
+    const content = contentFromInput(input, attachments)
 
     if (submitDisabled || !canSubmitContent(content)) {
       return
     }
 
     recordActivity({
-      title: readyImages === 0 ? 'Prompt submitted' : 'Image prompt submitted',
-      detail: readyImages === 0 ? input.trim() : attachmentReadyLabel(readyImages),
+      title: readyAttachments === 0 ? 'Prompt submitted' : 'Attachment prompt submitted',
+      detail: readyAttachments === 0 ? input.trim() : attachmentReadyLabel(readyAttachments),
       tone: 'neutral'
     })
     const result = submitMessage(UserMessage.make({ content }))
 
     if (result._tag === 'Submitted') {
       setInput('')
-      setImageAttachments([])
+      setAttachments([])
     }
-  }, [canSubmitContent, imageAttachments, input, recordActivity, submitDisabled, submitMessage])
+  }, [attachments, canSubmitContent, input, recordActivity, submitDisabled, submitMessage])
 
   const handleSlashCommandSubmit = useCallback(
     (command: string, argumentsText: string) => {
@@ -653,7 +743,7 @@ export function AgentPlayground({
 
           if (result._tag === 'Submitted') {
             setInput('')
-            setImageAttachments([])
+            setAttachments([])
           }
         })
         .catch(() => {
@@ -825,25 +915,25 @@ export function AgentPlayground({
     [hitlActionsDisabled, recordActivity, submitQuestionResponse]
   )
 
-  const handleImageAttachmentsChange = useCallback(
+  const handleAttachmentsChange = useCallback(
     (files: ReadonlyArray<File>) => {
       if (files.length === 0) {
         return
       }
 
-      processImageFiles(files, imageAttachments).then(attachments => {
-        const readyAttachments = Arr.filter(attachments, isReadyImageAttachment)
-        const failedAttachments = Arr.filter(attachments, isFailedImageAttachment)
+      processAttachmentFiles(files, attachments).then(processedAttachments => {
+        const readyAttachments = Arr.filter(processedAttachments, isReadyAttachment)
+        const failedAttachments = Arr.filter(processedAttachments, isFailedAttachment)
 
-        if (attachments.length === 0) {
+        if (processedAttachments.length === 0) {
           return
         }
 
-        setImageAttachments(current => [...current, ...attachments])
+        setAttachments(current => [...current, ...processedAttachments])
 
         if (readyAttachments.length > 0) {
           recordActivity({
-            title: readyAttachments.length === 1 ? 'Image attached' : 'Images attached',
+            title: readyAttachments.length === 1 ? 'Attachment added' : 'Attachments added',
             detail: Arr.map(readyAttachments, attachment => attachment.name).join(', '),
             tone: 'neutral'
           })
@@ -851,7 +941,7 @@ export function AgentPlayground({
 
         if (failedAttachments.length > 0) {
           recordActivity({
-            title: failedAttachments.length === 1 ? 'Image failed' : 'Images failed',
+            title: failedAttachments.length === 1 ? 'Attachment failed' : 'Attachments failed',
             detail: Arr.map(
               failedAttachments,
               attachment => `${attachment.name}: ${attachment.reason}`
@@ -861,19 +951,17 @@ export function AgentPlayground({
         }
       })
     },
-    [imageAttachments, recordActivity]
+    [attachments, recordActivity]
   )
 
-  const handleRemoveImageAttachment = useCallback((id: string) => {
-    setImageAttachments(current =>
-      Arr.filter(current, imageAttachment => imageAttachment.id !== id)
-    )
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments(current => Arr.filter(current, attachment => attachment.id !== id))
   }, [])
 
-  const handleRetryImageAttachment = useCallback(
+  const handleRetryAttachment = useCallback(
     (id: string) => {
       Option.match(
-        Arr.findFirst(imageAttachments, imageAttachment => imageAttachment.id === id),
+        Arr.findFirst(attachments, attachment => attachment.id === id),
         {
           onNone: () => undefined,
           onSome: attachment => {
@@ -882,23 +970,23 @@ export function AgentPlayground({
             }
 
             const remainingAttachments = Arr.filter(
-              imageAttachments,
-              imageAttachment => imageAttachment.id !== id
+              attachments,
+              currentAttachment => currentAttachment.id !== id
             )
-            setImageAttachments(remainingAttachments)
-            processImageFiles([attachment.file], remainingAttachments).then(attachments => {
-              setImageAttachments(current => [...current, ...attachments])
+            setAttachments(remainingAttachments)
+            processAttachmentFiles([attachment.file], remainingAttachments).then(processedAttachments => {
+              setAttachments(current => [...current, ...processedAttachments])
 
-              Option.match(Arr.findFirst(attachments, isFailedImageAttachment), {
+              Option.match(Arr.findFirst(processedAttachments, isFailedAttachment), {
                 onNone: () =>
                   recordActivity({
-                    title: 'Image retry succeeded',
+                    title: 'Attachment retry succeeded',
                     detail: attachment.name,
                     tone: 'neutral'
                   }),
                 onSome: failedAttachment =>
                   recordActivity({
-                    title: 'Image retry failed',
+                    title: 'Attachment retry failed',
                     detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
                     tone: 'error'
                   })
@@ -908,7 +996,7 @@ export function AgentPlayground({
         }
       )
     },
-    [imageAttachments, recordActivity]
+    [attachments, recordActivity]
   )
 
   const handleInputChange = useCallback((value: string) => {
@@ -994,19 +1082,20 @@ export function AgentPlayground({
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
             imageInputSupported={imageInputSupported}
+            documentInputSupported={documentInputSupported}
             textModel={textModel}
             textModelDisabled={isTextBusy}
             reasoningEffort={reasoningEffort}
             reasoningEffortDisabled={isTextBusy}
-            imageAttachments={imageAttachments}
+            attachments={attachments}
             commands={commands}
             isCommandRendering={isCommandRendering}
             onInputChange={handleInputChange}
             onTextModelChange={setTextModel}
             onReasoningEffortChange={setReasoningEffort}
-            onImageAttachmentsChange={handleImageAttachmentsChange}
-            onRemoveImageAttachment={handleRemoveImageAttachment}
-            onRetryImageAttachment={handleRetryImageAttachment}
+            onAttachmentsChange={handleAttachmentsChange}
+            onRemoveAttachment={handleRemoveAttachment}
+            onRetryAttachment={handleRetryAttachment}
             onSlashCommandSubmit={handleSlashCommandSubmit}
             onSubmit={handleSubmit}
             onStop={handleStop}

@@ -7,6 +7,7 @@ import {
   CompactionEnd,
   CompactionStart,
   AgentModelCapabilities,
+  DocumentPart,
   ImagePart,
   makeSubagentRunId,
   QuestionAnswer,
@@ -41,7 +42,7 @@ import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing'
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 
 const noToolReasoningCapabilities = AgentModelCapabilities.make({
-  input: AgentContentCapabilities.make({ text: true, image: false, audio: false }),
+  input: AgentContentCapabilities.make({ text: true, image: false, document: false, audio: false }),
   tools: false,
   reasoning: false
 })
@@ -585,6 +586,49 @@ describe('run', () => {
           _tag: 'LLMError',
           cause: 'validation_error',
           message: 'Image input is not supported by this model',
+          retryable: false
+        }
+      })
+      expect(requests).toEqual([])
+    })
+  )
+
+  it.effect('fails before provider call when document input is unsupported', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const result = yield* run({
+        messages: [
+          UserMessage.make({
+            content: [
+              DocumentPart.make({
+                data: 'abc=',
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf'
+              })
+            ]
+          })
+        ],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux',
+        capabilities: noToolReasoningCapabilities
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({ responses: [Reply.text('ok')], requests }),
+            TestToolExecutor.layer({})
+          ).pipe(Layer.provideMerge(BaseLayer))
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          cause: 'validation_error',
+          message: 'Document input is not supported by this model',
           retryable: false
         }
       })

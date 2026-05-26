@@ -10,12 +10,19 @@ export class ImagePart extends Schema.TaggedClass<ImagePart>()('Image', {
   mimeType: Schema.String
 }) {}
 
+export class DocumentPart extends Schema.TaggedClass<DocumentPart>()('Document', {
+  data: Schema.String,
+  mimeType: Schema.String,
+  filename: Schema.String,
+  title: Schema.optional(Schema.String)
+}) {}
+
 export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
   data: Schema.String,
   format: Schema.Literals(['pcm16', 'wav', 'mp3', 'opus'])
 }) {}
 
-export const ContentPart = Schema.Union([TextPart, ImagePart, AudioPart])
+export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart])
 export type ContentPart = typeof ContentPart.Type
 
 export const Content = Schema.Union([Schema.String, Schema.Array(ContentPart)])
@@ -26,6 +33,7 @@ export const contentPartText = (part: ContentPart) => {
     case 'Text':
       return part.text
     case 'Image':
+    case 'Document':
     case 'Audio':
       return ''
   }
@@ -37,6 +45,8 @@ export const contentPartPreview = (part: ContentPart) => {
       return part.text
     case 'Image':
       return 'Image'
+    case 'Document':
+      return `Document: ${part.title ?? part.filename}`
     case 'Audio':
       return 'Audio'
   }

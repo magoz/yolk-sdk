@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
+  DocumentPart,
   HostToolCallPart,
   ImagePart,
   TextPart,
@@ -24,7 +25,12 @@ describe('OpenAI Codex provider', () => {
             UserMessage.make({
               content: [
                 TextPart.make({ text: 'look' }),
-                ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+                ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+                DocumentPart.make({
+                  data: 'JVBERi0=',
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
               ]
             }),
             AssistantAgentMessage.make({
@@ -55,7 +61,12 @@ describe('OpenAI Codex provider', () => {
             role: 'user',
             content: [
               { type: 'input_text', text: 'look' },
-              { type: 'input_image', image_url: 'data:image/png;base64,abc' }
+              { type: 'input_image', image_url: 'data:image/png;base64,abc' },
+              {
+                type: 'input_file',
+                filename: 'brief.pdf',
+                file_data: 'data:application/pdf;base64,JVBERi0='
+              }
             ]
           },
           {
