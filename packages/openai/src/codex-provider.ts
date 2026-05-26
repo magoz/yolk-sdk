@@ -11,6 +11,7 @@ import {
   AgentOutputUsage,
   AgentUsage,
   ToolCall,
+  attachmentSourceDataUrl,
   assistantContent,
   assistantHostToolCalls,
   contentParts,
@@ -253,15 +254,21 @@ const userPartToCodexInputPart = (
     case 'Text':
       return Effect.succeed({ type: 'input_text', text: part.text })
     case 'Image':
-      return Effect.succeed({
-        type: 'input_image',
-        image_url: `data:${part.mimeType};base64,${part.data}`
+      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
+        onSome: url => Effect.succeed({
+          type: 'input_image',
+          image_url: url
+        })
       })
     case 'Document':
-      return Effect.succeed({
-        type: 'input_file',
-        filename: part.filename,
-        file_data: `data:${part.mimeType};base64,${part.data}`
+      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
+        onSome: url => Effect.succeed({
+          type: 'input_file',
+          filename: part.filename,
+          file_data: url
+        })
       })
     case 'Audio':
       return Effect.fail(unsupportedContentError('User audio'))

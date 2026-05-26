@@ -1,6 +1,13 @@
 import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
-import { AudioPart, ImagePart, TextPart, ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  AudioPart,
+  ImagePart,
+  TextPart,
+  ToolDef,
+  ToolResult,
+  inlineBase64Source
+} from '@yolk-sdk/agent/protocol'
 import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
@@ -146,28 +153,6 @@ const stringProperty = (block: GenericContentBlock, key: string) => {
   return typeof value === 'string' ? Option.some(value) : Option.none<string>()
 }
 
-const audioFormatFromMimeType = (
-  mimeType: string
-): Option.Option<'pcm16' | 'wav' | 'mp3' | 'opus'> => {
-  switch (mimeType) {
-    case 'audio/pcm':
-    case 'audio/pcm16':
-      return Option.some('pcm16')
-    case 'audio/wav':
-    case 'audio/wave':
-    case 'audio/x-wav':
-      return Option.some('wav')
-    case 'audio/mpeg':
-    case 'audio/mp3':
-      return Option.some('mp3')
-    case 'audio/opus':
-    case 'audio/ogg; codecs=opus':
-      return Option.some('opus')
-    default:
-      return Option.none<'pcm16' | 'wav' | 'mp3' | 'opus'>()
-  }
-}
-
 const contentBlockText = (block: GenericContentBlock): Option.Option<string> => {
   const type = block['type']
   const text = stringProperty(block, 'text')
@@ -226,16 +211,16 @@ const imagePartFromBlock = (block: GenericContentBlock): Option.Option<ContentPa
   Option.all({
     data: stringProperty(block, 'data'),
     mimeType: stringProperty(block, 'mimeType')
-  }).pipe(Option.map(({ data, mimeType }) => ImagePart.make({ data, mimeType })))
+  }).pipe(
+    Option.map(({ data, mimeType }) => ImagePart.make({ source: inlineBase64Source(data), mimeType }))
+  )
 
 const audioPartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
   Option.all({
     data: stringProperty(block, 'data'),
     mimeType: stringProperty(block, 'mimeType')
   }).pipe(
-    Option.flatMap(({ data, mimeType }) =>
-      audioFormatFromMimeType(mimeType).pipe(Option.map(format => AudioPart.make({ data, format })))
-    )
+    Option.map(({ data, mimeType }) => AudioPart.make({ source: inlineBase64Source(data), mimeType }))
   )
 
 const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {

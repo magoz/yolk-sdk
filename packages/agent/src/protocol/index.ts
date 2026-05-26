@@ -7,6 +7,12 @@ export {
 } from './capability.ts'
 export {
   appendTextToContent,
+  attachmentSourceBase64,
+  attachmentSourceDataUrl,
+  AttachmentSource,
+  type AttachmentContentPart,
+  type AttachmentSourceResolver,
+  attachmentSourcePreview,
   AudioPart,
   Content,
   ContentPart,
@@ -17,7 +23,15 @@ export {
   contentText,
   DocumentPart,
   ImagePart,
+  InlineBase64AttachmentSource,
+  inlineBase64AttachmentSource,
+  inlineBase64Source,
   isContentEmpty,
+  refAttachmentSource,
+  RefAttachmentSource,
+  resolveContentAttachmentSources,
+  urlAttachmentSource,
+  UrlAttachmentSource,
   TextPart
 } from './content.ts'
 export {

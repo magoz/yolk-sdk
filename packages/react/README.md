@@ -87,7 +87,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 
 - `AgentChatMessage` groups parts by role/turn.
 - `AgentChatPart` covers text, reasoning, tool calls/results, and errors.
-- User messages preserve ordered protocol content, including images and documents, for replay.
+- User messages preserve ordered protocol content, including inline or referenced images and documents, for replay.
 - Tool parts expose approval requested/granted/denied, question requested/answered/cancelled, execution, completion, and error states.
 - Question answer states preserve request context when available so renderers can show selected option labels instead of only `answered`.
 - `buildAgentChatItems` is optional convenience projection for simple flat UIs.

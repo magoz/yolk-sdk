@@ -5,7 +5,8 @@ import {
   AgentUsage,
   DocumentPart,
   ImagePart,
-  TextPart
+  TextPart,
+  inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
 import { agentTextContextBudget, contextBudgetStatus } from '@/lib/agents/context-budget'
 import {
@@ -92,43 +93,43 @@ describe('agent playground', () => {
   it('builds multipart image submit content', () => {
     expect(contentFromInput(' describe ', [imageAttachment])).toEqual([
       TextPart.make({ text: 'describe' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
     ])
   })
 
   it('builds image-only submit content', () => {
     expect(contentFromInput('   ', [imageAttachment])).toEqual([
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
     ])
   })
 
   it('builds multi-image submit content', () => {
     expect(contentFromInput(' compare ', [imageAttachment, secondImageAttachment])).toEqual([
       TextPart.make({ text: 'compare' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-      ImagePart.make({ data: 'def', mimeType: 'image/png' })
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+      ImagePart.make({ source: inlineBase64Source('def'), mimeType: 'image/png' })
     ])
   })
 
   it('omits failed images from submit content', () => {
     expect(contentFromInput(' describe ', [failedImageAttachment, imageAttachment])).toEqual([
       TextPart.make({ text: 'describe' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
     ])
   })
 
   it('builds PDF submit content', () => {
     expect(contentFromInput(' summarize ', [documentAttachment])).toEqual([
       TextPart.make({ text: 'summarize' }),
-      DocumentPart.make({ data: 'cGRm', mimeType: 'application/pdf', filename: 'brief.pdf' })
+      DocumentPart.make({ source: inlineBase64Source('cGRm'), mimeType: 'application/pdf', filename: 'brief.pdf' })
     ])
   })
 
   it('keeps attachment order in submit content', () => {
     expect(contentFromInput(' compare ', [documentAttachment, imageAttachment])).toEqual([
       TextPart.make({ text: 'compare' }),
-      DocumentPart.make({ data: 'cGRm', mimeType: 'application/pdf', filename: 'brief.pdf' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+      DocumentPart.make({ source: inlineBase64Source('cGRm'), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
     ])
   })
 

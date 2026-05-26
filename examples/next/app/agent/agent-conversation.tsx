@@ -19,6 +19,7 @@ import {
   QuestionAnswer,
   QuestionResponse,
   ToolApprovalResponse,
+  attachmentSourceDataUrl,
   contentParts,
   contentText,
   type Content,
@@ -914,10 +915,22 @@ function MessageContentParts({
               <MarkdownText key={`text-${index}`} text={part.text} />
             ) : null
           case 'Image':
+            const imageUrl = attachmentSourceDataUrl(part.source, part.mimeType)
+            if (imageUrl._tag === 'None') {
+              return (
+                <div
+                  key={`image-${index}`}
+                  className="rounded-xl border border-foreground/10 bg-background/20 px-3 py-2 text-xs"
+                >
+                  Image attachment
+                </div>
+              )
+            }
+
             return (
               <Image
                 key={`image-${index}`}
-                src={`data:${part.mimeType};base64,${part.data}`}
+                src={imageUrl.value}
                 alt={role === 'user' ? 'Uploaded image' : 'Generated image'}
                 width={640}
                 height={360}

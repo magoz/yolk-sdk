@@ -35,7 +35,7 @@
 ## Protocol/loop rules
 
 - `AgentReasoningEffort` is protocol-only request config; app/provider layers choose and pass through values.
-- `Content = string | ContentPart[]`; parts include text, image, document, and audio. Use protocol helpers (`contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`) instead of app-local duplication.
+- `Content = string | ContentPart[]`; parts include text, image, document, and audio. Media parts carry `InlineBase64`, `Url`, or host-owned `Ref` sources. Use protocol helpers (`inlineBase64AttachmentSource`, `urlAttachmentSource`, `refAttachmentSource`, `contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`, `resolveContentAttachmentSources`) instead of app-local duplication.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
 - Provider adapters classify retryable failures and normalize raw usage; loop owns retry/usage aggregation.

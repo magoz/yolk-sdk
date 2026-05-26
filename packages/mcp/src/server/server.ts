@@ -2,6 +2,8 @@ import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   ToolCall,
+  attachmentSourceBase64,
+  attachmentSourcePreview,
   contentParts,
   type ContentPart,
   type ToolDef,
@@ -149,19 +151,28 @@ const mcpContentBlockFromPart = (part: ContentPart) => {
     case 'Text':
       return { type: 'text', text: part.text }
     case 'Image':
-      return { type: 'image', data: part.data, mimeType: part.mimeType }
+      return Option.match(attachmentSourceBase64(part.source), {
+        onNone: () => ({ type: 'text', text: `Image attachment: ${attachmentSourcePreview(part.source)}` }),
+        onSome: data => ({ type: 'image', data, mimeType: part.mimeType })
+      })
     case 'Document':
-      return {
-        type: 'resource',
-        resource: {
-          uri: documentResourceUri(part.filename),
-          name: part.title ?? part.filename,
-          mimeType: part.mimeType,
-          blob: part.data
-        }
-      }
+      return Option.match(attachmentSourceBase64(part.source), {
+        onNone: () => ({ type: 'text', text: `Document attachment: ${attachmentSourcePreview(part.source)}` }),
+        onSome: data => ({
+          type: 'resource',
+          resource: {
+            uri: documentResourceUri(part.filename),
+            name: part.title ?? part.filename,
+            mimeType: part.mimeType,
+            blob: data
+          }
+        })
+      })
     case 'Audio':
-      return { type: 'audio', data: part.data, mimeType: `audio/${part.format}` }
+      return Option.match(attachmentSourceBase64(part.source), {
+        onNone: () => ({ type: 'text', text: `Audio attachment: ${attachmentSourcePreview(part.source)}` }),
+        onSome: data => ({ type: 'audio', data, mimeType: part.mimeType })
+      })
   }
 }
 

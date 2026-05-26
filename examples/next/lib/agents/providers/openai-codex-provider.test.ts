@@ -6,7 +6,7 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ImagePart, TextPart, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
+import { ImagePart, TextPart, ToolDef, UserMessage, inlineBase64Source } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/oauth'
 import { openAiCodexProviderId, openAiCodexResponsesUrl } from '@yolk-sdk/openai/codex'
@@ -252,7 +252,7 @@ describe('OpenAiCodexProviderLayer', () => {
               UserMessage.make({
                 content: [
                   TextPart.make({ text: 'Describe this image' }),
-                  ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+                  ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
                 ]
               })
             ],

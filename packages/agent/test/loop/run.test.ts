@@ -9,6 +9,7 @@ import {
   AgentModelCapabilities,
   DocumentPart,
   ImagePart,
+  inlineBase64Source,
   makeSubagentRunId,
   QuestionAnswer,
   QuestionResponse,
@@ -562,7 +563,7 @@ describe('run', () => {
       const result = yield* run({
         messages: [
           UserMessage.make({
-            content: [ImagePart.make({ data: 'abc', mimeType: 'image/png' })]
+            content: [ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })]
           })
         ],
         systemPrompt: 'Be brief.',
@@ -601,7 +602,7 @@ describe('run', () => {
           UserMessage.make({
             content: [
               DocumentPart.make({
-                data: 'abc=',
+                source: inlineBase64Source('abc='),
                 mimeType: 'application/pdf',
                 filename: 'brief.pdf'
               })

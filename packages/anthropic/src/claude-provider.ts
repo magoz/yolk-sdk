@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref, Stream } from 'effect'
+import { Effect, Layer, Option, Ref, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -11,6 +11,7 @@ import {
   AgentOutputUsage,
   AgentUsage,
   ToolCall,
+  attachmentSourceBase64,
   assistantContent,
   assistantHostToolCalls,
   type AgentMessage,
@@ -239,24 +240,30 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
     case 'Image':
-      return Effect.succeed({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: part.mimeType,
-          data: part.data
-        }
+      return Option.match(attachmentSourceBase64(part.source), {
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
+        onSome: data => Effect.succeed({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: part.mimeType,
+            data
+          }
+        })
       })
     case 'Document':
       return part.mimeType === 'application/pdf'
-        ? Effect.succeed({
-            type: 'document',
-            source: {
-              type: 'base64',
-              media_type: 'application/pdf',
-              data: part.data
-            },
-            title: part.title ?? part.filename
+        ? Option.match(attachmentSourceBase64(part.source), {
+            onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
+            onSome: data => Effect.succeed({
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data
+              },
+              title: part.title ?? part.filename
+            })
           })
         : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
     case 'Audio':

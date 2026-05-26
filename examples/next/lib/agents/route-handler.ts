@@ -2,6 +2,7 @@ import { Array as Arr, Effect, Option, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   assistantContent,
+  attachmentSourceBase64,
   contentParts,
   AgentMessage,
   AgentReasoningEffort,
@@ -88,16 +89,25 @@ const requestDocumentParts = (input: AgentRouteRequest) =>
 const imageLimitError = (message: string) => new AgentImageLimitError({ message })
 const documentLimitError = (message: string) => new AgentDocumentLimitError({ message })
 
+const inlineData = (source: ImagePart['source'] | DocumentPart['source']) =>
+  attachmentSourceBase64(source)
+
 const imagePartLimitError = (image: ImagePart) => {
   if (!isAllowedImageMimeType(image.mimeType)) {
     return Option.some(imageLimitError(`Unsupported image type: ${image.mimeType}`))
   }
 
-  if (image.data.length > maxImageBase64Chars) {
+  const data = inlineData(image.source)
+
+  if (Option.isNone(data)) {
+    return Option.some(imageLimitError('Image data must be inline base64.'))
+  }
+
+  if (data.value.length > maxImageBase64Chars) {
     return Option.some(imageLimitError('Image is too large.'))
   }
 
-  if (!isValidBase64(image.data)) {
+  if (!isValidBase64(data.value)) {
     return Option.some(imageLimitError('Invalid image data.'))
   }
 
@@ -109,11 +119,17 @@ const documentPartLimitError = (document: DocumentPart) => {
     return Option.some(documentLimitError(`Unsupported document type: ${document.mimeType}`))
   }
 
-  if (document.data.length > maxDocumentBase64Chars) {
+  const data = inlineData(document.source)
+
+  if (Option.isNone(data)) {
+    return Option.some(documentLimitError('Document data must be inline base64.'))
+  }
+
+  if (data.value.length > maxDocumentBase64Chars) {
     return Option.some(documentLimitError('Document is too large.'))
   }
 
-  if (!isValidBase64(document.data)) {
+  if (!isValidBase64(data.value)) {
     return Option.some(documentLimitError('Invalid document data.'))
   }
 
@@ -123,7 +139,11 @@ const documentPartLimitError = (document: DocumentPart) => {
 export const validateAgentRouteImages = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const images = requestImageParts(input)
-    const totalBase64Chars = Arr.reduce(images, 0, (total, image) => total + image.data.length)
+    const totalBase64Chars = Arr.reduce(
+      images,
+      0,
+      (total, image) => total + Option.getOrElse(inlineData(image.source), () => '').length
+    )
 
     if (images.length > maxImageCount) {
       return yield* Effect.fail(imageLimitError(`Attach up to ${maxImageCount} images.`))
@@ -155,7 +175,7 @@ export const validateAgentRouteDocuments = (input: AgentRouteRequest) =>
     const totalBase64Chars = Arr.reduce(
       documents,
       0,
-      (total, document) => total + document.data.length
+      (total, document) => total + Option.getOrElse(inlineData(document.source), () => '').length
     )
 
     if (documents.length > maxDocumentCount) {

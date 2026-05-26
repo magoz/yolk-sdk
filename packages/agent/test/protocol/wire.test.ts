@@ -70,6 +70,7 @@ import {
   UserInput,
   UserMessage,
   addAgentUsage,
+  inlineBase64Source,
   textImageModelCapabilities,
   textImageDocumentModelCapabilities,
   textOnlyModelCapabilities,
@@ -113,9 +114,9 @@ describe('protocol wire schemas', () => {
         UserMessage.make({
           content: [
             TextPart.make({ text: 'describe' }),
-            ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-            DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
-            AudioPart.make({ data: 'def', format: 'wav' })
+            ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+            DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+            AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/wav' })
           ]
         }),
         AssistantAgentMessage.make({
@@ -350,8 +351,8 @@ describe('protocol wire schemas', () => {
       })
       const content = [
         TextPart.make({ text: 'hi' }),
-        DocumentPart.make({ data: 'abc=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
-        AudioPart.make({ data: 'abc', format: 'mp3' })
+        DocumentPart.make({ source: inlineBase64Source('abc='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+        AudioPart.make({ source: inlineBase64Source('abc'), mimeType: 'audio/mpeg' })
       ]
       const capabilities = AgentModelCapabilities.make({
         input: AgentContentCapabilities.make({ text: true, image: true, document: true, audio: false }),
@@ -392,8 +393,7 @@ describe('protocol wire schemas', () => {
       }).pipe(Effect.result)
       const invalidAudio = yield* Schema.decodeUnknownEffect(ContentPart)({
         _tag: 'Audio',
-        data: 'abc',
-        format: 'flac'
+        mimeType: 'audio/flac'
       }).pipe(Effect.result)
       const invalidUsage = yield* Schema.decodeUnknownEffect(AgentUsage)({
         input: { total: '10' },

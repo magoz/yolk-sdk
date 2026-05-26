@@ -1,4 +1,4 @@
-import { Config, Context, Effect, Layer, Redacted, Stream } from 'effect'
+import { Config, Context, Effect, Layer, Option, Redacted, Stream } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -12,6 +12,7 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
+  attachmentSourceDataUrl,
   assistantContent,
   assistantHostToolCalls,
   type AgentMessage,
@@ -199,9 +200,9 @@ const contentPartToUserPart = (
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
     case 'Image':
-      return Effect.succeed({
-        type: 'image_url',
-        image_url: { url: `data:${part.mimeType};base64,${part.data}` }
+      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
+        onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
       })
     case 'Document':
       return Effect.fail(unsupportedContentError('Document'))

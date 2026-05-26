@@ -66,9 +66,14 @@ const program = run({
 `Content` is either plain text or ordered parts:
 
 - `TextPart`
-- `ImagePart`
-- `DocumentPart`
-- `AudioPart`
+- `ImagePart` with `InlineBase64`, `Url`, or host-owned `Ref` source
+- `DocumentPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
+- `AudioPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
+
+Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
+`refAttachmentSource`. Providers require inline/resolved media before lowering. Use inline base64
+for simple apps, or persist `Ref` values and call `resolveContentAttachmentSources` at your storage
+boundary before provider execution. Host apps own upload, auth, retention, and ref hydration policy.
 
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
 `textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.

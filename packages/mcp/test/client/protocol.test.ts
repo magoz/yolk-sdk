@@ -60,8 +60,8 @@ describe('MCP protocol helpers', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([
       { _tag: 'Text', text: 'hello' },
-      { _tag: 'Image', data: 'abc', mimeType: 'image/png' },
-      { _tag: 'Audio', data: 'def', format: 'mp3' },
+      { _tag: 'Image', source: { _tag: 'InlineBase64', data: 'abc' }, mimeType: 'image/png' },
+      { _tag: 'Audio', source: { _tag: 'InlineBase64', data: 'def' }, mimeType: 'audio/mpeg' },
       { _tag: 'Text', text: 'file text' },
       { _tag: 'Text', text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' }
     ])

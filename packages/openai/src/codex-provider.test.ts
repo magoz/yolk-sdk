@@ -9,7 +9,8 @@ import {
   ToolCall,
   ToolDef,
   ToolResultMessage,
-  UserMessage
+  UserMessage,
+  inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
 import { toOpenAiCodexRequestBody } from './codex-provider.ts'
 
@@ -25,9 +26,9 @@ describe('OpenAI Codex provider', () => {
             UserMessage.make({
               content: [
                 TextPart.make({ text: 'look' }),
-                ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
                 DocumentPart.make({
-                  data: 'JVBERi0=',
+                  source: inlineBase64Source('JVBERi0='),
                   mimeType: 'application/pdf',
                   filename: 'brief.pdf'
                 })

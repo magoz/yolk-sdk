@@ -1,5 +1,11 @@
 import { Array as Arr } from 'effect'
-import { DocumentPart, ImagePart, TextPart, type Content } from '@yolk-sdk/agent/protocol'
+import {
+  DocumentPart,
+  ImagePart,
+  TextPart,
+  inlineBase64Source,
+  type Content
+} from '@yolk-sdk/agent/protocol'
 import type {
   AgentComposerFailedAttachment,
   AgentComposerReadyDocumentAttachment,
@@ -49,10 +55,10 @@ export const contentFromInput = (
   const mediaParts = Arr.map(readyAttachments, attachment => {
     switch (attachment.kind) {
       case 'image':
-        return ImagePart.make({ data: attachment.data, mimeType: attachment.mimeType })
+        return ImagePart.make({ source: inlineBase64Source(attachment.data), mimeType: attachment.mimeType })
       case 'document':
         return DocumentPart.make({
-          data: attachment.data,
+          source: inlineBase64Source(attachment.data),
           mimeType: attachment.mimeType,
           filename: attachment.name
         })

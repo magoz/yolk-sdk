@@ -10,6 +10,7 @@ import {
   AgentModelCapabilities,
   DocumentPart,
   ImagePart,
+  inlineBase64Source,
   ToolDef,
   UserMessage,
   type AgentMessage
@@ -427,11 +428,11 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
-                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
-                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
-                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' }),
-                ImagePart.make({ data: 'aaaa', mimeType: 'image/png' })
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/png' })
               ]
             })
           ]
@@ -453,7 +454,7 @@ describe('makeAgentPostResponse', () => {
           sessionId: 'session_1',
           messages: [
             UserMessage.make({
-              content: [ImagePart.make({ data: 'aaaa', mimeType: 'image/svg+xml' })]
+              content: [ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/svg+xml' })]
             })
           ]
         }),
@@ -474,7 +475,7 @@ describe('makeAgentPostResponse', () => {
           sessionId: 'session_1',
           messages: [
             UserMessage.make({
-              content: [ImagePart.make({ data: 'abc', mimeType: 'image/png' })]
+              content: [ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })]
             })
           ]
         }),
@@ -497,10 +498,10 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
-                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
-                ImagePart.make({ data: imageData, mimeType: 'image/png' }),
-                ImagePart.make({ data: imageData, mimeType: 'image/png' })
+                ImagePart.make({ source: inlineBase64Source(imageData), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source(imageData), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source(imageData), mimeType: 'image/png' }),
+                ImagePart.make({ source: inlineBase64Source(imageData), mimeType: 'image/png' })
               ]
             })
           ]
@@ -524,7 +525,7 @@ describe('makeAgentPostResponse', () => {
             UserMessage.make({
               content: [
                 DocumentPart.make({
-                  data: 'cGRm',
+                  source: inlineBase64Source('cGRm'),
                   mimeType: 'application/pdf',
                   filename: 'brief.pdf'
                 })
@@ -545,7 +546,7 @@ describe('makeAgentPostResponse', () => {
   it.effect('rejects too many documents before provider execution', () =>
     Effect.gen(function* () {
       const document = DocumentPart.make({
-        data: 'cGRm',
+        source: inlineBase64Source('cGRm'),
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })
@@ -576,7 +577,7 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                DocumentPart.make({ data: 'eGxz', mimeType: 'text/plain', filename: 'brief.txt' })
+                DocumentPart.make({ source: inlineBase64Source('eGxz'), mimeType: 'text/plain', filename: 'brief.txt' })
               ]
             })
           ]
@@ -599,7 +600,7 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                DocumentPart.make({ data: 'abc', mimeType: 'application/pdf', filename: 'brief.pdf' })
+                DocumentPart.make({ source: inlineBase64Source('abc'), mimeType: 'application/pdf', filename: 'brief.pdf' })
               ]
             })
           ]
@@ -624,7 +625,7 @@ describe('makeAgentPostResponse', () => {
             UserMessage.make({
               content: [
                 DocumentPart.make({
-                  data: documentData,
+                  source: inlineBase64Source(documentData),
                   mimeType: 'application/pdf',
                   filename: 'brief.pdf'
                 })
@@ -646,7 +647,7 @@ describe('makeAgentPostResponse', () => {
     Effect.gen(function* () {
       const documentData = 'a'.repeat(8 * 1024 * 1024)
       const document = DocumentPart.make({
-        data: documentData,
+        source: inlineBase64Source(documentData),
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })

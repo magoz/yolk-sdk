@@ -1,3 +1,4 @@
+import { Effect, Option } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
@@ -5,20 +6,28 @@ import {
   ImagePart,
   TextPart,
   appendTextToContent,
+  attachmentSourceBase64,
+  attachmentSourceDataUrl,
+  attachmentSourcePreview,
   contentParts,
   contentPreview,
   contentText,
-  isContentEmpty
+  inlineBase64AttachmentSource,
+  inlineBase64Source,
+  isContentEmpty,
+  refAttachmentSource,
+  resolveContentAttachmentSources,
+  urlAttachmentSource
 } from '../../src/protocol'
 
 describe('content helpers', () => {
   it('extracts text-only content', () => {
     const content = [
       TextPart.make({ text: 'hello ' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-      DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+      DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
       TextPart.make({ text: 'world' }),
-      AudioPart.make({ data: 'def', format: 'wav' })
+      AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/wav' })
     ]
 
     expect(contentText(content)).toBe('hello world')
@@ -27,9 +36,9 @@ describe('content helpers', () => {
   it('previews mixed content with stable labels', () => {
     const content = [
       TextPart.make({ text: 'look' }),
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-      DocumentPart.make({ data: 'ghi=', mimeType: 'application/pdf', filename: 'brief.pdf' }),
-      AudioPart.make({ data: 'def', format: 'mp3' })
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+      DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' })
     ]
 
     expect(contentPreview(content)).toBe('look, Image, Document: brief.pdf, Audio')
@@ -38,8 +47,8 @@ describe('content helpers', () => {
   it('treats media parts as non-empty content', () => {
     expect(isContentEmpty('')).toBe(true)
     expect(isContentEmpty([TextPart.make({ text: '' })])).toBe(true)
-    expect(isContentEmpty([ImagePart.make({ data: 'abc', mimeType: 'image/png' })])).toBe(false)
-    expect(isContentEmpty([DocumentPart.make({ data: 'abc=', mimeType: 'application/pdf', filename: 'brief.pdf' })])).toBe(false)
+    expect(isContentEmpty([ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })])).toBe(false)
+    expect(isContentEmpty([DocumentPart.make({ source: inlineBase64Source('abc='), mimeType: 'application/pdf', filename: 'brief.pdf' })])).toBe(false)
   })
 
   it('normalizes string content to text parts', () => {
@@ -49,13 +58,89 @@ describe('content helpers', () => {
   it('appends text while preserving content shape', () => {
     expect(appendTextToContent('hel', 'lo')).toBe('hello')
     expect(
-      appendTextToContent([ImagePart.make({ data: 'abc', mimeType: 'image/png' })], 'caption')
+      appendTextToContent([ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })], 'caption')
     ).toEqual([
-      ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
       TextPart.make({ text: 'caption' })
     ])
     expect(appendTextToContent([TextPart.make({ text: 'hel' })], 'lo')).toEqual([
       TextPart.make({ text: 'hello' })
     ])
   })
+
+  it('builds attachment sources with stable helpers', () => {
+    const inline = inlineBase64AttachmentSource('abc')
+    const url = urlAttachmentSource('https://example.com/image.png')
+    const ref = refAttachmentSource('artifact_123')
+
+    expect(attachmentSourceBase64(inline)).toEqual(Option.some('abc'))
+    expect(attachmentSourceDataUrl(inline, 'image/png')).toEqual(Option.some('data:image/png;base64,abc'))
+    expect(attachmentSourceBase64(url)).toEqual(Option.none())
+    expect(attachmentSourceDataUrl(ref, 'image/png')).toEqual(Option.none())
+    expect(attachmentSourcePreview(inline)).toBe('inline')
+    expect(attachmentSourcePreview(url)).toBe('https://example.com/image.png')
+    expect(attachmentSourcePreview(ref)).toBe('artifact_123')
+  })
+
+  it.effect('resolves attachment sources while preserving part metadata', () =>
+    Effect.gen(function* () {
+      const content = [
+        TextPart.make({ text: 'inspect' }),
+        ImagePart.make({
+          source: refAttachmentSource('image_1'),
+          mimeType: 'image/png',
+          filename: 'photo.png',
+          title: 'Photo',
+          width: 320,
+          height: 240
+        }),
+        DocumentPart.make({
+          source: urlAttachmentSource('https://example.com/brief.pdf'),
+          mimeType: 'application/pdf',
+          filename: 'brief.pdf',
+          title: 'Brief'
+        }),
+        AudioPart.make({
+          source: refAttachmentSource('audio_1'),
+          mimeType: 'audio/mpeg',
+          filename: 'clip.mp3',
+          durationMs: 1200
+        })
+      ]
+
+      const resolved = yield* resolveContentAttachmentSources(content, part => {
+        switch (part._tag) {
+          case 'Image':
+            return Effect.succeed(inlineBase64AttachmentSource('image-data'))
+          case 'Document':
+            return Effect.succeed(inlineBase64AttachmentSource('document-data'))
+          case 'Audio':
+            return Effect.succeed(inlineBase64AttachmentSource('audio-data'))
+        }
+      })
+
+      expect(resolved).toEqual([
+        TextPart.make({ text: 'inspect' }),
+        ImagePart.make({
+          source: inlineBase64AttachmentSource('image-data'),
+          mimeType: 'image/png',
+          filename: 'photo.png',
+          title: 'Photo',
+          width: 320,
+          height: 240
+        }),
+        DocumentPart.make({
+          source: inlineBase64AttachmentSource('document-data'),
+          mimeType: 'application/pdf',
+          filename: 'brief.pdf',
+          title: 'Brief'
+        }),
+        AudioPart.make({
+          source: inlineBase64AttachmentSource('audio-data'),
+          mimeType: 'audio/mpeg',
+          filename: 'clip.mp3',
+          durationMs: 1200
+        })
+      ])
+    }))
 })

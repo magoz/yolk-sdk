@@ -22,6 +22,7 @@ import {
   ToolResult,
   ToolResultMessage,
   UserMessage,
+  inlineBase64Source,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -49,8 +50,8 @@ describe('agent chat messages', () => {
             id: 'message-0-user-content',
             content: [
               TextPart.make({ text: 'describe this' }),
-              ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-              DocumentPart.make({ data: 'def=', mimeType: 'application/pdf', filename: 'brief.pdf' })
+              ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+              DocumentPart.make({ source: inlineBase64Source('def='), mimeType: 'application/pdf', filename: 'brief.pdf' })
             ],
             state: 'done'
           }
@@ -63,8 +64,8 @@ describe('agent chat messages', () => {
         _tag: 'User',
         content: [
           TextPart.make({ text: 'describe this' }),
-          ImagePart.make({ data: 'abc', mimeType: 'image/png' }),
-          DocumentPart.make({ data: 'def=', mimeType: 'application/pdf', filename: 'brief.pdf' })
+          ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+          DocumentPart.make({ source: inlineBase64Source('def='), mimeType: 'application/pdf', filename: 'brief.pdf' })
         ]
       }
     ])

@@ -1,25 +1,53 @@
-import { Array as Arr, Option } from 'effect'
+import { Array as Arr, Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 
 export class TextPart extends Schema.TaggedClass<TextPart>()('Text', {
   text: Schema.String
 }) {}
 
+export class InlineBase64AttachmentSource extends Schema.TaggedClass<InlineBase64AttachmentSource>()(
+  'InlineBase64',
+  {
+    data: Schema.String
+  }
+) {}
+
+export class UrlAttachmentSource extends Schema.TaggedClass<UrlAttachmentSource>()('Url', {
+  url: Schema.String
+}) {}
+
+export class RefAttachmentSource extends Schema.TaggedClass<RefAttachmentSource>()('Ref', {
+  id: Schema.String
+}) {}
+
+export const AttachmentSource = Schema.Union([
+  InlineBase64AttachmentSource,
+  UrlAttachmentSource,
+  RefAttachmentSource
+])
+export type AttachmentSource = typeof AttachmentSource.Type
+
 export class ImagePart extends Schema.TaggedClass<ImagePart>()('Image', {
-  data: Schema.String,
-  mimeType: Schema.String
+  source: AttachmentSource,
+  mimeType: Schema.String,
+  filename: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  width: Schema.optional(Schema.Number),
+  height: Schema.optional(Schema.Number)
 }) {}
 
 export class DocumentPart extends Schema.TaggedClass<DocumentPart>()('Document', {
-  data: Schema.String,
+  source: AttachmentSource,
   mimeType: Schema.String,
   filename: Schema.String,
   title: Schema.optional(Schema.String)
 }) {}
 
 export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
-  data: Schema.String,
-  format: Schema.Literals(['pcm16', 'wav', 'mp3', 'opus'])
+  source: AttachmentSource,
+  mimeType: Schema.String,
+  filename: Schema.optional(Schema.String),
+  durationMs: Schema.optional(Schema.Number)
 }) {}
 
 export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart])
@@ -27,6 +55,65 @@ export type ContentPart = typeof ContentPart.Type
 
 export const Content = Schema.Union([Schema.String, Schema.Array(ContentPart)])
 export type Content = typeof Content.Type
+
+export type AttachmentContentPart = ImagePart | DocumentPart | AudioPart
+
+export type AttachmentSourceResolver<E = never, R = never> = (
+  part: AttachmentContentPart
+) => Effect.Effect<AttachmentSource, E, R>
+
+const resolveContentPartAttachmentSource = <E, R>(
+  part: ContentPart,
+  resolver: AttachmentSourceResolver<E, R>
+): Effect.Effect<ContentPart, E, R> => {
+  switch (part._tag) {
+    case 'Text':
+      return Effect.succeed(part)
+    case 'Image':
+      return resolver(part).pipe(
+        Effect.map(source =>
+          ImagePart.make({
+            source,
+            mimeType: part.mimeType,
+            filename: part.filename,
+            title: part.title,
+            width: part.width,
+            height: part.height
+          })
+        )
+      )
+    case 'Document':
+      return resolver(part).pipe(
+        Effect.map(source =>
+          DocumentPart.make({
+            source,
+            mimeType: part.mimeType,
+            filename: part.filename,
+            title: part.title
+          })
+        )
+      )
+    case 'Audio':
+      return resolver(part).pipe(
+        Effect.map(source =>
+          AudioPart.make({
+            source,
+            mimeType: part.mimeType,
+            filename: part.filename,
+            durationMs: part.durationMs
+          })
+        )
+      )
+  }
+}
+
+export const resolveContentAttachmentSources = <E, R>(
+  content: Content,
+  resolver: AttachmentSourceResolver<E, R>
+): Effect.Effect<Content, E, R> =>
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, part => resolveContentPartAttachmentSource(part, resolver))
 
 export const contentPartText = (part: ContentPart) => {
   switch (part._tag) {
@@ -83,4 +170,43 @@ export const appendTextToContent = (content: Content, text: string): Content => 
               : part
           )
   })
+}
+
+export const inlineBase64AttachmentSource = (data: string) => InlineBase64AttachmentSource.make({ data })
+
+export const urlAttachmentSource = (url: string) => UrlAttachmentSource.make({ url })
+
+export const refAttachmentSource = (id: string) => RefAttachmentSource.make({ id })
+
+export const inlineBase64Source = inlineBase64AttachmentSource
+
+export const attachmentSourcePreview = (source: AttachmentSource) => {
+  switch (source._tag) {
+    case 'InlineBase64':
+      return 'inline'
+    case 'Url':
+      return source.url
+    case 'Ref':
+      return source.id
+  }
+}
+
+export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: string) => {
+  switch (source._tag) {
+    case 'InlineBase64':
+      return Option.some(`data:${mimeType};base64,${source.data}`)
+    case 'Url':
+    case 'Ref':
+      return Option.none<string>()
+  }
+}
+
+export const attachmentSourceBase64 = (source: AttachmentSource) => {
+  switch (source._tag) {
+    case 'InlineBase64':
+      return Option.some(source.data)
+    case 'Url':
+    case 'Ref':
+      return Option.none<string>()
+  }
 }

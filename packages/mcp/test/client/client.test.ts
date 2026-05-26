@@ -306,8 +306,8 @@ describe('MCP client', () => {
         structuredContent: { answer: 42 },
         content: [
           { _tag: 'Text', text: 'remote result' },
-          { _tag: 'Image', data: 'abc', mimeType: 'image/png' },
-          { _tag: 'Audio', data: 'def', format: 'opus' },
+          { _tag: 'Image', source: { _tag: 'InlineBase64', data: 'abc' }, mimeType: 'image/png' },
+          { _tag: 'Audio', source: { _tag: 'InlineBase64', data: 'def' }, mimeType: 'audio/opus' },
           { _tag: 'Text', text: 'resource text' },
           { _tag: 'Text', text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' }
         ]
