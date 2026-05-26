@@ -61,6 +61,18 @@ const program = run({
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
 
+## Protocol content
+
+`Content` is either plain text or ordered parts:
+
+- `TextPart`
+- `ImagePart`
+- `DocumentPart`
+- `AudioPart`
+
+Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
+`textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.
+
 ## Human-in-the-loop
 
 HITL is protocol-level, not UI-level:

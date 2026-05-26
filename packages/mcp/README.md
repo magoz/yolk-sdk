@@ -61,6 +61,7 @@ import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
 ```
 
 The server is tool-only. Hosts own HTTP routes, auth, deployment, and tool policy.
+Protocol document parts are exposed as MCP resource blocks with encoded `file:///...` URIs.
 
 ## Host responsibilities
 

@@ -63,7 +63,7 @@ pnpm dev
 Current agent surfaces:
 
 - runtime chooser at `/agent`
-- text + mic voice mode in `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`
+- text + image/PDF + mic voice mode in `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`
 - text tools: web fetch/search, knowledge/storage search, skill, virtual bash, optional remote MCP, optional Telegram, HITL question, task subagents
 - `/agent/next`: no durable persistence; browser sends full protocol transcript each turn
 - `/agent/cloudflare`: Worker/Durable Object WS runtime with append-log storage
