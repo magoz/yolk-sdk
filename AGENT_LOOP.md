@@ -223,6 +223,11 @@ Pi's loop stores and forwards `AgentMessage[]` without inspecting roles beyond `
 const ContentPart = Schema.Union(
   Schema.TaggedStruct('Text', { text: Schema.String }),
   Schema.TaggedStruct('Image', { data: Schema.String, mimeType: Schema.String }),
+  Schema.TaggedStruct('Document', {
+    data: Schema.String,
+    mimeType: Schema.String,
+    filename: Schema.String
+  }),
   Schema.TaggedStruct('Audio', { data: Schema.String, format: AudioFormat })
 )
 
@@ -237,7 +242,7 @@ const AgentMessage = Schema.Union(
 )
 ```
 
-Three message types, multimodal content from day one. `Content` is either a plain string (shorthand for text-only) or an array of `ContentPart` (text, image, audio mixed). Voice support requires no message model changes later.
+Three message types, multimodal content from day one. `Content` is either a plain string (shorthand for text-only) or an array of `ContentPart` (text, image, document, audio mixed). Voice support requires no message model changes later.
 
 No `Notification`, `CompactionSummary`, `ContextInjection` — those are consumer concerns:
 
@@ -782,7 +787,7 @@ User speaks → STT → AgentMessage.User({ content: [Audio({ data, format: "pcm
   → run() → LLMAudioDelta events → consumer plays audio
 ```
 
-Works through the existing `run()` API unchanged. The multimodal `ContentPart` union (Text | Image | Audio) makes this transparent.
+Works through the existing `run()` API unchanged. The multimodal `ContentPart` union (Text | Image | Document | Audio) makes this transparent.
 
 **Architecture 2: Chained (STT → LLM → TTS)**
 
@@ -880,7 +885,7 @@ packages/agent/src/loop/
     index.ts                  # Public API re-exports
     run.ts                    # Text mode agent loop (Stream.asyncScoped + Effect.gen)
     session.ts                # Realtime mode session (v1.1)
-    content.ts                # ContentPart schema (Text | Image | Audio)
+    content.ts                # ContentPart schema (Text | Image | Document | Audio)
     message.ts                # AgentMessage schema (User | Assistant | ToolResult)
     event.ts                  # AgentEvent schema (full discriminated union)
     error.ts                  # AgentLoopError types (Data.TaggedError)

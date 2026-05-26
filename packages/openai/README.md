@@ -67,7 +67,7 @@ const events = run({
 
 The Codex provider:
 
-- Lowers Yolk `LLMRequest` messages/tools/images to Codex Responses input.
+- Lowers Yolk `LLMRequest` messages/tools/images/documents to Codex Responses input.
 - Handles Codex JSON and SSE response bodies, including non-`event-stream` SSE bodies.
 - Emits Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.
 - Preserves `originator` and optional `ChatGPT-Account-Id` auth headers.

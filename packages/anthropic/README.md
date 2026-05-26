@@ -63,7 +63,7 @@ const events = run({
 
 The provider:
 
-- Lowers Yolk `LLMRequest` messages/tools/images to Anthropic Messages API input.
+- Lowers Yolk `LLMRequest` messages/tools/images/PDFs to Anthropic Messages API input.
 - Preserves Claude subscription OAuth headers and Claude Code-compatible tool naming.
 - Maps Anthropic message responses to Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.
 - Maps provider failures to typed `LLMError` causes for retry/context/rate-limit handling.

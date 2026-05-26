@@ -156,7 +156,7 @@ export default async function ({ init, payload, env }: FlueContext) {
 |                   | Yolk                                              | Pi                                                        | OpenCode                                                 | Flue                                                                                    |
 | ----------------- | ------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | **Message types** | 3 (User, Assistant, ToolResult)                   | 3 base + 4 custom via declaration merging                 | 2 (User, Assistant)                                      | Pi `AgentMessage` in history + `SessionEntry` wrappers                                  |
-| **Content model** | Multimodal `ContentPart` (Text \| Image \| Audio) | `TextContent \| ImageContent`                             | 12 Part types (Text, File, Tool, Reasoning, etc.)        | Pi blocks (`text`, `thinking`, `toolCall`, `toolResult`); public `prompt(text)` only    |
+| **Content model** | Multimodal `ContentPart` (Text \| Image \| Document \| Audio) | `TextContent \| ImageContent`                             | 12 Part types (Text, File, Tool, Reasoning, etc.)        | Pi blocks (`text`, `thinking`, `toolCall`, `toolResult`); public `prompt(text)` only    |
 | **Audio**         | First-class (`Audio` content part)                | None                                                      | Schema acknowledges, all models `audio: false`           | None model-native; MCP audio becomes text placeholder                                   |
 | **Extensibility** | Closed union. Consumer converts at boundary.      | Open via `declare module` on `CustomAgentMessages`        | Closed. Escape hatch via `metadata: Record<string, any>` | No public message extension; stores compaction/branch summaries outside LLM messages    |
 | **LLM bridge**    | Harness-internal `toLLMMessages` (trivial)        | Consumer-provided `convertToLlm()` with exhaustive switch | Internal `toModelMessagesEffect` (~250 lines)            | Pi handles provider conversion; Flue rebuilds context from `SessionHistory`             |
@@ -168,6 +168,7 @@ export default async function ({ init, payload, env }: FlueContext) {
 type ContentPart =
   | { _tag: 'Text'; text: string }
   | { _tag: 'Image'; data: string; mimeType: string }
+  | { _tag: 'Document'; data: string; mimeType: string; filename: string }
   | { _tag: 'Audio'; data: string; format: AudioFormat }
 ```
 
