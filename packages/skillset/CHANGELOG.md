@@ -1,5 +1,7 @@
 # @yolk-sdk/skillset
 
+## 0.0.1-canary.9
+
 ## 0.0.1-canary.8
 
 ## 0.0.1-canary.7

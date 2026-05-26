@@ -1,5 +1,14 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.9
+
+### Patch Changes
+
+- Add typed attachment sources for inline media, URLs, and host-owned refs.
+- Updated dependencies
+  - @yolk-sdk/agent@0.0.1-canary.9
+  - @yolk-sdk/oauth@0.0.1-canary.9
+
 ## 0.0.1-canary.8
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.9
+
+### Patch Changes
+
+- Add typed attachment sources for inline media, URLs, and host-owned refs.
+
 ## 0.0.1-canary.8
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @yolk-sdk/knowledge
 
+## 0.0.1-canary.9
+
+### Patch Changes
+
+- Rename the archived knowledge policy.
+- Updated dependencies
+  - @yolk-sdk/agent@0.0.1-canary.9
+
 ## 0.0.1-canary.8
 
 ### Patch Changes
