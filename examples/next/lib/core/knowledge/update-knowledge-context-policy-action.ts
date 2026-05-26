@@ -11,7 +11,7 @@ import { updateKnowledgeContextPolicy } from './update-knowledge-context-policy'
 
 export const updateKnowledgeContextPolicyAction = async (input: {
   readonly id: string
-  readonly contextPolicy: 'pinned' | 'routable' | 'searchable' | 'archival'
+  readonly contextPolicy: 'pinned' | 'routable' | 'searchable' | 'archived'
 }) => {
   await cookies()
 

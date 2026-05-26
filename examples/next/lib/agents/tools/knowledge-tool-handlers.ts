@@ -14,7 +14,7 @@ const unknownToMessage = (error: unknown) => error instanceof Error ? error.mess
 const listKnowledgeForAgent = (input: {
   readonly userId: string
   readonly query?: string
-  readonly policy?: 'archival' | 'pinned' | 'routable' | 'searchable'
+  readonly policy?: 'archived' | 'pinned' | 'routable' | 'searchable'
   readonly limit: number
 }) =>
   listUserKnowledgeRecords(input).pipe(

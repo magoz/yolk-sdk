@@ -54,8 +54,8 @@ test.describe('knowledge UI', () => {
     await expect(authedPage.getByText('matches')).toBeVisible({ timeout: 15_000 })
     await expect(authedPage.getByText(title).first()).toBeVisible()
 
-    await item.getByLabel(`Set context policy for ${title}`).selectOption('archival')
-    await expect(item.getByText('archival', { exact: true }).filter({ visible: true })).toHaveCount(
+    await item.getByLabel(`Set context policy for ${title}`).selectOption('archived')
+    await expect(item.getByText('archived', { exact: true }).filter({ visible: true })).toHaveCount(
       1,
       {
         timeout: 15_000

@@ -23,7 +23,7 @@
 - `pinned`: host may inject into model startup context.
 - `routable`: host may use for dispatch/resolver maps.
 - `searchable`: host may expose through search tools.
-- `archival`: retained but normally omitted from active context/search.
+- `archived`: retained but normally omitted from active context/search.
 
 ## Subpaths
 

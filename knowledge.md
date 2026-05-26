@@ -181,7 +181,7 @@ Some records must be considered before the agent knows what to search for.
 pinned     # always considered for agent startup/context assembly
 routable   # included in knowledge maps/resolvers
 searchable # normal search
-archival   # direct lookup only, excluded from default search
+archived   # direct lookup only, excluded from default search
 ```
 
 Examples:
@@ -190,7 +190,7 @@ Examples:
 - Knowledge map: `pinned` or `routable`
 - Product decision: `routable` + `searchable`
 - Uploaded PDF: `searchable`
-- Old logs: `archival`
+- Old logs: `archived`
 
 ## GBrain influence
 
@@ -499,7 +499,7 @@ Add app domain functions under `lib/core/knowledge/`:
 - list user knowledge records
 - get knowledge record
 - delete knowledge record
-- mark record pinned/searchable/archival
+- mark record pinned/searchable/archived
 
 Move UI direction from `/storage` to `/knowledge`. If route migration is too much for v0, keep `/storage` temporarily but use knowledge internals.
 

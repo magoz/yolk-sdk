@@ -13,8 +13,8 @@ App-owned knowledge use-cases and agent context helpers.
 - Manual text and file knowledge creation; file text extraction reuses `FileExtractor`.
 - File upload is presigned R2 PUT + finalize action; finalize clones downloaded bytes before extraction because PDF parsing may detach ArrayBuffers.
 - `listUserKnowledgeRecords` returns record summaries for agent discovery before search/traversal.
-- Representation search ingestion uses `KnowledgeRepresentationChunker` + `KnowledgeEmbedder` and writes `knowledgeRepresentationChunk` rows.
-- Hybrid vector + FTS search filters to authenticated user, ready records, non-archival policy.
+- Representation search ingestion uses `KnowledgeChunker` + `KnowledgeEmbedder` and writes `knowledgeRepresentationChunk` rows.
+- Hybrid vector + FTS search filters to authenticated user, ready records, non-archived policy.
 - `getKnowledgeContext` traverses a chunk window around a search citation/record position for “show more/continue” flows.
 - Pinned knowledge context loading for text agents; unavailable context logs warning and proceeds.
 - Delete removes owned R2 artifacts before deleting DB rows.
@@ -25,7 +25,7 @@ App-owned knowledge use-cases and agent context helpers.
 - `pinned`: injected into startup context.
 - `routable`: reserved for routing/dispatch semantics.
 - `searchable`: searchable via `search_knowledge`.
-- `archival`: retained but excluded from active search/context.
+- `archived`: retained but excluded from active search/context.
 
 ## Boundaries
 

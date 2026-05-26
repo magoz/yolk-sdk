@@ -17,7 +17,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - Text route delegates provider/tool/prompt construction to `makeAgentTextResponse` / `makeAgentTextRuntime`.
 - Request body is `AgentRouteRequest`: `sessionId`, non-empty `messages`, optional `hitlResponses`, optional `model`, optional `reasoningEffort`.
-- Validate image count, MIME, base64, per-image size, and total payload before provider calls.
+- Validate image/PDF count, MIME, base64, per-attachment size, and total payload before provider calls.
 - Return in-band protocol `AgentError` for runtime failures after stream starts.
 
 ## Workflow Runtime
@@ -36,5 +36,5 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 ## Tests
 
 - Route-model tests cover Workflow stream headers/resume/cancel without starting real Workflow runs.
-- Route-handler tests cover schema failures, provider/tool failures, image validation, and NDJSON errors.
+- Route-handler tests cover schema failures, provider/tool failures, image/PDF validation, and NDJSON errors.
 - Keep transport tests below Playwright unless browser-visible `/agent` behavior is under test.

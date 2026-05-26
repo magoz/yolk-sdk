@@ -4,7 +4,7 @@ import { useOptimistic } from 'react'
 import { DeleteKnowledgeRecordButton } from './delete-knowledge-record-button'
 import { UpdateKnowledgeContextPolicyButton } from './update-knowledge-context-policy-button'
 
-type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archival'
+type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archived'
 
 type KnowledgeRecordListItem = {
   readonly object: {
@@ -49,7 +49,7 @@ const policyClassName = (policy: string) => {
       return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
     case 'routable':
       return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300'
-    case 'archival':
+    case 'archived':
       return 'border-muted bg-muted text-muted-foreground'
     default:
       return 'border-border bg-background text-muted-foreground'

@@ -82,7 +82,7 @@ export const getKnowledgeContext = (input: {
         and(
           eq(schema.knowledgeRecord.id, recordId),
           eq(schema.knowledgeRecord.userId, input.userId),
-          ne(schema.knowledgeRecord.contextPolicy, 'archival'),
+          ne(schema.knowledgeRecord.contextPolicy, 'archived'),
           eq(schema.knowledgeRecord.status, 'ready')
         )
       )

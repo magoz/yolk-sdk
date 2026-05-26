@@ -36,7 +36,7 @@ export const knowledgeContextPolicy = pgEnum('KnowledgeContextPolicy', [
   'pinned',
   'routable',
   'searchable',
-  'archival'
+  'archived'
 ])
 export const knowledgeLifecycleStatus = pgEnum('KnowledgeLifecycleStatus', [
   'draft',

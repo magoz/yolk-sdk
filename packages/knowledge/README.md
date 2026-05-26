@@ -64,7 +64,7 @@ Search APIs use canonical search naming. Removed retrieval APIs are intentionall
 | Provenance | Source metadata explaining where knowledge came from and how it was produced. |
 | Link | Typed relationship between knowledge records. |
 | Context | Model-ready knowledge selected for a run. Built from host policy. |
-| Context policy | Host intent for use: `pinned`, `routable`, `searchable`, or `archival`. |
+| Context policy | Host intent for use: `pinned`, `routable`, `searchable`, or `archived`. |
 | Search index | Searchable corpus built from source documents, chunks, embeddings, and metadata. |
 | Collection | Named searchable document group with shared embedding and chunking config. |
 | Document | Source item tracked through search ingestion: pending, processing, ready, or error. |
@@ -90,14 +90,14 @@ Search APIs use canonical search naming. Removed retrieval APIs are intentionall
 | `pinned` | Host may inject into model startup context |
 | `routable` | Host may use for routing/dispatch decisions |
 | `searchable` | Host may expose through search tools |
-| `archival` | Retained but normally omitted from active context/search |
+| `archived` | Retained but normally omitted from active context/search |
 
 ## Host responsibilities
 
 - Own users, teams, permissions, routing, and product policy.
 - Implement `KnowledgeStore` and `KnowledgeArtifactStore` with app storage.
 - Own concrete extraction, embeddings, search ingestion, R2/S3 layout, and DB schema.
-- Decide which knowledge is pinned, searchable, routable, or archival.
+- Decide which knowledge is pinned, searchable, routable, or archived.
 
 ## Boundaries
 

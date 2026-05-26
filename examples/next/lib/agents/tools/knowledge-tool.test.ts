@@ -99,7 +99,7 @@ describe('knowledge tool', () => {
     const calls: Array<{
       readonly userId: string
       readonly query?: string
-      readonly policy?: 'archival' | 'pinned' | 'routable' | 'searchable'
+      readonly policy?: 'archived' | 'pinned' | 'routable' | 'searchable'
       readonly limit: number
     }> = []
     const toolModule = makeKnowledgeToolModule({

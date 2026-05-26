@@ -70,9 +70,9 @@ describeWithDb('createFileKnowledgeRecord', () => {
       const otherUserResults = yield* searchUserKnowledge({ userId: createId(), query: 'Alpha file knowledge', limit: 4 })
       yield* db
         .update(schema.knowledgeRecord)
-        .set({ contextPolicy: 'archival' })
+        .set({ contextPolicy: 'archived' })
         .where(eq(schema.knowledgeRecord.id, object.id))
-      const archivalResults = yield* searchUserKnowledge({ userId, query: 'Alpha file knowledge', limit: 4 })
+      const archivedResults = yield* searchUserKnowledge({ userId, query: 'Alpha file knowledge', limit: 4 })
 
       expect(object.userId).toBe(userId)
       expect(object.role).toBe('source')
@@ -98,7 +98,7 @@ describeWithDb('createFileKnowledgeRecord', () => {
       expect(context.anchor.position).toBe(0)
       expect(context.text).toBe('Alpha file knowledge.')
       expect(otherUserResults).toEqual([])
-      expect(archivalResults).toEqual([])
+      expect(archivedResults).toEqual([])
       expect(provenance).toHaveLength(1)
       expect(provenance[0]?.artifactId).toBe(artifacts[0]?.id)
       expect(provenance[0]?.sourceKind).toBe('upload')

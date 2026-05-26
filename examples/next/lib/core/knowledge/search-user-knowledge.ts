@@ -88,7 +88,7 @@ export const searchUserKnowledge = (input: {
       .where(
         and(
           eq(schema.knowledgeRecord.userId, input.userId),
-          ne(schema.knowledgeRecord.contextPolicy, 'archival'),
+          ne(schema.knowledgeRecord.contextPolicy, 'archived'),
           eq(schema.knowledgeRecord.status, 'ready'),
           eq(schema.knowledgeRepresentation.status, 'ready'),
           minScoreCondition
@@ -113,7 +113,7 @@ export const searchUserKnowledge = (input: {
       .where(
         and(
           eq(schema.knowledgeRecord.userId, input.userId),
-          ne(schema.knowledgeRecord.contextPolicy, 'archival'),
+          ne(schema.knowledgeRecord.contextPolicy, 'archived'),
           eq(schema.knowledgeRecord.status, 'ready'),
           eq(schema.knowledgeRepresentation.status, 'ready'),
           sql`${searchVector} @@ ${searchQuery}`

@@ -7,7 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 export const updateKnowledgeContextPolicy = (input: {
   readonly userId: string
   readonly id: string
-  readonly contextPolicy: 'pinned' | 'routable' | 'searchable' | 'archival'
+  readonly contextPolicy: 'pinned' | 'routable' | 'searchable' | 'archived'
 }) =>
   Effect.gen(function* () {
     const db = yield* Db

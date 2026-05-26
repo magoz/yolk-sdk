@@ -21,7 +21,7 @@ export const KnowledgeContextPolicySchema = Schema.Literals([
   'pinned',
   'routable',
   'searchable',
-  'archival'
+  'archived'
 ])
 export type KnowledgeContextPolicy = Schema.Schema.Type<typeof KnowledgeContextPolicySchema>
 

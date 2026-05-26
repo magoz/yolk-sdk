@@ -28,7 +28,7 @@ const KnowledgeContextPolicy = Schema.Union([
   Schema.Literal('pinned'),
   Schema.Literal('routable'),
   Schema.Literal('searchable'),
-  Schema.Literal('archival')
+  Schema.Literal('archived')
 ])
 
 const KnowledgeListParams = Schema.Struct({

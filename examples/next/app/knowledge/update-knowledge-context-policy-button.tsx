@@ -3,13 +3,13 @@
 import { useState, useTransition } from 'react'
 import { updateKnowledgeContextPolicyAction } from '@/lib/core/knowledge/update-knowledge-context-policy-action'
 
-type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archival'
+type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archived'
 
 const policies: ReadonlyArray<{ readonly value: KnowledgeContextPolicy; readonly label: string }> = [
   { value: 'pinned', label: 'Pinned' },
   { value: 'routable', label: 'Routable' },
   { value: 'searchable', label: 'Searchable' },
-  { value: 'archival', label: 'Archival' }
+  { value: 'archived', label: 'Archived' }
 ]
 
 const policyFromValue = (value: string): KnowledgeContextPolicy | undefined => {
@@ -17,7 +17,7 @@ const policyFromValue = (value: string): KnowledgeContextPolicy | undefined => {
     case 'pinned':
     case 'routable':
     case 'searchable':
-    case 'archival':
+    case 'archived':
       return value
     default:
       return undefined
