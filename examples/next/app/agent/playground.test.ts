@@ -124,6 +124,14 @@ describe('agent playground', () => {
     ])
   })
 
+  it('keeps attachment order in submit content', () => {
+    expect(contentFromInput(' compare ', [documentAttachment, imageAttachment])).toEqual([
+      TextPart.make({ text: 'compare' }),
+      DocumentPart.make({ data: 'cGRm', mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      ImagePart.make({ data: 'abc', mimeType: 'image/png' })
+    ])
+  })
+
   it('formats token counts compactly', () => {
     expect(formatTokenCount(999)).toBe('999')
     expect(formatTokenCount(1_200)).toBe('1.2k')

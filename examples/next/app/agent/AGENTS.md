@@ -19,11 +19,11 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - `@yolk-sdk/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
 - `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - Chat text renders Markdown with `streamdown`; keep streaming-safe Markdown rendering in conversation view only.
-- `agent-composer.tsx` owns input UX: textarea, image picker/dropzone/paste, multi-image preview/remove, text model and reasoning selectors.
+- `agent-composer.tsx` owns input UX: textarea, image/PDF picker/dropzone/paste, attachment preview/remove, text model and reasoning selectors.
 - Slash command UI stays in `agent-composer.tsx`; command route transport stays in `command-client.ts` using Effect `HttpClient`.
 - Refresh slash command lists after completed `manage_skills` tool runs; new/updated skills may create commands mid-session.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
-- `image-attachment-content.ts` maps composer text+images state to protocol `Content`; test it without importing full playground.
+- `attachment-content.ts` maps composer text+attachments state to protocol `Content`; test it without importing full playground.
 - `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
 - `agent-status.tsx` owns console status controls: Codex/Claude auth, mirrored text model/reasoning controls, Realtime transcription model, capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
@@ -46,7 +46,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.
-- Image attachments are `ImagePart` base64 data URLs at the UI boundary; `toAgentMessages()` preserves multipart user content.
+- Attachments are base64 media parts at the UI boundary; `toAgentMessages()` preserves multipart user content.
 - Keep projection pure/deterministic; use Effect `Array`/`Option` helpers over mutable/null side channels.
 
 ## UX Rules
@@ -70,11 +70,11 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 
-## Image TODOs
+## Attachment TODOs
 
-- Server route validates image count, MIME, base64 shape, per-image size, and total payload before provider calls; UI compression is convenience only.
-- Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode image support in UI.
-- Add full-suite E2E coverage when image flow becomes less route-stubbed.
+- Server route validates attachment count, MIME, base64 shape, per-attachment size, and total payload before provider calls; UI compression is convenience only.
+- Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode media support in UI.
+- Add full-suite E2E coverage when attachment flow becomes less route-stubbed.
 
 ## Voice lifecycle
 

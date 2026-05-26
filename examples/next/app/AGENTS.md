@@ -8,7 +8,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | ------------- | ---------------------------------------- |
 | `page.tsx`    | Public home page                         |
 | `(auth)/`     | Login, OTP, logout, auth error UI        |
-| `agent/`      | Text+image + voice agent playground UI   |
+| `agent/`      | Text+image/PDF + voice agent playground UI |
 | `storage/`    | Storage source ingestion/list UI         |
 | `knowledge/`  | Agent-native knowledge record management |
 | `.well-known/workflow/v1/` | Generated Vercel Workflow artifacts; do not hand-edit |
@@ -39,7 +39,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Agent UI
 
-- `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image+mic UI.
+- `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF+mic UI.
 - Voice is available inside each runtime page; no separate voice route.
 - See `examples/next/app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.

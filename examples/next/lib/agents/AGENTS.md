@@ -4,7 +4,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image input and mic voice mode.
+- `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF input and mic voice mode.
 - Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes.
 - Default text prompt says tools run in parallel and distinguishes durable user knowledge from storage sources.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn.
@@ -31,7 +31,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, and reasoning defaults from there.
 - Package providers are Codex OAuth (`@yolk-sdk/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/anthropic/claude-provider`).
-- Providers accept text+image user input; audio is rejected by text capabilities.
+- Providers accept text+image/PDF user input; audio is rejected by text capabilities.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.

@@ -41,7 +41,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 ## Agent Routes
 
 - See `agent/AGENTS.md` for route-local text/Workflow/commands/Realtime contracts.
-- Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image protocol transcript.
+- Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image/PDF protocol transcript.
 - Workflow route starts `runAgentWorkflow`, returns `run.getReadable()` as NDJSON, and exposes `x-workflow-run-id`.
 - Workflow run route supports `GET /api/agent/workflow/:runId` for stream replay/resume and `DELETE /api/agent/workflow/:runId` for `run.cancel()`.
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.

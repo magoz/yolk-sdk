@@ -46,19 +46,18 @@ export const contentFromInput = (
     return text
   }
 
-  const imageParts = Arr.map(Arr.filter(readyAttachments, isReadyImageAttachment), imageAttachment =>
-    ImagePart.make({ data: imageAttachment.data, mimeType: imageAttachment.mimeType })
-  )
-  const documentParts = Arr.map(
-    Arr.filter(readyAttachments, isReadyDocumentAttachment),
-    documentAttachment =>
-      DocumentPart.make({
-        data: documentAttachment.data,
-        mimeType: documentAttachment.mimeType,
-        filename: documentAttachment.name
-      })
-  )
-  const mediaParts = [...imageParts, ...documentParts]
+  const mediaParts = Arr.map(readyAttachments, attachment => {
+    switch (attachment.kind) {
+      case 'image':
+        return ImagePart.make({ data: attachment.data, mimeType: attachment.mimeType })
+      case 'document':
+        return DocumentPart.make({
+          data: attachment.data,
+          mimeType: attachment.mimeType,
+          filename: attachment.name
+        })
+    }
+  })
 
   return text.length > 0 ? [TextPart.make({ text }), ...mediaParts] : mediaParts
 }
