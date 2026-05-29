@@ -30,6 +30,30 @@ Avoid testing:
 
 If the answer is "nothing" or "just the implementation changed", delete the test.
 
+## Test Seams
+
+A seam is where a test enters the system: browser UI, HTTP route, server action, package API,
+Effect service/layer, pure function, or simulation harness. Prefer the fewest stable seams that
+prove behavior.
+
+| Seam | Use for | Coupling risk |
+| --- | --- | --- |
+| Browser/UI | critical user/admin flows | lowest |
+| HTTP route/transport | API, protocol, stream, webhook contracts | low |
+| Server action | parse/auth/revalidate/client union behavior | medium |
+| Package public API | SDK contracts and provider compatibility | medium-low |
+| Effect service + layer | business behavior over services/DB | medium |
+| Pure function/model | dense domain rules/invariants | medium-low |
+| Simulation harness | state machines, retries, HITL/session workflows | medium |
+| Mocked module internals | external IO/framework seams only | highest |
+
+Rules:
+
+- Start from the outermost practical seam, then move inward only for speed, isolation, or precision.
+- Prefer one behavior test through a stable boundary over many tests of private helper steps.
+- Mock external services, not own-domain implementation details.
+- If a behavior-preserving refactor breaks tests, the seam is probably too internal.
+
 ## Test Organization
 
 ### File Location
@@ -173,6 +197,42 @@ test('user can login with OTP', async ({ page }) => {
 
 **Example:** MCP client tests use fake `HttpClient` layers for remote JSON/SSE and the reusable `@yolk-sdk/mcp/server` fixture in `packages/mcp/test/server/fixtures/fake-stdio-mcp-server.ts` for local stdio. MCP server tests cover public JSON-RPC/HTTP entrypoints and behavior errors: unknown methods/tools, invalid params, and tool failures.
 
+### Action and Route Tests
+
+**When:** Testing framework boundary behavior: parsing, auth, revalidation/cache, route protocol,
+and client-facing result unions.
+
+**Pattern:** Keep boundary tests thin. Move validation, normalization, state transitions, and retry
+rules into pure model/service tests before adding many route/action edge cases.
+
+- Test successful call/revalidation and recoverable failure contracts.
+- Do not duplicate every Schema invalid-input case across every action.
+- Mock only external framework/protocol seams: cookies/cache, workflow runtime, provider IO, webhooks.
+- Avoid mocking several own modules to test one action; that means the seam is too internal.
+
+### Property and Simulation Tests
+
+**When:** Example tests are really invariants: many inputs, same always/never law.
+
+Good property targets:
+
+- parsers, Schema codecs, provider schema compatibility
+- protocol encoders/decoders and transport events
+- tool registry availability and policy
+- sorting/filtering/ranking/cleanup predicates
+- HITL/session/event-log invariants
+
+Good simulation targets:
+
+- agent loop, HITL approvals/questions, tool execution boundaries
+- workflow run/resume/retry/abort behavior
+- chat/session append/edit/delete/regenerate flows
+- event logs and persisted snapshots
+
+Prefer model-level commands (`ApproveTool`, `AppendUserMessage`, `AbortRun`) over UI clicks or
+implementation helper calls. Assert invariants: no stale mutation, no dangling references,
+idempotent retries, monotonic revisions, terminal states stay terminal.
+
 ## Mock Strategy for Effect Services
 
 ### Factory Pattern for Mocks
@@ -261,6 +321,18 @@ Key patterns from EFFECT_TESTING.md:
 - Mock services - factory pattern with layer sharing
 
 ## Anti-Patterns
+
+### Flaky Tests
+
+Treat one flaky test as suite trust = 0.
+
+1. Quarantine or narrow immediately to preserve signal.
+2. Document failure mode, env, traces/logs, last stable step.
+3. Reproduce isolated with minimum app/deps.
+4. Fix or rewrite from intended behavior.
+5. Delete if still untrusted.
+
+### General
 
 | Anti-Pattern                     | Why Bad                              | Do Instead                          |
 | -------------------------------- | ------------------------------------ | ----------------------------------- |

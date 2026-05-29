@@ -329,6 +329,45 @@ it.prop('money addition is associative', [moneyArb, moneyArb, moneyArb], ([a, b,
 })
 ```
 
+### Property Rules
+
+- Test laws/invariants, not random examples.
+- Keep arbitraries domain-shaped and small.
+- Prefer `Schema.toArbitrary()` for boundary/domain schemas.
+- Assert one or two invariants per property; split broad laws.
+- Use deterministic `now`, IDs, clocks, and layers.
+- Keep explicit example tests for named regressions and edge cases.
+- Avoid property tests against browser UI or real external services.
+
+Good property seams:
+
+- pure domain functions
+- Schema decode/encode round trips
+- Effect services with in-memory layers
+- route/action model helpers before Next boundary wiring
+
+### Simulation Tests
+
+Use simulation tests for Effect workflows, task lifecycles, sessions, and event-sourced state. Model
+commands, apply them through one stable seam, then assert invariants after each step or at the end.
+
+Simulation rules:
+
+- Commands are user/domain events, not implementation calls.
+- The model owns expected behavior; implementation owns mechanics.
+- Check invariants after each command when debugging state machines.
+- Keep failing command sequences reproducible by logging the shrunk case.
+- Use in-memory stores/layers first; add DB-backed simulation only for persistence invariants.
+
+Common invariants:
+
+- revisions are monotonic
+- terminal states do not transition
+- retries are idempotent
+- deletes leave no dangling references
+- replay equals accumulated state
+- permissions never expand after denial
+
 ---
 
 ## Testing with Mock Services
