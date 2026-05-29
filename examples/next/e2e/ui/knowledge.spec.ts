@@ -52,7 +52,10 @@ test.describe('knowledge UI', () => {
     await authedPage.getByLabel('Query').fill('alpha marker')
     await authedPage.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(authedPage.getByText('matches')).toBeVisible({ timeout: 15_000 })
-    await expect(authedPage.getByText(title).first()).toBeVisible()
+    const searchResults = authedPage.getByRole('list').filter({
+      has: authedPage.getByText('score')
+    })
+    await expect(searchResults.getByText(title)).toBeVisible()
 
     await item.getByLabel(`Set context policy for ${title}`).selectOption('archived')
     await expect(item.getByText('archived', { exact: true }).filter({ visible: true })).toHaveCount(

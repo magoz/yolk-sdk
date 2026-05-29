@@ -1,23 +1,24 @@
 import { Config, Effect, Redacted } from 'effect'
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { TokenBrokerRequest, TokenBrokerResponse } from '@yolk-sdk/oauth'
+import { TokenBrokerRequest } from '@yolk-sdk/oauth'
 import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
 import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
 import { AppLayer } from '@/lib/layers'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
 import { getValidAnthropicClaudeToken } from '@/lib/core/agent/anthropic-claude-auth'
+import {
+  anthropicClaudeBrokerResponse,
+  cloudflareBridgeSecretHeader,
+  openAiCodexBrokerResponse,
+  tokenBrokerMinTtlMs
+} from './route-model'
 
 export const dynamic = 'force-dynamic'
-
-const authorizationHeader = 'x-yolk-cloudflare-secret'
-
-const minTtlMsFromSeconds = (seconds: number | undefined) =>
-  seconds === undefined ? undefined : Math.max(0, seconds) * 1000
 
 const handler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest
   const secret = yield* Config.redacted('YOLK_CLOUDFLARE_BRIDGE_SECRET')
-  const provided = request.headers[authorizationHeader]
+  const provided = request.headers[cloudflareBridgeSecretHeader]
 
   if (provided !== Redacted.value(secret)) {
     return yield* HttpServerResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -27,33 +28,20 @@ const handler = Effect.gen(function* () {
 
   if (input.provider === openAiCodexProviderId) {
     const token = yield* getValidOpenAiCodexToken(input.subjectId, {
-      minTtlMs: minTtlMsFromSeconds(input.minTtlSeconds),
+      minTtlMs: tokenBrokerMinTtlMs(input.minTtlSeconds),
       forceRefresh: input.forceRefresh
     })
 
-    return yield* HttpServerResponse.json(
-      new TokenBrokerResponse({
-        provider: openAiCodexProviderId,
-        accessToken: token.access,
-        expiresAt: token.expires,
-        accountId: token.accountId
-      })
-    )
+    return yield* HttpServerResponse.json(openAiCodexBrokerResponse(token))
   }
 
   if (input.provider === anthropicClaudeProviderId) {
     const token = yield* getValidAnthropicClaudeToken(input.subjectId, {
-      minTtlMs: minTtlMsFromSeconds(input.minTtlSeconds),
+      minTtlMs: tokenBrokerMinTtlMs(input.minTtlSeconds),
       forceRefresh: input.forceRefresh
     })
 
-    return yield* HttpServerResponse.json(
-      new TokenBrokerResponse({
-        provider: anthropicClaudeProviderId,
-        accessToken: token.access,
-        expiresAt: token.expires
-      })
-    )
+    return yield* HttpServerResponse.json(anthropicClaudeBrokerResponse(token))
   }
 
   return yield* HttpServerResponse.json({ error: 'Unsupported provider' }, { status: 400 })

@@ -39,6 +39,7 @@ import {
   makeDurableObjectSessionEventStoreLayer,
   type RuntimeEventLogStorage
 } from '../src/session-event-storage.ts'
+import { propertyOptions } from '../../../test/property/options.ts'
 
 const getRequest = (requests: ReadonlyArray<LLMRequest>, index: number) => {
   const request = requests[index]
@@ -78,18 +79,6 @@ const runtimeConfig = {
   model: 'faux-cloudflare'
 }
 
-const propertyRuns = () => {
-  const value = process.env.PROPERTY_RUNS
-
-  if (value === undefined) return { fastCheck: { numRuns: 50 } }
-
-  const parsed = Number(value)
-
-  return Number.isInteger(parsed) && parsed > 0
-    ? { fastCheck: { numRuns: parsed } }
-    : { fastCheck: { numRuns: 50 } }
-}
-
 const storageEventCommand = Schema.Struct({
   kind: Schema.Literals(['input', 'hitl', 'start', 'complete', 'await', 'fail', 'interrupt']),
   runId: Schema.Literals(['run_1', 'run_2', 'run_3'])
@@ -118,8 +107,6 @@ const wsCommand = Schema.Struct({
 })
 
 const wsCommandsArbitrary = Schema.toArbitrary(Schema.Array(wsCommand))
-
-const propertyOptions = propertyRuns()
 
 const toolCall = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
 
