@@ -51,10 +51,12 @@
 - Tool parts expose input streaming, approval, denied, question, executing, completed, errored, and provider-completed states.
 - Answered/cancelled question tool states should retain the original request when available so UI/replay can resolve selected option labels.
 - Completed tool parts may carry `result.isError`; renderers can style them as tool-origin errors while preserving replay.
+- Same-turn sibling tool calls stay in one assistant message while any tool in the batch is open; calls after terminal tool state start a new assistant message.
 - Subagent lifecycle events are protocol/activity telemetry; headless chat projections should tolerate them without duplicating tool parts.
 - Preserve ordered assistant parts when converting render messages back to protocol messages.
 - Preserve ordered multimodal user content (text/images/documents) when projecting/replaying messages.
 - Preserve timing when tool result/completion events arrive in different order.
+- Tool timing uses protocol `createdAtMs` first, injected `nowMs` fallback; item timing is no-time, start-only, or known start+end.
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
