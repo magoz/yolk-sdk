@@ -1,5 +1,11 @@
 # @yolk-sdk/mcp
 
+## 0.0.1-canary.10
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.0.1-canary.10
+
 ## 0.0.1-canary.9
 
 ### Patch Changes

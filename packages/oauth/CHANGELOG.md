@@ -1,5 +1,7 @@
 # @yolk-sdk/oauth
 
+## 0.0.1-canary.10
+
 ## 0.0.1-canary.9
 
 ## 0.0.1-canary.8
