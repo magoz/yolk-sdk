@@ -41,7 +41,12 @@ export type ChatToolState =
       readonly startedAtMs?: number
       readonly endedAtMs?: number
     }
-  | { readonly _tag: 'Errored'; readonly message: string; readonly endedAtMs?: number }
+  | {
+      readonly _tag: 'Errored'
+      readonly message: string
+      readonly startedAtMs?: number
+      readonly endedAtMs?: number
+    }
   | { readonly _tag: 'ProviderCompleted'; readonly result: ToolResult }
 
 export type AgentChatPart =
@@ -380,6 +385,16 @@ const hasStreamingTextPart = (message: AgentChatMessage) =>
 const hasToolCall = (message: AgentChatMessage, callId: string) =>
   message.parts.some(part => part._tag === 'ToolCall' && part.call.id === callId)
 
+const isOpenToolState = (state: ChatToolState) =>
+  state._tag === 'Called' ||
+  state._tag === 'InputStreaming' ||
+  state._tag === 'ApprovalRequested' ||
+  state._tag === 'QuestionRequested' ||
+  state._tag === 'Running'
+
+const hasOpenToolCall = (message: AgentChatMessage) =>
+  message.parts.some(part => part._tag === 'ToolCall' && isOpenToolState(part.state))
+
 const findLastMessageIndex = (
   messages: ReadonlyArray<AgentChatMessage>,
   predicate: (message: AgentChatMessage) => boolean
@@ -596,8 +611,19 @@ const appendAssistantReasoningDelta = (
 }
 
 const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolState => {
+  if (next._tag === 'Errored') {
+    return {
+      ...next,
+      startedAtMs:
+        next.startedAtMs ??
+        (existing._tag === 'Running' || existing._tag === 'Completed' || existing._tag === 'Errored'
+          ? existing.startedAtMs
+          : undefined),
+      endedAtMs: next.endedAtMs ?? (existing._tag === 'Errored' ? existing.endedAtMs : undefined)
+    }
+  }
+
   if (
-    next._tag === 'Errored' ||
     next._tag === 'Denied' ||
     next._tag === 'QuestionAnswered' ||
     next._tag === 'QuestionCancelled' ||
@@ -625,6 +651,60 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
   return next
 }
 
+const appendToolCallPart = (
+  messages: ReadonlyArray<AgentChatMessage>,
+  call: ToolCall,
+  state: ChatToolState
+): ReadonlyArray<AgentChatMessage> => {
+  const index = Option.filter(lastAssistantIndex(messages), assistantIndex => {
+    const message = messages[assistantIndex]
+
+    return hasStreamingPart(message) || hasOpenToolCall(message)
+  })
+
+  return Option.match(index, {
+    onNone: () => {
+      const sequence = nextMessageSequence(messages)
+      const currentTurnId = lastTurnId(messages) ?? turnId(sequence)
+
+      return [
+        ...messages,
+        {
+          id: messageId(sequence, 'assistant'),
+          turnId: currentTurnId,
+          sequence,
+          role: 'assistant',
+          parts: [
+            {
+              _tag: 'ToolCall',
+              id: `tool-call-${call.id}`,
+              call,
+              state
+            }
+          ]
+        }
+      ]
+    },
+    onSome: assistantIndex =>
+      messages.map((message, messageIndex) =>
+        messageIndex === assistantIndex
+          ? {
+              ...message,
+              parts: [
+                ...message.parts,
+                {
+                  _tag: 'ToolCall',
+                  id: `tool-call-${call.id}`,
+                  call,
+                  state
+                }
+              ]
+            }
+          : message
+      )
+  })
+}
+
 const upsertToolCallPart = (
   messages: ReadonlyArray<AgentChatMessage>,
   call: ToolCall,
@@ -647,12 +727,7 @@ const upsertToolCallPart = (
     )
   }
 
-  return appendAssistantPart(messages, {
-    _tag: 'ToolCall',
-    id: `tool-call-${call.id}`,
-    call,
-    state
-  })
+  return appendToolCallPart(messages, call, state)
 }
 
 const inputStreamingToolCall = (id: string, name: string | undefined) =>
@@ -865,7 +940,7 @@ export const applyAgentEventToChatMessages = (
   event: AgentEvent,
   options: ApplyAgentEventToChatMessagesOptions = {}
 ): ReadonlyArray<AgentChatMessage> => {
-  const nowMs = options.nowMs ?? 0
+  const eventTimeMs = event.createdAtMs ?? options.nowMs ?? 0
 
   switch (event._tag) {
     case 'AgentStart':
@@ -939,18 +1014,18 @@ export const applyAgentEventToChatMessages = (
         )
       }))
     case 'ToolExecutionStarted':
-      return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: nowMs })
+      return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: eventTimeMs })
     case 'ToolExecutionCompleted':
       return upsertToolCallPart(messages, event.call, {
         _tag: 'Completed',
         result: event.result,
-        endedAtMs: nowMs
+        endedAtMs: eventTimeMs
       })
     case 'ToolExecutionError':
       return upsertToolCallPart(messages, event.call, {
         _tag: 'Errored',
         message: event.message,
-        endedAtMs: nowMs
+        endedAtMs: eventTimeMs
       })
     case 'ProviderToolResult':
       return upsertToolCallPart(messages, event.call, {

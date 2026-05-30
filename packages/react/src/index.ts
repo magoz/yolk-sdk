@@ -29,6 +29,7 @@ export type {
   AgentChatItem,
   BuildAgentChatItemsInput,
   ToolDuration,
+  ToolRunTiming,
   ToolRunState
 } from './chat-items.ts'
 export {

@@ -17,8 +17,11 @@ import {
   QuestionResponse,
   TextPart,
   ToolCall,
+  ToolExecutionCompleted,
+  ToolExecutionStarted,
   ToolInputDelta,
   ToolInputStart,
+  ToolInputEnd,
   ToolResult,
   ToolResultMessage,
   UserMessage,
@@ -201,6 +204,80 @@ describe('agent chat messages', () => {
       id: `tool-call-${call.id}`,
       call,
       state: { _tag: 'ProviderCompleted', result }
+    })
+  })
+
+  it('groups same-turn sibling tool calls while a tool batch is open', () => {
+    const firstCall = ToolCall.make({ id: 'call_1', name: 'sleep', params: { seconds: 1 } })
+    const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
+    const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+    const firstRunning = applyAgentEventToChatMessages(
+      firstReady,
+      ToolExecutionStarted.make({ call: firstCall }),
+      { nowMs: 1000 }
+    )
+    const secondReady = applyAgentEventToChatMessages(
+      firstRunning,
+      ToolInputEnd.make({ call: secondCall })
+    )
+
+    expect(secondReady).toEqual([
+      {
+        id: 'message-0-assistant',
+        turnId: 'turn-0',
+        sequence: 0,
+        role: 'assistant',
+        parts: [
+          {
+            _tag: 'ToolCall',
+            id: 'tool-call-call_1',
+            call: firstCall,
+            state: { _tag: 'Running', startedAtMs: 1000 }
+          },
+          {
+            _tag: 'ToolCall',
+            id: 'tool-call-call_2',
+            call: secondCall,
+            state: { _tag: 'Called' }
+          }
+        ]
+      }
+    ])
+  })
+
+  it('keeps later tool calls separate after previous tool state is terminal', () => {
+    const firstCall = ToolCall.make({ id: 'call_1', name: 'sleep', params: { seconds: 1 } })
+    const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
+    const result = ToolResult.make({ toolCallId: firstCall.id, content: 'done' })
+    const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+    const firstRunning = applyAgentEventToChatMessages(
+      firstReady,
+      ToolExecutionStarted.make({ call: firstCall, createdAtMs: 1000 })
+    )
+    const firstCompleted = applyAgentEventToChatMessages(
+      firstRunning,
+      ToolExecutionCompleted.make({ call: firstCall, result, createdAtMs: 1500 })
+    )
+    const secondReady = applyAgentEventToChatMessages(
+      firstCompleted,
+      ToolInputEnd.make({ call: secondCall })
+    )
+
+    expect(secondReady.map(message => message.parts.map(part => part._tag))).toEqual([
+      ['ToolCall'],
+      ['ToolCall']
+    ])
+    expect(secondReady[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: 'tool-call-call_1',
+      call: firstCall,
+      state: { _tag: 'Completed', result, startedAtMs: 1000, endedAtMs: 1500 }
+    })
+    expect(secondReady[1]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: 'tool-call-call_2',
+      call: secondCall,
+      state: { _tag: 'Called' }
     })
   })
 

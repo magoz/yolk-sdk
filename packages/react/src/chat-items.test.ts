@@ -6,12 +6,18 @@ import {
   AssistantTextPart,
   HostToolCallPart,
   ToolCall,
+  ToolExecutionError,
+  ToolExecutionStarted,
   ToolResult,
   ToolResultMessage,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import { buildAgentChatItems } from './chat-items'
-import { buildAgentChatMessages, toAgentMessages } from './chat-messages'
+import {
+  applyAgentEventToChatMessages,
+  buildAgentChatMessages,
+  toAgentMessages
+} from './chat-messages'
 
 const assistantMessage = (input: {
   readonly content: string
@@ -151,6 +157,8 @@ describe('buildAgentChatItems', () => {
       state: {
         _tag: 'Completed',
         duration: { _tag: 'Known', milliseconds: 250 },
+        startedAtMs: 1000,
+        endedAtMs: 1250,
         result: ToolResult.make({ toolCallId: call.id, content: 'URL: https://example.com' })
       }
     })
@@ -229,7 +237,7 @@ describe('buildAgentChatItems', () => {
       id: 'message-1-tool-call-call_1',
       messageId: 'message-1-assistant',
       call,
-      state: { _tag: 'Running', duration: { _tag: 'Unknown' } }
+      state: { _tag: 'Running', duration: { _tag: 'Unknown' }, startedAtMs: 1000 }
     })
     expect(toolItems.at(-1)).toEqual({
       _tag: 'AssistantStatus',
@@ -267,6 +275,8 @@ describe('buildAgentChatItems', () => {
       state: {
         _tag: 'Completed',
         duration: { _tag: 'Known', milliseconds: 800 },
+        startedAtMs: 1000,
+        endedAtMs: 1800,
         result
       }
     })
@@ -275,6 +285,44 @@ describe('buildAgentChatItems', () => {
       id: 'assistant-status',
       label: 'Thinking'
     })
+  })
+
+  it('preserves errored tool run timing', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+    const running = applyAgentEventToChatMessages(
+      [],
+      ToolExecutionStarted.make({ call, createdAtMs: 1000 })
+    )
+    const errored = applyAgentEventToChatMessages(
+      running,
+      ToolExecutionError.make({
+        call,
+        message: 'Request failed',
+        code: 'tool_error',
+        createdAtMs: 1750
+      })
+    )
+    const items = buildAgentChatItems({
+      messages: errored,
+      isRunning: false,
+      activeToolLabel: Option.none()
+    })
+
+    expect(items).toEqual([
+      {
+        _tag: 'ToolRun',
+        id: 'tool-call-call_1',
+        messageId: 'message-0-assistant',
+        call,
+        state: {
+          _tag: 'Errored',
+          duration: { _tag: 'Known', milliseconds: 750 },
+          startedAtMs: 1000,
+          endedAtMs: 1750,
+          message: 'Request failed'
+        }
+      }
+    ])
   })
 
   it('anchors tool rows before the next assistant draft', () => {

@@ -14,22 +14,51 @@ export type ToolDuration =
   | { readonly _tag: 'Known'; readonly milliseconds: number }
   | { readonly _tag: 'Unknown' }
 
+type ToolRunNoTiming = {
+  readonly duration: { readonly _tag: 'Unknown' }
+  readonly startedAtMs?: undefined
+  readonly endedAtMs?: undefined
+}
+
+type ToolRunStartedTiming = {
+  readonly duration: { readonly _tag: 'Unknown' }
+  readonly startedAtMs: number
+  readonly endedAtMs?: undefined
+}
+
+type ToolRunKnownTiming = {
+  readonly duration: { readonly _tag: 'Known'; readonly milliseconds: number }
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+}
+
+export type ToolRunTiming = ToolRunNoTiming | ToolRunStartedTiming | ToolRunKnownTiming
+
+type ToolRunTerminalTiming = ToolRunTiming
+
 export type ToolRunState =
-  | { readonly _tag: 'Running'; readonly duration: ToolDuration }
-  | { readonly _tag: 'Called'; readonly duration: ToolDuration }
-  | { readonly _tag: 'InputStreaming'; readonly duration: ToolDuration; readonly input: string }
-  | { readonly _tag: 'ApprovalRequested'; readonly duration: ToolDuration; readonly request?: ToolApprovalRequest }
-  | { readonly _tag: 'Denied'; readonly duration: ToolDuration; readonly reason: string }
-  | { readonly _tag: 'QuestionRequested'; readonly duration: ToolDuration; readonly request: QuestionRequest }
-  | { readonly _tag: 'QuestionAnswered'; readonly duration: ToolDuration; readonly response: QuestionResponse; readonly request?: QuestionRequest }
-  | { readonly _tag: 'QuestionCancelled'; readonly duration: ToolDuration; readonly response: QuestionResponse; readonly request?: QuestionRequest }
-  | { readonly _tag: 'Completed'; readonly duration: ToolDuration; readonly result: ToolResult }
-  | { readonly _tag: 'Errored'; readonly duration: ToolDuration; readonly message: string }
-  | {
+  | ({ readonly _tag: 'Running' } & ToolRunStartedTiming)
+  | ({ readonly _tag: 'Called' } & ToolRunNoTiming)
+  | ({ readonly _tag: 'InputStreaming'; readonly input: string } & ToolRunNoTiming)
+  | ({ readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest } & ToolRunNoTiming)
+  | ({ readonly _tag: 'Denied'; readonly reason: string } & ToolRunNoTiming)
+  | ({ readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'QuestionAnswered'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'QuestionCancelled'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    } & ToolRunNoTiming)
+  | ({ readonly _tag: 'Completed'; readonly result: ToolResult } & ToolRunTerminalTiming)
+  | ({ readonly _tag: 'Errored'; readonly message: string } & ToolRunTerminalTiming)
+  | ({
       readonly _tag: 'ProviderCompleted'
-      readonly duration: ToolDuration
       readonly result: ToolResult
-    }
+    } & ToolRunNoTiming)
 
 export type AgentChatItem =
   | {
@@ -105,60 +134,79 @@ const activeStatusLabel = ({
   return 'Thinking'
 }
 
-const durationFromToolState = (state: ChatToolState): ToolDuration => {
-  if (
-    state._tag !== 'Completed' ||
-    state.startedAtMs === undefined ||
-    state.endedAtMs === undefined
-  ) {
-    return { _tag: 'Unknown' }
+const noTiming = (): ToolRunNoTiming => ({ duration: { _tag: 'Unknown' } })
+
+const startedTiming = (startedAtMs: number): ToolRunStartedTiming => ({
+  duration: { _tag: 'Unknown' },
+  startedAtMs
+})
+
+const unknownTerminalTiming = (startedAtMs?: number): ToolRunNoTiming | ToolRunStartedTiming =>
+  startedAtMs === undefined ? noTiming() : startedTiming(startedAtMs)
+
+const knownTiming = (startedAtMs: number, endedAtMs: number): ToolRunTiming => ({
+  duration: { _tag: 'Known', milliseconds: Math.max(0, endedAtMs - startedAtMs) },
+  startedAtMs,
+  endedAtMs
+})
+
+const terminalTimingFromState = (
+  state: Extract<ChatToolState, { readonly _tag: 'Completed' | 'Errored' }>
+): ToolRunTerminalTiming => {
+  if (state.startedAtMs !== undefined && state.endedAtMs !== undefined) {
+    return knownTiming(state.startedAtMs, state.endedAtMs)
   }
 
-  return { _tag: 'Known', milliseconds: Math.max(0, state.endedAtMs - state.startedAtMs) }
+  return unknownTerminalTiming(state.startedAtMs)
 }
 
 const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   if (state._tag === 'Running') {
-    return { _tag: 'Running', duration: { _tag: 'Unknown' } }
+    return { _tag: 'Running', ...startedTiming(state.startedAtMs) }
   }
 
   if (state._tag === 'Completed') {
-    return { _tag: 'Completed', duration: durationFromToolState(state), result: state.result }
+    return { _tag: 'Completed', ...terminalTimingFromState(state), result: state.result }
   }
 
   if (state._tag === 'InputStreaming') {
-    return { _tag: 'InputStreaming', duration: { _tag: 'Unknown' }, input: state.input }
+    return { _tag: 'InputStreaming', ...noTiming(), input: state.input }
   }
 
   if (state._tag === 'ApprovalRequested') {
-    return { _tag: 'ApprovalRequested', duration: { _tag: 'Unknown' }, request: state.request }
+    return { _tag: 'ApprovalRequested', ...noTiming(), request: state.request }
   }
 
   if (state._tag === 'Denied') {
-    return { _tag: 'Denied', duration: { _tag: 'Unknown' }, reason: state.reason }
+    return { _tag: 'Denied', ...noTiming(), reason: state.reason }
   }
 
   if (state._tag === 'QuestionRequested') {
-    return { _tag: 'QuestionRequested', duration: { _tag: 'Unknown' }, request: state.request }
+    return { _tag: 'QuestionRequested', ...noTiming(), request: state.request }
   }
 
   if (state._tag === 'QuestionAnswered') {
-    return { _tag: 'QuestionAnswered', duration: { _tag: 'Unknown' }, response: state.response, request: state.request }
+    return { _tag: 'QuestionAnswered', ...noTiming(), response: state.response, request: state.request }
   }
 
   if (state._tag === 'QuestionCancelled') {
-    return { _tag: 'QuestionCancelled', duration: { _tag: 'Unknown' }, response: state.response, request: state.request }
+    return {
+      _tag: 'QuestionCancelled',
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    }
   }
 
   if (state._tag === 'Errored') {
-    return { _tag: 'Errored', duration: { _tag: 'Unknown' }, message: state.message }
+    return { _tag: 'Errored', ...terminalTimingFromState(state), message: state.message }
   }
 
   if (state._tag === 'ProviderCompleted') {
-    return { _tag: 'ProviderCompleted', duration: { _tag: 'Unknown' }, result: state.result }
+    return { _tag: 'ProviderCompleted', ...noTiming(), result: state.result }
   }
 
-  return { _tag: 'Called', duration: { _tag: 'Unknown' } }
+  return { _tag: 'Called', ...noTiming() }
 }
 
 const textItemFromPart = (

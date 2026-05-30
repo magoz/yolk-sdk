@@ -131,7 +131,7 @@ const toolStateLabel = (state: ToolRunState) => {
     case 'Running':
       return 'running'
     case 'Called':
-      return state.duration._tag === 'Known' ? formatToolDuration(state.duration) : 'called'
+      return 'called'
     case 'Completed':
       return state.result.isError === true ? 'error' : formatToolDuration(state.duration)
     case 'Errored':
