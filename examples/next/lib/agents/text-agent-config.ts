@@ -3,13 +3,13 @@ import {
   type AgentReasoningEffort
 } from '@yolk-sdk/agent/protocol'
 
-export const openAiCodexTextModel = 'gpt-5.4'
+export const openAiCodexTextModel = 'gpt-5.5'
 export const anthropicClaudeTextModel = 'claude-sonnet-4-6'
 export const agentTextModel = openAiCodexTextModel
 export const agentTextModelOptions = [
   {
     model: openAiCodexTextModel,
-    label: 'GPT-5.4',
+    label: 'GPT-5.5',
     provider: 'openai-codex'
   },
   {
