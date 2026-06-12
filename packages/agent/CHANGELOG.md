@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.12
+
+### Patch Changes
+
+- b5a297a: Add HITL response helpers and serializable question results.
+
 ## 0.0.1-canary.11
 
 ### Patch Changes
