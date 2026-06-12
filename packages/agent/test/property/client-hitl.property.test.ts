@@ -32,7 +32,8 @@ import {
   markAgentAborted,
   markAgentError,
   reduceAgentEvents,
-  submitAgentUserMessage
+  submitAgentUserMessage,
+  toolRunsFromHitlRequests
 } from '../../src/client'
 import { propertyOptions } from './property-options'
 
@@ -127,9 +128,17 @@ const clientEvent = (kind: typeof clientEventKind.Type, index: number): AgentEve
     case 'reasoning':
       return LLMReasoningDelta.make({ eventId: `event_${index}`, text: 'r' })
     case 'approvalRequested':
-      return ToolApprovalRequested.make({ eventId: `event_${index}`, call, request: approvalRequest })
+      return ToolApprovalRequested.make({
+        eventId: `event_${index}`,
+        call,
+        request: approvalRequest
+      })
     case 'approvalDenied':
-      return ToolApprovalDenied.make({ eventId: `event_${index}`, toolCallId: call.id, reason: 'denied' })
+      return ToolApprovalDenied.make({
+        eventId: `event_${index}`,
+        toolCallId: call.id,
+        reason: 'denied'
+      })
     case 'questionRequested':
       return QuestionRequested.make({ eventId: `event_${index}`, request: questionRequest })
     case 'questionAnswered':
@@ -141,14 +150,26 @@ const clientEvent = (kind: typeof clientEventKind.Type, index: number): AgentEve
     case 'toolCompleted':
       return ToolExecutionCompleted.make({ eventId: `event_${index}`, call, result: toolResult })
     case 'toolErrored':
-      return ToolExecutionError.make({ eventId: `event_${index}`, call, message: 'failed', code: 'tool_error' })
+      return ToolExecutionError.make({
+        eventId: `event_${index}`,
+        call,
+        message: 'failed',
+        code: 'tool_error'
+      })
     case 'agentEnd':
-      return AgentEnd.make({ eventId: `event_${index}`, messages: [assistantMessage], turns: 1, usage: zeroAgentUsage })
+      return AgentEnd.make({
+        eventId: `event_${index}`,
+        messages: [assistantMessage],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
   }
 }
 
-const eventSequence = (kinds: ReadonlyArray<typeof clientEventKind.Type>) =>
-  [AgentStart.make({ eventId: 'event_start' }), ...kinds.map(clientEvent)]
+const eventSequence = (kinds: ReadonlyArray<typeof clientEventKind.Type>) => [
+  AgentStart.make({ eventId: 'event_start' }),
+  ...kinds.map(clientEvent)
+]
 
 const toolRunIds = (runs: ReturnType<typeof reduceAgentEvents>['toolRuns']) =>
   runs.map(run => {
@@ -255,11 +276,25 @@ const multiClientEvent = (
     case 'toolStarted':
       return ToolExecutionStarted.make({ eventId, call: targetCall })
     case 'toolCompleted':
-      return ToolExecutionCompleted.make({ eventId, call: targetCall, result: toolResultFor(command.target) })
+      return ToolExecutionCompleted.make({
+        eventId,
+        call: targetCall,
+        result: toolResultFor(command.target)
+      })
     case 'toolErrored':
-      return ToolExecutionError.make({ eventId, call: targetCall, message: 'failed', code: 'tool_error' })
+      return ToolExecutionError.make({
+        eventId,
+        call: targetCall,
+        message: 'failed',
+        code: 'tool_error'
+      })
     case 'agentEnd':
-      return AgentEnd.make({ eventId, messages: [assistantMessage], turns: 1, usage: zeroAgentUsage })
+      return AgentEnd.make({
+        eventId,
+        messages: [assistantMessage],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
   }
 }
 
@@ -267,6 +302,13 @@ const isTerminalToolRun = (run: ReturnType<typeof reduceAgentEvents>['toolRuns']
   !isActiveToolRun(run)
 
 describe('client HITL property tests', () => {
+  it('hydrates active tool runs from HITL requests', () => {
+    expect(toolRunsFromHitlRequests([approvalRequest, questionRequest])).toEqual([
+      { _tag: 'ApprovalRequested', call, request: approvalRequest },
+      { _tag: 'QuestionRequested', request: questionRequest }
+    ])
+  })
+
   it.prop(
     'terminal HITL states are inactive and unique by tool call',
     [terminalKindArbitrary],
@@ -340,10 +382,7 @@ describe('client HITL property tests', () => {
         ...input.commands.slice(0, 64).map(multiClientEvent)
       ])
       const completedBefore = state.toolRuns.filter(run => run._tag === 'Completed')
-      const submitted = submitAgentUserMessage(
-        state,
-        UserMessage.make({ content: 'next' })
-      )
+      const submitted = submitAgentUserMessage(state, UserMessage.make({ content: 'next' }))
       const errored = markAgentError(state, 'failed')
       const aborted = markAgentAborted(state)
 

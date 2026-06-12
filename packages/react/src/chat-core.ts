@@ -1,4 +1,11 @@
-import type { AgentEvent, AgentMessage, Content, HitlResponse, UserMessage } from '@yolk-sdk/agent/protocol'
+import {
+  hitlResponseEvent,
+  type AgentEvent,
+  type AgentMessage,
+  type Content,
+  type HitlResponse,
+  type UserMessage
+} from '@yolk-sdk/agent/protocol'
 import {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
@@ -95,7 +102,11 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
-        seenEventIds: []
+        seenEventIds: [],
+        chatMessages: applyAgentEventToChatMessages(
+          state.chatMessages,
+          hitlResponseEvent(action.response)
+        )
       }
     case 'DeleteTurn': {
       const next = deleteChatTurn(state.chatMessages, action.messageId)
@@ -169,33 +180,45 @@ export const reduceAgentChatState = (
 
       switch (action.event._tag) {
         case 'AgentStart':
-          return rememberEvent({
-            ...state,
-            status: 'running',
-            error: null,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }, action.event)
+          return rememberEvent(
+            {
+              ...state,
+              status: 'running',
+              error: null,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
         case 'AgentError':
-          return rememberEvent({
-            ...state,
-            status: 'error',
-            error: action.event.message,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }, action.event)
+          return rememberEvent(
+            {
+              ...state,
+              status: 'error',
+              error: action.event.message,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
         case 'AgentEnd':
-          return rememberEvent({
-            ...state,
-            status: 'done',
-            error: null,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }, action.event)
+          return rememberEvent(
+            {
+              ...state,
+              status: 'done',
+              error: null,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
         case 'AgentAwaitingInput':
-          return rememberEvent({
-            ...state,
-            status: 'waiting',
-            error: null,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }, action.event)
+          return rememberEvent(
+            {
+              ...state,
+              status: 'waiting',
+              error: null,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
         case 'AssistantMessage':
         case 'AgentRetry':
         case 'CompactionEnd':
@@ -222,10 +245,13 @@ export const reduceAgentChatState = (
         case 'TurnEnd':
         case 'TurnStart':
         case 'UsageUpdate':
-          return rememberEvent({
-            ...state,
-            chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-          }, action.event)
+          return rememberEvent(
+            {
+              ...state,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
       }
     }
     case 'Error': {

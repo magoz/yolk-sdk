@@ -12,7 +12,7 @@ import {
   ToolResultMessage,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { buildAgentChatItems } from './chat-items'
+import { buildAgentChatItems, dedupeAgentChatToolRunItems, type AgentChatItem } from './chat-items'
 import {
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
@@ -244,6 +244,54 @@ describe('buildAgentChatItems', () => {
       id: 'assistant-status',
       label: 'Running web_search'
     })
+  })
+
+  it('keeps the latest tool run item for duplicate tool call ids', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+    const items = [
+      {
+        _tag: 'ToolRun',
+        id: 'live-call',
+        messageId: 'message-0-assistant',
+        call,
+        state: { _tag: 'Called', duration: { _tag: 'Unknown' } }
+      },
+      { _tag: 'AssistantMessage', id: 'message-text', messageId: 'message-0', content: 'ok' },
+      {
+        _tag: 'ToolRun',
+        id: 'persisted-call',
+        messageId: 'message-0-assistant',
+        call,
+        state: { _tag: 'Called', duration: { _tag: 'Unknown' } }
+      }
+    ] satisfies ReadonlyArray<AgentChatItem>
+
+    expect(dedupeAgentChatToolRunItems(items).map(item => item.id)).toEqual([
+      'message-text',
+      'persisted-call'
+    ])
+  })
+
+  it('dedupes duplicate tool runs even when item ids match', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+    const items = [
+      {
+        _tag: 'ToolRun',
+        id: 'tool-call-call_1',
+        messageId: 'message-0-assistant',
+        call,
+        state: { _tag: 'Called', duration: { _tag: 'Unknown' } }
+      },
+      {
+        _tag: 'ToolRun',
+        id: 'tool-call-call_1',
+        messageId: 'message-0-assistant',
+        call,
+        state: { _tag: 'Running', duration: { _tag: 'Unknown' }, startedAtMs: 10 }
+      }
+    ] satisfies ReadonlyArray<AgentChatItem>
+
+    expect(dedupeAgentChatToolRunItems(items)).toEqual([items[1]])
   })
 
   it('keeps live tool results visible while the run continues', () => {

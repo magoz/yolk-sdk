@@ -90,6 +90,12 @@ export class QuestionAnswer extends Schema.Class<QuestionAnswer>('QuestionAnswer
   customAnswer: Schema.optional(Schema.String)
 }) {}
 
+export type PlainQuestionAnswer = {
+  readonly questionId: string
+  readonly optionIds?: ReadonlyArray<string>
+  readonly customAnswer?: string
+}
+
 export const QuestionResponseOutcome = Schema.Literals(['answered', 'cancelled'])
 export type QuestionResponseOutcome = typeof QuestionResponseOutcome.Type
 
@@ -102,23 +108,96 @@ export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('Qu
   reason: Schema.optional(Schema.String)
 }) {}
 
+export type PlainQuestionResponse = {
+  readonly _tag: 'QuestionResponse'
+  readonly requestId: string
+  readonly toolCallId: string
+  readonly outcome: QuestionResponseOutcome
+  readonly source: HitlResponseSource
+  readonly answers?: ReadonlyArray<PlainQuestionAnswer>
+  readonly reason?: string
+}
+
+export type PlainToolApprovalResponse = {
+  readonly _tag: 'ToolApprovalResponse'
+  readonly requestId: string
+  readonly toolCallId: string
+  readonly decision: ToolApprovalDecision
+  readonly source: HitlResponseSource
+  readonly reason?: string
+}
+
+export type PlainHitlResponse = PlainToolApprovalResponse | PlainQuestionResponse
+
+export type QuestionResponseStructuredContent = {
+  readonly type: 'question_response'
+  readonly outcome: QuestionResponseOutcome
+  readonly answers: ReadonlyArray<PlainQuestionAnswer>
+  readonly reason?: string
+  readonly source: HitlResponseSource
+}
+
+export const plainQuestionAnswer = (answer: QuestionAnswer): PlainQuestionAnswer => ({
+  questionId: answer.questionId,
+  ...(answer.optionIds === undefined ? {} : { optionIds: [...answer.optionIds] }),
+  ...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer })
+})
+
+export const plainQuestionResponse = (response: QuestionResponse): PlainQuestionResponse => ({
+  _tag: 'QuestionResponse',
+  requestId: response.requestId,
+  toolCallId: response.toolCallId,
+  outcome: response.outcome,
+  source: response.source,
+  ...(response.answers === undefined
+    ? {}
+    : { answers: response.answers.map(answer => plainQuestionAnswer(answer)) }),
+  ...(response.reason === undefined ? {} : { reason: response.reason })
+})
+
+export const plainToolApprovalResponse = (
+  response: ToolApprovalResponse
+): PlainToolApprovalResponse => ({
+  _tag: 'ToolApprovalResponse',
+  requestId: response.requestId,
+  toolCallId: response.toolCallId,
+  decision: response.decision,
+  source: response.source,
+  ...(response.reason === undefined ? {} : { reason: response.reason })
+})
+
+export const plainHitlResponse = (response: HitlResponse): PlainHitlResponse => {
+  switch (response._tag) {
+    case 'QuestionResponse':
+      return plainQuestionResponse(response)
+    case 'ToolApprovalResponse':
+      return plainToolApprovalResponse(response)
+  }
+}
+
+export const questionResponseStructuredContent = (
+  response: QuestionResponse
+): QuestionResponseStructuredContent => ({
+  type: 'question_response',
+  outcome: response.outcome,
+  answers: (response.answers ?? []).map(answer => plainQuestionAnswer(answer)),
+  ...(response.reason === undefined ? {} : { reason: response.reason }),
+  source: response.source
+})
+
 const optionLabel = (question: QuestionPrompt, optionId: string) =>
   question.options?.find(option => option.id === optionId)?.label ?? optionId
 
-const questionForAnswer = (
-  questions: ReadonlyArray<QuestionPrompt>,
-  answer: QuestionAnswer
-) => questions.find(question => question.id === answer.questionId)
+const questionForAnswer = (questions: ReadonlyArray<QuestionPrompt>, answer: QuestionAnswer) =>
+  questions.find(question => question.id === answer.questionId)
 
-const formatQuestionAnswer = (
-  answer: QuestionAnswer,
-  questions: ReadonlyArray<QuestionPrompt>
-) => {
+const formatQuestionAnswer = (answer: QuestionAnswer, questions: ReadonlyArray<QuestionPrompt>) => {
   const question = questionForAnswer(questions, answer)
   const prompt = question?.prompt ?? answer.questionId
-  const selected = answer.optionIds?.map(optionId =>
-    question === undefined ? optionId : optionLabel(question, optionId)
-  ) ?? []
+  const selected =
+    answer.optionIds?.map(optionId =>
+      question === undefined ? optionId : optionLabel(question, optionId)
+    ) ?? []
   const custom = answer.customAnswer?.trim()
   const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
 

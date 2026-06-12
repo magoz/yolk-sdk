@@ -24,7 +24,7 @@ export {
   UserMessageEdited,
   UserMessageSubmitted
 } from './chat-session-events.ts'
-export { buildAgentChatItems } from './chat-items.ts'
+export { buildAgentChatItems, dedupeAgentChatToolRunItems } from './chat-items.ts'
 export type {
   AgentChatItem,
   BuildAgentChatItemsInput,

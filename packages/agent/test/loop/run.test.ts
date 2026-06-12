@@ -432,12 +432,23 @@ describe('run', () => {
       )
 
       const resumed = Array.from(resumedChunk)
+      const resultMessage = requests[1]?.messages.at(-1)
+
+      if (resultMessage?._tag !== 'ToolResult') {
+        throw new Error('Expected tool result message')
+      }
+
       expect(resumed.map(event => event._tag)).toContain('QuestionAnswered')
-      expect(requests[1]?.messages.at(-1)).toMatchObject({
-        _tag: 'ToolResult',
+      expect(resultMessage).toMatchObject({
         toolCallId: 'call_question',
-        content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.',
-        structuredContent: { type: 'question_response', outcome: 'answered' }
+        content:
+          "User has answered your question: Pick one: A. Continue with the user's answers in mind."
+      })
+      expect(resultMessage.structuredContent).toEqual({
+        type: 'question_response',
+        outcome: 'answered',
+        source: 'user',
+        answers: [{ questionId: 'choice', optionIds: ['a'] }]
       })
     })
   )
@@ -927,7 +938,9 @@ describe('run', () => {
         turn: 1
       }).pipe(
         Stream.runCollect,
-        Effect.provide(FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} }))),
+        Effect.provide(
+          FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} }))
+        ),
         Effect.provide(BaseLayer)
       )
 
@@ -1084,7 +1097,9 @@ describe('run', () => {
         'ToolExecutionCompleted'
       ])
       expect(
-        events.flatMap(event => (event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []))
+        events.flatMap(event =>
+          event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []
+        )
       ).toEqual(['call_slow', 'call_fast'])
       expect(started).toEqual(['slow', 'fast'])
     })
@@ -1169,8 +1184,12 @@ describe('run', () => {
         tag => tag === 'ToolExecutionCompleted' || tag === 'SubagentCompleted'
       )
 
-      expect(lifecycle.slice(0, firstCompletion).filter(tag => tag === 'ToolExecutionStarted')).toHaveLength(2)
-      expect(lifecycle.slice(0, firstCompletion).filter(tag => tag === 'SubagentStarted')).toHaveLength(2)
+      expect(
+        lifecycle.slice(0, firstCompletion).filter(tag => tag === 'ToolExecutionStarted')
+      ).toHaveLength(2)
+      expect(
+        lifecycle.slice(0, firstCompletion).filter(tag => tag === 'SubagentStarted')
+      ).toHaveLength(2)
     })
   )
 
@@ -1243,7 +1262,9 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(
-        events.flatMap(event => (event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []))
+        events.flatMap(event =>
+          event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []
+        )
       ).toEqual(['call_slow', 'call_fast'])
       expect(started).toEqual(['slow', 'fast'])
       expect(requests[1]?.messages.map(message => message._tag)).toEqual([

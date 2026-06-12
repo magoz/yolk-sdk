@@ -7,7 +7,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | File | Role |
 | --- | --- |
 | `clone-repos.ts` | Delete/re-clone gitignored reference repos under `.repos/*` |
-| `build-skillset.ts` | Compile local `.opencode/skills/*` into Cloudflare generated skillset |
+| `build-skillset.ts` | Compile configured project skillset sources/commands into Cloudflare generated skillset |
 | `codex-ws-smoke.ts` | Manual Codex WebSocket smoke check |
 | `check-package-boundaries.ts` | Validate example/package import boundary rules |
 | `check-package-exports.ts` | Validate package export shape and tree-shaking smoke rules |
@@ -17,7 +17,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 ## Rules
 
 - Run scripts through `pnpm` package scripts; do not add ad hoc npm/yarn commands.
-- Node-only imports are allowed here: `node:fs`, `node:path`, `node:process`, `node:crypto`, `node:tls`, `node:child_process`.
+- Node-only imports are allowed here: `node:fs`, `node:fs/promises`, `node:path`, `node:process`, `node:crypto`, `node:tls`, `node:child_process`, `node:os`, `node:url`.
 - `process.env`, `console.*`, raw JSON, and raw network APIs are allowed only for CLI/smoke boundaries.
 - Prefer Effect for orchestration, errors, config, and cleanup when scripts grow beyond simple file transforms.
 - App DB setup scripts live under `examples/next/scripts`.

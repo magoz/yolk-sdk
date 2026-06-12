@@ -40,7 +40,10 @@ export type ToolRunState =
   | ({ readonly _tag: 'Running' } & ToolRunStartedTiming)
   | ({ readonly _tag: 'Called' } & ToolRunNoTiming)
   | ({ readonly _tag: 'InputStreaming'; readonly input: string } & ToolRunNoTiming)
-  | ({ readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest } & ToolRunNoTiming)
+  | ({
+      readonly _tag: 'ApprovalRequested'
+      readonly request?: ToolApprovalRequest
+    } & ToolRunNoTiming)
   | ({ readonly _tag: 'Denied'; readonly reason: string } & ToolRunNoTiming)
   | ({ readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest } & ToolRunNoTiming)
   | ({
@@ -104,6 +107,24 @@ export type BuildAgentChatItemsInput = {
   readonly messages: ReadonlyArray<AgentChatMessage>
   readonly isRunning: boolean
   readonly activeToolLabel: Option.Option<string>
+}
+
+export const dedupeAgentChatToolRunItems = (
+  items: ReadonlyArray<AgentChatItem>
+): ReadonlyArray<AgentChatItem> => {
+  // Tool call ids are transcript-global; latest wins when live and persisted projections overlap.
+  const latestIndexByToolCallId = new Map<string, number>()
+
+  for (const [index, item] of items.entries()) {
+    if (item._tag === 'ToolRun') {
+      latestIndexByToolCallId.set(item.call.id, index)
+    }
+  }
+
+  return items.filter(
+    (item, index) =>
+      item._tag !== 'ToolRun' || latestIndexByToolCallId.get(item.call.id) === index
+  )
 }
 
 const activeStatusLabel = ({
@@ -186,7 +207,12 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
   }
 
   if (state._tag === 'QuestionAnswered') {
-    return { _tag: 'QuestionAnswered', ...noTiming(), response: state.response, request: state.request }
+    return {
+      _tag: 'QuestionAnswered',
+      ...noTiming(),
+      response: state.response,
+      request: state.request
+    }
   }
 
   if (state._tag === 'QuestionCancelled') {
@@ -289,8 +315,10 @@ export const buildAgentChatItems = ({
   isRunning,
   activeToolLabel
 }: BuildAgentChatItemsInput): ReadonlyArray<AgentChatItem> => {
-  const items = Arr.getSomes(
-    Arr.flatMap(messages, message => Arr.map(message.parts, part => itemFromPart(message, part)))
+  const items = dedupeAgentChatToolRunItems(
+    Arr.getSomes(
+      Arr.flatMap(messages, message => Arr.map(message.parts, part => itemFromPart(message, part)))
+    )
   )
 
   if (isRunning) {

@@ -21,8 +21,10 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Denied approval becomes a model-visible `ToolResultMessage` with `isError = true`.
 - `question` is a package-owned tool name. The loop intercepts it, emits `QuestionRequested`, and resumes with structured answers in `ToolResult.structuredContent`.
 - Question resume `ToolResult.content` must include selected answer values/labels and continuation guidance, not only `answered`; providers reliably see text output.
+- Question `structuredContent` must be plain JSON-serializable; use `questionResponseStructuredContent`/`plainHitlResponse` at persistence and workflow boundaries.
 - Preserve unchosen options in `ToolCall.params`/UI input; model-visible question results should emphasize chosen answers.
 - HITL responses are control inputs (`ToolApprovalResponseInput`, `QuestionResponseInput`, `hitlResponses`), not user/assistant text.
+- Submitted HITL responses can be mapped to optimistic UI/protocol events with `hitlResponseEvent`.
 - Replay stays provider-neutral through normal assistant tool calls and tool result messages.
 - Same-turn sibling tools may yield multiple pending requests; submit responses one at a time unless a runtime adds batching later.
 
@@ -44,6 +46,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 ## Tests
 
 - Protocol wire round-trips: approval/question request + response.
+- Plain serialization helpers: no Schema/Class instances in durable HITL payloads.
 - Loop: pause, approve, deny, question answer/cancel, parallel pending, no duplicate execution.
 - Runtime: append pending state, replay responses, durable resume.
 - React: waiting status, submit helpers, projection/replay.

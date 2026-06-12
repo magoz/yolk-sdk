@@ -56,6 +56,7 @@ export {
   SubagentCompleted,
   SubagentStarted,
   SubagentStatus,
+  hitlResponseEvent,
   makeSubagentRunId,
   ToolApprovalDenied,
   ToolApprovalGranted,
@@ -106,6 +107,11 @@ export {
   QuestionResponseOutcome,
   QuestionToolParams,
   formatQuestionResponseContent,
+  plainHitlResponse,
+  plainQuestionAnswer,
+  plainQuestionResponse,
+  plainToolApprovalResponse,
+  questionResponseStructuredContent,
   ToolApprovalDecision,
   ToolApprovalMode,
   ToolApprovalPolicy,
@@ -114,6 +120,13 @@ export {
   ToolCall,
   ToolDef,
   ToolResult
+} from './tool.ts'
+export type {
+  PlainHitlResponse,
+  PlainQuestionAnswer,
+  PlainQuestionResponse,
+  PlainToolApprovalResponse,
+  QuestionResponseStructuredContent
 } from './tool.ts'
 export {
   addAgentUsage,

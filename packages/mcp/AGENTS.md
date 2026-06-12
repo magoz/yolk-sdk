@@ -16,7 +16,7 @@
 - MCP is external protocol infrastructure, not agent-core.
 - App auth, persisted config, policy, and product tool catalogs stay outside this package.
 - Keep Node-specific helpers behind `@yolk-sdk/mcp/client/node`.
-- Client/server may use `@yolk-sdk/agent/protocol` for generic `ToolDef`/`ToolResult`; agent loop/providers remain MCP-agnostic.
+- Client/server may use `@yolk-sdk/agent/protocol` for generic tool/content adapters; agent loop/providers remain MCP-agnostic.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ## Client/server rules
@@ -29,7 +29,7 @@
 - Server maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
-- Export normal `ToolDef`/`ToolResult`; agent loop/providers stay MCP-agnostic.
+- Export normal tool results/content; agent loop/providers stay MCP-agnostic.
 
 ## Tests
 

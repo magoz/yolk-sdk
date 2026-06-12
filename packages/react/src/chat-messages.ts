@@ -18,6 +18,7 @@ import {
   contentParts,
   formatQuestionResponseContent,
   isContentEmpty,
+  questionResponseStructuredContent,
   type AgentEvent,
   type AgentMessage,
   type AssistantPart,
@@ -32,8 +33,16 @@ export type ChatToolState =
   | { readonly _tag: 'ApprovalRequested'; readonly request?: ToolApprovalRequest }
   | { readonly _tag: 'Denied'; readonly reason: string }
   | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
-  | { readonly _tag: 'QuestionAnswered'; readonly response: QuestionResponse; readonly request?: QuestionRequest }
-  | { readonly _tag: 'QuestionCancelled'; readonly response: QuestionResponse; readonly request?: QuestionRequest }
+  | {
+      readonly _tag: 'QuestionAnswered'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    }
+  | {
+      readonly _tag: 'QuestionCancelled'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    }
   | { readonly _tag: 'Running'; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
@@ -155,9 +164,10 @@ const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, st
     case 'InputStreaming':
       return run.name === undefined ? [] : [[run.id, run.name]]
     case 'Denied':
+      return []
     case 'QuestionAnswered':
     case 'QuestionCancelled':
-      return []
+      return run.request === undefined ? [] : [[run.request.call.id, run.request.call.name]]
     case 'QuestionRequested':
       return [[run.request.call.id, run.request.call.name]]
     case 'InputReady':
@@ -241,6 +251,36 @@ const collectToolRunsById = (
   runs: ReadonlyArray<AgentToolRun>
 ): ReadonlyMap<string, AgentToolRun> => new Map(runs.map(toolRunEntry))
 
+const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | undefined => {
+  switch (state._tag) {
+    case 'QuestionRequested':
+      return state.request
+    case 'QuestionAnswered':
+    case 'QuestionCancelled':
+      return state.request
+    case 'Called':
+    case 'InputStreaming':
+    case 'ApprovalRequested':
+    case 'Denied':
+    case 'Running':
+    case 'Completed':
+    case 'Errored':
+    case 'ProviderCompleted':
+      return undefined
+  }
+}
+
+type QuestionTerminalState = Extract<
+  ChatToolState,
+  { readonly _tag: 'QuestionAnswered' | 'QuestionCancelled' }
+>
+
+const preserveQuestionRequest = (
+  request: QuestionRequest | undefined,
+  state: QuestionTerminalState
+): QuestionTerminalState =>
+  state.request !== undefined || request === undefined ? state : { ...state, request }
+
 const toolStateFor = (
   run: AgentToolRun | undefined,
   result: ToolResult | undefined
@@ -254,7 +294,7 @@ const toolStateFor = (
   }
 
   if (run?._tag === 'ApprovalRequested') {
-    return { _tag: 'ApprovalRequested' }
+    return { _tag: 'ApprovalRequested', request: run.request }
   }
 
   if (run?._tag === 'Denied') {
@@ -266,11 +306,17 @@ const toolStateFor = (
   }
 
   if (run?._tag === 'QuestionAnswered') {
-    return { _tag: 'QuestionAnswered', response: run.response }
+    return preserveQuestionRequest(run.request, {
+      _tag: 'QuestionAnswered',
+      response: run.response
+    })
   }
 
   if (run?._tag === 'QuestionCancelled') {
-    return { _tag: 'QuestionCancelled', response: run.response }
+    return preserveQuestionRequest(run.request, {
+      _tag: 'QuestionCancelled',
+      response: run.response
+    })
   }
 
   if (run?._tag === 'Completed') {
@@ -623,12 +669,11 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
     }
   }
 
-  if (
-    next._tag === 'Denied' ||
-    next._tag === 'QuestionAnswered' ||
-    next._tag === 'QuestionCancelled' ||
-    next._tag === 'ProviderCompleted'
-  ) {
+  if (next._tag === 'QuestionAnswered' || next._tag === 'QuestionCancelled') {
+    return preserveQuestionRequest(questionRequestFromToolState(existing), next)
+  }
+
+  if (next._tag === 'Denied' || next._tag === 'ProviderCompleted') {
     return next
   }
 
@@ -973,7 +1018,7 @@ export const applyAgentEventToChatMessages = (
         parts: message.parts.map(part =>
           part._tag === 'ToolCall' && part.call.id === event.toolCallId
             ? { ...part, state: { _tag: 'Denied', reason: event.reason } }
-          : part
+            : part
         )
       }))
     case 'QuestionRequested':
@@ -988,11 +1033,10 @@ export const applyAgentEventToChatMessages = (
           part._tag === 'ToolCall' && part.call.id === event.response.toolCallId
             ? {
                 ...part,
-                state: {
+                state: preserveQuestionRequest(questionRequestFromToolState(part.state), {
                   _tag: 'QuestionAnswered',
-                  response: event.response,
-                  request: part.state._tag === 'QuestionRequested' ? part.state.request : undefined
-                }
+                  response: event.response
+                })
               }
             : part
         )
@@ -1004,11 +1048,10 @@ export const applyAgentEventToChatMessages = (
           part._tag === 'ToolCall' && part.call.id === event.response.toolCallId
             ? {
                 ...part,
-                state: {
+                state: preserveQuestionRequest(questionRequestFromToolState(part.state), {
                   _tag: 'QuestionCancelled',
-                  response: event.response,
-                  request: part.state._tag === 'QuestionRequested' ? part.state.request : undefined
-                }
+                  response: event.response
+                })
               }
             : part
         )
@@ -1277,10 +1320,7 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
           ]
         }
 
-        if (
-          part.state._tag === 'QuestionAnswered' ||
-          part.state._tag === 'QuestionCancelled'
-        ) {
+        if (part.state._tag === 'QuestionAnswered' || part.state._tag === 'QuestionCancelled') {
           const response = part.state.response
 
           return [
@@ -1288,13 +1328,7 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
               toolCallId: response.toolCallId,
               content: formatQuestionResponseContent(response, part.state.request?.questions),
               isError: response.outcome === 'cancelled' ? true : undefined,
-              structuredContent: {
-                type: 'question_response',
-                outcome: response.outcome,
-                answers: response.answers ?? [],
-                reason: response.reason,
-                source: response.source
-              }
+              structuredContent: questionResponseStructuredContent(response)
             })
           ]
         }

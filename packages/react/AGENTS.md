@@ -29,6 +29,7 @@
 | `AgentChatPart`         | Text, reasoning, tool call/result, error parts              |
 | `toAgentMessages`       | Render model → protocol transcript                          |
 | `buildAgentChatItems`   | Flat render-item projection for simple UIs                  |
+| `dedupeAgentChatToolRunItems` | Drop duplicate live/persisted tool cards by tool call id |
 | `reduceAgentChatState`  | Pure reducer for headless chat actions/events               |
 | selectors               | Reasoning/tool/activity helpers                             |
 
@@ -50,6 +51,7 @@
 - Text may start after reasoning in the same assistant turn: first `LLMTextDelta` must create a streaming `Text` part if only `Reasoning` is streaming. Do not wait for final `AssistantMessage`.
 - Tool parts expose input streaming, approval, denied, question, executing, completed, errored, and provider-completed states.
 - Answered/cancelled question tool states should retain the original request when available so UI/replay can resolve selected option labels.
+- HITL submit should optimistically apply `hitlResponseEvent`; server replay later de-dupes by protocol `eventId`.
 - Completed tool parts may carry `result.isError`; renderers can style them as tool-origin errors while preserving replay.
 - Same-turn sibling tool calls stay in one assistant message while any tool in the batch is open; calls after terminal tool state start a new assistant message.
 - Subagent lifecycle events are protocol/activity telemetry; headless chat projections should tolerate them without duplicating tool parts.
@@ -59,6 +61,7 @@
 - Tool timing uses protocol `createdAtMs` first, injected `nowMs` fallback; item timing is no-time, start-only, or known start+end.
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.
 - `ToolResult` parts are only for orphan results; normal results merge into matching tool calls.
+- Flat chat items de-dupe tool runs by transcript-global tool call id to avoid live+persisted duplicate cards.
 - `AgentChatMessage[]` is render source; protocol `AgentMessage[]` is replay/transport source.
 - `AgentChatMessage` carries stable `turnId` and monotonic `sequence`; do not infer turns by parsing IDs or array position.
 - `deleteTurn` removes a user+assistant turn without transport; avoid deleting flat render items.

@@ -2,12 +2,14 @@ import * as Schema from 'effect/Schema'
 import { AssistantAgentMessage, AgentMessage } from './message.ts'
 import {
   HitlRequest,
+  QuestionAnswer,
   QuestionRequest,
   QuestionResponse,
   ToolApprovalRequest,
   ToolApprovalResponse,
   ToolCall,
-  ToolResult
+  ToolResult,
+  type HitlResponse
 } from './tool.ts'
 import { AgentUsage } from './usage.ts'
 
@@ -166,20 +168,26 @@ export class ToolApprovalDenied extends Schema.TaggedClass<ToolApprovalDenied>()
   }
 ) {}
 
-export class QuestionRequested extends Schema.TaggedClass<QuestionRequested>()('QuestionRequested', {
-  ...EventIdentity,
-  request: QuestionRequest
-}) {}
+export class QuestionRequested extends Schema.TaggedClass<QuestionRequested>()(
+  'QuestionRequested',
+  {
+    ...EventIdentity,
+    request: QuestionRequest
+  }
+) {}
 
 export class QuestionAnswered extends Schema.TaggedClass<QuestionAnswered>()('QuestionAnswered', {
   ...EventIdentity,
   response: QuestionResponse
 }) {}
 
-export class QuestionCancelled extends Schema.TaggedClass<QuestionCancelled>()('QuestionCancelled', {
-  ...EventIdentity,
-  response: QuestionResponse
-}) {}
+export class QuestionCancelled extends Schema.TaggedClass<QuestionCancelled>()(
+  'QuestionCancelled',
+  {
+    ...EventIdentity,
+    response: QuestionResponse
+  }
+) {}
 
 export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamEnd', {
   ...EventIdentity,
@@ -239,19 +247,73 @@ export class SubagentStarted extends Schema.TaggedClass<SubagentStarted>()('Suba
   model: Schema.String
 }) {}
 
-export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()('SubagentCompleted', {
-  ...EventIdentity,
-  parentToolCallId: NonEmptyTrimmedString,
-  subagentRunId: NonEmptyTrimmedString,
-  subagentType: NonEmptyTrimmedString,
-  description: Schema.String,
-  model: Schema.String,
-  status: SubagentStatus,
-  durationMs: Schema.Number,
-  summary: Schema.optional(Schema.String)
-}) {}
+export class SubagentCompleted extends Schema.TaggedClass<SubagentCompleted>()(
+  'SubagentCompleted',
+  {
+    ...EventIdentity,
+    parentToolCallId: NonEmptyTrimmedString,
+    subagentRunId: NonEmptyTrimmedString,
+    subagentType: NonEmptyTrimmedString,
+    description: Schema.String,
+    model: Schema.String,
+    status: SubagentStatus,
+    durationMs: Schema.Number,
+    summary: Schema.optional(Schema.String)
+  }
+) {}
 
 export const makeSubagentRunId = (parentToolCallId: string) => `subagent:${parentToolCallId}`
+
+const questionAnswerValue = (answer: QuestionAnswer) =>
+  QuestionAnswer.make({
+    questionId: answer.questionId,
+    ...(answer.optionIds === undefined ? {} : { optionIds: [...answer.optionIds] }),
+    ...(answer.customAnswer === undefined ? {} : { customAnswer: answer.customAnswer })
+  })
+
+const questionResponseValue = (response: QuestionResponse) =>
+  QuestionResponse.make({
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    outcome: response.outcome,
+    source: response.source,
+    ...(response.answers === undefined
+      ? {}
+      : { answers: response.answers.map(answer => questionAnswerValue(answer)) }),
+    ...(response.reason === undefined ? {} : { reason: response.reason })
+  })
+
+const toolApprovalResponseValue = (response: ToolApprovalResponse) =>
+  ToolApprovalResponse.make({
+    requestId: response.requestId,
+    toolCallId: response.toolCallId,
+    decision: response.decision,
+    source: response.source,
+    ...(response.reason === undefined ? {} : { reason: response.reason })
+  })
+
+export const hitlResponseEvent = (response: HitlResponse): AgentEvent => {
+  switch (response._tag) {
+    case 'QuestionResponse': {
+      const responseValue = questionResponseValue(response)
+
+      return response.outcome === 'answered'
+        ? QuestionAnswered.make({ response: responseValue })
+        : QuestionCancelled.make({ response: responseValue })
+    }
+    case 'ToolApprovalResponse': {
+      const responseValue = toolApprovalResponseValue(response)
+
+      return response.decision === 'approved'
+        ? ToolApprovalGranted.make({ toolCallId: response.toolCallId, response: responseValue })
+        : ToolApprovalDenied.make({
+            toolCallId: response.toolCallId,
+            reason: response.reason ?? 'Denied by user',
+            response: responseValue
+          })
+    }
+  }
+}
 
 export const AgentEvent = Schema.Union([
   AgentStart,

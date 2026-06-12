@@ -16,9 +16,11 @@ import {
   ToolExecutionStarted,
   ToolCall,
   ProviderToolResult,
+  QuestionAnswered,
   QuestionPrompt,
   QuestionRequest,
   QuestionRequested,
+  QuestionResponse,
   ToolApprovalDenied,
   ToolApprovalRequested,
   ToolInputDelta,
@@ -124,6 +126,21 @@ describe('reduceAgentEvents', () => {
       QuestionRequested.make({ request: questionRequest })
     ])
     expect(question.toolRuns).toEqual([{ _tag: 'QuestionRequested', request: questionRequest }])
+
+    const questionResponse = QuestionResponse.make({
+      requestId: questionRequest.requestId,
+      toolCallId: call.id,
+      outcome: 'answered',
+      source: 'user'
+    })
+    const answeredQuestion = reduceAgentEvents([
+      AgentStart.make({}),
+      QuestionRequested.make({ request: questionRequest }),
+      QuestionAnswered.make({ response: questionResponse })
+    ])
+    expect(answeredQuestion.toolRuns).toEqual([
+      { _tag: 'QuestionAnswered', response: questionResponse, request: questionRequest }
+    ])
 
     const denied = reduceAgentEvents([
       AgentStart.make({}),

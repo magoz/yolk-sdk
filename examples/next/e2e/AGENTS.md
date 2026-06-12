@@ -209,9 +209,9 @@ test.describe('My feature', () => {
     await Effect.gen(function* () {
       const db = yield* Db
       // Cleanup first (retries re-run beforeAll)
-      yield* db.delete(schema.post).where(eq(schema.post.id, MY_POST_ID))
+      yield* db.delete(schema.myTable).where(eq(schema.myTable.id, MY_ID))
       // Then seed
-      yield* db.insert(schema.post).values({ id: MY_POST_ID, ... })
+      yield* db.insert(schema.myTable).values({ id: MY_ID, ... })
     }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
   })
 })

@@ -17,19 +17,17 @@ import {
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
-  ToolApprovalDenied,
-  ToolApprovalGranted,
   ToolApprovalRequested,
   ToolInputEnd,
   ToolInputDelta,
   ToolInputStart,
-  QuestionAnswered,
-  QuestionCancelled,
   QuestionRequested,
   ProviderToolResult,
   QuestionRequest,
   QuestionToolParams,
   formatQuestionResponseContent,
+  hitlResponseEvent,
+  questionResponseStructuredContent,
   makeSubagentRunId,
   ToolApprovalRequest,
   ToolResultMessage,
@@ -60,7 +58,7 @@ import {
   LLMError,
   ToolError,
   type AgentLoopError,
-  type LLMProviderError,
+  type LLMProviderError
 } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
@@ -103,7 +101,9 @@ type TaskCallMetadata = {
 }
 
 const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+  input !== null && typeof input === 'object'
+    ? Object.getOwnPropertyDescriptor(input, key)?.value
+    : undefined
 
 const nonEmptyStringField = (input: unknown, key: string) => {
   const value = objectField(input, key)
@@ -366,9 +366,10 @@ const makeToolExecutionStream = (
     Effect.gen(function* () {
       const startedAtMs = yield* Clock.currentTimeMillis
       const started = subagentStartedEvent({ call, model, startedAtMs })
-      const startEvents: ReadonlyArray<AgentEvent> = started === undefined
-        ? [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
-        : [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs }), started]
+      const startEvents: ReadonlyArray<AgentEvent> =
+        started === undefined
+          ? [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
+          : [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs }), started]
 
       return Stream.fromIterable(startEvents).pipe(
         Stream.concat(
@@ -390,9 +391,7 @@ const makeToolExecutionStream = (
                       createdAtMs: endedAtMs
                     })
 
-                    return completed === undefined
-                      ? [toolCompleted]
-                      : [toolCompleted, completed]
+                    return completed === undefined ? [toolCompleted] : [toolCompleted, completed]
                   })
                 )
               )
@@ -498,10 +497,7 @@ const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolC
     response._tag === 'QuestionResponse' && matchesQuestion(response, call) ? [response] : []
   )[0]
 
-const toolApprovalRequest = (
-  tools: ReadonlyArray<ToolDef>,
-  call: ToolCall
-): ToolApprovalRequest =>
+const toolApprovalRequest = (tools: ReadonlyArray<ToolDef>, call: ToolCall): ToolApprovalRequest =>
   ToolApprovalRequest.make({
     requestId: approvalRequestId(call),
     toolCallId: call.id,
@@ -532,13 +528,7 @@ const questionToolResult = (
     toolCallId: response.toolCallId,
     content: formatQuestionResponseContent(response, questions),
     isError: response.outcome === 'cancelled' ? true : undefined,
-    structuredContent: {
-      type: 'question_response',
-      outcome: response.outcome,
-      answers: response.answers ?? [],
-      reason: response.reason,
-      source: response.source
-    }
+    structuredContent: questionResponseStructuredContent(response)
   })
 }
 
@@ -578,11 +568,7 @@ const prepareQuestionCall = (
         index,
         call,
         result: questionToolResult(response, decoded.success.questions),
-        events: [
-          response.outcome === 'answered'
-            ? QuestionAnswered.make({ response })
-            : QuestionCancelled.make({ response })
-        ]
+        events: [hitlResponseEvent(response)]
       }
     }
 
@@ -627,7 +613,7 @@ const prepareApprovalCall = (
       index,
       call,
       result: deniedToolResult(call, response),
-      events: [ToolApprovalDenied.make({ toolCallId: call.id, reason: response.reason ?? 'Denied by user', response })]
+      events: [hitlResponseEvent(response)]
     }
   }
 
@@ -635,7 +621,7 @@ const prepareApprovalCall = (
     _tag: 'Execute',
     index,
     call,
-    events: [ToolApprovalGranted.make({ toolCallId: call.id, response })]
+    events: [hitlResponseEvent(response)]
   }
 }
 
@@ -870,13 +856,20 @@ const makeAfterLlmStream = (
           Effect.flatMap(results => {
             const orderedResults = orderedToolResultMessages(results)
 
-            return Ref.update(input.createdMessages, messages => [...messages, ...orderedResults]).pipe(
+            return Ref.update(input.createdMessages, messages => [
+              ...messages,
+              ...orderedResults
+            ]).pipe(
               Effect.as(
                 Stream.make(TurnEnd.make({ turn: input.turn, reason: completion.stopReason })).pipe(
                   Stream.concat(
                     makeTurnStream({
                       ...input,
-                      currentMessages: [...input.currentMessages, assistantMessage, ...orderedResults],
+                      currentMessages: [
+                        ...input.currentMessages,
+                        assistantMessage,
+                        ...orderedResults
+                      ],
                       turn: input.turn + 1
                     })
                   )
@@ -1023,7 +1016,9 @@ const makeTurnStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, Agent
     ]).pipe(Stream.concat(llmStream))
   })
 
-const makePendingToolResumeStream = (input: TurnStreamInput): Stream.Stream<AgentEvent, AgentLoopError> =>
+const makePendingToolResumeStream = (
+  input: TurnStreamInput
+): Stream.Stream<AgentEvent, AgentLoopError> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const pendingCalls = pendingHostToolCalls(input.currentMessages)
@@ -1082,7 +1077,10 @@ const makePendingToolResumeStream = (input: TurnStreamInput): Stream.Stream<Agen
           Effect.flatMap(results => {
             const orderedResults = orderedToolResultMessages(results)
 
-            return Ref.update(input.createdMessages, messages => [...messages, ...orderedResults]).pipe(
+            return Ref.update(input.createdMessages, messages => [
+              ...messages,
+              ...orderedResults
+            ]).pipe(
               Effect.as(
                 makeTurnStream({
                   ...input,
@@ -1177,16 +1175,17 @@ export const runToolBatch = (
       const hasPendingRequests = prepared.pendingRequests.length > 0
       const resultEvents = hasPendingRequests ? [] : prepared.resultEvents
       const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
-      const awaitingEvents: ReadonlyArray<AgentEvent> = pendingRequests === undefined
-        ? []
-        : [
-            AgentAwaitingInput.make({
-              requests: pendingRequests,
-              messages: config.createdMessages ?? [],
-              turns: config.turn ?? 0,
-              usage: config.usage ?? zeroAgentUsage
-            })
-          ]
+      const awaitingEvents: ReadonlyArray<AgentEvent> =
+        pendingRequests === undefined
+          ? []
+          : [
+              AgentAwaitingInput.make({
+                requests: pendingRequests,
+                messages: config.createdMessages ?? [],
+                turns: config.turn ?? 0,
+                usage: config.usage ?? zeroAgentUsage
+              })
+            ]
 
       return Stream.fromIterable([
         ...prepared.events,

@@ -6,6 +6,11 @@ import {
   HostToolCallPart,
   LLMReasoningDelta,
   LLMTextDelta,
+  QuestionAnswer,
+  QuestionPrompt,
+  QuestionRequest,
+  QuestionResponse,
+  QuestionRequested,
   ToolCall,
   ToolExecutionCompleted,
   ToolExecutionStarted,
@@ -157,6 +162,39 @@ describe('agent chat core', () => {
 
     expect(toolPart.state.startedAtMs).toBe(123)
     expect(toolPart.state.endedAtMs).toBe(123)
+  })
+
+  it('optimistically applies HITL responses', () => {
+    const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+    const request = QuestionRequest.make({
+      requestId: 'question:call_question',
+      toolCallId: call.id,
+      call,
+      questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+    })
+    const response = QuestionResponse.make({
+      requestId: request.requestId,
+      toolCallId: call.id,
+      outcome: 'answered',
+      source: 'user',
+      answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
+    })
+    const waiting = reduceAgentChatState(initialAgentChatState, {
+      _tag: 'Event',
+      event: QuestionRequested.make({ request })
+    })
+    const submitted = reduceAgentChatState(waiting, {
+      _tag: 'SubmitHitlResponse',
+      response
+    })
+
+    expect(submitted.status).toBe('running')
+    expect(submitted.chatMessages[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: 'tool-call-call_question',
+      call,
+      state: { _tag: 'QuestionAnswered', response, request }
+    })
   })
 
   it('counts active text, tool, and voice work', () => {

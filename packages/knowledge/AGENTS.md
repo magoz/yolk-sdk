@@ -8,7 +8,7 @@
 - Expose flat search/chunking/embedding/ingestion subpaths for searchable knowledge.
 - Provide store contracts for app-owned Postgres/R2 adapters.
 - Provide pure context assembly helpers for pinned/routable knowledge.
-- Expose optional agent helper types without owning app tool policy.
+- Expose optional agent helpers such as `makeKnowledgeSearchTool` without owning app tool policy.
 
 ## Boundaries
 

@@ -23,11 +23,12 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 ```txt
 examples/next, cloudflare/agent, e2e -> @yolk-sdk/*
 react -> agent/client + agent/protocol
-knowledge -> agent/protocol + agent/tools only for agent adapter
-mcp -> agent/protocol only for ToolDef/ToolResult
+knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
+mcp -> agent/protocol only for tool/content adapters
 agent -> no knowledge/react/mcp/app/Next/provider SDKs
 provider packages -> oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
+voice-runtime -> agent/loop + agent/protocol
 ```
 
 ## Rules

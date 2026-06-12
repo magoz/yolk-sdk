@@ -317,11 +317,47 @@ describe('agent chat messages', () => {
       call,
       state: { _tag: 'QuestionAnswered', response, request }
     })
-    expect(toAgentMessages(answered).at(-1)).toMatchObject({
-      _tag: 'ToolResult',
+    const resultMessage = toAgentMessages(answered).at(-1)
+
+    if (resultMessage?._tag !== 'ToolResult') {
+      throw new Error('Expected question tool result message')
+    }
+
+    expect(resultMessage).toMatchObject({
       toolCallId: call.id,
-      content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.',
-      structuredContent: { type: 'question_response', outcome: 'answered' }
+      content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.'
+    })
+    expect(resultMessage.structuredContent).toStrictEqual({
+      type: 'question_response',
+      outcome: 'answered',
+      source: 'user',
+      answers: [{ questionId: 'choice', optionIds: ['a'] }]
+    })
+  })
+
+  it('preserves question request after repeated answer events', () => {
+    const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+    const request = QuestionRequest.make({
+      requestId: 'question:call_question',
+      toolCallId: call.id,
+      call,
+      questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
+    })
+    const response = QuestionResponse.make({
+      requestId: request.requestId,
+      toolCallId: call.id,
+      outcome: 'answered',
+      source: 'user'
+    })
+    const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
+    const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
+    const repeated = applyAgentEventToChatMessages(answered, QuestionAnswered.make({ response }))
+
+    expect(repeated[0]?.parts[0]).toEqual({
+      _tag: 'ToolCall',
+      id: `tool-call-${call.id}`,
+      call,
+      state: { _tag: 'QuestionAnswered', response, request }
     })
   })
 

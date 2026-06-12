@@ -70,7 +70,10 @@ import {
   UserInput,
   UserMessage,
   addAgentUsage,
+  hitlResponseEvent,
   inlineBase64Source,
+  plainHitlResponse,
+  questionResponseStructuredContent,
   textImageModelCapabilities,
   textImageDocumentModelCapabilities,
   textOnlyModelCapabilities,
@@ -115,7 +118,11 @@ describe('protocol wire schemas', () => {
           content: [
             TextPart.make({ text: 'describe' }),
             ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-            DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+            DocumentPart.make({
+              source: inlineBase64Source('ghi='),
+              mimeType: 'application/pdf',
+              filename: 'brief.pdf'
+            }),
             AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/wav' })
           ]
         }),
@@ -233,7 +240,11 @@ describe('protocol wire schemas', () => {
         AssistantMessageEvent.make({ message: assistant }),
         ToolApprovalRequested.make({ call, request: approvalRequest }),
         ToolApprovalGranted.make({ toolCallId: call.id, response: approvalResponse }),
-        ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy', response: denialResponse }),
+        ToolApprovalDenied.make({
+          toolCallId: call.id,
+          reason: 'policy',
+          response: denialResponse
+        }),
         QuestionRequested.make({ request: questionRequest }),
         QuestionAnswered.make({ response: questionResponse }),
         QuestionCancelled.make({ response: questionCancelled }),
@@ -275,6 +286,50 @@ describe('protocol wire schemas', () => {
       expect(yield* roundTripEvent(event)).toEqual(event)
     })
   )
+
+  it('creates plain HITL payloads and response events', () => {
+    const answered = QuestionResponse.make({
+      requestId: 'question:call_1',
+      toolCallId: 'call_1',
+      outcome: 'answered',
+      source: 'user',
+      answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+    })
+    const cancelled = QuestionResponse.make({
+      requestId: 'question:call_2',
+      toolCallId: 'call_2',
+      outcome: 'cancelled',
+      source: 'user',
+      reason: 'skip'
+    })
+    const denied = ToolApprovalResponse.make({
+      requestId: 'approval:call_3',
+      toolCallId: 'call_3',
+      decision: 'denied',
+      source: 'user',
+      reason: 'unsafe'
+    })
+
+    expect(plainHitlResponse(answered)).toEqual({
+      _tag: 'QuestionResponse',
+      requestId: 'question:call_1',
+      toolCallId: 'call_1',
+      outcome: 'answered',
+      source: 'user',
+      answers: [{ questionId: 'choice', optionIds: ['a'] }]
+    })
+    expect(questionResponseStructuredContent(answered)).toEqual({
+      type: 'question_response',
+      outcome: 'answered',
+      source: 'user',
+      answers: [{ questionId: 'choice', optionIds: ['a'] }]
+    })
+    expect(hitlResponseEvent(answered)._tag).toBe('QuestionAnswered')
+    expect(hitlResponseEvent(cancelled)._tag).toBe('QuestionCancelled')
+    expect(hitlResponseEvent(denied)).toEqual(
+      ToolApprovalDenied.make({ toolCallId: 'call_3', reason: 'unsafe', response: denied })
+    )
+  })
 
   it.effect('round-trips session websocket envelope variants', () =>
     Effect.gen(function* () {
@@ -351,11 +406,20 @@ describe('protocol wire schemas', () => {
       })
       const content = [
         TextPart.make({ text: 'hi' }),
-        DocumentPart.make({ source: inlineBase64Source('abc='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+        DocumentPart.make({
+          source: inlineBase64Source('abc='),
+          mimeType: 'application/pdf',
+          filename: 'brief.pdf'
+        }),
         AudioPart.make({ source: inlineBase64Source('abc'), mimeType: 'audio/mpeg' })
       ]
       const capabilities = AgentModelCapabilities.make({
-        input: AgentContentCapabilities.make({ text: true, image: true, document: true, audio: false }),
+        input: AgentContentCapabilities.make({
+          text: true,
+          image: true,
+          document: true,
+          audio: false
+        }),
         tools: true,
         reasoning: true
       })

@@ -1,9 +1,11 @@
 import {
   type AgentEvent,
   type AgentMessage,
+  type HitlRequest,
   type QuestionRequest,
   type QuestionResponse,
   type ToolCall,
+  type ToolApprovalRequest,
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
@@ -18,11 +20,23 @@ export type AgentToolRun =
       readonly input: string
     }
   | { readonly _tag: 'InputReady'; readonly call: ToolCall }
-  | { readonly _tag: 'ApprovalRequested'; readonly call: ToolCall }
+  | {
+      readonly _tag: 'ApprovalRequested'
+      readonly call: ToolCall
+      readonly request?: ToolApprovalRequest
+    }
   | { readonly _tag: 'Denied'; readonly toolCallId: string; readonly reason: string }
   | { readonly _tag: 'QuestionRequested'; readonly request: QuestionRequest }
-  | { readonly _tag: 'QuestionAnswered'; readonly response: QuestionResponse }
-  | { readonly _tag: 'QuestionCancelled'; readonly response: QuestionResponse }
+  | {
+      readonly _tag: 'QuestionAnswered'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    }
+  | {
+      readonly _tag: 'QuestionCancelled'
+      readonly response: QuestionResponse
+      readonly request?: QuestionRequest
+    }
   | { readonly _tag: 'Executing'; readonly call: ToolCall; readonly startedAtMs: number }
   | {
       readonly _tag: 'Completed'
@@ -100,14 +114,26 @@ const toolRunId = (run: AgentToolRun) => {
 
 export const isActiveToolRun = (run: AgentToolRun) =>
   run._tag !== 'Completed' &&
-    run._tag !== 'Errored' &&
-    run._tag !== 'Denied' &&
-    run._tag !== 'QuestionAnswered' &&
-    run._tag !== 'QuestionCancelled' &&
-    run._tag !== 'ProviderCompleted'
+  run._tag !== 'Errored' &&
+  run._tag !== 'Denied' &&
+  run._tag !== 'QuestionAnswered' &&
+  run._tag !== 'QuestionCancelled' &&
+  run._tag !== 'ProviderCompleted'
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => run._tag === 'Completed')
+
+export const toolRunsFromHitlRequests = (
+  requests: ReadonlyArray<HitlRequest>
+): ReadonlyArray<AgentToolRun> =>
+  requests.map(request => {
+    switch (request._tag) {
+      case 'QuestionRequest':
+        return { _tag: 'QuestionRequested', request }
+      case 'ToolApprovalRequest':
+        return { _tag: 'ApprovalRequested', call: request.call, request }
+    }
+  })
 
 const replaceToolRun = (
   runs: ReadonlyArray<AgentToolRun>,
@@ -143,6 +169,49 @@ const appendToolInputDelta = (
   runs.map(run =>
     run._tag === 'InputStreaming' && run.id === id ? { ...run, input: `${run.input}${delta}` } : run
   )
+
+const questionRequestForToolCall = (
+  runs: ReadonlyArray<AgentToolRun>,
+  toolCallId: string
+): QuestionRequest | undefined =>
+  runs.flatMap(run => {
+    if (toolRunId(run) !== toolCallId) {
+      return []
+    }
+
+    switch (run._tag) {
+      case 'QuestionRequested':
+        return [run.request]
+      case 'QuestionAnswered':
+      case 'QuestionCancelled':
+        return run.request === undefined ? [] : [run.request]
+      case 'InputStreaming':
+      case 'InputReady':
+      case 'ApprovalRequested':
+      case 'Denied':
+      case 'Executing':
+      case 'Completed':
+      case 'Errored':
+      case 'ProviderCompleted':
+        return []
+    }
+  })[0]
+
+const questionAnsweredRun = (
+  response: QuestionResponse,
+  request: QuestionRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? { _tag: 'QuestionAnswered', response }
+    : { _tag: 'QuestionAnswered', response, request }
+
+const questionCancelledRun = (
+  response: QuestionResponse,
+  request: QuestionRequest | undefined
+): AgentToolRun =>
+  request === undefined
+    ? { _tag: 'QuestionCancelled', response }
+    : { _tag: 'QuestionCancelled', response, request }
 
 export const appendAgentMessage = (
   messages: ReadonlyArray<AgentMessage>,
@@ -219,7 +288,11 @@ const applyAgentEventUnchecked = (
     case 'ToolApprovalRequested':
       return {
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, { _tag: 'ApprovalRequested', call: event.call })
+        toolRuns: replaceToolRun(state.toolRuns, {
+          _tag: 'ApprovalRequested',
+          call: event.call,
+          request: event.request
+        })
       }
     case 'ToolApprovalGranted':
       return state
@@ -243,18 +316,24 @@ const applyAgentEventUnchecked = (
     case 'QuestionAnswered':
       return {
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'QuestionAnswered',
-          response: event.response
-        })
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          questionAnsweredRun(
+            event.response,
+            questionRequestForToolCall(state.toolRuns, event.response.toolCallId)
+          )
+        )
       }
     case 'QuestionCancelled':
       return {
         ...state,
-        toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'QuestionCancelled',
-          response: event.response
-        })
+        toolRuns: replaceToolRun(
+          state.toolRuns,
+          questionCancelledRun(
+            event.response,
+            questionRequestForToolCall(state.toolRuns, event.response.toolCallId)
+          )
+        )
       }
     case 'ToolExecutionStarted':
       return {

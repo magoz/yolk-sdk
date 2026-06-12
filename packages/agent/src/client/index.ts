@@ -7,7 +7,8 @@ export {
   markAgentAborted,
   markAgentError,
   reduceAgentEvents,
-  submitAgentUserMessage
+  submitAgentUserMessage,
+  toolRunsFromHitlRequests
 } from './state.ts'
 export type {
   AgentClientState,
