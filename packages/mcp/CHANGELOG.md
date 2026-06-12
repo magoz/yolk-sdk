@@ -1,5 +1,17 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.13
+
+### Minor Changes
+
+- Add model-visible message envelopes with timestamps, author display names, and annotations.
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [3797339]
+  - @yolk-sdk/agent@0.1.0-canary.13
+
 ## 0.0.1-canary.12
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/skillset",
-  "version": "0.0.1-canary.12",
+  "version": "0.1.0-canary.13",
   "description": "Portable skill and slash-command parsing and catalog primitives for Yolk.",
   "license": "MIT",
   "type": "module",

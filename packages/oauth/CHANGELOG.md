@@ -1,5 +1,11 @@
 # @yolk-sdk/oauth
 
+## 0.1.0-canary.13
+
+### Minor Changes
+
+- Add model-visible message envelopes with timestamps, author display names, and annotations.
+
 ## 0.0.1-canary.12
 
 ## 0.0.1-canary.11
