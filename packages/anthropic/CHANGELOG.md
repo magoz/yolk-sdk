@@ -1,5 +1,13 @@
 # @yolk-sdk/anthropic
 
+## 0.0.1-canary.11
+
+### Patch Changes
+
+- Updated dependencies [0c7ed24]
+  - @yolk-sdk/agent@0.0.1-canary.11
+  - @yolk-sdk/oauth@0.0.1-canary.11
+
 ## 0.0.1-canary.10
 
 ### Patch Changes

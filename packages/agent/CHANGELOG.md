@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.0.1-canary.11
+
+### Patch Changes
+
+- 0c7ed24: Drain HTTP agent streams after terminal events.
+
 ## 0.0.1-canary.10
 
 ## 0.0.1-canary.9
