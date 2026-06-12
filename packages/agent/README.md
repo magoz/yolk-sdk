@@ -26,10 +26,15 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Imports
 
 ```ts
-import { makeSubagentRunId, UserMessage } from '@yolk-sdk/agent/protocol'
+import {
+  hitlResponseEvent,
+  makeSubagentRunId,
+  questionResponseStructuredContent,
+  UserMessage
+} from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
-import { initialAgentClientState } from '@yolk-sdk/agent/client'
+import { initialAgentClientState, toolRunsFromHitlRequests } from '@yolk-sdk/agent/client'
 import {
   makeNonRecursiveTaskToolModule,
   makeTaskToolResult,
@@ -87,6 +92,9 @@ HITL is protocol-level, not UI-level:
 - Resume by passing `hitlResponses` or using client helpers like `submitToolApprovalResponse`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
+- Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON.
+- Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
+- Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 
 HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream

@@ -67,6 +67,8 @@ Useful fields/actions:
 | `chat.canSubmitHitlResponse` | Guard approval/question response submission |
 | `chat.submitToolApprovalResponse` | Submit approve/deny response |
 | `chat.submitQuestionResponse` | Submit structured question answer/cancel |
+| `buildAgentChatItems` | Flat render projection for simple UIs |
+| `dedupeAgentChatToolRunItems` | Keep latest live/persisted tool run card per tool call id |
 | `chat.stop` | Interrupt active stream fiber |
 | `chat.deleteTurn` | Remove a user/assistant turn locally |
 | `chat.regenerateFrom` | Truncate and rerun from a message |
@@ -90,9 +92,10 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 - User messages preserve ordered protocol content, including inline or referenced images and documents, for replay.
 - Tool parts expose approval requested/denied, question requested/answered/cancelled, execution, completion, and error states.
 - Question answer states preserve request context when available so renderers can show selected option labels instead of only `answered`.
+- HITL response submit optimistically applies the protocol response event to local render state before the resumed stream arrives.
 - Same-turn sibling tool calls stay grouped while a tool batch is open; later calls after terminal states start a new assistant message.
 - Tool run item timing is modeled as no-time, start-only, or known start/end via `ToolRunTiming`.
-- `buildAgentChatItems` is optional convenience projection for simple flat UIs.
+- `buildAgentChatItems` de-dupes duplicate live/persisted tool cards by transcript-global tool call id.
 - Provider reasoning is displayed only from protocol reasoning events; never fabricate reasoning.
 
 ## Boundaries

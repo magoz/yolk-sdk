@@ -37,10 +37,11 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ```txt
 examples/next, cloudflare/agent, e2e -> @yolk-sdk/* public subpaths
 @yolk-sdk/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol
-@yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools only for agent adapter
-@yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for ToolDef/ToolResult
+@yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
+@yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/tools only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/openai, @yolk-sdk/anthropic -> @yolk-sdk/oauth + @yolk-sdk/agent/{loop,protocol}
+@yolk-sdk/voice-runtime -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent -> no @yolk-sdk/knowledge, @yolk-sdk/react, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
