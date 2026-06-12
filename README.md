@@ -70,7 +70,7 @@ Current agent surfaces:
 - `/agent/workflow`: Vercel Workflow durable run stream
 - streaming NDJSON token events
 - in-band `AgentError` events for stream failures
-- stop/cancel aborts active response streams
+- stop/cancel aborts active response streams; terminal protocol events drain HTTP bodies to EOF
 - `/api/agent` runs stateless text exchanges from submitted messages
 
 Text web tools:
@@ -82,8 +82,8 @@ Text model defaults:
 
 ```txt
 default provider: OpenAI Codex OAuth
-default model: gpt-5.4
-available text models: gpt-5.4, claude-sonnet-4-6
+default model: gpt-5.5
+available text models: gpt-5.5, claude-sonnet-4-6
 ```
 
 Optional prompt override:

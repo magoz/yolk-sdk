@@ -7,11 +7,14 @@ import {
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AgentEnd,
   AgentError,
   AgentStart,
   LLMTextDelta,
   SessionSnapshot,
+  ToolApprovalRequest,
+  ToolCall,
   UserMessage,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
@@ -180,6 +183,66 @@ describe('collectAgentEvents', () => {
     await events.return()
 
     expect(cancelled).toBe(true)
+  })
+
+  it('drains the response body after a protocol terminal event', async () => {
+    let cancelled = false
+    let closed = false
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    const requests: Array<CapturedRequest> = []
+    const awaitingInput = AgentAwaitingInput.make({
+      requests: [
+        ToolApprovalRequest.make({
+          requestId: 'approval:call_1',
+          toolCallId: 'call_1',
+          call: ToolCall.make({ id: 'call_1', name: 'write_file', params: {} })
+        })
+      ],
+      messages: [],
+      turns: 1,
+      usage: zeroAgentUsage
+    })
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start: streamController => {
+          controller = streamController
+          streamController.enqueue(new TextEncoder().encode(`${JSON.stringify(AgentStart.make({}))}\n`))
+          streamController.enqueue(new TextEncoder().encode(`${JSON.stringify(awaitingInput)}\n`))
+        },
+        cancel: () => {
+          cancelled = true
+        }
+      })
+    )
+    const closeResponseBody = () => {
+      if (controller === undefined || closed) return
+
+      closed = true
+      controller.close()
+    }
+    const eventsPromise = collectAgentEvents({
+      sessionId: 'session_1',
+      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+      httpClientLayer: makeHttpClientLayer(response, requests)
+    })
+
+    try {
+      const events = await Promise.race([
+        eventsPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out waiting for terminal event')), 100)
+        )
+      ])
+
+      expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentAwaitingInput'])
+      expect(cancelled).toBe(false)
+      expect(closed).toBe(false)
+    } finally {
+      closeResponseBody()
+      await eventsPromise.catch(() => undefined)
+    }
+
+    expect(cancelled).toBe(false)
   })
 
   it('streams Cloudflare WebSocket events after sending user input with snapshot revision', async () => {

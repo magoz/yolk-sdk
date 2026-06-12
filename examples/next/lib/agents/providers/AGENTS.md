@@ -7,14 +7,14 @@ that exercise package-backed providers through app runtime wiring.
 
 | Package subpath | Role |
 | ---- | ---- |
-| `@yolk-sdk/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.4`) |
+| `@yolk-sdk/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.5`) |
 | `@yolk-sdk/anthropic/claude-provider` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
 | `@yolk-sdk/openai/provider` | Dormant API-key Chat Completions scaffold |
 
 ## Model policy
 
 - Text model/reasoning/capabilities live in `examples/next/lib/agents/text-agent-config.ts`.
-- Active text providers: Codex OAuth (`gpt-5.4`) and Anthropic Claude OAuth (`claude-sonnet-4-6`).
+- Active text providers: Codex OAuth (`gpt-5.5`) and Anthropic Claude OAuth (`claude-sonnet-4-6`).
 - Provider choice is app boundary policy; package providers implement `LLMProvider` only.
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex requests set `reasoning.summary = 'auto'`; summaries are optional provider output.

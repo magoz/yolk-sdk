@@ -1,4 +1,4 @@
-import { Cause, Effect, Queue, Stream, type Layer } from 'effect'
+import { Cause, Channel, Effect, Exit, Pull, Queue, Ref, Scope, Stream, type Layer } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -320,20 +320,101 @@ const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
     )
   }).pipe(Effect.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
-const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) =>
+const isTerminalAgentEvent = (event: AgentEventType) =>
+  event._tag === 'AgentEnd' ||
+  event._tag === 'AgentError' ||
+  event._tag === 'AgentAwaitingInput'
+
+const responseToLineStream = (response: HttpClientResponse.HttpClientResponse) =>
   response.stream.pipe(
     Stream.mapError(toHttpClientTransportError('Could not read agent response body')),
     Stream.decodeText,
     Stream.splitLines,
     Stream.map(line => line.trim()),
-    Stream.filter(line => line.length > 0),
-    Stream.mapEffect(parseAgentEventLine),
-    Stream.takeUntil(
-      event =>
-        event._tag === 'AgentEnd' ||
-        event._tag === 'AgentError' ||
-        event._tag === 'AgentAwaitingInput'
-    )
+    Stream.filter(line => line.length > 0)
+  )
+
+const closeScope = (scope: Scope.Scope) => Scope.close(scope, Exit.succeed(undefined))
+
+// Protocol-terminal events finish the consumer stream, but HTTP bodies must still
+// drain to EOF so server runtimes do not observe client-side response aborts.
+const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) =>
+  Stream.callback<AgentEventType, AgentTransportError>(queue =>
+    Effect.gen(function* () {
+      const callbackScope = yield* Scope.Scope
+      // Own the response stream in a scope that can outlive the consumer after a
+      // terminal event; before terminal, consumer cancellation closes it.
+      const responseScope = yield* Scope.make()
+      const responseScopeClosed = yield* Ref.make(false)
+      const terminalReached = yield* Ref.make(false)
+      const pull = yield* Channel.toPullScoped(
+        Stream.toChannel(responseToLineStream(response)),
+        responseScope
+      )
+      const closeResponseScope = Effect.gen(function* () {
+        const closed = yield* Ref.get(responseScopeClosed)
+
+        if (!closed) {
+          yield* Ref.set(responseScopeClosed, true)
+          yield* closeScope(responseScope)
+        }
+      })
+      const endQueue = Queue.end(queue).pipe(Effect.asVoid)
+      const failQueue = (cause: Cause.Cause<AgentTransportError>) =>
+        Queue.failCause(queue, cause).pipe(Effect.andThen(closeResponseScope), Effect.asVoid)
+      const drainResponse = (): Effect.Effect<void, AgentTransportError> =>
+        Pull.matchEffect(pull, {
+          onSuccess: () => drainResponse(),
+          onFailure: cause => Effect.failCause(cause),
+          onDone: () => Effect.void
+        })
+      const startTerminalDrain = Effect.gen(function* () {
+        yield* Ref.set(terminalReached, true)
+        yield* endQueue
+        yield* drainResponse().pipe(
+          Effect.catch(() => Effect.void),
+          Effect.ensuring(closeResponseScope),
+          Effect.forkDetach({ startImmediately: true }),
+          Effect.asVoid
+        )
+      })
+      const emitLines = (lines: ReadonlyArray<string>): Effect.Effect<void, AgentTransportError> =>
+        Effect.gen(function* () {
+          for (const line of lines) {
+            const event = yield* parseAgentEventLine(line)
+
+            yield* Queue.offer(queue, event)
+
+            if (isTerminalAgentEvent(event)) {
+              yield* startTerminalDrain
+              return
+            }
+          }
+
+          yield* run()
+        })
+      const run = (): Effect.Effect<void, AgentTransportError> =>
+        Pull.matchEffect(pull, {
+          onSuccess: emitLines,
+          onFailure: failQueue,
+          onDone: () => endQueue.pipe(Effect.andThen(closeResponseScope))
+        })
+
+      yield* Scope.addFinalizer(
+        callbackScope,
+        Effect.gen(function* () {
+          const terminal = yield* Ref.get(terminalReached)
+
+          if (!terminal) {
+            yield* closeResponseScope
+          }
+        })
+      )
+
+      yield* run().pipe(
+        Effect.catch(error => Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid))
+      )
+    })
   )
 
 const abortSignalError = (signal: AbortSignal) =>

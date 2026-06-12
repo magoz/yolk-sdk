@@ -1,6 +1,6 @@
-# Agent Auth Domain
+# Agent Domain
 
-Domain functions and server actions for provider subscription OAuth state.
+Domain functions and server actions for provider OAuth, skills/commands, and connectors.
 
 ## Storage
 
@@ -8,6 +8,8 @@ Domain functions and server actions for provider subscription OAuth state.
 - Provider ids: `openai-codex`, `anthropic-claude`.
 - OpenAI `accountId` stores ChatGPT account id when available.
 - Cloudflare token bridge returns access/account/expiry only; refresh tokens stay in Next/Postgres.
+- Telegram connector credentials live in `agentConnector`, not Better Auth accounts.
+- Agent skills/commands live in `agentSkill`/`agentCommand`; `*WithCommand` helpers keep paired writes transactional.
 
 ## Token helpers
 
@@ -22,6 +24,7 @@ Domain functions and server actions for provider subscription OAuth state.
 - Redirect unauthenticated users via `NextEffect.redirect('/login')`.
 - Revalidate `/agent` only after successful connect/disconnect mutation.
 - Return explicit ADTs for UI state; do not leak provider error details.
+- Skills, commands, and Telegram connector mutations share the same action/result discipline.
 
 ## Anthropic PKCE
 

@@ -10,6 +10,7 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - Tool run lifecycle state.
 - HITL response submission helpers for approvals and questions.
 - Typed transport errors.
+- Terminal events (`AgentEnd`, `AgentError`, `AgentAwaitingInput`) end consumers while HTTP bodies drain to EOF.
 
 ## Use it when
 
@@ -21,3 +22,4 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - No React.
 - No UI components.
 - No auth chrome, provider defaults, or app routes.
+- Pre-terminal cancellation aborts active response body readers; terminal draining does not.

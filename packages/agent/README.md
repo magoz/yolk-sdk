@@ -20,7 +20,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/loop`         | Stateless LLM/tool loop                                        |
 | `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers                   |
 | `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
-| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport and client state helpers                 |
+| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, and client state helpers   |
 | `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
 
 ## Imports
@@ -88,6 +88,10 @@ HITL is protocol-level, not UI-level:
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
+
+HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream
+end for consumers. After a terminal event the response body drains to EOF; cancellation before a
+terminal event still aborts the active body reader.
 
 ## Task subagents
 

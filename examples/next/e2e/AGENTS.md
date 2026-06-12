@@ -127,10 +127,14 @@ examples/next/e2e/
     create-authed-context.ts      — BrowserContext with session cookie for multi-user tests
     ensure-test-env.ts            — Effect.die guard for NODE_ENV=test
     create-test-user.ts           — inserts user with random email
+    auth-cookie.ts                — better-auth cookie signing helpers
     setup.ts                      — Effect setup helper
+  assets/                         — checked-in audio fixtures
   ui/
     login.spec.ts                 — Public smoke tests
+    knowledge.spec.ts             — Authenticated knowledge management smoke
     agent-image.spec.ts           — Authenticated image upload + capability UI; stubs /api/agent stream
+    agent-workflow-task.spec.ts   — Workflow task/subagent UI smoke
     agent-voice.spec.ts           — Deterministic mocked WebRTC voice readiness smoke
     agent-voice-live.spec.ts      — Live fake-mic Realtime transcription smoke; skips without OPENAI_API_KEY
     agent-cloudflare.spec.ts      — Direct Worker WS reconnect/persistence/conflict/fallback smoke; skips without CLOUDFLARE_AGENT_URL

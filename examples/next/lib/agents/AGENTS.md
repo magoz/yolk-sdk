@@ -12,7 +12,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Cloudflare direct WS uses append-backed runtime. Missing env/bootstrap is explicit; no `/api/agent` fallback.
 - Route/runtime adapters choose package provider layers + tool modules explicitly; do not hide model/tool policy in globals.
 - Route streams NDJSON token events to browser, including `UsageUpdate`, `AgentRetry`, compaction lifecycle, and in-band `AgentError` failures.
-- Browser/client cancellation aborts active response body readers.
+- Client terminal events end consumers while HTTP bodies drain; pre-terminal cancellation still aborts active response readers.
 
 ## Map
 

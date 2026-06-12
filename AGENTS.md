@@ -100,7 +100,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | `executor` | `.repos/executor` | Connector/source/tool/plugin architecture reference |
 | `t3code` | `.repos/t3code` | Agent chat/product UI reference |
 | `mcp-sdk` | `.repos/mcp-sdk` | MCP protocol reference |
-| `pi-mono`, `kody`, `flue`, `clanka` | `.repos/*` | Architecture/tooling inspiration |
+| `pi`, `kody`, `flue`, `clanka` | `.repos/*` | Architecture/tooling inspiration |
 
 Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-repos` to fetch. Keep `.repos/**` out of workspace, lint, typecheck, test, and build.
 
@@ -113,18 +113,3 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 - LSP may show stale Effect v3 errors; trust `pnpm tsc`.
 - Root Vitest may discover package tests; `pnpm test:run` also runs package tests.
 - `CLAUDE.md` points here; this is canonical root knowledge.
-
-## SUBDIRECTORY DOCS
-
-- `patterns/README.md` — repo-wide SDK/package patterns
-- `examples/AGENTS.md` — runnable examples policy
-- `examples/next/AGENTS.md` — Next example policy
-- `examples/next/patterns/README.md` — Next-only patterns
-- `examples/next/app/AGENTS.md` — App Router rules
-- `examples/next/lib/core/AGENTS.md` — actions/domain/errors
-- `examples/next/lib/services/AGENTS.md` — Effect service architecture
-- `examples/next/lib/agents/AGENTS.md` — app agent provider selection/tool wiring
-- `packages/AGENTS.md` — public SDK package boundaries
-- `cloudflare/agent/AGENTS.md` — Cloudflare app rules
-- `examples/next/e2e/AGENTS.md` — Playwright rules
-- `scripts/AGENTS.md` — script boundary rules

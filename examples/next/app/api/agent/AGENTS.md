@@ -24,6 +24,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - `workflow/route.ts` calls Vercel `start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
 - `workflow/[runId]/route.ts` uses `getRun(runId)` for replay/cancellation and `resumeHook` for one-response HITL resume.
+- HITL resume captures `getTailIndex()` via `startIndex: -1` before `resumeHook`, then returns replay from that tail index.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow route handlers may use `Effect.runPromise` + raw `Response` because `workflow/api` returns Web-native run streams.
 

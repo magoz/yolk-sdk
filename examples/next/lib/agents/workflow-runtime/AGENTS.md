@@ -15,6 +15,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows-runtime/work
 - App wrapper assigns deterministic event ids: `workflow:<turn>:<sequence>`.
 - Carry `eventSequence` through model/tool step results so retries/replay can de-dupe.
 - Client/react reducers de-dupe by optional `eventId`; events without ids still replay.
+- `AgentAwaitingInput` pauses protocol while the Workflow writer stays open until resume/close/error; clients must not abort the HTTP body at HITL pause.
 
 ## Step split
 
