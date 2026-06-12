@@ -90,6 +90,7 @@ The transport must yield `AgentEvent`s and accept a protocol transcript in `requ
 - `AgentChatMessage` groups parts by role/turn.
 - `AgentChatPart` covers text, reasoning, tool calls/results, and errors.
 - User messages preserve ordered protocol content, including inline or referenced images and documents, for replay.
+- Message envelopes (`createdAtMs`, `author.displayName`, `annotations`) are preserved for protocol replay even if renderers ignore them.
 - Tool parts expose approval requested/denied, question requested/answered/cancelled, execution, completion, and error states.
 - Question answer states preserve request context when available so renderers can show selected option labels instead of only `answered`.
 - HITL response submit optimistically applies the protocol response event to local render state before the resumed stream arrives.

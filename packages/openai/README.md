@@ -68,6 +68,7 @@ const events = run({
 The Codex provider:
 
 - Lowers Yolk `LLMRequest` messages/tools/images/documents to Codex Responses input.
+- Renders message envelope metadata/annotations from `@yolk-sdk/agent/protocol` as contextual model input.
 - Maps protocol `DocumentPart` to Responses `input_file`; the API-key chat provider rejects documents explicitly.
 - Handles Codex JSON and SSE response bodies, including non-`event-stream` SSE bodies.
 - Emits Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.

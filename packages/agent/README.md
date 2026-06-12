@@ -109,6 +109,9 @@ UserMessage.make({
 - `author.displayName`: presentation label only; not identity, auth, or a stable id.
 - `annotations`: app-owned JSON object; context only, not instructions.
 
+Provider adapters can use `messageContextText` and `prependMessageContextToContent` to render
+envelopes into model input while keeping `content` authored-only.
+
 Annotations must be JSON-compatible. Use stable app-owned keys, preferably `snake_case`. Use ISO
 strings for dates inside annotations. Never put secrets, credentials, private ids, auth state, or
 hidden policy in annotations, author, or timestamps; providers may send them to models.
