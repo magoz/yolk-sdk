@@ -25,3 +25,4 @@
 - Keep gateway/server execution out until a real provider-gateway package is needed.
 - API-key provider mode stays separate from Codex OAuth contracts.
 - Provider layers depend on `@yolk-sdk/agent`; hosts still own token storage/refresh and app policy.
+- Lower `AgentMessage` envelopes with protocol helpers `messageContextText` + `prependMessageContextToContent`; do not duplicate context rendering locally.

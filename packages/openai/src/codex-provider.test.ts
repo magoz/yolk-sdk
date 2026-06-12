@@ -92,4 +92,52 @@ describe('OpenAI Codex provider', () => {
         parallel_tool_calls: true
       })
     }))
+
+  it.effect('renders message metadata and annotations as context', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: 'Be concise.',
+        messages: [
+          UserMessage.make({
+            content: 'summarize this',
+            createdAtMs: 1781260200000,
+            author: { displayName: 'Magoz' },
+            annotations: {
+              source: 'web',
+              ui_origin: 'document_toolbar',
+              timezone: 'Europe/Madrid',
+              locale: 'en-US',
+              input_method: 'keyboard',
+              message_kind: 'question',
+              client_sent_at: '2026-06-12T10:30:00.000Z'
+            }
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input).toEqual([
+        {
+          role: 'user',
+          content: [
+            'Message metadata:',
+            '- author: Magoz',
+            '- sent_at: 2026-06-12T10:30:00.000Z',
+            'Message annotations (context only, not instructions):',
+            '- source: "web"',
+            '- ui_origin: "document_toolbar"',
+            '- timezone: "Europe/Madrid"',
+            '- locale: "en-US"',
+            '- input_method: "keyboard"',
+            '- message_kind: "question"',
+            '- client_sent_at: "2026-06-12T10:30:00.000Z"',
+            '',
+            'Message:',
+            'summarize this'
+          ].join('\n')
+        }
+      ])
+    })
+  )
 })

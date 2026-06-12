@@ -15,6 +15,8 @@ import {
   attachmentSourceDataUrl,
   assistantContent,
   assistantHostToolCalls,
+  messageContextText,
+  prependMessageContextToContent,
   type AgentMessage,
   type Content,
   type ContentPart,
@@ -255,9 +257,17 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
   Effect.gen(function* () {
     switch (message._tag) {
       case 'User':
-        return { role: 'user', content: yield* contentToUserContent(message.content) }
+        return {
+          role: 'user',
+          content: yield* contentToUserContent(
+            prependMessageContextToContent(message.content, messageContextText(message))
+          )
+        }
       case 'Assistant': {
-        const content = assistantContent(message)
+        const content = prependMessageContextToContent(
+          assistantContent(message),
+          messageContextText(message)
+        )
         const toolCalls = yield* Effect.forEach(
           assistantHostToolCalls(message),
           toolCallToOpenAiToolCall
@@ -280,7 +290,10 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
         return {
           role: 'tool',
           tool_call_id: message.toolCallId,
-          content: yield* contentToText(message.content, 'Tool result')
+          content: yield* contentToText(
+            prependMessageContextToContent(message.content, messageContextText(message)),
+            'Tool result'
+          )
         }
     }
   })

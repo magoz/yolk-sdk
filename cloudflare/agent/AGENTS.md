@@ -42,16 +42,14 @@ Do not build these here yet unless explicitly requested:
 - full auth bridge (v1 only has app-server bootstrap + bridge secret)
 - production Cloudflare topology
 
-## Package Holes To Close First
+## Adapter Risks To Keep Visible
 
-- Cancellation/resume beyond reconnect interruption.
+- Append-log replay and revision conflicts.
+- Bootstrap token bridge and refresh expiry handling.
+- Direct WS reconnect/conflict behavior.
+- Proxy-first provider streaming and dormant direct Codex WS fallback.
 - Product permission policy beyond package HITL approval hooks.
-- Context provider API.
-- Compaction hook shape.
-- Protocol event completeness and stability.
 - Broader client transport abstraction for SSE/fanout/replay beyond current NDJSON + Cloudflare WS helpers.
-- Tests for event ordering, persistence, retries, failures.
-- Package docs and public API cleanup.
 
 ## Recommended Sequence
 

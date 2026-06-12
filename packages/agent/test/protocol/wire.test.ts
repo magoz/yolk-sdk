@@ -115,6 +115,17 @@ describe('protocol wire schemas', () => {
       })
       const messages: ReadonlyArray<AgentMessageType> = [
         UserMessage.make({
+          createdAtMs: 1781260200000,
+          author: { displayName: 'Magoz' },
+          annotations: {
+            source: 'web',
+            ui_origin: 'document_toolbar',
+            timezone: 'Europe/Madrid',
+            locale: 'en-US',
+            input_method: 'keyboard',
+            message_kind: 'question',
+            client_sent_at: '2026-06-12T10:30:00.000Z'
+          },
           content: [
             TextPart.make({ text: 'describe' }),
             ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
@@ -127,6 +138,7 @@ describe('protocol wire schemas', () => {
           ]
         }),
         AssistantAgentMessage.make({
+          createdAtMs: 1781260201000,
           parts: [
             AssistantReasoningPart.make({ text: 'summary' }),
             AssistantTextPart.make({ content: 'ok' }),
@@ -142,7 +154,12 @@ describe('protocol wire schemas', () => {
             })
           ]
         }),
-        ToolResultMessage.make({ toolCallId: call.id, content: 'result', isError: true })
+        ToolResultMessage.make({
+          toolCallId: call.id,
+          content: 'result',
+          isError: true,
+          annotations: { source: 'host_tool' }
+        })
       ]
 
       const decoded = yield* Effect.forEach(messages, roundTripMessage)

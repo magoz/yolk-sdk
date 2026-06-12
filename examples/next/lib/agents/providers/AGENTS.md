@@ -26,6 +26,7 @@ that exercise package-backed providers through app runtime wiring.
 - Use Effect `HttpClient`; tests inject fake clients.
 - Normalize all usage into protocol `AgentUsage`.
 - Mark retryability at provider boundary; loop owns retry policy.
+- Message envelope rendering belongs in package protocol helpers; app regressions may assert package providers preserve `createdAtMs`, `author.displayName`, and `annotations`.
 
 ## Codex quirks
 

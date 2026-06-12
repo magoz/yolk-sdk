@@ -14,6 +14,8 @@ import {
   attachmentSourceBase64,
   assistantContent,
   assistantHostToolCalls,
+  messageContextText,
+  prependMessageContextToContent,
   type AgentMessage,
   type Content,
   type ContentPart,
@@ -307,9 +309,17 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
   Effect.gen(function* () {
     switch (message._tag) {
       case 'User':
-        return { role: 'user', content: yield* contentToUserContent(message.content) }
+        return {
+          role: 'user',
+          content: yield* contentToUserContent(
+            prependMessageContextToContent(message.content, messageContextText(message))
+          )
+        }
       case 'Assistant': {
-        const text = yield* contentToText(assistantContent(message), 'Assistant')
+        const text = yield* contentToText(
+          prependMessageContextToContent(assistantContent(message), messageContextText(message)),
+          'Assistant'
+        )
         const textBlocks: ReadonlyArray<AnthropicTextBlock> =
           text.length === 0 ? [] : [{ type: 'text', text }]
         const toolBlocks = assistantHostToolCalls(message).map(toolCallToAnthropicBlock)
@@ -322,7 +332,10 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
             {
               type: 'tool_result',
               tool_use_id: message.toolCallId,
-              content: yield* contentToText(message.content, 'Tool result'),
+              content: yield* contentToText(
+                prependMessageContextToContent(message.content, messageContextText(message)),
+                'Tool result'
+              ),
               is_error: message.isError
             }
           ]

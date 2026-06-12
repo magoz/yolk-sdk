@@ -48,6 +48,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.
 - Attachments become protocol media parts with `InlineBase64` sources at the UI boundary; `toAgentMessages()` preserves multipart user content.
+- Preserve protocol message envelopes (`createdAtMs`, `author.displayName`, `annotations`) through chat state and `toAgentMessages()` replay even if UI ignores them.
 - Keep projection pure/deterministic; use Effect `Array`/`Option` helpers over mutable/null side channels.
 
 ## UX Rules
@@ -71,7 +72,7 @@ App-local conversation UI over headless `@yolk-sdk/react` chat state.
 - Realtime transcription selection belongs in console/status, not composer/chat.
 - Keep touch targets ≥44px and dynamic status accessible (`role="status"`, `aria-live="polite"`).
 
-## Attachment TODOs
+## Attachment Rules
 
 - Server route validates attachment count, MIME, base64 shape, per-attachment size, and total payload before provider calls; UI compression is convenience only.
 - Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode media support in UI.

@@ -57,6 +57,7 @@
 - Subagent lifecycle events are protocol/activity telemetry; headless chat projections should tolerate them without duplicating tool parts.
 - Preserve ordered assistant parts when converting render messages back to protocol messages.
 - Preserve ordered multimodal user content (text/images/documents) when projecting/replaying messages.
+- Preserve `createdAtMs`, `author.displayName`, and `annotations` when projecting protocol messages and replaying via `toAgentMessages`.
 - Preserve timing when tool result/completion events arrive in different order.
 - Tool timing uses protocol `createdAtMs` first, injected `nowMs` fallback; item timing is no-time, start-only, or known start+end.
 - `nowMs` is injected at hook/action boundary; reducers/projections do not read wall clock.

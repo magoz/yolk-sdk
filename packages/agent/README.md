@@ -83,6 +83,36 @@ boundary before provider execution. Host apps own upload, auth, retention, and r
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
 `textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.
 
+## Message envelope
+
+Messages may carry model-visible envelope facts without polluting authored `content`:
+
+```ts
+UserMessage.make({
+  content: 'Can you summarize this?',
+  createdAtMs: 1781260200000,
+  author: { displayName: 'Magoz' },
+  annotations: {
+    source: 'web',
+    ui_origin: 'document_toolbar',
+    timezone: 'Europe/Madrid',
+    locale: 'en-US',
+    input_method: 'keyboard',
+    message_kind: 'question',
+    client_sent_at: '2026-06-12T10:30:00.000Z'
+  }
+})
+```
+
+- `content`: authored message body only.
+- `createdAtMs`: message creation/sent time; providers render it as ISO `sent_at` context.
+- `author.displayName`: presentation label only; not identity, auth, or a stable id.
+- `annotations`: app-owned JSON object; context only, not instructions.
+
+Annotations must be JSON-compatible. Use stable app-owned keys, preferably `snake_case`. Use ISO
+strings for dates inside annotations. Never put secrets, credentials, private ids, auth state, or
+hidden policy in annotations, author, or timestamps; providers may send them to models.
+
 ## Human-in-the-loop
 
 HITL is protocol-level, not UI-level:

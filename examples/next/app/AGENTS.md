@@ -11,7 +11,6 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | `agent/`      | Text+image/PDF + voice agent playground UI |
 | `storage/`    | Storage source ingestion/list UI         |
 | `knowledge/`  | Agent-native knowledge record management |
-| `.well-known/workflow/v1/` | Generated Vercel Workflow artifacts; do not hand-edit |
 | `api/`        | HTTP boundaries; see `examples/next/app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
 

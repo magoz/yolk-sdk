@@ -26,3 +26,4 @@
 - Manual Claude OAuth uses PKCE; app-owned server actions store verifier outside `'use server'` modules.
 - API-key mode may be added later without changing OAuth contracts.
 - Provider layers depend on `@yolk-sdk/agent`; hosts still own token storage/refresh and app policy.
+- Lower `AgentMessage` envelopes with protocol helpers `messageContextText` + `prependMessageContextToContent`; do not duplicate context rendering locally.

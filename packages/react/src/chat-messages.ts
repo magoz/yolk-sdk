@@ -22,7 +22,10 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AssistantPart,
-  type Content
+  type Content,
+  type MessageAnnotations,
+  type MessageAuthor,
+  type MessageEnvelope
 } from '@yolk-sdk/agent/protocol'
 
 export type ChatPartState = 'streaming' | 'done'
@@ -93,6 +96,9 @@ export type AgentChatMessage = {
   readonly turnId: string
   readonly sequence: number
   readonly role: 'user' | 'assistant' | 'system'
+  readonly createdAtMs?: number
+  readonly author?: MessageAuthor
+  readonly annotations?: MessageAnnotations
   readonly parts: ReadonlyArray<AgentChatPart>
 }
 
@@ -135,11 +141,18 @@ const lastTurnId = (messages: ReadonlyArray<AgentChatMessage>) => messages.at(-1
 const nextMessageSequence = (messages: ReadonlyArray<AgentChatMessage>) =>
   messages.reduce((max, message) => Math.max(max, message.sequence), -1) + 1
 
+const chatMessageEnvelope = (message: MessageEnvelope) => ({
+  ...(message.createdAtMs === undefined ? {} : { createdAtMs: message.createdAtMs }),
+  ...(message.author === undefined ? {} : { author: message.author }),
+  ...(message.annotations === undefined ? {} : { annotations: message.annotations })
+})
+
 const userChatMessage = (message: UserMessage, sequence: number): AgentChatMessage => ({
   id: messageId(sequence, 'user'),
   turnId: turnId(sequence),
   sequence,
   role: 'user',
+  ...chatMessageEnvelope(message),
   parts: [
     {
       _tag: 'Text',
@@ -417,6 +430,7 @@ const assistantChatMessage = (
   turnId: currentTurnId,
   sequence,
   role: 'assistant',
+  ...chatMessageEnvelope(message),
   parts
 })
 
@@ -1378,14 +1392,17 @@ const assistantProtocolPartsFromChatParts = (
     }
   })
 
-const assistantMessageFromParts = (parts: ReadonlyArray<AgentChatPart>) => {
+const assistantMessageFromParts = (message: AgentChatMessage) => {
+  const parts = message.parts
   const assistantParts = assistantProtocolPartsFromChatParts(parts)
 
   if (assistantParts.length === 0) {
     return Option.none<AgentMessage>()
   }
 
-  return Option.some(AssistantAgentMessage.make({ parts: assistantParts }))
+  return Option.some(
+    AssistantAgentMessage.make({ ...chatMessageEnvelope(message), parts: assistantParts })
+  )
 }
 
 const protocolMessagesFromChatMessage = (
@@ -1395,11 +1412,13 @@ const protocolMessagesFromChatMessage = (
     case 'user': {
       const content = collectContent(message.parts)
 
-      return isContentEmpty(content) ? [] : [UserMessage.make({ content })]
+      return isContentEmpty(content)
+        ? []
+        : [UserMessage.make({ ...chatMessageEnvelope(message), content })]
     }
     case 'assistant':
       return [
-        ...Arr.getSomes([assistantMessageFromParts(message.parts)]),
+        ...Arr.getSomes([assistantMessageFromParts(message)]),
         ...collectToolResultMessages(message.parts)
       ]
     case 'system':

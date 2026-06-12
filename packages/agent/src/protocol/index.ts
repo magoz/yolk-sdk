@@ -78,13 +78,18 @@ export {
   AssistantReasoningPart,
   AssistantTextPart,
   HostToolCallPart,
+  MessageAnnotations,
+  MessageAuthor,
+  type MessageEnvelope,
   ProviderToolCallPart,
   ProviderToolResultPart,
   ToolResultMessage,
   UserMessage,
   assistantContent,
   assistantHostToolCalls,
-  assistantReasoningText
+  assistantReasoningText,
+  messageContextText,
+  prependMessageContextToContent
 } from './message.ts'
 export { AgentReasoningEffort } from './reasoning.ts'
 export {

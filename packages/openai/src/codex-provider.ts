@@ -15,6 +15,8 @@ import {
   assistantContent,
   assistantHostToolCalls,
   contentParts,
+  messageContextText,
+  prependMessageContextToContent,
   type AgentMessage,
   type AgentReasoningEffort,
   type Content,
@@ -313,9 +315,19 @@ const messageToCodexInput = (
   Effect.gen(function* () {
     switch (message._tag) {
       case 'User':
-        return [{ role: 'user', content: yield* contentToUserInput(message.content) }]
+        return [
+          {
+            role: 'user',
+            content: yield* contentToUserInput(
+              prependMessageContextToContent(message.content, messageContextText(message))
+            )
+          }
+        ]
       case 'Assistant': {
-        const content = yield* contentToText(assistantContent(message), 'Assistant')
+        const content = yield* contentToText(
+          prependMessageContextToContent(assistantContent(message), messageContextText(message)),
+          'Assistant'
+        )
         const toolCallInputs = yield* Effect.forEach(
           assistantHostToolCalls(message),
           toolCallToCodexInput
@@ -334,7 +346,10 @@ const messageToCodexInput = (
           {
             type: 'function_call_output',
             call_id: message.toolCallId,
-            output: yield* contentToText(message.content, 'Tool result')
+            output: yield* contentToText(
+              prependMessageContextToContent(message.content, messageContextText(message)),
+              'Tool result'
+            )
           }
         ]
     }

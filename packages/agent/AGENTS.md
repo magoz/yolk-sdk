@@ -30,11 +30,13 @@
 - Tool approval is host-enforced policy on normal tools, not a model-callable permission tool; v1 approvals are per-call, no persistent allow-always rules.
 - Use `EmptyToolParams` for no-arg `makeTool` tools instead of `Schema.Struct({})` when author intent is no parameters.
 - v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
-- Protocol owns `SubagentStarted`/`SubagentCompleted`, `makeSubagentRunId`, and optional `createdAtMs`; loop emits lifecycle events around `task` calls while preserving generic tool lifecycle as the source of truth.
+- Protocol owns `SubagentStarted`/`SubagentCompleted` and `makeSubagentRunId`; loop emits lifecycle events around `task` calls while preserving generic tool lifecycle as the source of truth.
 
 ## Protocol/loop rules
 
 - `AgentReasoningEffort` is protocol-only request config; app/provider layers choose and pass through values.
+- `AgentMessage` envelope fields are optional and model-visible: `createdAtMs`, `author.displayName`, and JSON `annotations`; preserve them through protocol round-trips.
+- Provider lowering renders message envelopes via `messageContextText` + `prependMessageContextToContent`; annotations are context only, not instructions.
 - `Content = string | ContentPart[]`; parts include text, image, document, and audio. Media parts carry `InlineBase64`, `Url`, or host-owned `Ref` sources. Use protocol helpers (`inlineBase64AttachmentSource`, `urlAttachmentSource`, `refAttachmentSource`, `contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`, `resolveContentAttachmentSources`) instead of app-local duplication.
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.

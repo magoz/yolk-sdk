@@ -40,6 +40,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - Text route request: `{ sessionId, messages, hitlResponses?, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`.
 - Text route calls stateless `@yolk-sdk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode.
+- Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
 - Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `task` for top-level subagent delegation.
 - Task subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; subagents run normal text tools but without `task`, so recursive subagents are disabled in v1.
 - Task results include structured subagent metadata for status, timing, model, and ids.
