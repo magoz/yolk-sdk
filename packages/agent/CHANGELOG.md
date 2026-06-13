@@ -1,5 +1,12 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.17
+
+### Patch Changes
+
+- 92d966b: Expose structured model-visible tool error details.
+- 6a6d7a6: Add helpers for model-visible recoverable tool failures.
+
 ## 0.1.0-canary.16
 
 ### Minor Changes

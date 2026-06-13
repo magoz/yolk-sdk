@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.17
+
+### Patch Changes
+
+- 92d966b: Expose structured model-visible tool error details.
+
 ## 0.1.0-canary.16
 
 ## 0.1.0-canary.15

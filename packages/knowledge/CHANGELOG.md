@@ -1,5 +1,14 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.17
+
+### Patch Changes
+
+- 92d966b: Expose structured model-visible tool error details.
+- Updated dependencies [92d966b]
+- Updated dependencies [6a6d7a6]
+  - @yolk-sdk/agent@0.1.0-canary.17
+
 ## 0.1.0-canary.16
 
 ### Patch Changes
