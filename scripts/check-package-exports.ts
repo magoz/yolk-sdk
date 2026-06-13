@@ -90,6 +90,12 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     tinyRoot: false
   },
   {
+    packageDir: 'packages/sandbox',
+    packageName: '@yolk-sdk/sandbox',
+    expectedExports: ['./package.json', '.', './agent', './testing', './vercel'],
+    tinyRoot: false
+  },
+  {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './workflow'],

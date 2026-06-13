@@ -136,6 +136,7 @@ Publish all public packages together:
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/knowledge`
 - `@yolk-sdk/connectors`
+- `@yolk-sdk/sandbox`
 - `@yolk-sdk/vercel-workflows`
 
 Rationale: lockstep versions are simpler when every workspace package is public. Unstable packages should document instability in README rather than staying private.

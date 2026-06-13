@@ -5,6 +5,7 @@ import process from 'node:process'
 type BoundaryRule = {
   readonly packageDir: string
   readonly forbiddenImports: ReadonlyArray<string>
+  readonly excludedDirs?: ReadonlyArray<string>
 }
 
 type RetiredPackage = {
@@ -123,6 +124,11 @@ const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'packages/knowledge/src',
     forbiddenImports: [...retiredImports, '@yolk-sdk/agent/react', '@yolk-sdk/mcp', 'next', 'react', 'node:']
+  },
+  {
+    packageDir: 'packages/sandbox/src',
+    forbiddenImports: ['@vercel/sandbox'],
+    excludedDirs: ['packages/sandbox/src/vercel']
   }
 ]
 
@@ -154,6 +160,12 @@ const packageExists = (packageDir: string) => {
   }
 }
 
+const isExcludedFile = (file: string, excludedDirs: ReadonlyArray<string> = []) =>
+  excludedDirs.some(excludedDir => {
+    const absoluteExcludedDir = join(workspaceRoot, excludedDir)
+    return file === absoluteExcludedDir || file.startsWith(`${absoluteExcludedDir}/`)
+  })
+
 const importsFrom = (source: string): ReadonlyArray<string> => {
   const imports: Array<string> = []
   for (const match of source.matchAll(importPattern)) {
@@ -179,7 +191,7 @@ const violations = rules.flatMap(rule => {
     return []
   }
 
-  return walk(join(workspaceRoot, rule.packageDir)).flatMap(file => {
+  return walk(join(workspaceRoot, rule.packageDir)).filter(file => !isExcludedFile(file, rule.excludedDirs)).flatMap(file => {
     const source = readFileSync(file, 'utf8')
     return importsFrom(source).flatMap(specifier =>
       rule.forbiddenImports

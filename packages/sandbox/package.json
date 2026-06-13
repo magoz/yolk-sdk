@@ -1,0 +1,91 @@
+{
+  "name": "@yolk-sdk/sandbox",
+  "version": "0.1.0-canary.17",
+  "description": "Effect-native sandbox execution plane primitives and Vercel Sandbox adapter for Yolk agents.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/sandbox"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "sandbox",
+    "agents",
+    "execution",
+    "vercel",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./agent": {
+      "types": "./src/agent.ts",
+      "default": "./src/agent.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    },
+    "./vercel": {
+      "types": "./src/vercel/index.ts",
+      "default": "./src/vercel/index.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": {
+        "types": "./dist/agent.d.mts",
+        "import": "./dist/agent.mjs",
+        "default": "./dist/agent.mjs"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.mts",
+        "import": "./dist/testing/index.mjs",
+        "default": "./dist/testing/index.mjs"
+      },
+      "./vercel": {
+        "types": "./dist/vercel/index.d.mts",
+        "import": "./dist/vercel/index.mjs",
+        "default": "./dist/vercel/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "2.2.1",
+    "@yolk-sdk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

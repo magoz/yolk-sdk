@@ -44,6 +44,7 @@ const packages: ReadonlyArray<PackageShape> = [
     exports: ['.', './agent', './artifacts', './chunking', './context', './embeddings', './errors', './extraction', './ingestion', './search-store', './documents', './links', './records', './provenance', './representations', './search', './store', './summarization', './vector-store']
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
+  { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
   { name: '@yolk-sdk/vercel-workflows', exports: ['.', './workflow'] }
 ]
 
@@ -81,6 +82,7 @@ const main = async () => {
       private: true,
       dependencies: {
         '@effect/platform-node': '4.0.0-beta.65',
+        '@vercel/sandbox': '2.2.1',
         effect: '4.0.0-beta.65',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',

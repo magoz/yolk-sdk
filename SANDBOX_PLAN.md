@@ -2,7 +2,7 @@
 
 ## Status
 
-Decision pass complete. Vercel Sandbox v2.2.1 checked locally in `.repos/vercel-sandbox` at `bc15403` against npm `@vercel/sandbox@2.2.1`. This is the working tracker until `@yolk-sdk/sandbox` exists. Move stable package-local details to `packages/sandbox/README.md` and `packages/sandbox/AGENTS.md` during implementation.
+Implementation started. Vercel Sandbox v2.2.1 checked locally in `.repos/vercel-sandbox` at `bc15403` against npm `@vercel/sandbox@2.2.1`. Stable package-local details now live in `packages/sandbox/README.md` and `packages/sandbox/AGENTS.md`.
 
 ## Core decision
 
@@ -564,59 +564,59 @@ DB adapter decodes `state` with `SandboxState` before returning from `load` and 
 
 ### 1. Package scaffold
 
-- [ ] Add `packages/sandbox` workspace package.
-- [ ] Add `README.md`, `AGENTS.md`, `CHANGELOG.md`.
-- [ ] Export root, `/agent`, `/vercel`, `/testing`.
-- [ ] Add package to `.changeset/config.json` fixed group.
-- [ ] Add package to `packages/AGENTS.md`, root `README.md`, `patterns/PACKAGE_ARCHITECTURE.md`, `patterns/PACKAGE_DISTRIBUTION.md`.
-- [ ] Update package export/boundary/smoke scripts; mark package root `tinyRoot: false`.
-- [ ] Add boundary rule that only `packages/sandbox/src/vercel` imports `@vercel/sandbox`.
-- [ ] Add `@vercel/sandbox` to smoke fixture dependencies.
+- [x] Add `packages/sandbox` workspace package.
+- [x] Add `README.md`, `AGENTS.md`, `CHANGELOG.md`.
+- [x] Export root, `/agent`, `/vercel`, `/testing`.
+- [x] Add package to `.changeset/config.json` fixed group.
+- [x] Add package to `packages/AGENTS.md`, root `README.md`, `patterns/PACKAGE_ARCHITECTURE.md`, `patterns/PACKAGE_DISTRIBUTION.md`.
+- [x] Update package export/boundary/smoke scripts; mark package root `tinyRoot: false`.
+- [x] Add boundary rule that only `packages/sandbox/src/vercel` imports `@vercel/sandbox`.
+- [x] Add `@vercel/sandbox` to smoke fixture dependencies.
 
 ### 2. Core
 
-- [ ] Define command input/result schemas.
-- [ ] Define state/lifecycle schemas.
-- [ ] Define initial source ADT schemas.
-- [ ] Define tagged errors and alias.
-- [ ] Define `Sandbox` service.
-- [ ] Define `SandboxStateStore` service.
-- [ ] Add name sanitization/hash helper.
-- [ ] Add lifecycle math helpers.
-- [ ] Add workspace reset metadata on stale/max-expired disposable recreate.
-- [ ] Add single-command concurrency guard/semaphore helper.
+- [x] Define command input/result schemas.
+- [x] Define state/lifecycle schemas.
+- [x] Define initial source ADT schemas.
+- [x] Define tagged errors and alias.
+- [x] Define `Sandbox` service.
+- [x] Define `SandboxStateStore` service.
+- [x] Add name sanitization/hash helper.
+- [x] Add lifecycle math helpers.
+- [x] Add workspace reset metadata on stale/max-expired disposable recreate.
+- [x] Add single-command concurrency guard/semaphore helper.
 
 ### 3. Testing subpath
 
-- [ ] Add fake `Sandbox` layer.
-- [ ] Add in-memory `SandboxStateStore` layer.
-- [ ] Add unit tests.
+- [x] Add fake `Sandbox` layer.
+- [x] Add in-memory `SandboxStateStore` layer.
+- [x] Add unit tests.
 
 ### 4. Agent subpath
 
-- [ ] Implement environment-free `makeSandboxToolModuleFromApi` and Effectful `makeSandboxToolModule` builder.
-- [ ] Generate self-contained tool description from context.
-- [ ] Map `SandboxExpiredError` to model-visible tool result.
-- [ ] Map infra errors to fatal `ToolError`.
-- [ ] Mark tool access `destructive`.
-- [ ] Normalize optional `null` params.
-- [ ] Add tool tests.
+- [x] Implement environment-free `makeSandboxToolModuleFromApi` and Effectful `makeSandboxToolModule` builder.
+- [x] Generate self-contained tool description from context.
+- [x] Map `SandboxExpiredError` to model-visible tool result.
+- [x] Map infra errors to fatal `ToolError`.
+- [x] Mark tool access `destructive`.
+- [x] Normalize optional `null` params.
+- [x] Add tool tests.
 
 ### 5. Vercel subpath
 
-- [ ] Add `@vercel/sandbox` dependency.
-- [ ] Implement Vercel SDK seam/facade for unit tests.
-- [ ] Implement Vercel layer with lazy manual get/create.
-- [ ] Implement snapshot-source create path without `Sandbox.getOrCreate`.
-- [ ] Map disposable lifecycle to `persistent: false`, `timeout`, and `delete()`.
-- [ ] Implement additive `extendTimeout` delta math.
-- [ ] Implement cwd normalization and escape rejection.
-- [ ] Implement wrapper-file shell execution with stdin.
-- [ ] Implement foreground timeout by detached wait/kill, not Vercel `timeoutMs`.
-- [ ] Implement background 2s probe and `backgroundId`.
-- [ ] Implement preview URL extraction.
-- [ ] Persist state through `SandboxStateStore`.
-- [ ] Add adapter tests with fakes/seams.
+- [x] Add `@vercel/sandbox` dependency.
+- [x] Implement Vercel SDK seam/facade for unit tests.
+- [x] Implement Vercel layer with lazy manual get/create.
+- [x] Implement snapshot-source create path without `Sandbox.getOrCreate`.
+- [x] Map disposable lifecycle to `persistent: false`, `timeout`, and `delete()`.
+- [x] Implement additive `extendTimeout` delta math.
+- [x] Implement cwd normalization and escape rejection.
+- [x] Implement wrapper-file shell execution with stdin.
+- [x] Implement foreground timeout by detached wait/kill, not Vercel `timeoutMs`.
+- [x] Implement background 2s probe and `backgroundId`.
+- [x] Implement preview URL extraction.
+- [x] Persist state through `SandboxStateStore`.
+- [x] Add adapter tests with fakes/seams.
 
 ### 6. Next Workflow wiring
 
@@ -677,3 +677,5 @@ None for v0 plan. Deferred non-v0 decisions live in Non-goals.
 - Verified `.repos/vercel-sandbox` is current with upstream `main` and npm `@vercel/sandbox@2.2.1`.
 - Fixed plan for Vercel v2 realities: no SDK stdin, timeout exit `137`, additive timeout extension, snapshot source requiring manual create, and no `getOrCreate` for snapshot source.
 - Resolved remaining v0 questions: Next DB table, cleanup trigger, source ADT, tool access, subagent sandbox sharing, and package-safe max lifetime.
+- Added `@yolk-sdk/sandbox` package scaffold, core service/state/lifecycle models, testing fakes, agent tool, and Vercel Sandbox adapter seam/layer.
+- Added package/unit tests for core, agent tool, and Vercel adapter fakes.
