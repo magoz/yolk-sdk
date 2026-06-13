@@ -1,22 +1,22 @@
-# Package Unification Plan
+# Package Unification Notes
 
-Discussion draft for reducing public npm package count without blurring runtime or product boundaries.
+Historical package-count reduction notes. Current package shape lives in `packages/AGENTS.md` and `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ## Motivation
 
-Current public surface is too fragmented for consumers.
+The pre-unification public surface was too fragmented for consumers.
 
 - Consumers must install many `@yolk-sdk/*` packages even though versions are lockstep.
 - Lockstep releases remove most independent-versioning benefits.
 - Docs/examples repeat the same install/version guidance across packages.
-- Common agent-adjacent APIs feel like one SDK: protocol, loop, client, providers, OAuth, React, skills, voice.
+- Common agent-adjacent APIs feel like one SDK: protocol, loop, client, compaction, providers, OAuth, React, skills, voice.
 - We still need boundaries for optional product areas and runtime/platform constraints.
 
 Goal: make the default install obvious while keeping tree-shaking, runtime portability, and host-owned policy intact.
 
-## Current public packages
+## Pre-unification public packages
 
-Published together today:
+Previously published together:
 
 - `@yolk-sdk/agent`
 - `@yolk-sdk/react`

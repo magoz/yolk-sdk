@@ -55,6 +55,7 @@ Document explicit subpaths:
 - `loop/testing`
 - `runtime`
 - `client`
+- `compaction`
 - `tools`
 - `react`
 - `oauth`

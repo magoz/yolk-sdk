@@ -1,6 +1,6 @@
 # @yolk-sdk/agent
 
-Domain-free agent protocol, loop, runtime, client, tools, providers, OAuth, React, skillset, and voice primitives.
+Domain-free agent protocol, loop, runtime, client, compaction, tools, providers, OAuth, React, skillset, and voice primitives.
 
 Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 
@@ -23,6 +23,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers                   |
 | `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
 | `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, and client state helpers   |
+| `@yolk-sdk/agent/compaction`   | Pure host-owned context budget, planning, and transformer utils |
 | `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
 | `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`        | Provider-neutral OAuth token and broker contracts              |
@@ -48,6 +49,11 @@ import {
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import { initialAgentClientState, toolRunsFromHitlRequests } from '@yolk-sdk/agent/client'
+import {
+  makeContextBudget,
+  makePreviewSummaryMessage,
+  makeWindowCompactionTransformer
+} from '@yolk-sdk/agent/compaction'
 import {
   makeNonRecursiveTaskToolModule,
   makeTaskToolResult,
@@ -90,6 +96,33 @@ const program = run({
 }).pipe(Stream.runCollect)
 
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
+```
+
+## Context compaction
+
+`@yolk-sdk/agent/compaction` provides pure scaffolding only. It does not call a model, persist
+checkpoints, or retry overflow. Hosts own thresholds, summary policy, and durable storage.
+
+```ts
+import {
+  makeContextBudget,
+  makePreviewSummaryMessage,
+  makeWindowCompactionTransformer
+} from '@yolk-sdk/agent/compaction'
+
+const budget = makeContextBudget({
+  contextWindowTokens: 200_000,
+  reservedOutputTokens: 20_000,
+  warningRatio: 0.8,
+  compactionRatio: 1
+})
+
+const ContextLayer = makeWindowCompactionTransformer({
+  strategy: 'window-summary-v1',
+  thresholdTokens: budget.compactionInputTokens,
+  tailMessageCount: 16,
+  makeSummaryMessage: messages => makePreviewSummaryMessage(messages)
+})
 ```
 
 ## Protocol content
@@ -187,6 +220,7 @@ See `examples/next/lib/agents/workflow-runtime/text-response.ts` for host-owned 
 ## Boundaries
 
 - Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
+- `@yolk-sdk/agent/compaction` is pure helper scaffolding; hosts own thresholds, summaries, checkpoints, and overflow retry.
 - `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - Loop stays stateless: transcript in, events out.
