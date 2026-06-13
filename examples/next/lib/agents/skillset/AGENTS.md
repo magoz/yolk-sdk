@@ -10,7 +10,7 @@ Node/app adapters for loading project skills and commands into the app agent run
 
 ## Sources
 
-- Project directories: `.yolk`, `.opencode`, `.claude`, `.agents` where supported by source code.
+- Project directories: `.yolk`/`.opencode` load skills+commands; `.claude`/`.agents` load skills only.
 - Env/config source uses `YOLK_SKILLSET` for app-provided skill/command data.
 - DB source reads enabled `agentSkill` and `agentCommand` rows and converts them to portable `SkillsetManifest` data.
 - Filesystem adapters are Node boundaries; keep raw FS here, not in packages.

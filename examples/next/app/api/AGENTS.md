@@ -1,6 +1,6 @@
 # API Routes
 
-HTTP boundaries for auth, agent text, and Realtime voice. CRUD/product mutations belong in server actions, not routes.
+HTTP boundaries for auth, agent text/Workflow/commands/Realtime, knowledge artifacts, and internal Cloudflare bridges. CRUD/product mutations belong in server actions, not routes.
 
 See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route pattern.
 
@@ -49,7 +49,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
 - Realtime `/tool` uses `@yolk-sdk/agent/voice`; see `agent/AGENTS.md` for the current voice toolset.
 - Realtime routes explicitly provide runtime-portable voice tool modules; route-local tool context lives in `agent/AGENTS.md`.
-- Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/account/expiry, never refresh token.
+- Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/expiry plus optional account id, never refresh token.
 - Internal Cloudflare Codex responses proxy is the default DO provider path; it forwards upstream body streams with `HttpServerResponse.raw(...)`.
 - See `internal/cloudflare/AGENTS.md` before changing bridge auth, token response shapes, or proxy header allowlists.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts`; never forward cookies or bridge secrets upstream.
@@ -57,7 +57,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 ## Exceptions
 
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
-- Workflow `start/getRun` routes may use `Effect.runPromise()` + raw `Response` for Vercel Workflow streams.
+- Workflow `[runId]` routes may use `Effect.runPromise()` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
 - Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `examples/next/lib/agents/realtime/*`, not route bodies.
 

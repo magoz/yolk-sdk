@@ -209,11 +209,13 @@ Requirements before dispatch:
 
 - changesets consumed by `pnpm changeset:version`
 - every public package has same version
-- package version is not already published on npm
+- package version is not already fully published on npm; partial retries skip already-published tarballs
 - `v<version>` tag does not exist
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`
 
-The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. Provenance is disabled while the repo is private; re-enable it when source is public.
+The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
+
+If a renamed/new package 404s on first publish, create/configure that package on npm for `publish.yml` trusted publishing, or provide a publish-capable `NPM_TOKEN` secret for the first publish.
 
 ## Release Prep Order
 

@@ -75,13 +75,13 @@ Do not build these here yet unless explicitly requested:
 - Use `pnpm cloudflare-agent:deploy:adopt` for pinned non-interactive deploys; it passes Alchemy `--adopt --force --yes`.
 - Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
-- Keep agent/MCP packages provider-neutral; provider packages stay host-runtime agnostic.
+- Keep agent/MCP packages provider-neutral; provider subpaths stay host-runtime agnostic.
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
-- Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
+- Centralize provider refresh in Next; DO caches access/optional account id/expiry only and never stores refresh tokens.
 - Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
-- Token broker requests use provider ids from `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
-- Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk-sdk/agent/protocol`.
+- Token broker requests use provider ids from `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/oauth` broker contracts.
+- Direct browser WS uses protocol `SessionSnapshot` server messages and `AgentWebSocketClientMessage` inputs (`UserInput`, approval/question HITL responses; `expectedRevision?`, `model?`, `reasoningEffort?`); keep schemas in `@yolk-sdk/agent/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.
 - Use bootstrap-injected skillsets or generated fallback; never add Node filesystem adapters to Worker/DO code.
@@ -100,5 +100,5 @@ Do not build these here yet unless explicitly requested:
 ## Checks
 
 - Run `pnpm cloudflare:check` after touching this app.
-- Run `NODE_ENV=test pnpm playwright test examples/next/e2e/ui/agent-cloudflare.spec.ts --project=chromium` for direct-WS reconnect/persistence/conflict/fallback changes.
+- Run `NODE_ENV=test pnpm --filter @yolk-example/next exec playwright test --config playwright.config.ts e2e/ui/agent-cloudflare.spec.ts --project=chromium` for direct-WS reconnect/persistence/conflict/fallback changes.
 - Run root `pnpm tsc`, `pnpm lint`, and `pnpm test:run` before finishing larger changes.

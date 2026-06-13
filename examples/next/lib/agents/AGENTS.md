@@ -31,7 +31,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, and reasoning defaults from there.
 - Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
-- Providers accept text+image/PDF user input; audio is rejected by text capabilities.
+- Next/Workflow providers receive text+image/PDF capabilities; Cloudflare UI gates media, and DO/provider paths reject unsupported input.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.
@@ -40,6 +40,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - Text route request: `{ sessionId, messages, hitlResponses?, model?, reasoningEffort? }`, where `messages` is non-empty `AgentMessage[]`.
 - Text route calls stateless `@yolk-sdk/agent/runtime` transcript mode; Cloudflare DO uses append-backed runtime mode.
+- Shared text runtime construction lives in `workflow-runtime/text-response.ts` for both `/api/agent` and Workflow.
 - Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
 - Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `task` for top-level subagent delegation.
 - Task subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; subagents run normal text tools but without `task`, so recursive subagents are disabled in v1.
@@ -51,7 +52,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## JSON Boundaries
 
 - Use Effect Schema at production JSON boundaries; prefer `Schema.UnknownFromJsonString` for unknown JSON strings.
-- Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages.
+- Avoid raw `JSON.parse/stringify` and `Effect.try` wrappers in providers/routes/packages when Schema/HTTP helpers fit.
+- Web-native Workflow run routes may use `request.json()`/`Effect.tryPromise` at the route boundary.
 - Browser-only Realtime hook may use raw JSON for data-channel payloads; HTTP uses Effect `HttpClient`.
 - Direct JSON helpers are fine in tests.
 

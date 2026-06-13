@@ -7,7 +7,7 @@ Domain functions and server actions for provider OAuth, skills/commands, and con
 - Tokens live in Better Auth `account` rows.
 - Provider ids: `openai-codex`, `anthropic-claude`.
 - OpenAI `accountId` stores ChatGPT account id when available.
-- Cloudflare token bridge returns access/account/expiry only; refresh tokens stay in Next/Postgres.
+- Cloudflare token bridge returns access/expiry plus optional account id only; refresh tokens stay in Next/Postgres.
 - Telegram connector credentials live in `agentConnector`, not Better Auth accounts.
 - Agent skills/commands live in `agentSkill`/`agentCommand`; `*WithCommand` helpers keep paired writes transactional.
 

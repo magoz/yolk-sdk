@@ -19,6 +19,7 @@
 | `agent` | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules |
 | `integration` | configured invokable connector instance data |
 | `action` | typed action definitions over Effect Schema |
+| `config` | required/optional string config helpers for integration config |
 | `credential` | slots, bindings, host resolver service, runtime credential values |
 | `http` | host-provided HTTP request/response port; not a connector |
 | `result` | value-level success/failure results for expected upstream failures |

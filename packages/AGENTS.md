@@ -21,7 +21,7 @@ mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
 agent/react -> agent/client + agent/protocol + optional React peer
 agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
-connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
+connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 agent/voice -> agent/loop + agent/protocol
 ```
 
@@ -33,12 +33,14 @@ agent/voice -> agent/loop + agent/protocol
 - Use source exports for workspace dev; npm `publishConfig.exports` points to `dist`.
 - Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
-- Provider/OAuth packages may model vendor auth mechanics, wire contracts, and agent provider adapters, not host storage or policy.
+- Provider/OAuth subpaths may model vendor auth mechanics, wire contracts, and agent provider adapters, not host storage or policy.
 - Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private app packages private.
+- Retired standalone package dirs/imports are forbidden; use unified subpaths checked by `scripts/check-package-boundaries.ts`.
+- When public packages/subpaths change, update package `exports`, `publishConfig.exports`, `scripts/check-package-exports.ts`, and `scripts/smoke-package-imports.ts` together.
 
 ## Commands
 
 - Check packages: `pnpm packages:check`
 - Build packages: `pnpm packages:build`
-- Publish validation: `pnpm packages:publint && pnpm packages:smoke`
+- Publish validation: `pnpm packages:build && pnpm packages:publint && pnpm packages:smoke`
 - Package tests run through root `pnpm test:run` unless a local doc says otherwise.

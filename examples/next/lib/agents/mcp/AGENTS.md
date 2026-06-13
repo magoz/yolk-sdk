@@ -4,7 +4,8 @@ Filesystem boundary for app-owned remote MCP server configuration.
 
 ## Source
 
-- Reads `.yolk/mcp.json` or `.opencode/mcp.json` from project root.
+- Reads `.yolk/mcp.json` and `.opencode/mcp.json` from project root when present.
+- Duplicate server names are last-wins; `.opencode/mcp.json` overrides `.yolk/mcp.json` by name.
 - Config shape is an array of remote MCP servers: name, type, url, headers, enabled.
 - App supports remote MCP only; local stdio stays behind `@yolk-sdk/mcp/client/node` package tests/core.
 

@@ -74,6 +74,19 @@ Check:
 - npm trusted publisher settings for `magoz/yolk-sdk`, workflow `publish.yml`
 - current workflow sets `NPM_CONFIG_PROVENANCE=false`; do not flip without updating npm/package support
 
+## New package publish returns npm 404
+
+Symptom: existing packages publish, then a renamed/new scoped package fails with `npm error 404 Not Found - PUT ...`.
+
+Cause: npm treats missing package + insufficient org/package publish permission as 404.
+
+Fix:
+
+- Check the package exists or `@yolk-sdk` org grants publish permission/trusted publishing for new package creation.
+- Treat earlier `+ @yolk-sdk/*@version` lines as published; do not rerun the same version.
+- Fix npm access, rerun the same workflow; it skips already-published tarballs. If retry guard is unavailable, bump all public packages to the next canary first.
+- If tag step never ran, create no tag for the partial version unless intentionally documenting the partial publish.
+
 ## Release prep includes unrelated files
 
 Cause: working tree had feature, env, generated, or local-only changes before release prep.

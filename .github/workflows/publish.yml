@@ -71,16 +71,31 @@ jobs:
             throw new Error(`Public package versions are not lockstep: ${versions.join(', ')}`)
           }
 
+          const publishedPackages = []
+          const unpublishedPackages = []
+
           for (const pkg of packages) {
             let published = []
             try {
-              published = JSON.parse(execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' }))
+              published = JSON.parse(execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
             } catch (error) {
               published = []
             }
-            if (published.includes(pkg.version)) {
-              throw new Error(`${pkg.name}@${pkg.version} already exists on npm; run changeset version first`)
+            const publishedVersions = Array.isArray(published) ? published : [published]
+            if (publishedVersions.includes(pkg.version)) {
+              publishedPackages.push(`${pkg.name}@${pkg.version}`)
+            } else {
+              unpublishedPackages.push(`${pkg.name}@${pkg.version}`)
             }
+          }
+
+          if (publishedPackages.length > 0) {
+            console.log(`Already published:\n${publishedPackages.map((pkg) => `- ${pkg}`).join('\n')}`)
+          }
+          if (unpublishedPackages.length > 0) {
+            console.log(`Packages to publish:\n${unpublishedPackages.map((pkg) => `- ${pkg}`).join('\n')}`)
+          } else {
+            console.log(`All packages already published for ${versions[0]}; will only ensure git tag exists`)
           }
 
           const tag = `v${versions[0]}`
@@ -99,9 +114,15 @@ jobs:
 
       - name: Publish tarballs
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: false
         run: |
           for tarball in .release/*.tgz; do
+            package_spec="$(tar -xOf "$tarball" package/package.json | node -e "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync(0, 'utf8')); if (typeof pkg.name !== 'string' || typeof pkg.version !== 'string') throw new Error('tarball package.json missing name/version'); process.stdout.write(pkg.name + '@' + pkg.version)")"
+            if npm view "$package_spec" version --json >/dev/null 2>&1; then
+              echo "Skipping already-published $package_spec"
+              continue
+            fi
             npm publish "$tarball" --tag "${{ inputs.tag }}" --access public --provenance=false
           done
 

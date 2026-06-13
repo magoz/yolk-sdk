@@ -23,7 +23,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - No Node-only imports/deps and no raw `fetch()` in this directory.
 - Use Effect `Config`, `HttpClient`, Schema, and runtime-injected adapters.
 - Define model-visible tool parameters with Effect Schema annotations and `makeTool`; avoid duplicated hand-written JSON schemas.
-- Optional model tool params should accept `null` as well as omission: use `Schema.optional(Schema.NullOr(...))`, then normalize `null` to `undefined` before handlers.
+- New provider-facing optional tool params should accept `null` as well as omission: use `Schema.optional(Schema.NullOr(...))`, then normalize `null` to `undefined` before handlers.
 - Use `EmptyToolParams` from `@yolk-sdk/agent/tools` for no-arg tools.
 - Tool modules receive context `{ surface, route, userId, sessionId?, subagent?, skillset? }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
@@ -46,3 +46,4 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 - Mock HTTP with `HttpClient` layers.
 - Cover portability, SSRF/redirect rejection, config fallback, toolset resolution, and Cloudflare parity.
+- Cloudflare shares `makeTextToolModules` via `cloudflare/agent/src/tool-modules.ts`; keep base text tool parity tests in sync.

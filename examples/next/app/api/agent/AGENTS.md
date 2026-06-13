@@ -16,6 +16,7 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 ## Text Runtime
 
 - Text route delegates provider/tool/prompt construction to `makeAgentTextResponse` / `makeAgentTextRuntime`.
+- Shared text runtime construction lives in `examples/next/lib/agents/workflow-runtime/text-response.ts` for both `/api/agent` and Workflow.
 - Request body is `AgentRouteRequest`: `sessionId`, non-empty `messages`, optional `hitlResponses`, optional `model`, optional `reasoningEffort`.
 - Validate image/PDF count, MIME, base64, per-attachment size, and total payload before provider calls.
 - Return in-band protocol `AgentError` for runtime failures after stream starts.
@@ -24,9 +25,10 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - `workflow/route.ts` calls Vercel `start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
 - `workflow/[runId]/route.ts` uses `getRun(runId)` for replay/cancellation and `resumeHook` for one-response HITL resume.
+- GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index`.
 - HITL resume captures `getTailIndex()` via `startIndex: -1` before `resumeHook`, then returns replay from that tail index.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
-- Workflow route handlers may use `Effect.runPromise` + raw `Response` because `workflow/api` returns Web-native run streams.
+- Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 
 ## Commands + Realtime
 
