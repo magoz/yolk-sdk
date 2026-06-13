@@ -21,7 +21,7 @@ Config in, event stream out. Consumer owns session persistence, transport (WebSo
 This package is one layer in the reusable stack. See `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ```txt
-protocol → agent-loop → agent-runtime → app
+protocol → @yolk-sdk/agent/loop → @yolk-sdk/agent/runtime → app
 ```
 
 The agent loop is **not** the runtime. It does not load sessions, persist transcripts, expose WebSockets, compact context, or understand any project domain. Those live in `packages/agent/src/runtime/` or the app layer.
@@ -65,7 +65,7 @@ Minimal terminal coding agent by Mario Zechner. Plain TypeScript, Vitest, event-
 
 - Extension system (25+ hooks, plugin loading, hot-reload) — we own the code.
 - TypeBox for schemas — Effect Schema instead.
-- TUI, RPC mode, session tree — not agent-loop concerns.
+- TUI, RPC mode, session tree — not agent loop concerns.
 
 ### OpenCode (`~/dev/docs/opencode`)
 
@@ -83,10 +83,10 @@ Open-source coding agent. Effect v4 throughout. Bun runtime.
 
 **Patterns we skip:**
 
-- `InstanceState` / `InstanceRef` / AsyncLocalStorage dual context — agent-loop is single-run. Consumer (runtime/DO) handles multi-tenancy.
-- `AppRuntime` / `ManagedRuntime` — agent-loop is a library, not an app. Consumer provides the runtime.
-- AI SDK interop / Zod bridging — agent-loop defines its own provider interface.
-- SQLite / Drizzle — agent-loop is stateless. Consumer owns persistence.
+- `InstanceState` / `InstanceRef` / AsyncLocalStorage dual context — agent loop is single-run. Consumer (runtime/DO) handles multi-tenancy.
+- `AppRuntime` / `ManagedRuntime` — agent loop is a library, not an app. Consumer provides the runtime.
+- AI SDK interop / Zod bridging — agent loop defines its own provider interface.
+- SQLite / Drizzle — agent loop is stateless. Consumer owns persistence.
 
 ---
 
@@ -250,7 +250,7 @@ No `Notification`, `CompactionSummary`, `ContextInjection` — those are consume
 - Context injections → happen in `ContextTransformer.transform()`, which prepends real `User` messages
 - Notifications → UI-level, never enter the agent loop
 
-`toLLMMessages` is agent-loop-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion). Provider layer decides how to encode audio parts for the specific API (base64 for audio completions, PCM16 chunks for realtime).
+`toLLMMessages` is loop-internal, trivial — almost 1:1 mapping with minor format differences per provider (handled in `LLMProvider` layer, not in the conversion). Provider layer decides how to encode audio parts for the specific API (base64 for audio completions, PCM16 chunks for realtime).
 
 Consumer's domain types (e.g., `KnowledgeResult`, `IntegrationEvent`) live in their session storage and UI layer. They convert to `AgentMessage` at the boundary before entering the agent loop.
 
@@ -400,7 +400,7 @@ type LLMEvent =
 
 Audio events are emitted by providers that support audio output (OpenAI audio completions, future Anthropic audio). Text-only providers never emit `AudioDelta`/`AudioDone`. The agent loop passes them through — it doesn't interpret audio data.
 
-The agent loop accumulates `LLMEvent`s into a complete response (assistant message + tool calls) via `Accumulator.add`. Provider implementations live outside the agent-loop package.
+The agent loop accumulates `LLMEvent`s into a complete response (assistant message + tool calls) via `Accumulator.add`. Provider implementations live outside `@yolk-sdk/agent/loop`.
 
 ---
 
@@ -776,7 +776,7 @@ For graceful stops (finish current turn but don't start another), consumer uses 
 
 Researched OpenAI Realtime API (GA, WebSocket/WebRTC, native speech-to-speech), OpenAI audio completions (same API as text, audio content parts), Google Gemini Live (WebSocket, bidirectional), Anthropic (no audio support), ElevenLabs (separate TTS/STT). Neither Pi nor OpenCode has any audio support.
 
-Voice is first-class in the agent-loop design. Three architectures supported, sharing the same core:
+Voice is first-class in the agent loop design. Three architectures supported, sharing the same core:
 
 **Architecture 1: Audio completions (same `LLMProvider`, multimodal content)**
 
@@ -809,13 +809,13 @@ class TTSProvider extends Context.Service<TTSProvider>()('@yolk-sdk/agent/loop/T
 }
 ```
 
-Higher latency (~1-2s) than native realtime. More control over each component. Works today with zero agent-loop changes beyond the interfaces.
+Higher latency (~1-2s) than native realtime. More control over each component. Works today with zero loop changes beyond the interfaces.
 
 **Architecture 3: Native realtime (v1.1)**
 
 For sub-second full-duplex voice. OpenAI Realtime API, Gemini Live. Fundamentally different protocol — persistent bidirectional WebSocket, LLM server drives the conversation.
 
-Cannot fit into `run()` (which is one-shot, agent-loop-driven). Separate API:
+Cannot fit into `run()` (which is one-shot, loop-driven). Separate API:
 
 ```typescript
 const session: (config: {
@@ -873,7 +873,7 @@ interface RealtimeConnection {
 - Only `effect` core packages (`effect`, `@effect/schema`, `@effect/platform` if needed)
 - Must run in: Node.js, Bun, Cloudflare Workers (V8 isolates), browser (stretch goal)
 
-Consumer packages (outside agent-loop) bridge to platform-specific APIs via layers.
+Consumer packages outside the agent loop bridge to platform-specific APIs via layers.
 
 ---
 
@@ -936,7 +936,7 @@ Pi's low-level `agentLoop()` carries new messages in the `agent_end` event:
 await emit({ type: 'agent_end', messages: newMessages })
 ```
 
-Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — agent-loop is stateless).
+Pi's `Agent` class also reconstructs from `message_end` events into `state.messages`. OpenCode reads from DB (not applicable — agent loop is stateless).
 
 Our `AgentEnd` event carries the accumulated messages from this run. Consumer can also reconstruct from per-turn `AssistantMessage` + `ToolResult` events. Both paths available, `AgentEnd` is the convenience path.
 

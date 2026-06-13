@@ -90,7 +90,10 @@ If uncertain, keep app-layer services rather than breaking template wiring. Reus
 
 ### 5. Add workspace packages
 
-Create:
+Historical package skeletons considered at the time. Current package shape lives in
+`packages/AGENTS.md` and `patterns/PACKAGE_ARCHITECTURE.md`.
+
+Then-planned shape:
 
 ```txt
 packages/
@@ -176,7 +179,7 @@ Do not start with runtime. Build smallest vertical slice:
 1. `@yolk-sdk/agent/protocol` message/event schemas
 2. `@yolk-sdk/agent/loop` text-only loop
 3. faux provider
-4. one passing agent-loop test
+4. one passing `@yolk-sdk/agent/loop` test
 5. runtime skeleton after loop works
 
 ## Done criteria

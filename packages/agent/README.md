@@ -10,6 +10,8 @@ Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 pnpm add @yolk-sdk/agent@canary effect
 ```
 
+Add `react` if you use `@yolk-sdk/agent/react`.
+
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
@@ -25,7 +27,12 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`        | Provider-neutral OAuth token and broker contracts              |
 | `@yolk-sdk/agent/providers/openai` | OpenAI/Codex OAuth and provider mechanics                  |
+| `@yolk-sdk/agent/providers/openai/codex` | OpenAI Codex request and auth helpers              |
+| `@yolk-sdk/agent/providers/openai/codex-provider` | Codex LLM provider factory                 |
+| `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible LLM provider factory              |
 | `@yolk-sdk/agent/providers/anthropic` | Anthropic/Claude OAuth and provider mechanics            |
+| `@yolk-sdk/agent/providers/anthropic/claude` | Claude request and auth helpers                    |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory              |
 | `@yolk-sdk/agent/skillset`     | Portable skill and slash-command parsing/catalogs              |
 | `@yolk-sdk/agent/voice`        | Provider-neutral voice tool-call bridge                        |
 

@@ -59,7 +59,12 @@ Document explicit subpaths:
 - `react`
 - `oauth`
 - `providers/openai`
+- `providers/openai/codex`
+- `providers/openai/codex-provider`
+- `providers/openai/provider`
 - `providers/anthropic`
+- `providers/anthropic/claude`
+- `providers/anthropic/claude-provider`
 - `skillset`
 - `voice`
 

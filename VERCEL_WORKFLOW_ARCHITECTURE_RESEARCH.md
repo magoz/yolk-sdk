@@ -519,7 +519,7 @@ Retry/idempotency policy:
 - add deterministic event ids before relying on automatic Workflow step retries for
   streamed model/tool chunks;
 - for now, prefer low/no retry at the Workflow step layer and keep existing provider retry
-  semantics inside `agent-loop`.
+  semantics inside `@yolk-sdk/agent/loop`.
 
 ## Cross-repo persistence patterns
 
@@ -728,7 +728,7 @@ fast UI loading. Keep Vercel Workflow state execution-only and retention-bound.
 
 Recommended event model additions for Yolk:
 
-- `RunStepStarted` / `RunStepCompleted` / `RunStepFailed` in `agent-runtime` append log;
+- `RunStepStarted` / `RunStepCompleted` / `RunStepFailed` in `@yolk-sdk/agent/runtime` append log;
 - deterministic protocol event ids for streamed `AgentEvent`s;
 - optional branch parent ids on persisted product messages/session entries;
 - compaction checkpoint entries with `summary`, `firstKeptMessageId`, `tokensBefore`,

@@ -249,7 +249,7 @@ Keep out of core:
 - policies/scopes
 - DB/storage adapters
 
-Those remain in `tool-registry`, app services, and host adapters.
+Those remain in `@yolk-sdk/agent/tools`, app services, and host adapters.
 
 ### Yolk synthesis
 
@@ -258,7 +258,7 @@ opencode/Claude folder UX
 + Codex-like normalized catalog
 + Executor-like source → catalog shape
 + source adapters for fs/bundle/KV/DB
-+ Yolk tool-registry/runtime boundaries
++ Yolk agent tools/runtime boundaries
 ```
 
 ## Skills v1
