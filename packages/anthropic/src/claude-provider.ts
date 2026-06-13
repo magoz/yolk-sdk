@@ -95,6 +95,11 @@ type AnthropicMessage =
   | { readonly role: 'assistant'; readonly content: ReadonlyArray<AnthropicAssistantBlock> }
 
 type JsonObject = Readonly<Record<string, unknown>>
+type TopLevelJsonSchemaCombinatorKey = 'anyOf' | 'oneOf' | 'allOf'
+type TopLevelJsonSchemaCombinator = {
+  readonly key: TopLevelJsonSchemaCombinatorKey
+  readonly items: ReadonlyArray<unknown>
+}
 
 type AnthropicTool = {
   readonly name: string
@@ -502,9 +507,19 @@ const isJsonObject = (value: unknown): value is JsonObject =>
 const jsonObjectField = (value: JsonObject, key: string) =>
   Object.getOwnPropertyDescriptor(value, key)?.value
 
-const topLevelJsonSchemaCombinatorKeys: ReadonlyArray<string> = ['anyOf', 'oneOf', 'allOf']
+const topLevelJsonSchemaCombinatorKeys: ReadonlyArray<TopLevelJsonSchemaCombinatorKey> = [
+  'anyOf',
+  'oneOf',
+  'allOf'
+]
 
-const topLevelJsonSchemaCombinator = (schema: JsonObject) => {
+const isTopLevelJsonSchemaCombinatorKey = (
+  key: string
+): key is TopLevelJsonSchemaCombinatorKey => key === 'anyOf' || key === 'oneOf' || key === 'allOf'
+
+const topLevelJsonSchemaCombinator = (
+  schema: JsonObject
+): TopLevelJsonSchemaCombinator | undefined => {
   for (const key of topLevelJsonSchemaCombinatorKeys) {
     const value = jsonObjectField(schema, key)
 
@@ -518,7 +533,7 @@ const topLevelJsonSchemaCombinator = (schema: JsonObject) => {
 
 const withoutTopLevelJsonSchemaCombinators = (schema: JsonObject): JsonObject =>
   Object.fromEntries(
-    Object.entries(schema).filter(([key]) => !topLevelJsonSchemaCombinatorKeys.includes(key))
+    Object.entries(schema).filter(([key]) => !isTopLevelJsonSchemaCombinatorKey(key))
   )
 
 const jsonSchemaProperties = (schema: JsonObject) => {
@@ -539,12 +554,20 @@ const jsonSchemaRequired = (schema: JsonObject) => {
   return Array.isArray(required) ? required.filter(item => typeof item === 'string') : []
 }
 
+const jsonValueKey = (value: unknown) => {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return undefined
+  }
+}
+
 const uniqueUnknownArray = (items: ReadonlyArray<unknown>): ReadonlyArray<unknown> => {
   const seen = new Set<string>()
   const result: Array<unknown> = []
 
   for (const item of items) {
-    const key = JSON.stringify(item)
+    const key = jsonValueKey(item)
 
     if (key === undefined || seen.has(key)) {
       continue
@@ -590,7 +613,9 @@ const jsonSchemaAnyOfItems = (schema: unknown) => {
 }
 
 const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
-  if (JSON.stringify(left) === JSON.stringify(right)) {
+  const leftKey = jsonValueKey(left)
+
+  if (leftKey !== undefined && leftKey === jsonValueKey(right)) {
     return left
   }
 
@@ -620,7 +645,7 @@ const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject 
 }
 
 const mergeJsonSchemaRequired = (
-  combinatorKey: string,
+  combinatorKey: TopLevelJsonSchemaCombinatorKey,
   objects: ReadonlyArray<JsonObject>
 ): ReadonlyArray<string> => {
   const requiredSets = objects.map(jsonSchemaRequired)
@@ -652,9 +677,11 @@ const mergeAdditionalProperties = (objects: ReadonlyArray<JsonObject>) => {
   return undefined
 }
 
+// Anthropic rejects root combinators. This widens provider-facing guidance only;
+// tool execution still validates calls against the original registry schema.
 const flattenTopLevelCombinatorToolSchema = (
   schema: JsonObject,
-  combinator: { readonly key: string; readonly items: ReadonlyArray<unknown> }
+  combinator: TopLevelJsonSchemaCombinator
 ): JsonObject => {
   const base = withoutTopLevelJsonSchemaCombinators(schema)
   const objectVariants = combinator.items.filter(isJsonObject)
