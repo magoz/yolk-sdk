@@ -117,6 +117,7 @@ export {
   plainQuestionResponse,
   plainToolApprovalResponse,
   questionResponseStructuredContent,
+  makeErrorToolResult,
   ToolApprovalDecision,
   ToolApprovalMode,
   ToolApprovalPolicy,
@@ -127,6 +128,7 @@ export {
   ToolResult
 } from './tool.ts'
 export type {
+  ErrorToolResultInput,
   PlainHitlResponse,
   PlainQuestionAnswer,
   PlainQuestionResponse,

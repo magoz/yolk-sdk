@@ -1,6 +1,8 @@
 import { Effect, Layer } from 'effect'
 import { ToolError } from '@yolk-sdk/agent/loop'
+import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import { ensureUserKnowledgeCollection } from '@/lib/core/storage/ensure-user-knowledge-collection'
+import type { NotFoundError } from '@/lib/core/errors'
 import { getStorageObject } from '@/lib/core/storage/get-storage-object'
 import { getUserStorage } from '@/lib/core/storage/get-user-storage'
 import { Db } from '@/lib/services/db/live-layer'
@@ -22,6 +24,14 @@ const storageSourceName = (source: {
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
+
+const notFoundToolError = (tool: string, error: NotFoundError) =>
+  modelVisibleToolError({ tool, message: error.message, reason: 'not_found' })
+
+const fatalToolError = (tool: string, error: unknown) =>
+  error instanceof ToolError || error instanceof ModelVisibleToolError
+    ? error
+    : new ToolError({ tool, message: unknownToMessage(error), cause: 'execution' })
 
 const truncateText = (input: { readonly text: string; readonly maxChars: number }) => ({
   text: input.text.slice(0, input.maxChars),
@@ -51,14 +61,7 @@ const searchStorageForAgent = (input: {
     })
   }).pipe(
     Effect.provide(KnowledgeSearchToolLayer),
-    Effect.mapError(
-      error =>
-        new ToolError({
-          tool: 'search_storage',
-          message: unknownToMessage(error),
-          cause: 'execution'
-        })
-    )
+    Effect.mapError(error => fatalToolError('search_storage', error))
   )
 
 const listStorageSourcesForAgent = (input: { readonly userId: string }) =>
@@ -78,14 +81,7 @@ const listStorageSourcesForAgent = (input: { readonly userId: string }) =>
       )
     ),
     Effect.provide(Db.layer),
-    Effect.mapError(
-      error =>
-        new ToolError({
-          tool: 'list_storage_sources',
-          message: unknownToMessage(error),
-          cause: 'execution'
-        })
-    )
+    Effect.mapError(error => fatalToolError('list_storage_sources', error))
   )
 
 const getStorageSourceForAgent = (input: {
@@ -112,15 +108,9 @@ const getStorageSourceForAgent = (input: {
         ...text
       } satisfies StorageSourceDetail
     }),
+    Effect.catchTag('NotFoundError', error => Effect.fail(notFoundToolError('get_storage_source', error))),
     Effect.provide(Db.layer),
-    Effect.mapError(
-      error =>
-        new ToolError({
-          tool: 'get_storage_source',
-          message: unknownToMessage(error),
-          cause: 'execution'
-        })
-    )
+    Effect.mapError(error => fatalToolError('get_storage_source', error))
   )
 
 export const makeAppStorageKnowledgeSearchToolModule = () =>

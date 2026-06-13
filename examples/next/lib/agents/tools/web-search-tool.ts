@@ -3,7 +3,14 @@ import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  modelVisibleToolError,
+  modelVisibleToolErrorResult,
+  type ModelVisibleToolErrorReason,
+  type ToolModule,
+  type ToolRegistration
+} from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'
@@ -105,10 +112,36 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
     cause
   })
 
+const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorReason) =>
+  modelVisibleToolError({
+    tool: webSearchToolName,
+    message,
+    reason
+  })
+
+const modelVisibleReasonFromToolError = (error: ToolError): ModelVisibleToolErrorReason => {
+  switch (error.cause) {
+    case 'validation':
+    case 'invalid_input':
+      return 'validation'
+    case 'permission':
+      return 'permission'
+    case 'denied':
+      return 'denied'
+    case 'not_found':
+      return 'not_found'
+    case 'timeout':
+      return 'timeout'
+    case 'unavailable':
+    case 'execution':
+      return 'unavailable'
+  }
+}
+
 const decodeWebSearchParams = (params: unknown) =>
   Schema.decodeUnknownEffect(WebSearchParams)(params).pipe(
     Effect.mapError(error =>
-      makeToolError(`Invalid web search arguments: ${unknownToMessage(error)}`, 'validation')
+      makeModelVisibleError(`Invalid web search arguments: ${unknownToMessage(error)}`, 'validation')
     )
   )
 
@@ -121,7 +154,7 @@ const normalizePositiveInteger = (input: {
   const value = input.value ?? input.defaultValue
 
   if (!Number.isInteger(value) || value <= 0) {
-    return Effect.fail(makeToolError(`${input.name} must be a positive integer`, 'validation'))
+    return Effect.fail(makeModelVisibleError(`${input.name} must be a positive integer`, 'validation'))
   }
 
   return Effect.succeed(Math.min(value, input.maxValue))
@@ -131,7 +164,7 @@ const normalizeWebSearchParams = (params: WebSearchParams) =>
   Effect.gen(function* () {
     const query = params.query.trim()
     if (query.length === 0) {
-      return yield* Effect.fail(makeToolError('query must not be empty', 'validation'))
+      return yield* Effect.fail(makeModelVisibleError('query must not be empty', 'validation'))
     }
 
     const numResults = yield* normalizePositiveInteger({
@@ -367,7 +400,12 @@ export const searchWeb = (
     const config = yield* loadWebSearchConfig
     const override = config.providerOverride
     const provider = selectWebSearchProvider(normalized.query, override)
-    const result = yield* runSearchWithFallback(deps, provider, normalized, override, config)
+    const result = yield* runSearchWithFallback(deps, provider, normalized, override, config).pipe(
+      Effect.mapError(error => makeModelVisibleError(
+        error.message,
+        modelVisibleReasonFromToolError(error)
+      ))
+    )
 
     return formatToolOutput({
       provider: result.provider,
@@ -395,7 +433,11 @@ export const executeWebSearchTool = (
     const content = yield* searchWeb(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })
-  })
+  }).pipe(
+    Effect.catchTag('ModelVisibleToolError', error =>
+      Effect.succeed(modelVisibleToolErrorResult(call, error))
+    )
+  )
 }
 
 export const webSearchToolRegistration: ToolRegistration<AgentToolContext> = makeTool({

@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk-sdk/agent/loop'
+import type { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
+import { makeTool, modelVisibleToolError, type ToolModule } from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const skillManagerToolName = 'manage_skills'
@@ -73,14 +73,18 @@ const skillManagerToolDescription = [
   'For create/update, provide concise name, description, and full content. By default create/update also creates or updates a matching slash command.'
 ].join(' ')
 
-const makeToolError = (message: string, cause: ToolError['cause']) =>
-  new ToolError({ tool: skillManagerToolName, message, cause })
+const makeModelVisibleError = (message: string) =>
+  modelVisibleToolError({
+    tool: skillManagerToolName,
+    message,
+    reason: 'validation'
+  })
 
 const requiredText = (params: SkillManagerParams, key: 'name' | 'description' | 'content') => {
   const value = params[key]?.trim()
 
   return value === undefined || value.length === 0
-    ? Effect.fail(makeToolError(`${key} is required`, 'validation'))
+    ? Effect.fail(makeModelVisibleError(`${key} is required`))
     : Effect.succeed(value)
 }
 

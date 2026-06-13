@@ -2,9 +2,17 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { EmptyToolParams, makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
+import {
+  EmptyToolParams,
+  makeTool,
+  modelVisibleToolError,
+  ModelVisibleToolError,
+  type ToolModule
+} from '@yolk-sdk/agent/tools'
 import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
 import type { AgentToolContext } from './tool-context.ts'
+
+type StorageToolError = ToolError | ModelVisibleToolError
 
 const storageSearchToolName = 'search_storage'
 const storageListSourcesToolName = 'list_storage_sources'
@@ -74,17 +82,17 @@ export type StorageSearchHandler = (input: {
   readonly limit: number
   readonly minScore?: number
   readonly contextChunks: number
-}) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, ToolError>
+}) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, StorageToolError>
 
 export type StorageListSourcesHandler = (input: {
   readonly userId: string
-}) => Effect.Effect<ReadonlyArray<StorageSourceSummary>, ToolError>
+}) => Effect.Effect<ReadonlyArray<StorageSourceSummary>, StorageToolError>
 
 export type StorageGetSourceHandler = (input: {
   readonly userId: string
   readonly id: string
   readonly maxChars: number
-}) => Effect.Effect<StorageSourceDetail, ToolError>
+}) => Effect.Effect<StorageSourceDetail, StorageToolError>
 
 export type StorageKnowledgeSearchToolHandlers = {
   readonly search: StorageSearchHandler
@@ -122,6 +130,13 @@ const makeToolError = (message: string, cause: ToolError['cause'], tool = storag
     cause
   })
 
+const makeModelVisibleError = (message: string, tool = storageSearchToolName) =>
+  modelVisibleToolError({
+    tool,
+    message,
+    reason: 'validation'
+  })
+
 const normalizeInteger = (input: {
   readonly value: number | undefined
   readonly defaultValue: number
@@ -133,7 +148,7 @@ const normalizeInteger = (input: {
 
   if (!Number.isInteger(value) || value < input.minimum) {
     return Effect.fail(
-      makeToolError(`${input.name} must be an integer >= ${input.minimum}`, 'validation')
+      makeModelVisibleError(`${input.name} must be an integer >= ${input.minimum}`)
     )
   }
 
@@ -146,7 +161,7 @@ const normalizeMinScore = (value: number | undefined) => {
   }
 
   if (!Number.isFinite(value) || value < 0 || value > 1) {
-    return Effect.fail(makeToolError('minScore must be a finite number from 0 to 1', 'validation'))
+    return Effect.fail(makeModelVisibleError('minScore must be a finite number from 0 to 1'))
   }
 
   return Effect.succeed(value)
@@ -156,10 +171,12 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
     if (queries.length === 0) {
-      return yield* Effect.fail(makeToolError('queries must not be empty', 'validation'))
+      return yield* Effect.fail(makeModelVisibleError('queries must not be empty'))
     }
     if (queries.length > maxQueries) {
-      return yield* Effect.fail(makeToolError(`queries must include at most ${maxQueries} items`, 'validation'))
+      return yield* Effect.fail(
+        makeModelVisibleError(`queries must include at most ${maxQueries} items`)
+      )
     }
 
     const limit = yield* normalizeInteger({
@@ -185,7 +202,7 @@ const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
   Effect.gen(function* () {
     const id = params.id.trim()
     if (id.length === 0) {
-      return yield* Effect.fail(makeToolError('id must not be empty', 'validation', storageGetSourceToolName))
+      return yield* Effect.fail(makeModelVisibleError('id must not be empty', storageGetSourceToolName))
     }
 
     const maxChars = yield* normalizeInteger({
@@ -345,7 +362,9 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
       Effect.mapError(error =>
         error instanceof ToolError
           ? error
-          : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
+          : error instanceof ModelVisibleToolError
+            ? error
+            : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
       )
     )
 })
@@ -404,7 +423,9 @@ const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentTool
       Effect.mapError(error =>
         error instanceof ToolError
           ? error
-          : makeToolError(
+          : error instanceof ModelVisibleToolError
+            ? error
+            : makeToolError(
               `Storage source read failed: ${unknownToMessage(error)}`,
               'execution',
               storageGetSourceToolName

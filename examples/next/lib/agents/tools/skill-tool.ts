@@ -1,8 +1,12 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  modelVisibleToolError,
+  type ToolModule,
+  type ToolRegistration
+} from '@yolk-sdk/agent/tools'
 import type { SkillInfo } from '@yolk-sdk/agent/skillset'
 import type { AgentToolContext } from './tool-context.ts'
 
@@ -19,13 +23,6 @@ const skillToolDescription = [
   'Use this tool to inject skill instructions into the conversation.'
 ].join(' ')
 
-const makeToolError = (message: string, cause: ToolError['cause']) =>
-  new ToolError({
-    tool: skillToolName,
-    message,
-    cause
-  })
-
 const findSkill = (skills: ReadonlyArray<SkillInfo>, name: string) =>
   skills.find(skill => skill.name === name)
 
@@ -39,6 +36,16 @@ const formatSkillContent = (skill: SkillInfo) =>
     `<skill_location>${skill.location}</skill_location>`,
     '</skill_content>'
   ].join('\n')
+
+const missingSkillContent = (name: string, skills: ReadonlyArray<SkillInfo>) => {
+  const availableNames = skills.map(skill => skill.name).toSorted((a, b) => a.localeCompare(b))
+
+  if (availableNames.length === 0) {
+    return `Skill not found: ${name}. No skills are available.`
+  }
+
+  return `Skill not found: ${name}. Available skills: ${availableNames.join(', ')}.`
+}
 
 const skillTool: ToolRegistration<AgentToolContext> = makeTool({
   name: skillToolName,
@@ -57,13 +64,21 @@ const skillTool: ToolRegistration<AgentToolContext> = makeTool({
       const skillset = context.skillset
 
       if (skillset === undefined) {
-        return yield* Effect.fail(makeToolError('Skills are not configured.', 'not_found'))
+        return yield* Effect.fail(modelVisibleToolError({
+          tool: skillToolName,
+          message: 'Skills are not configured.',
+          reason: 'not_found'
+        }))
       }
 
       const skill = findSkill(skillset.skills, params.name)
 
       if (skill === undefined) {
-        return yield* Effect.fail(makeToolError(`Skill not found: ${params.name}`, 'not_found'))
+        return yield* Effect.fail(modelVisibleToolError({
+          tool: skillToolName,
+          message: missingSkillContent(params.name, skillset.skills),
+          reason: 'not_found'
+        }))
       }
 
       return ToolResult.make({

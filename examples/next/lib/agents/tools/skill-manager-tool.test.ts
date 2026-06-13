@@ -54,4 +54,35 @@ describe('skill manager tool', () => {
       })
     })
   )
+
+  it.effect('returns model-visible errors for missing create fields', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeSkillManagerToolModule(() =>
+            Effect.succeed({ message: 'unused', data: {} })
+          )
+        ],
+        context
+      )
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'manage_skills',
+          params: {
+            action: 'create',
+            name: 'Weather',
+            description: '',
+            content: 'Use web_search for weather requests.'
+          }
+        })
+      )
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'description is required',
+        isError: true
+      })
+    })
+  )
 })

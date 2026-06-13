@@ -1,5 +1,5 @@
 import { createHook, getWritable } from 'workflow'
-import { Data, Effect, Ref, Stream } from 'effect'
+import { Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   runVercelAgentWorkflow,
@@ -10,7 +10,6 @@ import {
 import {
   addAgentUsage,
   AgentEnd,
-  AgentError,
   AgentUsage,
   AssistantMessageEvent,
   AgentMessage,
@@ -31,9 +30,11 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 import {
   AgentRouteRequest,
   encodeAgentNdjsonEvent,
+  validateAgentRouteDocuments,
   validateAgentRouteImages
 } from '@/lib/agents/route-handler'
 import { makeAgentTextRuntime } from './text-response'
+import { AgentWorkflowStepError, workflowErrorEvent, workflowStepError } from './workflow-error'
 
 export type AgentWorkflowInput = {
   readonly userId: string
@@ -44,11 +45,6 @@ type IndexedToolResultMessage = {
   readonly index: number
   readonly message: AgentMessage
 }
-
-class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepError')<{
-  message: string
-  cause?: unknown
-}> {}
 
 const writeEvent = (writer: WritableStreamDefaultWriter<Uint8Array>, event: AgentEvent) =>
   encodeAgentNdjsonEvent(event).pipe(Effect.flatMap(chunk => Effect.promise(() => writer.write(chunk))))
@@ -158,19 +154,6 @@ const collectModelEvent = (input: {
     })
   )
 
-const workflowErrorEvent = (error: unknown) =>
-  AgentError.make({
-    code: 'unknown',
-    message: error instanceof Error ? error.message : 'Workflow agent failed',
-    retryable: false
-  })
-
-const workflowStepError = (error: unknown) =>
-  new AgentWorkflowStepError({
-    message: error instanceof Error ? error.message : 'Workflow agent failed',
-    cause: error
-  })
-
 const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
@@ -214,6 +197,7 @@ export async function runAgentWorkflowModelStep(input: {
     Effect.gen(function* () {
       const request = yield* decodeStepRequest(input.state)
       yield* validateAgentRouteImages(request)
+      yield* validateAgentRouteDocuments(request)
       const createdMessages = yield* decodeMessages(input.state.createdMessages)
       const initialUsage = yield* decodeUsageOrZero(input.state.usage)
       const userId = yield* decodeWorkflowUserId(input.context)

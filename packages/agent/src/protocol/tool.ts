@@ -37,6 +37,22 @@ export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   structuredContent: Schema.optional(Schema.Unknown)
 }) {}
 
+export type ErrorToolResultInput = {
+  readonly toolCallId: string
+  readonly content: Content
+  readonly structuredContent?: unknown
+}
+
+export const makeErrorToolResult = (input: ErrorToolResultInput) =>
+  ToolResult.make({
+    toolCallId: input.toolCallId,
+    content: input.content,
+    isError: true,
+    ...(input.structuredContent === undefined
+      ? {}
+      : { structuredContent: input.structuredContent })
+  })
+
 export class ToolApprovalRequest extends Schema.TaggedClass<ToolApprovalRequest>()(
   'ToolApprovalRequest',
   {

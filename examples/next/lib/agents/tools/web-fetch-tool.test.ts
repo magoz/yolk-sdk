@@ -99,11 +99,12 @@ describe('web_fetch tool', () => {
           params: { url: 'http://127.0.0.1:3000/' }
         }),
         deps
-      ).pipe(Effect.result)
+      )
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'permission' }
+        toolCallId: 'call_1',
+        content: 'URL host resolves to a private or reserved address',
+        isError: true
       })
       expect(requested).toEqual([])
     })
@@ -121,11 +122,12 @@ describe('web_fetch tool', () => {
           params: { url: 'https://example.com/start' }
         }),
         deps
-      ).pipe(Effect.result)
+      )
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'permission' }
+        toolCallId: 'call_1',
+        content: 'URL host resolves to a private or reserved address',
+        isError: true
       })
       expect(requested).toEqual(['https://example.com/start'])
     })
@@ -144,11 +146,12 @@ describe('web_fetch tool', () => {
           params: { url: 'https://example.com/start' }
         }),
         deps
-      ).pipe(Effect.result)
+      )
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'execution' }
+        toolCallId: 'call_1',
+        content: 'Too many redirects',
+        isError: true
       })
     })
   )

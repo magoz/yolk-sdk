@@ -52,6 +52,9 @@ const handler = Effect.gen(function* () {
   Effect.catchTag('AgentImageLimitError', error =>
     HttpServerResponse.json({ error: error.message }, { status: 400 })
   ),
+  Effect.catchTag('AgentDocumentLimitError', error =>
+    HttpServerResponse.json({ error: error.message }, { status: 400 })
+  ),
   Effect.catchTag('OpenAiCodexAuthNotFoundError', () =>
     HttpServerResponse.json({ error: 'OpenAI Codex not connected' }, { status: 409 })
   ),

@@ -112,6 +112,58 @@ describe('web_search tool', () => {
     })
   )
 
+  it.effect('returns model-visible errors after provider fallback fails', () =>
+    Effect.gen(function* () {
+      const { deps, requested } = makeDependencies(input =>
+        Effect.fail(
+          new ToolError({
+            tool: 'web_search',
+            message: `${input.provider} failed`,
+            cause: 'execution'
+          })
+        )
+      )
+      const result = yield* executeWebSearchTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'web_search',
+          params: { query: 'b' }
+        }),
+        deps
+      )
+
+      expect(requested.map(request => request.provider)).toEqual(['exa', 'parallel'])
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'parallel failed',
+        isError: true
+      })
+    })
+  )
+
+  it.effect('returns model-visible errors for blank queries', () =>
+    Effect.gen(function* () {
+      const { deps, requested } = makeDependencies(() =>
+        Effect.succeed(mcpResult('unused'))
+      )
+      const result = yield* executeWebSearchTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'web_search',
+          params: { query: '   ' }
+        }),
+        deps
+      )
+
+      expect(requested).toEqual([])
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'query must not be empty',
+        isError: true
+      })
+    })
+  )
+
   it.effect('enables web_search for text and voice agents', () =>
     Effect.gen(function* () {
       const textTools = yield* resolveAgentTools({

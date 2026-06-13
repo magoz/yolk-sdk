@@ -10,7 +10,14 @@ import {
   type AgentMessage,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration, type ToolRegistryError } from './registry.ts'
+import {
+  makeTool,
+  modelVisibleToolError,
+  type ModelVisibleToolError,
+  type ToolModule,
+  type ToolRegistration,
+  type ToolRegistryError
+} from './registry.ts'
 
 export const taskToolName = 'task'
 
@@ -68,25 +75,36 @@ const taskToolError = (message: string, cause: ToolError['cause']) =>
     cause
   })
 
+const taskModelVisibleError = (message: string) =>
+  modelVisibleToolError({
+    tool: taskToolName,
+    message,
+    reason: 'validation'
+  })
+
 const trimmedTaskParams = (params: TaskToolParams) => ({
   description: params.description.trim(),
   prompt: params.prompt.trim(),
   subagent_type: params.subagent_type.trim()
 })
 
-const validateTaskParams = (params: TaskToolParams) => {
+const validateTaskParams = (params: TaskToolParams): Effect.Effect<{
+  readonly description: string
+  readonly prompt: string
+  readonly subagent_type: string
+}, ModelVisibleToolError> => {
   const trimmed = trimmedTaskParams(params)
 
   if (trimmed.description.length === 0) {
-    return Effect.fail(taskToolError('description must not be empty', 'validation'))
+    return Effect.fail(taskModelVisibleError('description must not be empty'))
   }
 
   if (trimmed.prompt.length === 0) {
-    return Effect.fail(taskToolError('prompt must not be empty', 'validation'))
+    return Effect.fail(taskModelVisibleError('prompt must not be empty'))
   }
 
   if (trimmed.subagent_type.length === 0) {
-    return Effect.fail(taskToolError('subagent_type must not be empty', 'validation'))
+    return Effect.fail(taskModelVisibleError('subagent_type must not be empty'))
   }
 
   return Effect.succeed(trimmed)
@@ -98,11 +116,11 @@ const findSubagent = (subagents: ReadonlyArray<TaskSubagentDefinition>, name: st
 const requireKnownSubagent = (
   subagents: ReadonlyArray<TaskSubagentDefinition>,
   name: string
-) => {
+): Effect.Effect<TaskSubagentDefinition, ModelVisibleToolError> => {
   const subagent = findSubagent(subagents, name)
 
   return subagent === undefined
-    ? Effect.fail(taskToolError(`Unknown subagent type: ${name}`, 'validation'))
+    ? Effect.fail(taskModelVisibleError(`Unknown subagent type: ${name}`))
     : Effect.succeed(subagent)
 }
 

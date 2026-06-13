@@ -1,7 +1,13 @@
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
-import { ToolDef, type ToolApprovalPolicy, type ToolCall, type ToolResult } from '@yolk-sdk/agent/protocol'
+import {
+  makeErrorToolResult,
+  ToolDef,
+  type ToolApprovalPolicy,
+  type ToolCall,
+  type ToolResult
+} from '@yolk-sdk/agent/protocol'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 export type ToolAccess = typeof ToolAccess.Type
@@ -13,6 +19,48 @@ export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError
     cause: Schema.Literals(['duplicate_tool'])
   }
 ) {}
+
+export const ModelVisibleToolErrorReason = Schema.Literals([
+  'validation',
+  'invalid_input',
+  'permission',
+  'denied',
+  'not_found',
+  'unavailable',
+  'timeout'
+])
+export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
+
+export class ModelVisibleToolError extends Schema.TaggedErrorClass<ModelVisibleToolError>()(
+  'ModelVisibleToolError',
+  {
+    tool: Schema.String,
+    message: Schema.String,
+    reason: ModelVisibleToolErrorReason,
+    structuredContent: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+export type ModelVisibleToolErrorInput = {
+  readonly tool: string
+  readonly message: string
+  readonly reason: ModelVisibleToolErrorReason
+  readonly structuredContent?: unknown
+}
+
+export const modelVisibleToolError = (input: ModelVisibleToolErrorInput) =>
+  new ModelVisibleToolError(input)
+
+export const modelVisibleToolErrorResult = (
+  call: ToolCall,
+  error: ModelVisibleToolError
+) => makeErrorToolResult({
+  toolCallId: call.id,
+  content: error.message,
+  ...(error.structuredContent === undefined
+    ? {}
+    : { structuredContent: error.structuredContent })
+})
 
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
@@ -45,7 +93,7 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly invalidParamsMessage?: (error: unknown) => string
   readonly execute: (
     input: SchemaToolExecutionInput<Context, ParamsSchema['Type']>
-  ) => Effect.Effect<ToolResult, ToolError>
+  ) => Effect.Effect<ToolResult, ToolError | ModelVisibleToolError>
 }
 
 export type ToolModule<Context> = {
@@ -173,14 +221,21 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   isEnabled: options.isEnabled,
   execute: ({ call, context }) =>
     Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
-      Effect.mapError(error =>
-        new ToolError({
-          tool: options.name,
-          message: options.invalidParamsMessage?.(error) ?? `Invalid ${options.name} arguments: ${unknownToMessage(error)}`,
-          cause: 'validation'
-        })
-      ),
-      Effect.flatMap(params => options.execute({ call, context, params }))
+      Effect.matchEffect({
+        onFailure: error =>
+          Effect.succeed(
+            makeErrorToolResult({
+              toolCallId: call.id,
+              content: options.invalidParamsMessage?.(error) ??
+                `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+            })
+          ),
+        onSuccess: params => options.execute({ call, context, params }).pipe(
+          Effect.catchTag('ModelVisibleToolError', error =>
+            Effect.succeed(modelVisibleToolErrorResult(call, error))
+          )
+        )
+      })
     )
 })
 

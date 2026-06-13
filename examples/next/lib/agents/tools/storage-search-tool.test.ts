@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
+import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import type { KnowledgeSearchResult } from '@yolk-sdk/knowledge/search'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeStorageSearchToolModule } from './storage-search-tool'
@@ -72,7 +73,7 @@ describe('storage knowledge search tool', () => {
     })
   })
 
-  it.effect('rejects blank queries', () => {
+  it.effect('returns model-visible errors for blank queries', () => {
     const toolModule = makeStorageSearchToolModule(() => Effect.succeed([]))
 
     return Effect.gen(function* () {
@@ -80,17 +81,19 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
-      const error = yield* toolSet
-        .execute(
-          ToolCall.make({
-            id: 'call_1',
-            name: 'search_storage',
-            params: { queries: ['   '] }
-          })
-        )
-        .pipe(Effect.flip)
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'search_storage',
+          params: { queries: ['   '] }
+        })
+      )
 
-      expect(error.cause).toBe('validation')
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'queries must not be empty',
+        isError: true
+      })
     })
   })
 
@@ -236,6 +239,33 @@ describe('storage knowledge search tool', () => {
         'list_storage_sources',
         'get_storage_source'
       ])
+    })
+  })
+
+  it.effect('returns model-visible errors for missing storage source', () => {
+    const toolModule = makeStorageSearchToolModule({
+      search: () => Effect.succeed([]),
+      getSource: () => Effect.fail(modelVisibleToolError({
+        tool: 'get_storage_source',
+        message: 'Storage source not found',
+        reason: 'not_found'
+      }))
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'get_storage_source', params: { id: 'missing_source' } })
+      )
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'Storage source not found',
+        isError: true
+      })
     })
   })
 })

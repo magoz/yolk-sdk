@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
+import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
@@ -170,7 +171,7 @@ describe('knowledge tool', () => {
     })
   })
 
-  it.effect('rejects blank queries', () => {
+  it.effect('returns model-visible errors for blank queries', () => {
     const toolModule = makeKnowledgeToolModule(() => Effect.succeed([]))
 
     return Effect.gen(function* () {
@@ -178,11 +179,15 @@ describe('knowledge tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
-      const error = yield* toolSet
-        .execute(ToolCall.make({ id: 'call_1', name: 'search_knowledge', params: { queries: ['   '] } }))
-        .pipe(Effect.flip)
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'search_knowledge', params: { queries: ['   '] } })
+      )
 
-      expect(error.cause).toBe('validation')
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'queries must not be empty',
+        isError: true
+      })
     })
   })
 
@@ -285,6 +290,37 @@ describe('knowledge tool', () => {
       expect(calls).toEqual([
         { userId: 'user_1', recordId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
       ])
+    })
+  })
+
+  it.effect('returns model-visible errors for missing knowledge context', () => {
+    const toolModule = makeKnowledgeToolModule({
+      search: () => Effect.succeed([]),
+      getContext: () => Effect.fail(modelVisibleToolError({
+        tool: 'get_knowledge_context',
+        message: 'Knowledge record not found',
+        reason: 'not_found'
+      }))
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveAgentToolSet({
+        modules: [toolModule],
+        context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
+      })
+      const result = yield* toolSet.execute(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'get_knowledge_context',
+          params: { recordId: 'missing_record' }
+        })
+      )
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'Knowledge record not found',
+        isError: true
+      })
     })
   })
 })

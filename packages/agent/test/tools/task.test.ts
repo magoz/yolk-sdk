@@ -85,7 +85,7 @@ describe('task tool', () => {
     })
   )
 
-  it.effect('rejects unknown subagent types', () =>
+  it.effect('returns model-visible errors for unknown subagent types', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
@@ -97,26 +97,25 @@ describe('task tool', () => {
         ],
         { sessionId: 'session_1' }
       )
-      const result = yield* toolSet
-        .execute({
-          id: 'call_1',
-          name: taskToolName,
-          params: {
-            description: 'Find auth',
-            prompt: 'Explore auth flow',
-            subagent_type: 'missing'
-          }
-        })
-        .pipe(Effect.result)
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'missing'
+        }
+      })
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'validation' }
+        toolCallId: 'call_1',
+        content: 'Unknown subagent type: missing',
+        isError: true
       })
     })
   )
 
-  it.effect('rejects empty prompts', () =>
+  it.effect('returns model-visible errors for empty prompts', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
@@ -128,21 +127,20 @@ describe('task tool', () => {
         ],
         { sessionId: 'session_1' }
       )
-      const result = yield* toolSet
-        .execute({
-          id: 'call_1',
-          name: taskToolName,
-          params: {
-            description: 'Find auth',
-            prompt: ' ',
-            subagent_type: 'explore'
-          }
-        })
-        .pipe(Effect.result)
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: ' ',
+          subagent_type: 'explore'
+        }
+      })
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'validation' }
+        toolCallId: 'call_1',
+        content: 'prompt must not be empty',
+        isError: true
       })
     })
   )

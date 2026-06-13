@@ -3,7 +3,15 @@ import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
-import { EmptyToolParams, makeTool as makeSchemaTool, makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
+import {
+  EmptyToolParams,
+  makeTool as makeSchemaTool,
+  makeToolExecutorLayer,
+  modelVisibleToolError,
+  resolveTools,
+  type ToolModule,
+  type ToolRegistration
+} from '../../src/tools'
 
 type TestContext = {
   readonly enabled: boolean
@@ -172,7 +180,7 @@ describe('resolveTools', () => {
     })
   )
 
-  it.effect('rejects unexpected parameters for empty tool params', () =>
+  it.effect('returns model-visible errors for invalid tool params', () =>
     Effect.gen(function* () {
       const tool = makeSchemaTool({
         name: 'empty_params',
@@ -183,11 +191,47 @@ describe('resolveTools', () => {
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
-      const result = yield* toolSet.execute({ id: 'call_1', name: 'empty_params', params: { extra: true } }).pipe(Effect.result)
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: 'empty_params',
+        params: { extra: true }
+      })
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'validation' }
+        toolCallId: 'call_1',
+        content: expect.stringContaining('Invalid empty_params arguments'),
+        isError: true
+      })
+    })
+  )
+
+  it.effect('returns model-visible errors from tool execution', () =>
+    Effect.gen(function* () {
+      const tool = makeSchemaTool({
+        name: 'visible_error',
+        description: 'Returns a model-visible error.',
+        parameters: EmptyToolParams,
+        access: 'read',
+        execute: () =>
+          Effect.fail(modelVisibleToolError({
+            tool: 'visible_error',
+            message: 'Try another input.',
+            reason: 'invalid_input',
+            structuredContent: { code: 'bad_input' }
+          }))
+      })
+      const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: 'visible_error',
+        params: {}
+      })
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        content: 'Try another input.',
+        isError: true,
+        structuredContent: { code: 'bad_input' }
       })
     })
   )

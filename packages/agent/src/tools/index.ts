@@ -1,4 +1,15 @@
-export { EmptyToolParams, makeTool, makeToolExecutorLayer, resolveTools, ToolAccess, ToolRegistryError } from './registry.ts'
+export {
+  EmptyToolParams,
+  makeTool,
+  makeToolExecutorLayer,
+  modelVisibleToolError,
+  modelVisibleToolErrorResult,
+  ModelVisibleToolError,
+  ModelVisibleToolErrorReason,
+  resolveTools,
+  ToolAccess,
+  ToolRegistryError
+} from './registry.ts'
 export {
   makeQuestionToolDef,
   makeQuestionToolModule,
@@ -19,6 +30,7 @@ export {
 export type {
   ResolvedToolSet,
   SchemaToolExecutionInput,
+  ModelVisibleToolErrorInput,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,

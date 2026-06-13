@@ -48,7 +48,7 @@ describe('skill tool', () => {
     })
   )
 
-  it.effect('fails missing skills as not found', () =>
+  it.effect('handles missing skills as model-visible tool errors', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools([skillToolModule], {
         surface: 'text',
@@ -56,13 +56,14 @@ describe('skill tool', () => {
         userId: 'user_1',
         skillset
       })
-      const result = yield* toolSet
-        .execute(ToolCall.make({ id: 'call_1', name: 'skill', params: { name: 'missing' } }))
-        .pipe(Effect.result)
+      const result = yield* toolSet.execute(
+        ToolCall.make({ id: 'call_1', name: 'skill', params: { name: 'missing' } })
+      )
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'not_found' }
+        toolCallId: 'call_1',
+        content: 'Skill not found: missing. Available skills: review-code.',
+        isError: true
       })
     })
   )

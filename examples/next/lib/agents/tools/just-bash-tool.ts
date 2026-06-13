@@ -121,16 +121,23 @@ const formatResult = (input: {
     '</stderr>'
   ].join('\n')
 
+const justBashToolResult = (call: ToolCall, result: {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+}) => ToolResult.make({
+  toolCallId: call.id,
+  content: formatResult(result),
+  isError: result.exitCode === 0 ? undefined : true
+})
+
 export const executeJustBashTool = (call: ToolCall) =>
   Effect.gen(function* () {
     const params = yield* decodeJustBashParams(call.params)
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
     const result = yield* runWithTimeout(params, timeoutMs)
 
-    return ToolResult.make({
-      toolCallId: call.id,
-      content: formatResult(result)
-    })
+    return justBashToolResult(call, result)
   })
 
 const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
@@ -145,10 +152,7 @@ const justBashTool: ToolRegistration<AgentToolContext> = makeTool({
       const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
       const result = yield* runWithTimeout(params, timeoutMs)
 
-      return ToolResult.make({
-        toolCallId: call.id,
-        content: formatResult(result)
-      })
+      return justBashToolResult(call, result)
     })
 })
 

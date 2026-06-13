@@ -182,7 +182,7 @@ describe('tool schema property tests', () => {
   )
 
   it.effect.prop(
-    'invalid schema-derived tool params fail before execution',
+    'invalid schema-derived tool params return model-visible errors before execution',
     [invalidSchemaVariantArbitrary],
     ([variant]) =>
       Effect.gen(function* () {
@@ -190,11 +190,12 @@ describe('tool schema property tests', () => {
         const result = yield* tool.execute({
           context: undefined,
           call: { id: 'call_1', name: tool.def.name, params: invalidParams(variant) }
-        }).pipe(Effect.result)
+        })
 
         expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'ToolError', cause: 'validation', tool: tool.def.name }
+          toolCallId: 'call_1',
+          content: expect.stringContaining(`Invalid ${tool.def.name} arguments`),
+          isError: true
         })
       }),
     propertyOptions

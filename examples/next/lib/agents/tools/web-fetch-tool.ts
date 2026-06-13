@@ -3,7 +3,15 @@ import * as Schema from 'effect/Schema'
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  modelVisibleToolError,
+  modelVisibleToolErrorResult,
+  type ModelVisibleToolError,
+  type ModelVisibleToolErrorReason,
+  type ToolModule,
+  type ToolRegistration
+} from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 
 const webFetchToolName = 'web_fetch'
@@ -25,16 +33,20 @@ const WebFetchParams = Schema.Struct({
 
 type WebFetchFormat = typeof WebFetchFormat.Type
 type WebFetchParams = typeof WebFetchParams.Type
+type WebFetchToolError = ToolError | ModelVisibleToolError
 
 export type WebFetchHttpResponse = {
   readonly status: number
   readonly headers: Readonly<Record<string, string | undefined>>
-  readonly body: Effect.Effect<ArrayBuffer, ToolError>
+  readonly body: Effect.Effect<ArrayBuffer, WebFetchToolError>
 }
 
 export type WebFetchToolDependencies = {
-  readonly ensurePublicUrl: (url: URL) => Effect.Effect<void, ToolError>
-  readonly request: (url: URL, timeoutMs: number) => Effect.Effect<WebFetchHttpResponse, ToolError>
+  readonly ensurePublicUrl: (url: URL) => Effect.Effect<void, WebFetchToolError>
+  readonly request: (
+    url: URL,
+    timeoutMs: number
+  ) => Effect.Effect<WebFetchHttpResponse, WebFetchToolError>
 }
 
 const webFetchToolDescription = [
@@ -46,17 +58,17 @@ const webFetchToolDescription = [
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
-const makeToolError = (message: string, cause: ToolError['cause']) =>
-  new ToolError({
+const makeModelVisibleError = (message: string, reason: ModelVisibleToolErrorReason) =>
+  modelVisibleToolError({
     tool: webFetchToolName,
     message,
-    cause
+    reason
   })
 
 const decodeWebFetchParams = (params: unknown) =>
   Schema.decodeUnknownEffect(WebFetchParams)(params).pipe(
     Effect.mapError(error =>
-      makeToolError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation')
+      makeModelVisibleError(`Invalid web fetch arguments: ${unknownToMessage(error)}`, 'validation')
     )
   )
 
@@ -67,7 +79,7 @@ const resolveTimeoutMs = (timeoutSeconds: number | undefined) => {
 
   if (!Number.isFinite(timeout) || timeout <= 0) {
     return Effect.fail(
-      makeToolError('timeoutSeconds must be a positive finite number', 'validation')
+      makeModelVisibleError('timeoutSeconds must be a positive finite number', 'validation')
     )
   }
 
@@ -78,15 +90,15 @@ const parsePublicHttpUrl = (rawUrl: string) => {
   const trimmed = rawUrl.trim()
 
   if (!URL.canParse(trimmed)) {
-    return Effect.fail(makeToolError(`Invalid URL: ${rawUrl}`, 'validation'))
+    return Effect.fail(makeModelVisibleError(`Invalid URL: ${rawUrl}`, 'validation'))
   }
 
   const url = new URL(trimmed)
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return Effect.fail(makeToolError('URL must use http or https', 'validation'))
+    return Effect.fail(makeModelVisibleError('URL must use http or https', 'validation'))
   }
   if (url.username.length > 0 || url.password.length > 0) {
-    return Effect.fail(makeToolError('URL credentials are not allowed', 'validation'))
+    return Effect.fail(makeModelVisibleError('URL credentials are not allowed', 'validation'))
   }
 
   return Effect.succeed(url)
@@ -165,13 +177,13 @@ export const isBlockedAddress = (address: string) =>
 export const ensurePublicUrlWithoutDns = (url: URL) => {
   const hostname = normalizeHostname(url.hostname)
   if (hostname.length === 0 || isLocalHostname(hostname)) {
-    return Effect.fail(makeToolError('URL host is not public', 'permission'))
+    return Effect.fail(makeModelVisibleError('URL host is not public', 'permission'))
   }
 
   if (isIpLiteral(hostname)) {
     return isBlockedAddress(hostname)
       ? Effect.fail(
-          makeToolError('URL host resolves to a private or reserved address', 'permission')
+          makeModelVisibleError('URL host resolves to a private or reserved address', 'permission')
         )
       : Effect.void
   }
@@ -181,7 +193,7 @@ export const ensurePublicUrlWithoutDns = (url: URL) => {
 
 export const ensureResolvedAddressesArePublic = (addresses: ReadonlyArray<string>) =>
   addresses.length === 0 || addresses.some(isBlockedAddress)
-    ? Effect.fail(makeToolError('URL host resolves to a private or reserved address', 'permission'))
+    ? Effect.fail(makeModelVisibleError('URL host resolves to a private or reserved address', 'permission'))
     : Effect.void
 
 const requestHeaders = {
@@ -201,11 +213,11 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
     )
     const response = yield* http.execute(request).pipe(
       Effect.mapError(error =>
-        makeToolError(`Request failed: ${unknownToMessage(error)}`, 'execution')
+        makeModelVisibleError(`Request failed: ${unknownToMessage(error)}`, 'unavailable')
       ),
       Effect.timeoutOrElse({
         duration: timeoutMs,
-        orElse: () => Effect.fail(makeToolError('Request timed out', 'timeout'))
+        orElse: () => Effect.fail(makeModelVisibleError('Request timed out', 'timeout'))
       })
     )
 
@@ -214,7 +226,7 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       headers: response.headers,
       body: response.arrayBuffer.pipe(
         Effect.mapError(error =>
-          makeToolError(`Could not read response body: ${unknownToMessage(error)}`, 'execution')
+          makeModelVisibleError(`Could not read response body: ${unknownToMessage(error)}`, 'unavailable')
         )
       )
     }
@@ -230,7 +242,7 @@ const isRedirectStatus = (status: number) => status >= 300 && status < 400
 
 const resolveRedirectUrl = (baseUrl: URL, location: string) => {
   if (!URL.canParse(location, baseUrl.toString())) {
-    return Effect.fail(makeToolError(`Invalid redirect URL: ${location}`, 'execution'))
+    return Effect.fail(makeModelVisibleError(`Invalid redirect URL: ${location}`, 'unavailable'))
   }
 
   return Effect.succeed(new URL(location, baseUrl.toString()))
@@ -241,7 +253,7 @@ const fetchWithRedirects = (
   url: URL,
   timeoutMs: number,
   remainingRedirects: number
-): Effect.Effect<{ readonly url: URL; readonly response: WebFetchHttpResponse }, ToolError> =>
+): Effect.Effect<{ readonly url: URL; readonly response: WebFetchHttpResponse }, WebFetchToolError> =>
   Effect.gen(function* () {
     yield* deps.ensurePublicUrl(url)
     const response = yield* deps.request(url, timeoutMs)
@@ -251,13 +263,13 @@ const fetchWithRedirects = (
     }
 
     if (remainingRedirects <= 0) {
-      return yield* Effect.fail(makeToolError('Too many redirects', 'execution'))
+      return yield* Effect.fail(makeModelVisibleError('Too many redirects', 'unavailable'))
     }
 
     const location = headerValue(response.headers, 'location')
     if (location === undefined || location.length === 0) {
       return yield* Effect.fail(
-        makeToolError(`Redirect ${response.status} missing Location header`, 'execution')
+        makeModelVisibleError(`Redirect ${response.status} missing Location header`, 'unavailable')
       )
     }
 
@@ -269,7 +281,7 @@ const fetchWithRedirects = (
 const ensureSuccessfulStatus = (status: number) =>
   status >= 200 && status < 300
     ? Effect.void
-    : Effect.fail(makeToolError(`Request failed with HTTP ${status}`, 'execution'))
+    : Effect.fail(makeModelVisibleError(`Request failed with HTTP ${status}`, 'unavailable'))
 
 const ensureContentLength = (headers: Readonly<Record<string, string | undefined>>) => {
   const rawContentLength = headerValue(headers, 'content-length')
@@ -280,13 +292,13 @@ const ensureContentLength = (headers: Readonly<Record<string, string | undefined
   const contentLength = Number.parseInt(rawContentLength, 10)
 
   return Number.isFinite(contentLength) && contentLength > maxResponseSizeBytes
-    ? Effect.fail(makeToolError('Response too large (exceeds 5MB limit)', 'execution'))
+    ? Effect.fail(makeModelVisibleError('Response too large (exceeds 5MB limit)', 'unavailable'))
     : Effect.void
 }
 
 const ensureArrayBufferSize = (arrayBuffer: ArrayBuffer) =>
   arrayBuffer.byteLength > maxResponseSizeBytes
-    ? Effect.fail(makeToolError('Response too large (exceeds 5MB limit)', 'execution'))
+    ? Effect.fail(makeModelVisibleError('Response too large (exceeds 5MB limit)', 'unavailable'))
     : Effect.void
 
 const contentTypeMime = (contentType: string | undefined) =>
@@ -420,7 +432,7 @@ export const fetchWebPage = (params: WebFetchParams, deps: WebFetchToolDependenc
     const contentType = headerValue(response.headers, 'content-type')
     const mime = contentTypeMime(contentType)
     if (!isTextLikeMime(mime)) {
-      return yield* Effect.fail(makeToolError(`Unsupported content type: ${mime}`, 'execution'))
+      return yield* Effect.fail(makeModelVisibleError(`Unsupported content type: ${mime}`, 'unavailable'))
     }
 
     const arrayBuffer = yield* response.body
@@ -453,7 +465,11 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
     const content = yield* fetchWebPage(params, deps)
 
     return ToolResult.make({ toolCallId: call.id, content })
-  })
+  }).pipe(
+    Effect.catchTag('ModelVisibleToolError', error =>
+      Effect.succeed(modelVisibleToolErrorResult(call, error))
+    )
+  )
 }
 
 export const makeWebFetchToolRegistration = (

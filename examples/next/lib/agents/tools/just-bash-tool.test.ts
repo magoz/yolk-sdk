@@ -38,6 +38,22 @@ describe('just_bash tool', () => {
     })
   )
 
+  it.effect('marks non-zero exits as model-visible errors', () =>
+    Effect.gen(function* () {
+      const result = yield* executeJustBashTool(
+        ToolCall.make({
+          id: 'call_1',
+          name: 'just_bash',
+          params: { script: 'printf "%s" nope >&2; exit 2' }
+        })
+      )
+
+      expect(result.content).toContain('exit_code: 2')
+      expect(result.content).toContain('nope')
+      expect(result.isError).toBe(true)
+    })
+  )
+
   it.effect('enables just_bash for text agents only', () =>
     Effect.gen(function* () {
       const textTools = yield* resolveAgentTools({

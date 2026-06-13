@@ -46,7 +46,7 @@ describe('question tool', () => {
     })
   )
 
-  it.effect('rejects empty question lists', () =>
+  it.effect('returns model-visible errors for empty question lists', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
@@ -57,17 +57,16 @@ describe('question tool', () => {
         ],
         { sessionId: 'session_1' }
       )
-      const result = yield* toolSet
-        .execute({
-          id: 'call_1',
-          name: questionToolName,
-          params: { questions: [] }
-        })
-        .pipe(Effect.result)
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: questionToolName,
+        params: { questions: [] }
+      })
 
       expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ToolError', cause: 'validation' }
+        toolCallId: 'call_1',
+        content: expect.stringContaining('Invalid question arguments'),
+        isError: true
       })
     })
   )

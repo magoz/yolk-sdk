@@ -2,11 +2,18 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeTool, type ToolModule } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  modelVisibleToolError,
+  ModelVisibleToolError,
+  type ToolModule
+} from '@yolk-sdk/agent/tools'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
 import type { KnowledgeRecordSummary } from '@/lib/core/knowledge/list-user-knowledge-records'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 import type { AgentToolContext } from './tool-context.ts'
+
+type KnowledgeToolError = ToolError | ModelVisibleToolError
 
 const knowledgeListToolName = 'list_knowledge_records'
 const knowledgeSearchToolName = 'search_knowledge'
@@ -88,7 +95,7 @@ export type KnowledgeListHandler = (input: {
   readonly query?: string
   readonly policy?: typeof KnowledgeContextPolicy.Type
   readonly limit: number
-}) => Effect.Effect<ReadonlyArray<KnowledgeRecordSummary>, ToolError>
+}) => Effect.Effect<ReadonlyArray<KnowledgeRecordSummary>, KnowledgeToolError>
 
 export type KnowledgeSearchHandler = (input: {
   readonly userId: string
@@ -96,7 +103,7 @@ export type KnowledgeSearchHandler = (input: {
   readonly limit: number
   readonly minScore?: number
   readonly contextChunks: number
-}) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, ToolError>
+}) => Effect.Effect<ReadonlyArray<KnowledgeSearchResult>, KnowledgeToolError>
 
 export type KnowledgeContextHandler = (input: {
   readonly userId: string
@@ -106,7 +113,7 @@ export type KnowledgeContextHandler = (input: {
   readonly before: number
   readonly after: number
   readonly maxChars: number
-}) => Effect.Effect<KnowledgeContextWindow, ToolError>
+}) => Effect.Effect<KnowledgeContextWindow, KnowledgeToolError>
 
 export type KnowledgeToolHandlers = {
   readonly list?: KnowledgeListHandler
@@ -125,6 +132,13 @@ const makeToolError = (message: string, cause: ToolError['cause']) =>
 const makeNamedToolError = (tool: string, message: string, cause: ToolError['cause']) =>
   new ToolError({ tool, message, cause })
 
+const makeModelVisibleError = (tool: string, message: string) =>
+  modelVisibleToolError({
+    tool,
+    message,
+    reason: 'validation'
+  })
+
 const optionalText = (value: string | null | undefined) => {
   const trimmed = value?.trim()
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
@@ -139,7 +153,12 @@ const normalizeInteger = (input: {
 }) => {
   const value = input.value ?? input.defaultValue
   if (!Number.isInteger(value) || value < input.minimum) {
-    return Effect.fail(makeToolError(`${input.name} must be an integer >= ${input.minimum}`, 'validation'))
+    return Effect.fail(
+      makeModelVisibleError(
+        knowledgeSearchToolName,
+        `${input.name} must be an integer >= ${input.minimum}`
+      )
+    )
   }
   return Effect.succeed(Math.min(value, input.maxValue))
 }
@@ -154,7 +173,9 @@ const normalizeNamedInteger = (input: {
 }) => {
   const value = input.value ?? input.defaultValue
   if (!Number.isInteger(value) || value < input.minimum) {
-    return Effect.fail(makeNamedToolError(input.tool, `${input.name} must be an integer >= ${input.minimum}`, 'validation'))
+    return Effect.fail(
+      makeModelVisibleError(input.tool, `${input.name} must be an integer >= ${input.minimum}`)
+    )
   }
 
   return Effect.succeed(Math.min(value, input.maxValue))
@@ -165,7 +186,9 @@ const normalizeMinScore = (value: number | null | undefined) => {
     return Effect.succeed(undefined)
   }
   if (!Number.isFinite(value) || value < 0 || value > 1) {
-    return Effect.fail(makeToolError('minScore must be a finite number from 0 to 1', 'validation'))
+    return Effect.fail(
+      makeModelVisibleError(knowledgeSearchToolName, 'minScore must be a finite number from 0 to 1')
+    )
   }
   return Effect.succeed(value)
 }
@@ -174,10 +197,12 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
     if (queries.length === 0) {
-      return yield* Effect.fail(makeToolError('queries must not be empty', 'validation'))
+      return yield* Effect.fail(makeModelVisibleError(knowledgeSearchToolName, 'queries must not be empty'))
     }
     if (queries.length > maxQueries) {
-      return yield* Effect.fail(makeToolError(`queries must include at most ${maxQueries} items`, 'validation'))
+      return yield* Effect.fail(
+        makeModelVisibleError(knowledgeSearchToolName, `queries must include at most ${maxQueries} items`)
+      )
     }
     const limit = yield* normalizeInteger({ value: params.limit, defaultValue: defaultLimit, maxValue: maxLimit, minimum: 1, name: 'limit' })
     const contextChunks = yield* normalizeInteger({ value: params.contextChunks, defaultValue: defaultContextChunks, maxValue: maxContextChunks, minimum: 0, name: 'contextChunks' })
@@ -195,15 +220,21 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
   Effect.gen(function* () {
     const recordId = params.recordId.trim()
     if (recordId.length === 0) {
-      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'recordId must not be empty', 'validation'))
+      return yield* Effect.fail(
+        makeModelVisibleError(knowledgeContextToolName, 'recordId must not be empty')
+      )
     }
     const chunkId = params.chunkId?.trim()
     if (chunkId !== undefined && chunkId.length === 0) {
-      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'chunkId must not be empty', 'validation'))
+      return yield* Effect.fail(
+        makeModelVisibleError(knowledgeContextToolName, 'chunkId must not be empty')
+      )
     }
     const position = params.position ?? undefined
     if (chunkId !== undefined && position !== undefined) {
-      return yield* Effect.fail(makeNamedToolError(knowledgeContextToolName, 'Use chunkId or position, not both', 'validation'))
+      return yield* Effect.fail(
+        makeModelVisibleError(knowledgeContextToolName, 'Use chunkId or position, not both')
+      )
     }
 
     const before = yield* normalizeNamedInteger({ value: params.before, defaultValue: defaultBefore, maxValue: maxTraversalChunks, minimum: 0, name: 'before', tool: knowledgeContextToolName })
@@ -352,7 +383,11 @@ const searchTool = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext
             structuredContent: { queries: items.map(item => structuredResult(item.query, item.results)) }
           })
         }).pipe(
-          Effect.mapError(error => error instanceof ToolError ? error : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution'))
+          Effect.mapError(error =>
+            error instanceof ToolError || error instanceof ModelVisibleToolError
+              ? error
+              : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution')
+          )
         )
     })
 
@@ -375,7 +410,11 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
           structuredContent: structuredRecordSummaries(records)
         })
       }).pipe(
-        Effect.mapError(error => error instanceof ToolError ? error : makeNamedToolError(knowledgeListToolName, `Knowledge listing failed: ${unknownToMessage(error)}`, 'execution'))
+        Effect.mapError(error =>
+          error instanceof ToolError || error instanceof ModelVisibleToolError
+            ? error
+            : makeNamedToolError(knowledgeListToolName, `Knowledge listing failed: ${unknownToMessage(error)}`, 'execution')
+        )
       )
   })
 
@@ -398,7 +437,11 @@ const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolC
           structuredContent: { context: structuredContextWindow(window) }
         })
       }).pipe(
-        Effect.mapError(error => error instanceof ToolError ? error : makeNamedToolError(knowledgeContextToolName, `Knowledge context read failed: ${unknownToMessage(error)}`, 'execution'))
+        Effect.mapError(error =>
+          error instanceof ToolError || error instanceof ModelVisibleToolError
+            ? error
+            : makeNamedToolError(knowledgeContextToolName, `Knowledge context read failed: ${unknownToMessage(error)}`, 'execution')
+        )
       )
   })
 
