@@ -11,6 +11,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/agent/loop/testing`
   - `@yolk-sdk/agent/runtime`
   - `@yolk-sdk/agent/client`
+  - `@yolk-sdk/agent/compaction`
   - `@yolk-sdk/agent/tools`
   - `@yolk-sdk/agent/react`
   - `@yolk-sdk/agent/oauth`
@@ -35,7 +36,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - Agent internals live under `packages/agent/src/*`, not separate workspace packages.
 - MCP internals live under `packages/mcp/src/*`, not separate workspace packages.
 - Area tests mirror source layout:
-  - `packages/agent/test/{protocol,loop,runtime,client,tools,property}`
+  - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,property}`
   - `packages/mcp/test/{client,server}`
 
 ## Dependency Direction
@@ -46,6 +47,7 @@ examples/next, cloudflare/agent, e2e -> @yolk-sdk/* public subpaths
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/tools only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + React peer
+@yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent/voice -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent core -> no @yolk-sdk/knowledge, @yolk-sdk/mcp, app, Next, provider SDKs

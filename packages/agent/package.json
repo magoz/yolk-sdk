@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/agent",
   "version": "0.1.0-canary.15",
-  "description": "Protocol, loop, runtime, client, tools, React, providers, OAuth, skillset, and voice primitives for building Yolk agents.",
+  "description": "Protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice primitives for building Yolk agents.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -34,6 +34,10 @@
     "./client": {
       "types": "./src/client/index.ts",
       "default": "./src/client/index.ts"
+    },
+    "./compaction": {
+      "types": "./src/compaction/index.ts",
+      "default": "./src/compaction/index.ts"
     },
     "./loop": {
       "types": "./src/loop/index.ts",
@@ -121,6 +125,11 @@
         "types": "./dist/client/index.d.mts",
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
+      },
+      "./compaction": {
+        "types": "./dist/compaction/index.d.mts",
+        "import": "./dist/compaction/index.mjs",
+        "default": "./dist/compaction/index.mjs"
       },
       "./loop": {
         "types": "./dist/loop/index.d.mts",

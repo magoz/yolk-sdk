@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { initialAgentClientState } from '@yolk-sdk/agent/client'
+import { makeContextBudget } from '@yolk-sdk/agent/compaction'
 import { LoopConfig } from '@yolk-sdk/agent/loop'
 import { Reply } from '@yolk-sdk/agent/loop/testing'
 import { makeInMemorySessionEventStoreLayer, SessionEventStore } from '@yolk-sdk/agent/runtime'
@@ -9,10 +10,11 @@ import { ToolAccess } from '@yolk-sdk/agent/tools'
 
 describe('@yolk-sdk/agent subpaths', () => {
   it('imports every public subpath', async () => {
-    const [root, protocol, client, loop, testing, runtime, tools] = await Promise.all([
+    const [root, protocol, client, compaction, loop, testing, runtime, tools] = await Promise.all([
       import('@yolk-sdk/agent'),
       import('@yolk-sdk/agent/protocol'),
       import('@yolk-sdk/agent/client'),
+      import('@yolk-sdk/agent/compaction'),
       import('@yolk-sdk/agent/loop'),
       import('@yolk-sdk/agent/loop/testing'),
       import('@yolk-sdk/agent/runtime'),
@@ -22,6 +24,7 @@ describe('@yolk-sdk/agent subpaths', () => {
     expect(root).toBeDefined()
     expect(protocol.UserMessage).toBeDefined()
     expect(client.initialAgentClientState.status).toBe('idle')
+    expect(compaction.makeContextBudget).toBeDefined()
     expect(loop.LoopConfig).toBeDefined()
     expect(testing.Reply).toBeDefined()
     expect(runtime.SessionEventStore).toBeDefined()
@@ -33,6 +36,7 @@ describe('@yolk-sdk/agent subpaths', () => {
 
     expect(message.content).toBe('hello')
     expect(initialAgentClientState.status).toBe('idle')
+    expect(makeContextBudget).toBeDefined()
     expect(Reply.text('ok').events.length).toBeGreaterThan(0)
     expect(ToolAccess).toBeDefined()
   })

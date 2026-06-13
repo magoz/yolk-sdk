@@ -20,6 +20,7 @@ knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
 mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
 agent/react -> agent/client + agent/protocol + optional React peer
+agent/compaction -> agent/protocol + agent/loop
 agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 agent/voice -> agent/loop + agent/protocol

@@ -16,6 +16,7 @@ const packages: ReadonlyArray<PackageShape> = [
     exports: [
       '.',
       './client',
+      './compaction',
       './loop',
       './loop/testing',
       './oauth',

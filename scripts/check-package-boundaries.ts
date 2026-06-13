@@ -93,6 +93,10 @@ const rules: ReadonlyArray<BoundaryRule> = [
     forbiddenImports: agentCoreForbiddenImports
   },
   {
+    packageDir: 'packages/agent/src/compaction',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
     packageDir: 'packages/agent/src/tools',
     forbiddenImports: agentCoreForbiddenImports
   },

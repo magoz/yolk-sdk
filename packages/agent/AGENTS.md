@@ -11,6 +11,7 @@
 | `@yolk-sdk/agent/loop/testing` | `src/loop/testing` | Loop test helpers |
 | `@yolk-sdk/agent/runtime` | `src/runtime` | Generic runtime/session orchestration |
 | `@yolk-sdk/agent/client` | `src/client` | Client transport/state helpers |
+| `@yolk-sdk/agent/compaction` | `src/compaction` | Host-owned context compaction utilities |
 | `@yolk-sdk/agent/tools` | `src/tools` | Generic tool module registry |
 | `@yolk-sdk/agent/react` | `src/react` | Headless React chat hook/state helpers |
 | `@yolk-sdk/agent/oauth` | `src/oauth` | Provider-neutral OAuth token contracts |
@@ -34,6 +35,7 @@
 - Loop depends on protocol only.
 - Runtime depends on protocol + loop only.
 - Client depends on protocol only.
+- Compaction depends on protocol + loop only.
 - Tools depend on protocol + loop only.
 - OAuth and skillset depend on Effect only.
 - Voice depends on protocol + loop only.
@@ -60,6 +62,7 @@
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
 - Provider adapters classify retryable failures and normalize raw usage; loop owns retry/usage aggregation.
 - Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
+- `@yolk-sdk/agent/compaction` provides pure planning/estimation/transformer helpers only; hosts own thresholds, summary wording, LLM summarization, overflow retry, and checkpoints.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
 - Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, loop runs them concurrently within `toolConcurrency`, and dependent work waits for the next model turn.
@@ -70,7 +73,7 @@
 
 ## Tests
 
-- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/tools`, `test/react`, `test/oauth`, `test/providers`, `test/skillset`, `test/voice`, and `test/property`.
+- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/compaction`, `test/tools`, `test/react`, `test/oauth`, `test/providers`, `test/skillset`, `test/voice`, and `test/property`.
 - Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
 - Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.

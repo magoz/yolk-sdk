@@ -19,6 +19,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './package.json',
       '.',
       './client',
+      './compaction',
       './loop',
       './loop/testing',
       './oauth',
