@@ -215,7 +215,47 @@ Requirements before dispatch:
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
 
-If a renamed/new package 404s on first publish, preauthorize `magoz/yolk-sdk` + `.github/workflows/publish.yml` as trusted publisher for that npm package name, then rerun the workflow.
+## New Package First Publish
+
+Trusted publishing can only be configured after a package exists on npm. For a renamed/new `@yolk-sdk/*` package, the first publish is the only approved local publish exception.
+
+Preconditions:
+
+- release prep commit is already on `main`
+- package version was validated with the full release checks
+- `npm view @yolk-sdk/<name>` returns 404
+- local `npm whoami` is `magoz`
+- user explicitly approves local first publish
+
+Create only the missing package from a packed tarball:
+
+```bash
+pnpm --filter @yolk-sdk/<name> build
+pnpm --filter @yolk-sdk/<name> pack --pack-destination /tmp
+npm publish /tmp/yolk-sdk-<name>-<version>.tgz \
+  --tag canary \
+  --access public \
+  --provenance=false \
+  --otp=<code>
+```
+
+Then configure npm trusted publishing for that package:
+
+```bash
+npm trust github @yolk-sdk/<name> \
+  --repo magoz/yolk-sdk \
+  --file publish.yml \
+  --allow-publish
+```
+
+or npmjs.com → package → Settings → Trusted Publisher → GitHub Actions:
+
+- Organization/user: `magoz`
+- Repository: `yolk-sdk`
+- Workflow filename: `publish.yml`
+- Allowed action: `npm publish`
+
+Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-published tarballs and creates the missing `v<version>` tag. Verify all package dist-tags; npm may assign `latest` to the first version of a brand-new package even when `--tag canary` is used.
 
 ## Release Prep Order
 

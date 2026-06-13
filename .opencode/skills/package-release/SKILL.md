@@ -115,6 +115,7 @@ pnpm test:run
     - Tell user to run Actions → `Publish packages` from `main`.
     - Use `canary` unless stable was explicitly approved.
     - Never run local `pnpm release:canary` for normal releases.
+    - Exception: first publish of a new npm package name may be a local packed-tarball publish after explicit approval; see `references/publishing.md`.
     - Before saying “run action”, confirm current `main` contains the version bump commit.
     - After action completes, verify npm dist-tags and new `v<version>` git tag.
 

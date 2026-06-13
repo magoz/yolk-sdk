@@ -158,6 +158,44 @@ Current workflow policy:
 - Tags the published commit as `v<version>` after successful publish.
 
 Do not run local publish in normal flow. Local `pnpm release:canary` is emergency-only and requires explicit user approval.
+
+## New package first publish
+
+New npm package names cannot be trusted-publisher preauthorized with `npm trust` until they exist on npm. Use a one-time local tarball publish only for the missing package name, then configure trust and rerun the workflow for the tag.
+
+Preconditions:
+
+- release prep commit is on `main`
+- full validation passed
+- package is missing on npm: `npm view @yolk-sdk/<name>` returns 404
+- local npm user is `magoz`: `npm whoami`
+- user explicitly approves local first publish
+
+Publish the missing package only:
+
+```bash
+pnpm --filter @yolk-sdk/<name> build
+pnpm --filter @yolk-sdk/<name> pack --pack-destination /tmp
+npm publish /tmp/yolk-sdk-<name>-<version>.tgz \
+  --tag canary \
+  --access public \
+  --provenance=false \
+  --otp=<code>
+```
+
+Then configure trusted publishing:
+
+```bash
+npm trust github @yolk-sdk/<name> \
+  --repo magoz/yolk-sdk \
+  --file publish.yml \
+  --allow-publish
+```
+
+Equivalent npm UI fields: GitHub Actions, org/user `magoz`, repo `yolk-sdk`, workflow filename `publish.yml`, allowed action `npm publish`.
+
+Finally rerun `.github/workflows/publish.yml` from `main`; it skips already-published tarballs and creates `v<version>`. Verify npm dist-tags for all packages. First publish of a brand-new package may leave `latest` on the canary version; note or correct intentionally.
+
 ## Future automation model
 
 Recommended later workflow:
