@@ -110,7 +110,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
         Effect.gen(function* () {
           const request = yield* HttpClientRequest.post(url).pipe(
             HttpClientRequest.setHeaders({
-              accept: 'application/json',
+              accept: 'application/json, text/plain, */*',
               'content-type': 'application/json',
               'user-agent': ANTHROPIC_CLAUDE_OAUTH_USER_AGENT
             }),
@@ -135,17 +135,18 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
       const exchangeAuthorizationCode = (input: {
         readonly authorizationCode: string
         readonly codeVerifier: string
+        readonly expectedState: string
       }) =>
         Effect.gen(function* () {
           const parsed = parseAnthropicClaudeAuthorizationCode(input.authorizationCode)
 
           if (parsed === undefined) {
             return yield* new AnthropicClaudeOAuthError({
-              message: 'Invalid Anthropic Claude authorization code. Expected code#state.'
+              message: 'Invalid Anthropic Claude authorization code. Expected callback URL or code#state.'
             })
           }
 
-          if (parsed.state !== input.codeVerifier) {
+          if (parsed.state !== input.expectedState) {
             return yield* new AnthropicClaudeOAuthError({
               message: 'Anthropic Claude OAuth state mismatch'
             })

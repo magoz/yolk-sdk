@@ -96,7 +96,15 @@ describe('AnthropicClaudeProviderLayer', () => {
       expect(requests[0]?.request.url).toBe('https://api.anthropic.com/v1/messages?beta=true')
       expect(requestBody).toMatchObject({
         model: 'claude-sonnet-4-6',
-        system: [{ type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }],
+        system: [
+          {
+            type: 'text',
+            text: expect.stringMatching(
+              /^x-anthropic-billing-header: cc_version=2\.1\.112\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
+            )
+          },
+          { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
+        ],
         messages: [{ role: 'user', content: 'Be brief.\n\nhello' }],
         tools: [{ name: 'mcp_Weather', description: 'Get weather.', input_schema: {} }]
       })

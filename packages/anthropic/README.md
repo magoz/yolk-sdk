@@ -66,7 +66,8 @@ The provider:
 - Lowers Yolk `LLMRequest` messages/tools/images/PDFs to Anthropic Messages API input.
 - Renders message envelope metadata/annotations from `@yolk-sdk/agent/protocol` as contextual model input.
 - Maps PDF `DocumentPart` to Anthropic `document` blocks; non-PDF documents fail explicitly.
-- Preserves Claude subscription OAuth headers and Claude Code-compatible tool naming.
+- Preserves Claude subscription OAuth headers, billing system block, and Claude Code-compatible tool naming.
+- Normalizes Anthropic tool `input_schema` payloads to provider-safe root objects, flattening top-level `anyOf` / `oneOf` / `allOf`.
 - Maps Anthropic message responses to Yolk loop events: text deltas, reasoning deltas, tool calls, done, and usage.
 - Maps provider failures to typed `LLMError` causes for retry/context/rate-limit handling.
 
@@ -76,9 +77,12 @@ Default request headers include Claude subscription OAuth compatibility headers:
 | --- | --- |
 | `authorization` | Bearer access token from `token` |
 | `anthropic-version` | `2023-06-01` |
-| `anthropic-beta` | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14` |
-| `user-agent` | `claude-cli/2.1.2 (external, cli)` |
+| `anthropic-beta` | Claude Code OAuth beta set, model-adjusted for Haiku/4.6/4.7 |
+| `anthropic-dangerous-direct-browser-access` | `true` |
+| `user-agent` | `claude-cli/2.1.112 (external, sdk-cli)` |
 | `x-app` | `cli` |
+| `x-client-request-id` / `X-Claude-Code-Session-Id` | Generated request/session ids |
+| `x-stainless-*` | Claude Code-compatible JS client metadata |
 
 `extraHeaders` are applied last, so hosts can add gateway headers or override defaults.
 

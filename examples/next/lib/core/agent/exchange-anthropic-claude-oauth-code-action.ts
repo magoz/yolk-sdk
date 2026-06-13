@@ -6,7 +6,10 @@ import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { saveAnthropicClaudeToken } from './anthropic-claude-auth'
-import { anthropicClaudeOAuthVerifierCookieName } from './anthropic-claude-oauth-cookie'
+import {
+  anthropicClaudeOAuthStateCookieName,
+  anthropicClaudeOAuthVerifierCookieName
+} from './anthropic-claude-oauth-cookie'
 import { getSession } from '@/lib/services/auth/get-session'
 import { AnthropicClaudeOAuth } from '@/lib/services/anthropic-oauth/live-layer'
 import { AnthropicClaudeOAuthError } from '@/lib/services/anthropic-oauth/errors'
@@ -26,6 +29,7 @@ export const exchangeAnthropicClaudeOAuthCodeAction = async (input: {
       const session = yield* getSession()
       const oauth = yield* AnthropicClaudeOAuth
       const codeVerifier = cookieStore.get(anthropicClaudeOAuthVerifierCookieName)?.value
+      const expectedState = cookieStore.get(anthropicClaudeOAuthStateCookieName)?.value
 
       yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
 
@@ -35,12 +39,20 @@ export const exchangeAnthropicClaudeOAuthCodeAction = async (input: {
         })
       }
 
+      if (expectedState === undefined || expectedState.length === 0) {
+        return yield* new AnthropicClaudeOAuthError({
+          message: 'No Anthropic Claude OAuth flow in progress. Start connection again.'
+        })
+      }
+
       const token = yield* oauth.exchangeAuthorizationCode({
         authorizationCode: input.authorizationCode,
-        codeVerifier
+        codeVerifier,
+        expectedState
       })
       yield* saveAnthropicClaudeToken({ userId: session.user.id, token })
       yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthVerifierCookieName))
+      yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthStateCookieName))
     }).pipe(
       Effect.withSpan('action.agent.anthropicClaude.exchangeOAuthCode'),
       Effect.provide(AppLayer),

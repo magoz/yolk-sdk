@@ -91,6 +91,7 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 const runMinimalProviderRequest = (
   input: {
     readonly extraHeaders?: Readonly<Record<string, string>>
+    readonly model?: string
     readonly response?: Response
   },
   requests: Array<CapturedRequest>
@@ -116,7 +117,7 @@ const runMinimalProviderRequest = (
       const provider = yield* LLMProvider
 
       yield* provider.stream({
-        model: 'claude-sonnet-4-6',
+        model: input.model ?? 'claude-sonnet-4-6',
         systemPrompt: '',
         messages: [UserMessage.make({ content: 'hello' })],
         tools: []
@@ -185,9 +186,17 @@ describe('Anthropic Claude provider', () => {
         { maxTokens: 123 }
       )
 
-      expect(body).toEqual({
+      expect(body.system).toEqual([
+        {
+          type: 'text',
+          text: expect.stringMatching(
+            /^x-anthropic-billing-header: cc_version=2\.1\.112\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/
+          )
+        },
+        { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }
+      ])
+      expect(body).toMatchObject({
         model: 'claude-sonnet-4-6',
-        system: [{ type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." }],
         messages: [
           {
             role: 'user',
@@ -223,6 +232,94 @@ describe('Anthropic Claude provider', () => {
       })
     }))
 
+  it.effect('normalizes Anthropic tool input schemas to provider-safe root objects', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: [
+          ToolDef.make({
+            name: 'missing_type',
+            description: 'Missing root type.',
+            parameters: {
+              properties: { query: { type: 'string' } },
+              required: ['query']
+            }
+          }),
+          ToolDef.make({
+            name: 'root_union',
+            description: 'Root union.',
+            parameters: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    operation: { type: 'string', enum: ['search'] },
+                    query: { type: 'string' }
+                  },
+                  required: ['operation', 'query'],
+                  additionalProperties: false,
+                  $defs: { SearchMeta: { type: 'string' } }
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    operation: { type: 'string', enum: ['list'] },
+                    limit: { type: 'number' }
+                  },
+                  required: ['operation'],
+                  additionalProperties: false,
+                  $defs: { ListMeta: { type: 'number' } }
+                }
+              ]
+            }
+          }),
+          ToolDef.make({
+            name: 'root_intersection',
+            description: 'Root intersection.',
+            parameters: {
+              allOf: [
+                {
+                  type: 'object',
+                  properties: { first: { type: 'string' } },
+                  required: ['first']
+                },
+                {
+                  type: 'object',
+                  properties: { second: { type: 'number' } },
+                  required: ['second']
+                }
+              ]
+            }
+          })
+        ]
+      })
+
+      expect(body.tools?.[0]?.input_schema).toEqual({
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query']
+      })
+      expect(body.tools?.[1]?.input_schema).toEqual({
+        type: 'object',
+        properties: {
+          operation: { type: 'string', enum: ['search', 'list'] },
+          query: { type: 'string' },
+          limit: { type: 'number' }
+        },
+        required: ['operation'],
+        additionalProperties: false,
+        $defs: { SearchMeta: { type: 'string' }, ListMeta: { type: 'number' } }
+      })
+      expect(body.tools?.[2]?.input_schema).toEqual({
+        type: 'object',
+        properties: { first: { type: 'string' }, second: { type: 'number' } },
+        required: ['first', 'second'],
+        $defs: {}
+      })
+    }))
+
   it.effect('sends required Anthropic version and beta headers by default', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
@@ -233,10 +330,47 @@ describe('Anthropic Claude provider', () => {
 
       expect(headers['anthropic-version']).toBe('2023-06-01')
       expect(headers['anthropic-beta']).toBe(
-        'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14'
+        'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,context-management-2025-06-27,advisor-tool-2026-03-01,effort-2025-11-24'
       )
+      expect(headers['anthropic-dangerous-direct-browser-access']).toBe('true')
+      expect(headers['user-agent']).toBe('claude-cli/2.1.112 (external, sdk-cli)')
+      expect(headers['x-app']).toBe('cli')
+      expect(headers['x-client-request-id']).toBeDefined()
+      expect(headers['x-claude-code-session-id']).toBeDefined()
+      expect(headers['x-stainless-lang']).toBe('js')
       expect(headers.accept).toBe('text/event-stream')
       expect(body).toContain('"stream":true')
+    }))
+
+  it.effect('sanitizes known OpenCode prompt fingerprints', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody(
+        {
+          model: 'claude-sonnet-4-6',
+          systemPrompt:
+            'Here is some useful information about the environment you are running in: if OpenCode honestly',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: []
+        },
+        { maxTokens: 123 }
+      )
+
+      expect(body.messages[0]).toMatchObject({
+        role: 'user',
+        content: 'Environment context you are running in: if the assistant honestly\n\nhello'
+      })
+    }))
+
+  it.effect('omits interleaved thinking beta for Haiku', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      yield* runMinimalProviderRequest({ model: 'claude-haiku-4-5' }, requests)
+
+      const headers = readCapturedHeaders(requests)
+
+      expect(headers['anthropic-beta']).toBe(
+        'claude-code-20250219,oauth-2025-04-20,prompt-caching-scope-2026-01-05,context-management-2025-06-27,advisor-tool-2026-03-01'
+      )
     }))
 
   it.effect('lets extraHeaders override Anthropic default headers', () =>
@@ -344,6 +478,27 @@ describe('Anthropic Claude provider', () => {
         call: { id: 'toolu_1', name: 'search', params: { query: 'yolk' } }
       })
       expect(events[1]).toMatchObject({ stopReason: 'tool_use' })
+    }))
+
+  it.effect('preserves StructuredOutput casing when unprefixing Claude tool calls', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const response = new Response(
+        JSON.stringify({
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'mcp_StructuredOutput', input: { ok: true } }
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 2, output_tokens: 3 }
+        }),
+        { status: 200 }
+      )
+      const eventsChunk = yield* collectProviderEvents(response, requests)
+      const events = Array.from(eventsChunk)
+
+      expect(events[0]).toMatchObject({
+        call: { id: 'toolu_1', name: 'StructuredOutput', params: { ok: true } }
+      })
     }))
 
   it.effect('emits Anthropic streaming usage when output-only usage arrives', () =>

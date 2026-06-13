@@ -32,7 +32,12 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { anthropicClaudeAuthorizationHeaders, anthropicClaudeOAuthUserAgent } from './claude.ts'
+import {
+  anthropicClaudeAuthorizationHeaders,
+  anthropicClaudeCodeEntrypoint,
+  anthropicClaudeCodeVersion,
+  anthropicClaudeOAuthUserAgent
+} from './claude.ts'
 import type { OAuthAccessToken } from '@yolk-sdk/oauth'
 
 export type AnthropicClaudeProviderConfig = {
@@ -89,6 +94,8 @@ type AnthropicMessage =
   | { readonly role: 'user'; readonly content: string | ReadonlyArray<AnthropicUserBlock> }
   | { readonly role: 'assistant'; readonly content: ReadonlyArray<AnthropicAssistantBlock> }
 
+type JsonObject = Readonly<Record<string, unknown>>
+
 type AnthropicTool = {
   readonly name: string
   readonly description: string
@@ -111,9 +118,35 @@ type AnthropicToolBlockState = {
 }
 
 const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+const anthropicClaudeBillingPrefix = 'x-anthropic-billing-header:'
 const anthropicClaudeToolPrefix = 'mcp_'
 const anthropicClaudeVersion = '2023-06-01'
-const anthropicClaudeOAuthBeta = 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14'
+const anthropicClaudeCchSalt = '59cf53e54c78'
+const anthropicClaudeCchPositions: ReadonlyArray<number> = [4, 7, 20]
+const anthropicClaudeEffortBeta = 'effort-2025-11-24'
+const anthropicClaudeInterleavedThinkingBeta = 'interleaved-thinking-2025-05-14'
+const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
+  'claude-code-20250219',
+  'oauth-2025-04-20',
+  anthropicClaudeInterleavedThinkingBeta,
+  'prompt-caching-scope-2026-01-05',
+  'context-management-2025-06-27',
+  'advisor-tool-2026-03-01'
+]
+const anthropicClaudeSystemTextReplacements: ReadonlyArray<{
+  readonly match: string
+  readonly replacement: string
+}> = [
+  {
+    match: 'if OpenCode honestly',
+    replacement: 'if the assistant honestly'
+  },
+  {
+    match: 'Here is some useful information about the environment you are running in:',
+    replacement: 'Environment context you are running in:'
+  }
+]
+const anthropicClaudeStainlessPackageVersion = '0.81.0'
 
 // Claude subscription OAuth is fingerprinted against Claude Code tool names.
 const prefixClaudeToolName = (name: string) =>
@@ -126,6 +159,10 @@ const unprefixClaudeToolName = (name: string) => {
 
   const unprefixed = name.slice(anthropicClaudeToolPrefix.length)
 
+  if (unprefixed === 'StructuredOutput') {
+    return unprefixed
+  }
+
   return `${unprefixed.charAt(0).toLowerCase()}${unprefixed.slice(1)}`
 }
 
@@ -136,12 +173,163 @@ const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   text: anthropicClaudeSystemIdentity
 }
 
+const randomHex = (byteLength: number) => {
+  const crypto = globalThis.crypto
+  const bytes = new Uint8Array(byteLength)
+
+  if (crypto !== undefined && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  }
+
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const makeAnthropicClaudeRequestId = () => {
+  const crypto = globalThis.crypto
+
+  if (crypto !== undefined && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return randomHex(16)
+}
+
+const sha256Hex = (value: string): Effect.Effect<string, LLMError> => {
+  const crypto = globalThis.crypto
+
+  if (crypto === undefined || crypto.subtle === undefined) {
+    return Effect.fail(
+      new LLMError({
+        cause: 'provider_error',
+        message: 'Web Crypto SHA-256 is required for Anthropic Claude OAuth billing headers',
+        retryable: false
+      })
+    )
+  }
+
+  return Effect.tryPromise({
+    try: () =>
+      crypto.subtle
+        .digest('SHA-256', new TextEncoder().encode(value))
+        .then(buffer =>
+          Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('')
+        ),
+    catch: error =>
+      new LLMError({
+        cause: 'provider_error',
+        message: `Could not compute Anthropic Claude OAuth billing header: ${unknownToMessage(error)}`,
+        retryable: false
+      })
+  })
+}
+
+const computeAnthropicClaudeCch = (messageText: string) =>
+  sha256Hex(messageText).pipe(Effect.map(hash => hash.slice(0, 5)))
+
+const computeAnthropicClaudeVersionSuffix = (messageText: string) => {
+  const chars = anthropicClaudeCchPositions.map(index => messageText[index] ?? '0').join('')
+
+  return sha256Hex(`${anthropicClaudeCchSalt}${chars}${anthropicClaudeCodeVersion}`).pipe(
+    Effect.map(hash => hash.slice(0, 3))
+  )
+}
+
+const firstUserMessageText = (messages: ReadonlyArray<AnthropicMessage>) => {
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      continue
+    }
+
+    if (typeof message.content === 'string') {
+      return message.content
+    }
+
+    for (const block of message.content) {
+      if (block.type === 'text') {
+        return block.text
+      }
+    }
+  }
+
+  return ''
+}
+
+const makeAnthropicClaudeBillingSystemBlock = (
+  messages: ReadonlyArray<AnthropicMessage>
+): Effect.Effect<AnthropicSystemBlock, LLMError> => {
+  const text = firstUserMessageText(messages)
+
+  return Effect.all({
+    cch: computeAnthropicClaudeCch(text),
+    suffix: computeAnthropicClaudeVersionSuffix(text)
+  }).pipe(
+    Effect.map(({ cch, suffix }): AnthropicSystemBlock => ({
+      type: 'text',
+      text:
+        `${anthropicClaudeBillingPrefix} ` +
+        `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
+        `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
+        `cch=${cch};`
+    }))
+  )
+}
+
+const sanitizeAnthropicClaudeSystemText = (text: string) => {
+  let result = text
+
+  for (const rule of anthropicClaudeSystemTextReplacements) {
+    result = result.split(rule.match).join(rule.replacement)
+  }
+
+  return result
+}
+
+const anthropicClaudeBetaHeader = (model: string) => {
+  const lowerModel = model.toLowerCase()
+  const baseBetas = lowerModel.includes('haiku')
+    ? anthropicClaudeRequiredBetas.filter(beta => beta !== anthropicClaudeInterleavedThinkingBeta)
+    : anthropicClaudeRequiredBetas
+
+  if (
+    !lowerModel.includes('haiku') &&
+    (lowerModel.includes('4-6') || lowerModel.includes('4-7')) &&
+    !baseBetas.includes(anthropicClaudeEffortBeta)
+  ) {
+    return [...baseBetas, anthropicClaudeEffortBeta].join(',')
+  }
+
+  return baseBetas.join(',')
+}
+
+const makeAnthropicClaudeCompatibilityHeaders = (input: {
+  readonly model: string
+  readonly sessionId: string
+}) => ({
+  'anthropic-beta': anthropicClaudeBetaHeader(input.model),
+  'anthropic-dangerous-direct-browser-access': 'true',
+  'anthropic-version': anthropicClaudeVersion,
+  'user-agent': anthropicClaudeOAuthUserAgent,
+  'x-app': 'cli',
+  'x-client-request-id': makeAnthropicClaudeRequestId(),
+  'X-Claude-Code-Session-Id': input.sessionId,
+  'x-stainless-arch': 'unknown',
+  'x-stainless-lang': 'js',
+  'x-stainless-os': 'unknown',
+  'x-stainless-package-version': anthropicClaudeStainlessPackageVersion,
+  'x-stainless-retry-count': '0',
+  'x-stainless-runtime': 'node',
+  'x-stainless-runtime-version': 'unknown',
+  'x-stainless-timeout': '600'
+})
+
 // Keep app instructions out of `system[]`; Anthropic can reject/limit otherwise.
 const prependSystemPromptToFirstUserMessage = (
   messages: ReadonlyArray<AnthropicMessage>,
   systemPrompt: string
 ): ReadonlyArray<AnthropicMessage> => {
-  if (systemPrompt.trim().length === 0) {
+  const sanitizedSystemPrompt = sanitizeAnthropicClaudeSystemText(systemPrompt).trim()
+
+  if (sanitizedSystemPrompt.length === 0) {
     return messages
   }
 
@@ -155,10 +343,13 @@ const prependSystemPromptToFirstUserMessage = (
     relocated = true
 
     if (typeof message.content === 'string') {
-      return { ...message, content: `${systemPrompt}\n\n${message.content}` }
+      return { ...message, content: `${sanitizedSystemPrompt}\n\n${message.content}` }
     }
 
-    return { ...message, content: [{ type: 'text', text: systemPrompt }, ...message.content] }
+    return {
+      ...message,
+      content: [{ type: 'text', text: sanitizedSystemPrompt }, ...message.content]
+    }
   })
 }
 
@@ -305,6 +496,207 @@ const toolCallToAnthropicBlock = (call: ToolCall): AnthropicToolUseBlock => ({
   input: call.params
 })
 
+const isJsonObject = (value: unknown): value is JsonObject =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const jsonObjectField = (value: JsonObject, key: string) =>
+  Object.getOwnPropertyDescriptor(value, key)?.value
+
+const topLevelJsonSchemaCombinatorKeys: ReadonlyArray<string> = ['anyOf', 'oneOf', 'allOf']
+
+const topLevelJsonSchemaCombinator = (schema: JsonObject) => {
+  for (const key of topLevelJsonSchemaCombinatorKeys) {
+    const value = jsonObjectField(schema, key)
+
+    if (Array.isArray(value)) {
+      return { key, items: value }
+    }
+  }
+
+  return undefined
+}
+
+const withoutTopLevelJsonSchemaCombinators = (schema: JsonObject): JsonObject =>
+  Object.fromEntries(
+    Object.entries(schema).filter(([key]) => !topLevelJsonSchemaCombinatorKeys.includes(key))
+  )
+
+const jsonSchemaProperties = (schema: JsonObject) => {
+  const properties = jsonObjectField(schema, 'properties')
+
+  return isJsonObject(properties) ? properties : {}
+}
+
+const jsonSchemaDefinitions = (schema: JsonObject) => {
+  const definitions = jsonObjectField(schema, '$defs')
+
+  return isJsonObject(definitions) ? definitions : {}
+}
+
+const jsonSchemaRequired = (schema: JsonObject) => {
+  const required = jsonObjectField(schema, 'required')
+
+  return Array.isArray(required) ? required.filter(item => typeof item === 'string') : []
+}
+
+const uniqueUnknownArray = (items: ReadonlyArray<unknown>): ReadonlyArray<unknown> => {
+  const seen = new Set<string>()
+  const result: Array<unknown> = []
+
+  for (const item of items) {
+    const key = JSON.stringify(item)
+
+    if (key === undefined || seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    result.push(item)
+  }
+
+  return result
+}
+
+const mergeEnumPropertySchemas = (left: unknown, right: unknown): unknown | undefined => {
+  if (!isJsonObject(left) || !isJsonObject(right)) {
+    return undefined
+  }
+
+  const leftEnum = jsonObjectField(left, 'enum')
+  const rightEnum = jsonObjectField(right, 'enum')
+
+  if (!Array.isArray(leftEnum) || !Array.isArray(rightEnum)) {
+    return undefined
+  }
+
+  const leftType = jsonObjectField(left, 'type')
+  const rightType = jsonObjectField(right, 'type')
+
+  if (leftType !== rightType) {
+    return undefined
+  }
+
+  return { ...left, ...right, enum: uniqueUnknownArray([...leftEnum, ...rightEnum]) }
+}
+
+const jsonSchemaAnyOfItems = (schema: unknown) => {
+  if (!isJsonObject(schema)) {
+    return [schema]
+  }
+
+  const anyOf = jsonObjectField(schema, 'anyOf')
+
+  return Array.isArray(anyOf) ? anyOf : [schema]
+}
+
+const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
+  if (JSON.stringify(left) === JSON.stringify(right)) {
+    return left
+  }
+
+  const mergedEnum = mergeEnumPropertySchemas(left, right)
+
+  if (mergedEnum !== undefined) {
+    return mergedEnum
+  }
+
+  return { anyOf: uniqueUnknownArray([...jsonSchemaAnyOfItems(left), ...jsonSchemaAnyOfItems(right)]) }
+}
+
+const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject => {
+  const merged = new Map<string, unknown>()
+
+  for (const object of objects) {
+    for (const [key, value] of Object.entries(object)) {
+      if (merged.has(key)) {
+        merged.set(key, mergePropertySchemas(merged.get(key), value))
+      } else {
+        merged.set(key, value)
+      }
+    }
+  }
+
+  return Object.fromEntries(merged)
+}
+
+const mergeJsonSchemaRequired = (
+  combinatorKey: string,
+  objects: ReadonlyArray<JsonObject>
+): ReadonlyArray<string> => {
+  const requiredSets = objects.map(jsonSchemaRequired)
+
+  if (requiredSets.length === 0) {
+    return []
+  }
+
+  if (combinatorKey === 'allOf') {
+    return Array.from(new Set(requiredSets.flat()))
+  }
+
+  const first = requiredSets[0] ?? []
+
+  return first.filter(item => requiredSets.every(required => required.includes(item)))
+}
+
+const mergeAdditionalProperties = (objects: ReadonlyArray<JsonObject>) => {
+  const values = objects.map(object => jsonObjectField(object, 'additionalProperties'))
+
+  if (values.every(value => value === false)) {
+    return false
+  }
+
+  if (values.every(value => value === true)) {
+    return true
+  }
+
+  return undefined
+}
+
+const flattenTopLevelCombinatorToolSchema = (
+  schema: JsonObject,
+  combinator: { readonly key: string; readonly items: ReadonlyArray<unknown> }
+): JsonObject => {
+  const base = withoutTopLevelJsonSchemaCombinators(schema)
+  const objectVariants = combinator.items.filter(isJsonObject)
+  const additionalProperties = mergeAdditionalProperties(objectVariants)
+  const flattened = {
+    ...base,
+    type: 'object',
+    properties: mergeJsonSchemaObjects(objectVariants.map(jsonSchemaProperties)),
+    required: mergeJsonSchemaRequired(combinator.key, objectVariants),
+    $defs: mergeJsonSchemaObjects([jsonSchemaDefinitions(schema), ...objectVariants.map(jsonSchemaDefinitions)])
+  }
+
+  if (additionalProperties === undefined) {
+    return flattened
+  }
+
+  return { ...flattened, additionalProperties }
+}
+
+const anthropicToolInputSchema = (schema: unknown): unknown => {
+  if (!isJsonObject(schema)) {
+    return {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false
+    }
+  }
+
+  const combinator = topLevelJsonSchemaCombinator(schema)
+
+  if (combinator !== undefined) {
+    return flattenTopLevelCombinatorToolSchema(schema, combinator)
+  }
+
+  if (jsonObjectField(schema, 'type') !== undefined) {
+    return schema
+  }
+
+  return { ...schema, type: 'object' }
+}
+
 const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessage, LLMError> =>
   Effect.gen(function* () {
     switch (message._tag) {
@@ -346,7 +738,7 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
 const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
   name: prefixClaudeToolName(tool.name),
   description: tool.description,
-  input_schema: tool.parameters
+  input_schema: anthropicToolInputSchema(tool.parameters)
 })
 
 export const toAnthropicClaudeRequestBody = (
@@ -355,10 +747,11 @@ export const toAnthropicClaudeRequestBody = (
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
+    const billingSystemBlock = yield* makeAnthropicClaudeBillingSystemBlock(rawMessages)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
     const baseBody = {
       model: request.model,
-      system: [anthropicClaudeIdentitySystemBlock],
+      system: [billingSystemBlock, anthropicClaudeIdentitySystemBlock],
       messages,
       max_tokens: config?.maxTokens ?? anthropicClaudeMaxTokens
     }
@@ -864,7 +1257,8 @@ export const streamAnthropicClaudeResponse = (
 const sendAnthropicClaudeRequest = (
   config: AnthropicClaudeProviderConfig,
   request: LLMRequest,
-  client: HttpClient.HttpClient
+  client: HttpClient.HttpClient,
+  sessionId: string
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
@@ -873,11 +1267,8 @@ const sendAnthropicClaudeRequest = (
       HttpClientRequest.setHeaders({
         accept: 'text/event-stream',
         ...anthropicClaudeAuthorizationHeaders(config.token),
-        'anthropic-beta': anthropicClaudeOAuthBeta,
-        'anthropic-version': anthropicClaudeVersion,
         'content-type': 'application/json',
-        'user-agent': anthropicClaudeOAuthUserAgent,
-        'x-app': 'cli',
+        ...makeAnthropicClaudeCompatibilityHeaders({ model: request.model, sessionId }),
         ...config.extraHeaders
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
@@ -915,10 +1306,11 @@ export const makeAnthropicClaudeProviderLayer = (config: AnthropicClaudeProvider
     LLMProvider,
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient
+      const sessionId = makeAnthropicClaudeRequestId()
 
       return LLMProvider.of({
         stream: request =>
-          Stream.fromEffect(sendAnthropicClaudeRequest(config, request, client)).pipe(
+          Stream.fromEffect(sendAnthropicClaudeRequest(config, request, client, sessionId)).pipe(
             Stream.flatMap(streamAnthropicClaudeResponse)
           )
       })

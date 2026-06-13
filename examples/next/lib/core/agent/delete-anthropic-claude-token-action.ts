@@ -6,7 +6,10 @@ import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { deleteAnthropicClaudeToken } from './anthropic-claude-auth'
-import { anthropicClaudeOAuthVerifierCookieName } from './anthropic-claude-oauth-cookie'
+import {
+  anthropicClaudeOAuthStateCookieName,
+  anthropicClaudeOAuthVerifierCookieName
+} from './anthropic-claude-oauth-cookie'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -24,6 +27,7 @@ export const deleteAnthropicClaudeTokenAction =
         yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
         yield* deleteAnthropicClaudeToken(session.user.id)
         yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthVerifierCookieName))
+        yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthStateCookieName))
       }).pipe(
         Effect.withSpan('action.agent.anthropicClaude.deleteToken'),
         Effect.provide(AppLayer),

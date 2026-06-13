@@ -3,11 +3,21 @@ import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@y
 
 export const anthropicClaudeProviderId = 'anthropic-claude'
 export const anthropicClaudeClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+export const anthropicClaudeCodeVersion = '2.1.112'
+export const anthropicClaudeCodeEntrypoint = 'sdk-cli'
 export const anthropicClaudeAuthorizeUrl = 'https://claude.ai/oauth/authorize'
-export const anthropicClaudeTokenEndpoint = 'https://console.anthropic.com/v1/oauth/token'
-export const anthropicClaudeRedirectUri = 'https://console.anthropic.com/oauth/code/callback'
-export const anthropicClaudeScopes = 'org:create_api_key user:profile user:inference'
-export const anthropicClaudeOAuthUserAgent = 'claude-cli/2.1.2 (external, cli)'
+export const anthropicClaudeTokenEndpoint = 'https://platform.claude.com/v1/oauth/token'
+export const anthropicClaudeRedirectUri = 'https://platform.claude.com/oauth/code/callback'
+export const anthropicClaudeScopes = [
+  'org:create_api_key',
+  'user:profile',
+  'user:inference',
+  'user:sessions:claude_code',
+  'user:mcp_servers',
+  'user:file_upload'
+].join(' ')
+export const anthropicClaudeOAuthUserAgent =
+  `claude-cli/${anthropicClaudeCodeVersion} (external, ${anthropicClaudeCodeEntrypoint})`
 export const anthropicClaudeRefreshBufferMs = 5 * 60 * 1000
 
 export class AnthropicClaudeOAuthToken extends Schema.Class<AnthropicClaudeOAuthToken>(

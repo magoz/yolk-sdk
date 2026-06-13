@@ -96,8 +96,9 @@ describe('AnthropicClaudeOAuth', () => {
       const result = yield* Effect.gen(function* () {
         const oauth = yield* AnthropicClaudeOAuth
         return yield* oauth.exchangeAuthorizationCode({
-          authorizationCode: 'code_1#verifier_1',
-          codeVerifier: 'verifier_1'
+          authorizationCode: 'code_1#state_1',
+          codeVerifier: 'verifier_1',
+          expectedState: 'state_1'
         })
       }).pipe(Effect.provide(layer))
 
@@ -108,7 +109,7 @@ describe('AnthropicClaudeOAuth', () => {
         grant_type: 'authorization_code',
         client_id: ANTHROPIC_CLAUDE_CLIENT_ID,
         code: 'code_1',
-        state: 'verifier_1',
+        state: 'state_1',
         redirect_uri: ANTHROPIC_CLAUDE_REDIRECT_URI,
         code_verifier: 'verifier_1'
       })
@@ -130,7 +131,8 @@ describe('AnthropicClaudeOAuth', () => {
         const oauth = yield* AnthropicClaudeOAuth
         return yield* oauth.exchangeAuthorizationCode({
           authorizationCode: 'code_1#wrong_state',
-          codeVerifier: 'verifier_1'
+          codeVerifier: 'verifier_1',
+          expectedState: 'state_1'
         })
       }).pipe(Effect.provide(layer), Effect.flip)
 

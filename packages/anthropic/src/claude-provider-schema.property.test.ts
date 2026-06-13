@@ -25,7 +25,8 @@ const schemaVariant = Schema.Literals([
   'optionalNestedStruct',
   'literalArray',
   'recordField',
-  'unionField'
+  'unionField',
+  'rootUnion'
 ])
 
 const schemaVariantArbitrary = Schema.toArbitrary(schemaVariant)
@@ -102,6 +103,11 @@ const schemaParameters = (variant: typeof schemaVariant.Type) => {
           Schema.Struct({ type: Schema.Literal('manual'), value: Schema.String })
         ])
       })
+    case 'rootUnion':
+      return Schema.Union([
+        Schema.Struct({ operation: Schema.Literal('search'), query: Schema.String }),
+        Schema.Struct({ operation: Schema.Literal('list'), limit: Schema.optional(Schema.Number) })
+      ])
   }
 }
 
@@ -122,9 +128,9 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) =>
 const assertProviderSafeParameters = (parameters: unknown) => {
   expect(field(parameters, 'type')).toBe('object')
   expect(field(parameters, '$ref')).toBeUndefined()
-
-  const anyOf = field(parameters, 'anyOf')
-  expect(Array.isArray(anyOf) && anyOf.some(item => field(item, 'type') === 'array')).toBe(false)
+  expect(field(parameters, 'anyOf')).toBeUndefined()
+  expect(field(parameters, 'oneOf')).toBeUndefined()
+  expect(field(parameters, 'allOf')).toBeUndefined()
 
   const definitions = field(parameters, '$defs')
   for (const ref of collectLocalRefs(parameters)) {

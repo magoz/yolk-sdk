@@ -9,6 +9,13 @@ Provider-facing JSON Schema conventions for agent/tool definitions.
 - When deriving from Effect Schema, dereference/inline a local root `$ref` before sending the schema to providers.
 - Preserve nested `$defs` for referenced child schemas after root inlining.
 
+## Anthropic tool input schemas
+
+- Anthropic `input_schema` must have root `{ "type": "object" }`.
+- Do not send top-level `anyOf`, `oneOf`, or `allOf`; Anthropic rejects root combinators.
+- Flatten root combinators into one object schema with merged `properties`, `required`, and `$defs`.
+- Nested combinators inside properties may remain when needed to preserve field semantics.
+
 ## Tests
 
 - Add regression coverage at the tool registry boundary, not each provider adapter.

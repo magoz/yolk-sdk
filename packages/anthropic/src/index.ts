@@ -3,6 +3,8 @@ export {
   AnthropicClaudeTokenBrokerResponse,
   anthropicClaudeAuthorizationHeaders,
   anthropicClaudeAuthorizeUrl,
+  anthropicClaudeCodeEntrypoint,
+  anthropicClaudeCodeVersion,
   anthropicClaudeClientId,
   anthropicClaudeOAuthUserAgent,
   anthropicClaudeProviderId,

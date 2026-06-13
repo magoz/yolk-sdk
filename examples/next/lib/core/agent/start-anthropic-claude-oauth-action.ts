@@ -6,7 +6,10 @@ import { cookies } from 'next/headers'
 import { makeAnthropicClaudeAuthorizationUrl } from '@yolk-sdk/anthropic/claude'
 import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
-import { anthropicClaudeOAuthVerifierCookieName } from './anthropic-claude-oauth-cookie'
+import {
+  anthropicClaudeOAuthStateCookieName,
+  anthropicClaudeOAuthVerifierCookieName
+} from './anthropic-claude-oauth-cookie'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
@@ -16,6 +19,8 @@ const generateCodeVerifier = () => randomBytes(32).toString('base64url')
 
 const generateCodeChallenge = (verifier: string) =>
   createHash('sha256').update(verifier).digest('base64url')
+
+const generateState = () => randomBytes(16).toString('hex')
 
 type StartAnthropicClaudeOAuthResult =
   | {
@@ -33,10 +38,19 @@ export const startAnthropicClaudeOAuthAction =
         const session = yield* getSession()
         const codeVerifier = generateCodeVerifier()
         const codeChallenge = generateCodeChallenge(codeVerifier)
+        const state = generateState()
 
         yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
         yield* Effect.sync(() =>
           cookieStore.set(anthropicClaudeOAuthVerifierCookieName, codeVerifier, {
+            httpOnly: true,
+            maxAge: verifierMaxAgeSeconds,
+            path: '/',
+            sameSite: 'lax'
+          })
+        )
+        yield* Effect.sync(() =>
+          cookieStore.set(anthropicClaudeOAuthStateCookieName, state, {
             httpOnly: true,
             maxAge: verifierMaxAgeSeconds,
             path: '/',
@@ -48,7 +62,7 @@ export const startAnthropicClaudeOAuthAction =
           _tag: 'Success' as const,
           authUrl: makeAnthropicClaudeAuthorizationUrl({
             codeChallenge,
-            state: codeVerifier
+            state
           })
         }
       }).pipe(

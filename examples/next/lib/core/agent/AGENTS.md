@@ -28,7 +28,7 @@ Domain functions and server actions for provider OAuth, skills/commands, and con
 
 ## Anthropic PKCE
 
-- Verifier cookie name/constants live in non-`'use server'` module.
+- Verifier/state cookie names/constants live in non-`'use server'` module.
 - Keep code verifier/state validation before token exchange.
 
 ## Anti-patterns

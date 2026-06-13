@@ -11,7 +11,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
 | `agent/agent-skill.ts`      | User-owned DB skill CRUD and validation        |
 | `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
-| `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier cookie name; keep constants out of `'use server'` files |
+| `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier/state cookie names; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth, skill/command, connector contracts |
 | `knowledge/*`                | `/knowledge` domain functions/actions; file/text records + search/context policy |
 | `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search ingestion |
