@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.16
+
+### Minor Changes
+
+- ca545a6: Add pure agent compaction utilities under `@yolk-sdk/agent/compaction`.
+
 ## 0.1.0-canary.15
 
 ### Minor Changes
