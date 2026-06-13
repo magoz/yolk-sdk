@@ -1,5 +1,13 @@
 # @yolk-sdk/anthropic
 
+## 0.1.0-canary.14
+
+### Patch Changes
+
+- Update Claude subscription OAuth compatibility headers, billing prompt parity, OAuth endpoints, and provider-safe Anthropic tool input schemas.
+  - @yolk-sdk/agent@0.1.0-canary.14
+  - @yolk-sdk/oauth@0.1.0-canary.14
+
 ## 0.1.0-canary.13
 
 ### Minor Changes
