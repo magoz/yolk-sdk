@@ -28,7 +28,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - `agent-status.tsx` owns console status controls: Codex/Claude auth, mirrored text model/reasoning controls, Realtime transcription model, capability/status badges.
 - `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
 - Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render task metadata from structured content only.
-- `agent-usage-meter.tsx` formats provider-normalized token usage/context budget for header/console chrome.
+- `agent-usage-meter.tsx` formats provider-normalized usage/context budget from `lib/agents/context-budget`; do not duplicate threshold/status logic in UI.
 - `message-edit-model.ts` owns pure edit shortcut/save-state helpers; keep keyboard semantics testable outside JSX.
 
 ## Chat Model

@@ -6,7 +6,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 | Package | Role | Local docs |
 | --- | --- | --- |
-| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, tools, React, providers, OAuth, skillset, voice | `packages/agent/AGENTS.md` |
+| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, voice | `packages/agent/AGENTS.md` |
 | `@yolk-sdk/mcp` | MCP client/server/protocol package | `packages/mcp/AGENTS.md` |
 | `@yolk-sdk/knowledge` | Knowledge record/artifact/context/search contracts | `packages/knowledge/AGENTS.md` |
 | `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
