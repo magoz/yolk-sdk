@@ -74,7 +74,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 
 ## Attachment Rules
 
-- Next route validates image+PDF count, MIME, base64 shape, per-attachment size, and total payload before provider calls; Workflow currently validates images only.
+- Next and Workflow routes validate image+PDF count, MIME, base64 shape, per-attachment size, and total payload before provider calls.
 - Keep provider capability copy in sync with `agentTextCapabilities`; do not hardcode media support in UI.
 - Add full-suite E2E coverage when attachment flow becomes less route-stubbed.
 

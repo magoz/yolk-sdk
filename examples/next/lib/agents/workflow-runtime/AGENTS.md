@@ -23,7 +23,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 - Model step runs one model turn, streams deltas, captures assistant message/tool calls/usage.
 - Tool batch step executes host tools separately and appends ordered `ToolResultMessage`s.
 - HITL tool step writes `AgentAwaitingInput`, returns hook metadata, and the workflow waits on `createHook` before rerunning the tool step with the response.
-- Close/error steps own final stream closure and in-band `AgentError` writing.
+- Close/error steps own final stream closure; `workflow-error.ts` maps typed route/loop/runtime errors to in-band `AgentError` codes.
 
 ## Tests
 

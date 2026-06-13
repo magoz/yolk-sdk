@@ -200,7 +200,13 @@ describe('resolveTools', () => {
       expect(result).toMatchObject({
         toolCallId: 'call_1',
         content: expect.stringContaining('Invalid empty_params arguments'),
-        isError: true
+        isError: true,
+        structuredContent: {
+          type: 'model_visible_tool_error',
+          tool: 'empty_params',
+          reason: 'validation',
+          message: expect.stringContaining('Invalid empty_params arguments')
+        }
       })
     })
   )
@@ -217,7 +223,7 @@ describe('resolveTools', () => {
             tool: 'visible_error',
             message: 'Try another input.',
             reason: 'invalid_input',
-            structuredContent: { code: 'bad_input' }
+            details: { code: 'bad_input' }
           }))
       })
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
@@ -231,7 +237,13 @@ describe('resolveTools', () => {
         toolCallId: 'call_1',
         content: 'Try another input.',
         isError: true,
-        structuredContent: { code: 'bad_input' }
+        structuredContent: {
+          type: 'model_visible_tool_error',
+          tool: 'visible_error',
+          reason: 'invalid_input',
+          message: 'Try another input.',
+          details: { code: 'bad_input' }
+        }
       })
     })
   )

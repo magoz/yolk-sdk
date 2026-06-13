@@ -25,6 +25,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Define model-visible tool parameters with Effect Schema annotations and `makeTool`; avoid duplicated hand-written JSON schemas.
 - New provider-facing optional tool params should accept `null` as well as omission: use `Schema.optional(Schema.NullOr(...))`, then normalize `null` to `undefined` before handlers.
 - Use `EmptyToolParams` from `@yolk-sdk/agent/tools` for no-arg tools.
+- Recoverable/model-correctable failures use `modelVisibleToolError` or `ToolResult.isError`; infra/config/auth/DB/service outages remain fatal `ToolError`.
 - Tool modules receive context `{ surface, route, userId, sessionId?, subagent?, skillset? }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow/voice only; they use app knowledge search/DB adapters from route runtime wiring, not Cloudflare bootstrap.

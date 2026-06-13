@@ -37,19 +37,39 @@ export class ModelVisibleToolError extends Schema.TaggedErrorClass<ModelVisibleT
     tool: Schema.String,
     message: Schema.String,
     reason: ModelVisibleToolErrorReason,
-    structuredContent: Schema.optional(Schema.Unknown)
+    details: Schema.optional(Schema.Unknown)
   }
 ) {}
+
+export const ModelVisibleToolErrorStructuredContentSchema = Schema.Struct({
+  type: Schema.Literal('model_visible_tool_error'),
+  tool: Schema.String,
+  reason: ModelVisibleToolErrorReason,
+  message: Schema.String,
+  details: Schema.optional(Schema.Unknown)
+})
+export type ModelVisibleToolErrorStructuredContent =
+  typeof ModelVisibleToolErrorStructuredContentSchema.Type
 
 export type ModelVisibleToolErrorInput = {
   readonly tool: string
   readonly message: string
   readonly reason: ModelVisibleToolErrorReason
-  readonly structuredContent?: unknown
+  readonly details?: unknown
 }
 
 export const modelVisibleToolError = (input: ModelVisibleToolErrorInput) =>
   new ModelVisibleToolError(input)
+
+export const modelVisibleToolErrorStructuredContent = (
+  error: ModelVisibleToolError
+): ModelVisibleToolErrorStructuredContent => ({
+  type: 'model_visible_tool_error',
+  tool: error.tool,
+  reason: error.reason,
+  message: error.message,
+  ...(error.details === undefined ? {} : { details: error.details })
+})
 
 export const modelVisibleToolErrorResult = (
   call: ToolCall,
@@ -57,9 +77,7 @@ export const modelVisibleToolErrorResult = (
 ) => makeErrorToolResult({
   toolCallId: call.id,
   content: error.message,
-  ...(error.structuredContent === undefined
-    ? {}
-    : { structuredContent: error.structuredContent })
+  structuredContent: modelVisibleToolErrorStructuredContent(error)
 })
 
 export type ToolExecutionInput<Context> = {
@@ -222,14 +240,21 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   execute: ({ call, context }) =>
     Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
       Effect.matchEffect({
-        onFailure: error =>
-          Effect.succeed(
-            makeErrorToolResult({
-              toolCallId: call.id,
-              content: options.invalidParamsMessage?.(error) ??
-                `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
-            })
-          ),
+        onFailure: error => {
+          const message = options.invalidParamsMessage?.(error) ??
+            `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+
+          return Effect.succeed(
+            modelVisibleToolErrorResult(
+              call,
+              modelVisibleToolError({
+                tool: options.name,
+                message,
+                reason: 'validation'
+              })
+            )
+          )
+        },
         onSuccess: params => options.execute({ call, context, params }).pipe(
           Effect.catchTag('ModelVisibleToolError', error =>
             Effect.succeed(modelVisibleToolErrorResult(call, error))

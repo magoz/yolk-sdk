@@ -203,21 +203,18 @@ Package-owned tests:
 packages/agent/test/
   property/
     hitl.property.test.ts
-    session.property.test.ts
-  simulation/
-    hitl-commands.ts
-    hitl-model.ts
-    fake-provider.ts
-    fake-tool-runner.ts
-    harness.ts
+    runtime-hitl.simulation.test.ts
+    session-event.property.test.ts
+    tool-schema.property.test.ts
+    property-options.ts
 ```
 
 Next app-owned tests:
 
 ```txt
-examples/next/lib/agents/test/
-  property/
-  simulation/
+examples/next/lib/**
+  *.property.test.ts
+  *.simulation.test.ts
 ```
 
 Cloudflare-owned tests:
@@ -232,8 +229,7 @@ Promote reusable helpers only after repeated use across multiple areas:
 
 ```txt
 test/property/
-  effect.ts
-  seed.ts
+  options.ts
 ```
 
 Avoid `packages/testing` until at least three domains need the same helpers.

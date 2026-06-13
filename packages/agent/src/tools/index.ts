@@ -4,8 +4,10 @@ export {
   makeToolExecutorLayer,
   modelVisibleToolError,
   modelVisibleToolErrorResult,
+  modelVisibleToolErrorStructuredContent,
   ModelVisibleToolError,
   ModelVisibleToolErrorReason,
+  ModelVisibleToolErrorStructuredContentSchema,
   resolveTools,
   ToolAccess,
   ToolRegistryError
@@ -31,6 +33,7 @@ export type {
   ResolvedToolSet,
   SchemaToolExecutionInput,
   ModelVisibleToolErrorInput,
+  ModelVisibleToolErrorStructuredContent,
   ToolExecutionInput,
   ToolMetadata,
   ToolModule,

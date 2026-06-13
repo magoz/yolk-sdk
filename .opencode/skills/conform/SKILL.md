@@ -70,6 +70,7 @@ Always read relevant owner docs before editing:
   - API routes: `examples/next/patterns/EFFECT_API_ROUTES.md`
   - domain/data: `examples/next/patterns/EFFECT_DOMAIN_FUNCTIONS.md`, `examples/next/patterns/DATA_ACCESS_PATTERNS.md`
   - URL state/UX: `examples/next/patterns/NUQS_URL_STATE.md`, `examples/next/patterns/USABILITY_BEST_PRACTICES.md`
+  - E2E: `examples/next/patterns/E2E_TESTING.md`
 
 Use Glob/Read/Grep. Avoid shell `find`/`grep`.
 
