@@ -10,6 +10,7 @@ Generic host tool registration and resolution.
 - Adapter from resolved tools to `@yolk-sdk/agent/loop` `ToolExecutor`.
 - Package-owned `task` and `question` tool contracts.
 - Helpers for task subagent result metadata and non-recursive task tool exposure.
+- `ModelVisibleToolError` helpers for recoverable, model-visible tool failures.
 
 ## Use it when
 
@@ -21,6 +22,27 @@ Generic host tool registration and resolution.
 - No app tool catalogs.
 - No provider SDKs.
 - Tool access/approval is metadata; host apps enforce product policy.
+
+## Recoverable tool failures
+
+Use `modelVisibleToolError(...)` for expected failures the model can recover from: validation,
+invalid input, denied policy, not-found resources, unavailable upstream data, or timeouts. `makeTool`
+converts these into `ToolResult.isError = true` with structured content:
+
+```ts
+import { Effect } from 'effect'
+import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
+
+return Effect.fail(modelVisibleToolError({
+  tool: 'search_docs',
+  reason: 'not_found',
+  message: 'Document not found',
+  details: { documentId: 'doc_123' }
+}))
+```
+
+Use `ToolError` for fatal runtime/tool infrastructure failures such as broken wiring, auth/config,
+storage outages, or implementation bugs.
 
 ## Task subagents
 

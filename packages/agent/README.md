@@ -58,6 +58,7 @@ import {
   makeNonRecursiveTaskToolModule,
   makeTaskToolResult,
   modelVisibleToolError,
+  modelVisibleToolErrorStructuredContent,
   makeQuestionToolModule,
   resolveTools
 } from '@yolk-sdk/agent/tools'
@@ -216,8 +217,8 @@ See `examples/next/lib/agents/workflow-runtime/text-response.ts` for host-owned 
 Use `modelVisibleToolError(...)` for expected tool-domain failures the model can recover
 from, such as invalid arguments, not-found resources, denied policy, or unavailable upstream
 data. `makeTool` converts these failures into `ToolResult.isError = true` so the agent can
-see the message and continue. The result includes structured content with `tool`, `reason`,
-`message`, and optional `details` for UI/runtime handling.
+see the message and continue. The result includes structured content with `type`, `tool`,
+`reason`, `message`, and optional `details` for UI/runtime handling.
 
 Use `ToolError` for fatal runtime/tool infrastructure failures: broken wiring, auth/config
 defects, storage failures, or implementation bugs.
