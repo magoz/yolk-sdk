@@ -106,10 +106,10 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 
 ## NOTES
 
-- No full CI; Vercel auto-deploys app. Package publish uses GitHub Actions.
+- No full CI; Vercel auto-deploys app. Package releases use Changesets/scripts unless workflows are added.
 - React Compiler enabled.
 - PostHog proxied via `/ph/*`.
 - Drizzle v1 RC with Effect-native driver.
 - LSP may show stale Effect v3 errors; trust `pnpm tsc`.
 - Root Vitest may discover package tests; `pnpm test:run` also runs package tests.
-- `CLAUDE.md` points here; this is canonical root knowledge.
+- This is canonical root knowledge.

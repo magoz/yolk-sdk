@@ -39,7 +39,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - `web_fetch` blocks localhost/private/reserved IPs and revalidates redirects before fetching.
 - `web_search` chooses provider by checksum unless `YOLK_WEBSEARCH_PROVIDER` overrides.
 - `just_bash` uses a fresh in-memory virtual filesystem per call; network is enabled with literal private/loopback hosts denied; DNS rebinding checks are disabled for portable browser/Worker runtime; no host filesystem, JS, or Python.
-- Invalid/unavailable remote MCP config logs warning and omits tools.
+- Unavailable remote MCP servers log warning and omit tools; malformed config fails earlier at the MCP file-source boundary.
 - Local stdio MCP is package-level only; never import `@yolk-sdk/mcp/client/node` here.
 
 ## Tests

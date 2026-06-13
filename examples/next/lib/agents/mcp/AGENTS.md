@@ -6,13 +6,13 @@ Filesystem boundary for app-owned remote MCP server configuration.
 
 - Reads `.yolk/mcp.json` or `.opencode/mcp.json` from project root.
 - Config shape is an array of remote MCP servers: name, type, url, headers, enabled.
-- App supports remote MCP only; local stdio stays in `@yolk-sdk/mcp/client` package tests/core.
+- App supports remote MCP only; local stdio stays behind `@yolk-sdk/mcp/client/node` package tests/core.
 
 ## Boundaries
 
 - Next app reads project files and passes parsed configs into tool modules.
 - Cloudflare does not read filesystem/env for MCP; Next passes remote MCP configs in bootstrap.
-- Invalid config should warn and omit tools, not crash the agent surface.
+- Malformed config currently fails at the file-source boundary; unavailable remote MCP servers warn and omit tools.
 
 ## Security
 

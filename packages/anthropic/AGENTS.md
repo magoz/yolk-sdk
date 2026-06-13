@@ -22,6 +22,7 @@
 - Keep Claude subscription auth compatible with Worker/server runtimes.
 - Claude OAuth provider requests must include Claude Code OAuth compatibility headers by default; `extraHeaders` stays last so hosts can override/gateway them.
 - Claude OAuth request bodies keep `system[]` to Claude Code identity plus billing header; host instructions move into first user message.
+- Claude tool names use Claude Code MCP parity (`name` → `mcp_Name`) and provider responses unprefix back; preserve `StructuredOutput` casing.
 - Claude provider streams by default but accepts SSE or JSON bodies by body shape; do not rely on content-type.
 - Claude tool `input_schema` payloads must be provider-safe root objects; add missing root `type: 'object'` and flatten top-level `anyOf`/`oneOf`/`allOf`.
 - Claude provider lowers PDF `DocumentPart` to Anthropic `document` blocks; non-PDF documents fail explicitly.

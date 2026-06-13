@@ -1,6 +1,6 @@
-# MCP Server Test Fixtures
+# MCP Stdio Test Fixtures
 
-Tiny process-boundary programs used by MCP server tests.
+Tiny process-boundary programs used by MCP local stdio client/server tests.
 
 ## Rules
 
