@@ -54,7 +54,7 @@ const rules: ReadonlyArray<BoundaryRule> = [
     ]
   },
   {
-    packageDir: 'lib',
+    packageDir: 'examples/next/lib',
     forbiddenImports: [
       ...retiredImports,
       '@yolk-sdk/agent$',
@@ -70,7 +70,7 @@ const rules: ReadonlyArray<BoundaryRule> = [
     ]
   },
   {
-    packageDir: 'e2e',
+    packageDir: 'examples/next/e2e',
     forbiddenImports: [
       ...retiredImports,
       '@yolk-sdk/agent$',
@@ -129,6 +129,11 @@ const rules: ReadonlyArray<BoundaryRule> = [
     packageDir: 'packages/sandbox/src',
     forbiddenImports: ['@vercel/sandbox'],
     excludedDirs: ['packages/sandbox/src/vercel']
+  },
+  {
+    packageDir: 'packages/sandbox/src',
+    forbiddenImports: ['@yolk-sdk/agent'],
+    excludedDirs: ['packages/sandbox/src/agent.ts']
   }
 ]
 

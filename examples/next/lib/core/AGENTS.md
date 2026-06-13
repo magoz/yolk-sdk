@@ -6,7 +6,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 
 | Path                         | Role                                           |
 | ---------------------------- | ---------------------------------------------- |
-| `agent/*-action.ts`          | Provider connect/disconnect server actions     |
+| `agent/*-action.ts`          | Provider OAuth, skill/command, connector server actions |
 | `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
 | `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
 | `agent/agent-skill.ts`      | User-owned DB skill CRUD and validation        |

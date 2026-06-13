@@ -1,6 +1,6 @@
 # Sandbox Package
 
-`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, and the Vercel Sandbox v0 adapter.
+`@yolk-sdk/sandbox` provides the domain-free execution plane contract for agents. The package models sandbox state, lifecycle, command execution, testing fakes, one agent-facing tool, and the Vercel Sandbox adapter over `@vercel/sandbox` 2.x.
 
 ## Subpaths
 
@@ -25,6 +25,12 @@
 - `sandboxSessionId` must already include user/session scope; package never models users.
 - Vercel sandbox names are stable hashes from `sandboxSessionId`.
 - Disposable lifecycle is default: 30m idle TTL, 45m max lifetime.
+- Persistent lifecycle is modeled but dogfood should stay disposable until stable.
+- Initial source is an ADT: empty, snapshot, git, or tarball. Snapshot replaces separate base-snapshot fields.
+- Hosts choose Vercel env, ports, resources, runtime, and network policy; package stores no secrets.
 - Stale or max-expired disposable state recreates before command and reports `workspaceReset: true`.
 - `cwd` is workspace-relative; absolute paths and `..` escape are rejected.
+- Stdin uses wrapper files because Vercel SDK commands have no stdin param.
+- Timeout is Yolk-owned: run detached, wait with Effect timeout, kill on expiry; do not rely on Vercel `timeoutMs` exit `137`.
 - Agent-facing surface stays one destructive `sandbox` tool.
+- Live Vercel smoke is manual/opt-in only; default tests use fakes/seams.

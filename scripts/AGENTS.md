@@ -9,7 +9,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 | `clone-repos.ts` | Delete/re-clone gitignored reference repos under `.repos/*` |
 | `build-skillset.ts` | Compile configured project skillset sources/commands into Cloudflare generated skillset |
 | `codex-ws-smoke.ts` | Manual Codex WebSocket smoke check |
-| `check-package-boundaries.ts` | Validate example/package import boundary rules |
+| `check-package-boundaries.ts` | Validate example/package import boundaries, retired packages, and sandbox provider isolation |
 | `check-package-exports.ts` | Validate package export shape and tree-shaking smoke rules |
 | `check-package-publint.ts` | Run `publint` strict checks across public packages |
 | `smoke-package-imports.ts` | Pack public packages, install/extract into temp fixture, import every public subpath |

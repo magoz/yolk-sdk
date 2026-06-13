@@ -16,7 +16,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 ## Dependency direction
 
 ```txt
-examples/next, cloudflare/agent, e2e -> @yolk-sdk/*
+examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/*
 knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
 mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
