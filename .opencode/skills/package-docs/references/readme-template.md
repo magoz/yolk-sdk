@@ -56,14 +56,22 @@ Document explicit subpaths:
 - `runtime`
 - `client`
 - `tools`
+- `react`
+- `oauth`
+- `providers/openai`
+- `providers/anthropic`
+- `skillset`
+- `voice`
 
-Mention host-owned providers, persistence, tools, context compaction, and policy.
+Mention host-owned providers, persistence, tools, context compaction, token storage, UI/styling, and policy.
 
-### React
+`react` docs should cover hook state/actions, render model, custom transport, optional React peer, and no UI/styling/auth.
 
-Document hook state/actions, render model, custom transport, and no UI/styling/auth.
+`oauth` and `providers/*` docs should cover broker/credential-source flow and host-owned token storage. Never imply package stores secrets.
 
-Include `react` in install command.
+`skillset` docs should cover skill markdown, command markdown, render/parse APIs, manifests, and merge priority.
+
+`voice` docs should cover normalized voice tool request, JSON output envelope, and provider adapter responsibilities.
 
 ### MCP
 
@@ -73,21 +81,9 @@ Document remote client, local stdio client, `client/node` Node-only boundary, se
 
 Document records, artifacts, representations, provenance, links, context policy, collection/document/chunk/search contracts, ingestion, context packing, and host-owned adapters/stores/permissions.
 
-### OAuth/provider packages
+### Vercel Workflows
 
-Document broker/credential-source flow and host-owned token storage. Never imply package stores secrets.
-
-### Vercel Workflows Runtime
-
-State root export is intentionally empty. Import from `@yolk-sdk/vercel-workflows-runtime/workflow`.
-
-### Skillset
-
-Document skill markdown, command markdown, render/parse APIs, manifests, and merge priority.
-
-### Voice Runtime
-
-Document normalized voice tool request, JSON output envelope, and provider adapter responsibilities.
+Import Vercel Workflow APIs from `@yolk-sdk/vercel-workflows`.
 
 ## Style
 

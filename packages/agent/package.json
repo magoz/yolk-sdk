@@ -54,6 +54,50 @@
     "./tools": {
       "types": "./src/tools/index.ts",
       "default": "./src/tools/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
+    "./oauth": {
+      "types": "./src/oauth/index.ts",
+      "default": "./src/oauth/index.ts"
+    },
+    "./providers/openai": {
+      "types": "./src/providers/openai/index.ts",
+      "default": "./src/providers/openai/index.ts"
+    },
+    "./providers/openai/codex": {
+      "types": "./src/providers/openai/codex.ts",
+      "default": "./src/providers/openai/codex.ts"
+    },
+    "./providers/openai/codex-provider": {
+      "types": "./src/providers/openai/codex-provider.ts",
+      "default": "./src/providers/openai/codex-provider.ts"
+    },
+    "./providers/openai/provider": {
+      "types": "./src/providers/openai/provider.ts",
+      "default": "./src/providers/openai/provider.ts"
+    },
+    "./providers/anthropic": {
+      "types": "./src/providers/anthropic/index.ts",
+      "default": "./src/providers/anthropic/index.ts"
+    },
+    "./providers/anthropic/claude": {
+      "types": "./src/providers/anthropic/claude.ts",
+      "default": "./src/providers/anthropic/claude.ts"
+    },
+    "./providers/anthropic/claude-provider": {
+      "types": "./src/providers/anthropic/claude-provider.ts",
+      "default": "./src/providers/anthropic/claude-provider.ts"
+    },
+    "./skillset": {
+      "types": "./src/skillset/index.ts",
+      "default": "./src/skillset/index.ts"
+    },
+    "./voice": {
+      "types": "./src/voice/index.ts",
+      "default": "./src/voice/index.ts"
     }
   },
   "files": [
@@ -102,6 +146,61 @@
         "types": "./dist/tools/index.d.mts",
         "import": "./dist/tools/index.mjs",
         "default": "./dist/tools/index.mjs"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.mts",
+        "import": "./dist/react/index.mjs",
+        "default": "./dist/react/index.mjs"
+      },
+      "./oauth": {
+        "types": "./dist/oauth/index.d.mts",
+        "import": "./dist/oauth/index.mjs",
+        "default": "./dist/oauth/index.mjs"
+      },
+      "./providers/openai": {
+        "types": "./dist/providers/openai/index.d.mts",
+        "import": "./dist/providers/openai/index.mjs",
+        "default": "./dist/providers/openai/index.mjs"
+      },
+      "./providers/openai/codex": {
+        "types": "./dist/providers/openai/codex.d.mts",
+        "import": "./dist/providers/openai/codex.mjs",
+        "default": "./dist/providers/openai/codex.mjs"
+      },
+      "./providers/openai/codex-provider": {
+        "types": "./dist/providers/openai/codex-provider.d.mts",
+        "import": "./dist/providers/openai/codex-provider.mjs",
+        "default": "./dist/providers/openai/codex-provider.mjs"
+      },
+      "./providers/openai/provider": {
+        "types": "./dist/providers/openai/provider.d.mts",
+        "import": "./dist/providers/openai/provider.mjs",
+        "default": "./dist/providers/openai/provider.mjs"
+      },
+      "./providers/anthropic": {
+        "types": "./dist/providers/anthropic/index.d.mts",
+        "import": "./dist/providers/anthropic/index.mjs",
+        "default": "./dist/providers/anthropic/index.mjs"
+      },
+      "./providers/anthropic/claude": {
+        "types": "./dist/providers/anthropic/claude.d.mts",
+        "import": "./dist/providers/anthropic/claude.mjs",
+        "default": "./dist/providers/anthropic/claude.mjs"
+      },
+      "./providers/anthropic/claude-provider": {
+        "types": "./dist/providers/anthropic/claude-provider.d.mts",
+        "import": "./dist/providers/anthropic/claude-provider.mjs",
+        "default": "./dist/providers/anthropic/claude-provider.mjs"
+      },
+      "./skillset": {
+        "types": "./dist/skillset/index.d.mts",
+        "import": "./dist/skillset/index.mjs",
+        "default": "./dist/skillset/index.mjs"
+      },
+      "./voice": {
+        "types": "./dist/voice/index.d.mts",
+        "import": "./dist/voice/index.mjs",
+        "default": "./dist/voice/index.mjs"
       }
     }
   },
@@ -113,5 +212,13 @@
   },
   "dependencies": {
     "effect": "catalog:"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   }
 }

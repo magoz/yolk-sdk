@@ -7,16 +7,10 @@ Use this checklist before npm canaries and after package API changes.
 Every public package should have `packages/<name>/README.md`:
 
 - `@yolk-sdk/agent`
-- `@yolk-sdk/react`
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/knowledge`
 - `@yolk-sdk/connectors`
-- `@yolk-sdk/oauth`
-- `@yolk-sdk/openai`
-- `@yolk-sdk/anthropic`
-- `@yolk-sdk/vercel-workflows-runtime`
-- `@yolk-sdk/skillset`
-- `@yolk-sdk/voice-runtime`
+- `@yolk-sdk/vercel-workflows`
 
 Do not require READMEs for private app packages unless useful internally.
 
@@ -56,6 +50,13 @@ VectorStore
 agent-loop
 agent-runtime
 tool-registry
+@yolk-sdk/react
+@yolk-sdk/oauth
+@yolk-sdk/openai
+@yolk-sdk/anthropic
+@yolk-sdk/skillset
+@yolk-sdk/voice-runtime
+@yolk-sdk/vercel-workflows-runtime
 @yolk/
 First Alpha
 Planned Changesets

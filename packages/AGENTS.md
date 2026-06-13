@@ -6,29 +6,23 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 | Package | Role | Local docs |
 | --- | --- | --- |
-| `@yolk-sdk/agent` | Protocol, loop, runtime, client, tool registry | `packages/agent/AGENTS.md` |
-| `@yolk-sdk/react` | Headless React hooks over agent client state | `packages/react/AGENTS.md` |
+| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, tools, React, providers, OAuth, skillset, voice | `packages/agent/AGENTS.md` |
 | `@yolk-sdk/mcp` | MCP client/server/protocol package | `packages/mcp/AGENTS.md` |
 | `@yolk-sdk/knowledge` | Knowledge record/artifact/context/search contracts | `packages/knowledge/AGENTS.md` |
 | `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
-| `@yolk-sdk/oauth` | Provider-neutral OAuth token contracts | `packages/oauth/AGENTS.md` |
-| `@yolk-sdk/openai` | OpenAI/Codex reusable OAuth and agent provider mechanics | `packages/openai/AGENTS.md` |
-| `@yolk-sdk/anthropic` | Anthropic/Claude reusable OAuth and agent provider mechanics | `packages/anthropic/AGENTS.md` |
-| `@yolk-sdk/skillset` | Portable skill + command parsing/catalog | `packages/skillset/AGENTS.md` |
-| `@yolk-sdk/voice-runtime` | Provider-neutral voice tool-call bridge | `packages/voice-runtime/AGENTS.md` |
-| `@yolk-sdk/vercel-workflows-runtime` | Vercel Workflow agent loop contract | `packages/vercel-workflows-runtime/AGENTS.md` |
+| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract | `packages/vercel-workflows/AGENTS.md` |
 
 ## Dependency direction
 
 ```txt
 examples/next, cloudflare/agent, e2e -> @yolk-sdk/*
-react -> agent/client + agent/protocol
 knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
 mcp -> agent/protocol only for tool/content adapters
-agent -> no knowledge/react/mcp/app/Next/provider SDKs
-provider packages -> oauth + agent/loop + agent/protocol + Effect
+agent core -> no knowledge/mcp/app/Next/provider SDKs
+agent/react -> agent/client + agent/protocol + optional React peer
+agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/tools only through ./agent; no app/storage/auth/UI policy
-voice-runtime -> agent/loop + agent/protocol
+agent/voice -> agent/loop + agent/protocol
 ```
 
 ## Rules

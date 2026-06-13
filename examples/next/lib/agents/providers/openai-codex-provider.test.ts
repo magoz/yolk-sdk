@@ -8,9 +8,9 @@ import {
 import { describe, expect, it } from '@effect/vitest'
 import { ImagePart, TextPart, ToolDef, UserMessage, inlineBase64Source } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { OAuthAccessToken } from '@yolk-sdk/oauth'
-import { openAiCodexProviderId, openAiCodexResponsesUrl } from '@yolk-sdk/openai/codex'
-import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/openai/codex-provider'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import { openAiCodexProviderId, openAiCodexResponsesUrl } from '@yolk-sdk/agent/providers/openai/codex'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest

@@ -1,6 +1,6 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Data, Effect } from 'effect'
-import { VoiceToolCallRequest, executeVoiceToolCall } from '@yolk-sdk/voice-runtime'
+import { VoiceToolCallRequest, executeVoiceToolCall } from '@yolk-sdk/agent/voice'
 import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
 import { AppLayer } from '@/lib/layers'
 import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'

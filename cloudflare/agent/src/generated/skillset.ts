@@ -1,4 +1,4 @@
-import type { SkillsetManifest } from '@yolk-sdk/skillset'
+import type { SkillsetManifest } from '@yolk-sdk/agent/skillset'
 
 export const generatedSkillsetManifest: SkillsetManifest = {
   version: 1,

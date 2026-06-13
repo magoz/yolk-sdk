@@ -10,7 +10,7 @@ import {
   type TaskSubagentDefinition,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
-import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/agent/skillset'
 import {
   UserMessage,
   type AgentModelCapabilities,
@@ -30,11 +30,11 @@ import {
 } from '@/lib/agents/text-agent-config'
 import { getValidAnthropicClaudeToken } from '@/lib/core/agent/anthropic-claude-auth'
 import { getValidOpenAiCodexToken } from '@/lib/core/agent/openai-codex-auth'
-import { OAuthAccessToken } from '@yolk-sdk/oauth'
-import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
-import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
-import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
-import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/openai/codex-provider'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
+import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
 import { AgentRouteRequest, makeAgentPostResponse } from '@/lib/agents/route-handler'
 import { loadRuntimeSkillset } from '@/lib/agents/skillset/project-source'
 import { loadProjectMcpServers } from '@/lib/agents/mcp/file-source'

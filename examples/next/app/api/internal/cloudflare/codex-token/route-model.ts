@@ -1,6 +1,6 @@
-import { TokenBrokerResponse } from '@yolk-sdk/oauth'
-import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
-import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
+import { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
+import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
+import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
 
 export type AppOAuthToken = {
   readonly access: string

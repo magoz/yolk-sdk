@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { commandHints, type CommandInfo, type SkillInfo, type SkillsetManifest } from '@yolk-sdk/skillset'
+import { commandHints, type CommandInfo, type SkillInfo, type SkillsetManifest } from '@yolk-sdk/agent/skillset'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 

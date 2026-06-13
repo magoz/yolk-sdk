@@ -2,8 +2,8 @@ import {
   anthropicClaudeRefreshBufferMs,
   makeAnthropicClaudeBrokerRequest,
   toAnthropicClaudeOAuthAccessToken
-} from '@yolk-sdk/anthropic/claude'
-import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
+} from '@yolk-sdk/agent/providers/anthropic/claude'
+import type { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
 
 export const anthropicTokenRefreshBufferMs = anthropicClaudeRefreshBufferMs
 

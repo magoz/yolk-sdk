@@ -13,9 +13,27 @@ type PackageShape = {
 const packages: ReadonlyArray<PackageShape> = [
   {
     name: '@yolk-sdk/agent',
-    exports: ['.', './client', './loop', './loop/testing', './protocol', './runtime', './tools']
+    exports: [
+      '.',
+      './client',
+      './loop',
+      './loop/testing',
+      './oauth',
+      './protocol',
+      './providers/anthropic',
+      './providers/anthropic/claude',
+      './providers/anthropic/claude-provider',
+      './providers/openai',
+      './providers/openai/codex',
+      './providers/openai/codex-provider',
+      './providers/openai/provider',
+      './react',
+      './runtime',
+      './skillset',
+      './tools',
+      './voice'
+    ]
   },
-  { name: '@yolk-sdk/anthropic', exports: ['.', './claude', './claude-provider'] },
   {
     name: '@yolk-sdk/connectors',
     exports: ['.', './agent', './figma', './google', './linkedin-search', './notion', './r2-storage', './telegram', './todoist']
@@ -25,12 +43,7 @@ const packages: ReadonlyArray<PackageShape> = [
     exports: ['.', './agent', './artifacts', './chunking', './context', './embeddings', './errors', './extraction', './ingestion', './search-store', './documents', './links', './records', './provenance', './representations', './search', './store', './summarization', './vector-store']
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
-  { name: '@yolk-sdk/oauth', exports: ['.'] },
-  { name: '@yolk-sdk/openai', exports: ['.', './codex', './codex-provider', './provider'] },
-  { name: '@yolk-sdk/react', exports: ['.'] },
-  { name: '@yolk-sdk/skillset', exports: ['.'] },
-  { name: '@yolk-sdk/vercel-workflows-runtime', exports: ['.', './workflow'] },
-  { name: '@yolk-sdk/voice-runtime', exports: ['.'] }
+  { name: '@yolk-sdk/vercel-workflows', exports: ['.', './workflow'] }
 ]
 
 const extractTarballName = (output: string) => {

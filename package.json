@@ -54,9 +54,7 @@
     "script": "dev:app"
   },
   "dependencies": {
-    "@yolk-sdk/oauth": "workspace:^",
-    "@yolk-sdk/openai": "workspace:^",
-    "@yolk-sdk/skillset": "workspace:^",
+    "@yolk-sdk/agent": "workspace:^",
     "drizzle-orm": "1.0.0-rc.1",
     "effect": "catalog:"
   },

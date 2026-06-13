@@ -14,9 +14,9 @@ import {
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { OAuthAccessToken } from '@yolk-sdk/oauth'
-import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
-import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest

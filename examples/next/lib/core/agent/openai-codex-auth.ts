@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { and, eq } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
-import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
+import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { OpenAiCodexOAuth } from '@/lib/services/openai-codex-oauth/live-layer'

@@ -30,7 +30,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## Models + Providers
 
 - Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, and reasoning defaults from there.
-- Package providers are Codex OAuth (`@yolk-sdk/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/anthropic/claude-provider`).
+- Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
 - Providers accept text+image/PDF user input; audio is rejected by text capabilities.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.

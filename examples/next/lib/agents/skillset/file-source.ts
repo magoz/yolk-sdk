@@ -8,7 +8,7 @@ import {
   type CommandInfo,
   type SkillInfo,
   type SkillsetManifest
-} from '@yolk-sdk/skillset'
+} from '@yolk-sdk/agent/skillset'
 
 type FileSkillsetSource = {
   readonly id: string

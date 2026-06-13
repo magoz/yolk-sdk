@@ -11,7 +11,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 | `@yolk-sdk/agent/runtime` | Transcript replay and append-log pending/resume events |
 | `@yolk-sdk/agent/client` | HTTP/WS response submission helpers |
 | `@yolk-sdk/agent/tools` | Domain-free `question` tool contract |
-| `@yolk-sdk/react` | Headless waiting/tool/question render state |
+| `@yolk-sdk/agent/react` | Headless waiting/tool/question render state |
 | App adapters | Storage, auth, concrete routes, hooks, buttons/forms |
 
 ## Semantics

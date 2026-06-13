@@ -139,21 +139,21 @@ When this PRD is complete, the following will be true:
 - `packages/agent/src/protocol/tool.ts` — `ToolCall`, `ToolDef`, `ToolResult` schemas.
 - `packages/agent/src/loop/run.ts` — local tool execution stream emits start/end/result after full LLM turn.
 - `packages/agent/src/client/state.ts` — client tool run state: `Called`, `Running`, `Completed`.
-- `packages/react/src/chat-messages.ts` — render projection mirrors the current tool states.
-- `packages/voice-runtime/src/tool-bridge.ts` — realtime voice bridge has provider-normalized tool call/result envelope.
+- `packages/agent/src/react/chat-messages.ts` — render projection mirrors the current tool states.
+- `packages/agent/src/voice/tool-bridge.ts` — realtime voice bridge has provider-normalized tool call/result envelope.
 
 ### Key Files
 
 - `packages/agent/src/protocol/event.ts` — event vocabulary changes.
 - `packages/agent/src/client/state.ts` — generic reducer state changes.
-- `packages/react/src/chat-messages.ts` — headless UI state changes.
+- `packages/agent/src/react/chat-messages.ts` — headless UI state changes.
 - `packages/agent/src/loop/run.ts` — local execution compatibility path.
-- `@yolk-sdk/openai/provider` and `@yolk-sdk/openai/codex-provider` — provider adapter normalization later.
+- `@yolk-sdk/agent/providers/openai/provider` and `@yolk-sdk/agent/providers/openai/codex-provider` — provider adapter normalization later.
 
 ### System Dependencies
 
 - `@yolk-sdk/agent/protocol` schema compatibility.
-- `@yolk-sdk/agent/client` and `@yolk-sdk/react` projection compatibility.
+- `@yolk-sdk/agent/client` and `@yolk-sdk/agent/react` projection compatibility.
 - `@yolk-sdk/agent/loop` local tool execution semantics.
 - Future append store PRD for durable persistence of lifecycle events.
 
@@ -279,8 +279,8 @@ The final API may differ, but it must preserve these semantics.
 ## Documentation Requirements
 
 - [x] Update `packages/agent/AGENTS.md` event guidance.
-- [x] Update `packages/react/AGENTS.md` tool reducer guidance.
-- [x] Update `packages/react/AGENTS.md` render-state guidance.
+- [x] Update `packages/agent/AGENTS.md` tool reducer guidance.
+- [x] Update `packages/agent/AGENTS.md` render-state guidance.
 - [x] Update `packages/agent/AGENTS.md` local execution semantics.
 - [x] Update `packages/AGENTS.md` reference gap TODO after implementation.
 

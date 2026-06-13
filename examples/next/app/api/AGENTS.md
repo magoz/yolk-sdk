@@ -47,7 +47,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 - Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text runtime construction lives in `makeAgentTextResponse` / `makeAgentTextRuntime`; route wrappers keep auth/status boundaries thin.
 - Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
-- Realtime `/tool` uses `@yolk-sdk/voice-runtime`; see `agent/AGENTS.md` for the current voice toolset.
+- Realtime `/tool` uses `@yolk-sdk/agent/voice`; see `agent/AGENTS.md` for the current voice toolset.
 - Realtime routes explicitly provide runtime-portable voice tool modules; route-local tool context lives in `agent/AGENTS.md`.
 - Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/account/expiry, never refresh token.
 - Internal Cloudflare Codex responses proxy is the default DO provider path; it forwards upstream body streams with `HttpServerResponse.raw(...)`.

@@ -1,4 +1,4 @@
-import type { VoiceToolExecutionResult } from '@yolk-sdk/voice-runtime'
+import type { VoiceToolExecutionResult } from '@yolk-sdk/agent/voice'
 import {
   makeOpenAiRealtimeFunctionCallOutputEvent,
   type OpenAiRealtimeConversationItemCreateEvent

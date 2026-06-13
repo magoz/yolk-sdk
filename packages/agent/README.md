@@ -1,6 +1,6 @@
 # @yolk-sdk/agent
 
-Domain-free agent protocol, loop, runtime, client, and tool primitives.
+Domain-free agent protocol, loop, runtime, client, tools, providers, OAuth, React, skillset, and voice primitives.
 
 Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 
@@ -22,6 +22,12 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
 | `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, and client state helpers   |
 | `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
+| `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
+| `@yolk-sdk/agent/oauth`        | Provider-neutral OAuth token and broker contracts              |
+| `@yolk-sdk/agent/providers/openai` | OpenAI/Codex OAuth and provider mechanics                  |
+| `@yolk-sdk/agent/providers/anthropic` | Anthropic/Claude OAuth and provider mechanics            |
+| `@yolk-sdk/agent/skillset`     | Portable skill and slash-command parsing/catalogs              |
+| `@yolk-sdk/agent/voice`        | Provider-neutral voice tool-call bridge                        |
 
 ## Imports
 
@@ -41,7 +47,20 @@ import {
   makeQuestionToolModule,
   resolveTools
 } from '@yolk-sdk/agent/tools'
+import { useAgentChat } from '@yolk-sdk/agent/react'
+import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
 ```
+
+## Import migration
+
+| Old package | New subpath |
+| --- | --- |
+| `@yolk-sdk/react` | `@yolk-sdk/agent/react` |
+| `@yolk-sdk/oauth` | `@yolk-sdk/agent/oauth` |
+| `@yolk-sdk/openai/*` | `@yolk-sdk/agent/providers/openai/*` |
+| `@yolk-sdk/anthropic/*` | `@yolk-sdk/agent/providers/anthropic/*` |
+| `@yolk-sdk/skillset` | `@yolk-sdk/agent/skillset` |
+| `@yolk-sdk/voice-runtime` | `@yolk-sdk/agent/voice` |
 
 Test helpers live behind their own subpath:
 
@@ -160,7 +179,9 @@ See `examples/next/lib/agents/workflow-runtime/text-response.ts` for host-owned 
 
 ## Boundaries
 
-- No React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
+- Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
+- `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
+- Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - Loop stays stateless: transcript in, events out.
 - Runtime owns generic session orchestration only; host apps own persistence adapters and policy.
 - Tools model generic metadata/execution; host apps own concrete tool catalogs.

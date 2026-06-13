@@ -12,16 +12,28 @@
 | `@yolk-sdk/agent/runtime` | `src/runtime` | Generic runtime/session orchestration |
 | `@yolk-sdk/agent/client` | `src/client` | Client transport/state helpers |
 | `@yolk-sdk/agent/tools` | `src/tools` | Generic tool module registry |
+| `@yolk-sdk/agent/react` | `src/react` | Headless React chat hook/state helpers |
+| `@yolk-sdk/agent/oauth` | `src/oauth` | Provider-neutral OAuth token contracts |
+| `@yolk-sdk/agent/providers/openai` | `src/providers/openai` | OpenAI/Codex OAuth and provider mechanics |
+| `@yolk-sdk/agent/providers/anthropic` | `src/providers/anthropic` | Anthropic/Claude OAuth and provider mechanics |
+| `@yolk-sdk/agent/skillset` | `src/skillset` | Portable skill + command parsing/catalog |
+| `@yolk-sdk/agent/voice` | `src/voice` | Provider-neutral voice tool-call bridge |
 
 ## Boundaries
 
-- No React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
-- Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, `@yolk-sdk/react`, or concrete adapter packages from core agent subpaths.
+- Core subpaths have no React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
+- `src/react` is the only React-using area; React is an optional peer.
+- Provider subpaths own vendor mechanics only; hosts still own token storage/refresh and app policy.
+- Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, or app packages from agent subpaths.
 - Protocol has no package dependencies except Effect.
 - Loop depends on protocol only.
 - Runtime depends on protocol + loop only.
 - Client depends on protocol only.
 - Tools depend on protocol + loop only.
+- OAuth and skillset depend on Effect only.
+- Voice depends on protocol + loop only.
+- React depends on client + protocol only.
+- Providers depend on protocol + loop + oauth only.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk-sdk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
@@ -53,7 +65,7 @@
 
 ## Tests
 
-- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/tools`, and `test/property`.
+- Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/tools`, `test/react`, `test/oauth`, `test/providers`, `test/skillset`, `test/voice`, and `test/property`.
 - Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
 - Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.

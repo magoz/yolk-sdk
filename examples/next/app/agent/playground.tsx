@@ -17,7 +17,7 @@ import {
   getCompletedChatToolParts,
   useAgentChat,
   type AgentChatTransport
-} from '@yolk-sdk/react'
+} from '@yolk-sdk/agent/react'
 import { cancelAgentRun, streamAgentEvents, streamAgentRunEvents, streamCloudflareAgentEvents } from '@yolk-sdk/agent/client'
 import {
   agentTextCapabilities,

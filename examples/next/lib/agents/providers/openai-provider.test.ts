@@ -3,7 +3,7 @@ import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/u
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { makeOpenAiProviderLayer } from '@yolk-sdk/openai/provider'
+import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest

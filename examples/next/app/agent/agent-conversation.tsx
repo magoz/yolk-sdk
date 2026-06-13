@@ -33,7 +33,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { cn } from '@/lib/utils'
 import { contentPreview, unknownPreview } from './agent-format'
 import { canSaveEditedMessage, editDraftText, editKeyAction } from './message-edit-model'
-import type { AgentChatItem, ToolDuration, ToolRunState } from '@yolk-sdk/react'
+import type { AgentChatItem, ToolDuration, ToolRunState } from '@yolk-sdk/agent/react'
 
 const chatRowClass = 'mx-auto w-full max-w-3xl'
 

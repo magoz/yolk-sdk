@@ -7,9 +7,9 @@ that exercise package-backed providers through app runtime wiring.
 
 | Package subpath | Role |
 | ---- | ---- |
-| `@yolk-sdk/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.5`) |
-| `@yolk-sdk/anthropic/claude-provider` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
-| `@yolk-sdk/openai/provider` | Dormant API-key Chat Completions scaffold |
+| `@yolk-sdk/agent/providers/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.5`) |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
+| `@yolk-sdk/agent/providers/openai/provider` | Dormant API-key Chat Completions scaffold |
 
 ## Model policy
 
@@ -43,13 +43,13 @@ that exercise package-backed providers through app runtime wiring.
 - Used for Claude Pro/Max subscription access via `claude-sonnet-4-6`.
 - Does **not** use `ANTHROPIC_API_KEY`.
 - Requires per-user token from `examples/next/lib/core/agent/anthropic-claude-auth.ts`.
-- Requests use Bearer auth with Claude Code OAuth compatibility headers from `@yolk-sdk/anthropic`.
+- Requests use Bearer auth with Claude Code OAuth compatibility headers from `@yolk-sdk/agent/providers/anthropic`.
 - Requests set `stream: true` and parse SSE/JSON by body shape; content-type may be misleading behind gateways.
 - Request shape must mimic Claude Code OAuth fingerprinting:
   - `system[]` contains only Claude Code billing header + `You are Claude Code, Anthropic's official CLI for Claude.`
   - app/system instructions are prepended to the first user message
   - tools are sent as `mcp_` names with first letter uppercased (`weather` → `mcp_Weather`)
-  - tool `input_schema` roots are provider-safe objects; top-level schema combinators are flattened in `@yolk-sdk/anthropic`
+  - tool `input_schema` roots are provider-safe objects; top-level schema combinators are flattened in `@yolk-sdk/agent/providers/anthropic`
   - tool input JSON arrives as partial SSE deltas; concatenate before decoding
   - model tool calls are unprefixed back to app tool names
 - Anthropic can return misleading 429/usage errors when this fingerprint drifts.
@@ -64,6 +64,6 @@ that exercise package-backed providers through app runtime wiring.
 
 ## Tests
 
-- Package unit tests live beside provider implementations under `packages/openai` and `packages/anthropic`.
+- Package unit tests live under `packages/agent/test/providers`.
 - App regression tests here cover package providers through Next-style HTTP layers and runtime assumptions.
 - Keep coverage for images, tool calls, reasoning deltas, usage, empty responses, cancellation, malformed SSE JSON, invalid tool-call arguments, and provider-emitted SSE errors.

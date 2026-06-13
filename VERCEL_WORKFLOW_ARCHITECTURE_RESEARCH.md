@@ -252,9 +252,9 @@ Keep core packages runtime-neutral:
 packages/agent/src/loop      # pure loop
 packages/agent/src/runtime   # runtime contract + append/session abstractions
 packages/agent/src/client          # protocol/client replay helpers
-packages/react           # headless chat state/UI hooks
-packages/openai          # Codex mechanics and OAuth schemas
-packages/oauth           # broker/credential contracts
+packages/agent/src/react     # headless chat state/UI hooks
+packages/agent/src/providers/openai  # Codex mechanics and OAuth schemas
+packages/agent/src/oauth     # broker/credential contracts
 ```
 
 Put Vercel-specific glue at the app boundary first:
@@ -585,7 +585,7 @@ Key properties:
   or user-only session files in normal history.
 
 Yolk does not need file JSONL, but the tree shape is useful for future edit/regenerate
-and branch UX. Current `@yolk-sdk/react` already has local edit/regenerate session events;
+and branch UX. Current `@yolk-sdk/agent/react` already has local edit/regenerate session events;
 server persistence should eventually model branch parentage instead of overwriting a
 linear transcript.
 

@@ -39,9 +39,9 @@ import {
   type AgentReasoningEffort,
   type HitlResponse
 } from '@yolk-sdk/agent/protocol'
-import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/skillset'
+import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/agent/skillset'
 import { makeToolExecutorLayer, type ToolRegistryError } from '@yolk-sdk/agent/tools'
-import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/anthropic/claude-provider'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
 import {
   agentTextModel,

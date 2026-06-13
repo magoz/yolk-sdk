@@ -28,7 +28,7 @@ Published together today:
 - `@yolk-sdk/anthropic`
 - `@yolk-sdk/skillset`
 - `@yolk-sdk/voice-runtime`
-- `@yolk-sdk/vercel-workflows-runtime`
+- `@yolk-sdk/vercel-workflows`
 
 Prior consolidation already happened: old planned packages such as `@yolk-sdk/protocol`, `@yolk-sdk/agent-loop`, `@yolk-sdk/agent-runtime`, `@yolk-sdk/client`, and `@yolk-sdk/tool-registry` were folded into `@yolk-sdk/agent/*` subpaths. Boundary scripts now reject those retired packages/imports.
 
@@ -111,16 +111,16 @@ Known dependency/runtime pressure points:
 - `gpt-tokenizer`: knowledge chunking/search only.
 - file parsers/extractors: currently app-owned; should not enter core agent.
 
-## Agreed direction
+## Implemented direction
 
-Reduce from 11 public packages to a smaller set:
+Reduce from 11 public packages to this smaller set:
 
 ```txt
 @yolk-sdk/agent
 @yolk-sdk/mcp
 @yolk-sdk/knowledge
 @yolk-sdk/connectors
-@yolk-sdk/vercel-workflows-runtime
+@yolk-sdk/vercel-workflows
 ```
 
 Future platform packages may be separate and explicit:
@@ -217,7 +217,7 @@ import { figmaMcpServerUrl, figmaOAuthSlotId } from '@yolk-sdk/connectors/figma'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 ```
 
-### `@yolk-sdk/vercel-workflows-runtime`
+### `@yolk-sdk/vercel-workflows`
 
 Keep separate.
 
@@ -275,25 +275,23 @@ Unchanged:
 - `@yolk-sdk/mcp/*`
 - `@yolk-sdk/knowledge/*`
 - `@yolk-sdk/connectors/*`
-- `@yolk-sdk/vercel-workflows-runtime/*`
+- `@yolk-sdk/vercel-workflows/*`
 
 ## Migration approach
 
-1. Add new agent subpaths while keeping old packages as compatibility packages.
-2. Update internal consumers (`examples/next`, `cloudflare/agent`, Speldosa later) to new imports.
+1. Move folded package source into `packages/agent/src/*`.
+2. Update internal consumers (`examples/next`, `cloudflare/agent`) to new imports.
 3. Update package architecture/distribution docs and package READMEs.
 4. Update package boundary/export/smoke scripts.
-5. Mark folded packages deprecated in README/changelog/npm metadata if needed.
-6. Publish canary with both old and new surfaces.
-7. After adoption, stop publishing folded compatibility packages in a deliberate breaking release.
+5. Remove folded workspace packages.
+6. Speldosa updates imports using the migration table above.
 
-Compatibility packages can either re-export from `@yolk-sdk/agent/*` or remain source-identical during transition. Re-export packages still require publishing, so they only solve migration, not final package count.
+No compatibility packages are planned. Re-export packages would still require publishing, so they would not solve final package count.
 
 Long term, source of truth should mirror the final published package set unless we deliberately adopt executor-style publish tooling. Hidden internal packages add build/release complexity and private-package leak risk.
 
 ## Open decisions
 
-- Keep `@yolk-sdk/vercel-workflows-runtime` name or rename before stable?
 - Should folded compatibility packages publish for one canary, many canaries, or until 1.0?
 - Should `react` become optional peer on `@yolk-sdk/agent` immediately?
 - Should `effect` remain dependency or become peer before stable?

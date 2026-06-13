@@ -5,16 +5,10 @@
     "@yolk-sdk/cloudflare-agent": "0.0.0",
     "@yolk-example/next": "0.0.0",
     "@yolk-sdk/agent": "0.0.0",
-    "@yolk-sdk/anthropic": "0.0.0",
     "@yolk-sdk/connectors": "0.0.0",
     "@yolk-sdk/knowledge": "0.0.0",
     "@yolk-sdk/mcp": "0.0.0",
-    "@yolk-sdk/oauth": "0.0.0",
-    "@yolk-sdk/openai": "0.0.0",
-    "@yolk-sdk/react": "0.0.0",
-    "@yolk-sdk/skillset": "0.0.0",
-    "@yolk-sdk/vercel-workflows-runtime": "0.0.0",
-    "@yolk-sdk/voice-runtime": "0.0.0"
+    "@yolk-sdk/vercel-workflows": "0.0.0"
   },
   "changesets": [
     "brave-hitl-rules",

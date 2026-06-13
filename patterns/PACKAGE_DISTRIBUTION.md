@@ -35,7 +35,7 @@ Current Changesets config:
 
 ```json
 {
-  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/react", "..."]],
+  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/mcp", "..."]],
   "updateInternalDependencies": "patch",
   "access": "public",
   "privatePackages": false
@@ -44,7 +44,7 @@ Current Changesets config:
 
 Rationale:
 
-- `@yolk-sdk/agent` protocol, loop, runtime, client, tools, React, MCP, connectors, and related packages are tightly coupled.
+- `@yolk-sdk/agent` protocol, loop, runtime, client, tools, React, providers, MCP, connectors, and related packages are tightly coupled.
 - Users should not debug package version skew.
 - Early APIs will move quickly.
 - Docs can say: install matching `@yolk-sdk/*` versions.
@@ -123,26 +123,20 @@ Current canary policy: keep runtime libraries in package `dependencies` unless s
 Host-owned singletons to revisit before stable releases:
 
 - `effect`: peer for publishable packages that expose Effect services/types.
-- `react`: peer for `@yolk-sdk/react`.
-- `workflow`: peer for `@yolk-sdk/vercel-workflows-runtime` if published.
+- `react`: optional peer for `@yolk-sdk/agent/react`.
+- `workflow`: peer for `@yolk-sdk/vercel-workflows` if published.
 
-Current exception: `@yolk-sdk/react` keeps `react` as a peer now. Keep platform-specific deps behind explicit subpaths.
+Current exception: `@yolk-sdk/agent` keeps `react` as an optional peer for the `./react` subpath. Keep platform-specific deps behind explicit subpaths.
 
 ## Public Package Set
 
 Publish all public packages together:
 
 - `@yolk-sdk/agent`
-- `@yolk-sdk/react`
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/knowledge`
 - `@yolk-sdk/connectors`
-- `@yolk-sdk/oauth`
-- `@yolk-sdk/openai`
-- `@yolk-sdk/anthropic`
-- `@yolk-sdk/vercel-workflows-runtime`
-- `@yolk-sdk/skillset`
-- `@yolk-sdk/voice-runtime`
+- `@yolk-sdk/vercel-workflows`
 
 Rationale: lockstep versions are simpler when every workspace package is public. Unstable packages should document instability in README rather than staying private.
 

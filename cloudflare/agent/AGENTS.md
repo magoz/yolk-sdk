@@ -26,7 +26,7 @@ Primary work should stay in reusable packages first:
 - `@yolk-sdk/agent/client`
 - `@yolk-sdk/agent/tools`
 - `@yolk-sdk/mcp`
-- `@yolk-sdk/openai` / `@yolk-sdk/anthropic` for reusable provider adapters
+- `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` for reusable provider adapters
 
 Cloudflare should remain a thin runtime adapter; policy, auth, token refresh, and tools stay app-owned until stable.
 
@@ -80,7 +80,7 @@ Do not build these here yet unless explicitly requested:
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Centralize provider refresh in Next; DO caches access/account id/expiry only and never stores refresh tokens.
 - Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
-- Token broker requests use provider ids from `@yolk-sdk/openai` / `@yolk-sdk/anthropic` and `@yolk-sdk/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
+- Token broker requests use provider ids from `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/oauth` broker contracts; DO caches access/account id/expiry only and never stores refresh tokens.
 - Direct browser WS uses protocol `SessionSnapshot` + `UserInput` (`model?`, `reasoningEffort?`); keep schemas in `@yolk-sdk/agent/protocol`.
 - App-generated session ids should be URL-safe; raw `:` in `/connect/:sessionId` breaks browser WS/Worker routing.
 - DO storage returns plain structured-clone objects; hydrate protocol messages with Schema before `SessionSnapshot.make`.

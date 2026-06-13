@@ -1,4 +1,4 @@
-import { renderCommand, type CommandInfo } from '@yolk-sdk/skillset'
+import { renderCommand, type CommandInfo } from '@yolk-sdk/agent/skillset'
 
 export const commandSummary = (command: CommandInfo) => ({
   name: command.name,

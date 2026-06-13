@@ -6,7 +6,7 @@ import {
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepResult
-} from '@yolk-sdk/vercel-workflows-runtime/workflow'
+} from '@yolk-sdk/vercel-workflows'
 import {
   addAgentUsage,
   AgentEnd,

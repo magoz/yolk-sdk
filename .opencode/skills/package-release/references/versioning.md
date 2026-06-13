@@ -7,7 +7,11 @@ Yolk uses SemVer plus Changesets.
 Public packages are lockstep/fixed:
 
 ```txt
-@yolk-sdk/*
+@yolk-sdk/agent
+@yolk-sdk/mcp
+@yolk-sdk/knowledge
+@yolk-sdk/connectors
+@yolk-sdk/vercel-workflows
 ```
 
 All public packages share one version, even if only one package changed.
@@ -50,7 +54,7 @@ Expected `.changeset/config.json` traits:
 
 ```json
 {
-  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/react", "..."]],
+  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/mcp", "..."]],
   "updateInternalDependencies": "patch",
   "ignore": ["@yolk-sdk/cloudflare-agent"],
   "access": "public",

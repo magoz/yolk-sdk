@@ -1,6 +1,6 @@
 # App Workflow Runtime
 
-App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows-runtime/workflow`.
+App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 
 ## Boundaries
 
@@ -28,4 +28,4 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows-runtime/work
 
 - `run-agent-workflow.test.ts` guards no Effect runtime calls in `'use workflow'` body.
 - Route model tests live under `examples/next/app/api/agent/workflow*`.
-- Package directive behavior is tested in `packages/vercel-workflows-runtime` with `@workflow/vitest`.
+- Package directive behavior is tested in `packages/vercel-workflows` with `@workflow/vitest`.

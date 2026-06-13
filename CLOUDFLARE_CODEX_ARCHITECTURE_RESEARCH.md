@@ -227,7 +227,7 @@ Provider-neutral interface for model calls.
 
 No app auth. No token storage. No deployment assumptions.
 
-### `packages/oauth-credentials`
+### OAuth credential helpers
 
 Generic OAuth credential mechanics:
 
@@ -365,14 +365,15 @@ Cloudflare:
 
 ## Package direction
 
-Create two packages first:
+Use folded `@yolk-sdk/agent` subpaths:
 
 ```txt
-@yolk-sdk/oauth
-@yolk-sdk/openai
+@yolk-sdk/agent/oauth
+@yolk-sdk/agent/providers/openai
+@yolk-sdk/agent/providers/anthropic
 ```
 
-`@yolk-sdk/oauth` owns shared contracts only:
+`@yolk-sdk/agent/oauth` owns shared contracts only:
 
 - token broker request/response schemas
 - credential source interfaces
@@ -380,7 +381,7 @@ Create two packages first:
 - no provider-specific endpoints
 - no token storage ownership
 
-`@yolk-sdk/openai` owns reusable OpenAI/Codex mechanics:
+`@yolk-sdk/agent/providers/openai` owns reusable OpenAI/Codex mechanics:
 
 - Codex request lowering
 - Codex SSE/body parsing
@@ -402,17 +403,17 @@ Consumers:
 
 ```txt
 Cloudflare app
-  → @yolk-sdk/openai Codex provider
-  → @yolk-sdk/openai token broker client
+  → agent OpenAI/Codex provider
+  → agent OpenAI token broker client
 
 Vercel app
-  → @yolk-sdk/openai Codex refresh helpers
-  → @yolk-sdk/oauth broker contract
+  → agent OpenAI Codex refresh helpers
+  → agent OAuth broker contract
   → app-owned Postgres token store
 
 Local CLI/app
-  → @yolk-sdk/openai Codex provider
-  → @yolk-sdk/openai local OAuth source
+  → agent OpenAI Codex provider
+  → agent OpenAI local OAuth source
 ```
 
 Do not create `@yolk-sdk/gateway` yet. The current architecture needs a token broker, not a provider gateway. Add a generic gateway package only after another provider or deployment mode needs remote provider execution.
@@ -420,9 +421,9 @@ Do not create `@yolk-sdk/gateway` yet. The current architecture needs a token br
 Anthropic Max / Claude subscription auth should use the same split later:
 
 ```txt
-@yolk-sdk/oauth      shared broker/local credential contracts
-@yolk-sdk/openai     OpenAI/Codex auth + provider mechanics
-@yolk-sdk/anthropic  Anthropic/Claude auth + provider mechanics
+agent/oauth                 shared broker/local credential contracts
+agent/providers/openai      OpenAI/Codex auth + provider mechanics
+agent/providers/anthropic   Anthropic/Claude auth + provider mechanics
 ```
 
 The invariant:

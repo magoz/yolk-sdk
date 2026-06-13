@@ -15,7 +15,27 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/agent',
     packageName: '@yolk-sdk/agent',
-    expectedExports: ['./package.json', '.', './client', './loop', './loop/testing', './protocol', './runtime', './tools'],
+    expectedExports: [
+      './package.json',
+      '.',
+      './client',
+      './loop',
+      './loop/testing',
+      './oauth',
+      './protocol',
+      './providers/anthropic',
+      './providers/anthropic/claude',
+      './providers/anthropic/claude-provider',
+      './providers/openai',
+      './providers/openai/codex',
+      './providers/openai/codex-provider',
+      './providers/openai/provider',
+      './react',
+      './runtime',
+      './skillset',
+      './tools',
+      './voice'
+    ],
     tinyRoot: true
   },
   {
@@ -52,12 +72,6 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     tinyRoot: false
   },
   {
-    packageDir: 'packages/anthropic',
-    packageName: '@yolk-sdk/anthropic',
-    expectedExports: ['./package.json', '.', './claude', './claude-provider'],
-    tinyRoot: false
-  },
-  {
     packageDir: 'packages/connectors',
     packageName: '@yolk-sdk/connectors',
     expectedExports: [
@@ -75,39 +89,9 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     tinyRoot: false
   },
   {
-    packageDir: 'packages/oauth',
-    packageName: '@yolk-sdk/oauth',
-    expectedExports: ['./package.json', '.'],
-    tinyRoot: false
-  },
-  {
-    packageDir: 'packages/openai',
-    packageName: '@yolk-sdk/openai',
-    expectedExports: ['./package.json', '.', './codex', './codex-provider', './provider'],
-    tinyRoot: false
-  },
-  {
-    packageDir: 'packages/react',
-    packageName: '@yolk-sdk/react',
-    expectedExports: ['./package.json', '.'],
-    tinyRoot: false
-  },
-  {
-    packageDir: 'packages/skillset',
-    packageName: '@yolk-sdk/skillset',
-    expectedExports: ['./package.json', '.'],
-    tinyRoot: false
-  },
-  {
-    packageDir: 'packages/vercel-workflows-runtime',
-    packageName: '@yolk-sdk/vercel-workflows-runtime',
+    packageDir: 'packages/vercel-workflows',
+    packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './workflow'],
-    tinyRoot: true
-  },
-  {
-    packageDir: 'packages/voice-runtime',
-    packageName: '@yolk-sdk/voice-runtime',
-    expectedExports: ['./package.json', '.'],
     tinyRoot: false
   }
 ]

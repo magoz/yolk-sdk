@@ -5,16 +5,10 @@
   "fixed": [
     [
       "@yolk-sdk/agent",
-      "@yolk-sdk/anthropic",
       "@yolk-sdk/connectors",
       "@yolk-sdk/knowledge",
       "@yolk-sdk/mcp",
-      "@yolk-sdk/oauth",
-      "@yolk-sdk/openai",
-      "@yolk-sdk/react",
-      "@yolk-sdk/skillset",
-      "@yolk-sdk/vercel-workflows-runtime",
-      "@yolk-sdk/voice-runtime"
+      "@yolk-sdk/vercel-workflows"
     ]
   ],
   "linked": [],

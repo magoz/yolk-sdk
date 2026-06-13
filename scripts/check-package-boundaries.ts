@@ -17,14 +17,31 @@ const workspaceRoot = process.cwd()
 const retiredPackages: ReadonlyArray<RetiredPackage> = [
   { dir: 'packages/agent-loop', importName: '@yolk-sdk/agent-loop' },
   { dir: 'packages/agent-runtime', importName: '@yolk-sdk/agent-runtime' },
+  { dir: 'packages/anthropic', importName: '@yolk-sdk/anthropic' },
   { dir: 'packages/client', importName: '@yolk-sdk/client' },
   { dir: 'packages/mcp-client', importName: '@yolk-sdk/mcp-client' },
   { dir: 'packages/mcp-server', importName: '@yolk-sdk/mcp-server' },
+  { dir: 'packages/oauth', importName: '@yolk-sdk/oauth' },
+  { dir: 'packages/openai', importName: '@yolk-sdk/openai' },
   { dir: 'packages/protocol', importName: '@yolk-sdk/protocol' },
-  { dir: 'packages/tool-registry', importName: '@yolk-sdk/tool-registry' }
+  { dir: 'packages/react', importName: '@yolk-sdk/react' },
+  { dir: 'packages/skillset', importName: '@yolk-sdk/skillset' },
+  { dir: 'packages/tool-registry', importName: '@yolk-sdk/tool-registry' },
+  { dir: 'packages/vercel-workflows-runtime', importName: '@yolk-sdk/vercel-workflows-runtime' },
+  { dir: 'packages/voice-runtime', importName: '@yolk-sdk/voice-runtime' }
 ]
 
 const retiredImports = retiredPackages.map(retiredPackage => retiredPackage.importName)
+
+const agentCoreForbiddenImports = [
+  ...retiredImports,
+  '@yolk-sdk/knowledge',
+  '@yolk-sdk/mcp',
+  '@yolk-sdk/agent/react',
+  'next',
+  'react',
+  'node:'
+]
 
 const rules: ReadonlyArray<BoundaryRule> = [
   {
@@ -60,16 +77,48 @@ const rules: ReadonlyArray<BoundaryRule> = [
     ]
   },
   {
-    packageDir: 'packages/agent/src',
-    forbiddenImports: ['@yolk-sdk/knowledge', '@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
+    packageDir: 'packages/agent/src/protocol',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/loop',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/runtime',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/client',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/tools',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/oauth',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/providers',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/skillset',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/voice',
+    forbiddenImports: agentCoreForbiddenImports
+  },
+  {
+    packageDir: 'packages/agent/src/react',
+    forbiddenImports: [...retiredImports, '@yolk-sdk/knowledge', '@yolk-sdk/mcp', 'next', 'node:']
   },
   {
     packageDir: 'packages/knowledge/src',
-    forbiddenImports: ['@yolk-sdk/mcp', '@yolk-sdk/react', 'next', 'react', 'node:']
-  },
-  {
-    packageDir: 'packages/react/src',
-    forbiddenImports: ['next', 'node:']
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent/react', '@yolk-sdk/mcp', 'next', 'react', 'node:']
   }
 ]
 

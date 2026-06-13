@@ -12,8 +12,8 @@ import {
 } from '@yolk-sdk/agent/loop'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 
-import { TokenBrokerResponse } from '@yolk-sdk/oauth'
-import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
+import { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
+import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
 import {
   codexWsHeaders,
   makeCodexWsProviderLayer,

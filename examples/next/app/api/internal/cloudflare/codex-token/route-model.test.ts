@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { anthropicClaudeProviderId } from '@yolk-sdk/anthropic/claude'
-import { openAiCodexProviderId } from '@yolk-sdk/openai/codex'
+import { anthropicClaudeProviderId } from '@yolk-sdk/agent/providers/anthropic/claude'
+import { openAiCodexProviderId } from '@yolk-sdk/agent/providers/openai/codex'
 import { propertyOptions } from '../../../../../../../test/property/options'
 import {
   anthropicClaudeBrokerResponse,

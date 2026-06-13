@@ -62,8 +62,8 @@ App tests are usually colocated with source files using `*.test.ts`. Package tes
 colocated or live in package-owned `test/*` areas when that package's `AGENTS.md` says so.
 
 ```
-packages/anthropic/src/claude-provider.ts
-packages/anthropic/src/claude-provider.test.ts
+packages/agent/src/providers/anthropic/claude-provider.ts
+packages/agent/test/providers/anthropic/claude-provider.test.ts
 
 packages/agent/test/loop/run.test.ts
 ```
@@ -350,7 +350,7 @@ Treat one flaky test as suite trust = 0.
 
 See current test files for working examples:
 
-- `packages/anthropic/src/claude-provider.test.ts` - provider HTTP/stream fixtures
+- `packages/agent/test/providers/anthropic/claude-provider.test.ts` - provider HTTP/stream fixtures
 - `packages/agent/test/property/*.test.ts` - property tests
 - `packages/agent/test/loop/error.test.ts` - error handling
 - `packages/mcp/test/client/client.test.ts` - protocol/transport fixtures

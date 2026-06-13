@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import type { CommandInfo } from '@yolk-sdk/skillset'
+import type { CommandInfo } from '@yolk-sdk/agent/skillset'
 import { commandSummary, renderCommandResponse } from './route-model'
 
 const command: CommandInfo = {

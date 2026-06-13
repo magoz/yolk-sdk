@@ -140,10 +140,10 @@ This keeps authoring portable while runtime stays filesystem-free.
 
 ### Package boundary
 
-Longer term, reusable parsing/merge/render can live in a domain-free package:
+Reusable parsing/merge/render lives under the agent package:
 
 ```txt
-packages/skillset
+packages/agent/src/skillset
   schemas
   markdown parsers
   command renderer
@@ -154,7 +154,7 @@ packages/skillset
 Node-only helpers can live behind a subpath later:
 
 ```txt
-@yolk-sdk/skillset/node
+@yolk-sdk/agent/skillset/node
 ```
 
 App and Cloudflare own concrete source adapters and policy.
@@ -434,7 +434,7 @@ Never let skills bypass existing tool policy.
 - No global dirs v1.
 - No permissions DSL v1.
 
-### Phase 1: `packages/skillset` core
+### Phase 1: `packages/agent/src/skillset` core
 
 Build reusable, runtime-agnostic primitives first.
 
@@ -462,7 +462,7 @@ Reads standard folders and returns normalized skillset records.
 Later, if useful, move Node helpers behind:
 
 ```txt
-@yolk-sdk/skillset/node
+@yolk-sdk/agent/skillset/node
 ```
 
 ### Phase 3: skills runtime
@@ -529,7 +529,7 @@ Do not start with UI. Lock runtime contract first.
 
 Completed:
 
-- `packages/skillset` core package.
+- `packages/agent/src/skillset` core.
 - Skill parsing + name/directory validation.
 - Command parsing + argument rendering.
 - Manifest schema + merge helpers.

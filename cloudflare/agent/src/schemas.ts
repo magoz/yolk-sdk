@@ -1,6 +1,6 @@
 import * as Schema from 'effect/Schema'
-import { TokenBrokerResponse } from '@yolk-sdk/oauth'
-import { SkillsetManifest } from '@yolk-sdk/skillset'
+import { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
+import { SkillsetManifest } from '@yolk-sdk/agent/skillset'
 import { McpRemoteServerConfigsSchema } from '../../../examples/next/lib/agents/mcp/schema.ts'
 
 export const BootstrapRequest = Schema.Struct({

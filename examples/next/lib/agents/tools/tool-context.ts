@@ -1,4 +1,4 @@
-import type { MergedSkillset } from '@yolk-sdk/skillset'
+import type { MergedSkillset } from '@yolk-sdk/agent/skillset'
 
 export type AgentToolSurface = 'text' | 'voice'
 

@@ -1,5 +1,5 @@
-import { openAiCodexRefreshBufferMs, makeOpenAiCodexBrokerRequest } from '@yolk-sdk/openai/codex'
-import type { TokenBrokerResponse } from '@yolk-sdk/oauth'
+import { openAiCodexRefreshBufferMs, makeOpenAiCodexBrokerRequest } from '@yolk-sdk/agent/providers/openai/codex'
+import type { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
 
 export const codexTokenRefreshBufferMs = openAiCodexRefreshBufferMs
 

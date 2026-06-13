@@ -14,11 +14,7 @@
   },
   "dependencies": {
     "@yolk-sdk/agent": "workspace:^",
-    "@yolk-sdk/anthropic": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",
-    "@yolk-sdk/oauth": "workspace:^",
-    "@yolk-sdk/openai": "workspace:^",
-    "@yolk-sdk/skillset": "workspace:^",
     "alchemy": "2.0.0-beta.36",
     "effect": "catalog:"
   },
