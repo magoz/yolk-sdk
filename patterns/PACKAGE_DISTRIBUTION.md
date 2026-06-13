@@ -157,8 +157,9 @@ Canary prep flow:
 ```bash
 pnpm changeset:canary:enter
 pnpm changeset:version
-pnpm install --lockfile-only
 ```
+
+`pnpm changeset:version` already runs `pnpm install --lockfile-only` in this repo.
 
 Verify every public package got the same canary version. Then run full validation before publishing:
 
@@ -206,7 +207,7 @@ Use the `/package-release` command after restarting opencode for guided release 
 
 Requirements before dispatch:
 
-- changesets consumed by `pnpm changeset:version && pnpm install --lockfile-only`
+- changesets consumed by `pnpm changeset:version`
 - every public package has same version
 - package version is not already published on npm
 - `v<version>` tag does not exist

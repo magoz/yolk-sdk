@@ -12,7 +12,7 @@ Feature PRs:
 Release PRs:
 
 - Start from `main` after feature PRs merge.
-- Run `pnpm changeset:version` and `pnpm install --lockfile-only`.
+- Run `pnpm changeset:version`.
 - Include only generated release files: package versions, changelogs, lockfile, consumed changesets, and `.changeset/pre.json` changes.
 - No feature code.
 - Merge/push to `main`, then user manually runs `.github/workflows/publish.yml`.
@@ -34,7 +34,6 @@ Use this for canary/stable prep. This does not publish.
 
 ```bash
 pnpm changeset:version
-pnpm install --lockfile-only
 pnpm packages:build
 pnpm packages:publint
 pnpm packages:smoke
@@ -165,7 +164,7 @@ Recommended later workflow:
 
 - Trigger release PR on push to `main`.
 - Use `changesets/action` for version PRs.
-- `version`: `pnpm changeset:version && pnpm install --lockfile-only`.
+- `version`: `pnpm changeset:version`.
 - `publish`: validation + `.github/workflows/publish.yml`.
 - Set `id-token: write` for npm trusted publishing/provenance.
 

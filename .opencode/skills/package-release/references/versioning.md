@@ -23,7 +23,7 @@ Default release channel is canary.
 Current release line:
 
 ```txt
-0.0.1-canary.x
+0.1.0-canary.x
 ```
 
 Canary install example:
@@ -109,10 +109,9 @@ Consume changesets and bump package manifests/changelogs:
 
 ```bash
 pnpm changeset:version
-pnpm install --lockfile-only
 ```
 
-This command pair must run before GitHub Actions publish. A changeset file alone does not change package versions.
+This command must run before GitHub Actions publish. A changeset file alone does not change package versions. `pnpm changeset:version` already runs `pnpm install --lockfile-only` in this repo.
 
 Required generated output:
 
@@ -129,7 +128,6 @@ Stable release requires explicit approval, then exit prerelease mode first:
 ```bash
 pnpm changeset:canary:exit
 pnpm changeset:version
-pnpm install --lockfile-only
 ```
 
 ## Channels

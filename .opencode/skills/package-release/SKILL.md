@@ -54,8 +54,9 @@ fi
 
 ```bash
 pnpm changeset:version
-pnpm install --lockfile-only
 ```
+
+`pnpm changeset:version` already runs `pnpm install --lockfile-only` in this repo.
 
    - If no files change, stop: there is no new version to publish.
    - Never tell user to run the GitHub Action until bumped versions/changelogs are committed and pushed.
@@ -135,7 +136,6 @@ pnpm changeset
 
 # release branch from main
 pnpm changeset:version
-pnpm install --lockfile-only
 ```
 
 ## Common Commands

@@ -104,7 +104,7 @@ Most common cause: pushed only a `.changeset/*.md`, then ran action without `pnp
 
 Fix:
 
-- Run `pnpm changeset:version && pnpm install --lockfile-only`.
+- Run `pnpm changeset:version`.
 - Confirm public packages bumped to a new unpublished version.
 - Confirm changelog entries generated.
 - Validate, commit, push, rerun action.
