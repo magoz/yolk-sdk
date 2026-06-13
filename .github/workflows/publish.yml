@@ -114,7 +114,6 @@ jobs:
 
       - name: Publish tarballs
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: false
         run: |
           for tarball in .release/*.tgz; do

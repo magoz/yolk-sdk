@@ -82,7 +82,7 @@ Cause: npm treats missing package + insufficient org/package publish permission 
 
 Fix:
 
-- Check the package exists or `@yolk-sdk` org grants publish permission/trusted publishing for new package creation.
+- Preauthorize `magoz/yolk-sdk` + `.github/workflows/publish.yml` as trusted publisher for the new npm package name.
 - Treat earlier `+ @yolk-sdk/*@version` lines as published; do not rerun the same version.
 - Fix npm access, rerun the same workflow; it skips already-published tarballs. If retry guard is unavailable, bump all public packages to the next canary first.
 - If tag step never ran, create no tag for the partial version unless intentionally documenting the partial publish.

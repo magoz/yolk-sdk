@@ -215,7 +215,7 @@ Requirements before dispatch:
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
 
-If a renamed/new package 404s on first publish, create/configure that package on npm for `publish.yml` trusted publishing, or provide a publish-capable `NPM_TOKEN` secret for the first publish.
+If a renamed/new package 404s on first publish, preauthorize `magoz/yolk-sdk` + `.github/workflows/publish.yml` as trusted publisher for that npm package name, then rerun the workflow.
 
 ## Release Prep Order
 
