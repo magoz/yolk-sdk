@@ -25,6 +25,7 @@ agent/compaction -> agent/protocol + agent/loop
 agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 sandbox root -> Effect only; sandbox/agent -> agent tools/protocol/loop; sandbox/vercel -> @vercel/sandbox only
+vercel-workflows -> workflow runtime APIs only; no app/auth/provider/tool/storage policy
 agent/voice -> agent/loop + agent/protocol
 ```
 

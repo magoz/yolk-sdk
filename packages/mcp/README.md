@@ -34,15 +34,16 @@ import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
 
 ```ts
 import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 
 const tools = listRemoteMcpServerTools({
-  id: 'docs',
-  transport: { kind: 'http', url: 'https://example.com/mcp' },
-  allowHttpLocalhost: false
-})
+  name: 'docs',
+  type: 'remote',
+  url: 'https://example.com/mcp'
+}).pipe(Effect.provide(FetchHttpClient.layer))
 
-// Host provides HttpClient layer and auth policy.
+// Host chooses HttpClient layer and auth policy.
 Effect.runPromise(tools)
 ```
 

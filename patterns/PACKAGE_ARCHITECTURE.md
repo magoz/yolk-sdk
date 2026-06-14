@@ -16,7 +16,12 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/agent/react`
   - `@yolk-sdk/agent/oauth`
   - `@yolk-sdk/agent/providers/openai`
+  - `@yolk-sdk/agent/providers/openai/codex`
+  - `@yolk-sdk/agent/providers/openai/codex-provider`
+  - `@yolk-sdk/agent/providers/openai/provider`
   - `@yolk-sdk/agent/providers/anthropic`
+  - `@yolk-sdk/agent/providers/anthropic/claude`
+  - `@yolk-sdk/agent/providers/anthropic/claude-provider`
   - `@yolk-sdk/agent/skillset`
   - `@yolk-sdk/agent/voice`
 - `@yolk-sdk/mcp` is a sibling MCP package, not part of agent core.
@@ -28,7 +33,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - `@yolk-sdk/knowledge` owns knowledge search/chunking/embedding/vector-store contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; agent integration lives behind `@yolk-sdk/sandbox/agent`, and Vercel provider code lives behind `@yolk-sdk/sandbox/vercel`.
-- `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; workflow directive entrypoints live behind `@yolk-sdk/vercel-workflows/workflow`.
+- `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, while hosts own concrete Workflow directives.
 - OpenAI/Codex and Anthropic/Claude provider mechanics live under `@yolk-sdk/agent/providers/*`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 

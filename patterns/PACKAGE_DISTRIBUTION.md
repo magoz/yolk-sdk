@@ -139,7 +139,7 @@ Publish all public packages together:
 - `@yolk-sdk/sandbox`
 - `@yolk-sdk/vercel-workflows`
 
-Rationale: lockstep versions are simpler when every workspace package is public. Unstable packages should document instability in README rather than staying private.
+Rationale: lockstep versions are simpler when every public `packages/*` package is published together. Private app workspaces stay private; unstable public packages document instability in README.
 
 ## Package Metadata Decisions
 

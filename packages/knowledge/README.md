@@ -37,7 +37,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ```ts
 import { buildKnowledgeContext, KnowledgeStore } from '@yolk-sdk/knowledge'
-import { KnowledgeRecord } from '@yolk-sdk/knowledge/records'
+import type { KnowledgeRecord } from '@yolk-sdk/knowledge/records'
 import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
 import { makeDefaultKnowledgeChunker } from '@yolk-sdk/knowledge/chunking'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
