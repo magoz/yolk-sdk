@@ -15,7 +15,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | Subpath | Purpose |
 | --- | --- |
 | `@yolk-sdk/sandbox` | Core `Sandbox` service, state store, models, lifecycle helpers, errors |
-| `@yolk-sdk/sandbox/agent` | One trusted `sandbox` tool module for `@yolk-sdk/agent/tools` |
+| `@yolk-sdk/sandbox/agent` | One destructive `sandbox` tool module for `@yolk-sdk/agent/tools` |
 | `@yolk-sdk/sandbox/vercel` | Vercel Sandbox provider layer |
 | `@yolk-sdk/sandbox/testing` | Fake sandbox + in-memory state store layers |
 
@@ -45,6 +45,19 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(layer))
 ```
 
+## State reuse
+
+- Vercel sandbox names are deterministic from `sandboxSessionId`.
+- Stored state is the fast path; when state is missing, the Vercel adapter tries `get(name)` before `create(name)`.
+- Reattached sandboxes save fresh state and report `workspaceReset: false`.
+- Expired stored state still recreates and reports `workspaceReset: true`.
+
+## Agent tool output
+
+- Command failure is result data: nonzero exit and timeout return `ToolResult.isError`.
+- Provider/state/config failures fail the Effect with `ToolError`; hosts decide retry/report policy.
+- `structuredContent` is plain JSON for workflow/session persistence.
+
 ## Host responsibilities
 
 - Build `sandboxSessionId` from host user/session scope.
@@ -57,4 +70,4 @@ const program = Effect.gen(function* () {
 
 - Core is provider-free and app-free.
 - Vercel SDK imports live only under `@yolk-sdk/sandbox/vercel`.
-- The package exposes one agent tool; hosts decide where to enable it.
+- The package exposes one destructive agent tool; hosts decide where to enable it and how to approve it.
