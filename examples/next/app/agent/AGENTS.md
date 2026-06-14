@@ -55,7 +55,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 
 - Textarea stays focused and enabled; submit is disabled while text run or voice mode is active.
 - Attachment input supports picker, drag/drop, and clipboard paste; max 4 images and 4 PDFs; downscale/compress images before protocol conversion.
-- Gate attachment input from `agentTextCapabilities.input.image` / `.document`; console exposes text/image/document/audio + tools support.
+- Gate attachment input from `agentTextCapabilities.input.image` / `.document`; console exposes text/image/audio + tools support.
 - Enter submits; Shift+Enter inserts newline; ignore Enter while IME composing.
 - Auto-scroll only when user is near bottom.
 - Message actions are turn-level: delete removes a user+assistant turn; regenerate starts from an assistant message.

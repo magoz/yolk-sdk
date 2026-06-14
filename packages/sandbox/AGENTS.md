@@ -17,6 +17,7 @@
 - Only `src/vercel/*` may import `@vercel/sandbox`.
 - `src/agent.ts` may depend on `@yolk-sdk/agent/tools`, `@yolk-sdk/agent/protocol`, and `@yolk-sdk/agent/loop`; core must not.
 - Hosts own identity, auth, storage adapters, lifecycle cleanup scans, env/secrets, snapshots, git policy, approvals, and UI.
+- SDK only marks the `sandbox` tool destructive; hosts enforce safety/approval policy.
 - Command failure is result data; provider/state/config failures are Effect failures.
 
 ## Design rules
@@ -28,9 +29,11 @@
 - Persistent lifecycle is modeled but dogfood should stay disposable until stable.
 - Initial source is an ADT: empty, snapshot, git, or tarball. Snapshot replaces separate base-snapshot fields.
 - Hosts choose Vercel env, ports, resources, runtime, and network policy; package stores no secrets.
+- Vercel state store is a fast path: if empty, `get(name)` before `create(name)` and save reattached state.
 - Stale or max-expired disposable state recreates before command and reports `workspaceReset: true`.
 - `cwd` is workspace-relative; absolute paths and `..` escape are rejected.
 - Stdin uses wrapper files because Vercel SDK commands have no stdin param.
 - Timeout is Yolk-owned: run detached, wait with Effect timeout, kill on expiry; do not rely on Vercel `timeoutMs` exit `137`.
 - Agent-facing surface stays one destructive `sandbox` tool.
+- Agent tool `structuredContent` stays plain JSON; do not return Effect Schema class instances.
 - Live Vercel smoke is manual/opt-in only; default tests use fakes/seams.

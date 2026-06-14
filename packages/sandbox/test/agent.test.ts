@@ -5,6 +5,7 @@ import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   SandboxCommandResult,
   SandboxExpiredError,
+  SandboxPreviewUrl,
   VercelSandboxState,
   type SandboxApi
 } from '../src/index.ts'
@@ -28,6 +29,7 @@ const commandResult = (input: {
   readonly stderr?: string
   readonly timedOut?: boolean
   readonly workspaceReset?: boolean
+  readonly previewUrls?: ReadonlyArray<SandboxPreviewUrl>
 }) => SandboxCommandResult.make({
   exitCode: input.exitCode ?? 0,
   stdout: input.stdout ?? '',
@@ -35,7 +37,7 @@ const commandResult = (input: {
   durationMs: 10,
   timedOut: input.timedOut ?? false,
   workspaceReset: input.workspaceReset ?? false,
-  previewUrls: [],
+  previewUrls: input.previewUrls ?? [],
   state
 })
 
@@ -83,6 +85,35 @@ describe('sandbox agent tool', () => {
       expect(result.isError).toBe(false)
     })
   )
+
+  it('emits plain JSON structured content', () => {
+    const result = makeSandboxToolResult({
+      callId: 'call_1',
+      result: commandResult({
+        stdout: 'ok',
+        previewUrls: [
+          SandboxPreviewUrl.make({ port: 3000, url: 'https://3000.example.test' })
+        ]
+      })
+    })
+
+    expect(result.structuredContent).toStrictEqual({
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+      truncated: false,
+      workspaceReset: false,
+      previewUrls: [{ port: 3000, url: 'https://3000.example.test' }],
+      state: {
+        _tag: 'Vercel',
+        name: 'sandbox-test',
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        expiresAtMs: 60_000,
+        maxExpiresAtMs: 120_000
+      }
+    })
+  })
 
   it.effect('returns model-visible expired errors', () =>
     Effect.gen(function* () {

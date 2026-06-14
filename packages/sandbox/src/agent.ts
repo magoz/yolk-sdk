@@ -67,6 +67,20 @@ export type SandboxToolModuleOptions<Context> = {
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
 }
 
+type PlainSandboxPreviewUrl = {
+  readonly port: number
+  readonly url: string
+}
+
+type PlainSandboxState = {
+  readonly _tag: 'Vercel'
+  readonly name: string
+  readonly createdAtMs: number
+  readonly lastUsedAtMs: number
+  readonly expiresAtMs: number
+  readonly maxExpiresAtMs: number
+}
+
 export type SandboxToolStructuredContent = {
   readonly exitCode: number | null
   readonly durationMs: number
@@ -74,8 +88,8 @@ export type SandboxToolStructuredContent = {
   readonly truncated: boolean
   readonly workspaceReset: boolean
   readonly backgroundId?: string
-  readonly previewUrls: SandboxCommandResult['previewUrls']
-  readonly state: SandboxCommandResult['state']
+  readonly previewUrls: ReadonlyArray<PlainSandboxPreviewUrl>
+  readonly state: PlainSandboxState
 }
 
 type OutputSlice = {
@@ -198,6 +212,27 @@ const formatSandboxToolContent = (result: SandboxCommandResult, output: OutputSl
     '</stderr>'
   ].filter(line => line !== undefined).join('\n')
 
+const plainSandboxPreviewUrl = (
+  previewUrl: SandboxCommandResult['previewUrls'][number]
+): PlainSandboxPreviewUrl => ({
+  port: previewUrl.port,
+  url: previewUrl.url
+})
+
+const plainSandboxState = (state: SandboxCommandResult['state']): PlainSandboxState => {
+  switch (state._tag) {
+    case 'Vercel':
+      return {
+        _tag: state._tag,
+        name: state.name,
+        createdAtMs: state.createdAtMs,
+        lastUsedAtMs: state.lastUsedAtMs,
+        expiresAtMs: state.expiresAtMs,
+        maxExpiresAtMs: state.maxExpiresAtMs
+      }
+  }
+}
+
 const structuredContent = (
   result: SandboxCommandResult,
   truncated: boolean
@@ -208,8 +243,8 @@ const structuredContent = (
   truncated,
   workspaceReset: result.workspaceReset,
   ...(result.backgroundId === undefined ? {} : { backgroundId: result.backgroundId }),
-  previewUrls: result.previewUrls,
-  state: result.state
+  previewUrls: result.previewUrls.map(plainSandboxPreviewUrl),
+  state: plainSandboxState(result.state)
 })
 
 export const makeSandboxToolResult = (input: {

@@ -274,6 +274,35 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
           return { handle, state, workspaceReset: input.workspaceReset }
         })
 
+      const attachExistingSandbox = (input: {
+        readonly handle: VercelSandboxHandle
+        readonly nowMs: number
+      }) =>
+        Effect.gen(function* () {
+          const state = initialSandboxState({ name, nowMs: input.nowMs, lifecycle })
+          yield* store.save({ sandboxSessionId: config.sandboxSessionId, state })
+
+          return {
+            handle: input.handle,
+            state,
+            workspaceReset: false
+          }
+        })
+
+      const attachOrCreateSandbox = (input: {
+        readonly nowMs: number
+        readonly workspaceReset: boolean
+      }) =>
+        Effect.gen(function* () {
+          const handle = yield* tryProvider('get', () => client.get({ name }))
+
+          if (handle !== null) {
+            return yield* attachExistingSandbox({ handle, nowMs: input.nowMs })
+          }
+
+          return yield* createSandbox(input)
+        })
+
       const touchExistingSandbox = (input: {
         readonly handle: VercelSandboxHandle
         readonly state: SandboxState
@@ -307,6 +336,13 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
           const decision = sandboxStateDecision({ state: loaded, name, nowMs })
 
           if (decision._tag === 'Create') {
+            if (Option.isNone(loaded)) {
+              return yield* attachOrCreateSandbox({
+                nowMs,
+                workspaceReset: decision.workspaceReset
+              })
+            }
+
             if (Option.isSome(loaded) && decision.workspaceReset) {
               yield* deleteNamedSandbox(loaded.value.name)
               yield* store.clear(config.sandboxSessionId)

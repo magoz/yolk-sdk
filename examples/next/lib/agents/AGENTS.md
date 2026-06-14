@@ -31,7 +31,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 - Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, and reasoning defaults from there.
 - Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
-- Next/Workflow providers receive text+image/PDF capabilities; Cloudflare UI gates media, and DO/provider paths reject unsupported input.
+- Next/Workflow providers receive text+image/PDF capabilities; Cloudflare direct WS currently shares UI flags but does not pass package capability validation.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
 - Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.

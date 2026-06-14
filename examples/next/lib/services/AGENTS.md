@@ -36,12 +36,13 @@ examples/next/lib/services/[service-name]/
 - Static live layers provide `FetchHttpClient.layer` internally.
 - HTTP-backed services expose injectable layer factories accepting `Layer.Layer<HttpClient.HttpClient>`.
 - Current examples: `makeOpenAiCodexOAuthLayer(httpClientLayer)`, `makeAnthropicClaudeOAuthLayer(httpClientLayer)`.
+- Email is the current SDK-client exception: `email/live-layer.ts` wraps Resend directly.
 - Avoid raw `fetch` or storing `typeof fetch` in service config.
 
 ## Errors
 
 - Service-owned integration errors live beside the service.
-- Domain-owned errors live in `examples/next/lib/core/[domain]/errors.ts`.
+- Domain-owned errors live in `examples/next/lib/core/errors` or beside the owning domain file.
 - Use `Data.TaggedError` for simple internal service errors.
 - Use `Schema.TaggedErrorClass` when `Schema.is`, serialization, or schema-boundary validation is needed.
 - Prefix service errors with the service name; common suffixes: `ApiError`, `ConfigError`, `ValidationError`.

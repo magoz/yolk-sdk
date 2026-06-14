@@ -89,6 +89,39 @@ describe('vercel sandbox layer', () => {
     })
   )
 
+  it.effect('reattaches named sandbox when state store is empty', () =>
+    Effect.gen(function* () {
+      const files: Array<VercelSandboxFile> = []
+      const commands: Array<VercelRunCommandInput> = []
+      const deleted: Array<string> = []
+      const sandboxSessionId = 'session_reattach'
+      const name = makeVercelSandboxName(sandboxSessionId)
+      const handle = makeHandle({ name, files, commands, deleted })
+      let createCount = 0
+      const clientLayer = Layer.succeed(
+        VercelSandboxClient,
+        VercelSandboxClient.of({
+          get: () => Promise.resolve(handle),
+          create: () => {
+            createCount = createCount + 1
+            return Promise.resolve(handle)
+          }
+        })
+      )
+      const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(
+        Layer.provide(Layer.mergeAll(clientLayer, makeInMemorySandboxStateStoreLayer()))
+      )
+      const result = yield* Effect.gen(function* () {
+        const sandbox = yield* Sandbox
+        return yield* sandbox.run({ command: 'pwd' })
+      }).pipe(Effect.provide(layer))
+
+      expect(createCount).toBe(0)
+      expect(result.workspaceReset).toBe(false)
+      expect(result.state.name).toBe(name)
+    })
+  )
+
   it.effect('recreates expired disposable state', () =>
     Effect.gen(function* () {
       const files: Array<VercelSandboxFile> = []
