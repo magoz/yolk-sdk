@@ -1,22 +1,22 @@
 # Publishing
 
-## GitHub Actions first workflow
+## Model
 
 Feature PRs:
 
 - Include code/docs/package changes.
 - Add `.changeset/*.md` when public package behavior, API, runtime deps, exports, or release-facing docs change.
 - Do not run `pnpm changeset:version` in feature PRs.
-- Release notes live in changesets. Make them user-facing, concise, and specific.
+- Make changeset notes user-facing, concise, specific.
 
 Release PRs:
 
 - Start from `main` after feature PRs merge.
 - Run `pnpm changeset:version`.
-- Include only generated release files: package versions, changelogs, lockfile, consumed changesets, and `.changeset/pre.json` changes.
+- Include only generated release files: package versions, changelogs, lockfile, consumed changesets, `.changeset/pre.json`.
 - No feature code.
-- Merge/push to `main`, then user manually runs `.github/workflows/publish.yml`.
-- Do not run the action from a commit that only adds `.changeset/*.md`; it will republish the existing package version and 403.
+- Merge/push to `main`, then publish manually or by approved agent `gh` trigger.
+- Do not run the action from a commit that only adds `.changeset/*.md`; it will republish existing versions and 403.
 
 After successful release prep:
 
@@ -24,13 +24,11 @@ After successful release prep:
 - List exact files that belong in the release PR.
 - Propose a concise commit message.
 - Ask before committing or pushing.
-- Never include env files, generated `dist`, `.next`, `.turbo`, coverage, or unrelated local changes.
-
-Release PR content should be mechanically reviewable: “these changesets became these versions/changelogs”.
+- Never include env files, `dist`, `.next`, `.turbo`, coverage, or unrelated local changes.
 
 ## Agent release-prep flow
 
-Use this for canary/stable prep. This does not publish.
+Use for canary/stable prep. This does not publish.
 
 ```bash
 pnpm changeset:version
@@ -46,24 +44,38 @@ pnpm test:run
 
 Then inspect, commit, push after explicit approval.
 
-Before telling user to run the Action, verify with the unpublished-version check from `SKILL.md`:
+Before any publish trigger, verify with the unpublished-version check from `SKILL.md`:
 
-- public package versions changed from the previously published canary/latest
-- changelog entries were generated
-- consumed changeset ids were recorded in `.changeset/pre.json`
+- public package versions changed from previously published canary/latest
+- changelog entries generated
+- consumed changeset ids recorded in `.changeset/pre.json`
 - no package version to publish already exists on npm
 
 ## GitHub Actions publish steps
 
-1. Ensure release prep is on `main`.
+1. Ensure release prep is committed and pushed to `main`.
+2. Confirm package versions are unpublished on npm.
+3. Get explicit user approval to publish.
+4. Trigger manually or by approved agent command.
 
-2. User opens GitHub → Actions → `Publish packages` → Run workflow.
+Manual:
 
-3. Select dist-tag:
-   - `canary`: default prerelease.
-   - `latest`: stable only after explicit approval.
+```txt
+GitHub → Actions → Publish packages → Run workflow
+```
 
-4. Workflow runs:
+Approved agent:
+
+```bash
+gh workflow run publish.yml --ref main -f tag=canary
+gh run list --workflow publish.yml --limit 3
+gh run view <run-id> --json conclusion,status,url,headSha,displayTitle
+gh run watch <run-id> --exit-status
+```
+
+Use `canary` by default. Use `latest` only after explicit stable approval.
+
+Workflow runs:
 
 ```bash
 pnpm packages:build
@@ -80,7 +92,7 @@ npm publish .release/*.tgz --tag <tag> --access public
 git tag -a v<version> && git push origin v<version>
 ```
 
-5. Verify locally after action completes:
+Verify after action completes:
 
 ```bash
 npm view @yolk-sdk/agent dist-tags
@@ -90,30 +102,15 @@ git fetch --tags
 git tag --list 'v*' --sort=-v:refname | head -n 5
 ```
 
-Or check every public package:
-
-```bash
-node - <<'NODE'
-const { execFileSync } = require('node:child_process')
-const fs = require('node:fs')
-for (const d of fs.readdirSync('packages')) {
-  const p = `packages/${d}/package.json`
-  if (!fs.existsSync(p)) continue
-  const pkg = JSON.parse(fs.readFileSync(p, 'utf8'))
-  if (!pkg.name?.startsWith('@yolk-sdk/') || pkg.private) continue
-  const tags = execFileSync('npm', ['view', pkg.name, 'dist-tags', '--json'], { encoding: 'utf8' })
-  console.log(pkg.name, tags.trim())
-}
-NODE
-```
-
 Preconditions:
 
-- release prep commit is on `main`.
-- release prep includes package version bumps and changelog entries, not just changesets.
-- publish target tag is `canary` unless stable approved.
-- all public versions are lockstep.
-- working tree state was clean before release prep.
+- release prep commit is on `main`
+- release prep includes package version bumps and changelog entries, not just changesets
+- explicit user approval was given before any `gh workflow run`
+- every public package version is unpublished
+- publish target tag is `canary` unless stable approved
+- all public versions are lockstep
+- working tree state was clean before release prep
 
 ## Public package gates
 
@@ -127,12 +124,8 @@ Before publish:
 - `publishConfig.exports` points to `dist`
 - all runtime deps declared in package manifests
 
-## Artifact validation
-
 `pnpm packages:publint` checks package export health.
-
 `pnpm packages:smoke` packs public packages, installs/extracts them in a temp fixture, and imports every public subpath.
-
 If either fails, fix package exports/deps before publishing.
 
 ## Workflow notes
@@ -160,78 +153,27 @@ Current workflow policy:
 
 Do not run local publish in normal flow. Local `pnpm release:canary` is emergency-only and requires explicit user approval.
 
-## New package first publish
+## Exceptions/failures
 
-New npm package names cannot be trusted-publisher preauthorized with `npm trust` until they exist on npm. Use a one-time local tarball publish only for the missing package name, then configure trust and rerun the workflow for the tag.
+New package first publish:
 
-Preconditions:
+- New npm package names cannot be trusted-publisher preauthorized until they exist on npm.
+- After approval, first publish only the missing package from a packed tarball with interactive npm auth/OTP.
+- Then configure trust: `npm trust github @yolk-sdk/<name> --repo magoz/yolk-sdk --file publish.yml --allow-publish --yes`.
+- Rerun `.github/workflows/publish.yml`; it skips already-published tarballs and creates `v<version>`.
+- First publish of a brand-new package may leave `latest` on the canary version; note or correct intentionally.
 
-- release prep commit is on `main`
-- full validation passed
-- package is missing on npm: `npm view @yolk-sdk/<name>` returns 404
-- local npm user is `magoz`: `npm whoami`
-- user explicitly approves local first publish
-
-Publish the missing package only:
+Partial trusted-publish failure:
 
 ```bash
-pnpm --filter @yolk-sdk/<name> build
-pnpm --filter @yolk-sdk/<name> pack --pack-destination /tmp
-npm publish /tmp/yolk-sdk-<name>-<version>.tgz \
-  --tag canary \
-  --access public \
-  --provenance=false \
-  --otp=<code>
-```
-
-Then configure trusted publishing:
-
-```bash
-npm trust github @yolk-sdk/<name> \
+gh run view <run-id> --log-failed
+npm trust github @yolk-sdk/sandbox \
   --repo magoz/yolk-sdk \
   --file publish.yml \
-  --allow-publish
+  --allow-publish \
+  --yes
 ```
 
-Equivalent npm UI fields: GitHub Actions, org/user `magoz`, repo `yolk-sdk`, workflow filename `publish.yml`, allowed action `npm publish`.
+If no git tag was created, do not bump versions. Rerun the same workflow; already-published tarballs are skipped.
 
-Finally rerun `.github/workflows/publish.yml` from `main`; it skips already-published tarballs and creates `v<version>`. Verify npm dist-tags for all packages. First publish of a brand-new package may leave `latest` on the canary version; note or correct intentionally.
-
-## Future automation model
-
-Recommended later workflow:
-
-- Trigger release PR on push to `main`.
-- Use `changesets/action` for version PRs.
-- `version`: `pnpm changeset:version`.
-- `publish`: validation + `.github/workflows/publish.yml`.
-- Set `id-token: write` for npm trusted publishing/provenance.
-
-Reference patterns:
-
-- Effect: fixed group + `changesets/action` release PR/publish.
-- MCP SDK: separate version/publish jobs + OIDC provenance.
-- AI SDK: optional snapshot workflow.
-
-## Post-publish checks
-
-After GitHub Action publish:
-
-```bash
-npm view @yolk-sdk/agent version
-npm view @yolk-sdk/agent dist-tags
-git fetch --tags
-git tag --list 'v*' --sort=-v:refname | head -n 1
-```
-
-Optionally run a clean external install fixture with `@canary`.
-
-## Bad publish response
-
-Never unpublish unless user explicitly asks and npm policy allows it.
-
-Prefer:
-
-- publish a fixed canary
-- deprecate bad version with clear message
-- update docs/changelog
+Bad publish response: never unpublish unless user explicitly asks and npm policy allows it. Prefer fixed canary, deprecation, or docs/changelog update.

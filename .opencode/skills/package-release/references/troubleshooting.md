@@ -88,6 +88,29 @@ Fix:
 - Rerun the same workflow; it skips already-published tarballs and creates the missing tag.
 - If retry guard is unavailable, bump all public packages to the next canary first.
 
+## Existing package lacks trusted publisher
+
+Symptom: workflow publishes some packages, then fails with npm 404/permission for an existing package.
+
+Cause: package exists, but npm trusted publishing is not configured for `magoz/yolk-sdk` + `publish.yml`.
+
+Fix:
+
+- Do not bump versions again if no git tag was created.
+- Configure trust with npm auth/2FA:
+
+```bash
+npm trust github @yolk-sdk/<name> \
+  --repo magoz/yolk-sdk \
+  --file publish.yml \
+  --allow-publish \
+  --yes
+```
+
+- Example: `npm trust github @yolk-sdk/sandbox --repo magoz/yolk-sdk --file publish.yml --allow-publish --yes`.
+- Rerun the same workflow; already-published tarballs are skipped.
+- Verify all dist-tags and `v<version>` after rerun.
+
 ## Release prep includes unrelated files
 
 Cause: working tree had feature, env, generated, or local-only changes before release prep.

@@ -117,11 +117,11 @@ pnpm test:run
    - Do not commit or push without explicit user approval.
 
 10. Publish by GitHub Actions only.
-    - Tell user to run Actions → `Publish packages` from `main`.
+    - Manual UI default; approved agent can run `gh workflow run publish.yml --ref main -f tag=canary`.
     - Use `canary` unless stable was explicitly approved.
     - Never run local `pnpm release:canary` for normal releases.
     - Exception: first publish of a new npm package name may be a local packed-tarball publish after explicit approval; see `references/publishing.md`.
-    - Before saying “run action”, confirm current `main` contains the version bump commit.
+    - Before UI/`gh` trigger, confirm current `main` contains the version bump commit.
     - After action completes, verify npm dist-tags and new `v<version>` git tag.
 
 ## PR Workflow
@@ -161,7 +161,7 @@ pnpm changeset:version
 Publish from GitHub:
 
 - Push release PR to `main`.
-- Run Actions → `Publish packages`.
+- Run Actions → `Publish packages`, or approved `gh workflow run publish.yml --ref main -f tag=canary`.
 - Choose `canary` unless stable was explicitly approved.
 
 Exit canary prerelease mode:
@@ -175,9 +175,8 @@ pnpm changeset:canary:exit
 Yolk should mirror Effect + MCP SDK:
 
 - Agent prepares and validates release files locally.
-- Human triggers GitHub Actions publish from `main`.
+- Human or explicitly approved agent triggers GitHub Actions publish from `main`.
 - GitHub Actions builds, validates, checks unpublished versions, packs, publishes tarballs, then tags `v<version>`.
-- Optional snapshot workflow later, inspired by AI SDK.
 
 ## Guardrails
 
