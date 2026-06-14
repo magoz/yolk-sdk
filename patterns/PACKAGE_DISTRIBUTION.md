@@ -93,9 +93,9 @@ For npm, keep local dev source exports but publish `dist` via `publishConfig.exp
     "provenance": true,
     "exports": {
       ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
       }
     }
   }
@@ -111,7 +111,7 @@ Use `tsdown` for publish prep unless a concrete package needs something else.
 Requirements:
 
 - ESM only.
-- `.d.ts` output.
+- `.d.mts` declaration output.
 - no bundled peer deps.
 - source maps optional.
 - package-local `build`, `check`, and `test:run` scripts stay consistent.
@@ -120,11 +120,11 @@ Requirements:
 
 Current canary policy: keep runtime libraries in package `dependencies` unless singleton identity matters at runtime. This makes first canary installs simpler and avoids peer-resolution friction while APIs are unstable.
 
-Host-owned singletons to revisit before stable releases:
+Host-owned singletons/platform deps to revisit before stable releases:
 
 - `effect`: peer for publishable packages that expose Effect services/types.
 - `react`: optional peer for `@yolk-sdk/agent/react`.
-- `workflow`: peer for `@yolk-sdk/vercel-workflows` if published.
+- `workflow`: current dependency for `@yolk-sdk/vercel-workflows`; revisit peer if host version skew matters.
 
 Current exception: `@yolk-sdk/agent` keeps `react` as an optional peer for the `./react` subpath. Keep platform-specific deps behind explicit subpaths.
 

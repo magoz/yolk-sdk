@@ -470,7 +470,7 @@ Normal test run stays cheap. Add opt-in stress by env:
 PROPERTY_RUNS=1000 pnpm test:run
 ```
 
-Package-local property tests should share a tiny helper instead of repeating run counts:
+Package-local property tests should share a tiny test-config helper instead of repeating run counts. This helper is an approved test boundary; keep `process.env` reads out of package runtime code.
 
 ```ts
 const defaultPropertyRuns = 50

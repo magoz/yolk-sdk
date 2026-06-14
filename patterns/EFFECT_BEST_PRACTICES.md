@@ -40,23 +40,7 @@ Using `any` defeats TypeScript's type system. Type casts (`x as Y`) bypass type 
 5. Use proper generics and type parameters
 6. Refactor the code to avoid the need for casting
 
-**Only use eslint-disable when:**
-
-- Interfacing with external libraries that have incorrect/missing types
-- Working around a known TypeScript limitation (document which one)
-- Schema.suspend for recursive types (rare)
-
-```typescript
-// eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Schema.suspend requires cast for recursive type
-const children: Schema.Schema<TreeNode, TreeNodeEncoded> = Schema.suspend(
-  () => TreeNode
-) as Schema.Schema<TreeNode, TreeNodeEncoded>
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Third-party library returns untyped data
-const externalData: any = thirdPartyLib.getData()
-```
-
-The comment MUST explain WHY the cast is necessary. If you can't articulate a clear reason, you probably don't need the cast.
+Do not disable `no-explicit-any` or `consistent-type-assertions`. If a vendor type is weak, contain it at the boundary with `unknown`, Schema decoding, overloads, or a tiny typed wrapper.
 
 #### Type-Safe Alternatives to Casting
 
@@ -130,7 +114,7 @@ The `never` error type means the effect cannot fail. Adding `catch` to a `never`
 const bad: Effect.Effect<Result, Error> = Effect.fail(new Error('failed'))
 Effect.catch(e => Effect.fail(new Error(`Wrapped: ${e}`)))
 
-// CORRECT - use Schema.TaggedErrorClass for all domain errors
+// CORRECT - use a tagged error in the typed error channel
 export class ValidationError extends Schema.TaggedErrorClass<ValidationError>()('ValidationError', {
   message: Schema.String
 }) {
@@ -152,7 +136,7 @@ Using the global `Error` type:
 - Makes error discrimination impossible
 - Prevents the compiler from tracking which errors are handled
 
-Always use `Schema.TaggedErrorClass` with a unique `_tag` for every error type.
+Always use tagged errors with a unique `_tag`. Use `Schema.TaggedErrorClass` when the error crosses a Schema/wire boundary; use `Data.TaggedError` for simple internal typed failures.
 
 ### 3.1 `Effect.die` Is for Defects Only
 
@@ -172,7 +156,7 @@ if (row === undefined) {
 }
 ```
 
-Rule of thumb: if a server action can return a user-safe message or retry/report the failure,
+Rule of thumb: if a boundary can return a user-safe message or retry/report the failure,
 it belongs in the typed error channel, not the defect channel.
 
 ### 4. NEVER Use `{ disableValidation: true }` - It Is Banned
@@ -559,14 +543,13 @@ const money = Money.make({ amount, currency })
 ```typescript
 export class JournalEntry extends Schema.Class<JournalEntry>('JournalEntry')({
   id: JournalEntryId,
-  date: Schema.DateFromSelf,
   description: Schema.String,
   // Default value for constructor
   status: Schema.propertySignature(Schema.String).pipe(Schema.withConstructorDefault(() => 'draft'))
 }) {}
 
 // status defaults to "draft"
-const entry = JournalEntry.make({ id, date: new Date(), description: '...' })
+const entry = JournalEntry.make({ id, description: '...' })
 ```
 
 ### Schema Decoding/Encoding - Use Effect Variants

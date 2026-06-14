@@ -103,8 +103,12 @@ Reporting at domain level would flood logs with expected control flow. Only the 
 Logs via Effect logger. Used at **boundaries only**:
 
 ```typescript
-// Server actions: tapError before catchTag chains
-Effect.tapError(error => reportError(error, { operation: 'action.domain.create' }))
+// Server actions: catch expected tags first, then report unexpected failures before final fallback
+program.pipe(
+  Effect.catchTag('ValidationError', error => Effect.succeed({ _tag: 'Error', message: error.message })),
+  Effect.tapError(error => reportError(error, { operation: 'action.domain.create' })),
+  Effect.catch(() => Effect.succeed({ _tag: 'Error', message: 'Something went wrong' }))
+)
 
 // Catch-all in pages/actions: report unexpected errors
 Effect.catch(error => {

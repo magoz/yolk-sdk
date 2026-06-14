@@ -59,7 +59,7 @@ Always read relevant owner docs before editing:
 - `patterns/README.md`
 - task-specific root patterns:
   - packages: `patterns/PACKAGE_ARCHITECTURE.md`, `patterns/PACKAGE_DISTRIBUTION.md`
-  - Effect: `patterns/EFFECT_BEST_PRACTICES.md`, `patterns/EFFECT_TESTING.md`
+  - Effect: `patterns/EFFECT_BEST_PRACTICES.md`, `patterns/EFFECT_TESTING.md`, `patterns/SIMULATION_PROPERTY_TESTING.md`
   - AI tools: `patterns/AI_TOOL_SCHEMAS.md`, `patterns/AGENT_HITL.md`, `patterns/MCP_TRANSPORTS.md`
   - telemetry: `patterns/TELEMETRY.md`
   - tests: `patterns/TESTING_STRATEGY.md`
@@ -101,7 +101,7 @@ Check common violations:
 - `Effect.catchCause`
 - `*FromSelf` schemas
 - sync Schema decode/encode
-- missing `Option.fromNullable`-style nullish helpers
+- missing `Option.fromNullishOr` / nullish helpers
 - untyped catch-all recovery that hides failures
 - Node-only imports where runtime-portability is required
 - `any`, non-null assertions, or type assertions

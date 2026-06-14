@@ -10,6 +10,7 @@ Every public package should have `packages/<name>/README.md`:
 - `@yolk-sdk/mcp`
 - `@yolk-sdk/knowledge`
 - `@yolk-sdk/connectors`
+- `@yolk-sdk/sandbox`
 - `@yolk-sdk/vercel-workflows`
 
 Do not require READMEs for private app packages unless useful internally.

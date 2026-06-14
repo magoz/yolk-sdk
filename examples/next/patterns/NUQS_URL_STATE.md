@@ -143,7 +143,7 @@ Use `loadSearchParams` in server components to get typed, parsed values:
 // examples/next/app/(dashboard)/posts/page.tsx
 import { Suspense } from 'react'
 import type { SearchParams } from 'nuqs/server'
-import { loadSearchParams } from './searchParams'
+import { loadSearchParams } from './search-params'
 import { PostList } from './post-list'
 import { PostFilters } from './post-filters'
 
@@ -190,7 +190,10 @@ Client components use `useQueryState` hook with the same parsers:
 
 import { useQueryState, parseAsStringLiteral } from 'nuqs'
 import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/ui/select'
-import { statusFilterValues, type StatusFilter } from './searchParams'
+import { statusFilterValues, type StatusFilter } from './search-params'
+
+const isStatusFilter = (value: string): value is StatusFilter =>
+  statusFilterValues.some(status => status === value)
 
 export function PostStatusFilter() {
   const [status, setStatus] = useQueryState(
@@ -206,7 +209,9 @@ export function PostStatusFilter() {
   return (
     <Select
       value={status}
-      onValueChange={value => setStatus(value as StatusFilter)}
+      onValueChange={value => {
+        if (isStatusFilter(value)) void setStatus(value)
+      }}
     >
       <SelectTrigger>
         <span>{status === 'all' ? 'All statuses' : status}</span>
@@ -323,7 +328,7 @@ Reset multiple filters to their defaults:
 
 import { useQueryState, parseAsString, parseAsStringLiteral } from 'nuqs'
 import { Button } from '@/components/ui/button'
-import { statusFilterValues, sortByValues } from './searchParams'
+import { statusFilterValues, sortByValues } from './search-params'
 
 export function ClearFiltersButton() {
   const [query, setQuery] = useQueryState('q', parseAsString)
@@ -402,7 +407,7 @@ export function PublishedFilter() {
 ## Pattern 7: Pagination
 
 ```typescript
-// searchParams.ts
+// search-params.ts
 export const searchParams = {
   page: parseAsInteger.withDefault(1),
   perPage: parseAsInteger.withDefault(20)

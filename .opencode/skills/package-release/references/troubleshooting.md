@@ -40,7 +40,7 @@ Cause: stale generated Next types.
 Fix:
 
 ```bash
-rm -rf .next
+rm -rf .next examples/next/.next
 pnpm tsc
 ```
 

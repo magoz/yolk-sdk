@@ -53,7 +53,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 ## ENV BOUNDARIES
 
 - Effect app/service code uses `Config.*` inside `Effect.gen`; map config errors around the whole block.
-- Direct `process.env` only in sync framework/config boundaries: root configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures env handoff, sync SDK callbacks like `TelemetryLayer`.
+- Direct `process.env` only in sync framework/config boundaries: root configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures env handoff, test-runner config helpers, sync SDK callbacks like `TelemetryLayer`.
 - Never add direct `dotenv.config()` outside `examples/next/lib/dotenv.ts`.
 
 ## WHERE TO LOOK

@@ -79,7 +79,12 @@ for (const d of fs.readdirSync('packages')) {
   if (!fs.existsSync(p)) continue
   const pkg = JSON.parse(fs.readFileSync(p, 'utf8'))
   if (!pkg.name?.startsWith('@yolk-sdk/') || pkg.private) continue
-  const versions = execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' })
+  let versions = '[]'
+  try {
+    versions = execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' })
+  } catch (error) {
+    if (!String(error).includes('E404')) throw error
+  }
   if (JSON.parse(versions).includes(pkg.version)) {
     throw new Error(`${pkg.name}@${pkg.version} already published`)
   }

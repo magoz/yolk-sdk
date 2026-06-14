@@ -11,6 +11,7 @@ Public packages are lockstep/fixed:
 @yolk-sdk/mcp
 @yolk-sdk/knowledge
 @yolk-sdk/connectors
+@yolk-sdk/sandbox
 @yolk-sdk/vercel-workflows
 ```
 

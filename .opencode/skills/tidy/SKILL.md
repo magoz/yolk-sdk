@@ -30,7 +30,7 @@ Do not tidy source code unless docs require tiny path/config updates.
 | `--check` | Report only. Do not edit. |
 | `--docs` | Docs only. Default. |
 | `--create-new` | Read existing first, then rebuild docs. Ask before using. |
-| `--max-depth=N` | Limit AGENTS scan depth. Default: 5. |
+| `--max-depth=N` | Limit AGENTS scan depth. Default: 6. |
 
 ## Repo Knowledge Model
 
@@ -75,6 +75,7 @@ If package/release/docs hierarchy changed, also read relevant project skills:
 - `.opencode/skills/package-release/SKILL.md`
 - `.opencode/skills/package-release/references/*.md`
 - `.opencode/skills/tidy/SKILL.md`
+- `.opencode/skills/conform/SKILL.md`
 
 Glob:
 

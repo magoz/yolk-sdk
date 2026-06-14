@@ -8,7 +8,7 @@ This document defines usability standards for the application. All UI work must 
 
 ### 1.1 Always Provide a Way Home
 
-Every page must have a clear path back to the main dashboard:
+Every page must have a clear path back to `/` or the current runtime landing:
 
 ```typescript
 // Header logo should link to home
@@ -16,10 +16,10 @@ Every page must have a clear path back to the main dashboard:
   <Logo className="h-8 w-auto cursor-pointer" />
 </Link>
 
-// Auth pages (login/register) need brand link to home
+// Auth pages (login/OTP/error) need brand link to home
 <Link href="/" className="flex items-center gap-2 mb-8">
   <Logo className="h-10 w-10" />
-  <span className="text-xl font-semibold">AppName</span>
+  <span className="text-xl font-semibold">Yolk</span>
 </Link>
 ```
 
@@ -28,17 +28,13 @@ Every page must have a clear path back to the main dashboard:
 Any page more than one level deep must show breadcrumbs:
 
 ```typescript
-// Organizations > Acme Corp > Settings
+// Knowledge > Record > Details
 <nav className="flex items-center gap-2 text-sm text-gray-500 mb-6">
-  <Link href="/organizations" className="hover:text-gray-700">
-    Organizations
+  <Link href="/knowledge" className="hover:text-gray-700">
+    Knowledge
   </Link>
   <ChevronRight className="h-4 w-4" />
-  <Link href={`/organizations/${orgId}`} className="hover:text-gray-700">
-    {orgName}
-  </Link>
-  <ChevronRight className="h-4 w-4" />
-  <span className="text-gray-900 font-medium">Settings</span>
+  <span className="text-gray-900 font-medium">Record details</span>
 </nav>
 ```
 
@@ -70,7 +66,7 @@ const isActive = pathname.startsWith(item.href)
 
 ---
 
-## 2. Authentication Pages (Login/Register)
+## 2. Authentication Pages (Login/OTP)
 
 ### 2.1 Form Best Practices
 
@@ -82,45 +78,22 @@ const isActive = pathname.startsWith(item.href)
   // Use type="email" for mobile keyboard optimization
 />
 
-// Show/hide password toggle (NO confirm password field on login)
-const [showPassword, setShowPassword] = useState(false)
-
-<div className="relative">
-  <input
-    type={showPassword ? 'text' : 'password'}
-    className="pr-10"
-  />
-  <button
-    type="button"
-    onClick={() => setShowPassword(!showPassword)}
-    className="absolute right-3 top-1/2 -translate-y-1/2"
-  >
-    {showPassword ? <EyeOff /> : <Eye />}
-  </button>
-</div>
+// OTP inputs need explicit label/help text
+<input inputMode="numeric" autoComplete="one-time-code" aria-label="Verification code" />
 
 // Validate on blur, not on change
 <input onBlur={(e) => validateEmail(e.target.value)} />
 ```
 
-### 2.2 Easy Switching Between Forms
+### 2.2 Easy Recovery Paths
 
-Always provide a link at the bottom:
+Always provide a way to restart login or go home:
 
 ```typescript
-// On login page
 <p className="text-center text-sm text-gray-600">
-  Don't have an account?{' '}
-  <Link href="/register" className="text-primary-600 hover:text-primary-700 font-medium">
-    Register
-  </Link>
-</p>
-
-// On register page
-<p className="text-center text-sm text-gray-600">
-  Already have an account?{' '}
+  Wrong email?{' '}
   <Link href="/login" className="text-primary-600 hover:text-primary-700 font-medium">
-    Sign in
+    Start over
   </Link>
 </p>
 ```
@@ -130,13 +103,13 @@ Always provide a link at the bottom:
 Don't clear form on failed submission:
 
 ```typescript
-// Keep email populated after failed login
+// Keep email populated after failed login/OTP
 const handleSubmit = async () => {
   try {
-    await login({ email, password })
+    await verifyOtp({ email, code })
   } catch (error) {
     setError(error.message)
-    setPassword('') // Only clear password, keep email
+    setCode('') // Clear code, keep email
   }
 }
 ```
@@ -170,12 +143,12 @@ function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps)
 // Usage
 <EmptyState
   icon={Building2}
-  title="No organizations yet"
-  description="Organizations help you group related data together. Create your first organization to get started."
+  title="No knowledge records yet"
+  description="Add records so agents can ground answers in your own context."
   action={
     <Button onClick={openCreateModal}>
       <Plus className="h-4 w-4 mr-2" />
-      Create Organization
+      Add record
     </Button>
   }
 />
@@ -586,7 +559,7 @@ Before marking any UI task complete, verify:
 
 ### Navigation
 
-- [ ] Logo links to home/dashboard
+- [ ] Logo links to home/runtime landing
 - [ ] Breadcrumbs on pages 2+ levels deep
 - [ ] Active route highlighted in sidebar
 - [ ] Back button works as expected
@@ -603,8 +576,8 @@ Before marking any UI task complete, verify:
 ### Auth Pages
 
 - [ ] Brand/logo links to home
-- [ ] Easy switch between login/register
-- [ ] Password requirements shown while typing
+- [ ] Restart-login link on OTP/error pages
+- [ ] OTP/email help text clear
 - [ ] Values remembered after failed attempts
 
 ### States

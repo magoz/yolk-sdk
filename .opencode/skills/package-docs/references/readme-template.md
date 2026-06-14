@@ -87,6 +87,10 @@ Document remote client, local stdio client, `client/node` Node-only boundary, se
 
 Document records, artifacts, representations, provenance, links, context policy, collection/document/chunk/search contracts, ingestion, context packing, and host-owned adapters/stores/permissions.
 
+### Sandbox
+
+Document execution-plane service, source/lifecycle ADTs, `sandbox` agent tool, testing fakes, Vercel adapter, and host-owned state store/secrets/cleanup/policy.
+
 ### Vercel Workflows
 
 Import Vercel Workflow APIs from `@yolk-sdk/vercel-workflows`.

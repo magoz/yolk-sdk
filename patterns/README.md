@@ -17,7 +17,7 @@ Architecture and convention patterns for the SDK workspace.
 | ------------------------------------------------------ | ------------------------------------------------------------- |
 | [AGENT_HITL.md](./AGENT_HITL.md)                       | Shared approval/question pause/resume semantics               |
 | [AI_TOOL_SCHEMAS.md](./AI_TOOL_SCHEMAS.md)             | Provider-compatible tool parameter JSON Schema rules          |
-| [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Agent/MCP/knowledge package shape, boundaries, tree-shaking rules |
+| [PACKAGE_ARCHITECTURE.md](./PACKAGE_ARCHITECTURE.md)   | Public package shape, boundaries, tree-shaking rules |
 | [PACKAGE_DISTRIBUTION.md](./PACKAGE_DISTRIBUTION.md)   | Package versioning, build, release, and artifact validation   |
 
 ## Observability

@@ -105,24 +105,22 @@ entrypoints.
 
 ### Always Require Justification
 
-When you must disable an ESLint rule, **always include a comment explaining WHY**:
+When you must disable an ESLint rule, **always include a comment explaining WHY**. Never disable `no-explicit-any` or `consistent-type-assertions`; use `unknown`, Schema, generics, or a typed wrapper.
 
 ```typescript
-// WRONG - no explanation
+// WRONG - no explanation, disables banned rule
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const data: any = externalLib.getData()
 
-// CORRECT - explains the reason
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- External library returns untyped data, see issue #123
-const data: any = externalLib.getData()
+// CORRECT - contain weak vendor output as unknown
+const data: unknown = externalLib.getData()
+const parsedEffect = Schema.decodeUnknownEffect(ExternalData)(data)
 ```
 
 ### Valid Reasons for Disabling Rules
 
 | Rule                                            | Valid Reason                                      |
 | ----------------------------------------------- | ------------------------------------------------- |
-| `@typescript-eslint/no-explicit-any`            | Third-party library with missing/incorrect types  |
-| `@typescript-eslint/consistent-type-assertions` | Schema.suspend for recursive types                |
 | `@typescript-eslint/no-unused-vars`             | Destructuring to omit properties (use `_` prefix) |
 
 ### Invalid Reasons (Never Do This)

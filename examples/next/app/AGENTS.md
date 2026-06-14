@@ -22,7 +22,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 - Protected/session-gated pages must be dynamic: `export const dynamic = 'force-dynamic'` or dynamic APIs like `cookies()`.
 - Re-fail `NextEffect.isNavigationError(error)` before catch-all fallbacks.
 - Route-level shareable filters/search state belongs in local `search-params.ts` with `nuqs/server` imports; see `examples/next/patterns/NUQS_URL_STATE.md`.
-- After deleting routes, stale `.next/dev/types/validator.ts` may reference removed pages; delete generated file if `pnpm tsc` reports a removed route.
+- After deleting routes, stale `examples/next/.next/dev/types/validator.ts` may reference removed pages; delete generated output if `pnpm tsc` reports a removed route.
 
 ## Auth UI
 

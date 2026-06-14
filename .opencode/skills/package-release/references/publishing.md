@@ -84,6 +84,7 @@ git tag -a v<version> && git push origin v<version>
 
 ```bash
 npm view @yolk-sdk/agent dist-tags
+npm view @yolk-sdk/sandbox dist-tags
 npm view @yolk-sdk/connectors dist-tags
 git fetch --tags
 git tag --list 'v*' --sort=-v:refname | head -n 5
