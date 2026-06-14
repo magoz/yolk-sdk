@@ -8,7 +8,8 @@
     "@yolk-sdk/connectors": "0.0.0",
     "@yolk-sdk/knowledge": "0.0.0",
     "@yolk-sdk/mcp": "0.0.0",
-    "@yolk-sdk/vercel-workflows": "0.0.0"
+    "@yolk-sdk/vercel-workflows": "0.0.0",
+    "@yolk-sdk/sandbox": "0.1.0-canary.17"
   },
   "changesets": [
     "brave-hitl-rules",
@@ -24,6 +25,7 @@
     "next-canary-release",
     "quiet-owls-approve",
     "quiet-timers-jump",
+    "sandbox-execution-plane",
     "sharp-provider-docs",
     "slow-tools-report",
     "ten-frogs-smile",
