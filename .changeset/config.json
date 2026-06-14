@@ -8,6 +8,7 @@
       "@yolk-sdk/connectors",
       "@yolk-sdk/knowledge",
       "@yolk-sdk/mcp",
+      "@yolk-sdk/sandbox",
       "@yolk-sdk/vercel-workflows"
     ]
   ],
