@@ -140,4 +140,38 @@ describe('OpenAI Codex provider', () => {
       ])
     })
   )
+
+  it.effect('sends markdown documents as Codex input files', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'summarize' }),
+              DocumentPart.make({
+                source: inlineBase64Source(btoa('# Identity\n\nSpeldosa docs.')),
+                mimeType: 'text/markdown',
+                filename: 'company.identity.md'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'summarize' },
+          {
+            type: 'input_file',
+            filename: 'company.identity.md',
+            file_data: `data:text/markdown;base64,${btoa('# Identity\n\nSpeldosa docs.')}`
+          }
+        ]
+      })
+    })
+  )
 })

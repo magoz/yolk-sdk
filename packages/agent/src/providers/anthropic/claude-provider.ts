@@ -12,8 +12,10 @@ import {
   AgentUsage,
   ToolCall,
   attachmentSourceBase64,
+  attachmentSourceText,
   assistantContent,
   assistantHostToolCalls,
+  isTextDocumentMimeType,
   messageContextText,
   prependMessageContextToContent,
   type AgentMessage,
@@ -433,6 +435,24 @@ const unsupportedContentError = (contentType: string) =>
     retryable: false
   })
 
+const textDocumentToAnthropicBlock = (part: Extract<ContentPart, { readonly _tag: 'Document' }>) =>
+  attachmentSourceText(part.source).pipe(
+    Effect.mapError(() => unsupportedContentError('Invalid document text')),
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
+        onSome: text => {
+          const block: AnthropicTextBlock = {
+            type: 'text',
+            text: `Document: ${part.title ?? part.filename}\n\n${text}`
+          }
+
+          return Effect.succeed(block)
+        }
+      })
+    )
+  )
+
 const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserBlock, LLMError> => {
   switch (part._tag) {
     case 'Text':
@@ -450,7 +470,9 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
         })
       })
     case 'Document':
-      return part.mimeType === 'application/pdf'
+      return isTextDocumentMimeType(part.mimeType)
+        ? textDocumentToAnthropicBlock(part)
+        : part.mimeType === 'application/pdf'
         ? Option.match(attachmentSourceBase64(part.source), {
             onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
             onSome: data => Effect.succeed({

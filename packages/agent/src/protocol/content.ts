@@ -201,6 +201,43 @@ export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: stri
   }
 }
 
+const normalizeMimeType = (mimeType: string) => mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+
+export const isTextDocumentMimeType = (mimeType: string) => {
+  const normalized = normalizeMimeType(mimeType)
+
+  return (
+    normalized.startsWith('text/') ||
+    normalized === 'application/json' ||
+    normalized === 'application/ld+json' ||
+    normalized === 'application/xml' ||
+    normalized === 'application/yaml' ||
+    normalized === 'application/x-yaml' ||
+    normalized === 'application/toml' ||
+    normalized === 'application/markdown'
+  )
+}
+
+const decodeBase64Utf8 = (data: string) => {
+  const binary = globalThis.atob(data)
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
+
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+}
+
+export const attachmentSourceText = (source: AttachmentSource) => {
+  switch (source._tag) {
+    case 'InlineBase64':
+      return Effect.try({
+        try: () => Option.some(decodeBase64Utf8(source.data)),
+        catch: error => error
+      })
+    case 'Url':
+    case 'Ref':
+      return Effect.succeed(Option.none<string>())
+  }
+}
+
 export const attachmentSourceBase64 = (source: AttachmentSource) => {
   switch (source._tag) {
     case 'InlineBase64':

@@ -320,6 +320,36 @@ describe('Anthropic Claude provider', () => {
       })
     }))
 
+  it.effect('inlines text documents for Claude Messages input', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'summarize' }),
+              DocumentPart.make({
+                source: inlineBase64Source(btoa('# Identity\n\nSpeldosa docs.')),
+                mimeType: 'text/markdown',
+                filename: 'company.identity.md'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'summarize' },
+          { type: 'text', text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.' }
+        ]
+      })
+    })
+  )
+
   it.effect('sends required Anthropic version and beta headers by default', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []

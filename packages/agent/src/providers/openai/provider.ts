@@ -13,8 +13,10 @@ import {
   AgentOutputUsage,
   AgentUsage,
   attachmentSourceDataUrl,
+  attachmentSourceText,
   assistantContent,
   assistantHostToolCalls,
+  isTextDocumentMimeType,
   messageContextText,
   prependMessageContextToContent,
   type AgentMessage,
@@ -195,6 +197,24 @@ const unsupportedContentError = (contentType: string) =>
     retryable: false
   })
 
+const textDocumentToOpenAiPart = (part: Extract<ContentPart, { readonly _tag: 'Document' }>) =>
+  attachmentSourceText(part.source).pipe(
+    Effect.mapError(() => unsupportedContentError('Invalid document text')),
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
+        onSome: text => {
+          const block: OpenAiTextContentPart = {
+            type: 'text',
+            text: `Document: ${part.title ?? part.filename}\n\n${text}`
+          }
+
+          return Effect.succeed(block)
+        }
+      })
+    )
+  )
+
 const contentPartToUserPart = (
   part: ContentPart
 ): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> => {
@@ -207,7 +227,9 @@ const contentPartToUserPart = (
         onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
       })
     case 'Document':
-      return Effect.fail(unsupportedContentError('Document'))
+      return isTextDocumentMimeType(part.mimeType)
+        ? textDocumentToOpenAiPart(part)
+        : Effect.fail(unsupportedContentError('Document'))
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio'))
   }

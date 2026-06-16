@@ -9,12 +9,14 @@ import {
   attachmentSourceBase64,
   attachmentSourceDataUrl,
   attachmentSourcePreview,
+  attachmentSourceText,
   contentParts,
   contentPreview,
   contentText,
   inlineBase64AttachmentSource,
   inlineBase64Source,
   isContentEmpty,
+  isTextDocumentMimeType,
   refAttachmentSource,
   resolveContentAttachmentSources,
   urlAttachmentSource
@@ -81,6 +83,16 @@ describe('content helpers', () => {
     expect(attachmentSourcePreview(url)).toBe('https://example.com/image.png')
     expect(attachmentSourcePreview(ref)).toBe('artifact_123')
   })
+
+  it.effect('decodes inline text document sources', () =>
+    Effect.gen(function* () {
+      const text = yield* attachmentSourceText(inlineBase64AttachmentSource(btoa('# Identity')))
+
+      expect(text).toEqual(Option.some('# Identity'))
+      expect(isTextDocumentMimeType('text/markdown')).toBe(true)
+      expect(isTextDocumentMimeType('APPLICATION/JSON; charset=utf-8')).toBe(true)
+      expect(isTextDocumentMimeType('application/pdf')).toBe(false)
+    }))
 
   it.effect('resolves attachment sources while preserving part metadata', () =>
     Effect.gen(function* () {
