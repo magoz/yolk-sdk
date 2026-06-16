@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.20
+
+### Patch Changes
+
+- Add text document attachment helpers.
+
 ## 0.1.0-canary.19
 
 ## 0.1.0-canary.18
