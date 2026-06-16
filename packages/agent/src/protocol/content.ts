@@ -203,6 +203,31 @@ export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: stri
 
 const normalizeMimeType = (mimeType: string) => mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 
+const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
+  '.csv': 'text/csv',
+  '.css': 'text/css',
+  '.gql': 'application/graphql',
+  '.graphql': 'application/graphql',
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.jsx': 'application/javascript',
+  '.json': 'application/json',
+  '.jsonl': 'application/x-ndjson',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.sql': 'application/sql',
+  '.toml': 'application/toml',
+  '.ts': 'application/typescript',
+  '.tsx': 'application/typescript',
+  '.txt': 'text/plain',
+  '.xml': 'application/xml',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml'
+}
+
+const isUnknownDocumentMimeType = (mimeType: string) =>
+  mimeType.length === 0 || mimeType === 'application/octet-stream' || mimeType === 'binary/octet-stream'
+
 export const isTextDocumentMimeType = (mimeType: string) => {
   const normalized = normalizeMimeType(mimeType)
 
@@ -210,12 +235,79 @@ export const isTextDocumentMimeType = (mimeType: string) => {
     normalized.startsWith('text/') ||
     normalized === 'application/json' ||
     normalized === 'application/ld+json' ||
+    normalized === 'application/jsonl' ||
+    normalized === 'application/x-ndjson' ||
+    normalized === 'application/javascript' ||
+    normalized === 'application/x-javascript' ||
+    normalized === 'application/typescript' ||
+    normalized === 'application/x-typescript' ||
     normalized === 'application/xml' ||
     normalized === 'application/yaml' ||
     normalized === 'application/x-yaml' ||
     normalized === 'application/toml' ||
-    normalized === 'application/markdown'
+    normalized === 'application/markdown' ||
+    normalized === 'application/sql' ||
+    normalized === 'application/graphql' ||
+    normalized.endsWith('+json') ||
+    normalized.endsWith('+xml')
   )
+}
+
+export const textDocumentMimeTypeFromFilename = (filename: string) => {
+  const normalized = filename.trim().toLowerCase()
+  const entry = Object.entries(textDocumentMimeTypeByExtension).find(([extension]) =>
+    normalized.endsWith(extension)
+  )
+
+  return entry?.[1]
+}
+
+export const inferTextDocumentMimeType = (input: {
+  readonly filename: string
+  readonly mimeType: string
+}) => {
+  const normalized = normalizeMimeType(input.mimeType)
+
+  if (isTextDocumentMimeType(normalized)) return normalized
+  if (!isUnknownDocumentMimeType(normalized)) return undefined
+
+  return textDocumentMimeTypeFromFilename(input.filename)
+}
+
+export const textToBase64Utf8 = (text: string) => {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+
+  return globalThis.btoa(binary)
+}
+
+export const documentPartFromText = (input: {
+  readonly text: string
+  readonly filename: string
+  readonly mimeType: string
+  readonly title?: string
+}) => {
+  const normalized = normalizeMimeType(input.mimeType)
+  const mimeType = inferTextDocumentMimeType({
+    filename: input.filename,
+    mimeType: input.mimeType
+  }) ?? (isUnknownDocumentMimeType(normalized) ? 'text/plain' : undefined)
+
+  if (mimeType === undefined) return undefined
+
+  const base = {
+    source: inlineBase64AttachmentSource(textToBase64Utf8(input.text)),
+    mimeType,
+    filename: input.filename
+  }
+
+  return input.title === undefined
+    ? DocumentPart.make(base)
+    : DocumentPart.make({ ...base, title: input.title })
 }
 
 const decodeBase64Utf8 = (data: string) => {

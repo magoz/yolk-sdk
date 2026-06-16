@@ -13,12 +13,16 @@ import {
   contentParts,
   contentPreview,
   contentText,
+  documentPartFromText,
+  inferTextDocumentMimeType,
   inlineBase64AttachmentSource,
   inlineBase64Source,
   isContentEmpty,
   isTextDocumentMimeType,
   refAttachmentSource,
   resolveContentAttachmentSources,
+  textDocumentMimeTypeFromFilename,
+  textToBase64Utf8,
   urlAttachmentSource
 } from '../../src/protocol'
 
@@ -87,11 +91,62 @@ describe('content helpers', () => {
   it.effect('decodes inline text document sources', () =>
     Effect.gen(function* () {
       const text = yield* attachmentSourceText(inlineBase64AttachmentSource(btoa('# Identity')))
+      const unicode = 'Crème brûlée 🥚 — 東京'
+      const unicodeText = yield* attachmentSourceText(
+        inlineBase64AttachmentSource(textToBase64Utf8(unicode))
+      )
 
       expect(text).toEqual(Option.some('# Identity'))
+      expect(unicodeText).toEqual(Option.some(unicode))
       expect(isTextDocumentMimeType('text/markdown')).toBe(true)
       expect(isTextDocumentMimeType('APPLICATION/JSON; charset=utf-8')).toBe(true)
+      expect(isTextDocumentMimeType('application/activity+json')).toBe(true)
+      expect(isTextDocumentMimeType('application/x-ndjson')).toBe(true)
       expect(isTextDocumentMimeType('application/pdf')).toBe(false)
+      expect(textDocumentMimeTypeFromFilename('company.identity.md')).toBe('text/markdown')
+      expect(textDocumentMimeTypeFromFilename('events.jsonl')).toBe('application/x-ndjson')
+      expect(inferTextDocumentMimeType({ filename: 'data.json', mimeType: '' })).toBe('application/json')
+      expect(inferTextDocumentMimeType({ filename: 'data.jsonl', mimeType: 'application/octet-stream' })).toBe(
+        'application/x-ndjson'
+      )
+      expect(inferTextDocumentMimeType({ filename: 'fake.txt', mimeType: 'image/png' })).toBeUndefined()
+      expect(inferTextDocumentMimeType({ filename: 'data.bin', mimeType: 'TEXT/PLAIN; charset=utf-8' })).toBe(
+        'text/plain'
+      )
+      expect(textToBase64Utf8('# Identity')).toBe('IyBJZGVudGl0eQ==')
+      expect(
+        documentPartFromText({
+          text: '# Identity',
+          filename: 'company.identity.md',
+          mimeType: ''
+        })
+      ).toEqual(
+        DocumentPart.make({
+          source: inlineBase64AttachmentSource('IyBJZGVudGl0eQ=='),
+          mimeType: 'text/markdown',
+          filename: 'company.identity.md'
+        })
+      )
+      expect(
+        documentPartFromText({
+          text: '# Identity',
+          filename: 'company.identity.md',
+          mimeType: 'image/png'
+        })
+      ).toBeUndefined()
+      expect(
+        documentPartFromText({
+          text: '# Identity',
+          filename: 'company.identity',
+          mimeType: ''
+        })
+      ).toEqual(
+        DocumentPart.make({
+          source: inlineBase64AttachmentSource('IyBJZGVudGl0eQ=='),
+          mimeType: 'text/plain',
+          filename: 'company.identity'
+        })
+      )
     }))
 
   it.effect('resolves attachment sources while preserving part metadata', () =>

@@ -1,3 +1,4 @@
+export { documentPartFromTextFile, textFromBlob } from './attachments.ts'
 export {
   appendAgentMessage,
   applyAgentEvent,

@@ -23,7 +23,9 @@ export {
   contentPreview,
   contentText,
   DocumentPart,
+  documentPartFromText,
   ImagePart,
+  inferTextDocumentMimeType,
   InlineBase64AttachmentSource,
   inlineBase64AttachmentSource,
   inlineBase64Source,
@@ -32,6 +34,8 @@ export {
   refAttachmentSource,
   RefAttachmentSource,
   resolveContentAttachmentSources,
+  textDocumentMimeTypeFromFilename,
+  textToBase64Utf8,
   urlAttachmentSource,
   UrlAttachmentSource,
   TextPart

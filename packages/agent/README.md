@@ -130,6 +130,10 @@ Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
 for simple apps, or persist `Ref` values and call `resolveContentAttachmentSources` at your storage
 boundary before provider execution. Host apps own upload, auth, retention, and ref hydration policy.
 
+For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helper
+`documentPartFromTextFile` to create UTF-8 inline `DocumentPart` values without trusting filename
+extensions over explicit non-text MIME types.
+
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
 `textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.
 
