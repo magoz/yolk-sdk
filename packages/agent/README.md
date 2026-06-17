@@ -148,9 +148,24 @@ const ContextLayer = makeWindowCompactionTransformer({
 - `AudioPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
-`refAttachmentSource`. Providers require inline/resolved media before lowering. Use inline base64
-for simple apps, or persist `Ref` values and call `resolveContentAttachmentSources` at your storage
-boundary before provider execution. Host apps own upload, auth, retention, and ref hydration policy.
+`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat, OpenAI Codex,
+and Anthropic support image URLs; Anthropic also supports PDF URLs. Use inline base64 for simple apps,
+durable URLs for app-owned uploads, or persist `Ref` values and call
+`resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
+upload, auth, retention, URL durability, and ref hydration policy.
+
+```ts
+import { ImagePart, UserMessage, urlAttachmentSource } from '@yolk-sdk/agent/protocol'
+
+const message = UserMessage.make({
+  content: [
+    ImagePart.make({
+      source: urlAttachmentSource('https://cdn.example.com/image.webp'),
+      mimeType: 'image/webp'
+    })
+  ]
+})
+```
 
 For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helper
 `documentPartFromTextFile` to create UTF-8 inline `DocumentPart` values without trusting filename

@@ -12,8 +12,8 @@ import {
   AgentInputUsage,
   AgentOutputUsage,
   AgentUsage,
-  attachmentSourceDataUrl,
   attachmentSourceText,
+  attachmentSourceUrl,
   assistantContent,
   assistantHostToolCalls,
   isTextDocumentMimeType,
@@ -229,7 +229,7 @@ const contentPartToUserPart = (
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
     case 'Image':
-      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+      return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
         onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
         onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
       })

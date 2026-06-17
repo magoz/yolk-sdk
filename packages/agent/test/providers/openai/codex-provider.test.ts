@@ -11,7 +11,8 @@ import {
   ToolDef,
   ToolResultMessage,
   UserMessage,
-  inlineBase64Source
+  inlineBase64Source,
+  urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import {
   streamOpenAiCodexResponse,
@@ -225,6 +226,35 @@ describe('OpenAI Codex provider', () => {
             filename: 'company.identity.md',
             file_data: `data:text/markdown;base64,${btoa('# Identity\n\nSpeldosa docs.')}`
           }
+        ]
+      })
+    })
+  )
+
+  it.effect('passes image URLs through for Codex Responses input', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'describe' }),
+              ImagePart.make({
+                source: urlAttachmentSource('https://cdn.example.com/image.webp'),
+                mimeType: 'image/webp'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'describe' },
+          { type: 'input_image', image_url: 'https://cdn.example.com/image.webp' }
         ]
       })
     })

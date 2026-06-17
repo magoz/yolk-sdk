@@ -10,6 +10,7 @@ import {
   attachmentSourceDataUrl,
   attachmentSourcePreview,
   attachmentSourceText,
+  attachmentSourceUrl,
   contentParts,
   contentPreview,
   contentText,
@@ -81,8 +82,11 @@ describe('content helpers', () => {
 
     expect(attachmentSourceBase64(inline)).toEqual(Option.some('abc'))
     expect(attachmentSourceDataUrl(inline, 'image/png')).toEqual(Option.some('data:image/png;base64,abc'))
+    expect(attachmentSourceUrl(inline, 'image/png')).toEqual(Option.some('data:image/png;base64,abc'))
     expect(attachmentSourceBase64(url)).toEqual(Option.none())
+    expect(attachmentSourceUrl(url, 'image/png')).toEqual(Option.some('https://example.com/image.png'))
     expect(attachmentSourceDataUrl(ref, 'image/png')).toEqual(Option.none())
+    expect(attachmentSourceUrl(ref, 'image/png')).toEqual(Option.none())
     expect(attachmentSourcePreview(inline)).toBe('inline')
     expect(attachmentSourcePreview(url)).toBe('https://example.com/image.png')
     expect(attachmentSourcePreview(ref)).toBe('artifact_123')

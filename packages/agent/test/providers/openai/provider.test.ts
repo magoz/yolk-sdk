@@ -5,10 +5,12 @@ import {
   AssistantAgentMessage,
   DocumentPart,
   HostToolCallPart,
+  ImagePart,
   TextPart,
   ToolCall,
   UserMessage,
-  inlineBase64Source
+  inlineBase64Source,
+  urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer, toOpenAiRequestBody } from '../../../src/providers/openai/provider.ts'
@@ -61,6 +63,34 @@ describe('OpenAI provider', () => {
         content: [
           { type: 'text', text: 'summarize' },
           { type: 'text', text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.' }
+        ]
+      })
+    }))
+
+  it.effect('passes image URLs through for Chat Completions input', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'describe' }),
+              ImagePart.make({
+                source: urlAttachmentSource('https://cdn.example.com/image.webp'),
+                mimeType: 'image/webp'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[1]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe' },
+          { type: 'image_url', image_url: { url: 'https://cdn.example.com/image.webp' } }
         ]
       })
     }))

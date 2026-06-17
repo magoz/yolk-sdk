@@ -11,6 +11,7 @@ export {
   attachmentSourceDataUrl,
   AttachmentSource,
   attachmentSourceText,
+  attachmentSourceUrl,
   type AttachmentContentPart,
   type AttachmentSourceResolver,
   attachmentSourcePreview,

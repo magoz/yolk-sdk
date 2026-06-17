@@ -12,6 +12,7 @@ import {
   AgentUsage,
   ToolCall,
   attachmentSourceDataUrl,
+  attachmentSourceUrl,
   assistantContent,
   assistantHostToolCalls,
   contentParts,
@@ -264,7 +265,7 @@ const userPartToCodexInputPart = (
     case 'Text':
       return Effect.succeed({ type: 'input_text', text: part.text })
     case 'Image':
-      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+      return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
         onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
         onSome: url => Effect.succeed({
           type: 'input_image',

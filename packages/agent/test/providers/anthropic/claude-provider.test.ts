@@ -16,7 +16,8 @@ import {
   ToolDef,
   ToolResultMessage,
   UserMessage,
-  inlineBase64Source
+  inlineBase64Source,
+  urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
@@ -395,6 +396,73 @@ describe('Anthropic Claude provider', () => {
         content: [
           { type: 'text', text: 'summarize' },
           { type: 'text', text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.' }
+        ]
+      })
+    })
+  )
+
+  it.effect('passes image URLs through for Claude Messages input', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'describe' }),
+              ImagePart.make({
+                source: urlAttachmentSource('https://cdn.example.com/image.webp'),
+                mimeType: 'image/webp'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe' },
+          {
+            type: 'image',
+            source: { type: 'url', url: 'https://cdn.example.com/image.webp' }
+          }
+        ]
+      })
+    })
+  )
+
+  it.effect('passes PDF URLs through for Claude Messages input', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'summarize' }),
+              DocumentPart.make({
+                source: urlAttachmentSource('https://cdn.example.com/brief.pdf'),
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf',
+                title: 'Brief'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'summarize' },
+          {
+            type: 'document',
+            source: { type: 'url', url: 'https://cdn.example.com/brief.pdf' },
+            title: 'Brief'
+          }
         ]
       })
     })

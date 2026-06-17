@@ -11,7 +11,6 @@ import {
   AgentOutputUsage,
   AgentUsage,
   ToolCall,
-  attachmentSourceBase64,
   attachmentSourceText,
   assistantContent,
   assistantHostToolCalls,
@@ -66,20 +65,30 @@ type AnthropicSystemBlock = AnthropicTextBlock
 
 type AnthropicImageBlock = {
   readonly type: 'image'
-  readonly source: {
-    readonly type: 'base64'
-    readonly media_type: string
-    readonly data: string
-  }
+  readonly source:
+    | {
+        readonly type: 'base64'
+        readonly media_type: string
+        readonly data: string
+      }
+    | {
+        readonly type: 'url'
+        readonly url: string
+      }
 }
 
 type AnthropicDocumentBlock = {
   readonly type: 'document'
-  readonly source: {
-    readonly type: 'base64'
-    readonly media_type: 'application/pdf'
-    readonly data: string
-  }
+  readonly source:
+    | {
+        readonly type: 'base64'
+        readonly media_type: 'application/pdf'
+        readonly data: string
+      }
+    | {
+        readonly type: 'url'
+        readonly url: string
+      }
   readonly title?: string
 }
 
@@ -443,6 +452,60 @@ const unsupportedContentError = (contentType: string) =>
     retryable: false
   })
 
+const imageToAnthropicBlock = (
+  part: Extract<ContentPart, { readonly _tag: 'Image' }>
+): Effect.Effect<AnthropicImageBlock, LLMError> => {
+  switch (part.source._tag) {
+    case 'InlineBase64':
+      return Effect.succeed({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: part.mimeType,
+          data: part.source.data
+        }
+      })
+    case 'Url':
+      return Effect.succeed({
+        type: 'image',
+        source: {
+          type: 'url',
+          url: part.source.url
+        }
+      })
+    case 'Ref':
+      return Effect.fail(unsupportedContentError('Unresolved image source'))
+  }
+}
+
+const pdfDocumentToAnthropicBlock = (
+  part: Extract<ContentPart, { readonly _tag: 'Document' }>
+): Effect.Effect<AnthropicDocumentBlock, LLMError> => {
+  switch (part.source._tag) {
+    case 'InlineBase64':
+      return Effect.succeed({
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: part.source.data
+        },
+        title: part.title ?? part.filename
+      })
+    case 'Url':
+      return Effect.succeed({
+        type: 'document',
+        source: {
+          type: 'url',
+          url: part.source.url
+        },
+        title: part.title ?? part.filename
+      })
+    case 'Ref':
+      return Effect.fail(unsupportedContentError('Unresolved document source'))
+  }
+}
+
 const textDocumentToAnthropicBlock = (part: Extract<ContentPart, { readonly _tag: 'Document' }>) =>
   attachmentSourceText(part.source).pipe(
     Effect.mapError(() => unsupportedContentError('Invalid document text')),
@@ -466,33 +529,12 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
     case 'Image':
-      return Option.match(attachmentSourceBase64(part.source), {
-        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
-        onSome: data => Effect.succeed({
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: part.mimeType,
-            data
-          }
-        })
-      })
+      return imageToAnthropicBlock(part)
     case 'Document':
       return isTextDocumentMimeType(part.mimeType)
         ? textDocumentToAnthropicBlock(part)
         : part.mimeType === 'application/pdf'
-        ? Option.match(attachmentSourceBase64(part.source), {
-            onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
-            onSome: data => Effect.succeed({
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data
-              },
-              title: part.title ?? part.filename
-            })
-          })
+        ? pdfDocumentToAnthropicBlock(part)
         : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio'))

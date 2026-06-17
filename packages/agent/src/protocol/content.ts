@@ -201,6 +201,17 @@ export const attachmentSourceDataUrl = (source: AttachmentSource, mimeType: stri
   }
 }
 
+export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) => {
+  switch (source._tag) {
+    case 'InlineBase64':
+      return Option.some(`data:${mimeType};base64,${source.data}`)
+    case 'Url':
+      return Option.some(source.url)
+    case 'Ref':
+      return Option.none<string>()
+  }
+}
+
 const normalizeMimeType = (mimeType: string) => mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 
 const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
