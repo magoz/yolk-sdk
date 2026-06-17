@@ -11,8 +11,10 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
 | `agent/agent-skill.ts`      | User-owned DB skill CRUD and validation        |
 | `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
+| `agent/telegram-connector.ts` | User-owned Telegram connector credential helpers |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier/state cookie names; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth, skill/command, connector contracts |
+| `storage/AGENTS.md`          | Storage source ingestion contracts             |
 | `knowledge/*`                | `/knowledge` domain functions/actions; file/text records + search/context policy |
 | `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search ingestion |
 | `errors/index.ts`            | Shared domain errors                           |
@@ -29,7 +31,7 @@ See `examples/next/patterns/EFFECT_SERVER_ACTIONS.md` for the canonical Next bou
 - `UnauthenticatedError` redirects to `/login` via `NextEffect.redirect()`.
 - Catch expected auth/domain errors before generic reporting where possible; return safe UI messages.
 - Put `Effect.map` / `Effect.as({ _tag: 'Success' })` before expected `catchTag`s so handled error ADTs are not remapped to success.
-- Revalidate affected pages (`revalidatePath('/agent')`) only after successful mutation.
+- Revalidate affected route(s) only after successful mutation (`/agent`, `/agent/skills`, `/agent/connectors`, `/storage`, `/knowledge`, etc.).
 - Client components call result-returning server actions directly from event handlers in `startTransition(async () => ...)`; do not pass them to `<form action>` / `formAction` unless the action is redirect-only.
 
 ## Domain Functions

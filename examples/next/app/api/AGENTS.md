@@ -41,16 +41,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 ## Agent Routes
 
 - See `agent/AGENTS.md` for route-local text/Workflow/commands/Realtime contracts.
-- Text route supports model-picked Codex/Claude OAuth providers, `agentTextCapabilities`, and non-empty text+image/PDF protocol transcript.
-- Workflow route starts `runAgentWorkflow`, returns `run.getReadable()` as NDJSON, and exposes `x-workflow-run-id`.
-- Workflow run route supports `GET /api/agent/workflow/:runId` for stream replay/resume and `DELETE /api/agent/workflow/:runId` for `run.cancel()`.
-- Commands route requires auth, loads merged project skillset, lists command summaries, and renders selected command macros as normal prompt text.
 - Text runtime construction lives in `makeAgentTextResponse` / `makeAgentTextRuntime`; route wrappers keep auth/status boundaries thin.
-- Realtime `/call` uses `OPENAI_API_KEY`, accepts raw SDP, returns `application/sdp`.
-- Realtime `/tool` uses `@yolk-sdk/agent/voice`; see `agent/AGENTS.md` for the current voice toolset.
-- Realtime routes explicitly provide runtime-portable voice tool modules; route-local tool context lives in `agent/AGENTS.md`.
-- Internal Cloudflare token bridge is app-server-to-Worker only; it supports Codex/Claude providers and returns access token/expiry plus optional account id, never refresh token.
-- Internal Cloudflare Codex responses proxy is the default DO provider path; it forwards upstream body streams with `HttpServerResponse.raw(...)`.
 - See `internal/cloudflare/AGENTS.md` before changing bridge auth, token response shapes, or proxy header allowlists.
 - Keep Codex proxy allowlist logic in `internal/cloudflare/codex-responses/route-model.ts`; never forward cookies or bridge secrets upstream.
 

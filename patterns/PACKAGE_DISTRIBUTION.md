@@ -188,9 +188,13 @@ pnpm release:canary
 Verify npm after publish:
 
 ```bash
-npm view @yolk-sdk/agent version
-npm view @yolk-sdk/agent dist-tags
+npm view @yolk-sdk/agent dist-tags --json
+git fetch --tags
+git tag --list "v<version>"
+git ls-remote --tags origin "refs/tags/v<version>"
 ```
+
+For lockstep canaries, verify every public package has the new `canary` dist-tag and `v<version>` exists locally and on origin.
 
 Requirements:
 

@@ -46,5 +46,5 @@ agent/voice -> agent/loop + agent/protocol
 
 - Check packages: `pnpm packages:check`
 - Build packages: `pnpm packages:build`
-- Publish validation: `pnpm packages:build && pnpm packages:publint && pnpm packages:smoke`
+- Release validation: see `patterns/PACKAGE_DISTRIBUTION.md`; full gates include build, publint, smoke, packages check, Cloudflare check, `tsc`, lint, and tests.
 - Package tests run through root `pnpm test:run` unless a local doc says otherwise.

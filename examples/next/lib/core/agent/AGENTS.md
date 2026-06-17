@@ -22,7 +22,7 @@ Domain functions and server actions for provider OAuth, skills/commands, and con
 
 - One action per `*-action.ts` file with `'use server'`.
 - Redirect unauthenticated users via `NextEffect.redirect('/login')`.
-- Revalidate `/agent` only after successful connect/disconnect mutation.
+- Revalidate affected `/agent*` route(s) only after successful mutation.
 - Return explicit ADTs for UI state; do not leak provider error details.
 - Skills, commands, and Telegram connector mutations share the same action/result discipline.
 
