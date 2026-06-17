@@ -1,16 +1,18 @@
 import * as Schema from 'effect/Schema'
-import { AgentError, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
+import { AgentError, ProviderErrorInfo, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
 
 export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {
   cause: Schema.Literals([
     'validation_error',
     'provider_error',
     'rate_limit',
+    'overloaded',
     'context_overflow',
     'invalid_response'
   ]),
   message: Schema.String,
-  retryable: Schema.Boolean
+  retryable: Schema.Boolean,
+  provider: Schema.optional(ProviderErrorInfo)
 }) {}
 
 export class FauxExhaustedError extends Schema.TaggedErrorClass<FauxExhaustedError>()(
@@ -75,7 +77,8 @@ export const agentLoopErrorToAgentError = (error: AgentLoopError): AgentError =>
       return AgentError.make({
         code: error.cause,
         message: error.message,
-        retryable: error.retryable
+        retryable: error.retryable,
+        ...(error.provider === undefined ? {} : { provider: error.provider })
       })
     case 'ToolError':
       return AgentError.make({

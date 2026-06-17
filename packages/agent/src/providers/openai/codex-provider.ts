@@ -21,6 +21,7 @@ import {
   type AgentReasoningEffort,
   type Content,
   type ContentPart,
+  type ProviderFailureKind,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -36,6 +37,12 @@ import {
 } from '@yolk-sdk/agent/loop'
 import { openAiCodexAuthorizationHeaders, openAiCodexResponsesUrl } from './codex.ts'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import {
+  classifyProviderFailure,
+  providerErrorInfo,
+  providerFailureCause,
+  providerFailureRetryable
+} from '../provider-error.ts'
 
 export type OpenAiCodexReasoningSummary = 'auto' | 'concise' | 'detailed'
 
@@ -395,22 +402,50 @@ export const toOpenAiCodexRequestBody = (
     }
   })
 
-const responseStatusToCause = (status: number): LLMError['cause'] => {
-  if (status === 429) {
-    return 'rate_limit'
-  }
-
-  if (status === 413) {
-    return 'context_overflow'
-  }
-
-  return 'provider_error'
-}
-
-const isRetryableStatus = (status: number) => status === 429 || status >= 500
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const stringField = (value: unknown, key: string) => {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const field = Object.getOwnPropertyDescriptor(value, key)?.value
+
+  return typeof field === 'string' ? field : undefined
+}
+
+const recordField = (value: unknown, key: string) => {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const field = Object.getOwnPropertyDescriptor(value, key)?.value
+
+  return isRecord(field) ? field : undefined
+}
+
+const openAiCodexProvider = 'openai_codex'
+
+const providerSignalError = (input: {
+  readonly message: string
+  readonly providerCode?: string
+  readonly fallbackKind?: ProviderFailureKind
+}) => {
+  const provider = classifyProviderFailure({
+    provider: openAiCodexProvider,
+    message: input.message,
+    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
+    ...(input.fallbackKind === undefined ? {} : { fallbackKind: input.fallbackKind })
+  })
+
+  return new LLMError({
+    cause: providerFailureCause(provider.kind),
+    message: `OpenAI Codex stream error: ${input.message}`,
+    retryable: providerFailureRetryable(provider.kind),
+    provider
+  })
+}
 
 const parseToolArguments = (raw: string) =>
   decodeJsonString(raw, 'Invalid OpenAI Codex tool arguments JSON')
@@ -811,12 +846,26 @@ const processSseData = (
       }
     }
 
-    if (parsed.type === 'error' && typeof parsed.message === 'string') {
+    if (parsed.type === 'response.failed') {
+      const error = recordField(recordField(parsed, 'response'), 'error')
+      const message = stringField(error, 'message') ?? 'OpenAI Codex response failed'
+      const providerCode = stringField(error, 'code') ?? stringField(error, 'type')
+
       return yield* Effect.fail(
-        new LLMError({
-          cause: 'provider_error',
-          message: `OpenAI Codex stream error: ${parsed.message}`,
-          retryable: false
+        providerSignalError({
+          message,
+          ...(providerCode === undefined ? {} : { providerCode })
+        })
+      )
+    }
+
+    if (parsed.type === 'error' && typeof parsed.message === 'string') {
+      const providerCode = stringField(parsed, 'code') ?? stringField(parsed, 'type')
+
+      return yield* Effect.fail(
+        providerSignalError({
+          message: parsed.message,
+          ...(providerCode === undefined ? {} : { providerCode })
         })
       )
     }
@@ -915,11 +964,16 @@ const finalizeBodyState = (
   })
 
 const toHttpClientLlmError =
-  (message: string, retryable: boolean) => (error: HttpClientError.HttpClientError) =>
+  (message: string, retryable: boolean, kind: ProviderFailureKind = 'network') =>
+  (error: HttpClientError.HttpClientError) =>
     new LLMError({
       cause: 'provider_error',
       message: `${message}: ${error.message}`,
-      retryable
+      retryable,
+      provider: providerErrorInfo({
+        provider: openAiCodexProvider,
+        kind: retryable ? kind : 'unknown'
+      })
     })
 
 export const streamOpenAiCodexResponse = (
@@ -929,7 +983,7 @@ export const streamOpenAiCodexResponse = (
     Ref.make(initialBodyState).pipe(
       Effect.map(bodyStateRef => {
         const chunks = response.stream.pipe(
-          Stream.mapError(toHttpClientLlmError('Could not read OpenAI Codex stream', false)),
+          Stream.mapError(toHttpClientLlmError('Could not read OpenAI Codex stream', true, 'stream')),
           Stream.decodeText,
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {
@@ -987,11 +1041,19 @@ const sendOpenAiCodexRequest = (
         )
       )
 
+      const provider = classifyProviderFailure({
+        provider: openAiCodexProvider,
+        status: response.status,
+        headers: response.headers,
+        body: errorText
+      })
+
       return yield* Effect.fail(
         new LLMError({
-          cause: responseStatusToCause(response.status),
-          message: `OpenAI Codex returned ${response.status}: ${errorText}`,
-          retryable: isRetryableStatus(response.status)
+          cause: providerFailureCause(provider.kind),
+          message: `OpenAI Codex returned ${response.status}`,
+          retryable: providerFailureRetryable(provider.kind),
+          provider
         })
       )
     }

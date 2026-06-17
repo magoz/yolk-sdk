@@ -292,8 +292,30 @@ type TurnStreamInput = {
   readonly turn: number
 }
 
-const retryDelayMs = (baseDelayMs: number, attempt: number) =>
-  Math.max(0, Math.floor(baseDelayMs * 2 ** Math.max(0, attempt - 1)))
+const maxUnhintedRetryDelayMs = 30_000
+const maxHintedRetryDelayMs = 2_147_483_647
+
+const validDelayMs = (delayMs: number) =>
+  Number.isFinite(delayMs) && delayMs >= 0 ? Math.floor(delayMs) : undefined
+
+const hintedRetryDelayMs = (error: LLMError) => {
+  const delayMs = error.provider?.retryAfterMs
+  const validDelay = delayMs === undefined ? undefined : validDelayMs(delayMs)
+
+  return validDelay === undefined ? undefined : Math.min(validDelay, maxHintedRetryDelayMs)
+}
+
+const retryDelayMs = (baseDelayMs: number, attempt: number, error: LLMError) => {
+  const hintedDelay = hintedRetryDelayMs(error)
+
+  if (hintedDelay !== undefined) {
+    return hintedDelay
+  }
+
+  const delayMs = validDelayMs(baseDelayMs * 2 ** Math.max(0, attempt - 1)) ?? 0
+
+  return Math.min(delayMs, maxUnhintedRetryDelayMs)
+}
 
 const retryReason = (error: LLMError): AgentErrorCode => error.cause
 
@@ -332,13 +354,14 @@ const withProviderRetries = (
                       return failAgentLoopError(error)
                     }
 
-                    const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt)
+                    const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt, error)
                     return Stream.make(
                       AgentRetry.make({
                         attempt,
                         reason: retryReason(error),
                         delayMs,
-                        message: error.message
+                        message: error.message,
+                        ...(error.provider === undefined ? {} : { provider: error.provider })
                       })
                     ).pipe(
                       Stream.concat(sleepStream(delayMs)),

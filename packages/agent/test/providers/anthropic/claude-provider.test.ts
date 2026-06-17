@@ -1,5 +1,10 @@
 import { Effect, Layer, Stream } from 'effect'
-import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
+import {
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse
+} from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -64,6 +69,24 @@ const openResponseWithFirstChunk = (chunk: string) => {
     }),
     { status: 200 }
   )
+}
+
+const streamErrorHttpResponse = () => {
+  const request = HttpClientRequest.get('https://example.com')
+  const response = HttpClientResponse.fromWeb(request, new Response('', { status: 200 }))
+
+  Object.defineProperty(response, 'stream', {
+    value: Stream.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request,
+          description: 'stream broke'
+        })
+      })
+    )
+  })
+
+  return response
 }
 
 const readCapturedHeaders = (requests: ReadonlyArray<CapturedRequest>) => {
@@ -548,5 +571,47 @@ describe('Anthropic Claude provider', () => {
       expect(events.map(event => event._tag)).toEqual(['Usage', 'Usage', 'Done'])
       expect(events[0]).toMatchObject({ usage: { input: { total: 4 }, output: { total: 1 } } })
       expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 7 } } })
+    }))
+
+  it.effect('maps Anthropic overloaded stream errors to retryable metadata', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n'
+        ])
+      )
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'overloaded',
+        retryable: true,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'overloaded',
+          providerCode: 'overloaded_error'
+        }
+      })
+    }))
+
+  it.effect('marks Anthropic stream read failures retryable', () =>
+    Effect.gen(function* () {
+      const response = streamErrorHttpResponse()
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'provider_error',
+        retryable: true,
+        provider: { provider: 'anthropic_claude', kind: 'stream' }
+      })
     }))
 })

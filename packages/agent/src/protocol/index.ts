@@ -55,6 +55,8 @@ export {
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta,
+  ProviderErrorInfo,
+  ProviderFailureKind,
   ProviderToolResult,
   QuestionAnswered,
   QuestionCancelled,

@@ -21,6 +21,7 @@ import {
   type AgentMessage,
   type Content,
   type ContentPart,
+  type ProviderFailureKind,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -41,6 +42,12 @@ import {
   anthropicClaudeOAuthUserAgent
 } from './claude.ts'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
+import {
+  classifyProviderFailure,
+  providerErrorInfo,
+  providerFailureCause,
+  providerFailureRetryable
+} from '../provider-error.ts'
 
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
@@ -817,26 +824,19 @@ export const toAnthropicClaudeRequestBody = (
     }
   })
 
-const responseStatusToCause = (status: number): LLMError['cause'] => {
-  if (status === 429) {
-    return 'rate_limit'
-  }
-
-  if (status === 413 || status === 400) {
-    return 'context_overflow'
-  }
-
-  return 'provider_error'
-}
-
-const isRetryableStatus = (status: number) => status === 429 || status >= 500
+const anthropicClaudeProvider = 'anthropic_claude'
 
 const toHttpClientLlmError =
-  (message: string, retryable: boolean) => (error: HttpClientError.HttpClientError) =>
+  (message: string, retryable: boolean, kind: ProviderFailureKind = 'network') =>
+  (error: HttpClientError.HttpClientError) =>
     new LLMError({
       cause: 'provider_error',
       message: `${message}: ${error.message}`,
-      retryable
+      retryable,
+      provider: providerErrorInfo({
+        provider: anthropicClaudeProvider,
+        kind: retryable ? kind : 'unknown'
+      })
     })
 
 const decodeJsonString = (raw: string, message: string) =>
@@ -860,6 +860,26 @@ const field = (value: unknown, key: string) =>
 const stringField = (value: unknown, key: string) => {
   const raw = field(value, key)
   return typeof raw === 'string' ? raw : undefined
+}
+
+const providerSignalError = (input: {
+  readonly message: string
+  readonly providerCode?: string
+  readonly fallbackKind?: ProviderFailureKind
+}) => {
+  const provider = classifyProviderFailure({
+    provider: anthropicClaudeProvider,
+    message: input.message,
+    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
+    ...(input.fallbackKind === undefined ? {} : { fallbackKind: input.fallbackKind })
+  })
+
+  return new LLMError({
+    cause: providerFailureCause(provider.kind),
+    message: input.message,
+    retryable: providerFailureRetryable(provider.kind),
+    provider
+  })
 }
 
 const numberField = (value: unknown, key: string) => {
@@ -1156,11 +1176,12 @@ const makeAnthropicStreamEmitter = () => {
 
     if (type === 'error') {
       const error = field(data, 'error')
+      const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
+
       return Effect.fail(
-        new LLMError({
-          cause: 'provider_error',
+        providerSignalError({
           message: stringField(error, 'message') ?? 'Anthropic Claude stream error',
-          retryable: false
+          ...(providerCode === undefined ? {} : { providerCode })
         })
       )
     }
@@ -1280,7 +1301,7 @@ export const streamAnthropicClaudeResponse = (
       Effect.map(bodyStateRef => {
         const emitData = makeAnthropicStreamEmitter()
         const chunks = response.stream.pipe(
-          Stream.mapError(toHttpClientLlmError('Could not read Anthropic Claude stream', false)),
+          Stream.mapError(toHttpClientLlmError('Could not read Anthropic Claude stream', true, 'stream')),
           Stream.decodeText,
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {
@@ -1338,11 +1359,19 @@ const sendAnthropicClaudeRequest = (
         )
       )
 
+      const provider = classifyProviderFailure({
+        provider: anthropicClaudeProvider,
+        status: response.status,
+        headers: response.headers,
+        body: errorText
+      })
+
       return yield* Effect.fail(
         new LLMError({
-          cause: responseStatusToCause(response.status),
-          message: `Anthropic Claude returned ${response.status}: ${errorText}`,
-          retryable: isRetryableStatus(response.status)
+          cause: providerFailureCause(provider.kind),
+          message: `Anthropic Claude returned ${response.status}`,
+          retryable: providerFailureRetryable(provider.kind),
+          provider
         })
       )
     }

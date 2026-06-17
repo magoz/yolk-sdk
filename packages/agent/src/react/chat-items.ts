@@ -1,6 +1,7 @@
 import { Array as Arr, Option } from 'effect'
 import {
   contentText,
+  type AgentRetry,
   type QuestionRequest,
   type QuestionResponse,
   type ToolApprovalRequest,
@@ -100,6 +101,7 @@ export type AgentChatItem =
     }
   | { readonly _tag: 'UserDraft'; readonly id: string; readonly text: string }
   | { readonly _tag: 'AssistantDraft'; readonly id: string; readonly text: string }
+  | { readonly _tag: 'Retry'; readonly id: string; readonly retry: AgentRetry }
   | { readonly _tag: 'AssistantStatus'; readonly id: string; readonly label: string }
   | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
 
@@ -107,6 +109,7 @@ export type BuildAgentChatItemsInput = {
   readonly messages: ReadonlyArray<AgentChatMessage>
   readonly isRunning: boolean
   readonly activeToolLabel: Option.Option<string>
+  readonly retryInfo?: AgentRetry | null
 }
 
 export const dedupeAgentChatToolRunItems = (
@@ -122,8 +125,7 @@ export const dedupeAgentChatToolRunItems = (
   }
 
   return items.filter(
-    (item, index) =>
-      item._tag !== 'ToolRun' || latestIndexByToolCallId.get(item.call.id) === index
+    (item, index) => item._tag !== 'ToolRun' || latestIndexByToolCallId.get(item.call.id) === index
   )
 }
 
@@ -313,7 +315,8 @@ const itemFromPart = (
 export const buildAgentChatItems = ({
   messages,
   isRunning,
-  activeToolLabel
+  activeToolLabel,
+  retryInfo
 }: BuildAgentChatItemsInput): ReadonlyArray<AgentChatItem> => {
   const items = dedupeAgentChatToolRunItems(
     Arr.getSomes(
@@ -322,6 +325,10 @@ export const buildAgentChatItems = ({
   )
 
   if (isRunning) {
+    if (retryInfo !== undefined && retryInfo !== null) {
+      return [...items, { _tag: 'Retry', id: 'agent-retry', retry: retryInfo }]
+    }
+
     return [
       ...items,
       {

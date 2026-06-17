@@ -1,11 +1,14 @@
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentError,
+  AgentRetry,
   AssistantAgentMessage,
   AssistantMessageEvent,
   AssistantTextPart,
   HostToolCallPart,
   LLMReasoningDelta,
   LLMTextDelta,
+  ProviderErrorInfo,
   QuestionAnswer,
   QuestionPrompt,
   QuestionRequest,
@@ -33,6 +36,40 @@ describe('agent chat core', () => {
     expect(state.status).toBe('running')
     expect(state.chatMessages.map(chatMessage => chatMessage.role)).toEqual(['user'])
     expect(state.error).toBeNull()
+  })
+
+  it('stores typed retry and error events on chat state', () => {
+    const provider = ProviderErrorInfo.make({
+      provider: 'anthropic',
+      kind: 'overloaded',
+      status: 529
+    })
+    const retry = AgentRetry.make({
+      attempt: 1,
+      reason: 'overloaded',
+      delayMs: 2000,
+      message: 'overloaded',
+      provider
+    })
+    const error = AgentError.make({
+      code: 'overloaded',
+      message: 'provider overloaded',
+      retryable: true,
+      provider
+    })
+    const retrying = reduceAgentChatState(initialAgentChatState, {
+      _tag: 'Event',
+      event: retry
+    })
+    const failed = reduceAgentChatState(retrying, { _tag: 'Event', event: error })
+
+    expect(retrying.retryInfo).toBe(retry)
+    expect(failed).toMatchObject({
+      status: 'error',
+      error: 'provider overloaded',
+      errorInfo: error,
+      retryInfo: null
+    })
   })
 
   it('detects streaming reasoning summaries', () => {

@@ -1,6 +1,8 @@
 import {
+  type AgentError,
   type AgentEvent,
   type AgentMessage,
+  type AgentRetry,
   type HitlRequest,
   type QuestionRequest,
   type QuestionResponse,
@@ -63,6 +65,8 @@ export type AgentClientState = {
   readonly reasoning: string
   readonly toolRuns: ReadonlyArray<AgentToolRun>
   readonly error: string | null
+  readonly errorInfo: AgentError | null
+  readonly retryInfo: AgentRetry | null
   readonly seenEventIds: ReadonlyArray<string>
 }
 
@@ -80,8 +84,13 @@ export const initialAgentClientState: AgentClientState = {
   reasoning: '',
   toolRuns: [],
   error: null,
+  errorInfo: null,
+  retryInfo: null,
   seenEventIds: []
 }
+
+const clearRetryInfo = (state: AgentClientState): AgentClientState =>
+  state.retryInfo === null ? state : { ...state, retryInfo: null }
 
 const hasSeenEvent = (state: AgentClientState, event: AgentEvent) =>
   event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
@@ -260,16 +269,18 @@ const applyAgentEventUnchecked = (
         reasoning: '',
         liveMessages: [],
         toolRuns: completedToolRuns(state.toolRuns),
-        error: null
+        error: null,
+        errorInfo: null,
+        retryInfo: null
       }
     case 'AgentError':
-      return markAgentError(state, event.message)
+      return markAgentError(state, event.message, event)
     case 'LLMTextDelta':
-      return { ...state, text: `${state.text}${event.text}` }
+      return clearRetryInfo({ ...state, text: `${state.text}${event.text}` })
     case 'LLMReasoningDelta':
-      return { ...state, reasoning: `${state.reasoning}${event.text}` }
+      return clearRetryInfo({ ...state, reasoning: `${state.reasoning}${event.text}` })
     case 'ToolInputStart':
-      return {
+      return clearRetryInfo({
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
           _tag: 'InputStreaming',
@@ -277,14 +288,17 @@ const applyAgentEventUnchecked = (
           name: event.name,
           input: ''
         })
-      }
+      })
     case 'ToolInputDelta':
-      return { ...state, toolRuns: appendToolInputDelta(state.toolRuns, event.id, event.delta) }
+      return clearRetryInfo({
+        ...state,
+        toolRuns: appendToolInputDelta(state.toolRuns, event.id, event.delta)
+      })
     case 'ToolInputEnd':
-      return {
+      return clearRetryInfo({
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, { _tag: 'InputReady', call: event.call })
-      }
+      })
     case 'ToolApprovalRequested':
       return {
         ...state,
@@ -370,21 +384,21 @@ const applyAgentEventUnchecked = (
         })
       }
     case 'ProviderToolResult':
-      return {
+      return clearRetryInfo({
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
           _tag: 'ProviderCompleted',
           call: event.call,
           result: event.result
         })
-      }
+      })
     case 'AssistantMessage':
-      return {
+      return clearRetryInfo({
         ...state,
         liveMessages: [...state.liveMessages, event.message],
         text: '',
         reasoning: ''
-      }
+      })
     case 'AgentEnd':
       return {
         ...state,
@@ -393,7 +407,8 @@ const applyAgentEventUnchecked = (
         liveMessages: [],
         text: '',
         reasoning: '',
-        toolRuns: completedToolRuns(state.toolRuns)
+        toolRuns: completedToolRuns(state.toolRuns),
+        retryInfo: null
       }
     case 'AgentAwaitingInput':
       return {
@@ -403,9 +418,12 @@ const applyAgentEventUnchecked = (
         liveMessages: [],
         text: '',
         reasoning: '',
-        error: null
+        error: null,
+        errorInfo: null,
+        retryInfo: null
       }
     case 'AgentRetry':
+      return { ...state, retryInfo: event }
     case 'CompactionEnd':
     case 'CompactionStart':
     case 'LLMStreamEnd':
@@ -431,24 +449,31 @@ export const submitAgentUserMessage = (
   reasoning: '',
   toolRuns: completedToolRuns(state.toolRuns),
   error: null,
+  errorInfo: null,
+  retryInfo: null,
   seenEventIds: []
 })
 
 export const markAgentError = (
   state: AgentClientState,
-  message = 'Agent request failed'
+  message = 'Agent request failed',
+  errorInfo: AgentError | null = null
 ): AgentClientState => ({
   ...state,
   status: 'error',
   toolRuns: completedToolRuns(state.toolRuns),
-  error: message
+  error: message,
+  errorInfo,
+  retryInfo: null
 })
 
 export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
   ...state,
   status: 'aborted',
   toolRuns: completedToolRuns(state.toolRuns),
-  error: null
+  error: null,
+  errorInfo: null,
+  retryInfo: null
 })
 
 export const reduceAgentEvents = (

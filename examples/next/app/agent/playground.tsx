@@ -1055,6 +1055,8 @@ export function AgentPlayground({
               activeToolCallCount={activeToolRunCount}
               toolResultCount={completedToolRunCount}
               error={state.error}
+              errorInfo={state.errorInfo}
+              retryInfo={state.retryInfo}
               workflowRunId={workflowRunId}
               workflowResumeDisabled={isWorkflowResumeDisabled({ status: state.status, isTextBusy })}
               onResumeWorkflowRun={handleResumeWorkflowRun}

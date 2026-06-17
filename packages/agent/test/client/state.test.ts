@@ -3,6 +3,7 @@ import {
   AgentAwaitingInput,
   AgentEnd,
   AgentError,
+  AgentRetry,
   AgentStart,
   AssistantAgentMessage,
   AssistantMessageEvent,
@@ -16,6 +17,7 @@ import {
   ToolExecutionStarted,
   ToolCall,
   ProviderToolResult,
+  ProviderErrorInfo,
   QuestionAnswered,
   QuestionPrompt,
   QuestionRequest,
@@ -187,16 +189,49 @@ describe('reduceAgentEvents', () => {
   })
 
   it('stores in-band agent errors', () => {
+    const provider = ProviderErrorInfo.make({ provider: 'openai', kind: 'rate_limit', status: 429 })
+    const error = AgentError.make({
+      code: 'rate_limit',
+      message: 'Provider failed',
+      retryable: true,
+      provider
+    })
     const state = reduceAgentEvents([
       AgentStart.make({}),
-      AgentError.make({ code: 'provider_error', message: 'Provider failed', retryable: true })
+      error
     ])
 
     expect(state).toMatchObject({
       status: 'error',
       toolRuns: [],
-      error: 'Provider failed'
+      error: 'Provider failed',
+      errorInfo: error
     })
+  })
+
+  it('tracks current retry info until provider output resumes', () => {
+    const provider = ProviderErrorInfo.make({
+      provider: 'openai',
+      kind: 'overloaded',
+      status: 529,
+      retryAfterMs: 500
+    })
+    const retry = AgentRetry.make({
+      attempt: 1,
+      reason: 'overloaded',
+      delayMs: 500,
+      message: 'overloaded',
+      provider
+    })
+    const retrying = reduceAgentEvents([AgentStart.make({}), retry])
+
+    expect(retrying.retryInfo).toBe(retry)
+    expect(retrying.errorInfo).toBeNull()
+
+    const resumed = reduceAgentEvents([LLMTextDelta.make({ text: 'ok' })], retrying)
+
+    expect(resumed.retryInfo).toBeNull()
+    expect(resumed.text).toBe('ok')
   })
 
   it('ignores duplicate events with the same event id', () => {

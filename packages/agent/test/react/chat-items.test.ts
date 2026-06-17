@@ -1,10 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
 import { Option } from 'effect'
 import {
+  AgentRetry,
   AssistantAgentMessage,
   AssistantReasoningPart,
   AssistantTextPart,
   HostToolCallPart,
+  ProviderErrorInfo,
   ToolCall,
   ToolExecutionError,
   ToolExecutionStarted,
@@ -12,7 +14,11 @@ import {
   ToolResultMessage,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { buildAgentChatItems, dedupeAgentChatToolRunItems, type AgentChatItem } from '../../src/react/chat-items.ts'
+import {
+  buildAgentChatItems,
+  dedupeAgentChatToolRunItems,
+  type AgentChatItem
+} from '../../src/react/chat-items.ts'
 import {
   applyAgentEventToChatMessages,
   buildAgentChatMessages,
@@ -244,6 +250,33 @@ describe('buildAgentChatItems', () => {
       id: 'assistant-status',
       label: 'Running web_search'
     })
+  })
+
+  it('projects retry info instead of generic assistant status', () => {
+    const retry = AgentRetry.make({
+      attempt: 1,
+      reason: 'overloaded',
+      delayMs: 2000,
+      message: 'Provider is overloaded',
+      provider: ProviderErrorInfo.make({ provider: 'anthropic', kind: 'overloaded', status: 529 })
+    })
+    const messages = buildAgentChatMessages({
+      messages: [UserMessage.make({ content: 'hello' })],
+      userDraft: '',
+      assistantDraft: '',
+      reasoningDraft: '',
+      toolRuns: [],
+      error: null
+    })
+
+    expect(
+      buildAgentChatItems({
+        messages,
+        isRunning: true,
+        activeToolLabel: Option.none(),
+        retryInfo: retry
+      }).at(-1)
+    ).toEqual({ _tag: 'Retry', id: 'agent-retry', retry })
   })
 
   it('keeps the latest tool run item for duplicate tool call ids', () => {

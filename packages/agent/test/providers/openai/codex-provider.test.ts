@@ -1,4 +1,5 @@
-import { Effect } from 'effect'
+import { Effect, Stream } from 'effect'
+import { HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -12,7 +13,34 @@ import {
   UserMessage,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
-import { toOpenAiCodexRequestBody } from '../../../src/providers/openai/codex-provider.ts'
+import {
+  streamOpenAiCodexResponse,
+  toOpenAiCodexRequestBody
+} from '../../../src/providers/openai/codex-provider.ts'
+
+const responseFromText = (text: string) => {
+  const request = HttpClientRequest.get('https://example.com')
+
+  return HttpClientResponse.fromWeb(request, new Response(text, { status: 200 }))
+}
+
+const streamErrorResponse = () => {
+  const request = HttpClientRequest.get('https://example.com')
+  const response = HttpClientResponse.fromWeb(request, new Response('', { status: 200 }))
+
+  Object.defineProperty(response, 'stream', {
+    value: Stream.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request,
+          description: 'stream broke'
+        })
+      })
+    )
+  })
+
+  return response
+}
 
 describe('OpenAI Codex provider', () => {
   it.effect('lowers protocol transcript to Codex Responses input', () =>
@@ -171,6 +199,46 @@ describe('OpenAI Codex provider', () => {
             file_data: `data:text/markdown;base64,${btoa('# Identity\n\nSpeldosa docs.')}`
           }
         ]
+      })
+    })
+  )
+
+  it.effect('maps Codex SSE overload errors to retryable metadata', () =>
+    Effect.gen(function* () {
+      const response = responseFromText(
+        ['event: error', 'data: {"type":"error","message":"backend overloaded"}', ''].join('\n')
+      )
+
+      const error = yield* streamOpenAiCodexResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'overloaded',
+        retryable: true,
+        provider: {
+          provider: 'openai_codex',
+          kind: 'overloaded',
+          providerCode: 'error'
+        }
+      })
+    })
+  )
+
+  it.effect('marks Codex stream read failures retryable', () =>
+    Effect.gen(function* () {
+      const error = yield* streamOpenAiCodexResponse(streamErrorResponse()).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'provider_error',
+        retryable: true,
+        provider: { provider: 'openai_codex', kind: 'stream' }
       })
     })
   )

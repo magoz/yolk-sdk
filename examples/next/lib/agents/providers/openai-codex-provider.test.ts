@@ -604,7 +604,7 @@ describe('OpenAiCodexProviderLayer', () => {
     })
   )
 
-  it.effect('maps OpenAI Codex SSE error events to provider errors', () =>
+  it.effect('maps OpenAI Codex SSE overload errors to retryable provider errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       const layer = makeProviderLayer(
@@ -628,8 +628,9 @@ describe('OpenAiCodexProviderLayer', () => {
 
       expect(error).toMatchObject({
         _tag: 'LLMError',
-        cause: 'provider_error',
-        retryable: false
+        cause: 'overloaded',
+        retryable: true,
+        provider: { provider: 'openai_codex', kind: 'overloaded' }
       })
       expect(error.message).toContain('OpenAI Codex stream error: backend overloaded')
     })

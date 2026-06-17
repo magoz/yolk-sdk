@@ -34,6 +34,12 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
+import {
+  classifyProviderFailure,
+  providerErrorInfo,
+  providerFailureCause,
+  providerFailureRetryable
+} from '../provider-error.ts'
 
 export type OpenAiProviderConfig = {
   readonly chatCompletionsUrl?: string
@@ -355,20 +361,6 @@ export const toOpenAiRequestBody = (
     }
   })
 
-const responseStatusToCause = (status: number): LLMError['cause'] => {
-  if (status === 429) {
-    return 'rate_limit'
-  }
-
-  if (status === 413) {
-    return 'context_overflow'
-  }
-
-  return 'provider_error'
-}
-
-const isRetryableStatus = (status: number) => status === 429 || status >= 500
-
 const parseToolArguments = (raw: string) =>
   decodeJsonString(raw, 'Invalid OpenAI tool arguments JSON')
 
@@ -418,7 +410,11 @@ const toHttpClientLlmError =
     new LLMError({
       cause: 'provider_error',
       message: `${message}: ${error.message}`,
-      retryable
+      retryable,
+      provider: providerErrorInfo({
+        provider: 'openai',
+        kind: retryable ? 'network' : 'unknown'
+      })
     })
 
 const parseOpenAiResponseJson = (
@@ -469,11 +465,19 @@ const sendOpenAiRequest = (
         )
       )
 
+      const provider = classifyProviderFailure({
+        provider: 'openai',
+        status: response.status,
+        headers: response.headers,
+        body: errorText
+      })
+
       return yield* Effect.fail(
         new LLMError({
-          cause: responseStatusToCause(response.status),
-          message: `OpenAI returned ${response.status}: ${errorText}`,
-          retryable: isRetryableStatus(response.status)
+          cause: providerFailureCause(provider.kind),
+          message: `OpenAI returned ${response.status}`,
+          retryable: providerFailureRetryable(provider.kind),
+          provider
         })
       )
     }

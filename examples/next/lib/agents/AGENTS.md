@@ -11,7 +11,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Workflow text runtime has durable execution/streaming; product transcript is still client-owned per turn in v1.
 - Cloudflare direct WS uses append-backed runtime. Missing env/bootstrap is explicit; no `/api/agent` fallback.
 - Route/runtime adapters choose package provider layers + tool modules explicitly; do not hide model/tool policy in globals.
-- Route streams NDJSON token events to browser, including `UsageUpdate`, `AgentRetry`, compaction lifecycle, and in-band `AgentError` failures.
+- Route streams NDJSON token events to browser, including `UsageUpdate`, `AgentRetry`, compaction lifecycle, and in-band `AgentError` failures with safe provider metadata.
 - Client terminal events end consumers while HTTP bodies drain; pre-terminal cancellation still aborts active response readers.
 
 ## Map
@@ -33,7 +33,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
 - Next/Workflow providers receive text+image/PDF capabilities; Cloudflare direct WS currently shares UI flags but does not pass package capability validation.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
-- Providers normalize raw usage into `AgentUsage` and mark retryable errors; loop owns retry policy.
+- Providers normalize raw usage, mark retryable errors, and attach protocol-visible retry/error metadata; loop owns retry policy and UI status chrome surfaces retry state.
 - Show reasoning only from `LLMReasoningDelta` / assistant reasoning parts; never synthesize or label missing reasoning as available.
 
 ## Runtime Contracts

@@ -11,6 +11,7 @@ import {
   ImagePart,
   inlineBase64Source,
   makeSubagentRunId,
+  ProviderErrorInfo,
   QuestionAnswer,
   QuestionResponse,
   ToolCall,
@@ -851,6 +852,182 @@ describe('run', () => {
         delayMs: 0
       })
       expect(assistantContent(assistantMessageFromEvents(events))).toBe('ok')
+    })
+  )
+
+  it.effect('uses provider retry-after metadata for retry delay', () =>
+    Effect.gen(function* () {
+      let calls = 0
+      const providerInfo = ProviderErrorInfo.make({
+        provider: 'openai',
+        kind: 'rate_limit',
+        status: 429,
+        retryAfterMs: 0
+      })
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => {
+            calls++
+
+            return calls === 1
+              ? Stream.fail(
+                  new LLMError({
+                    cause: 'rate_limit',
+                    message: 'slow down',
+                    retryable: true,
+                    provider: providerInfo
+                  })
+                )
+              : Stream.fromIterable(Reply.text('ok').events)
+          }
+        })
+      )
+
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({
+                  maxTurns: 500,
+                  maxRetries: 1,
+                  retryBaseDelayMs: 999,
+                  toolConcurrency: 4
+                })
+              )
+            )
+          )
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(calls).toBe(2)
+      expect(events.find(event => event._tag === 'AgentRetry')).toMatchObject({
+        attempt: 1,
+        reason: 'rate_limit',
+        delayMs: 0,
+        provider: providerInfo
+      })
+    })
+  )
+
+  it.effect('caps default retry attempts at three provider calls', () =>
+    Effect.gen(function* () {
+      let calls = 0
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => {
+            calls++
+
+            return Stream.fail(
+              new LLMError({
+                cause: 'overloaded',
+                message: 'provider overloaded',
+                retryable: true,
+                provider: ProviderErrorInfo.make({ provider: 'anthropic', kind: 'overloaded' })
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({
+                  maxTurns: 500,
+                  maxRetries: 2,
+                  retryBaseDelayMs: 0,
+                  toolConcurrency: 4
+                })
+              )
+            )
+          )
+        ),
+        Effect.result
+      )
+
+      expect(calls).toBe(3)
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'LLMError', cause: 'overloaded', retryable: true }
+      })
+    })
+  )
+
+  it.effect('does not retry post-emission provider failures', () =>
+    Effect.gen(function* () {
+      let calls = 0
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => {
+            calls++
+
+            return Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(
+              Stream.concat(
+                Stream.fail(
+                  new LLMError({
+                    cause: 'rate_limit',
+                    message: 'late rate limit',
+                    retryable: true,
+                    provider: ProviderErrorInfo.make({ provider: 'openai', kind: 'rate_limit' })
+                  })
+                )
+              )
+            )
+          }
+        })
+      )
+
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                ContextTransformer.identity,
+                LoopConfig.layer({
+                  maxTurns: 500,
+                  maxRetries: 2,
+                  retryBaseDelayMs: 0,
+                  toolConcurrency: 4
+                })
+              )
+            )
+          )
+        ),
+        Effect.result
+      )
+
+      expect(calls).toBe(1)
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'LLMError', message: 'late rate limit' }
+      })
     })
   )
 

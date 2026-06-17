@@ -19,7 +19,14 @@ import {
   type LLMEvent,
   type LLMRequest
 } from '@yolk-sdk/agent/loop'
-import { AgentInputUsage, AgentOutputUsage, AgentUsage, ToolCall } from '@yolk-sdk/agent/protocol'
+import {
+  AgentInputUsage,
+  AgentOutputUsage,
+  AgentUsage,
+  ProviderErrorInfo,
+  ToolCall,
+  type ProviderFailureKind
+} from '@yolk-sdk/agent/protocol'
 import {
   streamOpenAiCodexResponse,
   toOpenAiCodexRequestBody
@@ -66,6 +73,151 @@ const getRecord = (
 ): Record<string, unknown> | undefined => {
   const v = obj[key]
   return isRecord(v) ? v : undefined
+}
+
+type HeaderMap = Readonly<Record<string, string>>
+
+const codexProvider = 'openai_codex'
+
+const numericDelayMs = (value: number) =>
+  Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+
+const headerValue = (headers: HeaderMap, name: string) => {
+  const lowerName = name.toLowerCase()
+
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === lowerName) {
+      return value
+    }
+  }
+
+  return undefined
+}
+
+const parseRetryAfterMs = (value: string | undefined) =>
+  value === undefined ? undefined : numericDelayMs(Number(value.trim()))
+
+const parseRetryAfter = (value: string | undefined) => {
+  if (value === undefined) return undefined
+
+  const trimmed = value.trim()
+  const secondsDelay = numericDelayMs(Number(trimmed) * 1000)
+  if (secondsDelay !== undefined) return secondsDelay
+
+  const timestamp = Date.parse(trimmed)
+  return Number.isNaN(timestamp) ? undefined : numericDelayMs(timestamp - Date.now())
+}
+
+const retryAfterMsFromHeaders = (headers: HeaderMap | undefined) => {
+  if (headers === undefined) return undefined
+
+  return (
+    parseRetryAfterMs(headerValue(headers, 'retry-after-ms')) ??
+    parseRetryAfter(headerValue(headers, 'retry-after'))
+  )
+}
+
+const codexFailureKind = (input: {
+  readonly status?: number
+  readonly providerCode?: string
+  readonly message?: string
+  readonly body?: string
+  readonly fallbackKind?: ProviderFailureKind
+}): ProviderFailureKind => {
+  const signal = [input.providerCode, input.message, input.body]
+    .filter(value => value !== undefined)
+    .join(' ')
+    .toLowerCase()
+
+  if (
+    signal.includes('rate_limit') ||
+    signal.includes('rate limit') ||
+    signal.includes('too_many_requests') ||
+    signal.includes('too many request')
+  ) {
+    return 'rate_limit'
+  }
+
+  if (
+    signal.includes('overloaded_error') ||
+    signal.includes('overloaded') ||
+    signal.includes('overload') ||
+    signal.includes('service unavailable')
+  ) {
+    return 'overloaded'
+  }
+
+  if (input.status === 429) return 'rate_limit'
+  if (input.status === 529) return 'overloaded'
+  if (input.status === 413) return 'context_overflow'
+  if (input.status === 401 || input.status === 403) return 'auth'
+  if (input.status !== undefined && input.status >= 500) return 'server_error'
+
+  return input.fallbackKind ?? 'unknown'
+}
+
+const codexFailureRetryable = (kind: ProviderFailureKind) =>
+  kind === 'rate_limit' ||
+  kind === 'overloaded' ||
+  kind === 'server_error' ||
+  kind === 'network' ||
+  kind === 'stream'
+
+const codexFailureCause = (kind: ProviderFailureKind): LLMError['cause'] => {
+  switch (kind) {
+    case 'rate_limit':
+      return 'rate_limit'
+    case 'overloaded':
+      return 'overloaded'
+    case 'context_overflow':
+      return 'context_overflow'
+    case 'invalid_response':
+      return 'invalid_response'
+    case 'auth':
+    case 'network':
+    case 'server_error':
+    case 'stream':
+    case 'unknown':
+      return 'provider_error'
+  }
+}
+
+const codexProviderInfo = (input: {
+  readonly kind: ProviderFailureKind
+  readonly status?: number
+  readonly providerCode?: string
+  readonly retryAfterMs?: number
+}) =>
+  ProviderErrorInfo.make({
+    provider: codexProvider,
+    kind: input.kind,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
+    ...(input.retryAfterMs === undefined ? {} : { retryAfterMs: input.retryAfterMs })
+  })
+
+const codexProviderError = (input: {
+  readonly message: string
+  readonly status?: number
+  readonly headers?: HeaderMap
+  readonly providerCode?: string
+  readonly body?: string
+  readonly fallbackKind?: ProviderFailureKind
+}) => {
+  const kind = codexFailureKind(input)
+  const provider = codexProviderInfo({
+    kind,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.providerCode === undefined ? {} : { providerCode: input.providerCode }),
+    ...(input.headers === undefined ? {} : { retryAfterMs: retryAfterMsFromHeaders(input.headers) })
+  })
+
+  return new LLMError({
+    cause: codexFailureCause(provider.kind),
+    message: input.message,
+    retryable: codexFailureRetryable(provider.kind),
+    provider
+  })
 }
 
 const parseWsJson = (text: string): Record<string, unknown> | undefined => {
@@ -240,10 +392,15 @@ export const mapWsMessage = (
         error !== undefined
           ? (getString(error, 'message') ?? 'Codex response failed')
           : 'Codex response failed'
+      const providerCode =
+        error !== undefined ? getString(error, 'code') ?? getString(error, 'type') : undefined
 
       return {
         _tag: 'Error',
-        error: new LLMError({ cause: 'provider_error', message, retryable: false })
+        error: codexProviderError({
+          message,
+          ...(providerCode === undefined ? {} : { providerCode })
+        })
       }
     }
 
@@ -257,10 +414,9 @@ export const mapWsMessage = (
 
       return {
         _tag: 'Error',
-        error: new LLMError({
-          cause: code === 'rate_limit' ? 'rate_limit' : 'provider_error',
+        error: codexProviderError({
           message,
-          retryable: code === 'rate_limit'
+          ...(code === undefined ? {} : { providerCode: code })
         })
       }
     }
@@ -412,7 +568,8 @@ const socketErrorToLlmError = (error: Socket.SocketError) =>
   new LLMError({
     cause: 'provider_error',
     message: `Codex WebSocket error: ${error.message}`,
-    retryable: true
+    retryable: true,
+    provider: codexProviderInfo({ kind: 'network' })
   })
 
 const httpClientErrorToLlmError =
@@ -420,16 +577,9 @@ const httpClientErrorToLlmError =
     new LLMError({
       cause: 'provider_error',
       message: `${message}: ${error.message}`,
-      retryable
+      retryable,
+      provider: codexProviderInfo({ kind: retryable ? 'network' : 'unknown' })
     })
-
-const responseStatusToCause = (status: number): LLMError['cause'] => {
-  if (status === 429) return 'rate_limit'
-  if (status === 413) return 'context_overflow'
-  return 'provider_error'
-}
-
-const isRetryableStatus = (status: number) => status === 429 || status >= 500
 
 const codexProxyHeaders = (config: CodexWsConfig): Record<string, string> => {
   const headers: Record<string, string> = {
@@ -472,10 +622,11 @@ const sendCodexProxyRequest = (
       )
 
       return yield* Effect.fail(
-        new LLMError({
-          cause: responseStatusToCause(response.status),
-          message: `Codex proxy returned ${response.status}: ${errorText}`,
-          retryable: isRetryableStatus(response.status)
+        codexProviderError({
+          message: `Codex proxy returned ${response.status}`,
+          status: response.status,
+          headers: response.headers,
+          body: errorText
         })
       )
     }

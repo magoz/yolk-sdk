@@ -14,7 +14,7 @@ export class LoopConfig extends Context.Service<LoopConfig, LoopConfigShape>()(
   static defaultLayer = this.layer({
     maxTurns: 500,
     maxRetries: 2,
-    retryBaseDelayMs: 1000,
+    retryBaseDelayMs: 2000,
     toolConcurrency: 4
   })
 }

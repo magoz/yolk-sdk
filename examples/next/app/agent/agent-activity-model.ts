@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@yolk-sdk/agent/protocol'
+import type { AgentError, AgentEvent, AgentRetry, ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
 import { contentPreview, countLabel, truncate, unknownPreview } from './agent-format'
 
 export type ActivityTone = 'neutral' | 'active' | 'success' | 'error' | 'tool'
@@ -12,6 +12,73 @@ export type AgentActivityItem = {
 
 export const maxActivityItems = 80
 export const activityPanelId = 'agent-activity-panel'
+
+const formatRetryDelay = (delayMs: number) =>
+  delayMs >= 1000 ? `${(delayMs / 1000).toFixed(1)}s` : `${delayMs}ms`
+
+export const providerFailureLabel = (code: AgentError['code'] | AgentRetry['reason']) => {
+  switch (code) {
+    case 'rate_limit':
+      return 'Rate limited'
+    case 'overloaded':
+      return 'Provider overloaded'
+    case 'provider_error':
+      return 'Provider failure'
+    case 'context_overflow':
+      return 'Context too large'
+    case 'invalid_response':
+      return 'Invalid provider response'
+    case 'validation_error':
+    case 'tool_error':
+    case 'tool_denied':
+    case 'tool_timeout':
+    case 'store_error':
+    case 'aborted':
+    case 'session_not_found':
+    case 'conflict':
+    case 'unknown':
+      return code
+  }
+}
+
+export const providerInfoDetail = (provider: ProviderErrorInfo | undefined) => {
+  if (provider === undefined) {
+    return ''
+  }
+
+  return [
+    provider.provider,
+    provider.kind,
+    provider.status === undefined ? undefined : `status ${provider.status}`,
+    provider.providerCode,
+    provider.retryAfterMs === undefined
+      ? undefined
+      : `retry-after ${formatRetryDelay(provider.retryAfterMs)}`
+  ]
+    .filter(value => value !== undefined && value.length > 0)
+    .join(' · ')
+}
+
+export const agentRetryTitle = (event: AgentRetry) =>
+  `${providerFailureLabel(event.reason)}, retrying attempt ${event.attempt}`
+
+export const agentRetryDetail = (event: AgentRetry) => {
+  const provider = providerInfoDetail(event.provider)
+  const detail = `next attempt in ${formatRetryDelay(event.delayMs)}`
+
+  return provider.length === 0 ? detail : `${detail} · ${provider}`
+}
+
+export const agentErrorTitle = (event: AgentError) => providerFailureLabel(event.code)
+
+export const agentErrorDetail = (event: AgentError) => {
+  const provider = providerInfoDetail(event.provider)
+  const retryable = event.retryable ? 'retryable' : 'terminal'
+
+  return provider.length === 0
+    ? `${event.message} · ${retryable}`
+    : `${event.message} · ${retryable} · ${provider}`
+}
 
 export const activityItemFromAgentEvent = (
   event: AgentEvent
@@ -66,11 +133,11 @@ export const activityItemFromAgentEvent = (
         tone: 'active'
       }
     case 'AgentError':
-      return { title: 'Agent error', detail: event.message, tone: 'error' }
+      return { title: agentErrorTitle(event), detail: agentErrorDetail(event), tone: 'error' }
     case 'AgentRetry':
       return {
-        title: `Retrying model call (${event.attempt})`,
-        detail: `${event.reason} · ${event.delayMs}ms`,
+        title: agentRetryTitle(event),
+        detail: agentRetryDetail(event),
         tone: 'active'
       }
     case 'CompactionStart':

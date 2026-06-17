@@ -1,7 +1,9 @@
 import {
   hitlResponseEvent,
+  type AgentError,
   type AgentEvent,
   type AgentMessage,
+  type AgentRetry,
   type Content,
   type HitlResponse,
   type UserMessage
@@ -31,6 +33,8 @@ export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' |
 export type AgentChatState = {
   readonly status: AgentRunStatus
   readonly error: string | null
+  readonly errorInfo: AgentError | null
+  readonly retryInfo: AgentRetry | null
   readonly chatMessages: ReadonlyArray<AgentChatMessage>
   readonly sessionEvents: ReadonlyArray<AgentChatSessionEvent>
   readonly seenEventIds: ReadonlyArray<string>
@@ -39,6 +43,8 @@ export type AgentChatState = {
 export const initialAgentChatState: AgentChatState = {
   status: 'idle',
   error: null,
+  errorInfo: null,
+  retryInfo: null,
   chatMessages: [],
   sessionEvents: [],
   seenEventIds: []
@@ -51,6 +57,9 @@ const rememberEvent = (state: AgentChatState, event: AgentEvent): AgentChatState
   event.eventId === undefined
     ? state
     : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
+
+const clearRetryInfo = (state: AgentChatState): AgentChatState =>
+  state.retryInfo === null ? state : { ...state, retryInfo: null }
 
 export type AgentChatAction =
   | { readonly _tag: 'HydrateMessage'; readonly message: AgentMessage }
@@ -73,13 +82,17 @@ export const reduceAgentChatState = (
       return {
         ...state,
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
-        error: null
+        error: null,
+        errorInfo: null,
+        retryInfo: null
       }
     case 'Submit':
       return {
         ...state,
         status: 'running',
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         seenEventIds: [],
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
         sessionEvents: [
@@ -92,6 +105,8 @@ export const reduceAgentChatState = (
         ...state,
         chatMessages: appendProtocolMessage(state.chatMessages, action.message),
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         sessionEvents: [
           ...state.sessionEvents,
           ProtocolMessageAppended.make({ message: action.message })
@@ -102,6 +117,8 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         seenEventIds: [],
         chatMessages: applyAgentEventToChatMessages(
           state.chatMessages,
@@ -118,6 +135,8 @@ export const reduceAgentChatState = (
       return {
         ...state,
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         chatMessages: next.messages,
         sessionEvents: [
           ...state.sessionEvents,
@@ -139,6 +158,8 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         seenEventIds: [],
         chatMessages: next.messages,
         sessionEvents: [
@@ -161,6 +182,8 @@ export const reduceAgentChatState = (
         ...state,
         status: 'running',
         error: null,
+        errorInfo: null,
+        retryInfo: null,
         seenEventIds: [],
         chatMessages: next.messages,
         sessionEvents: [
@@ -185,6 +208,8 @@ export const reduceAgentChatState = (
               ...state,
               status: 'running',
               error: null,
+              errorInfo: null,
+              retryInfo: null,
               chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
             },
             action.event
@@ -195,6 +220,8 @@ export const reduceAgentChatState = (
               ...state,
               status: 'error',
               error: action.event.message,
+              errorInfo: action.event,
+              retryInfo: null,
               chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
             },
             action.event
@@ -205,6 +232,8 @@ export const reduceAgentChatState = (
               ...state,
               status: 'done',
               error: null,
+              errorInfo: null,
+              retryInfo: null,
               chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
             },
             action.event
@@ -215,13 +244,23 @@ export const reduceAgentChatState = (
               ...state,
               status: 'waiting',
               error: null,
+              errorInfo: null,
+              retryInfo: null,
               chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
             },
             action.event
           )
-        case 'AssistantMessage':
         case 'AgentRetry':
+          return rememberEvent(
+            {
+              ...state,
+              retryInfo: action.event,
+              chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
+            },
+            action.event
+          )
         case 'CompactionEnd':
+        case 'AssistantMessage':
         case 'CompactionStart':
         case 'LLMReasoningDelta':
         case 'LLMStreamEnd':
@@ -246,10 +285,10 @@ export const reduceAgentChatState = (
         case 'TurnStart':
         case 'UsageUpdate':
           return rememberEvent(
-            {
+            clearRetryInfo({
               ...state,
               chatMessages: applyAgentEventToChatMessages(state.chatMessages, action.event, action)
-            },
+            }),
             action.event
           )
       }
@@ -259,11 +298,13 @@ export const reduceAgentChatState = (
         ...state,
         status: 'error',
         error: action.message,
+        errorInfo: null,
+        retryInfo: null,
         chatMessages: markChatError(state.chatMessages, action.message)
       }
     }
     case 'Abort':
-      return { ...state, status: 'aborted', error: null }
+      return { ...state, status: 'aborted', error: null, errorInfo: null, retryInfo: null }
   }
 }
 

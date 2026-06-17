@@ -321,6 +321,22 @@ describe('Codex WS event mapping', () => {
 
     expect(result._tag).toBe('Error')
     expect(errorMessage(result)).toBe('rate limit exceeded')
+    expect(errorCause(result)).toBe('rate_limit')
+    expect(errorRetryable(result)).toBe(true)
+  })
+
+  it('maps response.failed overload to retryable error', () => {
+    const result = mapWsMessage(
+      {
+        type: 'response.failed',
+        response: { error: { code: 'overloaded_error', message: 'backend overloaded' } }
+      },
+      0
+    )
+
+    expect(result._tag).toBe('Error')
+    expect(errorCause(result)).toBe('overloaded')
+    expect(errorRetryable(result)).toBe(true)
   })
 
   it('maps connection error event', () => {

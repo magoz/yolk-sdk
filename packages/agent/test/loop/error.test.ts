@@ -6,6 +6,7 @@ import {
   LLMError,
   ToolError
 } from '../../src/loop'
+import { ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
 
 describe('agentLoopErrorToAgentError', () => {
   it('maps LLM errors directly to wire codes', () => {
@@ -18,6 +19,32 @@ describe('agentLoopErrorToAgentError', () => {
         })
       )
     ).toMatchObject({ code: 'validation_error', message: 'bad input', retryable: false })
+  })
+
+  it('preserves LLM provider metadata on wire errors', () => {
+    const provider = ProviderErrorInfo.make({
+      provider: 'openai',
+      kind: 'overloaded',
+      status: 529,
+      providerCode: 'overloaded_error',
+      retryAfterMs: 250
+    })
+
+    expect(
+      agentLoopErrorToAgentError(
+        new LLMError({
+          cause: 'overloaded',
+          message: 'provider overloaded',
+          retryable: true,
+          provider
+        })
+      )
+    ).toMatchObject({
+      code: 'overloaded',
+      message: 'provider overloaded',
+      retryable: true,
+      provider
+    })
   })
 
   it('maps tool causes to canonical wire codes', () => {

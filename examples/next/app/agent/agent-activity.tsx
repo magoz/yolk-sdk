@@ -1,7 +1,16 @@
 import type { AgentRunStatus } from '@yolk-sdk/agent/client'
+import type { AgentError, AgentRetry } from '@yolk-sdk/agent/protocol'
 import { Badge } from '@/components/ui/badge'
 import { countLabel } from './agent-format'
-import { activityPanelId, type ActivityTone, type AgentActivityItem } from './agent-activity-model'
+import {
+  activityPanelId,
+  agentErrorDetail,
+  agentErrorTitle,
+  agentRetryDetail,
+  agentRetryTitle,
+  type ActivityTone,
+  type AgentActivityItem
+} from './agent-activity-model'
 import { textStatusVariant, voiceStatusVariant } from './agent-status'
 import type { VoiceStatus } from './use-realtime-voice'
 
@@ -40,6 +49,8 @@ type AgentActivityPanelProps = {
   readonly activeToolCallCount: number
   readonly toolResultCount: number
   readonly error: string | null
+  readonly errorInfo: AgentError | null
+  readonly retryInfo: AgentRetry | null
   readonly workflowRunId: string | null
   readonly workflowResumeDisabled: boolean
   readonly onResumeWorkflowRun: () => void
@@ -52,6 +63,8 @@ export function AgentActivityPanel({
   activeToolCallCount,
   toolResultCount,
   error,
+  errorInfo,
+  retryInfo,
   workflowRunId,
   workflowResumeDisabled,
   onResumeWorkflowRun
@@ -85,10 +98,21 @@ export function AgentActivityPanel({
           </div>
         ) : null}
 
+        {retryInfo !== null ? (
+          <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">
+            <div className="font-medium">{agentRetryTitle(retryInfo)}</div>
+            <div className="mt-1 whitespace-pre-wrap leading-5">{agentRetryDetail(retryInfo)}</div>
+          </div>
+        ) : null}
+
         {error !== null ? (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            <div className="font-medium">Current error</div>
-            <div className="mt-1 whitespace-pre-wrap leading-5">{error}</div>
+            <div className="font-medium">
+              {errorInfo === null ? 'Current error' : agentErrorTitle(errorInfo)}
+            </div>
+            <div className="mt-1 whitespace-pre-wrap leading-5">
+              {errorInfo === null ? error : agentErrorDetail(errorInfo)}
+            </div>
           </div>
         ) : null}
 

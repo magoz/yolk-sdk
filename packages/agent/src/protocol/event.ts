@@ -27,6 +27,7 @@ export const AgentErrorCode = Schema.Literals([
   'validation_error',
   'provider_error',
   'rate_limit',
+  'overloaded',
   'context_overflow',
   'invalid_response',
   'tool_error',
@@ -40,6 +41,27 @@ export const AgentErrorCode = Schema.Literals([
 ])
 export type AgentErrorCode = typeof AgentErrorCode.Type
 
+export const ProviderFailureKind = Schema.Literals([
+  'rate_limit',
+  'overloaded',
+  'server_error',
+  'network',
+  'stream',
+  'auth',
+  'context_overflow',
+  'invalid_response',
+  'unknown'
+])
+export type ProviderFailureKind = typeof ProviderFailureKind.Type
+
+export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('ProviderErrorInfo')({
+  provider: NonEmptyTrimmedString,
+  kind: ProviderFailureKind,
+  status: Schema.optional(Schema.Number),
+  providerCode: Schema.optional(Schema.String),
+  retryAfterMs: Schema.optional(Schema.Number)
+}) {}
+
 export class AgentStart extends Schema.TaggedClass<AgentStart>()('AgentStart', {
   ...EventIdentity
 }) {}
@@ -48,7 +70,8 @@ export class AgentError extends Schema.TaggedClass<AgentError>()('AgentError', {
   ...EventIdentity,
   code: AgentErrorCode,
   message: Schema.String,
-  retryable: Schema.Boolean
+  retryable: Schema.Boolean,
+  provider: Schema.optional(ProviderErrorInfo)
 }) {}
 
 export class AgentEnd extends Schema.TaggedClass<AgentEnd>()('AgentEnd', {
@@ -79,7 +102,8 @@ export class AgentRetry extends Schema.TaggedClass<AgentRetry>()('AgentRetry', {
   attempt: Schema.Number,
   reason: AgentErrorCode,
   delayMs: Schema.Number,
-  message: Schema.String
+  message: Schema.String,
+  provider: Schema.optional(ProviderErrorInfo)
 }) {}
 
 export class CompactionStart extends Schema.TaggedClass<CompactionStart>()('CompactionStart', {
