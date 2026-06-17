@@ -173,6 +173,52 @@ const subagentCompletedEvent = (input: {
       })
 }
 
+const toolCompletionEvents = (input: {
+  readonly call: ToolCall
+  readonly result: ToolResult
+  readonly model: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+}): ReadonlyArray<AgentEvent> => {
+  const completed = subagentCompletedEvent(input)
+  const toolCompleted = ToolExecutionCompleted.make({
+    call: input.call,
+    result: input.result,
+    createdAtMs: input.endedAtMs
+  })
+
+  return completed === undefined ? [toolCompleted] : [toolCompleted, completed]
+}
+
+const toolErrorResult = (call: ToolCall, error: ToolError) =>
+  ToolResult.make({
+    toolCallId: call.id,
+    content: error.message,
+    isError: true
+  })
+
+const toolErrorEvents = (input: {
+  readonly call: ToolCall
+  readonly error: ToolError
+  readonly model: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+}): ReadonlyArray<AgentEvent> => [
+  ToolExecutionError.make({
+    call: input.call,
+    message: input.error.message,
+    code: toolErrorCode(input.error),
+    createdAtMs: input.endedAtMs
+  }),
+  ...toolCompletionEvents({
+    call: input.call,
+    result: toolErrorResult(input.call, input.error),
+    model: input.model,
+    startedAtMs: input.startedAtMs,
+    endedAtMs: input.endedAtMs
+  })
+]
+
 const unsupportedInputError = (message: string) =>
   new LLMError({
     cause: 'validation_error',
@@ -400,22 +446,15 @@ const makeToolExecutionStream = (
             executor.execute(call).pipe(
               Effect.flatMap(result =>
                 Clock.currentTimeMillis.pipe(
-                  Effect.map(endedAtMs => {
-                    const completed = subagentCompletedEvent({
+                  Effect.map(endedAtMs =>
+                    toolCompletionEvents({
                       call,
                       result,
                       model,
                       startedAtMs,
                       endedAtMs
                     })
-                    const toolCompleted = ToolExecutionCompleted.make({
-                      call,
-                      result,
-                      createdAtMs: endedAtMs
-                    })
-
-                    return completed === undefined ? [toolCompleted] : [toolCompleted, completed]
-                  })
+                  )
                 )
               )
             )
@@ -424,16 +463,16 @@ const makeToolExecutionStream = (
             Stream.catchTag('ToolError', error =>
               Stream.fromEffect(Clock.currentTimeMillis).pipe(
                 Stream.flatMap(endedAtMs =>
-                  Stream.make(
-                    ToolExecutionError.make({
+                  Stream.fromIterable(
+                    toolErrorEvents({
                       call,
-                      message: error.message,
-                      code: toolErrorCode(error),
-                      createdAtMs: endedAtMs
+                      error,
+                      model,
+                      startedAtMs,
+                      endedAtMs
                     })
                   )
-                ),
-                Stream.concat(Stream.fail(error))
+                )
               )
             )
           )

@@ -36,12 +36,27 @@ import {
   run,
   runModelTurn,
   runToolBatch,
+  ToolError,
   ToolExecutor,
   type LLMRequest
 } from '../../src/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '../../src/loop/testing'
 
 const BaseLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
+
+const failingToolExecutorLayer = Layer.succeed(
+  ToolExecutor,
+  ToolExecutor.of({
+    execute: call =>
+      Effect.fail(
+        new ToolError({
+          tool: call.name,
+          message: `Tool failed: ${call.name}`,
+          cause: 'execution'
+        })
+      )
+  })
+)
 
 const noToolReasoningCapabilities = AgentModelCapabilities.make({
   input: AgentContentCapabilities.make({ text: true, image: false, document: false, audio: false }),
@@ -1150,6 +1165,127 @@ describe('run', () => {
       ])
       expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
         result: { toolCallId: 'call_1', content: '72F' }
+      })
+    })
+  )
+
+  it.effect('turns tool batch failures into model-visible error tool results', () =>
+    Effect.gen(function* () {
+      const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+      const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
+        Stream.runCollect,
+        Effect.provide(failingToolExecutorLayer),
+        Effect.provide(LoopConfig.defaultLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      expect(events.map(event => event._tag)).toEqual([
+        'ToolExecutionStarted',
+        'ToolExecutionError',
+        'ToolExecutionCompleted'
+      ])
+      expect(events.find(event => event._tag === 'ToolExecutionError')).toMatchObject({
+        call,
+        message: 'Tool failed: weather',
+        code: 'tool_error'
+      })
+      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        call,
+        result: {
+          toolCallId: call.id,
+          content: 'Tool failed: weather',
+          isError: true
+        }
+      })
+    })
+  )
+
+  it.effect('continues sibling tool calls when one tool fails', () =>
+    Effect.gen(function* () {
+      const failingCall = ToolCall.make({ id: 'call_fail', name: 'weather', params: {} })
+      const successCall = ToolCall.make({ id: 'call_ok', name: 'time', params: {} })
+      const executorLayer = Layer.succeed(
+        ToolExecutor,
+        ToolExecutor.of({
+          execute: call =>
+            call.id === failingCall.id
+              ? Effect.fail(
+                  new ToolError({
+                    tool: call.name,
+                    message: 'Weather unavailable',
+                    cause: 'unavailable'
+                  })
+                )
+              : Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'noon' }))
+        })
+      )
+      const eventsChunk = yield* runToolBatch({ calls: [failingCall, successCall] }).pipe(
+        Stream.runCollect,
+        Effect.provide(executorLayer),
+        Effect.provide(LoopConfig.defaultLayer)
+      )
+
+      const events = Array.from(eventsChunk)
+      const completed = events.flatMap(event =>
+        event._tag === 'ToolExecutionCompleted' ? [event] : []
+      )
+
+      expect(events.find(event => event._tag === 'ToolExecutionError')).toMatchObject({
+        call: failingCall,
+        message: 'Weather unavailable'
+      })
+      expect(completed).toHaveLength(2)
+      expect(completed.find(event => event.call.id === failingCall.id)).toMatchObject({
+        result: { toolCallId: failingCall.id, content: 'Weather unavailable', isError: true }
+      })
+      expect(completed.find(event => event.call.id === successCall.id)).toMatchObject({
+        result: { toolCallId: successCall.id, content: 'noon' }
+      })
+    })
+  )
+
+  it.effect('continues the agent run after a tool failure result', () =>
+    Effect.gen(function* () {
+      const requests: Array<LLMRequest> = []
+      const eventsChunk = yield* run({
+        messages: [UserMessage.make({ content: 'check weather' })],
+        systemPrompt: 'Be brief.',
+        tools: [
+          ToolDef.make({ name: 'weather', description: 'Weather.', parameters: { type: 'object' } })
+        ],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(
+            FauxProvider.layerWithRequests({
+              responses: [
+                Reply.toolCall({ id: 'call_1', name: 'weather', params: { city: 'Paris' } }),
+                Reply.text('retry later')
+              ],
+              requests
+            }),
+            failingToolExecutorLayer
+          ).pipe(Layer.provideMerge(BaseLayer))
+        )
+      )
+
+      const events = Array.from(eventsChunk)
+      const secondRequest = requests[1]
+      expect(events.some(event => event._tag === 'AgentEnd')).toBe(true)
+      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        result: { toolCallId: 'call_1', isError: true }
+      })
+      expect(secondRequest?.messages.map(message => message._tag)).toEqual([
+        'User',
+        'Assistant',
+        'ToolResult'
+      ])
+      expect(secondRequest?.messages[2]).toMatchObject({
+        _tag: 'ToolResult',
+        toolCallId: 'call_1',
+        content: 'Tool failed: weather',
+        isError: true
       })
     })
   )

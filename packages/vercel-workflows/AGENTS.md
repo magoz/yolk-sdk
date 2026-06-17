@@ -24,6 +24,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
 - Keep APIs Workflow-specific and free of app/provider/tool/storage policy.
 - Preserve tool result order by original model tool-call order.
+- Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.
 - Step retries are opt-in per model/tool/close step; default is `noWorkflowStepRetry` (`maxAttempts: 1`) because streamed retries can replay chunks.

@@ -41,8 +41,9 @@ return Effect.fail(modelVisibleToolError({
 }))
 ```
 
-Use `ToolError` for fatal runtime/tool infrastructure failures such as broken wiring, auth/config,
-storage outages, or implementation bugs.
+Thrown `ToolError`s become model-visible failed tool results plus `ToolExecutionError` events,
+so keep messages safe and non-secret. Reserve stream failure for provider/runtime defects,
+aborts, and implementation bugs outside typed tool execution.
 
 ## Task subagents
 

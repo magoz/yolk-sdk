@@ -40,6 +40,7 @@ import {
   providerFailureCause,
   providerFailureRetryable
 } from '../provider-error.ts'
+import { validateProviderTranscript } from '../transcript.ts'
 
 export type OpenAiProviderConfig = {
   readonly chatCompletionsUrl?: string
@@ -340,6 +341,7 @@ export const toOpenAiRequestBody = (
   config?: { readonly maxCompletionTokens?: number }
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
+    yield* validateProviderTranscript(request.messages)
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
     const requestMessages = yield* Effect.forEach(request.messages, toOpenAiMessage)
     const messages = [systemMessage, ...requestMessages]

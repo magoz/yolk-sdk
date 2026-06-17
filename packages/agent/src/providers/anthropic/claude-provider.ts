@@ -48,6 +48,7 @@ import {
   providerFailureCause,
   providerFailureRetryable
 } from '../provider-error.ts'
+import { validateProviderTranscript } from '../transcript.ts'
 
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
@@ -802,6 +803,7 @@ export const toAnthropicClaudeRequestBody = (
   config?: { readonly maxTokens?: number; readonly stream?: boolean }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
+    yield* validateProviderTranscript(request.messages)
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
     const billingSystemBlock = yield* makeAnthropicClaudeBillingSystemBlock(rawMessages)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)

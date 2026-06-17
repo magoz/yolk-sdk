@@ -72,7 +72,7 @@ describe('tool batch property tests', () => {
   )
 
   it.effect.prop(
-    'tool batch execution errors surface after started event and before completion',
+    'tool batch execution errors become model-visible error tool results',
     [toolBatchCaseArbitrary],
     ([input]) =>
       Effect.gen(function* () {
@@ -93,13 +93,18 @@ describe('tool batch property tests', () => {
           Effect.result
         )
 
-        expect(result).toMatchObject({
-          _tag: 'Failure',
-          failure: { _tag: 'ToolError', cause: 'not_found', tool: call.name }
-        })
-        expect(events.map(event => event._tag)).toEqual(['ToolExecutionStarted', 'ToolExecutionError'])
+        expect(result).toMatchObject({ _tag: 'Success' })
+        expect(events.map(event => event._tag)).toEqual([
+          'ToolExecutionStarted',
+          'ToolExecutionError',
+          'ToolExecutionCompleted'
+        ])
         expect(events[0]).toMatchObject({ call })
         expect(events[1]).toMatchObject({ call, code: 'tool_error' })
+        expect(events[2]).toMatchObject({
+          call,
+          result: { toolCallId: call.id, content: `No tool: ${call.name}`, isError: true }
+        })
       }),
     propertyOptions
   )

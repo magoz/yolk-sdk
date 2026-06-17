@@ -43,6 +43,7 @@ import {
   providerFailureCause,
   providerFailureRetryable
 } from '../provider-error.ts'
+import { validateProviderTranscript } from '../transcript.ts'
 
 export type OpenAiCodexReasoningSummary = 'auto' | 'concise' | 'detailed'
 
@@ -377,6 +378,7 @@ export const toOpenAiCodexRequestBody = (
   }
 ): Effect.Effect<OpenAiCodexRequestBody, LLMError> =>
   Effect.gen(function* () {
+    yield* validateProviderTranscript(request.messages)
     const input = Arr.flatten(yield* Effect.forEach(request.messages, messageToCodexInput))
 
     const body: Omit<OpenAiCodexRequestBody, 'tools'> = {

@@ -2,8 +2,11 @@ import { Effect, Layer, Redacted, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AssistantAgentMessage,
   DocumentPart,
+  HostToolCallPart,
   TextPart,
+  ToolCall,
   UserMessage,
   inlineBase64Source
 } from '@yolk-sdk/agent/protocol'
@@ -61,6 +64,33 @@ describe('OpenAI provider', () => {
         ]
       })
     }))
+
+  it.effect('rejects dangling host tool calls before Chat Completions request lowering', () =>
+    Effect.gen(function* () {
+      const error = yield* toOpenAiRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'search' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'search', params: { query: 'yolk' } })
+              })
+            ]
+          })
+        ],
+        tools: []
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'validation_error',
+        retryable: false
+      })
+      expect(error.message).toContain('search (call-1)')
+    })
+  )
 
   it.effect('classifies rate limits with retry-after metadata', () =>
     Effect.gen(function* () {

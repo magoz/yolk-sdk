@@ -232,8 +232,9 @@ data. `makeTool` converts these failures into `ToolResult.isError = true` so the
 see the message and continue. The result includes structured content with `type`, `tool`,
 `reason`, `message`, and optional `details` for UI/runtime handling.
 
-Use `ToolError` for fatal runtime/tool infrastructure failures: broken wiring, auth/config
-defects, storage failures, or implementation bugs.
+Thrown `ToolError`s become model-visible failed tool results plus `ToolExecutionError` events,
+so keep messages safe and non-secret. Reserve stream failure for provider/runtime defects,
+aborts, and implementation bugs outside typed tool execution.
 
 ## Host responsibilities
 

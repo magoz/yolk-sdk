@@ -96,8 +96,16 @@ export {
   assistantContent,
   assistantHostToolCalls,
   assistantReasoningText,
+  danglingHostToolCalls,
   messageContextText,
-  prependMessageContextToContent
+  prependMessageContextToContent,
+  repairDanglingHostToolCalls,
+  validateNoDanglingHostToolCalls
+} from './message.ts'
+export type {
+  DanglingHostToolCall,
+  RepairDanglingHostToolCallsOptions,
+  TranscriptInvariantValidation
 } from './message.ts'
 export { AgentReasoningEffort } from './reasoning.ts'
 export {

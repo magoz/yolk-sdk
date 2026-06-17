@@ -111,7 +111,8 @@ const makeFailingToolLayer = () =>
         id: 'call_1',
         name: 'slow_tool',
         params: {}
-      })
+      }),
+      Reply.text('recovered')
     ),
     Layer.succeed(
       ToolExecutor,
@@ -257,7 +258,7 @@ describe('makeAgentPostResponse', () => {
     })
   )
 
-  it.effect('encodes tool failures as canonical tool errors', () =>
+  it.effect('encodes tool failures as model-visible error tool results', () =>
     Effect.gen(function* () {
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
@@ -272,7 +273,7 @@ describe('makeAgentPostResponse', () => {
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
-      expect(events.map(event => event._tag)).toEqual([
+      expect(events.map(event => event._tag).slice(0, 10)).toEqual([
         'AgentStart',
         'TurnStart',
         'LLMStreamStart',
@@ -281,17 +282,22 @@ describe('makeAgentPostResponse', () => {
         'AssistantMessage',
         'ToolExecutionStarted',
         'ToolExecutionError',
-        'AgentError'
+        'ToolExecutionCompleted',
+        'TurnEnd'
       ])
       expect(events[7]).toMatchObject({
         code: 'tool_timeout',
         message: 'Tool timed out'
       })
       expect(events[8]).toMatchObject({
-        code: 'tool_timeout',
-        message: 'Tool timed out',
-        retryable: true
+        result: {
+          toolCallId: 'call_1',
+          content: 'Tool timed out',
+          isError: true
+        }
       })
+      expect(events.some(event => event._tag === 'AgentError')).toBe(false)
+      expect(events.some(event => event._tag === 'AgentEnd')).toBe(true)
     })
   )
 

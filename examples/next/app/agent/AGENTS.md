@@ -43,7 +43,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Only terminal tool rows show elapsed duration; called/input/approval/question states remain status labels.
 - Question tool rows show original prompt/options from tool input and selected answer from HITL response; assistant recaps are normal model text, not the source of truth.
 - Task tool rows should show subagent type/status/timing from structured result metadata; do not infer subagent state from text content.
-- Tool-origin error results (`ToolResult.isError`) render as failed tool output, distinct from transport/tool execution errors.
+- Tool-origin error results (`ToolResult.isError`) render as failed tool output; `ToolExecutionError` is a lifecycle event, not necessarily a terminal transport error.
 - Render standalone `ToolResult` only for orphan results.
 - Pending agent state is an `AssistantStatus` item (`Thinking`, `Responding`, `Running …`), not fabricated reasoning.
 - Voice user draft is transient UI only; completed voice transcripts append protocol user messages into chat parts.

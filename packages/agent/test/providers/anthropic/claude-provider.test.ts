@@ -255,6 +255,33 @@ describe('Anthropic Claude provider', () => {
       })
     }))
 
+  it.effect('rejects dangling host tool calls before Anthropic request lowering', () =>
+    Effect.gen(function* () {
+      const error = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'search' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'search', params: { query: 'yolk' } })
+              })
+            ]
+          }),
+          UserMessage.make({ content: 'continue' })
+        ],
+        tools: []
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'validation_error',
+        retryable: false
+      })
+      expect(error.message).toContain('search (call-1)')
+    }))
+
   it.effect('normalizes Anthropic tool input schemas to provider-safe root objects', () =>
     Effect.gen(function* () {
       const body = yield* toAnthropicClaudeRequestBody({
