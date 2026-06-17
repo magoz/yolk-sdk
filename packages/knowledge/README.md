@@ -14,6 +14,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 | Subpath | Purpose |
 | --- | --- |
+| `@yolk-sdk/knowledge` | Root context/store/artifact/error helpers |
 | `@yolk-sdk/knowledge/records` | Knowledge record schemas and roles |
 | `@yolk-sdk/knowledge/artifacts` | Artifact catalog and blob-store contract |
 | `@yolk-sdk/knowledge/representations` | Agent-readable/searchable representations |

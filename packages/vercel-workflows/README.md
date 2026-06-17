@@ -36,6 +36,7 @@ The `./workflow` subpath is also exported for explicit imports.
 
 - model step: produce model events/tool calls
 - tool batch step: execute requested tools
+- tool batch result: return one ordered tool-result message per host call, including failed `isError` results
 - awaiting-input state: carry pending HITL hook data, wait through `awaitInput`, then rerun the
   same tool batch with accumulated responses
 - close step: flush/close output stream
@@ -93,6 +94,7 @@ Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are op
 
 - Own Next/Vercel routes, auth, providers, tools, persistence, and telemetry.
 - Encode/decode app transcript/session state into serializable Workflow inputs.
+- Preserve tool result order and never advance the next model step with dangling host tool calls.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.

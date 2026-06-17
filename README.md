@@ -65,6 +65,7 @@ Current agent surfaces:
 - `/agent/workflow`: Vercel Workflow durable run stream
 - streaming NDJSON token events, including `AgentRetry`
 - in-band `AgentError` events for stream failures with safe provider metadata
+- tool execution failures surface as `ToolExecutionError` plus failed `ToolResult`, not terminal `AgentError`
 - stop/cancel aborts active response streams; terminal protocol events drain HTTP bodies to EOF
 - `/api/agent` runs stateless text exchanges from submitted messages
 

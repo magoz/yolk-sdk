@@ -55,7 +55,7 @@ const program = Effect.gen(function* () {
 ## Agent tool output
 
 - Command failure is result data: nonzero exit and timeout return `ToolResult.isError`.
-- Provider/state/config failures fail the Effect with `ToolError`; hosts decide retry/report policy.
+- Provider/state/config failures fail the adapter Effect with `ToolError`; the agent loop turns those into model-visible failed tool results, so keep messages safe.
 - `structuredContent` is plain JSON for workflow/session persistence.
 
 ## Host responsibilities

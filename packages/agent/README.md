@@ -27,11 +27,11 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
 | `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`        | Provider-neutral OAuth token and broker contracts              |
-| `@yolk-sdk/agent/providers/openai` | OpenAI/Codex OAuth and provider mechanics                  |
+| `@yolk-sdk/agent/providers/openai` | OpenAI/Codex OAuth and broker helpers                      |
 | `@yolk-sdk/agent/providers/openai/codex` | OpenAI Codex request and auth helpers              |
 | `@yolk-sdk/agent/providers/openai/codex-provider` | Codex LLM provider factory                 |
 | `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible LLM provider factory              |
-| `@yolk-sdk/agent/providers/anthropic` | Anthropic/Claude OAuth and provider mechanics            |
+| `@yolk-sdk/agent/providers/anthropic` | Anthropic/Claude OAuth and broker helpers                |
 | `@yolk-sdk/agent/providers/anthropic/claude` | Claude request and auth helpers                    |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory              |
 | `@yolk-sdk/agent/skillset`     | Portable skill and slash-command parsing/catalogs              |
@@ -41,11 +41,14 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ```ts
 import {
+  danglingHostToolCalls,
   hitlResponseEvent,
   makeSubagentRunId,
   ProviderErrorInfo,
   questionResponseStructuredContent,
-  UserMessage
+  repairDanglingHostToolCalls,
+  UserMessage,
+  validateNoDanglingHostToolCalls
 } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
@@ -189,6 +192,14 @@ Annotations must be JSON-compatible. Use stable app-owned keys, preferably `snak
 strings for dates inside annotations. Never put secrets, credentials, private ids, auth state, or
 hidden policy in annotations, author, or timestamps; providers may send them to models.
 
+## Transcript invariants
+
+Every assistant host tool call must be followed by a matching `ToolResultMessage` before the next
+non-tool message/provider request. Use `validateNoDanglingHostToolCalls` for preflight checks,
+`danglingHostToolCalls` for diagnostics, and `repairDanglingHostToolCalls` only when loading older
+persisted transcripts that already have gaps. Built-in providers reject dangling host tool calls
+before vendor lowering with a non-retryable validation error.
+
 ## Human-in-the-loop
 
 HITL is protocol-level, not UI-level:
@@ -240,6 +251,7 @@ aborts, and implementation bugs outside typed tool execution.
 
 - Choose models/providers and map provider streams into protocol events.
 - Persist sessions, transcripts, and append logs.
+- Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.
 - Provide tools, approval policy, auth, storage, and observability.
 - Compact context and decide memory/search policy.

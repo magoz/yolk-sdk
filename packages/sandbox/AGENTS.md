@@ -18,7 +18,7 @@
 - `src/agent.ts` may depend on `@yolk-sdk/agent/tools`, `@yolk-sdk/agent/protocol`, and `@yolk-sdk/agent/loop`; core must not.
 - Hosts own identity, auth, storage adapters, lifecycle cleanup scans, env/secrets, snapshots, git policy, approvals, and UI.
 - SDK only marks the `sandbox` tool destructive; hosts enforce safety/approval policy.
-- Command failure is result data; provider/state/config failures are Effect failures.
+- Command failure is result data; provider/state/config failures are `ToolError`s with safe messages that the agent loop renders as failed tool results.
 
 ## Design rules
 

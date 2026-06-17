@@ -15,11 +15,11 @@
 | `@yolk-sdk/agent/tools` | `src/tools` | Generic tool module registry |
 | `@yolk-sdk/agent/react` | `src/react` | Headless React chat hook/state helpers |
 | `@yolk-sdk/agent/oauth` | `src/oauth` | Provider-neutral OAuth token contracts |
-| `@yolk-sdk/agent/providers/openai` | `src/providers/openai` | OpenAI/Codex OAuth and provider mechanics |
+| `@yolk-sdk/agent/providers/openai` | `src/providers/openai` | OpenAI/Codex OAuth and broker helpers |
 | `@yolk-sdk/agent/providers/openai/codex` | `src/providers/openai/codex.ts` | OpenAI Codex request and auth helpers |
 | `@yolk-sdk/agent/providers/openai/codex-provider` | `src/providers/openai/codex-provider.ts` | Codex LLM provider factory |
 | `@yolk-sdk/agent/providers/openai/provider` | `src/providers/openai/provider.ts` | OpenAI-compatible LLM provider factory |
-| `@yolk-sdk/agent/providers/anthropic` | `src/providers/anthropic` | Anthropic/Claude OAuth and provider mechanics |
+| `@yolk-sdk/agent/providers/anthropic` | `src/providers/anthropic` | Anthropic/Claude OAuth and broker helpers |
 | `@yolk-sdk/agent/providers/anthropic/claude` | `src/providers/anthropic/claude.ts` | Claude request and auth helpers |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory |
 | `@yolk-sdk/agent/skillset` | `src/skillset` | Portable skill + command parsing/catalog |
