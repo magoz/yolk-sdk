@@ -22,7 +22,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/loop`         | Stateless LLM/tool loop                                        |
 | `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers                   |
 | `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
-| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, and client state helpers   |
+| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
 | `@yolk-sdk/agent/compaction`   | Pure host-owned context budget, planning, and transformer utils |
 | `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
 | `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
@@ -43,6 +43,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 import {
   hitlResponseEvent,
   makeSubagentRunId,
+  ProviderErrorInfo,
   questionResponseStructuredContent,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
@@ -88,6 +89,24 @@ const program = run({
 
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
+
+## Provider failures and retries
+
+Provider adapters classify safe failure metadata at the boundary. The loop owns bounded retry
+policy and emits protocol-visible retry/error state:
+
+- `ProviderErrorInfo` carries safe provider id, failure kind, HTTP status, provider code, and
+  optional `retryAfterMs`.
+- `AgentRetry.provider` exposes current retry metadata and chosen `delayMs`.
+- `AgentError.provider` preserves final terminal metadata.
+- `AgentErrorCode` includes `rate_limit`, `overloaded`, `context_overflow`, and generic
+  `provider_error`.
+- Client and React state keep `error: string | null` for compatibility and add typed `errorInfo` /
+  `retryInfo`.
+- `buildAgentChatItems` can project active retry state as an `AgentChatItem` with `_tag: 'Retry'`.
+
+Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
+typed retry/error state.
 
 ## Context compaction
 
@@ -220,6 +239,7 @@ defects, storage failures, or implementation bugs.
 
 - Choose models/providers and map provider streams into protocol events.
 - Persist sessions, transcripts, and append logs.
+- Persist terminal provider failures and clear active run ids where applicable.
 - Provide tools, approval policy, auth, storage, and observability.
 - Compact context and decide memory/search policy.
 

@@ -63,8 +63,8 @@ Current agent surfaces:
 - `/agent/next`: no durable persistence; browser sends full protocol transcript each turn
 - `/agent/cloudflare`: Worker/Durable Object WS runtime with append-log storage
 - `/agent/workflow`: Vercel Workflow durable run stream
-- streaming NDJSON token events
-- in-band `AgentError` events for stream failures
+- streaming NDJSON token events, including `AgentRetry`
+- in-band `AgentError` events for stream failures with safe provider metadata
 - stop/cancel aborts active response streams; terminal protocol events drain HTTP bodies to EOF
 - `/api/agent` runs stateless text exchanges from submitted messages
 

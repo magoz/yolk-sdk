@@ -2,6 +2,8 @@
 
 Written against `37dc8a0d`.
 
+Execution status: IMPLEMENTED LOCAL. Yolk phases 1-4/6 are in this worktree and passed gates. Speldosa phase 5 is implemented in sibling `../speldosa` against local package tarballs; do not commit those tarball paths. Publish or version a lockstep canary before final Speldosa commit/release.
+
 Scope: `yolk-sdk` first, then sibling consumer `../speldosa`.
 
 ## Motivation
@@ -198,31 +200,31 @@ In `../speldosa` after Yolk changes are published or linked:
 
 ### Yolk SDK
 
-- [ ] YOLK-01 Add provider failure metadata schemas.
-- [ ] YOLK-02 Add `overloaded` `AgentErrorCode` and aligned loop/provider cause.
-- [ ] YOLK-03 Extend `LLMError`, `AgentError`, `AgentRetry` with metadata.
-- [ ] YOLK-04 Respect provider `retryAfterMs` in loop retry delay.
-- [ ] YOLK-05 Use opencode-style backoff: 2s base, factor 2, 30s unhinted cap.
-- [ ] YOLK-06 Cap hinted retry delays at `2_147_483_647ms`.
-- [ ] YOLK-07 Preserve `LoopConfig.maxRetries` default `2` retry attempts.
-- [ ] YOLK-08 Test retry metadata + retry-after behavior.
-- [ ] YOLK-09 Test `maxRetries: 2` caps at three total provider calls.
-- [ ] YOLK-10 Classify OpenAI Chat HTTP failures with metadata.
-- [ ] YOLK-11 Classify OpenAI Codex HTTP/SSE/stream failures.
-- [ ] YOLK-12 Classify Anthropic HTTP/SSE/stream failures.
-- [ ] YOLK-13 Classify Cloudflare Codex proxy/WS failures.
-- [ ] YOLK-14 Replace overload-is-non-retryable regression.
-- [ ] YOLK-15 Add provider package tests for rate limit/overload/stream read failures.
-- [ ] YOLK-16 Add client `errorInfo` + `retryInfo`.
-- [ ] YOLK-17 Add React `errorInfo` + `retryInfo`.
-- [ ] YOLK-18 Add client/react state tests.
-- [ ] YOLK-19 Surface retry/provider info in Next example activity/status UI.
-- [ ] YOLK-20 Update Yolk docs/AGENTS notes.
-- [ ] YOLK-21 Run `pnpm tsc`.
-- [ ] YOLK-22 Run `pnpm lint`.
-- [ ] YOLK-23 Run `pnpm packages:check`.
-- [ ] YOLK-24 Run `pnpm cloudflare:check`.
-- [ ] YOLK-25 Run `pnpm test:run` if changes are broad.
+- [x] YOLK-01 Add provider failure metadata schemas.
+- [x] YOLK-02 Add `overloaded` `AgentErrorCode` and aligned loop/provider cause.
+- [x] YOLK-03 Extend `LLMError`, `AgentError`, `AgentRetry` with metadata.
+- [x] YOLK-04 Respect provider `retryAfterMs` in loop retry delay.
+- [x] YOLK-05 Use opencode-style backoff: 2s base, factor 2, 30s unhinted cap.
+- [x] YOLK-06 Cap hinted retry delays at `2_147_483_647ms`.
+- [x] YOLK-07 Preserve `LoopConfig.maxRetries` default `2` retry attempts.
+- [x] YOLK-08 Test retry metadata + retry-after behavior.
+- [x] YOLK-09 Test `maxRetries: 2` caps at three total provider calls.
+- [x] YOLK-10 Classify OpenAI Chat HTTP failures with metadata.
+- [x] YOLK-11 Classify OpenAI Codex HTTP/SSE/stream failures.
+- [x] YOLK-12 Classify Anthropic HTTP/SSE/stream failures.
+- [x] YOLK-13 Classify Cloudflare Codex proxy/WS failures.
+- [x] YOLK-14 Replace overload-is-non-retryable regression.
+- [x] YOLK-15 Add provider package tests for rate limit/overload/stream read failures.
+- [x] YOLK-16 Add client `errorInfo` + `retryInfo`.
+- [x] YOLK-17 Add React `errorInfo` + `retryInfo`.
+- [x] YOLK-18 Add client/react state tests.
+- [x] YOLK-19 Surface retry/provider info in Next example activity/status UI.
+- [x] YOLK-20 Update Yolk docs/AGENTS notes.
+- [x] YOLK-21 Run `pnpm tsc`.
+- [x] YOLK-22 Run `pnpm lint`.
+- [x] YOLK-23 Run `pnpm packages:check`.
+- [x] YOLK-24 Run `pnpm cloudflare:check`.
+- [x] YOLK-25 Run `pnpm test:run` if changes are broad.
 
 ### Speldosa
 
