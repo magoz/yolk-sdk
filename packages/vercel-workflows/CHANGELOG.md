@@ -1,5 +1,7 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.22
+
 ## 0.1.0-canary.21
 
 ### Patch Changes

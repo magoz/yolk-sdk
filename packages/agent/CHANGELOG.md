@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.22
+
+### Patch Changes
+
+- 378cd92: Turn recoverable tool execution failures into model-visible error tool results, add transcript repair/validation helpers, and preflight dangling tool calls before provider lowering.
+
 ## 0.1.0-canary.21
 
 ### Patch Changes

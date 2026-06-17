@@ -12,7 +12,6 @@
     "@yolk-sdk/sandbox": "0.1.0-canary.17"
   },
   "changesets": [
-    "better-provider-errors",
     "brave-hitl-rules",
     "brisk-claude-streams",
     "curvy-claude-headers",
@@ -26,6 +25,7 @@
     "next-canary-release",
     "quiet-owls-approve",
     "quiet-timers-jump",
+    "safe-tool-errors",
     "sandbox-execution-plane",
     "sharp-provider-docs",
     "slow-tools-report",
