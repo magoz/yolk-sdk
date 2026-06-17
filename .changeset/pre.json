@@ -12,6 +12,7 @@
     "@yolk-sdk/sandbox": "0.1.0-canary.17"
   },
   "changesets": [
+    "better-provider-errors",
     "brave-hitl-rules",
     "brisk-claude-streams",
     "curvy-claude-headers",
@@ -29,7 +30,6 @@
     "sharp-provider-docs",
     "slow-tools-report",
     "smooth-sandboxes-reuse",
-    "soft-text-docs",
     "ten-frogs-smile",
     "tidy-subagents-serve",
     "warm-attachment-sources",

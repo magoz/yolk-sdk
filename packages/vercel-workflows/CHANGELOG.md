@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.21
+
+### Patch Changes
+
+- Surface typed provider failure metadata, retry state, and retry-aware chat items.
+
 ## 0.1.0-canary.20
 
 ## 0.1.0-canary.19
