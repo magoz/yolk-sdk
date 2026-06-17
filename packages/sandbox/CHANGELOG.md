@@ -1,5 +1,12 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.23
+
+### Patch Changes
+
+- Updated dependencies [e8ac8ce]
+  - @yolk-sdk/agent@0.1.0-canary.23
+
 ## 0.1.0-canary.22
 
 ### Patch Changes

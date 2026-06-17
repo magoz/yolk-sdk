@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.23
+
+### Patch Changes
+
+- e8ac8ce: Support URL-backed image and PDF attachment lowering in agent providers.
+
 ## 0.1.0-canary.22
 
 ### Patch Changes
