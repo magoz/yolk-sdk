@@ -1,4 +1,4 @@
-# Agent Loop Comparison — Yolk vs Pi vs OpenCode vs Flue
+# Agent / Framework Comparison — Yolk vs Pi vs OpenCode vs Flue
 
 Four agent harnesses. Different layers, different trade-offs.
 
@@ -12,6 +12,79 @@ Flue is the odd one: it is a headless framework around Pi's core loop, not a new
 | Test runner    | TBD (Effect-native)                     | Vitest                              | Bun test                               | None found; build/lint/typecheck + manual examples  |
 | Primary use    | Org intelligence platform (headless DO) | Terminal coding agent (interactive) | CLI/desktop coding agent (interactive) | Headless programmable agents (HTTP, CI, Cloudflare) |
 | Source studied | This repo                               | `~/dev/docs/pi-mono`                | `~/dev/docs/opencode`                  | `~/dev/docs/flue`                                   |
+
+## Vercel Eve addendum
+
+Checked: `.repos/eve` @ `12970f0`, Eve `0.11.1`.
+
+Eve is not just a loop peer. It is a filesystem-first durable agent framework:
+
+```txt
+agent/
+  agent.ts
+  instructions.md
+  tools/*
+  skills/*
+  channels/*
+  schedules/*
+  subagents/*
+evals/*
+```
+
+Eve compiles this to `.eve/` artifacts and, on Vercel builds, `.vercel/output`.
+
+| Axis | Eve | Yolk |
+| --- | --- | --- |
+| Shape | Framework/product | SDK/substrate |
+| Authoring | Filesystem conventions, path-derived names | Explicit package APIs and app wiring |
+| Runtime | Workflow-backed durable sessions by default | Stateless loop + generic runtime + host adapters |
+| Persistence | Workflow snapshots/state | Append-only event log + revisions |
+| HITL | Built-in approvals/questions, channel-rendered | Protocol-level approvals/questions, app-rendered |
+| Tools | `defineTool`, Standard Schema/Zod/JSON Schema | Effect Schema `makeTool`, explicit names |
+| Channels | First-class HTTP/Slack/GitHub/Discord/etc | App-owned Next/Workflow/Cloudflare transports |
+| Evals | `defineEval`, `eve eval`, reporters, fixture e2e | Vitest/property/e2e; no eval product yet |
+| Providers | AI SDK / AI Gateway centered | Effect `LLMProvider`, provider-neutral |
+| Sandbox | Productized workspace + seed/prewarm | Domain-free contract + Vercel adapter |
+| Type posture | Strong public DX, pragmatic internals | Stricter no-`any`/no-casts policy |
+| Portability | Claims anywhere; Vercel/Nitro/Workflow centered | Next + Vercel + Cloudflare paths are explicit |
+
+Eve advantages:
+
+- Great onboarding: `npx eve init`, `eve dev`, `eve info`, `eve build`.
+- Filesystem conventions reduce user decisions.
+- Durable runtime is productized: session → turn → step, parked work, resume tokens.
+- Evals are first-class and run against real HTTP sessions.
+- Channels are core, not app glue.
+- Vercel deploy/dashboard story is tight.
+- React/Vue/Svelte hooks share a framework-agnostic store.
+
+Yolk advantages:
+
+- Cleaner public package boundaries.
+- Core stays platform/provider/app agnostic.
+- Explicit protocol/event-log persistence is auditable.
+- Effect-native schemas and services at boundaries.
+- Real Cloudflare Durable Object adapter proves portability.
+- App owns auth, DB, prompts, provider selection, tool policy, UI.
+
+Steal:
+
+1. First-class eval surface: `defineEval`, real transport runner, JUnit/Braintrust reporter seam.
+2. Optional agent definition layer over current primitives.
+3. Inspectable build/runtime manifest, maybe `.yolk/`.
+4. Stable session transport contract with create/continue/stream/replay cursor.
+5. Framework-agnostic client store, React wrapper on top.
+6. Sandbox seed/prewarm story.
+
+Avoid:
+
+- One mega-package.
+- Workflow/Vercel assumptions in core packages.
+- AI SDK or AI Gateway as required provider layer.
+- Path-derived identity as the only model.
+- Hidden platform persistence replacing app-owned storage seams.
+
+Verdict: Eve validates the upper-framework direction and raises DX expectations. Yolk should keep the portable typed SDK core, then add an optional framework/DX layer on top.
 
 ---
 

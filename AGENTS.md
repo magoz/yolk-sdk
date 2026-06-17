@@ -93,6 +93,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Repo | Location | Use |
 | --- | --- | --- |
 | `effect-smol` | `.repos/effect` | Effect v4 source/docs |
+| `eve` | `.repos/eve` | Vercel durable agent framework competitor/reference |
 | `ai-sdk` | `.repos/ai` | SDK/package/examples monorepo reference |
 | `opencode` | `.repos/opencode` | Codex/OpenAI agent protocol/provider reference |
 | `opencode-simulation` | `.repos/opencode-simulation` | opencode simulation/property testing reference |
