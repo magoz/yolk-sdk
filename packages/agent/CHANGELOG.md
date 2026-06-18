@@ -1,5 +1,7 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.24
+
 ## 0.1.0-canary.23
 
 ### Patch Changes

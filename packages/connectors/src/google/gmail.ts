@@ -59,14 +59,16 @@ export class GmailDraftComposeInput extends Schema.Class<GmailDraftComposeInput>
   subject: Schema.String,
   body: Schema.String,
   cc: Schema.optional(Schema.Array(Schema.String)),
-  bcc: Schema.optional(Schema.Array(Schema.String))
+  bcc: Schema.optional(Schema.Array(Schema.String)),
+  from: Schema.optional(Schema.String)
 }) {}
 
 export class GmailDraftReplyInput extends Schema.Class<GmailDraftReplyInput>(
   'GmailDraftReplyInput'
 )({
   messageId: Schema.String,
-  body: Schema.String
+  body: Schema.String,
+  from: Schema.optional(Schema.String)
 }) {}
 
 export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
@@ -77,7 +79,8 @@ export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
   subject: Schema.String,
   body: Schema.String,
   cc: Schema.optional(Schema.Array(Schema.String)),
-  bcc: Schema.optional(Schema.Array(Schema.String))
+  bcc: Schema.optional(Schema.Array(Schema.String)),
+  from: Schema.optional(Schema.String)
 }) {}
 
 export class GmailGetAttachmentInput extends Schema.Class<GmailGetAttachmentInput>(
@@ -111,6 +114,19 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
     })
   ),
   raw: Schema.optional(Schema.String)
+}) {}
+
+export class GmailSendAs extends Schema.Class<GmailSendAs>('GmailSendAs')({
+  sendAsEmail: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.String),
+  isDefault: Schema.optional(Schema.Boolean),
+  verificationStatus: Schema.optional(Schema.String)
+}) {}
+
+export class GmailListSendAsOutput extends Schema.Class<GmailListSendAsOutput>(
+  'GmailListSendAsOutput'
+)({
+  sendAs: Schema.optional(Schema.Array(GmailSendAs))
 }) {}
 
 export const GmailUnknownOutput = Schema.Unknown
@@ -180,6 +196,95 @@ const splitAddresses = (value: string | undefined) =>
         .split(',')
         .map(address => address.trim())
         .filter(address => address !== '')
+
+const extractEmailAddress = (value: string) => {
+  const match = /<([^<>]+)>/.exec(value)
+
+  return (match?.[1] ?? value).trim().toLowerCase()
+}
+
+const sendAsEmailsFromOutput = (output: GmailListSendAsOutput) =>
+  new Set(
+    (output.sendAs ?? [])
+      .flatMap(sendAs => (sendAs.sendAsEmail === undefined ? [] : [sendAs.sendAsEmail]))
+      .map(extractEmailAddress)
+  )
+
+const fetchSendAsOutput = (token: string) =>
+  Effect.gen(function* () {
+    const http = yield* ConnectorHttpClient
+    const response = yield* http.request(
+      gmailRequest({ token, method: 'GET', path: '/users/me/settings/sendAs' })
+    )
+
+    if (!isSuccessStatus(response.status)) {
+      return gmailProviderFailure(
+        'gmail_list_send_as_failed',
+        'Gmail list send-as aliases failed',
+        response.status,
+        response.body
+      )
+    }
+
+    const output = yield* decodeJsonResponse(GmailListSendAsOutput, response)
+    return ActionResult.success(output)
+  })
+
+const fetchSendAsEmails = (token: string) =>
+  Effect.gen(function* () {
+    const result = yield* fetchSendAsOutput(token)
+
+    switch (result._tag) {
+      case 'Failure':
+        return result
+      case 'Success':
+        return ActionResult.success(sendAsEmailsFromOutput(result.value))
+    }
+  })
+
+const fetchOptionalSendAsEmails = (token: string) =>
+  fetchSendAsEmails(token).pipe(
+    Effect.map(result => (result._tag === 'Success' ? result.value : new Set<string>()))
+  )
+
+const validateFromAddress = (fromAddress: string, sendAsEmails: ReadonlySet<string>) => {
+  const email = extractEmailAddress(fromAddress)
+
+  if (sendAsEmails.has(email)) return ActionResult.success(fromAddress)
+
+  const available = [...sendAsEmails].sort().join(', ')
+  const suffix = available === '' ? '' : ` Available addresses: ${available}`
+
+  return ActionResult.failure({
+    code: 'gmail_from_not_configured',
+    message: `"${fromAddress}" is not a configured Gmail send-as address.${suffix}`
+  })
+}
+
+const validateOptionalFromAddress = (token: string, fromAddress: string | undefined) =>
+  Effect.gen(function* () {
+    if (fromAddress === undefined) return ActionResult.success(undefined)
+
+    const sendAsEmails = yield* fetchSendAsEmails(token)
+    if (sendAsEmails._tag === 'Failure') return sendAsEmails
+
+    return validateFromAddress(fromAddress, sendAsEmails.value)
+  })
+
+const detectReplyFromAddress = (
+  original: GmailMessageOutput,
+  sendAsEmails: ReadonlySet<string>
+): string | undefined => {
+  for (const headerName of ['Delivered-To', 'To', 'Cc']) {
+    const header = headerValue(original, headerName)
+    for (const address of splitAddresses(header)) {
+      const email = extractEmailAddress(address)
+      if (sendAsEmails.has(email)) return email
+    }
+  }
+
+  return undefined
+}
 
 const replySubject = (subject: string | undefined) => {
   if (subject === undefined || subject.trim() === '') {
@@ -426,18 +531,33 @@ export const gmailDraftComposeAction = defineAction({
   inputSchema: GmailDraftComposeInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
-    runGmailJsonAction(
-      integration,
-      token =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(integration)
+      const fromValidation = yield* validateOptionalFromAddress(token, input.from)
+      if (fromValidation._tag === 'Failure') return fromValidation
+
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
         gmailRequest({
           token,
           method: 'POST',
           path: '/users/me/drafts',
           body: { message: { raw: rawEmail(input) } }
-        }),
-      'gmail_draft_compose_failed',
-      'Gmail draft compose failed'
-    )
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return gmailProviderFailure(
+          'gmail_draft_compose_failed',
+          'Gmail draft compose failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+      return ActionResult.success(output)
+    })
 })
 
 export const gmailDraftUpdateAction = defineAction({
@@ -446,18 +566,33 @@ export const gmailDraftUpdateAction = defineAction({
   inputSchema: GmailDraftUpdateInput,
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
-    runGmailJsonAction(
-      integration,
-      token =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(integration)
+      const fromValidation = yield* validateOptionalFromAddress(token, input.from)
+      if (fromValidation._tag === 'Failure') return fromValidation
+
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
         gmailRequest({
           token,
           method: 'PUT',
           path: `/users/me/drafts/${encodeURIComponent(input.draftId)}`,
           body: { id: input.draftId, message: { raw: rawEmail(input) } }
-        }),
-      'gmail_draft_update_failed',
-      'Gmail draft update failed'
-    )
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return gmailProviderFailure(
+          'gmail_draft_update_failed',
+          'Gmail draft update failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+      return ActionResult.success(output)
+    })
 })
 
 export const gmailDraftDeleteAction = defineAction({
@@ -523,11 +658,34 @@ export const gmailDraftReplyAction = defineAction({
         Schema.Struct({ emailAddress: Schema.optional(Schema.String) }),
         profileResponse
       )
-      const ownEmail = profile.emailAddress?.toLowerCase()
+      const requestedFrom = input.from
+      const sendAsEmailsResult =
+        requestedFrom === undefined
+          ? ActionResult.success(yield* fetchOptionalSendAsEmails(token))
+          : yield* fetchSendAsEmails(token).pipe(
+              Effect.flatMap(result => {
+                if (result._tag === 'Failure') return Effect.succeed(result)
+
+                const fromValidation = validateFromAddress(requestedFrom, result.value)
+                return Effect.succeed(
+                  fromValidation._tag === 'Failure'
+                    ? fromValidation
+                    : ActionResult.success(result.value)
+                )
+              })
+            )
+
+      if (sendAsEmailsResult._tag === 'Failure') return sendAsEmailsResult
+
+      const ownEmails = new Set([
+        ...sendAsEmailsResult.value,
+        ...(profile.emailAddress === undefined ? [] : [extractEmailAddress(profile.emailAddress)])
+      ])
+      const fromAddress = requestedFrom ?? detectReplyFromAddress(original, sendAsEmailsResult.value)
       const recipients = splitAddresses(headerValue(original, 'From'))
         .concat(splitAddresses(headerValue(original, 'To')))
         .concat(splitAddresses(headerValue(original, 'Cc')))
-        .filter(address => ownEmail === undefined || !address.toLowerCase().includes(ownEmail))
+        .filter(address => !ownEmails.has(extractEmailAddress(address)))
       const messageId = headerValue(original, 'Message-ID')
       const references = [headerValue(original, 'References'), messageId]
         .filter((value): value is string => value !== undefined && value.trim() !== '')
@@ -544,6 +702,7 @@ export const gmailDraftReplyAction = defineAction({
                 to: recipients,
                 subject: replySubject(headerValue(original, 'Subject')),
                 body: input.body,
+                from: fromAddress,
                 inReplyTo: messageId,
                 references: references === '' ? undefined : references
               })
@@ -585,6 +744,18 @@ export const gmailGetAttachmentAction = defineAction({
     )
 })
 
+export const gmailListSendAsAction = defineAction({
+  id: 'gmail.list_send_as',
+  description: 'List configured Gmail send-as addresses.',
+  inputSchema: Schema.Struct({}),
+  outputSchema: GmailListSendAsOutput,
+  execute: ({ integration }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(integration)
+      return yield* fetchSendAsOutput(token)
+    })
+})
+
 export const gmailListAccountsAction = defineAction({
   id: 'gmail.list_accounts',
   description: 'List the configured Gmail account.',
@@ -613,5 +784,6 @@ export const gmailActions = [
   gmailTrashAction,
   gmailUntrashAction,
   gmailDraftDeleteAction,
+  gmailListSendAsAction,
   gmailListAccountsAction
 ]

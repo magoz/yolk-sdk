@@ -152,12 +152,14 @@ const result = GoogleConnector.invoke({
 
 Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
 
+Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. The Google OAuth slot includes `gmail.settings.basic` for send-as listing and validation. Hosts that run Google OAuth should request `GoogleOAuthCredentialSlot.requiredScopes`; existing credentials may need re-consent after scope changes.
+
 ## Provider actions
 
 | Subpath | Actions |
 | --- | --- |
 | `@yolk-sdk/connectors/figma` | `figma.mcp_auth` |
-| `@yolk-sdk/connectors/google` | Gmail search/list/message/thread/draft/label/trash actions; Calendar calendar/event/account actions |
+| `@yolk-sdk/connectors/google` | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email` |
 | `@yolk-sdk/connectors/notion` | Notion search, page, block, database, data source, user, and comment actions |
 | `@yolk-sdk/connectors/r2-storage` | `r2_storage.upload_url` |
@@ -184,7 +186,7 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 ## Host responsibilities
 
 - Store, encrypt, refresh, revoke, and audit credentials.
-- Own OAuth routes, callbacks, state, and token persistence.
+- Own OAuth routes, callbacks, state, token persistence, and required-scope consent.
 - Map integrations to users, workspaces, agents, or projects outside this package.
 - Authorize action execution before invoking connectors.
 

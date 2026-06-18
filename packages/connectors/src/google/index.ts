@@ -39,6 +39,8 @@ export {
   gmailListAction,
   gmailListDraftsAction,
   gmailListLabelsAction,
+  gmailListSendAsAction,
+  GmailListSendAsOutput,
   GmailMessageIdInput,
   gmailSearchAction,
   gmailModifyLabelsAction,
@@ -47,6 +49,7 @@ export {
   GmailMessageRef,
   GmailSearchInput,
   GmailSearchOutput,
+  GmailSendAs,
   gmailTrashAction,
   gmailUntrashAction,
   googleGmailApiBaseUrl
@@ -59,6 +62,7 @@ export {
   googleConnectorId,
   googleGmailReadonlyScope,
   googleGmailSendScope,
+  googleGmailSettingsBasicScope,
   googleOAuthAuthorizeUrl,
   googleOAuthSlotId,
   googleOAuthTokenUrl

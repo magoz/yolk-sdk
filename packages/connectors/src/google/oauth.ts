@@ -7,6 +7,8 @@ export const googleOAuthTokenUrl = 'https://oauth2.googleapis.com/token'
 
 export const googleGmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.readonly'
 export const googleGmailSendScope = 'https://www.googleapis.com/auth/gmail.send'
+export const googleGmailSettingsBasicScope =
+  'https://www.googleapis.com/auth/gmail.settings.basic'
 export const googleCalendarReadonlyScope = 'https://www.googleapis.com/auth/calendar.readonly'
 export const googleCalendarEventsScope = 'https://www.googleapis.com/auth/calendar.events'
 
@@ -16,6 +18,7 @@ export const GoogleOAuthCredentialSlot = CredentialSlot.make({
   requiredScopes: [
     googleGmailReadonlyScope,
     googleGmailSendScope,
+    googleGmailSettingsBasicScope,
     googleCalendarReadonlyScope,
     googleCalendarEventsScope
   ]

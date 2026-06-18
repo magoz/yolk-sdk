@@ -20,6 +20,9 @@ import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import { FigmaConnector } from '@yolk-sdk/connectors/figma'
 import {
+  gmailDraftComposeAction,
+  gmailDraftReplyAction,
+  gmailListSendAsAction,
   GoogleConnector,
   GoogleOAuthCredentialSlot,
   googleCalendarCreateEventAction
@@ -50,6 +53,32 @@ import {
 const TestInput = Schema.Struct({ text: Schema.String })
 const TestOutput = Schema.Struct({ value: Schema.String })
 
+const encodeBase64Url = (value: string) => Buffer.from(value, 'utf8').toString('base64url')
+
+const rawTextEmail = (input: {
+  readonly to: ReadonlyArray<string>
+  readonly subject: string
+  readonly body: string
+  readonly cc?: ReadonlyArray<string>
+  readonly bcc?: ReadonlyArray<string>
+  readonly from?: string
+  readonly inReplyTo?: string
+  readonly references?: string
+}) => {
+  const headers = [
+    ...(input.from === undefined ? [] : [`From: ${input.from}`]),
+    ...(input.to.length === 0 ? [] : [`To: ${input.to.join(', ')}`]),
+    ...(input.cc === undefined ? [] : [`Cc: ${input.cc.join(', ')}`]),
+    ...(input.bcc === undefined ? [] : [`Bcc: ${input.bcc.join(', ')}`]),
+    `Subject: ${input.subject}`,
+    ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${input.inReplyTo}`]),
+    ...(input.references === undefined ? [] : [`References: ${input.references}`]),
+    'Content-Type: text/plain; charset=utf-8'
+  ]
+
+  return encodeBase64Url(`${headers.join('\r\n')}\r\n\r\n${input.body}`)
+}
+
 const testAction = defineAction({
   id: 'test.echo',
   description: 'Echo test action.',
@@ -72,6 +101,67 @@ const TestConnector = defineConnector({
 })
 
 const integration = makeIntegration({ connectorId: 'test' })
+
+const googleIntegration = makeIntegration({
+  connectorId: 'google',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: GoogleOAuthCredentialSlot.id,
+      credentialRef: 'google-token'
+    })
+  ]
+})
+
+const GoogleCredentialResolverTest = Layer.succeed(
+  CredentialResolver,
+  CredentialResolver.of({
+    resolve: () =>
+      Effect.succeed(
+        OAuthCredential.make({
+          _tag: 'OAuthCredential',
+          provider: 'google',
+          accessToken: 'google_token',
+          expiresAt: Date.now() + 60_000
+        })
+      )
+  })
+)
+
+const jsonHttpResponse = (body: string) =>
+  ConnectorHttpResponse.make({
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body
+  })
+
+const makeConnectorHttpClientTest = (
+  requests: Array<ConnectorHttpRequest>,
+  responses: ReadonlyArray<ConnectorHttpResponse>
+) => {
+  let index = 0
+
+  return Layer.succeed(
+    ConnectorHttpClient,
+    ConnectorHttpClient.of({
+      request: request => {
+        requests.push(request)
+        const response = responses.at(index)
+        index += 1
+
+        if (response === undefined) {
+          return Effect.fail(
+            new ConnectorError({
+              cause: 'validation_failed',
+              message: 'Unexpected test request'
+            })
+          )
+        }
+
+        return Effect.succeed(response)
+      }
+    })
+  )
+}
 
 type JsonRequestCase = {
   readonly name: string
@@ -247,6 +337,7 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.trash',
       'gmail.untrash',
       'gmail.draft_delete',
+      'gmail.list_send_as',
       'gmail.list_accounts',
       'calendar.list_calendars',
       'calendar.list_events',
@@ -458,6 +549,167 @@ describe('@yolk-sdk/connectors', () => {
       })
     )
   }
+
+  it.effect('validates Gmail draft compose send-as aliases', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"sendAs":[{"sendAsEmail":"elina@speldosa.app"}]}'),
+        jsonHttpResponse('{"id":"draft_1"}')
+      ])
+
+      const result = yield* gmailDraftComposeAction
+        .execute({
+          integration: googleIntegration,
+          input: {
+            to: ['lead@example.com'],
+            subject: 'Hej',
+            body: 'Välkommen',
+            from: 'Elina <elina@speldosa.app>'
+          }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      const sendAsRequest = requests.at(0)
+      const draftRequest = requests.at(1)
+      if (sendAsRequest === undefined || draftRequest === undefined) {
+        throw new Error('Expected Gmail requests')
+      }
+
+      expect(result).toMatchObject({ _tag: 'Success' })
+      expect(sendAsRequest).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs'
+      })
+      expect(draftRequest).toMatchObject({
+        method: 'POST',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts',
+        body: JSON.stringify({
+          message: {
+            raw: rawTextEmail({
+              to: ['lead@example.com'],
+              subject: 'Hej',
+              body: 'Välkommen',
+              from: 'Elina <elina@speldosa.app>'
+            })
+          }
+        })
+      })
+    })
+  )
+
+  it.effect('rejects unconfigured Gmail draft send-as aliases', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"sendAs":[{"sendAsEmail":"elina@speldosa.app"}]}')
+      ])
+
+      const result = yield* gmailDraftComposeAction
+        .execute({
+          integration: googleIntegration,
+          input: {
+            to: ['lead@example.com'],
+            subject: 'Hej',
+            body: 'Välkommen',
+            from: 'wrong@speldosa.app'
+          }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        error: { code: 'gmail_from_not_configured' }
+      })
+      expect(requests).toHaveLength(1)
+    })
+  )
+
+  it.effect('lists Gmail send-as aliases', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          '{"sendAs":[{"sendAsEmail":"elina@speldosa.app","displayName":"Elina","isDefault":true}]}'
+        )
+      ])
+
+      const result = yield* gmailListSendAsAction
+        .execute({ integration: googleIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: {
+          sendAs: [
+            { sendAsEmail: 'elina@speldosa.app', displayName: 'Elina', isDefault: true }
+          ]
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs'
+      })
+    })
+  )
+
+  it.effect('detects Gmail reply send-as aliases from recipient headers', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'msg_1',
+            threadId: 'thread_1',
+            payload: {
+              headers: [
+                { name: 'From', value: 'Lead <lead@example.com>' },
+                { name: 'To', value: 'Elina <elina@speldosa.app>' },
+                { name: 'Cc', value: 'Other <other@example.com>' },
+                { name: 'Message-ID', value: '<msg_1@example.com>' },
+                { name: 'References', value: '<root@example.com>' },
+                { name: 'Subject', value: 'Hej' }
+              ]
+            }
+          })
+        ),
+        jsonHttpResponse('{"emailAddress":"primary@gmail.com"}'),
+        jsonHttpResponse(
+          '{"sendAs":[{"sendAsEmail":"primary@gmail.com"},{"sendAsEmail":"elina@speldosa.app"}]}'
+        ),
+        jsonHttpResponse('{"id":"draft_1"}')
+      ])
+
+      const result = yield* gmailDraftReplyAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'msg_1', body: 'Tack' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      const draftRequest = requests.at(3)
+      if (draftRequest === undefined) throw new Error('Expected Gmail draft request')
+
+      expect(result).toMatchObject({ _tag: 'Success' })
+      expect(draftRequest).toMatchObject({
+        method: 'POST',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts',
+        body: JSON.stringify({
+          message: {
+            threadId: 'thread_1',
+            raw: rawTextEmail({
+              to: ['Lead <lead@example.com>', 'Other <other@example.com>'],
+              subject: 'Re: Hej',
+              body: 'Tack',
+              from: 'elina@speldosa.app',
+              inReplyTo: '<msg_1@example.com>',
+              references: '<root@example.com> <msg_1@example.com>'
+            })
+          }
+        })
+      })
+    })
+  )
 
   it.effect('adapts Telegram connector to an agent tool', () =>
     Effect.gen(function* () {
