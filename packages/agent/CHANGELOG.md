@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.25
+
+### Patch Changes
+
+- Fix connector provider pagination, Google scoped OAuth, Gmail drafts/send-as, LinkedIn queued email lookup, and R2 public URL handling.
+
 ## 0.1.0-canary.24
 
 ## 0.1.0-canary.23
