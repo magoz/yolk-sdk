@@ -5,7 +5,7 @@ import type { ActionResult } from './result.ts'
 import type { ConnectorIntegration } from './integration.ts'
 
 type ActionInputSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
-type ActionOutputSchema = Schema.Schema<unknown>
+type ActionOutputSchema = Schema.Schema<unknown> & { readonly EncodingServices: never }
 
 export type ActionExecutionInput<Input> = {
   readonly integration: ConnectorIntegration
@@ -36,7 +36,7 @@ export type DefineActionOptions<
   readonly id: string
   readonly description?: string
   readonly inputSchema: InputSchema
-  readonly outputSchema: Schema.Schema<Output>
+  readonly outputSchema: Schema.Schema<Output> & { readonly EncodingServices: never }
   readonly execute: (
     input: ActionExecutionInput<InputSchema['Type']>
   ) => Effect.Effect<ActionResult<Output>, Error | ConnectorError, Env>

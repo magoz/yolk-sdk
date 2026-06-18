@@ -1,9 +1,17 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
+import type { CredentialSlot } from '../credential.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import { ActionResult } from '../result.ts'
-import { googleAuthorizationHeaders } from './oauth.ts'
+import {
+  GoogleGmailComposeOAuthCredentialSlot,
+  GoogleGmailDraftReplyOAuthCredentialSlot,
+  GoogleGmailModifyOAuthCredentialSlot,
+  GoogleGmailReadonlyOAuthCredentialSlot,
+  GoogleGmailSettingsOAuthCredentialSlot,
+  googleAuthorizationHeaders
+} from './oauth.ts'
 import {
   appendNumberSearchParam,
   appendSearchParam,
@@ -164,18 +172,52 @@ const rawEmail = (input: {
   readonly references?: string
 }) => {
   const headers = [
-    ...(input.from === undefined ? [] : [`From: ${input.from}`]),
-    ...(input.to.length === 0 ? [] : [`To: ${input.to.join(', ')}`]),
-    ...(input.cc === undefined ? [] : [`Cc: ${input.cc.join(', ')}`]),
-    ...(input.bcc === undefined ? [] : [`Bcc: ${input.bcc.join(', ')}`]),
-    `Subject: ${input.subject}`,
-    ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${input.inReplyTo}`]),
-    ...(input.references === undefined ? [] : [`References: ${input.references}`]),
+    ...(input.from === undefined ? [] : [`From: ${encodeEmailAddress(input.from)}`]),
+    ...(input.to.length === 0 ? [] : [`To: ${encodeAddressList(input.to)}`]),
+    ...(input.cc === undefined ? [] : [`Cc: ${encodeAddressList(input.cc)}`]),
+    ...(input.bcc === undefined ? [] : [`Bcc: ${encodeAddressList(input.bcc)}`]),
+    `Subject: ${encodeRfc2047(input.subject)}`,
+    ...(input.inReplyTo === undefined ? [] : [`In-Reply-To: ${sanitizeHeader(input.inReplyTo)}`]),
+    ...(input.references === undefined ? [] : [`References: ${sanitizeHeader(input.references)}`]),
     'Content-Type: text/plain; charset=utf-8'
   ]
 
   return base64UrlEncode(`${headers.join('\r\n')}\r\n\r\n${input.body}`)
 }
+
+const sanitizeHeader = (value: string) => value.replaceAll('\r', ' ').replaceAll('\n', ' ').trim()
+
+const hasOnlyAscii = (value: string) => /^[\u0000-\u007f]*$/.test(value)
+
+const base64Encode = (value: string) => {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary)
+}
+
+const encodeRfc2047 = (value: string) => {
+  const safeValue = sanitizeHeader(value)
+  return hasOnlyAscii(safeValue) ? safeValue : `=?UTF-8?B?${base64Encode(safeValue)}?=`
+}
+
+const encodeEmailAddress = (address: string) => {
+  const trimmed = sanitizeHeader(address)
+  const angleIndex = trimmed.lastIndexOf('<')
+  if (angleIndex <= 0) return trimmed
+
+  const displayPart = trimmed.slice(0, angleIndex).trim()
+  const emailPart = trimmed.slice(angleIndex)
+  if (displayPart === '') return emailPart
+
+  const name = displayPart.replace(/^"(.*)"$/, '$1')
+  return hasOnlyAscii(name) ? trimmed : `${encodeRfc2047(name)} ${emailPart}`
+}
+
+const encodeAddressList = (addresses: ReadonlyArray<string>) =>
+  addresses.flatMap(address => splitAddresses(address)).map(encodeEmailAddress).join(', ')
 
 const base64UrlEncode = (value: string) => {
   const bytes = new TextEncoder().encode(value)
@@ -189,13 +231,36 @@ const base64UrlEncode = (value: string) => {
 const headerValue = (message: GmailMessageOutput, name: string) =>
   message.payload?.headers?.find(header => header.name.toLowerCase() === name.toLowerCase())?.value
 
-const splitAddresses = (value: string | undefined) =>
-  value === undefined
-    ? []
-    : value
-        .split(',')
-        .map(address => address.trim())
-        .filter(address => address !== '')
+const splitAddresses = (value: string | undefined) => {
+  if (value === undefined) return []
+
+  const result: Array<string> = []
+  let current = ''
+  let inQuotes = false
+  let inAngle = false
+
+  for (const char of value) {
+    if (char === '"' && !inAngle) {
+      inQuotes = !inQuotes
+    } else if (char === '<' && !inQuotes) {
+      inAngle = true
+    } else if (char === '>' && !inQuotes) {
+      inAngle = false
+    }
+
+    if (char === ',' && !inQuotes && !inAngle) {
+      const address = current.trim()
+      if (address !== '') result.push(address)
+      current = ''
+    } else {
+      current += char
+    }
+  }
+
+  const address = current.trim()
+  if (address !== '') result.push(address)
+  return result
+}
 
 const extractEmailAddress = (value: string) => {
   const match = /<([^<>]+)>/.exec(value)
@@ -298,10 +363,11 @@ const runGmailJsonAction = (
   integration: Parameters<typeof resolveGoogleAccessToken>[0],
   request: (token: string) => ConnectorHttpRequest,
   errorCode: string,
-  errorMessage: string
+  errorMessage: string,
+  credentialSlot: CredentialSlot = GoogleGmailReadonlyOAuthCredentialSlot
 ) =>
   Effect.gen(function* () {
-    const token = yield* resolveGoogleAccessToken(integration)
+    const token = yield* resolveGoogleAccessToken(integration, credentialSlot)
     const http = yield* ConnectorHttpClient
     const response = yield* http.request(request(token))
 
@@ -320,7 +386,7 @@ export const gmailSearchAction = defineAction({
   outputSchema: GmailSearchOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailReadonlyOAuthCredentialSlot)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'q', input.query)
@@ -356,7 +422,7 @@ export const gmailGetMessageAction = defineAction({
   outputSchema: GmailMessageOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailReadonlyOAuthCredentialSlot)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'format', input.format)
@@ -420,6 +486,7 @@ export const gmailListDraftsAction = defineAction({
       integration,
       token => {
         const params = new URLSearchParams()
+        appendSearchParam(params, 'q', input.query)
         appendNumberSearchParam(params, 'maxResults', input.maxResults)
         appendSearchParam(params, 'pageToken', input.pageToken)
         const query = params.toString()
@@ -430,7 +497,8 @@ export const gmailListDraftsAction = defineAction({
         })
       },
       'gmail_list_drafts_failed',
-      'Gmail list drafts failed'
+      'Gmail list drafts failed',
+      GoogleGmailComposeOAuthCredentialSlot
     )
 })
 
@@ -483,7 +551,8 @@ export const gmailModifyLabelsAction = defineAction({
           body: { addLabelIds: input.addLabelIds, removeLabelIds: input.removeLabelIds }
         }),
       'gmail_modify_labels_failed',
-      'Gmail modify labels failed'
+      'Gmail modify labels failed',
+      GoogleGmailModifyOAuthCredentialSlot
     )
 })
 
@@ -502,7 +571,8 @@ export const gmailTrashAction = defineAction({
           path: `/users/me/messages/${encodeURIComponent(input.messageId)}/trash`
         }),
       'gmail_trash_failed',
-      'Gmail trash failed'
+      'Gmail trash failed',
+      GoogleGmailModifyOAuthCredentialSlot
     )
 })
 
@@ -521,7 +591,8 @@ export const gmailUntrashAction = defineAction({
           path: `/users/me/messages/${encodeURIComponent(input.messageId)}/untrash`
         }),
       'gmail_untrash_failed',
-      'Gmail untrash failed'
+      'Gmail untrash failed',
+      GoogleGmailModifyOAuthCredentialSlot
     )
 })
 
@@ -532,7 +603,7 @@ export const gmailDraftComposeAction = defineAction({
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailComposeOAuthCredentialSlot)
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
       if (fromValidation._tag === 'Failure') return fromValidation
 
@@ -567,7 +638,7 @@ export const gmailDraftUpdateAction = defineAction({
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailComposeOAuthCredentialSlot)
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
       if (fromValidation._tag === 'Failure') return fromValidation
 
@@ -610,7 +681,8 @@ export const gmailDraftDeleteAction = defineAction({
           path: `/users/me/drafts/${encodeURIComponent(input.draftId)}`
         }),
       'gmail_draft_delete_failed',
-      'Gmail draft delete failed'
+      'Gmail draft delete failed',
+      GoogleGmailComposeOAuthCredentialSlot
     )
 })
 
@@ -621,7 +693,10 @@ export const gmailDraftReplyAction = defineAction({
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailDraftReplyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const messageResponse = yield* http.request(
         gmailRequest({
@@ -751,7 +826,7 @@ export const gmailListSendAsAction = defineAction({
   outputSchema: GmailListSendAsOutput,
   execute: ({ integration }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailSettingsOAuthCredentialSlot)
       return yield* fetchSendAsOutput(token)
     })
 })

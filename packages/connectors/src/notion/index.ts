@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -18,6 +18,9 @@ export const NotionApiTokenSlot = CredentialSlot.make({
   kind: 'api_key'
 })
 
+const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+const isJsonObject = Schema.is(JsonObject)
+
 export const notionAuthorizationHeaders = (token: string) => ({
   authorization: `Bearer ${token}`,
   'notion-version': notionVersion
@@ -33,8 +36,8 @@ const notionProviderFailure = (input: {
 }) =>
   ActionResult.failure(
     new ProviderFailure({
-      code: input.code,
-      message: input.message,
+      code: providerCode(input.code, input.status),
+      message: providerMessage(input.message, input.body),
       status: input.status,
       underlying: input.body
     })
@@ -87,6 +90,12 @@ export class NotionSearchOutput extends Schema.Class<NotionSearchOutput>('Notion
   hasMore: Schema.Boolean
 }) {}
 
+const NotionSearchApiOutput = Schema.Struct({
+  results: Schema.Array(Schema.Unknown),
+  next_cursor: Schema.NullOr(Schema.String),
+  has_more: Schema.Boolean
+})
+
 export class NotionGetPageInput extends Schema.Class<NotionGetPageInput>('NotionGetPageInput')({
   pageId: Schema.String
 }) {}
@@ -99,7 +108,9 @@ export class NotionCreatePageInput extends Schema.Class<NotionCreatePageInput>(
   children: Schema.optional(Schema.Array(Schema.Unknown)),
   parentPageId: Schema.optional(Schema.String),
   parentDatabaseId: Schema.optional(Schema.String),
-  title: Schema.optional(Schema.String)
+  parentDataSourceId: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  titlePropertyName: Schema.optional(Schema.String)
 }) {}
 
 export class NotionPageIdInput extends Schema.Class<NotionPageIdInput>('NotionPageIdInput')({
@@ -121,7 +132,7 @@ export class NotionDatabaseIdInput extends Schema.Class<NotionDatabaseIdInput>(
 export class NotionDataSourceIdInput extends Schema.Class<NotionDataSourceIdInput>(
   'NotionDataSourceIdInput'
 )({
-  dataSourceId: Schema.String,
+  dataSourceId: Schema.optional(Schema.String),
   data_source_id: Schema.optional(Schema.String)
 }) {}
 
@@ -183,7 +194,7 @@ export class NotionUpdateBlockInput extends Schema.Class<NotionUpdateBlockInput>
 export class NotionQueryDataSourceInput extends Schema.Class<NotionQueryDataSourceInput>(
   'NotionQueryDataSourceInput'
 )({
-  dataSourceId: Schema.String,
+  dataSourceId: Schema.optional(Schema.String),
   data_source_id: Schema.optional(Schema.String),
   filter: Schema.optional(Schema.Unknown),
   sorts: Schema.optional(Schema.Array(Schema.Unknown)),
@@ -202,7 +213,7 @@ export class NotionCreateDataSourceInput extends Schema.Class<NotionCreateDataSo
 export class NotionUpdateDataSourceInput extends Schema.Class<NotionUpdateDataSourceInput>(
   'NotionUpdateDataSourceInput'
 )({
-  dataSourceId: Schema.String,
+  dataSourceId: Schema.optional(Schema.String),
   data_source_id: Schema.optional(Schema.String),
   title: Schema.optional(Schema.Array(Schema.Unknown)),
   properties: Schema.optional(NotionProperties),
@@ -213,7 +224,9 @@ export class NotionGetPagePropertyInput extends Schema.Class<NotionGetPageProper
   'NotionGetPagePropertyInput'
 )({
   pageId: Schema.String,
-  propertyId: Schema.String
+  propertyId: Schema.String,
+  pageSize: Schema.optional(Schema.Number),
+  startCursor: Schema.optional(Schema.String)
 }) {}
 
 export class NotionUserIdInput extends Schema.Class<NotionUserIdInput>('NotionUserIdInput')({
@@ -234,7 +247,7 @@ export class NotionCreateCommentInput extends Schema.Class<NotionCreateCommentIn
   discussion_id: Schema.optional(Schema.String),
   discussionId: Schema.optional(Schema.String),
   rich_text: Schema.optional(Schema.Array(Schema.Unknown)),
-  richText: Schema.Array(Schema.Unknown)
+  richText: Schema.optional(Schema.Array(Schema.Unknown))
 }) {}
 
 export class NotionListCommentsInput extends Schema.Class<NotionListCommentsInput>(
@@ -250,6 +263,10 @@ const pageParent = (input: NotionCreatePageInput) => {
     return input.parent
   }
 
+  if (input.parentDataSourceId !== undefined) {
+    return { data_source_id: input.parentDataSourceId }
+  }
+
   if (input.parentDatabaseId !== undefined) {
     return { database_id: input.parentDatabaseId }
   }
@@ -261,32 +278,111 @@ const pageParent = (input: NotionCreatePageInput) => {
   return undefined
 }
 
-const pageProperties = (input: NotionCreatePageInput) => ({
-  ...input.properties,
-  title: {
+const unknownField = (value: unknown, key: string) => {
+  if (!isJsonObject(value)) return undefined
+  return value[key]
+}
+
+const pageProperties = (propertyName: string, title: string | undefined) => ({
+  [propertyName]: {
     title: [
       {
         text: {
-          content: input.title ?? 'Untitled'
+          content: title ?? 'Untitled'
         }
       }
     ]
   }
 })
 
-const createPageProperties = (input: NotionCreatePageInput) => {
-  if (input.properties !== undefined) {
-    return input.properties
-  }
+const hasDatabaseLikeParent = (input: NotionCreatePageInput) =>
+  input.parentDatabaseId !== undefined ||
+  input.parentDataSourceId !== undefined ||
+  unknownField(input.parent, 'database_id') !== undefined ||
+  unknownField(input.parent, 'data_source_id') !== undefined
 
-  return pageProperties(input)
+const createPageProperties = (input: NotionCreatePageInput) =>
+  Effect.gen(function* () {
+    if (input.properties !== undefined) {
+      return input.properties
+    }
+
+    if (hasDatabaseLikeParent(input) && input.titlePropertyName === undefined) {
+      return yield* Effect.fail(
+        new ConnectorError({
+          cause: 'validation_failed',
+          message:
+            'Notion database/data-source pages require properties or titlePropertyName when using title',
+          connectorId: notionConnectorId,
+          actionId: 'notion.create_page'
+        })
+      )
+    }
+
+    return pageProperties(input.titlePropertyName ?? 'title', input.title)
+  })
+
+const requireNotionDataSourceId = (
+  input: NotionDataSourceIdInput | NotionQueryDataSourceInput | NotionUpdateDataSourceInput,
+  actionId: string
+) =>
+  Effect.gen(function* () {
+    const dataSourceId = input.data_source_id ?? input.dataSourceId
+    if (dataSourceId !== undefined) return dataSourceId
+
+    return yield* Effect.fail(
+      new ConnectorError({
+        cause: 'validation_failed',
+        message: 'Notion action requires dataSourceId or data_source_id',
+        connectorId: notionConnectorId,
+        actionId
+      })
+    )
+  })
+
+const requireNotionRichText = (input: NotionCreateCommentInput) =>
+  Effect.gen(function* () {
+    const richText = input.rich_text ?? input.richText
+    if (richText !== undefined) return richText
+
+    return yield* Effect.fail(
+      new ConnectorError({
+        cause: 'validation_failed',
+        message: 'Notion create comment requires rich_text or richText',
+        connectorId: notionConnectorId,
+        actionId: 'notion.create_comment'
+      })
+    )
+  })
+
+const jsonMessageField = (body: string, keys: ReadonlyArray<string>) => {
+  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body)
+  if (Option.isNone(parsed) || !isJsonObject(parsed.value)) return undefined
+  for (const key of keys) {
+    const value = parsed.value[key]
+    if (typeof value === 'string' && value.trim() !== '') return value
+  }
+  return undefined
 }
 
-const notionDataSourceId = (input: NotionDataSourceIdInput | NotionUpdateDataSourceInput) =>
-  input.data_source_id ?? input.dataSourceId
+const providerMessage = (fallback: string, body: string) => {
+  const detail = jsonMessageField(body, ['message', 'error_description', 'error'])
+  return detail === undefined ? fallback : `${fallback}: ${detail}`
+}
 
-const notionQueryableDataSourceId = (input: NotionQueryDataSourceInput) =>
-  input.data_source_id ?? input.dataSourceId
+const providerCode = (fallback: string, status: number) => {
+  switch (status) {
+    case 401:
+    case 403:
+      return 'notion_unauthorized'
+    case 404:
+      return 'notion_not_found'
+    case 429:
+      return 'notion_rate_limited'
+    default:
+      return fallback
+  }
+}
 
 const notionJsonAction = (
   integration: ConnectorIntegration,
@@ -366,8 +462,14 @@ export const notionSearchAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(NotionSearchOutput, response)
-      return ActionResult.success(output)
+      const output = yield* decodeJsonResponse(NotionSearchApiOutput, response)
+      return ActionResult.success(
+        NotionSearchOutput.make({
+          results: output.results,
+          nextCursor: output.next_cursor,
+          hasMore: output.has_more
+        })
+      )
     })
 })
 
@@ -423,6 +525,7 @@ export const notionCreatePageAction = defineAction({
 
       const token = yield* resolveNotionToken(integration)
       const http = yield* ConnectorHttpClient
+      const properties = yield* createPageProperties(input)
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -433,7 +536,7 @@ export const notionCreatePageAction = defineAction({
           },
           body: JSON.stringify({
             parent,
-            properties: createPageProperties(input),
+            properties,
             children: input.children
           })
         })
@@ -681,17 +784,20 @@ export const notionGetDataSourceAction = defineAction({
   inputSchema: NotionDataSourceIdInput,
   outputSchema: Schema.Unknown,
   execute: ({ integration, input }) =>
-    notionJsonAction(
-      integration,
-      token =>
-        notionRequest({
-          token,
-          method: 'GET',
-          path: `/data_sources/${encodeURIComponent(notionDataSourceId(input))}`
-        }),
-      'notion_get_data_source_failed',
-      'Notion get data source failed'
-    )
+    Effect.gen(function* () {
+      const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.get_data_source')
+      return yield* notionJsonAction(
+        integration,
+        token =>
+          notionRequest({
+            token,
+            method: 'GET',
+            path: `/data_sources/${encodeURIComponent(dataSourceId)}`
+          }),
+        'notion_get_data_source_failed',
+        'Notion get data source failed'
+      )
+    })
 })
 
 export const notionQueryDataSourceAction = defineAction({
@@ -700,23 +806,26 @@ export const notionQueryDataSourceAction = defineAction({
   inputSchema: NotionQueryDataSourceInput,
   outputSchema: Schema.Unknown,
   execute: ({ integration, input }) =>
-    notionJsonAction(
-      integration,
-      token =>
-        notionRequest({
-          token,
-          method: 'POST',
-          path: `/data_sources/${encodeURIComponent(notionQueryableDataSourceId(input))}/query`,
-          body: {
-            filter: input.filter,
-            sorts: input.sorts,
-            page_size: input.pageSize,
-            start_cursor: input.startCursor
-          }
-        }),
-      'notion_query_data_source_failed',
-      'Notion query data source failed'
-    )
+    Effect.gen(function* () {
+      const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.query_data_source')
+      return yield* notionJsonAction(
+        integration,
+        token =>
+          notionRequest({
+            token,
+            method: 'POST',
+            path: `/data_sources/${encodeURIComponent(dataSourceId)}/query`,
+            body: {
+              filter: input.filter,
+              sorts: input.sorts,
+              page_size: input.pageSize,
+              start_cursor: input.startCursor
+            }
+          }),
+        'notion_query_data_source_failed',
+        'Notion query data source failed'
+      )
+    })
 })
 
 export const notionCreateDataSourceAction = defineAction({
@@ -749,18 +858,21 @@ export const notionUpdateDataSourceAction = defineAction({
   inputSchema: NotionUpdateDataSourceInput,
   outputSchema: Schema.Unknown,
   execute: ({ integration, input }) =>
-    notionJsonAction(
-      integration,
-      token =>
-        notionRequest({
-          token,
-          method: 'PATCH',
-          path: `/data_sources/${encodeURIComponent(notionDataSourceId(input))}`,
-          body: { title: input.title, properties: input.properties, archived: input.archived }
-        }),
-      'notion_update_data_source_failed',
-      'Notion update data source failed'
-    )
+    Effect.gen(function* () {
+      const dataSourceId = yield* requireNotionDataSourceId(input, 'notion.update_data_source')
+      return yield* notionJsonAction(
+        integration,
+        token =>
+          notionRequest({
+            token,
+            method: 'PATCH',
+            path: `/data_sources/${encodeURIComponent(dataSourceId)}`,
+            body: { title: input.title, properties: input.properties, archived: input.archived }
+          }),
+        'notion_update_data_source_failed',
+        'Notion update data source failed'
+      )
+    })
 })
 
 export const notionGetPagePropertyAction = defineAction({
@@ -771,12 +883,17 @@ export const notionGetPagePropertyAction = defineAction({
   execute: ({ integration, input }) =>
     notionJsonAction(
       integration,
-      token =>
-        notionRequest({
+      token => {
+        const params = new URLSearchParams()
+        if (input.pageSize !== undefined) params.set('page_size', String(input.pageSize))
+        if (input.startCursor !== undefined) params.set('start_cursor', input.startCursor)
+        const query = params.toString()
+        return notionRequest({
           token,
           method: 'GET',
-          path: `/pages/${encodeURIComponent(input.pageId)}/properties/${encodeURIComponent(input.propertyId)}`
-        }),
+          path: `/pages/${encodeURIComponent(input.pageId)}/properties/${encodeURIComponent(input.propertyId)}${query === '' ? '' : `?${query}`}`
+        })
+      },
       'notion_get_page_property_failed',
       'Notion get page property failed'
     )
@@ -841,22 +958,25 @@ export const notionCreateCommentAction = defineAction({
   inputSchema: NotionCreateCommentInput,
   outputSchema: Schema.Unknown,
   execute: ({ integration, input }) =>
-    notionJsonAction(
-      integration,
-      token =>
-        notionRequest({
-          token,
-          method: 'POST',
-          path: '/comments',
-          body: {
-            parent: input.parent,
-            discussion_id: input.discussion_id ?? input.discussionId,
-            rich_text: input.rich_text ?? input.richText
-          }
-        }),
-      'notion_create_comment_failed',
-      'Notion create comment failed'
-    )
+    Effect.gen(function* () {
+      const richText = yield* requireNotionRichText(input)
+      return yield* notionJsonAction(
+        integration,
+        token =>
+          notionRequest({
+            token,
+            method: 'POST',
+            path: '/comments',
+            body: {
+              parent: input.parent,
+              discussion_id: input.discussion_id ?? input.discussionId,
+              rich_text: richText
+            }
+          }),
+        'notion_create_comment_failed',
+        'Notion create comment failed'
+      )
+    })
 })
 
 export const notionListCommentsAction = defineAction({

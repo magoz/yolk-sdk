@@ -1,7 +1,7 @@
 import { Context, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
-import { requiredStringConfig } from '../config.ts'
+import { optionalStringConfig, requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ActionResult } from '../result.ts'
@@ -70,7 +70,7 @@ export class R2UploadUrlInput extends Schema.Class<R2UploadUrlInput>('R2UploadUr
 
 export class R2UploadUrlOutput extends Schema.Class<R2UploadUrlOutput>('R2UploadUrlOutput')({
   uploadUrl: Schema.String,
-  publicUrl: Schema.String,
+  publicUrl: Schema.optional(Schema.String),
   key: Schema.String
 }) {}
 
@@ -83,7 +83,7 @@ export const r2StorageUploadUrlAction = defineAction({
     Effect.gen(function* () {
       const endpoint = yield* requiredStringConfig(integration, 'endpoint')
       const bucket = yield* requiredStringConfig(integration, 'bucket')
-      const publicUrl = yield* requiredStringConfig(integration, 'publicUrl')
+      const publicUrl = optionalStringConfig(integration, 'publicUrl')
       const accessKeyId = yield* resolveApiToken(integration, R2AccessKeyIdSlot)
       const secretAccessKey = yield* resolveApiToken(integration, R2SecretAccessKeySlot)
       const presigner = yield* R2Presigner
@@ -102,7 +102,7 @@ export const r2StorageUploadUrlAction = defineAction({
       return ActionResult.success(
         R2UploadUrlOutput.make({
           uploadUrl: presigned.uploadUrl,
-          publicUrl: joinPublicUrl(publicUrl, key),
+          publicUrl: publicUrl === undefined ? undefined : joinPublicUrl(publicUrl, key),
           key
         })
       )

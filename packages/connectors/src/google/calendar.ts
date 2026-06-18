@@ -3,7 +3,11 @@ import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import { ActionResult } from '../result.ts'
-import { googleAuthorizationHeaders } from './oauth.ts'
+import {
+  GoogleCalendarEventsOAuthCredentialSlot,
+  GoogleCalendarReadonlyOAuthCredentialSlot,
+  googleAuthorizationHeaders
+} from './oauth.ts'
 import {
   appendNumberSearchParam,
   appendSearchParam,
@@ -138,7 +142,10 @@ export const googleCalendarListEventsAction = defineAction({
   outputSchema: GoogleCalendarListEventsOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarReadonlyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'timeMin', input.timeMin)
@@ -183,7 +190,10 @@ export const googleCalendarCreateEventAction = defineAction({
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarEventsOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const response = yield* http.request(
         ConnectorHttpRequest.make({
@@ -225,7 +235,10 @@ export const googleCalendarListCalendarsAction = defineAction({
   outputSchema: GoogleCalendarListCalendarsOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarReadonlyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendNumberSearchParam(params, 'maxResults', input.maxResults)
@@ -260,7 +273,10 @@ export const googleCalendarGetEventAction = defineAction({
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarReadonlyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const response = yield* http.request(
         calendarRequest({
@@ -291,7 +307,10 @@ export const googleCalendarUpdateEventAction = defineAction({
   outputSchema: GoogleCalendarEvent,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarEventsOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const response = yield* http.request(
         calendarRequest({
@@ -330,7 +349,10 @@ export const googleCalendarDeleteEventAction = defineAction({
   outputSchema: Schema.Struct({ deleted: Schema.Boolean, eventId: Schema.String }),
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleCalendarEventsOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const response = yield* http.request(
         calendarRequest({

@@ -22,23 +22,39 @@ import { FigmaConnector } from '@yolk-sdk/connectors/figma'
 import {
   gmailDraftComposeAction,
   gmailDraftReplyAction,
+  gmailListDraftsAction,
   gmailListSendAsAction,
   GoogleConnector,
+  googleCalendarEventsScope,
   GoogleOAuthCredentialSlot,
+  googleGmailComposeScope,
+  googleGmailReadonlyScope,
   googleCalendarCreateEventAction
 } from '@yolk-sdk/connectors/google'
 import {
+  EnrichLayerApiKeySlot,
   ExaApiKeySlot,
   LinkedInSearchConnector,
+  linkedInEmailAction,
   linkedInSearchAction
 } from '@yolk-sdk/connectors/linkedin-search'
 import {
   NotionApiTokenSlot,
   NotionConnector,
+  notionCreateCommentAction,
   notionCreatePageAction,
+  notionGetDataSourceAction,
+  notionGetPagePropertyAction,
   notionSearchAction
 } from '@yolk-sdk/connectors/notion'
-import { R2StorageConnector } from '@yolk-sdk/connectors/r2-storage'
+import {
+  R2AccessKeyIdSlot,
+  R2PresignOutput,
+  R2Presigner,
+  R2SecretAccessKeySlot,
+  R2StorageConnector,
+  r2StorageUploadUrlAction
+} from '@yolk-sdk/connectors/r2-storage'
 import {
   TelegramConnector,
   telegramBotTokenSlotId,
@@ -47,7 +63,10 @@ import {
 import {
   TodoistApiTokenSlot,
   TodoistConnector,
-  todoistCreateTaskAction
+  todoistCreateTaskAction,
+  todoistListLabelsAction,
+  todoistListProjectsAction,
+  todoistListTasksAction
 } from '@yolk-sdk/connectors/todoist'
 
 const TestInput = Schema.Struct({ text: Schema.String })
@@ -134,6 +153,13 @@ const jsonHttpResponse = (body: string) =>
     body
   })
 
+const jsonStatusHttpResponse = (status: number, body: string) =>
+  ConnectorHttpResponse.make({
+    status,
+    headers: { 'content-type': 'application/json' },
+    body
+  })
+
 const makeConnectorHttpClientTest = (
   requests: Array<ConnectorHttpRequest>,
   responses: ReadonlyArray<ConnectorHttpResponse>
@@ -186,7 +212,7 @@ const successBody = (name: string) => {
     case 'Calendar create event':
       return '{"id":"event_1","summary":"Planning"}'
     case 'Notion search':
-      return '{"results":[],"hasMore":false}'
+      return '{"results":[],"has_more":false,"next_cursor":null}'
     case 'Notion create page':
       return '{"id":"page_1","object":"page"}'
     case 'Todoist create task':
@@ -549,6 +575,465 @@ describe('@yolk-sdk/connectors', () => {
       })
     )
   }
+
+  it.effect('normalizes Notion search pagination', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
+        jsonHttpResponse(
+          '{"results":[{"id":"page_1"}],"has_more":true,"next_cursor":"cursor_1"}'
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const notionIntegration = makeIntegration({
+        connectorId: 'notion',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: NotionApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const result = yield* notionSearchAction
+        .execute({ integration: notionIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { results: [{ id: 'page_1' }], hasMore: true, nextCursor: 'cursor_1' }
+      })
+    })
+  )
+
+  it.effect('normalizes Todoist task pagination', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          '{"results":[{"id":"task_1","content":"Buy milk","section_id":null,"parent_id":null}],"next_cursor":"cursor_1"}'
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const todoistIntegration = makeIntegration({
+        connectorId: 'todoist',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: TodoistApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const result = yield* todoistListTasksAction
+        .execute({ integration: todoistIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+      const request = requests.at(0)
+      if (request === undefined) throw new Error('Expected Todoist request')
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { tasks: [{ id: 'task_1', content: 'Buy milk' }], nextCursor: 'cursor_1' }
+      })
+      expect(request).toMatchObject({
+        method: 'GET',
+        url: 'https://api.todoist.com/api/v1/tasks'
+      })
+      expect(request.body).toBeUndefined()
+    })
+  )
+
+  it.effect('normalizes Notion terminal pagination', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
+        jsonHttpResponse('{"results":[],"has_more":false,"next_cursor":null}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const notionIntegration = makeIntegration({
+        connectorId: 'notion',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: NotionApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const result = yield* notionSearchAction
+        .execute({ integration: notionIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { results: [], hasMore: false, nextCursor: null }
+      })
+    })
+  )
+
+  it.effect('accepts Notion data source snake-case ids', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"id":"ds_1"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const notionIntegration = makeIntegration({
+        connectorId: 'notion',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: NotionApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      yield* notionGetDataSourceAction
+        .execute({ integration: notionIntegration, input: { data_source_id: 'ds_1' } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://api.notion.com/v1/data_sources/ds_1'
+      })
+    })
+  )
+
+  it.effect('sends Notion comment rich_text snake-case input', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"id":"comment_1"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const notionIntegration = makeIntegration({
+        connectorId: 'notion',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: NotionApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      yield* notionCreateCommentAction
+        .execute({
+          integration: notionIntegration,
+          input: { discussion_id: 'disc_1', rich_text: [{ text: { content: 'Hi' } }] }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'POST',
+        url: 'https://api.notion.com/v1/comments',
+        body: JSON.stringify({
+          discussion_id: 'disc_1',
+          rich_text: [{ text: { content: 'Hi' } }]
+        })
+      })
+    })
+  )
+
+  it.effect('paginates Notion page property requests', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"object":"list","results":[]}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const notionIntegration = makeIntegration({
+        connectorId: 'notion',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: NotionApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      yield* notionGetPagePropertyAction
+        .execute({
+          integration: notionIntegration,
+          input: { pageId: 'page_1', propertyId: 'title', pageSize: 10, startCursor: 'cursor_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://api.notion.com/v1/pages/page_1/properties/title?page_size=10&start_cursor=cursor_1'
+      })
+    })
+  )
+
+  it.effect('normalizes Todoist project and label pagination', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          '{"results":[{"id":"project_1","name":"Inbox"}],"next_cursor":null}'
+        ),
+        jsonHttpResponse(
+          '{"results":[{"id":"label_1","name":"Urgent"}],"next_cursor":"cursor_2"}'
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const todoistIntegration = makeIntegration({
+        connectorId: 'todoist',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: TodoistApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const projects = yield* todoistListProjectsAction
+        .execute({ integration: todoistIntegration, input: { cursor: 'cursor_1', limit: 5 } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+      const labels = yield* todoistListLabelsAction
+        .execute({ integration: todoistIntegration, input: { limit: 3 } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(projects).toMatchObject({
+        _tag: 'Success',
+        value: { projects: [{ id: 'project_1', name: 'Inbox' }], nextCursor: null }
+      })
+      expect(labels).toMatchObject({
+        _tag: 'Success',
+        value: { labels: [{ id: 'label_1', name: 'Urgent' }], nextCursor: 'cursor_2' }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://api.todoist.com/api/v1/projects?cursor=cursor_1&limit=5'
+      })
+      expect(requests.at(1)).toMatchObject({
+        method: 'GET',
+        url: 'https://api.todoist.com/api/v1/labels?limit=3'
+      })
+    })
+  )
+
+  it.effect('uses Todoist filter endpoint for filtered tasks', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"results":[],"next_cursor":null}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const todoistIntegration = makeIntegration({
+        connectorId: 'todoist',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: TodoistApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      yield* todoistListTasksAction
+        .execute({
+          integration: todoistIntegration,
+          input: { filter: 'today', filterLang: 'en', projectId: 'ignored', cursor: 'c', limit: 5 }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://api.todoist.com/api/v1/tasks/filter?query=today&lang=en&cursor=c&limit=5'
+      })
+    })
+  )
+
+  it.effect('maps provider status and body details into failures', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
+        jsonStatusHttpResponse(429, '{"error":"Rate limit exceeded"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const todoistIntegration = makeIntegration({
+        connectorId: 'todoist',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: TodoistApiTokenSlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const result = yield* todoistListTasksAction
+        .execute({ integration: todoistIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'todoist_rate_limited',
+          message: 'Todoist list tasks failed: Rate limit exceeded',
+          status: 429
+        }
+      })
+    })
+  )
+
+  it.effect('uses scoped Google OAuth slots and draft query params', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"drafts":[]}'),
+        jsonHttpResponse('{"id":"event_1","summary":"Planning"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'google',
+                accessToken: 'google_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      yield* gmailListDraftsAction
+        .execute({
+          integration: googleIntegration,
+          input: { query: 'subject:draft', maxResults: 3, pageToken: 'page_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+      yield* googleCalendarCreateEventAction
+        .execute({
+          integration: googleIntegration,
+          input: {
+            summary: 'Planning',
+            start: { dateTime: '2026-05-21T10:00:00Z' },
+            end: { dateTime: '2026-05-21T10:30:00Z' }
+          }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      const gmailScopes = requestedScopes.at(0)
+      const calendarScopes = requestedScopes.at(1)
+      if (gmailScopes === undefined || calendarScopes === undefined) {
+        throw new Error('Expected requested Google scopes')
+      }
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts?q=subject%3Adraft&maxResults=3&pageToken=page_1'
+      })
+      expect(gmailScopes).toContain(googleGmailComposeScope)
+      expect(gmailScopes).not.toContain(googleCalendarEventsScope)
+      expect(calendarScopes).toContain(googleCalendarEventsScope)
+      expect(calendarScopes).not.toContain(googleGmailReadonlyScope)
+    })
+  )
+
+  it.effect('returns queued LinkedIn email lookups', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
+        jsonHttpResponse('{"email_queue_count":2}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_token' }))
+        })
+      )
+      const linkedInIntegration = makeIntegration({
+        connectorId: 'linkedin-search',
+        credentialBindings: [
+          makeCredentialBinding({ slotId: EnrichLayerApiKeySlot.id, credentialRef: 'api-token' })
+        ]
+      })
+
+      const result = yield* linkedInEmailAction
+        .execute({ integration: linkedInIntegration, input: { linkedinUrl: 'https://linkedin.com/in/a' } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { email: null, status: 'queued' }
+      })
+    })
+  )
+
+  it.effect('omits R2 public URL when integration has no publicUrl config', () =>
+    Effect.gen(function* () {
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request =>
+            Effect.succeed(
+              ApiKeyCredential.make({
+                _tag: 'ApiKeyCredential',
+                key: request.slot.id === R2SecretAccessKeySlot.id ? 'secret' : 'access'
+              })
+            )
+        })
+      )
+      const R2PresignerTest = Layer.succeed(
+        R2Presigner,
+        R2Presigner.of({
+          presignPutObject: () =>
+            Effect.succeed(R2PresignOutput.make({ uploadUrl: 'https://upload.example.com' }))
+        })
+      )
+      const r2Integration = makeIntegration({
+        connectorId: 'r2-storage',
+        config: { endpoint: 'https://r2.example.com', bucket: 'bucket' },
+        credentialBindings: [
+          makeCredentialBinding({ slotId: R2AccessKeyIdSlot.id, credentialRef: 'access' }),
+          makeCredentialBinding({ slotId: R2SecretAccessKeySlot.id, credentialRef: 'secret' })
+        ]
+      })
+
+      const result = yield* r2StorageUploadUrlAction
+        .execute({ integration: r2Integration, input: { filename: '/file.png', contentType: 'image/png' } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, R2PresignerTest)))
+
+      if (result._tag !== 'Success' || typeof result.value !== 'object' || result.value === null) {
+        throw new Error('Expected R2 success')
+      }
+
+      expect(result.value).toMatchObject({
+        uploadUrl: 'https://upload.example.com',
+        key: 'file.png'
+      })
+      expect(Object.getOwnPropertyDescriptor(result.value, 'publicUrl')?.value).toBeUndefined()
+    })
+  )
 
   it.effect('validates Gmail draft compose send-as aliases', () =>
     Effect.gen(function* () {

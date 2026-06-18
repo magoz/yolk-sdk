@@ -152,7 +152,7 @@ const result = GoogleConnector.invoke({
 
 Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
 
-Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. The Google OAuth slot includes `gmail.settings.basic` for send-as listing and validation. Hosts that run Google OAuth should request `GoogleOAuthCredentialSlot.requiredScopes`; existing credentials may need re-consent after scope changes.
+Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, and `GoogleCalendarEventsOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
 
 ## Provider actions
 
@@ -166,7 +166,7 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 | `@yolk-sdk/connectors/telegram` | `telegram.send_message`, `telegram.validate` |
 | `@yolk-sdk/connectors/todoist` | Todoist project, task, and label actions |
 
-R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled.
+R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled. `r2_storage.upload_url` includes `publicUrl` only when integration config provides `publicUrl`.
 
 ## Agent adapter
 

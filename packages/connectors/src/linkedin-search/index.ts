@@ -83,6 +83,19 @@ export class LinkedInEmailOutput extends Schema.Class<LinkedInEmailOutput>('Link
   message: Schema.optional(Schema.String)
 }) {}
 
+const LinkedInEmailApiOutput = Schema.Struct({
+  email: Schema.optional(Schema.NullOr(Schema.String)),
+  status: Schema.optional(Schema.String),
+  message: Schema.optional(Schema.String),
+  email_queue_count: Schema.optional(Schema.Number)
+})
+
+const linkedInEmailStatus = (email: string | null | undefined) => {
+  if (email === undefined) return 'unknown'
+  if (email === null) return 'not_found'
+  return 'found'
+}
+
 const missingEnrichLayer = (integration: ConnectorIntegration) =>
   new ConnectorError({
     cause: 'credential_binding_missing',
@@ -196,15 +209,24 @@ export const linkedInEmailAction = defineAction({
         })
       }
 
-      const decoded = yield* decodeJsonResponse(
-        Schema.Struct({
-          email: Schema.NullOr(Schema.String),
-          status: Schema.optional(Schema.String),
-          message: Schema.optional(Schema.String)
-        }),
-        response
+      const decoded = yield* decodeJsonResponse(LinkedInEmailApiOutput, response)
+      if (decoded.email_queue_count !== undefined && decoded.email === undefined) {
+        return ActionResult.success(
+          LinkedInEmailOutput.make({
+            email: null,
+            status: 'queued',
+            message: 'Email lookup queued by Enrich Layer'
+          })
+        )
+      }
+
+      return ActionResult.success(
+        LinkedInEmailOutput.make({
+          email: decoded.email ?? null,
+          status: decoded.status ?? linkedInEmailStatus(decoded.email),
+          message: decoded.message
+        })
       )
-      return ActionResult.success(LinkedInEmailOutput.make(decoded))
     })
 })
 
