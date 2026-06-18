@@ -170,7 +170,7 @@ export const googleCalendarListEventsAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_list_events_failed',
           message: 'Google Calendar list events failed',
           status: response.status,
@@ -215,7 +215,7 @@ export const googleCalendarCreateEventAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_create_event_failed',
           message: 'Google Calendar create event failed',
           status: response.status,
@@ -253,7 +253,7 @@ export const googleCalendarListCalendarsAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_list_calendars_failed',
           message: 'Google Calendar list calendars failed',
           status: response.status,
@@ -287,7 +287,7 @@ export const googleCalendarGetEventAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_get_event_failed',
           message: 'Google Calendar get event failed',
           status: response.status,
@@ -329,7 +329,7 @@ export const googleCalendarUpdateEventAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_update_event_failed',
           message: 'Google Calendar update event failed',
           status: response.status,
@@ -363,7 +363,7 @@ export const googleCalendarDeleteEventAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'calendar_delete_event_failed',
           message: 'Google Calendar delete event failed',
           status: response.status,

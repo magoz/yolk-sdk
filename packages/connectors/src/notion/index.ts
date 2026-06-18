@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -28,19 +28,49 @@ export const notionAuthorizationHeaders = (token: string) => ({
 
 const isSuccessStatus = (status: number) => status >= 200 && status < 300
 
+const decodeJsonObject = (body: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+    Effect.result,
+    Effect.map(result => {
+      if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+      return result.success
+    })
+  )
+
+const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
+  decodeJsonObject(body).pipe(
+    Effect.map(parsed => {
+      if (parsed === undefined) return undefined
+      for (const key of keys) {
+        const value = parsed[key]
+        if (typeof value === 'string' && value.trim() !== '') return value
+      }
+      return undefined
+    })
+  )
+
+const providerMessage = (fallback: string, body: string) =>
+  jsonMessageField(body, ['message', 'error_description', 'error']).pipe(
+    Effect.map(detail => (detail === undefined ? fallback : `${fallback}: ${detail}`))
+  )
+
 const notionProviderFailure = (input: {
   readonly code: string
   readonly message: string
   readonly status: number
   readonly body: string
 }) =>
-  ActionResult.failure(
-    new ProviderFailure({
-      code: providerCode(input.code, input.status),
-      message: providerMessage(input.message, input.body),
-      status: input.status,
-      underlying: input.body
-    })
+  providerMessage(input.message, input.body).pipe(
+    Effect.map(message =>
+      ActionResult.failure(
+        new ProviderFailure({
+          code: providerCode(input.code, input.status),
+          message,
+          status: input.status,
+          underlying: input.body
+        })
+      )
+    )
   )
 
 const resolveNotionToken = (integration: ConnectorIntegration) =>
@@ -355,21 +385,6 @@ const requireNotionRichText = (input: NotionCreateCommentInput) =>
     )
   })
 
-const jsonMessageField = (body: string, keys: ReadonlyArray<string>) => {
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body)
-  if (Option.isNone(parsed) || !isJsonObject(parsed.value)) return undefined
-  for (const key of keys) {
-    const value = parsed.value[key]
-    if (typeof value === 'string' && value.trim() !== '') return value
-  }
-  return undefined
-}
-
-const providerMessage = (fallback: string, body: string) => {
-  const detail = jsonMessageField(body, ['message', 'error_description', 'error'])
-  return detail === undefined ? fallback : `${fallback}: ${detail}`
-}
-
 const providerCode = (fallback: string, status: number) => {
   switch (status) {
     case 401:
@@ -396,7 +411,7 @@ const notionJsonAction = (
     const response = yield* http.request(request(token))
 
     if (!isSuccessStatus(response.status)) {
-      return notionProviderFailure({
+      return yield* notionProviderFailure({
         code: errorCode,
         message: errorMessage,
         status: response.status,
@@ -454,7 +469,7 @@ export const notionSearchAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return notionProviderFailure({
+        return yield* notionProviderFailure({
           code: 'notion_search_failed',
           message: 'Notion search failed',
           status: response.status,
@@ -491,7 +506,7 @@ export const notionGetPageAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return notionProviderFailure({
+        return yield* notionProviderFailure({
           code: 'notion_get_page_failed',
           message: 'Notion get page failed',
           status: response.status,
@@ -543,7 +558,7 @@ export const notionCreatePageAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return notionProviderFailure({
+        return yield* notionProviderFailure({
           code: 'notion_create_page_failed',
           message: 'Notion create page failed',
           status: response.status,

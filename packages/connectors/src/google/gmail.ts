@@ -283,7 +283,7 @@ const fetchSendAsOutput = (token: string) =>
     )
 
     if (!isSuccessStatus(response.status)) {
-      return gmailProviderFailure(
+      return yield* gmailProviderFailure(
         'gmail_list_send_as_failed',
         'Gmail list send-as aliases failed',
         response.status,
@@ -372,7 +372,7 @@ const runGmailJsonAction = (
     const response = yield* http.request(request(token))
 
     if (!isSuccessStatus(response.status)) {
-      return gmailProviderFailure(errorCode, errorMessage, response.status, response.body)
+      return yield* gmailProviderFailure(errorCode, errorMessage, response.status, response.body)
     }
 
     const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
@@ -402,7 +402,7 @@ export const gmailSearchAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'gmail_search_failed',
           message: 'Gmail search failed',
           status: response.status,
@@ -437,7 +437,7 @@ export const gmailGetMessageAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return providerFailureFromResponse({
+        return yield* providerFailureFromResponse({
           code: 'gmail_get_message_failed',
           message: 'Gmail get message failed',
           status: response.status,
@@ -618,7 +618,7 @@ export const gmailDraftComposeAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return gmailProviderFailure(
+        return yield* gmailProviderFailure(
           'gmail_draft_compose_failed',
           'Gmail draft compose failed',
           response.status,
@@ -653,7 +653,7 @@ export const gmailDraftUpdateAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return gmailProviderFailure(
+        return yield* gmailProviderFailure(
           'gmail_draft_update_failed',
           'Gmail draft update failed',
           response.status,
@@ -707,7 +707,7 @@ export const gmailDraftReplyAction = defineAction({
       )
 
       if (!isSuccessStatus(messageResponse.status)) {
-        return gmailProviderFailure(
+        return yield* gmailProviderFailure(
           'gmail_draft_reply_failed',
           'Gmail draft reply failed',
           messageResponse.status,
@@ -720,7 +720,7 @@ export const gmailDraftReplyAction = defineAction({
       )
 
       if (!isSuccessStatus(profileResponse.status)) {
-        return gmailProviderFailure(
+        return yield* gmailProviderFailure(
           'gmail_draft_reply_failed',
           'Gmail draft reply failed',
           profileResponse.status,
@@ -787,7 +787,7 @@ export const gmailDraftReplyAction = defineAction({
       )
 
       if (!isSuccessStatus(draftResponse.status)) {
-        return gmailProviderFailure(
+        return yield* gmailProviderFailure(
           'gmail_draft_reply_failed',
           'Gmail draft reply failed',
           draftResponse.status,

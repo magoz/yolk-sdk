@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -26,20 +26,31 @@ export const todoistAuthorizationHeaders = (token: string) => ({
 
 const isSuccessStatus = (status: number) => status >= 200 && status < 300
 
-const jsonMessageField = (body: string, keys: ReadonlyArray<string>) => {
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body)
-  if (Option.isNone(parsed) || !isJsonObject(parsed.value)) return undefined
-  for (const key of keys) {
-    const value = parsed.value[key]
-    if (typeof value === 'string' && value.trim() !== '') return value
-  }
-  return undefined
-}
+const decodeJsonObject = (body: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+    Effect.result,
+    Effect.map(result => {
+      if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+      return result.success
+    })
+  )
 
-const providerMessage = (fallback: string, body: string) => {
-  const detail = jsonMessageField(body, ['error', 'message', 'error_description', 'error_tag'])
-  return detail === undefined ? fallback : `${fallback}: ${detail}`
-}
+const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
+  decodeJsonObject(body).pipe(
+    Effect.map(parsed => {
+      if (parsed === undefined) return undefined
+      for (const key of keys) {
+        const value = parsed[key]
+        if (typeof value === 'string' && value.trim() !== '') return value
+      }
+      return undefined
+    })
+  )
+
+const providerMessage = (fallback: string, body: string) =>
+  jsonMessageField(body, ['error', 'message', 'error_description', 'error_tag']).pipe(
+    Effect.map(detail => (detail === undefined ? fallback : `${fallback}: ${detail}`))
+  )
 
 const providerCode = (fallback: string, status: number) => {
   switch (status) {
@@ -61,13 +72,17 @@ const todoistProviderFailure = (input: {
   readonly status: number
   readonly body: string
 }) =>
-  ActionResult.failure(
-    new ProviderFailure({
-      code: providerCode(input.code, input.status),
-      message: providerMessage(input.message, input.body),
-      status: input.status,
-      underlying: input.body
-    })
+  providerMessage(input.message, input.body).pipe(
+    Effect.map(message =>
+      ActionResult.failure(
+        new ProviderFailure({
+          code: providerCode(input.code, input.status),
+          message,
+          status: input.status,
+          underlying: input.body
+        })
+      )
+    )
   )
 
 const resolveTodoistToken = (integration: ConnectorIntegration) =>
@@ -398,7 +413,7 @@ const todoistJsonAction = <A>(input: {
     const response = yield* http.request(input.request(token))
 
     if (!isSuccessStatus(response.status)) {
-      return todoistProviderFailure({
+      return yield* todoistProviderFailure({
         code: input.errorCode,
         message: input.errorMessage,
         status: response.status,
@@ -443,7 +458,7 @@ export const todoistListTasksAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return todoistProviderFailure({
+        return yield* todoistProviderFailure({
           code: 'todoist_list_tasks_failed',
           message: 'Todoist list tasks failed',
           status: response.status,
@@ -499,7 +514,7 @@ export const todoistCreateTaskAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return todoistProviderFailure({
+        return yield* todoistProviderFailure({
           code: 'todoist_create_task_failed',
           message: 'Todoist create task failed',
           status: response.status,
@@ -531,7 +546,7 @@ export const todoistCloseTaskAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return todoistProviderFailure({
+        return yield* todoistProviderFailure({
           code: 'todoist_close_task_failed',
           message: 'Todoist close task failed',
           status: response.status,
@@ -679,7 +694,7 @@ export const todoistDeleteProjectAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return todoistProviderFailure({
+        return yield* todoistProviderFailure({
           code: 'todoist_delete_project_failed',
           message: 'Todoist delete project failed',
           status: response.status,
@@ -770,7 +785,7 @@ export const todoistDeleteTaskAction = defineAction({
       )
 
       if (!isSuccessStatus(response.status)) {
-        return todoistProviderFailure({
+        return yield* todoistProviderFailure({
           code: 'todoist_delete_task_failed',
           message: 'Todoist delete task failed',
           status: response.status,

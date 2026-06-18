@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect'
+import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { resolveCredential } from '../credential.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -34,23 +34,34 @@ export const resolveGoogleAccessToken = (
     }
   })
 
-const jsonMessageField = (body: string, keys: ReadonlyArray<string>) => {
-  const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(body)
-  if (Option.isNone(parsed) || !isJsonObject(parsed.value)) return undefined
-  for (const key of keys) {
-    const value = parsed.value[key]
-    if (typeof value === 'string' && value.trim() !== '') return value
-  }
-  const error = parsed.value.error
-  if (!isJsonObject(error)) return undefined
-  const message = error.message
-  return typeof message === 'string' && message.trim() !== '' ? message : undefined
-}
+const decodeJsonObject = (body: string) =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(
+    Effect.result,
+    Effect.map(result => {
+      if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+      return result.success
+    })
+  )
 
-const providerMessage = (fallback: string, body: string) => {
-  const detail = jsonMessageField(body, ['message', 'error_description', 'error'])
-  return detail === undefined ? fallback : `${fallback}: ${detail}`
-}
+const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
+  decodeJsonObject(body).pipe(
+    Effect.map(parsed => {
+      if (parsed === undefined) return undefined
+      for (const key of keys) {
+        const value = parsed[key]
+        if (typeof value === 'string' && value.trim() !== '') return value
+      }
+      const error = parsed.error
+      if (!isJsonObject(error)) return undefined
+      const message = error.message
+      return typeof message === 'string' && message.trim() !== '' ? message : undefined
+    })
+  )
+
+const providerMessage = (fallback: string, body: string) =>
+  jsonMessageField(body, ['message', 'error_description', 'error']).pipe(
+    Effect.map(detail => (detail === undefined ? fallback : `${fallback}: ${detail}`))
+  )
 
 const providerCode = (fallback: string, status: number) => {
   switch (status) {
@@ -72,13 +83,17 @@ export const providerFailureFromResponse = (input: {
   readonly status: number
   readonly body: string
 }) =>
-  ActionResult.failure(
-    new ProviderFailure({
-      code: providerCode(input.code, input.status),
-      message: providerMessage(input.message, input.body),
-      status: input.status,
-      underlying: input.body
-    })
+  providerMessage(input.message, input.body).pipe(
+    Effect.map(message =>
+      ActionResult.failure(
+        new ProviderFailure({
+          code: providerCode(input.code, input.status),
+          message,
+          status: input.status,
+          underlying: input.body
+        })
+      )
+    )
   )
 
 export const isSuccessStatus = (status: number) => status >= 200 && status < 300
