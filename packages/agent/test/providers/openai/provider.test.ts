@@ -95,6 +95,48 @@ describe('OpenAI provider', () => {
       })
     }))
 
+  it.effect('rejects non-text documents for Chat Completions input', () =>
+    Effect.gen(function* () {
+      const unsupportedDocuments = [
+        { mimeType: 'application/pdf', filename: 'brief.pdf' },
+        {
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          filename: 'brief.docx'
+        }
+      ]
+
+      const errors = yield* Effect.forEach(unsupportedDocuments, document =>
+        toOpenAiRequestBody({
+          model: 'gpt-5.4',
+          systemPrompt: '',
+          messages: [
+            UserMessage.make({
+              content: [
+                TextPart.make({ text: 'summarize' }),
+                DocumentPart.make({
+                  source: inlineBase64Source('JVBERi0='),
+                  mimeType: document.mimeType,
+                  filename: document.filename
+                })
+              ]
+            })
+          ],
+          tools: []
+        }).pipe(Effect.flip)
+      )
+
+      expect(errors).toHaveLength(2)
+      for (const error of errors) {
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'provider_error',
+          retryable: false
+        })
+        expect(error.message).toBe('Document content is not supported by the OpenAI provider yet')
+      }
+    })
+  )
+
   it.effect('rejects dangling host tool calls before Chat Completions request lowering', () =>
     Effect.gen(function* () {
       const error = yield* toOpenAiRequestBody({

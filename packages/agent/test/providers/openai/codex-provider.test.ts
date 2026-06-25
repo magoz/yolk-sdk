@@ -231,6 +231,40 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('sends PDF documents as Codex input files', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({
+            content: [
+              TextPart.make({ text: 'summarize' }),
+              DocumentPart.make({
+                source: inlineBase64Source('JVBERi0='),
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input[0]).toEqual({
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'summarize' },
+          {
+            type: 'input_file',
+            filename: 'brief.pdf',
+            file_data: 'data:application/pdf;base64,JVBERi0='
+          }
+        ]
+      })
+    })
+  )
+
   it.effect('passes image URLs through for Codex Responses input', () =>
     Effect.gen(function* () {
       const body = yield* toOpenAiCodexRequestBody({
