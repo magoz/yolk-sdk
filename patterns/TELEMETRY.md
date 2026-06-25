@@ -9,7 +9,7 @@ Spans, error reporting, and observability patterns. All Effect programs should b
 
 ## Spans
 
-Every operation gets a span via `Effect.withSpan`. Span names follow `domain.entity.action`:
+Every operation gets a span via `Effect.withSpan`. Domain/package spans prefer `domain.entity.action`; service-method spans may use `Service.method` when that matches existing code:
 
 ```
 post.get
@@ -229,40 +229,6 @@ Custom attributes per span:
 | `Auth.*`          | (none — session data is the result)     |
 | `Integration.*`   | low-cardinality integration metadata    |
 
-## Axiom Dashboards
+## Exporters
 
-Spans ship to Axiom via OpenTelemetry. Dashboards visualize them.
-
-### API
-
-Auth: personal access token + `X-Axiom-Org-Id` header.
-
-```bash
-# List dashboards
-curl -H "Authorization: Bearer $AXIOM_TOKEN" \
-     -H "X-Axiom-Org-Id: $AXIOM_ORG_ID" \
-     "https://api.axiom.co/v2/dashboards"
-
-# Create dashboard
-curl -X POST \
-     -H "Authorization: Bearer $AXIOM_TOKEN" \
-     -H "X-Axiom-Org-Id: $AXIOM_ORG_ID" \
-     -H "Content-Type: application/json" \
-     "https://api.axiom.co/v2/dashboards" \
-     -d '{"dashboard": { ...full dashboard object... }}'
-
-# Update dashboard by UID (upsert)
-curl -X PUT \
-     -H "Authorization: Bearer $AXIOM_TOKEN" \
-     -H "X-Axiom-Org-Id: $AXIOM_ORG_ID" \
-     -H "Content-Type: application/json" \
-     "https://api.axiom.co/v2/dashboards/uid/{uid}" \
-     -d '{"overwrite": true, "dashboard": { ...full dashboard object... }}'
-```
-
-Key details:
-
-- **Update endpoint is `/v2/dashboards/uid/{uid}`** (not `/v2/dashboards/{id}`) — requires the `uid` path segment
-- `overwrite: true` bypasses version conflicts
-- `owner: "X-AXIOM-EVERYONE"` makes dashboard visible to all org members
-- Dashboard `uid` is in the URL: `app.axiom.co/{org}/dashboards/uid/{uid}`
+Current repo wiring uses `TelemetryLayer` plus `Logger.consolePretty()`. No external exporter/env is canonical in repo docs. Add exporter-specific setup only when matching code/config lands.

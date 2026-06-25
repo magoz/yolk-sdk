@@ -4,7 +4,7 @@ Patterns specific to the private Next.js dogfood/reference app.
 
 | Pattern | Purpose |
 | --- | --- |
-| [DATA_ACCESS_PATTERNS.md](./DATA_ACCESS_PATTERNS.md) | RSC for reads, server actions for mutations, S3 signed URLs |
+| [DATA_ACCESS_PATTERNS.md](./DATA_ACCESS_PATTERNS.md) | RSC for reads, server actions for mutations, R2 presigned upload URLs |
 | [EFFECT_API_ROUTES.md](./EFFECT_API_ROUTES.md) | HttpEffect API routes, request schemas, response/error handling |
 | [EFFECT_DOMAIN_FUNCTIONS.md](./EFFECT_DOMAIN_FUNCTIONS.md) | App-owned Effect domain functions, data access, typed errors |
 | [E2E_TESTING.md](./E2E_TESTING.md) | Playwright locators, isolation, setup, streaming gotchas |

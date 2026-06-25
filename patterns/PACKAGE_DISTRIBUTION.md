@@ -37,6 +37,7 @@ Current Changesets config:
 {
   "fixed": [["@yolk-sdk/agent", "@yolk-sdk/mcp", "..."]],
   "updateInternalDependencies": "patch",
+  "ignore": ["@yolk-sdk/cloudflare-agent"],
   "access": "public",
   "privatePackages": false
 }
@@ -175,7 +176,7 @@ pnpm lint
 pnpm test:run
 ```
 
-Public `packages/*` manifests are publishable. Do not remove `private: true` from private app packages such as `@yolk-sdk/cloudflare-agent`.
+Public `packages/*` manifests are publishable. Keep private workspaces such as `examples/next` and `cloudflare/agent` private/ignored.
 
 Verify `git status` is clean/understood. Normal publish path is GitHub Actions after merged version-prep commit, not local publish. The Action validates versions/tags, publishes with npm CLI, then creates `v<version>`.
 

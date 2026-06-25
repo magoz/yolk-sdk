@@ -160,7 +160,7 @@ async function Shell({
 }
 ```
 
-Client filters use nuqs with `{ shallow: false, history: 'replace' }` so changes trigger server rendering.
+Client filters use nuqs with `shallow: false` so changes trigger server rendering. Use `history: 'replace'` for high-frequency typing/search and `history: 'push'` for deliberate filter/page navigation.
 
 ## Anti-patterns
 

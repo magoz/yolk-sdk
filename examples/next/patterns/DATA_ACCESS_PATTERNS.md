@@ -11,7 +11,7 @@ ordering lives in the linked boundary patterns.
 | Auth/session-gated page | Suspense shell + async `Content` | `EFFECT_PAGES.md` |
 | Create/update/delete | Server action in `examples/next/lib/core/[domain]/*-action.ts` | `EFFECT_SERVER_ACTIONS.md` |
 | Domain read/write logic | App-owned Effect function in `examples/next/lib/core/*` | `EFFECT_DOMAIN_FUNCTIONS.md` |
-| Browser upload | Server action creates signed R2/S3 URL; browser uploads direct; action finalizes | Storage/knowledge core docs |
+| Browser upload | Server action creates R2 presigned PUT URL; browser uploads direct; action finalizes | Storage/knowledge core docs |
 | External webhook/HTTP boundary | API route under `examples/next/app/api/*` | `EFFECT_API_ROUTES.md` |
 | Shareable filters/page state | Route-local `search-params.ts` with `nuqs/server` | `NUQS_URL_STATE.md` |
 

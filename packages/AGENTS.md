@@ -38,7 +38,7 @@ agent/voice -> agent/loop + agent/protocol
 - Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
 - Provider/OAuth subpaths may model vendor auth mechanics, wire contracts, and agent provider adapters, not host storage or policy.
-- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private app packages private.
+- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private workspaces private.
 - Retired standalone package dirs/imports are forbidden; use unified subpaths checked by `scripts/check-package-boundaries.ts`.
 - When public packages/subpaths change, update package `exports`, `publishConfig.exports`, `scripts/check-package-exports.ts`, and `scripts/smoke-package-imports.ts` together.
 

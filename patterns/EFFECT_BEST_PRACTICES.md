@@ -442,9 +442,9 @@ export class Account extends Schema.Class<Account>('Account')({
 
 The ESLint rule `local/no-schema-from-self` catches any accidental use of stale v3 `*FromSelf` patterns.
 
-### Schema.TaggedErrorClass for Domain Errors
+### Schema.TaggedErrorClass for Wire-Boundary Errors
 
-Use `Schema.TaggedErrorClass` for all domain errors. Schema automatically provides type guards via `Schema.is()`.
+Use `Schema.TaggedErrorClass` when an error crosses a Schema/wire boundary or needs schema-derived guards/serialization. Use `Data.TaggedError` for simple internal typed failures.
 
 ```typescript
 import * as Schema from 'effect/Schema'

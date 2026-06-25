@@ -145,12 +145,11 @@ layer(createMockAuth())('post operations', it => {
 
 **When:** Testing service composition or database operations
 
-**Pattern:** Real services (Db, etc.) via testcontainers or shared test Layer
+**Pattern:** Real services via a documented test environment or shared test Layer. Do not assume container libraries unless the package declares and documents them.
 
 **Example:**
 
 ```typescript
-// With testcontainers (see patterns/EFFECT_TESTING.md for setup)
 layer(TestDbLayer)('database operations', it => {
   it.effect('persists and retrieves posts', () =>
     Effect.gen(function* () {
@@ -161,15 +160,15 @@ layer(TestDbLayer)('database operations', it => {
 })
 ```
 
-**Location:** Colocated with source or `examples/next/lib/services/*/integration.test.ts`
+**Location:** Colocated with source or documented by the owning app/package.
 
-**Note:** Integration tests require additional setup (testcontainers for Postgres). See `patterns/EFFECT_TESTING.md` for details.
+**Note:** Next app DB tests use `examples/next/.env.test`; root `pnpm test:run` runs `pnpm test:db:push` first and DB-dependent tests skip when `DATABASE_URL` is absent.
 
 ### E2E Tests
 
 **When:** Testing full user flows through the UI
 
-**Pattern:** Playwright tests in the owning app's `e2e/` directory
+**Pattern:** Playwright tests in the owning app's `e2e/` directory. Next-specific rules live in `examples/next/patterns/E2E_TESTING.md`.
 
 **Example:**
 
@@ -309,7 +308,7 @@ layer(testLayer)('post operations', it => {
 
 For detailed Effect testing patterns, see:
 
-- **[patterns/EFFECT_TESTING.md](EFFECT_TESTING.md)** - @effect/vitest usage, TestClock, property testing, mocking, testcontainers
+- **[patterns/EFFECT_TESTING.md](EFFECT_TESTING.md)** - @effect/vitest usage, TestClock, property testing, mocking, integration-test layers
 
 Key patterns from EFFECT_TESTING.md:
 

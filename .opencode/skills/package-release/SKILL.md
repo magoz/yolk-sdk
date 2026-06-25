@@ -47,7 +47,7 @@ fi
 
 4. Use fixed lockstep public package versioning.
    - Public scope: `@yolk-sdk/*` in `packages/*`.
-   - Private app package: `@yolk-sdk/cloudflare-agent`, ignored by Changesets.
+   - Private workspace: `cloudflare/agent` (`@yolk-sdk/cloudflare-agent`), ignored by Changesets.
    - All public packages share one version.
 
 5. Version locally; publish only in GitHub Actions. This step is mandatory before any publish action.

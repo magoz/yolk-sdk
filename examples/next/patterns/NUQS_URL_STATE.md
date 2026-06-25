@@ -202,7 +202,7 @@ export function PostStatusFilter() {
       .withDefault('all')
       .withOptions({
         shallow: false,  // Trigger server re-render
-        history: 'push'  // Enable back/forward navigation
+        history: 'push'  // Deliberate filter change; keep back/forward navigation
       })
   )
 
@@ -229,12 +229,12 @@ export function PostStatusFilter() {
 
 ### Required Options
 
-Always use these options for filters that affect server data:
+Use these defaults for params that affect server data:
 
 ```typescript
 .withOptions({
   shallow: false,  // Re-runs server components on change
-  history: 'push'  // Enables browser back/forward navigation
+  history: 'push'  // Deliberate filter/page navigation
 })
 ```
 
@@ -242,8 +242,8 @@ Always use these options for filters that affect server data:
 | ------------ | ----------- | ---------------------------------------------- |
 | `shallow`    | `false`     | Triggers server component re-render            |
 | `shallow`    | `true`      | Client-only update (default)                   |
-| `history`    | `'push'`    | Adds entry to browser history                  |
-| `history`    | `'replace'` | Replaces current history entry                 |
+| `history`    | `'push'`    | Deliberate filter/page navigation              |
+| `history`    | `'replace'` | High-frequency typing/search                   |
 | `scroll`     | `false`     | Prevents scroll to top on change               |
 | `throttleMs` | `500`       | Debounce URL updates (useful for search input) |
 
@@ -263,7 +263,7 @@ export function PostSearch() {
     'q',
     parseAsString.withDefault('').withOptions({
       shallow: false,
-      history: 'push',
+      history: 'replace',
       throttleMs: 300  // Debounce 300ms
     })
   )
@@ -468,7 +468,7 @@ export function Pagination({ totalPages }: Props) {
 
 1. **Define params once** - Share definitions between server and client via `search-params.ts`
 2. **Always use `shallow: false`** - For filters that affect server data
-3. **Always use `history: 'push'`** - Enable back/forward navigation
+3. **Choose `history` by interaction** - `replace` for typing/search; `push` for deliberate filter/page changes
 4. **Use Suspense keys** - Derived from search params for smooth loading states
 5. **Debounce search inputs** - Use `throttleMs` to avoid excessive requests
 6. **Set `null` to remove** - Setting a param to `null` removes it from the URL

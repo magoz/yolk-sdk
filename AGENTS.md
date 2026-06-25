@@ -10,7 +10,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 - Run `pnpm test:run` before committing broad changes.
 - Run `pnpm packages:check` when touching `packages/*`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
-- Agent tools must be runtime-portable: no Node-only imports/deps in `examples/next/lib/agents/tools/*`; use Effect `Config`, `HttpClient`, Schema, and Worker-safe adapters.
+- Follow local `AGENTS.md` before editing scoped app/package areas; root owns repo-wide boundaries only.
 - Never commit generated `.next`, `.turbo`, `dist`, coverage, or env files.
 
 ## MONOREPO STRATEGY
@@ -83,10 +83,8 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 
 ## APP BOUNDARIES
 
-- CRUD mutations use server actions in `examples/next/lib/core/[domain]/*-action.ts`, not API routes.
-- API routes are HTTP/webhook/streaming boundaries only.
-- App-owned tools in `examples/next/lib/agents/tools/*` must stay runtime-portable.
-- Next/Auth/UI rules live under `examples/next/*` docs, not root.
+- App-owned code stays outside packages unless it becomes domain-free SDK surface.
+- Next page/API/server-action/tool/auth/UI rules live under `examples/next/*` docs and patterns, not root.
 
 ## REFERENCE REPOS
 

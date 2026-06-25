@@ -40,11 +40,11 @@ Cause: stale generated Next types.
 Fix:
 
 ```bash
-rm -rf .next examples/next/.next
+rm -rf examples/next/.next
 pnpm tsc
 ```
 
-Only remove generated output, never source files.
+Only remove generated output, never source files. Remove root `.next` only if it was accidentally generated.
 
 ## GitHub Action publishes wrong tag
 
@@ -63,7 +63,7 @@ Symptom: `changeset publish` skips package.
 Fix:
 
 - Public `packages/*` should be publishable.
-- Keep private app packages private and ignored.
+- Keep private workspaces private and ignored.
 
 ## npm auth/provenance fails
 
