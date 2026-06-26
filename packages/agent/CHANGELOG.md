@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.26
+
+### Minor Changes
+
+- Add replay-safe workflow event sequencing and chat projection helpers.
+
 ## 0.1.0-canary.25
 
 ### Patch Changes
