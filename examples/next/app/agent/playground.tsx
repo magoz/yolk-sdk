@@ -18,7 +18,14 @@ import {
   useAgentChat,
   type AgentChatTransport
 } from '@yolk-sdk/agent/react'
-import { cancelAgentRun, streamAgentEvents, streamAgentRunEvents, streamCloudflareAgentEvents } from '@yolk-sdk/agent/client'
+import {
+  AgentTransportError,
+  cancelAgentRun,
+  streamAgentEventsUntilTerminal,
+  streamAgentRunEventsUntilTerminal,
+  streamAgentRunHitlResponseEventsUntilTerminal,
+  streamCloudflareAgentEvents
+} from '@yolk-sdk/agent/client'
 import {
   agentTextCapabilities,
   agentTextModel,
@@ -203,8 +210,14 @@ const readyDocumentAttachmentCount = (attachments: ReadonlyArray<AgentAttachment
 const readyAttachmentCount = (attachments: ReadonlyArray<AgentAttachment>) =>
   Arr.filter(attachments, isReadyAttachment).length
 
-const attachmentReadyLabel = (count: number) =>
-  `${count} attachment${count === 1 ? '' : 's'}`
+const attachmentReadyLabel = (count: number) => `${count} attachment${count === 1 ? '' : 's'}`
+
+async function* missingWorkflowRunIdAgentEvents(): AsyncGenerator<AgentEvent, void, void> {
+  throw new AgentTransportError({
+    message: 'Workflow HITL response requires an active run id',
+    cause: 'missing_workflow_run_id'
+  })
+}
 
 const sourceImageCanBeReady = (file: File) =>
   file.type.startsWith('image/') && file.size <= maxSourceImageBytes
@@ -312,9 +325,7 @@ const processAttachmentFiles = (
   currentAttachments: ReadonlyArray<AgentAttachment>
 ) => {
   return Promise.all(
-    Arr.map(files, (file, index) =>
-      processAttachmentFile(file, files, index, currentAttachments)
-    )
+    Arr.map(files, (file, index) => processAttachmentFile(file, files, index, currentAttachments))
   )
 }
 
@@ -537,10 +548,15 @@ export function AgentPlayground({
     return request => {
       const hitlResponse = request.hitlResponses?.[0]
 
-      if (hitlResponse !== undefined && workflowRunId !== null) {
-        return streamAgentEvents({
-          ...request,
+      if (hitlResponse !== undefined) {
+        if (workflowRunId === null) {
+          return missingWorkflowRunIdAgentEvents()
+        }
+
+        return streamAgentRunHitlResponseEventsUntilTerminal({
           endpoint: `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`,
+          hitlResponses: [hitlResponse],
+          signal: request.signal,
           onResponse: response => {
             const runId = response.headers['x-workflow-run-id']
 
@@ -553,16 +569,10 @@ export function AgentPlayground({
         })
       }
 
-      return streamAgentEvents({
+      return streamAgentEventsUntilTerminal({
         ...request,
         endpoint: '/api/agent/workflow',
-        onResponse: response => {
-          const runId = response.headers['x-workflow-run-id']
-
-          if (runId === undefined) {
-            return
-          }
-
+        onRunId: runId => {
           setWorkflowRunId(runId)
           recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
         }
@@ -641,15 +651,15 @@ export function AgentPlayground({
       return Option.none()
     }
 
-      return Option.some(
-        isWaiting
-          ? activeToolParts.length === 1
-            ? `Waiting for ${firstRun.call.name}`
-            : `Waiting for ${activeToolParts.length} inputs`
-          : activeToolParts.length === 1
-            ? `Running ${firstRun.call.name}`
-            : `Running ${activeToolParts.length} tools`
-      )
+    return Option.some(
+      isWaiting
+        ? activeToolParts.length === 1
+          ? `Waiting for ${firstRun.call.name}`
+          : `Waiting for ${activeToolParts.length} inputs`
+        : activeToolParts.length === 1
+          ? `Running ${firstRun.call.name}`
+          : `Running ${activeToolParts.length} tools`
+    )
   }, [activeToolParts, isWaiting])
   const chatItems = useMemo(
     () =>
@@ -808,13 +818,20 @@ export function AgentPlayground({
     setIsWorkflowResuming(true)
     const abortController = new AbortController()
     workflowResumeAbortRef.current = abortController
-    recordActivity({ title: 'Workflow stream resume requested', detail: workflowRunId, tone: 'neutral' })
+    recordActivity({
+      title: 'Workflow stream resume requested',
+      detail: workflowRunId,
+      tone: 'neutral'
+    })
 
     const endpoint = `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`
 
     Effect.runPromise(
       Effect.promise(async () => {
-        for await (const event of streamAgentRunEvents({ endpoint, signal: abortController.signal })) {
+        for await (const event of streamAgentRunEventsUntilTerminal({
+          endpoint,
+          signal: abortController.signal
+        })) {
           applyEvent(event)
         }
       })
@@ -832,7 +849,16 @@ export function AgentPlayground({
         }
         setIsWorkflowResuming(false)
       })
-  }, [applyEvent, fail, isRunning, isWorkflowResuming, recordActivity, runtime, state.status, workflowRunId])
+  }, [
+    applyEvent,
+    fail,
+    isRunning,
+    isWorkflowResuming,
+    recordActivity,
+    runtime,
+    state.status,
+    workflowRunId
+  ])
 
   const handleStop = useCallback(() => {
     const runId = workflowRunId
@@ -974,24 +1000,26 @@ export function AgentPlayground({
               currentAttachment => currentAttachment.id !== id
             )
             setAttachments(remainingAttachments)
-            processAttachmentFiles([attachment.file], remainingAttachments).then(processedAttachments => {
-              setAttachments(current => [...current, ...processedAttachments])
+            processAttachmentFiles([attachment.file], remainingAttachments).then(
+              processedAttachments => {
+                setAttachments(current => [...current, ...processedAttachments])
 
-              Option.match(Arr.findFirst(processedAttachments, isFailedAttachment), {
-                onNone: () =>
-                  recordActivity({
-                    title: 'Attachment retry succeeded',
-                    detail: attachment.name,
-                    tone: 'neutral'
-                  }),
-                onSome: failedAttachment =>
-                  recordActivity({
-                    title: 'Attachment retry failed',
-                    detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
-                    tone: 'error'
-                  })
-              })
-            })
+                Option.match(Arr.findFirst(processedAttachments, isFailedAttachment), {
+                  onNone: () =>
+                    recordActivity({
+                      title: 'Attachment retry succeeded',
+                      detail: attachment.name,
+                      tone: 'neutral'
+                    }),
+                  onSome: failedAttachment =>
+                    recordActivity({
+                      title: 'Attachment retry failed',
+                      detail: `${failedAttachment.name}: ${failedAttachment.reason}`,
+                      tone: 'error'
+                    })
+                })
+              }
+            )
           }
         }
       )
@@ -1058,7 +1086,10 @@ export function AgentPlayground({
               errorInfo={state.errorInfo}
               retryInfo={state.retryInfo}
               workflowRunId={workflowRunId}
-              workflowResumeDisabled={isWorkflowResumeDisabled({ status: state.status, isTextBusy })}
+              workflowResumeDisabled={isWorkflowResumeDisabled({
+                status: state.status,
+                isTextBusy
+              })}
               onResumeWorkflowRun={handleResumeWorkflowRun}
             />
           ) : null}

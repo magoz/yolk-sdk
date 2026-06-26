@@ -5,12 +5,17 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 ## What it provides
 
 - Effect stream and async generator helpers for streamed `AgentEvent`s.
+- Durable run resume helpers that follow continuation chunks until terminal events.
 - Generic client state reducer helpers.
 - Non-empty `AgentTranscript` type.
 - Tool run lifecycle state.
 - HITL response submission helpers for approvals and questions.
+- Existing-run HITL resume helpers that POST only `hitlResponses`.
 - Typed transport errors.
 - Terminal events (`AgentEnd`, `AgentError`, `AgentAwaitingInput`) end consumers while HTTP bodies drain to EOF.
+- Durable continuation helpers fail with `AgentTransportError` if a terminal event is not reached.
+- HITL resume tail headers describe the stream tail before the returned body.
+- `continuationLimit: 0` makes non-terminal responses fail without follow-up requests.
 
 ## Use it when
 

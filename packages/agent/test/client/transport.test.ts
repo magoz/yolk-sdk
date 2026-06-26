@@ -14,14 +14,23 @@ import {
   LLMTextDelta,
   SessionSnapshot,
   ToolApprovalRequest,
+  ToolApprovalResponse,
   ToolCall,
   UserMessage,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import {
+  agentRunEndpointWithStartIndex,
+  agentRunIdFromHeaders,
+  agentRunStreamStartIndexFromHeaders,
+  agentRunStreamTailIndexFromHeaders,
   appendAgentMessage,
   cancelAgentRun,
   collectAgentEvents,
+  streamAgentEventsUntilTerminal,
+  streamAgentRunHitlResponseEvents,
+  streamAgentRunHitlResponseEventsUntilTerminal,
+  streamAgentRunEventsUntilTerminal,
   streamAgentRunEvents,
   streamAgentEvents,
   streamCloudflareAgentEvents
@@ -34,20 +43,35 @@ type CapturedRequest = {
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
   events.map(event => JSON.stringify(event)).join('\n')
 
-const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest>) =>
-  Layer.succeed(
+const makeHttpClientLayerFromResponses = (
+  responses: ReadonlyArray<Response>,
+  requests: Array<CapturedRequest>
+) => {
+  let index = 0
+
+  return Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make(request =>
       Effect.sync(() => {
         requests.push({ request })
+        const response = responses[index]
+        index += 1
+
+        if (response === undefined) {
+          throw new Error(`No response configured for request ${index}`)
+        }
 
         return HttpClientResponse.fromWeb(request, response)
       })
     )
   )
+}
 
-const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
-  const body = requests[0]?.request.body
+const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest>) =>
+  makeHttpClientLayerFromResponses([response], requests)
+
+const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>, index = 0) => {
+  const body = requests[index]?.request.body
   expect(body?._tag).toBe('Uint8Array')
 
   if (body?._tag !== 'Uint8Array') {
@@ -146,6 +170,289 @@ describe('collectAgentEvents', () => {
     expect(events).toEqual(responseEvents)
   })
 
+  it('parses durable run headers and start-index endpoints', () => {
+    const headers = {
+      'X-Workflow-Run-Id': ' run_1 ',
+      'X-Workflow-Stream-Tail-Index': ' 41 '
+    }
+
+    expect(agentRunIdFromHeaders(headers)).toBe('run_1')
+    expect(agentRunStreamTailIndexFromHeaders(headers)).toBe(41)
+    expect(agentRunStreamStartIndexFromHeaders(headers)).toBe(42)
+    expect(agentRunStreamTailIndexFromHeaders({ 'x-workflow-stream-tail-index': '-1' })).toBe(-1)
+    expect(agentRunStreamStartIndexFromHeaders({ 'x-workflow-stream-tail-index': '-1' })).toBe(0)
+    expect(
+      agentRunStreamTailIndexFromHeaders({ 'x-workflow-stream-tail-index': '41x' })
+    ).toBeUndefined()
+    expect(
+      agentRunStreamTailIndexFromHeaders({ 'x-workflow-stream-tail-index': '1.5' })
+    ).toBeUndefined()
+    expect(agentRunIdFromHeaders({ 'x-workflow-run-id': '   ' })).toBeUndefined()
+    expect(agentRunEndpointWithStartIndex('/api/agent/run_1', 42)).toBe(
+      '/api/agent/run_1?startIndex=42'
+    )
+    expect(agentRunEndpointWithStartIndex('/api/agent/run_1?debug=1', 42)).toBe(
+      '/api/agent/run_1?debug=1&startIndex=42'
+    )
+    expect(agentRunEndpointWithStartIndex('/api/agent/run_1?startIndex=4', 42)).toBe(
+      '/api/agent/run_1?startIndex=42'
+    )
+    expect(agentRunEndpointWithStartIndex('/api/agent/run_1#events', 42)).toBe(
+      '/api/agent/run_1?startIndex=42#events'
+    )
+    expect(() => agentRunEndpointWithStartIndex('/api/agent/run_1', -1)).toThrow(
+      'Invalid agent run stream start index'
+    )
+  })
+
+  it('continues newly started durable runs until a terminal event', async () => {
+    const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+    const requests: Array<CapturedRequest> = []
+    const runIds: Array<string> = []
+    const seen: Array<string> = []
+    const events = await collectAsync(
+      streamAgentEventsUntilTerminal({
+        endpoint: '/api/agent',
+        sessionId: 'session_1',
+        messages,
+        onRunId: runId => runIds.push(runId),
+        onEvent: event => seen.push(event._tag),
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response(encodeEvents([AgentStart.make({})]), {
+              headers: { 'x-workflow-run-id': 'run_1' }
+            }),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent',
+      '/api/agent/run_1?startIndex=1'
+    ])
+    expect(requests.map(item => item.request.method)).toEqual(['POST', 'GET'])
+    expect(runIds).toEqual(['run_1'])
+    expect(seen).toEqual(['AgentStart', 'AgentEnd'])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
+  it('continues existing durable runs from the requested start index', async () => {
+    const requests: Array<CapturedRequest> = []
+    const events = await collectAsync(
+      streamAgentRunEventsUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        startIndex: 4,
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response(encodeEvents([AgentStart.make({})])),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1?startIndex=4',
+      '/api/agent/run_1?startIndex=5'
+    ])
+    expect(requests.map(item => item.request.method)).toEqual(['GET', 'GET'])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
+  it('rejects negative durable run start indexes', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentRunEventsUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          startIndex: -2,
+          httpClientLayer: makeHttpClientLayer(
+            new Response(encodeEvents([AgentStart.make({})])),
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests).toEqual([])
+  })
+
+  it('posts HITL responses to existing durable runs', async () => {
+    const response = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+    const requests: Array<CapturedRequest> = []
+    const events = await collectAsync(
+      streamAgentRunHitlResponseEvents({
+        endpoint: '/api/agent/run_1',
+        hitlResponses: [response],
+        httpClientLayer: makeHttpClientLayer(
+          new Response(encodeEvents([AgentStart.make({})])),
+          requests
+        )
+      })
+    )
+
+    expect(requests[0]?.request.url).toBe('/api/agent/run_1')
+    expect(requests[0]?.request.method).toBe('POST')
+    expect(readCapturedBody(requests)).toBe(JSON.stringify({ hitlResponses: [response] }))
+    expect(events.map(event => event._tag)).toEqual(['AgentStart'])
+  })
+
+  it('continues durable HITL resumes from the response tail index', async () => {
+    const response = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+    const requests: Array<CapturedRequest> = []
+    const events = await collectAsync(
+      streamAgentRunHitlResponseEventsUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        hitlResponses: [response],
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response(encodeEvents([LLMTextDelta.make({ text: 'working' })]), {
+              headers: { 'x-workflow-stream-tail-index': '3' }
+            }),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=5'
+    ])
+    expect(requests.map(item => item.request.method)).toEqual(['POST', 'GET'])
+    expect(readCapturedBody(requests)).toBe(JSON.stringify({ hitlResponses: [response] }))
+    expect(events.map(event => event._tag)).toEqual(['LLMTextDelta', 'AgentEnd'])
+  })
+
+  it('rejects non-terminal start responses without a durable run id', async () => {
+    const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentEventsUntilTerminal({
+          endpoint: '/api/agent',
+          sessionId: 'session_1',
+          messages,
+          httpClientLayer: makeHttpClientLayer(
+            new Response(encodeEvents([AgentStart.make({})])),
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+  })
+
+  it('rejects when continuation limit is exhausted before terminal', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentRunEventsUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          continuationLimit: 1,
+          httpClientLayer: makeHttpClientLayerFromResponses(
+            [
+              new Response(encodeEvents([AgentStart.make({})])),
+              new Response(encodeEvents([LLMTextDelta.make({ text: 'still working' })]))
+            ],
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=1'
+    ])
+  })
+
+  it('rejects empty non-terminal continuation chunks', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentRunEventsUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          httpClientLayer: makeHttpClientLayerFromResponses(
+            [new Response(encodeEvents([AgentStart.make({})])), new Response('')],
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=1'
+    ])
+  })
+
+  it('rejects durable HITL continuations without tail index headers', async () => {
+    const response = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentRunHitlResponseEventsUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          hitlResponses: [response],
+          httpClientLayer: makeHttpClientLayer(
+            new Response(encodeEvents([LLMTextDelta.make({ text: 'working' })])),
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+  })
+
+  it('rejects invalid durable continuation options', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectAsync(
+        streamAgentRunEventsUntilTerminal({
+          endpoint: '/api/agent/run_1',
+          continuationLimit: 1.5,
+          httpClientLayer: makeHttpClientLayer(
+            new Response(encodeEvents([AgentStart.make({})])),
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests).toEqual([])
+  })
+
   it('cancels existing runs with DELETE', async () => {
     const requests: Array<CapturedRequest> = []
 
@@ -206,7 +513,9 @@ describe('collectAgentEvents', () => {
       new ReadableStream<Uint8Array>({
         start: streamController => {
           controller = streamController
-          streamController.enqueue(new TextEncoder().encode(`${JSON.stringify(AgentStart.make({}))}\n`))
+          streamController.enqueue(
+            new TextEncoder().encode(`${JSON.stringify(AgentStart.make({}))}\n`)
+          )
           streamController.enqueue(new TextEncoder().encode(`${JSON.stringify(awaitingInput)}\n`))
         },
         cancel: () => {

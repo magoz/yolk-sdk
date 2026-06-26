@@ -50,10 +50,11 @@ type IndexedToolResultMessage = {
 const workflowEventStreamId = 'workflow'
 const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
 
-export const agentWorkflowHitlHookToken = (input: {
-  readonly sessionId: string
-  readonly requestId: string
-}) => `agent-hitl:${input.sessionId}:${input.requestId}`
+// App-owned token strategy, not an SDK transport contract. The client only posts
+// `{ hitlResponses }` to the run endpoint; this route authorizes run access, and
+// the agent loop validates `requestId`/`toolCallId` before executing anything.
+export const agentWorkflowHitlHookToken = (input: { readonly runId: string }) =>
+  `agent-hitl:${input.runId}`
 
 const writeSequencedWorkflowEvent = (input: {
   readonly writer: WritableStreamDefaultWriter<Uint8Array>
@@ -94,7 +95,9 @@ const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
 
 const decodeUsageOrZero = (usage: unknown | undefined) =>
-  usage === undefined ? Effect.succeed(zeroAgentUsage) : Schema.decodeUnknownEffect(AgentUsage)(usage)
+  usage === undefined
+    ? Effect.succeed(zeroAgentUsage)
+    : Schema.decodeUnknownEffect(AgentUsage)(usage)
 
 const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
   responses === undefined
@@ -148,7 +151,9 @@ const collectModelEvent = (input: {
 
       if (Schema.is(UsageUpdate)(input.event)) {
         return Schema.decodeUnknownEffect(UsageUpdate)(input.event).pipe(
-          Effect.flatMap(event => Ref.update(input.usage, usage => addAgentUsage(usage, event.usage)))
+          Effect.flatMap(event =>
+            Ref.update(input.usage, usage => addAgentUsage(usage, event.usage))
+          )
         )
       }
 
@@ -160,7 +165,7 @@ const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessa
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
 const workflowAwaitingInput = (input: {
-  readonly request: AgentRouteRequest
+  readonly runId: string
   readonly event: AgentAwaitingInput
   readonly eventSequence: number
 }) =>
@@ -175,8 +180,7 @@ const workflowAwaitingInput = (input: {
 
     return {
       hookToken: agentWorkflowHitlHookToken({
-        sessionId: input.request.sessionId,
-        requestId: firstRequest.requestId
+        runId: input.runId
       }),
       requests: yield* Effect.forEach(input.event.requests, request => encodeHitlRequest(request)),
       messages: yield* Effect.forEach(input.event.messages, message => encodeMessage(message)),
@@ -238,12 +242,14 @@ export async function runAgentWorkflowModelStep(input: {
       const currentToolCalls = yield* Ref.get(toolCalls)
       const currentUsage = yield* Ref.get(usage)
       const currentReason = yield* Ref.get(reason)
-      const nextCreatedMessages = currentAssistantMessage === undefined
-        ? createdMessages
-        : [...createdMessages, currentAssistantMessage]
-      const nextMessages = currentAssistantMessage === undefined
-        ? runtime.input.messages
-        : [...runtime.input.messages, currentAssistantMessage]
+      const nextCreatedMessages =
+        currentAssistantMessage === undefined
+          ? createdMessages
+          : [...createdMessages, currentAssistantMessage]
+      const nextMessages =
+        currentAssistantMessage === undefined
+          ? runtime.input.messages
+          : [...runtime.input.messages, currentAssistantMessage]
 
       if (currentReason === 'stop') {
         yield* writeSequencedWorkflowEvent({
@@ -262,7 +268,9 @@ export async function runAgentWorkflowModelStep(input: {
       return {
         done: currentReason === 'stop',
         messages: yield* Effect.forEach(nextMessages, message => encodeMessage(message)),
-        createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
+        createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
+          encodeMessage(message)
+        ),
         toolCalls: yield* Effect.forEach(currentToolCalls, call => encodeToolCall(call)),
         usage: yield* encodeUsage(currentUsage),
         turn: input.state.turn,
@@ -286,6 +294,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
 
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
+  const workflowRunId = getWorkflowMetadata().workflowRunId
 
   return await Effect.runPromise(
     Effect.gen(function* () {
@@ -356,14 +365,17 @@ export async function runAgentWorkflowToolBatchStep(input: {
 
       return {
         messages: yield* Effect.forEach(messages, message => encodeMessage(message)),
-        createdMessages: yield* Effect.forEach(nextCreatedMessages, message => encodeMessage(message)),
-        awaitingInput: currentAwaitingInput === undefined
-          ? undefined
-          : yield* workflowAwaitingInput({
-              request,
-              event: currentAwaitingInput,
-              eventSequence: nextEventSequence
-            }),
+        createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
+          encodeMessage(message)
+        ),
+        awaitingInput:
+          currentAwaitingInput === undefined
+            ? undefined
+            : yield* workflowAwaitingInput({
+                runId: workflowRunId,
+                event: currentAwaitingInput,
+                eventSequence: nextEventSequence
+              }),
         eventSequence: nextEventSequence
       }
     }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)

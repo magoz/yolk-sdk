@@ -20,6 +20,10 @@ export type {
 } from './state.ts'
 export {
   AgentTransportError,
+  agentRunEndpointWithStartIndex,
+  agentRunIdFromHeaders,
+  agentRunStreamStartIndexFromHeaders,
+  agentRunStreamTailIndexFromHeaders,
   cancelAgentRun,
   collectAgentEvents,
   collectAgentEventsEffect,
@@ -27,19 +31,30 @@ export {
   streamCloudflareAgentEventStream,
   streamCloudflareAgentEvents,
   streamAgentEvents,
+  streamAgentEventsUntilTerminal,
   streamAgentEventStream,
   streamAgentRunEvents,
+  streamAgentRunEventsUntilTerminal,
   streamAgentRunEventStream,
+  streamAgentRunHitlResponseEvents,
+  streamAgentRunHitlResponseEventsUntilTerminal,
+  streamAgentRunHitlResponseEventStream,
   streamToolApprovalResponseEventStream,
   submitQuestionResponse,
   submitToolApprovalResponse
 } from './transport.ts'
 export type {
+  AgentRunContinuationOptions,
   AgentHttpResponseInfo,
   CancelAgentRunRequest,
   SubmitQuestionResponseRequest,
   SubmitToolApprovalResponseRequest,
   StreamAgentEventsRequest,
+  StreamAgentEventsUntilTerminalRequest,
+  StreamAgentEventHandler,
   StreamAgentRunEventsRequest,
+  StreamAgentRunEventsUntilTerminalRequest,
+  StreamAgentRunHitlResponseEventsRequest,
+  StreamAgentRunHitlResponseEventsUntilTerminalRequest,
   StreamCloudflareAgentEventsRequest
 } from './transport.ts'

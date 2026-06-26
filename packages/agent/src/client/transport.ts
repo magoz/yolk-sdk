@@ -48,10 +48,38 @@ export type StreamAgentEventsRequest = {
 
 export type StreamAgentRunEventsRequest = {
   readonly endpoint: string
+  readonly startIndex?: number
   readonly signal?: AbortSignal
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
   readonly onResponse?: (response: AgentHttpResponseInfo) => void
 }
+
+export type StreamAgentRunHitlResponseEventsRequest = {
+  readonly endpoint: string
+  readonly hitlResponses: ReadonlyArray<HitlResponse>
+  readonly signal?: AbortSignal
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  readonly onResponse?: (response: AgentHttpResponseInfo) => void
+}
+
+export type StreamAgentEventHandler = (event: AgentEventType, count: number) => void
+
+export type AgentRunContinuationOptions = {
+  readonly continuationLimit?: number
+  readonly onEvent?: StreamAgentEventHandler
+}
+
+export type StreamAgentEventsUntilTerminalRequest = StreamAgentEventsRequest &
+  AgentRunContinuationOptions & {
+    readonly runEndpoint?: (runId: string) => string
+    readonly onRunId?: (runId: string) => void
+  }
+
+export type StreamAgentRunEventsUntilTerminalRequest = StreamAgentRunEventsRequest &
+  AgentRunContinuationOptions
+
+export type StreamAgentRunHitlResponseEventsUntilTerminalRequest =
+  StreamAgentRunHitlResponseEventsRequest & AgentRunContinuationOptions
 
 export type CancelAgentRunRequest = {
   readonly endpoint: string
@@ -81,6 +109,173 @@ export type StreamCloudflareAgentEventsRequest = {
 }
 
 const defaultEndpoint = '/api/agent'
+const defaultRunContinuationLimit = 120
+const relativeEndpointBase = 'http://yolk.local'
+
+const headerValue = (headers: Readonly<Record<string, string | undefined>>, name: string) => {
+  const direct = headers[name]
+
+  if (direct !== undefined) {
+    return direct
+  }
+
+  const normalizedName = name.toLowerCase()
+
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalizedName) {
+      return value
+    }
+  }
+
+  return undefined
+}
+
+const nonEmptyHeaderValue = (
+  headers: Readonly<Record<string, string | undefined>>,
+  name: string
+) => {
+  const value = headerValue(headers, name)?.trim()
+
+  return value === undefined || value.length === 0 ? undefined : value
+}
+
+const safeIntegerPattern = /^-?(0|[1-9]\d*)$/
+
+const parseSafeInteger = (raw: string) => {
+  const value = raw.trim()
+
+  if (!safeIntegerPattern.test(value)) {
+    return undefined
+  }
+
+  const parsed = Number.parseInt(value, 10)
+
+  return Number.isSafeInteger(parsed) ? parsed : undefined
+}
+
+export const agentRunIdFromHeaders = (headers: Readonly<Record<string, string | undefined>>) =>
+  nonEmptyHeaderValue(headers, 'x-workflow-run-id')
+
+export const agentRunStreamTailIndexFromHeaders = (
+  headers: Readonly<Record<string, string | undefined>>
+) => {
+  const raw = nonEmptyHeaderValue(headers, 'x-workflow-stream-tail-index')
+  if (raw === undefined) return undefined
+
+  const parsed = parseSafeInteger(raw)
+
+  return parsed !== undefined && parsed >= -1 ? parsed : undefined
+}
+
+export const agentRunStreamStartIndexFromHeaders = (
+  headers: Readonly<Record<string, string | undefined>>
+) => {
+  const tailIndex = agentRunStreamTailIndexFromHeaders(headers)
+
+  return tailIndex === undefined ? undefined : tailIndex + 1
+}
+
+export const agentRunEndpointWithStartIndex = (endpoint: string, startIndex?: number) => {
+  if (startIndex === undefined) return endpoint
+
+  validateAgentRunStartIndex(startIndex)
+
+  const parsed = parseEndpointOrThrow(endpoint)
+  parsed.url.searchParams.set('startIndex', String(startIndex))
+
+  return serializeEndpoint(parsed)
+}
+
+type ParsedEndpoint = {
+  readonly url: URL
+  readonly absolute: boolean
+  readonly leadingSlash: boolean
+}
+
+const absoluteUrlPattern = /^[A-Za-z][A-Za-z\d+.-]*:/
+
+const parseEndpoint = (endpoint: string): ParsedEndpoint | undefined => {
+  try {
+    return {
+      url: new URL(endpoint, relativeEndpointBase),
+      absolute: absoluteUrlPattern.test(endpoint),
+      leadingSlash: endpoint.startsWith('/')
+    }
+  } catch {
+    return undefined
+  }
+}
+
+const parseEndpointOrThrow = (endpoint: string) => {
+  const parsed = parseEndpoint(endpoint)
+
+  if (parsed !== undefined) {
+    return parsed
+  }
+
+  throw new AgentTransportError({
+    message: 'Invalid agent run endpoint',
+    cause: endpoint
+  })
+}
+
+const serializeEndpoint = (endpoint: ParsedEndpoint) => {
+  if (endpoint.absolute) {
+    return endpoint.url.toString()
+  }
+
+  const serialized = `${endpoint.url.pathname}${endpoint.url.search}${endpoint.url.hash}`
+
+  return endpoint.leadingSlash ? serialized : serialized.slice(1)
+}
+
+const appendEncodedPathSegment = (endpoint: string, segment: string) => {
+  const parsed = parseEndpointOrThrow(endpoint)
+
+  const basePath = parsed.url.pathname.endsWith('/')
+    ? parsed.url.pathname.slice(0, -1)
+    : parsed.url.pathname
+
+  parsed.url.pathname = `${basePath}/${encodeURIComponent(segment)}`
+
+  return serializeEndpoint(parsed)
+}
+
+const defaultAgentRunEndpoint = (endpoint: string | undefined, runId: string) =>
+  appendEncodedPathSegment(endpoint ?? defaultEndpoint, runId)
+
+const agentRunContinuationLimit = (limit: number | undefined) => {
+  if (limit === undefined) {
+    return defaultRunContinuationLimit
+  }
+
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new AgentTransportError({
+      message: 'Invalid agent run continuation limit',
+      cause: limit
+    })
+  }
+
+  return limit
+}
+
+const validateAgentRunContinuationLimit = (limit: number | undefined) => {
+  agentRunContinuationLimit(limit)
+}
+
+const validateAgentRunStartIndex = (startIndex: number | undefined) => {
+  if (startIndex === undefined || (Number.isSafeInteger(startIndex) && startIndex >= 0)) {
+    return
+  }
+
+  throw new AgentTransportError({
+    message: 'Invalid agent run stream start index',
+    cause: startIndex
+  })
+}
+
+const nextAgentRunStartIndex = (startIndex: number | undefined, count: number) =>
+  (startIndex ?? 0) + count
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -250,6 +445,22 @@ const makeHttpRequest = (request: StreamAgentEventsRequest) =>
     )
   )
 
+const makeHttpRunHitlResponseRequest = (request: StreamAgentRunHitlResponseEventsRequest) =>
+  encodeJsonString(
+    { hitlResponses: request.hitlResponses },
+    'Could not serialize agent run HITL response'
+  ).pipe(
+    Effect.map(body =>
+      HttpClientRequest.post(request.endpoint).pipe(
+        HttpClientRequest.setHeaders({
+          accept: 'application/x-ndjson',
+          'content-type': 'application/json'
+        }),
+        HttpClientRequest.bodyText(body, 'application/json')
+      )
+    )
+  )
+
 const requestAgentResponse = (request: StreamAgentEventsRequest) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
@@ -259,7 +470,9 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
       .pipe(Effect.mapError(toHttpClientTransportError('Agent request failed')))
 
     if (response.status >= 200 && response.status < 300) {
-      yield* Effect.sync(() => request.onResponse?.({ status: response.status, headers: response.headers }))
+      yield* Effect.sync(() =>
+        request.onResponse?.({ status: response.status, headers: response.headers })
+      )
       return response
     }
 
@@ -275,17 +488,21 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
 
 const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
   Effect.gen(function* () {
+    validateAgentRunStartIndex(request.startIndex)
+
     const client = yield* HttpClient.HttpClient
     const response = yield* client
       .execute(
-        HttpClientRequest.get(request.endpoint).pipe(
-          HttpClientRequest.setHeaders({ accept: 'application/x-ndjson' })
-        )
+        HttpClientRequest.get(
+          agentRunEndpointWithStartIndex(request.endpoint, request.startIndex)
+        ).pipe(HttpClientRequest.setHeaders({ accept: 'application/x-ndjson' }))
       )
       .pipe(Effect.mapError(toHttpClientTransportError('Agent run request failed')))
 
     if (response.status >= 200 && response.status < 300) {
-      yield* Effect.sync(() => request.onResponse?.({ status: response.status, headers: response.headers }))
+      yield* Effect.sync(() =>
+        request.onResponse?.({ status: response.status, headers: response.headers })
+      )
       return response
     }
 
@@ -294,6 +511,31 @@ const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
     return yield* Effect.fail(
       new AgentTransportError({
         message: `Agent run request failed (${response.status}): ${message}`,
+        cause: response.status
+      })
+    )
+  })
+
+const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRequest) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient
+    const httpRequest = yield* makeHttpRunHitlResponseRequest(request)
+    const response = yield* client
+      .execute(httpRequest)
+      .pipe(Effect.mapError(toHttpClientTransportError('Agent run HITL request failed')))
+
+    if (response.status >= 200 && response.status < 300) {
+      yield* Effect.sync(() =>
+        request.onResponse?.({ status: response.status, headers: response.headers })
+      )
+      return response
+    }
+
+    const message = yield* responseErrorMessage(response)
+
+    return yield* Effect.fail(
+      new AgentTransportError({
+        message: `Agent run HITL request failed (${response.status}): ${message}`,
         cause: response.status
       })
     )
@@ -321,9 +563,7 @@ const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
   }).pipe(Effect.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
 const isTerminalAgentEvent = (event: AgentEventType) =>
-  event._tag === 'AgentEnd' ||
-  event._tag === 'AgentError' ||
-  event._tag === 'AgentAwaitingInput'
+  event._tag === 'AgentEnd' || event._tag === 'AgentError' || event._tag === 'AgentAwaitingInput'
 
 const responseToLineStream = (response: HttpClientResponse.HttpClientResponse) =>
   response.stream.pipe(
@@ -453,12 +693,225 @@ export const streamAgentRunEventStream = (request: StreamAgentRunEventsRequest) 
     request.signal
   ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
-export const streamToolApprovalResponseEventStream = (
-  request: SubmitToolApprovalResponseRequest
-) => streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+export const streamAgentRunHitlResponseEventStream = (
+  request: StreamAgentRunHitlResponseEventsRequest
+) =>
+  applyAbortSignal(
+    Stream.fromEffect(requestAgentRunHitlResponse(request)).pipe(
+      Stream.flatMap(responseToEventStream)
+    ),
+    request.signal
+  ).pipe(Stream.provide(request.httpClientLayer ?? FetchHttpClient.layer))
+
+export const streamToolApprovalResponseEventStream = (request: SubmitToolApprovalResponseRequest) =>
+  streamAgentEventStream({ ...request, hitlResponses: [request.response] })
 
 export const streamQuestionResponseEventStream = (request: SubmitQuestionResponseRequest) =>
   streamAgentEventStream({ ...request, hitlResponses: [request.response] })
+
+type AgentEventChunkResult = {
+  readonly count: number
+  readonly terminal: boolean
+}
+
+type AgentRunContinuationInput = AgentRunContinuationOptions & {
+  readonly endpoint: string | undefined
+  readonly startIndex: number | undefined
+  readonly countOffset: number
+  readonly terminal: boolean
+  readonly signal?: AbortSignal
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  readonly onResponse?: (response: AgentHttpResponseInfo) => void
+}
+
+const missingAgentRunContinuationEndpointError = () =>
+  new AgentTransportError({
+    message: 'Agent run continuation failed: missing x-workflow-run-id',
+    cause: 'missing_run_id'
+  })
+
+const exhaustedAgentRunContinuationLimitError = (limit: number) =>
+  new AgentTransportError({
+    message: 'Agent run continuation limit reached before a terminal event',
+    cause: { limit }
+  })
+
+const noProgressAgentRunContinuationError = (endpoint: string, startIndex: number | undefined) =>
+  new AgentTransportError({
+    message: 'Agent run continuation made no progress before a terminal event',
+    cause: { endpoint, startIndex }
+  })
+
+const missingAgentRunTailIndexError = () =>
+  new AgentTransportError({
+    message: 'Agent run HITL response missing x-workflow-stream-tail-index',
+    cause: 'missing_tail_index'
+  })
+
+const streamAgentEventChunk = async function* (input: {
+  readonly events: AsyncGenerator<AgentEventType, void, void>
+  readonly countOffset: number
+  readonly onEvent?: StreamAgentEventHandler
+}): AsyncGenerator<AgentEventType, AgentEventChunkResult, void> {
+  let count = 0
+  let terminal = false
+
+  for await (const event of input.events) {
+    count += 1
+    terminal = terminal || isTerminalAgentEvent(event)
+    input.onEvent?.(event, input.countOffset + count)
+    yield event
+  }
+
+  return { count, terminal }
+}
+
+const streamAgentRunContinuations = async function* (
+  input: AgentRunContinuationInput
+): AsyncGenerator<AgentEventType, void, void> {
+  let totalCount = input.countOffset
+  let terminal = input.terminal
+  let startIndex = input.startIndex
+  const limit = agentRunContinuationLimit(input.continuationLimit)
+
+  if (terminal) {
+    return
+  }
+
+  if (input.endpoint === undefined) {
+    throw missingAgentRunContinuationEndpointError()
+  }
+
+  for (let continuation = 0; continuation < limit; continuation += 1) {
+    const endpoint = input.endpoint
+
+    const chunk = yield* streamAgentEventChunk({
+      events: streamAgentRunEvents({
+        endpoint,
+        startIndex,
+        signal: input.signal,
+        httpClientLayer: input.httpClientLayer,
+        onResponse: input.onResponse
+      }),
+      countOffset: totalCount,
+      onEvent: input.onEvent
+    })
+
+    if (chunk.count === 0 && !chunk.terminal) {
+      throw noProgressAgentRunContinuationError(endpoint, startIndex)
+    }
+
+    terminal = chunk.terminal
+    startIndex = nextAgentRunStartIndex(startIndex, chunk.count)
+    totalCount += chunk.count
+
+    if (terminal) {
+      return
+    }
+  }
+
+  throw exhaustedAgentRunContinuationLimitError(limit)
+}
+
+export async function* streamAgentEventsUntilTerminal(
+  request: StreamAgentEventsUntilTerminalRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  validateAgentRunContinuationLimit(request.continuationLimit)
+
+  let runEndpoint: string | undefined
+  let startIndex: number | undefined
+
+  const firstChunk = yield* streamAgentEventChunk({
+    events: streamAgentEvents({
+      ...request,
+      onResponse: response => {
+        startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
+        const runId = agentRunIdFromHeaders(response.headers)
+        if (runId !== undefined) {
+          runEndpoint =
+            request.runEndpoint?.(runId) ?? defaultAgentRunEndpoint(request.endpoint, runId)
+          request.onRunId?.(runId)
+        }
+
+        request.onResponse?.(response)
+      }
+    }),
+    countOffset: 0,
+    onEvent: request.onEvent
+  })
+
+  yield* streamAgentRunContinuations({
+    endpoint: runEndpoint,
+    startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
+    countOffset: firstChunk.count,
+    terminal: firstChunk.terminal,
+    continuationLimit: request.continuationLimit,
+    signal: request.signal,
+    httpClientLayer: request.httpClientLayer,
+    onResponse: request.onResponse,
+    onEvent: request.onEvent
+  })
+}
+
+export async function* streamAgentRunEventsUntilTerminal(
+  request: StreamAgentRunEventsUntilTerminalRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  validateAgentRunContinuationLimit(request.continuationLimit)
+
+  const firstChunk = yield* streamAgentEventChunk({
+    events: streamAgentRunEvents(request),
+    countOffset: 0,
+    onEvent: request.onEvent
+  })
+
+  yield* streamAgentRunContinuations({
+    endpoint: request.endpoint,
+    startIndex: nextAgentRunStartIndex(request.startIndex, firstChunk.count),
+    countOffset: firstChunk.count,
+    terminal: firstChunk.terminal,
+    continuationLimit: request.continuationLimit,
+    signal: request.signal,
+    httpClientLayer: request.httpClientLayer,
+    onResponse: request.onResponse,
+    onEvent: request.onEvent
+  })
+}
+
+export async function* streamAgentRunHitlResponseEventsUntilTerminal(
+  request: StreamAgentRunHitlResponseEventsUntilTerminalRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  validateAgentRunContinuationLimit(request.continuationLimit)
+
+  let startIndex: number | undefined
+
+  const firstChunk = yield* streamAgentEventChunk({
+    events: streamAgentRunHitlResponseEvents({
+      ...request,
+      onResponse: response => {
+        startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
+        request.onResponse?.(response)
+      }
+    }),
+    countOffset: 0,
+    onEvent: request.onEvent
+  })
+
+  if (!firstChunk.terminal && startIndex === undefined) {
+    throw missingAgentRunTailIndexError()
+  }
+
+  yield* streamAgentRunContinuations({
+    endpoint: request.endpoint,
+    startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
+    countOffset: firstChunk.count,
+    terminal: firstChunk.terminal,
+    continuationLimit: request.continuationLimit,
+    signal: request.signal,
+    httpClientLayer: request.httpClientLayer,
+    onResponse: request.onResponse,
+    onEvent: request.onEvent
+  })
+}
 
 const isAgentEvent = (message: AgentWebSocketServerMessageType): message is AgentEventType =>
   message._tag !== 'SessionSnapshot'
@@ -572,10 +1025,22 @@ export async function* streamAgentRunEvents(
   }
 }
 
+export async function* streamAgentRunHitlResponseEvents(
+  request: StreamAgentRunHitlResponseEventsRequest
+): AsyncGenerator<AgentEventType, void, void> {
+  for await (const event of Stream.toAsyncIterable(
+    streamAgentRunHitlResponseEventStream(request)
+  )) {
+    yield event
+  }
+}
+
 export async function* submitToolApprovalResponse(
   request: SubmitToolApprovalResponseRequest
 ): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(streamToolApprovalResponseEventStream(request))) {
+  for await (const event of Stream.toAsyncIterable(
+    streamToolApprovalResponseEventStream(request)
+  )) {
     yield event
   }
 }

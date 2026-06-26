@@ -16,26 +16,26 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath                        | Purpose                                                        |
-| ------------------------------ | -------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`     | Wire messages, events, content, usage, tool schemas            |
-| `@yolk-sdk/agent/loop`         | Stateless LLM/tool loop                                        |
-| `@yolk-sdk/agent/loop/testing` | Faux provider and tool executor test helpers                   |
-| `@yolk-sdk/agent/runtime`      | Transcript or append-backed runtime orchestration              |
-| `@yolk-sdk/agent/client`       | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
-| `@yolk-sdk/agent/compaction`   | Pure host-owned context budget, planning, and transformer utils |
-| `@yolk-sdk/agent/tools`        | Tool module registry, `makeTool`, task/question tool contracts |
-| `@yolk-sdk/agent/react`        | Headless React chat hook, reducer, selectors, and render model |
-| `@yolk-sdk/agent/oauth`        | Provider-neutral OAuth token and broker contracts              |
-| `@yolk-sdk/agent/providers/openai` | OpenAI/Codex OAuth and broker helpers                      |
-| `@yolk-sdk/agent/providers/openai/codex` | OpenAI Codex request and auth helpers              |
-| `@yolk-sdk/agent/providers/openai/codex-provider` | Codex LLM provider factory                 |
-| `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible LLM provider factory              |
-| `@yolk-sdk/agent/providers/anthropic` | Anthropic/Claude OAuth and broker helpers                |
-| `@yolk-sdk/agent/providers/anthropic/claude` | Claude request and auth helpers                    |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory              |
-| `@yolk-sdk/agent/skillset`     | Portable skill and slash-command parsing/catalogs              |
-| `@yolk-sdk/agent/voice`        | Provider-neutral voice tool-call bridge                        |
+| Subpath                                               | Purpose                                                         |
+| ----------------------------------------------------- | --------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                            | Wire messages, events, content, usage, tool schemas             |
+| `@yolk-sdk/agent/loop`                                | Stateless LLM/tool loop                                         |
+| `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                    |
+| `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration               |
+| `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers   |
+| `@yolk-sdk/agent/compaction`                          | Pure host-owned context budget, planning, and transformer utils |
+| `@yolk-sdk/agent/tools`                               | Tool module registry, `makeTool`, task/question tool contracts  |
+| `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model  |
+| `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts               |
+| `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                           |
+| `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                           |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                      |
+| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                          |
+| `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                       |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                 |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                     |
+| `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs               |
+| `@yolk-sdk/agent/voice`                               | Provider-neutral voice tool-call bridge                         |
 
 ## Imports
 
@@ -259,6 +259,14 @@ HITL is protocol-level, not UI-level:
 HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream
 end for consumers. After a terminal event the response body drains to EOF; cancellation before a
 terminal event still aborts the active body reader.
+Durable Workflow clients can use `streamAgentEventsUntilTerminal`,
+`streamAgentRunEventsUntilTerminal`, and `streamAgentRunHitlResponseEventsUntilTerminal` to follow
+continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` headers. These helpers
+fail with `AgentTransportError` if no terminal event is reached before the continuation limit.
+For HITL resume responses, `x-workflow-stream-tail-index` means the stream tail before the returned
+body. The returned body starts at `tail + 1`; the next continuation starts after all returned
+events. `continuationLimit: 0` disables follow-up chunks, so any non-terminal response fails
+immediately.
 
 ## Task subagents
 

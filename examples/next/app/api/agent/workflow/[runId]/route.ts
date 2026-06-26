@@ -3,11 +3,15 @@ import * as Schema from 'effect/Schema'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
 import { getRun, resumeHook } from 'workflow/api'
 import { AppLayer } from '@/lib/layers'
-import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { agentWorkflowHitlHookToken } from '@/lib/agents/workflow-runtime/run-agent-workflow'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import { workflowCancelResponse, workflowResumeResponse } from './route-model'
+import {
+  workflowCancelResponse,
+  workflowResumeResponse,
+  workflowResumeStartIndexFromUrl,
+  workflowResumeStartIndexAfterTail
+} from './route-model'
 import { workflowReadableTailIndex } from '../route-model'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +30,17 @@ class AgentWorkflowHitlRequestError extends Data.TaggedError('AgentWorkflowHitlR
   cause?: unknown
 }> {}
 
+class AgentWorkflowRunRequestError extends Data.TaggedError('AgentWorkflowRunRequestError')<{
+  message: string
+  cause?: unknown
+}> {}
+
+class AgentWorkflowHitlResumeRequest extends Schema.Class<AgentWorkflowHitlResumeRequest>(
+  'AgentWorkflowHitlResumeRequest'
+)({
+  hitlResponses: Schema.Tuple([HitlResponse])
+}) {}
+
 const invalidHitlRequest = (message: string, cause?: unknown) =>
   new AgentWorkflowHitlRequestError({ message, cause })
 
@@ -38,24 +53,12 @@ const readRequestJson = (request: Request) =>
     catch: error => invalidHitlRequest('Invalid request body', error)
   })
 
-const firstHitlResponse = (request: AgentRouteRequest) => {
-  const response = request.hitlResponses?.[0]
-  const extra = request.hitlResponses?.[1]
-
-  if (response === undefined) {
-    return Effect.fail(invalidHitlRequest('Missing HITL response'))
-  }
-
-  if (extra !== undefined) {
-    return Effect.fail(invalidHitlRequest('Workflow HITL resume accepts one response'))
-  }
-
-  return Effect.succeed(response)
-}
+const hitlResponse = (request: AgentWorkflowHitlResumeRequest) =>
+  Effect.succeed(request.hitlResponses[0])
 
 const decodeHitlRequest = (request: Request) =>
   readRequestJson(request).pipe(
-    Effect.flatMap(body => Schema.decodeUnknownEffect(AgentRouteRequest)(body)),
+    Effect.flatMap(body => Schema.decodeUnknownEffect(AgentWorkflowHitlResumeRequest)(body)),
     Effect.mapError(error => invalidHitlRequest('Invalid HITL request body', error))
   )
 
@@ -65,15 +68,18 @@ const encodeHitlResponse = (response: HitlResponse) =>
   )
 
 const parseStartIndex = (request: Request) => {
-  const raw = new URL(request.url).searchParams.get('startIndex')
+  const result = workflowResumeStartIndexFromUrl(request.url)
 
-  if (raw === null) {
-    return undefined
+  if (result._tag === 'ValidStartIndex') {
+    return Effect.succeed(result.startIndex)
   }
 
-  const parsed = Number.parseInt(raw, 10)
-
-  return Number.isFinite(parsed) ? parsed : undefined
+  return Effect.fail(
+    new AgentWorkflowRunRequestError({
+      message: 'Invalid workflow stream startIndex',
+      cause: result.raw
+    })
+  )
 }
 
 const currentWorkflowTailIndex = (runId: string) =>
@@ -83,21 +89,40 @@ const currentWorkflowTailIndex = (runId: string) =>
       new AgentWorkflowRunRouteError({ message: 'Workflow stream cursor failed', cause: error })
   })
 
+const requireWorkflowTailIndex = (tailIndex: number | undefined) =>
+  tailIndex === undefined
+    ? Effect.fail(new AgentWorkflowRunRouteError({ message: 'Workflow stream cursor missing' }))
+    : Effect.succeed(tailIndex)
+
 const resumeProgram = (request: Request, context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
     const runId = yield* getRunId(context)
-    return workflowResumeResponse(runId, getRun, { startIndex: parseStartIndex(request) })
+    const startIndex = yield* parseStartIndex(request)
+    return workflowResumeResponse(runId, getRun, { startIndex })
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.get'),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))
     ),
-    Effect.catch(error =>
-      reportError(new AgentWorkflowRunRouteError({ message: 'Workflow resume failed', cause: error }), {
+    Effect.catchTag('AgentWorkflowRunRequestError', error =>
+      reportError(error, {
         operation: 'agent.workflow.resume',
-        status: 500
-      }).pipe(Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 }))))
+        status: 400
+      }).pipe(
+        Effect.andThen(Effect.succeed(Response.json({ error: error.message }, { status: 400 })))
+      )
+    ),
+    Effect.catch(error =>
+      reportError(
+        new AgentWorkflowRunRouteError({ message: 'Workflow resume failed', cause: error }),
+        {
+          operation: 'agent.workflow.resume',
+          status: 500
+        }
+      ).pipe(
+        Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
+      )
     ),
     Effect.provide(AppLayer)
   )
@@ -107,19 +132,16 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
     yield* getSession()
     const runId = yield* getRunId(context)
     const body = yield* decodeHitlRequest(request)
-    const response = yield* firstHitlResponse(body)
+    const response = yield* hitlResponse(body)
     const encodedResponse = yield* encodeHitlResponse(response)
-    const tailIndex = yield* currentWorkflowTailIndex(runId)
-
-    yield* Effect.promise(() =>
-      resumeHook(
-        agentWorkflowHitlHookToken({ sessionId: body.sessionId, requestId: response.requestId }),
-        encodedResponse
-      )
+    const tailIndex = yield* currentWorkflowTailIndex(runId).pipe(
+      Effect.flatMap(requireWorkflowTailIndex)
     )
 
+    yield* Effect.promise(() => resumeHook(agentWorkflowHitlHookToken({ runId }), encodedResponse))
+
     return workflowResumeResponse(runId, getRun, {
-      startIndex: tailIndex,
+      startIndex: workflowResumeStartIndexAfterTail(tailIndex),
       tailIndex
     })
   }).pipe(
@@ -131,13 +153,20 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
       reportError(error, {
         operation: 'agent.workflow.hitl_resume',
         status: 400
-      }).pipe(Effect.andThen(Effect.succeed(Response.json({ error: error.message }, { status: 400 }))))
+      }).pipe(
+        Effect.andThen(Effect.succeed(Response.json({ error: error.message }, { status: 400 })))
+      )
     ),
     Effect.catch(error =>
-      reportError(new AgentWorkflowRunRouteError({ message: 'Workflow HITL resume failed', cause: error }), {
-        operation: 'agent.workflow.hitl_resume',
-        status: 500
-      }).pipe(Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 }))))
+      reportError(
+        new AgentWorkflowRunRouteError({ message: 'Workflow HITL resume failed', cause: error }),
+        {
+          operation: 'agent.workflow.hitl_resume',
+          status: 500
+        }
+      ).pipe(
+        Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
+      )
     ),
     Effect.provide(AppLayer)
   )
@@ -153,15 +182,21 @@ const cancelProgram = (context: RouteContext) =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))
     ),
     Effect.catch(error =>
-      reportError(new AgentWorkflowRunRouteError({ message: 'Workflow cancel failed', cause: error }), {
-        operation: 'agent.workflow.cancel',
-        status: 500
-      }).pipe(Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 }))))
+      reportError(
+        new AgentWorkflowRunRouteError({ message: 'Workflow cancel failed', cause: error }),
+        {
+          operation: 'agent.workflow.cancel',
+          status: 500
+        }
+      ).pipe(
+        Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
+      )
     ),
     Effect.provide(AppLayer)
   )
 
-export const GET = (request: Request, context: RouteContext) => Effect.runPromise(resumeProgram(request, context))
+export const GET = (request: Request, context: RouteContext) =>
+  Effect.runPromise(resumeProgram(request, context))
 export const POST = (request: Request, context: RouteContext) =>
   Effect.runPromise(hitlResumeProgram(request, context))
 export const DELETE = (_request: Request, context: RouteContext) =>

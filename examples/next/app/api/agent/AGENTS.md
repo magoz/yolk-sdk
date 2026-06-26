@@ -4,14 +4,14 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 ## Routes
 
-| Route                        | Role                                    |
-| ---------------------------- | --------------------------------------- |
-| `route.ts`                   | Stateless text NDJSON via Next runtime  |
-| `workflow/route.ts`          | Start Vercel Workflow and stream NDJSON |
-| `workflow/[runId]/route.ts`  | Resume/cancel Workflow runs and append HITL responses by id |
-| `commands/route.ts`          | Authenticated command list/render       |
-| `realtime/call/route.ts`     | OpenAI Realtime SDP exchange            |
-| `realtime/tool/route.ts`     | Voice tool execution bridge             |
+| Route                       | Role                                                        |
+| --------------------------- | ----------------------------------------------------------- |
+| `route.ts`                  | Stateless text NDJSON via Next runtime                      |
+| `workflow/route.ts`         | Start Vercel Workflow and stream NDJSON                     |
+| `workflow/[runId]/route.ts` | Resume/cancel Workflow runs and append HITL responses by id |
+| `commands/route.ts`         | Authenticated command list/render                           |
+| `realtime/call/route.ts`    | OpenAI Realtime SDP exchange                                |
+| `realtime/tool/route.ts`    | Voice tool execution bridge                                 |
 
 ## Text Runtime
 
@@ -25,8 +25,11 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 
 - `workflow/route.ts` calls Vercel `start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
 - `workflow/[runId]/route.ts` uses `getRun(runId)` for replay/cancellation and `resumeHook` for one-response HITL resume.
-- GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index`.
-- HITL resume captures `getTailIndex()` via `startIndex: -1` before `resumeHook`, then returns replay from that tail index.
+- GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index` for
+  the stream tail before the returned body.
+- HITL resume body is `{ hitlResponses: [response] }`; route/workflow own hook-token routing, not the SDK client.
+- Current hook token is run-scoped; route auth must authorize run ownership, and loop response matching validates `requestId`/`toolCallId`.
+- HITL resume captures `getTailIndex()` via `startIndex: -1` before `resumeHook`, then returns replay after that tail index.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 
