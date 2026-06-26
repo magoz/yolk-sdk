@@ -66,7 +66,11 @@ import {
   makeQuestionToolModule,
   resolveTools
 } from '@yolk-sdk/agent/tools'
-import { useAgentChat } from '@yolk-sdk/agent/react'
+import {
+  applyAgentEventToChatProjection,
+  makeAgentChatEventProjectionState,
+  useAgentChat
+} from '@yolk-sdk/agent/react'
 import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
 ```
 
@@ -206,6 +210,29 @@ envelopes into model input while keeping `content` authored-only.
 Annotations must be JSON-compatible. Use stable app-owned keys, preferably `snake_case`. Use ISO
 strings for dates inside annotations. Never put secrets, credentials, private ids, auth state, or
 hidden policy in annotations, author, or timestamps; providers may send them to models.
+
+## Replay-safe chat projection
+
+Durable transports may reconnect or replay overlapping chunks. Protocol events can carry optional
+`eventId`; `LLMTextDelta` and `LLMReasoningDelta` can also carry `textSoFar` / `reasoningSoFar`
+snapshots when a host can provide cumulative text.
+
+Use `applyAgentEventToChatProjection` for replayable event logs:
+
+```ts
+import {
+  applyAgentEventToChatProjection,
+  makeAgentChatEventProjectionState
+} from '@yolk-sdk/agent/react'
+
+const projection = events.reduce(
+  (state, event) => applyAgentEventToChatProjection(state, event),
+  makeAgentChatEventProjectionState()
+)
+```
+
+Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
+replay.
 
 ## Transcript invariants
 
