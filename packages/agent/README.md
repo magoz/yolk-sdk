@@ -52,7 +52,11 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
-import { initialAgentClientState, toolRunsFromHitlRequests } from '@yolk-sdk/agent/client'
+import {
+  initialAgentClientState,
+  streamAgentEventsUntilTerminal,
+  toolRunsFromHitlRequests
+} from '@yolk-sdk/agent/client'
 import {
   makeContextBudget,
   makePreviewSummaryMessage,
@@ -267,6 +271,23 @@ For HITL resume responses, `x-workflow-stream-tail-index` means the stream tail 
 body. The returned body starts at `tail + 1`; the next continuation starts after all returned
 events. `continuationLimit: 0` disables follow-up chunks, so any non-terminal response fails
 immediately.
+
+```ts
+import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+for await (const event of streamAgentEventsUntilTerminal({
+  endpoint: '/api/agent/workflow',
+  sessionId: 'session_1',
+  messages: [UserMessage.make({ content: 'Hello' })],
+  runEndpoint: runId => `/api/agent/workflow/${encodeURIComponent(runId)}`
+})) {
+  // Apply AgentEvent to app state.
+}
+```
+
+The SDK client does not own durable route auth, run ownership, Workflow hook-token routing, or HITL
+request matching. Hosts expose the run endpoints and validate access/response identity server-side.
 
 ## Task subagents
 

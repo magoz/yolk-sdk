@@ -4,26 +4,26 @@
 
 ## Subpaths
 
-| Subpath | Source | Role |
-| --- | --- | --- |
-| `@yolk-sdk/agent/protocol` | `src/protocol` | Agent wire/message/event schemas |
-| `@yolk-sdk/agent/loop` | `src/loop` | Stateless LLM/tool loop |
-| `@yolk-sdk/agent/loop/testing` | `src/loop/testing` | Loop test helpers |
-| `@yolk-sdk/agent/runtime` | `src/runtime` | Generic runtime/session orchestration |
-| `@yolk-sdk/agent/client` | `src/client` | Client transport/state helpers |
-| `@yolk-sdk/agent/compaction` | `src/compaction` | Host-owned context compaction utilities |
-| `@yolk-sdk/agent/tools` | `src/tools` | Generic tool module registry |
-| `@yolk-sdk/agent/react` | `src/react` | Headless React chat hook/state helpers |
-| `@yolk-sdk/agent/oauth` | `src/oauth` | Provider-neutral OAuth token contracts |
-| `@yolk-sdk/agent/providers/openai` | `src/providers/openai` | OpenAI/Codex OAuth and broker helpers |
-| `@yolk-sdk/agent/providers/openai/codex` | `src/providers/openai/codex.ts` | OpenAI Codex request and auth helpers |
-| `@yolk-sdk/agent/providers/openai/codex-provider` | `src/providers/openai/codex-provider.ts` | Codex LLM provider factory |
-| `@yolk-sdk/agent/providers/openai/provider` | `src/providers/openai/provider.ts` | OpenAI-compatible LLM provider factory |
-| `@yolk-sdk/agent/providers/anthropic` | `src/providers/anthropic` | Anthropic/Claude OAuth and broker helpers |
-| `@yolk-sdk/agent/providers/anthropic/claude` | `src/providers/anthropic/claude.ts` | Claude request and auth helpers |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory |
-| `@yolk-sdk/agent/skillset` | `src/skillset` | Portable skill + command parsing/catalog |
-| `@yolk-sdk/agent/voice` | `src/voice` | Provider-neutral voice tool-call bridge |
+| Subpath                                               | Source                                       | Role                                      |
+| ----------------------------------------------------- | -------------------------------------------- | ----------------------------------------- |
+| `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas          |
+| `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                   |
+| `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                         |
+| `@yolk-sdk/agent/runtime`                             | `src/runtime`                                | Generic runtime/session orchestration     |
+| `@yolk-sdk/agent/client`                              | `src/client`                                 | Client transport/state helpers            |
+| `@yolk-sdk/agent/compaction`                          | `src/compaction`                             | Host-owned context compaction utilities   |
+| `@yolk-sdk/agent/tools`                               | `src/tools`                                  | Generic tool module registry              |
+| `@yolk-sdk/agent/react`                               | `src/react`                                  | Headless React chat hook/state helpers    |
+| `@yolk-sdk/agent/oauth`                               | `src/oauth`                                  | Provider-neutral OAuth token contracts    |
+| `@yolk-sdk/agent/providers/openai`                    | `src/providers/openai`                       | OpenAI/Codex OAuth and broker helpers     |
+| `@yolk-sdk/agent/providers/openai/codex`              | `src/providers/openai/codex.ts`              | OpenAI Codex request and auth helpers     |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                |
+| `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory    |
+| `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers           |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory               |
+| `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog  |
+| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice tool-call bridge   |
 
 ## Boundaries
 
@@ -74,6 +74,7 @@
 - Question resume content must be model-visible text with selected answer labels plus structured answers; never replay only `answered`.
 - Use SDK HITL helpers for durable apps: `plainHitlResponse`, `questionResponseStructuredContent`, `hitlResponseEvent`, and `toolRunsFromHitlRequests`.
 - Client HTTP transport treats `AgentEnd`/`AgentError`/`AgentAwaitingInput` as logical end, but only pre-terminal consumer cancellation should abort the body.
+- Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
 
 ## Tests
 

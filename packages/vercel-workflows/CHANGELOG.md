@@ -1,5 +1,7 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.27
+
 ## 0.1.0-canary.26
 
 ### Minor Changes

@@ -16,6 +16,7 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - Durable continuation helpers fail with `AgentTransportError` if a terminal event is not reached.
 - HITL resume tail headers describe the stream tail before the returned body.
 - `continuationLimit: 0` makes non-terminal responses fail without follow-up requests.
+- Durable helpers do not own route auth, run ownership, Workflow hook tokens, or HITL request matching.
 
 ## Use it when
 

@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.27
+
+### Patch Changes
+
+- Add durable run continuation and HITL resume client helpers.
+
 ## 0.1.0-canary.26
 
 ### Minor Changes
