@@ -22,9 +22,11 @@ import {
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import {
+  applyAgentEventToChatProjection,
   getAgentChatLiveActivityCount,
   hasAgentChatReasoningSummary,
   initialAgentChatState,
+  makeAgentChatEventProjectionState,
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
 
@@ -113,6 +115,82 @@ describe('agent chat core', () => {
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
       { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+    ])
+  })
+
+  it('dedupes text deltas in replay-safe chat projection state', () => {
+    const state = [
+      LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'lo' })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect(state.chatMessages[0]?.parts).toEqual([
+      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+    ])
+  })
+
+  it('dedupes reasoning deltas in replay-safe chat projection state', () => {
+    const state = [
+      LLMReasoningDelta.make({ eventId: 'workflow:1:0', text: 'Think.' }),
+      LLMReasoningDelta.make({ eventId: 'workflow:1:0', text: 'Think.' }),
+      LLMReasoningDelta.make({ eventId: 'workflow:1:1', text: ' Done.' })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
+    expect(state.chatMessages[0]?.parts).toEqual([
+      {
+        _tag: 'Reasoning',
+        id: 'message-0-reasoning',
+        text: 'Think. Done.',
+        state: 'streaming'
+      }
+    ])
+  })
+
+  it('uses text snapshots when projecting replayed durable deltas', () => {
+    const state = [
+      LLMTextDelta.make({ eventId: 'workflow:1:0', text: 'hel', textSoFar: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:1', text: 'hel', textSoFar: 'hel' }),
+      LLMTextDelta.make({ eventId: 'workflow:1:2', text: 'lo', textSoFar: 'hello' })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.chatMessages[0]?.parts).toEqual([
+      { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+    ])
+  })
+
+  it('uses reasoning snapshots when projecting replayed durable deltas', () => {
+    const state = [
+      LLMReasoningDelta.make({ eventId: 'workflow:1:0', text: 'Think', reasoningSoFar: 'Think' }),
+      LLMReasoningDelta.make({ eventId: 'workflow:1:1', text: 'Think', reasoningSoFar: 'Think' }),
+      LLMReasoningDelta.make({
+        eventId: 'workflow:1:2',
+        text: ' done',
+        reasoningSoFar: 'Think done'
+      })
+    ].reduce(
+      (current, event) => applyAgentEventToChatProjection(current, event),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.chatMessages[0]?.parts).toEqual([
+      {
+        _tag: 'Reasoning',
+        id: 'message-0-reasoning',
+        text: 'Think done',
+        state: 'streaming'
+      }
     ])
   })
 

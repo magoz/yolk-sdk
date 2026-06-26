@@ -23,8 +23,10 @@ Import Workflow APIs from the package root:
 
 ```ts
 import {
+  makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
-  runVercelAgentWorkflow
+  runVercelAgentWorkflow,
+  writeDurableAgentEvent
 } from '@yolk-sdk/vercel-workflows'
 ```
 
@@ -88,7 +90,33 @@ tokens that the resume side can reconstruct or store.
 
 ## Retry policy
 
-Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because streamed retries can duplicate chunks unless host/client de-dupe is ready.
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because
+streamed retries can duplicate chunks unless host/client de-dupe is ready.
+
+## Durable stream events
+
+Workflow streams can replay old chunks after retries or reconnects. Durable streams should emit an
+`eventId` on every JSON-serializable event, typically `AgentEvent`, including errors. Clients should
+track seen ids.
+
+Use `writeDurableAgentEvent` to assign deterministic ids and write NDJSON:
+
+```ts
+const state = makeDurableAgentEventSequencerState(eventSequence)
+const sequenced = await writeDurableAgentEvent({
+  writer,
+  event,
+  streamId: 'workflow',
+  turn,
+  state
+})
+
+eventSequence = sequenced.nextEventSequence
+```
+
+The id format is `${streamId}:${turn}:${eventSequence}`. Keep `eventSequence` in Workflow state.
+Resume route reads should use `startIndex` when available. Host apps still own active-run locking,
+stale-run guards, and cancellation behavior.
 
 ## Host responsibilities
 
@@ -97,6 +125,7 @@ Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are op
 - Preserve tool result order and never advance the next model step with dangling host tool calls.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
+- Emit replay-safe event ids for durable streams and de-dupe by `eventId` client-side.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
 
 ## Boundaries

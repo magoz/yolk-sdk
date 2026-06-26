@@ -1,4 +1,5 @@
 export {
+  applyAgentEventToChatProjection,
   getActiveChatToolParts,
   getAgentChatLiveActivityCount,
   getCompletedChatToolParts,
@@ -7,11 +8,13 @@ export {
   initialAgentChatState,
   isActiveChatToolPart,
   isCompletedChatToolPart,
+  makeAgentChatEventProjectionState,
   reduceAgentChatState
 } from './chat-core.ts'
 export type {
   ActiveChatToolPart,
   AgentChatAction,
+  AgentChatEventProjectionState,
   AgentChatState,
   AgentRunStatus,
   CompletedChatToolPart

@@ -1,11 +1,20 @@
 export {
+  durableAgentEventId,
   defaultMaxWorkflowTurns,
+  makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
   retryWorkflowStep,
   runVercelAgentWorkflow,
-  settleWorkflowStep
+  sequenceDurableAgentEvent,
+  settleWorkflowStep,
+  writeDurableAgentEvent
 } from './workflow.ts'
 export type {
+  DurableAgentEvent,
+  DurableAgentEventIdInput,
+  DurableAgentEventSequencerState,
+  SequenceDurableAgentEventInput,
+  SequencedDurableAgentEvent,
   SerializableWorkflowState,
   VercelAgentWorkflowAwaitingInput,
   VercelAgentWorkflowInput,
@@ -16,5 +25,6 @@ export type {
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
   VercelAgentWorkflowToolBatchStepResult,
-  WorkflowStepResult
+  WorkflowStepResult,
+  WriteDurableAgentEventInput
 } from './workflow.ts'

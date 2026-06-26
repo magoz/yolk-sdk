@@ -136,14 +136,16 @@ export class LLMStreamStart extends Schema.TaggedClass<LLMStreamStart>()('LLMStr
 
 export class LLMTextDelta extends Schema.TaggedClass<LLMTextDelta>()('LLMTextDelta', {
   ...EventIdentity,
-  text: Schema.String
+  text: Schema.String,
+  textSoFar: Schema.optional(Schema.String)
 }) {}
 
 export class LLMReasoningDelta extends Schema.TaggedClass<LLMReasoningDelta>()(
   'LLMReasoningDelta',
   {
     ...EventIdentity,
-    text: Schema.String
+    text: Schema.String,
+    reasoningSoFar: Schema.optional(Schema.String)
   }
 ) {}
 

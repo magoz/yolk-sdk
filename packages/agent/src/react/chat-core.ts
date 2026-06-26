@@ -40,6 +40,11 @@ export type AgentChatState = {
   readonly seenEventIds: ReadonlyArray<string>
 }
 
+export type AgentChatEventProjectionState = {
+  readonly chatMessages: ReadonlyArray<AgentChatMessage>
+  readonly seenEventIds: ReadonlyArray<string>
+}
+
 export const initialAgentChatState: AgentChatState = {
   status: 'idle',
   error: null,
@@ -50,16 +55,50 @@ export const initialAgentChatState: AgentChatState = {
   seenEventIds: []
 }
 
+const hasSeenEventId = (seenEventIds: ReadonlyArray<string>, event: AgentEvent) =>
+  event.eventId !== undefined && seenEventIds.includes(event.eventId)
+
+const rememberEventId = (seenEventIds: ReadonlyArray<string>, event: AgentEvent) =>
+  event.eventId === undefined ? seenEventIds : [...seenEventIds, event.eventId]
+
 const hasSeenEvent = (state: AgentChatState, event: AgentEvent) =>
-  event.eventId !== undefined && state.seenEventIds.includes(event.eventId)
+  hasSeenEventId(state.seenEventIds, event)
 
 const rememberEvent = (state: AgentChatState, event: AgentEvent): AgentChatState =>
   event.eventId === undefined
     ? state
-    : { ...state, seenEventIds: [...state.seenEventIds, event.eventId] }
+    : { ...state, seenEventIds: rememberEventId(state.seenEventIds, event) }
 
 const clearRetryInfo = (state: AgentChatState): AgentChatState =>
   state.retryInfo === null ? state : { ...state, retryInfo: null }
+
+export const makeAgentChatEventProjectionState = (
+  chatMessages: ReadonlyArray<AgentChatMessage> = []
+): AgentChatEventProjectionState => ({
+  chatMessages,
+  seenEventIds: []
+})
+
+/**
+ * Applies replayable agent events to chat messages while deduping by `eventId`.
+ *
+ * Use this for durable streams that may reconnect, overlap, or replay events.
+ * For ephemeral local streams, `applyAgentEventToChatMessages` is still useful.
+ */
+export const applyAgentEventToChatProjection = (
+  state: AgentChatEventProjectionState,
+  event: AgentEvent,
+  options: ApplyAgentEventToChatMessagesOptions = {}
+): AgentChatEventProjectionState => {
+  if (hasSeenEventId(state.seenEventIds, event)) {
+    return state
+  }
+
+  return {
+    chatMessages: applyAgentEventToChatMessages(state.chatMessages, event, options),
+    seenEventIds: rememberEventId(state.seenEventIds, event)
+  }
+}
 
 export type AgentChatAction =
   | { readonly _tag: 'HydrateMessage'; readonly message: AgentMessage }

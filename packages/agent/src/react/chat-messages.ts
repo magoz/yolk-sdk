@@ -590,9 +590,10 @@ const appendAssistantPart = (
 
 const appendAssistantTextDelta = (
   messages: ReadonlyArray<AgentChatMessage>,
-  delta: string
+  input: { readonly delta: string; readonly textSoFar?: string }
 ): ReadonlyArray<AgentChatMessage> => {
   const index = targetAssistantIndex(messages)
+  const content = input.textSoFar ?? input.delta
 
   if (Option.isNone(index)) {
     const sequence = nextMessageSequence(messages)
@@ -600,7 +601,7 @@ const appendAssistantTextDelta = (
     return appendAssistantPart(messages, {
       _tag: 'Text',
       id: `message-${sequence}-assistant-text`,
-      content: delta,
+      content,
       state: 'streaming'
     })
   }
@@ -612,7 +613,10 @@ const appendAssistantTextDelta = (
           parts: hasStreamingTextPart(message)
             ? message.parts.map(part =>
                 part._tag === 'Text' && part.state === 'streaming'
-                  ? { ...part, content: appendTextToContent(part.content, delta) }
+                  ? {
+                      ...part,
+                      content: input.textSoFar ?? appendTextToContent(part.content, input.delta)
+                    }
                   : part
               )
             : [
@@ -620,7 +624,7 @@ const appendAssistantTextDelta = (
                 {
                   _tag: 'Text',
                   id: `message-${message.sequence}-assistant-text`,
-                  content: delta,
+                  content,
                   state: 'streaming'
                 }
               ]
@@ -631,9 +635,10 @@ const appendAssistantTextDelta = (
 
 const appendAssistantReasoningDelta = (
   messages: ReadonlyArray<AgentChatMessage>,
-  delta: string
+  input: { readonly delta: string; readonly reasoningSoFar?: string }
 ): ReadonlyArray<AgentChatMessage> => {
   const index = targetAssistantIndex(messages)
+  const text = input.reasoningSoFar ?? input.delta
 
   if (Option.isNone(index)) {
     const sequence = nextMessageSequence(messages)
@@ -641,7 +646,7 @@ const appendAssistantReasoningDelta = (
     return appendAssistantPart(messages, {
       _tag: 'Reasoning',
       id: `message-${sequence}-reasoning`,
-      text: delta,
+      text,
       state: 'streaming'
     })
   }
@@ -653,7 +658,7 @@ const appendAssistantReasoningDelta = (
           parts: message.parts.some(part => part._tag === 'Reasoning' && part.state === 'streaming')
             ? message.parts.map(part =>
                 part._tag === 'Reasoning' && part.state === 'streaming'
-                  ? { ...part, text: `${part.text}${delta}` }
+                  ? { ...part, text: input.reasoningSoFar ?? `${part.text}${input.delta}` }
                   : part
               )
             : [
@@ -661,7 +666,7 @@ const appendAssistantReasoningDelta = (
                 {
                   _tag: 'Reasoning',
                   id: `message-${message.sequence}-reasoning`,
-                  text: delta,
+                  text,
                   state: 'streaming'
                 }
               ]
@@ -994,6 +999,12 @@ export const markChatError = (
   }
 ]
 
+/**
+ * Applies one event without tracking `eventId` replay state.
+ *
+ * Prefer `applyAgentEventToChatProjection` for durable streams that can replay
+ * or overlap. Append-only text and reasoning deltas are not idempotent here.
+ */
 export const applyAgentEventToChatMessages = (
   messages: ReadonlyArray<AgentChatMessage>,
   event: AgentEvent,
@@ -1005,9 +1016,12 @@ export const applyAgentEventToChatMessages = (
     case 'AgentStart':
       return clearTransientParts(messages)
     case 'LLMTextDelta':
-      return appendAssistantTextDelta(messages, event.text)
+      return appendAssistantTextDelta(messages, { delta: event.text, textSoFar: event.textSoFar })
     case 'LLMReasoningDelta':
-      return appendAssistantReasoningDelta(messages, event.text)
+      return appendAssistantReasoningDelta(messages, {
+        delta: event.text,
+        reasoningSoFar: event.reasoningSoFar
+      })
     case 'ToolInputEnd':
       return upsertToolCallPart(messages, event.call, { _tag: 'Called' })
     case 'AssistantMessage':

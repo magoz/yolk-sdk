@@ -1,8 +1,10 @@
-import { createHook, getWritable } from 'workflow'
+import { createHook, getWorkflowMetadata, getWritable } from 'workflow'
 import { Effect, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  makeDurableAgentEventSequencerState,
   runVercelAgentWorkflow,
+  writeDurableAgentEvent,
   type SerializableWorkflowState,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepResult
@@ -21,15 +23,14 @@ import {
   ToolResultMessage,
   TurnEnd,
   UsageUpdate,
-  zeroAgentUsage,
-  AgentEvent
+  type AgentEvent,
+  zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import { runModelTurn, runToolBatch } from '@yolk-sdk/agent/loop'
 import { AppLayer } from '@/lib/layers'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {
   AgentRouteRequest,
-  encodeAgentNdjsonEvent,
   validateAgentRouteDocuments,
   validateAgentRouteImages
 } from '@/lib/agents/route-handler'
@@ -46,14 +47,8 @@ type IndexedToolResultMessage = {
   readonly message: AgentMessage
 }
 
-const writeEvent = (writer: WritableStreamDefaultWriter<Uint8Array>, event: AgentEvent) =>
-  encodeAgentNdjsonEvent(event).pipe(Effect.flatMap(chunk => Effect.promise(() => writer.write(chunk))))
-
-export const addWorkflowEventId = (event: AgentEvent, eventId: string) =>
-  Schema.decodeUnknownEffect(AgentEvent)({ ...event, eventId })
-
-const workflowEventId = (turn: number, eventSequence: number) =>
-  `workflow:${turn}:${eventSequence}`
+const workflowEventStreamId = 'workflow'
+const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
 
 export const agentWorkflowHitlHookToken = (input: {
   readonly sessionId: string
@@ -68,10 +63,17 @@ const writeSequencedWorkflowEvent = (input: {
 }) =>
   Effect.gen(function* () {
     const sequence = yield* Ref.get(input.eventSequence)
-    yield* Ref.set(input.eventSequence, sequence + 1)
-    const event = yield* addWorkflowEventId(input.event, workflowEventId(input.turn, sequence))
+    const result = yield* Effect.promise(() =>
+      writeDurableAgentEvent({
+        writer: input.writer,
+        event: input.event,
+        streamId: workflowEventStreamId,
+        turn: input.turn,
+        state: makeDurableAgentEventSequencerState(sequence)
+      })
+    )
 
-    yield* writeEvent(input.writer, event)
+    yield* Ref.set(input.eventSequence, result.nextEventSequence)
   })
 
 const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
@@ -382,9 +384,19 @@ export async function writeAgentWorkflowError(error: unknown) {
 
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
+  const workflowRunId = getWorkflowMetadata().workflowRunId
 
   await Effect.runPromise(
-    writeEvent(writer, workflowErrorEvent(error)).pipe(
+    Effect.promise(() =>
+      writeDurableAgentEvent({
+        writer,
+        event: workflowErrorEvent(error),
+        streamId: workflowErrorEventStreamId(workflowRunId),
+        turn: 0,
+        state: makeDurableAgentEventSequencerState()
+      })
+    ).pipe(
+      Effect.asVoid,
       Effect.tap(() => reportError(workflowStepError(error), { operation: 'agent.workflow.step' })),
       Effect.catch(() => Effect.void),
       Effect.ensuring(closeWorkflowWriter(writer))
