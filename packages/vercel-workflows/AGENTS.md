@@ -8,6 +8,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Keep continuation state plain serializable wire data.
 - Coordinate model-step, tool-batch-step, close, and error callbacks.
 - Carry generic awaiting-input wire data between host tool steps and Workflow hooks.
+- Provide deterministic durable stream event id sequencing for JSON-serializable events.
 - Provide contract tests for Workflow lifecycle without app auth/provider/tool/UI coupling.
 
 ## Boundaries
@@ -22,6 +23,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
+- Durable event helpers are generic over JSON-serializable objects; do not couple this package to `AgentEvent`.
 - Keep APIs Workflow-specific and free of app/provider/tool/storage policy.
 - Preserve tool result order by original model tool-call order.
 - Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.

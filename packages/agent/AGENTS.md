@@ -65,6 +65,7 @@
 - Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
 - `@yolk-sdk/agent/compaction` provides pure planning/estimation/transformer helpers only; hosts own thresholds, summary wording, LLM summarization, overflow retry, and checkpoints.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
+- Durable replay may use `LLMTextDelta.textSoFar` / `LLMReasoningDelta.reasoningSoFar`; chat projection prefers snapshots and de-dupes by `eventId`.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
 - Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, loop runs them concurrently within `toolConcurrency`, and dependent work waits for the next model turn.
 - Tool executor `ToolError`s are model-visible failed tool results, not stream failures; every host tool call must have a matching `ToolResultMessage` before the next provider request.

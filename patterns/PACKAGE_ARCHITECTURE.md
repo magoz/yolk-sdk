@@ -58,7 +58,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> @vercel/sandbox
-@yolk-sdk/vercel-workflows -> workflow runtime APIs only; no app/auth/provider/tool/storage policy
+@yolk-sdk/vercel-workflows -> workflow runtime APIs only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}
@@ -95,6 +95,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
+- Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 
 ## When Adding A Package API
 
