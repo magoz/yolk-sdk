@@ -78,7 +78,9 @@ export {
   ToolInputStart,
   TurnEnd,
   TurnStart,
-  UsageUpdate
+  UsageUpdate,
+  isTerminalAgentEvent,
+  type TerminalAgentEvent
 } from './event.ts'
 export {
   AgentMessage,

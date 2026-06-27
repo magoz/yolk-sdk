@@ -374,3 +374,11 @@ export const AgentEvent = Schema.Union([
   SubagentCompleted
 ])
 export type AgentEvent = typeof AgentEvent.Type
+
+export type TerminalAgentEvent = Extract<
+  AgentEvent,
+  { readonly _tag: 'AgentEnd' | 'AgentError' | 'AgentAwaitingInput' }
+>
+
+export const isTerminalAgentEvent = (event: AgentEvent): event is TerminalAgentEvent =>
+  event._tag === 'AgentEnd' || event._tag === 'AgentError' || event._tag === 'AgentAwaitingInput'

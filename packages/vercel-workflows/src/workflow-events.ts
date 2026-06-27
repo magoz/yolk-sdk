@@ -33,6 +33,46 @@ export type WriteDurableAgentEventInput<Event extends object = object> =
     readonly writer: WritableStreamDefaultWriter<Uint8Array>
   }
 
+export type TerminalEventCloseResult =
+  | { readonly _tag: 'Closed' }
+  | { readonly _tag: 'CloseFailed'; readonly error: unknown }
+
+export type CommitThenWriteTerminalEventInput<
+  TerminalEvent extends object,
+  TerminalWriteResult,
+  CommitErrorWriteResult
+> = {
+  readonly commit: () => Promise<void>
+  readonly terminal: TerminalEvent
+  readonly write: (event: TerminalEvent) => Promise<TerminalWriteResult>
+  readonly writeCommitError: (error: unknown) => Promise<CommitErrorWriteResult>
+  readonly close: () => Promise<void>
+}
+
+export type CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> =
+  | {
+      readonly _tag: 'Committed'
+      readonly writeResult: TerminalWriteResult
+      readonly closeResult: TerminalEventCloseResult
+    }
+  | {
+      readonly _tag: 'CommitFailed'
+      readonly commitError: unknown
+      readonly writeResult: CommitErrorWriteResult
+      readonly closeResult: TerminalEventCloseResult
+    }
+  | {
+      readonly _tag: 'TerminalWriteFailed'
+      readonly error: unknown
+      readonly closeResult: TerminalEventCloseResult
+    }
+  | {
+      readonly _tag: 'CommitErrorWriteFailed'
+      readonly commitError: unknown
+      readonly error: unknown
+      readonly closeResult: TerminalEventCloseResult
+    }
+
 const textEncoder = new TextEncoder()
 
 export const makeDurableAgentEventSequencerState = (
@@ -77,4 +117,54 @@ export const writeDurableAgentEvent = async <Event extends object>(
   await input.writer.write(encodeDurableAgentEventNdjson(sequenced.event))
 
   return sequenced
+}
+
+const closeTerminalEventWriter = async (
+  close: () => Promise<void>
+): Promise<TerminalEventCloseResult> => {
+  try {
+    await close()
+
+    return { _tag: 'Closed' }
+  } catch (error) {
+    return { _tag: 'CloseFailed', error }
+  }
+}
+
+export const commitThenWriteTerminalEvent = async <
+  TerminalEvent extends object,
+  TerminalWriteResult,
+  CommitErrorWriteResult
+>(
+  input: CommitThenWriteTerminalEventInput<
+    TerminalEvent,
+    TerminalWriteResult,
+    CommitErrorWriteResult
+  >
+): Promise<CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>> => {
+  try {
+    await input.commit()
+  } catch (commitError) {
+    try {
+      const writeResult = await input.writeCommitError(commitError)
+      const closeResult = await closeTerminalEventWriter(input.close)
+
+      return { _tag: 'CommitFailed', commitError, writeResult, closeResult }
+    } catch (error) {
+      const closeResult = await closeTerminalEventWriter(input.close)
+
+      return { _tag: 'CommitErrorWriteFailed', commitError, error, closeResult }
+    }
+  }
+
+  try {
+    const writeResult = await input.write(input.terminal)
+    const closeResult = await closeTerminalEventWriter(input.close)
+
+    return { _tag: 'Committed', writeResult, closeResult }
+  } catch (error) {
+    const closeResult = await closeTerminalEventWriter(input.close)
+
+    return { _tag: 'TerminalWriteFailed', error, closeResult }
+  }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  commitThenWriteTerminalEvent,
   durableAgentEventId,
   makeDurableAgentEventSequencerState,
   sequenceDurableAgentEvent,
@@ -85,5 +86,154 @@ describe('durable workflow agent events', () => {
     expect(new TextDecoder().decode(firstChunk)).toBe(
       `${JSON.stringify(result.event)}\n`
     )
+  })
+
+  it('commits before writing terminal events', async () => {
+    const operations: Array<string> = []
+    const result = await commitThenWriteTerminalEvent({
+      terminal: { _tag: 'AgentEnd' },
+      commit: async () => {
+        operations.push('commit')
+      },
+      write: async event => {
+        operations.push(`write:${event._tag}`)
+
+        return { nextEventSequence: 2 }
+      },
+      writeCommitError: async () => {
+        operations.push('write-error')
+
+        return { nextEventSequence: 2 }
+      },
+      close: async () => {
+        operations.push('close')
+      }
+    })
+
+    expect(operations).toEqual(['commit', 'write:AgentEnd', 'close'])
+    expect(result).toMatchObject({
+      _tag: 'Committed',
+      writeResult: { nextEventSequence: 2 },
+      closeResult: { _tag: 'Closed' }
+    })
+  })
+
+  it('writes terminal error when commit fails', async () => {
+    const operations: Array<string> = []
+    const commitError = new Error('commit failed')
+    const result = await commitThenWriteTerminalEvent({
+      terminal: { _tag: 'AgentEnd' },
+      commit: async () => {
+        operations.push('commit')
+
+        throw commitError
+      },
+      write: async event => {
+        operations.push(`write:${event._tag}`)
+
+        return event
+      },
+      writeCommitError: async error => {
+        operations.push(error === commitError ? 'write-error:commit' : 'write-error:unknown')
+
+        return { _tag: 'AgentError' }
+      },
+      close: async () => {
+        operations.push('close')
+      }
+    })
+
+    expect(operations).toEqual(['commit', 'write-error:commit', 'close'])
+    expect(result).toMatchObject({
+      _tag: 'CommitFailed',
+      commitError,
+      writeResult: { _tag: 'AgentError' },
+      closeResult: { _tag: 'Closed' }
+    })
+  })
+
+  it('closes when terminal write fails', async () => {
+    const operations: Array<string> = []
+    const writeError = new Error('write failed')
+    const result = await commitThenWriteTerminalEvent({
+      terminal: { _tag: 'AgentEnd' },
+      commit: async () => {
+        operations.push('commit')
+      },
+      write: async () => {
+        operations.push('write')
+
+        throw writeError
+      },
+      writeCommitError: async () => {
+        operations.push('write-error')
+
+        return { _tag: 'AgentError' }
+      },
+      close: async () => {
+        operations.push('close')
+      }
+    })
+
+    expect(operations).toEqual(['commit', 'write', 'close'])
+    expect(result).toEqual({
+      _tag: 'TerminalWriteFailed',
+      error: writeError,
+      closeResult: { _tag: 'Closed' }
+    })
+  })
+
+  it('reports close failure separately from commit success', async () => {
+    const closeError = new Error('close failed')
+    const result = await commitThenWriteTerminalEvent({
+      terminal: { _tag: 'AgentEnd' },
+      commit: async () => undefined,
+      write: async event => event,
+      writeCommitError: async () => ({ _tag: 'AgentError' }),
+      close: async () => {
+        throw closeError
+      }
+    })
+
+    expect(result).toEqual({
+      _tag: 'Committed',
+      writeResult: { _tag: 'AgentEnd' },
+      closeResult: { _tag: 'CloseFailed', error: closeError }
+    })
+  })
+
+  it('closes when commit error terminal write fails', async () => {
+    const operations: Array<string> = []
+    const commitError = new Error('commit failed')
+    const writeError = new Error('write commit error failed')
+    const result = await commitThenWriteTerminalEvent({
+      terminal: { _tag: 'AgentEnd' },
+      commit: async () => {
+        operations.push('commit')
+
+        throw commitError
+      },
+      write: async event => {
+        operations.push(`write:${event._tag}`)
+
+        return event
+      },
+      writeCommitError: async error => {
+        operations.push(error === commitError ? 'write-error:commit' : 'write-error:unknown')
+
+        throw writeError
+      },
+      close: async () => {
+        operations.push('close')
+      }
+    })
+
+    expect(operations).toEqual(['commit', 'write-error:commit', 'close'])
+    expect(result).toEqual({
+      _tag: 'CommitErrorWriteFailed',
+      commitError,
+      error: writeError,
+      closeResult: { _tag: 'Closed' }
+    })
   })
 })

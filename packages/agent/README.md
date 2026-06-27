@@ -43,6 +43,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 import {
   danglingHostToolCalls,
   hitlResponseEvent,
+  isTerminalAgentEvent,
   makeSubagentRunId,
   ProviderErrorInfo,
   questionResponseStructuredContent,
@@ -268,8 +269,9 @@ HITL is protocol-level, not UI-level:
 - Approval is a host-enforced per-call gate for normal tools, not a model-callable permission tool or persisted allow-always system.
 
 HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as logical stream
-end for consumers. After a terminal event the response body drains to EOF; cancellation before a
-terminal event still aborts the active body reader.
+end for consumers. Use `isTerminalAgentEvent` when projecting generic protocol streams. After a
+terminal event the response body drains to EOF; cancellation before a terminal event still aborts
+the active body reader.
 Durable Workflow clients can use `streamAgentEventsUntilTerminal`,
 `streamAgentRunEventsUntilTerminal`, and `streamAgentRunHitlResponseEventsUntilTerminal` to follow
 continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` headers. These helpers

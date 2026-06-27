@@ -12,7 +12,8 @@ import {
   AgentWebSocketServerMessage,
   QuestionResponseInput,
   ToolApprovalResponseInput,
-  UserInput
+  UserInput,
+  isTerminalAgentEvent
 } from '@yolk-sdk/agent/protocol'
 import type {
   AgentEvent as AgentEventType,
@@ -562,9 +563,6 @@ const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
     )
   }).pipe(Effect.provide(request.httpClientLayer ?? FetchHttpClient.layer))
 
-const isTerminalAgentEvent = (event: AgentEventType) =>
-  event._tag === 'AgentEnd' || event._tag === 'AgentError' || event._tag === 'AgentAwaitingInput'
-
 const responseToLineStream = (response: HttpClientResponse.HttpClientResponse) =>
   response.stream.pipe(
     Stream.mapError(toHttpClientTransportError('Could not read agent response body')),
@@ -959,11 +957,7 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
 
                 return Effect.sync(() => {
                   Queue.offerUnsafe(queue, message)
-                  if (
-                    message._tag === 'AgentEnd' ||
-                    message._tag === 'AgentError' ||
-                    message._tag === 'AgentAwaitingInput'
-                  ) {
+                  if (isTerminalAgentEvent(message)) {
                     settled = true
                     endQueue()
                     socket.close(1000, 'done')

@@ -6,6 +6,7 @@ export {
   settleWorkflowStep
 } from './workflow-loop.ts'
 export {
+  commitThenWriteTerminalEvent,
   durableAgentEventId,
   makeDurableAgentEventSequencerState,
   sequenceDurableAgentEvent,
@@ -28,7 +29,10 @@ export type {
   DurableAgentEvent,
   DurableAgentEventIdInput,
   DurableAgentEventSequencerState,
+  CommitThenWriteTerminalEventInput,
+  CommitThenWriteTerminalEventResult,
   SequenceDurableAgentEventInput,
   SequencedDurableAgentEvent,
+  TerminalEventCloseResult,
   WriteDurableAgentEventInput
 } from './workflow-events.ts'

@@ -23,6 +23,7 @@ Import Workflow APIs from the package root:
 
 ```ts
 import {
+  commitThenWriteTerminalEvent,
   makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
   runVercelAgentWorkflow,
@@ -118,6 +119,37 @@ The id format is `${streamId}:${turn}:${eventSequence}`. Keep `eventSequence` in
 Resume route reads should use `startIndex` when available. Host apps still own active-run locking,
 stale-run guards, and cancellation behavior.
 
+## Terminal barriers
+
+For durable host streams, terminal events are commit barriers. Emit live/progress events first,
+commit canonical host state, then write the terminal event, then close the writer:
+
+```txt
+live events -> host durable commit -> terminal event -> close
+```
+
+This lets clients stop consuming at a protocol-terminal event and immediately revalidate or reconnect
+from durable state. Hosts that emit terminal events before persistence should not rely on
+`streamAgentEventsUntilTerminal()` as a durable-settled signal.
+
+Use `commitThenWriteTerminalEvent` when a step must commit host state before writing its terminal
+event:
+
+```ts
+const result = await commitThenWriteTerminalEvent({
+  terminal,
+  commit: () => persistState(),
+  write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
+  writeCommitError: error =>
+    writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state }),
+  close: () => writer.close()
+})
+```
+
+The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes
+the host-provided terminal error event instead. Terminal write failures still attempt `close`; close
+failures are returned separately and do not turn a successful durable commit into a failed commit.
+
 ## Host responsibilities
 
 - Own Next/Vercel routes, auth, providers, tools, persistence, and telemetry.
@@ -126,6 +158,7 @@ stale-run guards, and cancellation behavior.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
 - Emit replay-safe event ids for durable streams and de-dupe by `eventId` client-side.
+- Write durable terminal events only after host persistence has settled.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
 
 ## Boundaries
