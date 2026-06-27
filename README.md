@@ -7,6 +7,7 @@ Reusable agent stack. Domain-free below the app layer.
 | Category  | Technology                               |
 | --------- | ---------------------------------------- |
 | Example   | Next.js 16 App Router                    |
+| Docs      | Fumadocs + Next.js                       |
 | Language  | TypeScript 5                             |
 | Effects   | Effect-TS                                |
 | Database  | PostgreSQL via Drizzle ORM + @effect/sql |
@@ -30,6 +31,8 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives |
 | `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes |
 | `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract |
+
+Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 
 Canary install example:
 

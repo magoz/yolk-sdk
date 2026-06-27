@@ -1,0 +1,64 @@
+---
+title: Add a tool
+description: Define a typed tool with Effect Schema and pass it to an agent loop.
+---
+
+Tools let the model ask your app to do work.
+
+## Define the tool
+
+```ts
+import { Effect, Schema } from 'effect'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeTool } from '@yolk-sdk/agent/tools'
+
+const WeatherParams = Schema.Struct({
+  city: Schema.String
+})
+
+export const weatherTool = makeTool({
+  name: 'get_weather',
+  description: 'Get the current weather for a city.',
+  parameters: WeatherParams,
+  access: 'read',
+  execute: input =>
+    Effect.succeed(
+      ToolResult.make({
+        toolCallId: input.call.id,
+        content: `Weather in ${input.params.city}: sunny`,
+        structuredContent: {
+          city: input.params.city,
+          condition: 'sunny'
+        }
+      })
+    )
+})
+```
+
+`makeTool` uses your Effect Schema to validate model input and generate the JSON Schema exposed to the model.
+
+## Resolve tools for a request
+
+```ts
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+
+const toolModule = {
+  id: 'weather',
+  tools: [weatherTool]
+}
+
+const toolSet = await Effect.runPromise(resolveTools([toolModule], requestContext))
+```
+
+Pass `toolSet.tools` into `run` or `runRuntime`. Use `toolSet.execute` inside your `ToolExecutor` layer.
+
+## Access levels
+
+| Access | Use for |
+| --- | --- |
+| `read` | search, fetch, inspect |
+| `write` | create/update external state |
+| `destructive` | shell commands, delete, send irreversible messages |
+
+The SDK records access. Your host decides whether to approve, deny, log, or hide a tool.

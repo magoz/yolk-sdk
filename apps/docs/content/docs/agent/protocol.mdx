@@ -1,0 +1,99 @@
+---
+title: Protocol
+description: Create transcript messages, pass files, and consume stream events.
+---
+
+Use `@yolk-sdk/agent/protocol` any time your app needs to build messages, inspect stream events, or persist a transcript.
+
+## Create messages
+
+Concrete transcript message variants:
+
+- `UserMessage`
+- `AssistantAgentMessage`
+- `ToolResultMessage`
+
+`AgentMessage` is the union of those variants, not a fourth message kind:
+
+```ts
+type AgentMessage = UserMessage | AssistantAgentMessage | ToolResultMessage
+```
+
+`AssistantAgentMessage` is the assistant/model-authored variant. It can contain text, reasoning, host tool calls, provider tool calls, and provider tool results.
+
+Create a normal user message:
+
+```ts
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const message = UserMessage.make({ content: 'Summarize this file.' })
+```
+
+Add optional model-visible envelope facts:
+
+```ts
+const message = UserMessage.make({
+  content: 'Summarize this.',
+  createdAtMs: Date.now(),
+  author: { displayName: 'Magoz' },
+  annotations: { timezone: 'Europe/Madrid' }
+})
+```
+
+Do not put secrets, auth state, private ids, or hidden policy in envelope fields. Providers may send them to models.
+
+## Send files and media
+
+`Content` is either plain text or ordered content parts:
+
+- `TextPart`
+- `ImagePart`
+- `DocumentPart`
+- `AudioPart`
+
+Media sources can be inline base64, durable URLs, or host-owned refs:
+
+```ts
+import { ImagePart, UserMessage, urlAttachmentSource } from '@yolk-sdk/agent/protocol'
+
+const message = UserMessage.make({
+  content: [
+    ImagePart.make({
+      source: urlAttachmentSource('https://cdn.example.com/image.webp'),
+      mimeType: 'image/webp'
+    })
+  ]
+})
+```
+
+Hosts own upload, auth, URL durability, retention, and ref hydration policy.
+
+## Consume events
+
+Streams emit `AgentEvent` values such as:
+
+- `AgentStart`, `AgentEnd`, `AgentError`, `AgentRetry`
+- `TurnStart`, `TurnEnd`
+- `LLMStreamStart`, `LLMTextDelta`, `LLMReasoningDelta`, `LLMStreamEnd`
+- `ToolExecutionStarted`, `ToolExecutionCompleted`, `ToolExecutionError`
+- `AgentAwaitingInput`, `QuestionRequested`, approval events
+
+Use `isTerminalAgentEvent` to detect logical stream termination.
+
+```ts
+import { isTerminalAgentEvent } from '@yolk-sdk/agent/protocol'
+
+for (const event of events) {
+  if (event._tag === 'LLMTextDelta') {
+    process.stdout.write(event.text)
+  }
+
+  if (isTerminalAgentEvent(event)) {
+    break
+  }
+}
+```
+
+## Validate transcripts before provider calls
+
+Every assistant host tool call must have a matching `ToolResultMessage` before the next provider request. Use `validateNoDanglingHostToolCalls` before lowering transcripts to providers.

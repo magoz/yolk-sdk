@@ -1,0 +1,118 @@
+---
+title: Agent APIs
+description: Public agent subpaths and commonly used exports.
+---
+
+Import feature APIs from explicit subpaths. The root package is intentionally tiny.
+
+## Protocol
+
+`@yolk-sdk/agent/protocol`
+
+| Export | Purpose |
+| --- | --- |
+| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage` | transcript messages |
+| `AgentEvent` | stream event union |
+| `ToolDef`, `ToolCall`, `ToolResult` | tool protocol |
+| `ToolApprovalRequest`, `ToolApprovalResponse` | approval HITL |
+| `QuestionRequest`, `QuestionResponse` | question HITL |
+| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent` | durable/client HITL helpers |
+| `isTerminalAgentEvent` | terminal event guard |
+| `assistantContent`, `contentText`, `contentParts` | content helpers |
+| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart` | multimodal content parts |
+| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource` | attachment source helpers |
+
+## Loop
+
+`@yolk-sdk/agent/loop`
+
+| Export | Purpose |
+| --- | --- |
+| `run` | stateless agent loop, returns `Stream<AgentEvent>` |
+| `LLMProvider` | provider service contract |
+| `ToolExecutor` | host tool execution service |
+| `ContextTransformer` | host context compaction/injection service |
+| `LoopConfig` | loop limits/retry config service |
+| `LLMError`, `ToolError` | safe loop/provider/tool failures |
+
+Testing: `@yolk-sdk/agent/loop/testing`
+
+| Export | Purpose |
+| --- | --- |
+| `FauxProvider` | deterministic test provider layer |
+| `Reply` | fake model replies: text, reasoning, tool calls, usage |
+| `TestToolExecutor` | canned tool results |
+
+## Runtime
+
+`@yolk-sdk/agent/runtime`
+
+| Export | Purpose |
+| --- | --- |
+| `runRuntime` | transcript or append-backed runtime stream |
+| `SessionEventStore` | append-log service contract |
+| `makeInMemorySessionEventStoreLayer` | test/local store layer |
+| `InputAppended`, `HitlResponseAppended`, `RunStarted`, `RunCompleted`, `RunAwaitingInput`, `RunFailed`, `RunInterrupted` | runtime log events |
+| `appendRuntimeSessionEventsToLog` | append helper for adapters |
+| `replayRuntimeSessionEvents`, `replayRuntimeHitlResponses` | rebuild transcript/responses from log |
+| `latestIncompleteRuntimeRun` | detect interrupted active run |
+
+Runtime request tags:
+
+- `Transcript`
+- `AppendInput`
+- `AppendHitlResponse`
+
+## Tools
+
+`@yolk-sdk/agent/tools`
+
+| Export | Purpose |
+| --- | --- |
+| `makeTool` | schema-backed tool registration |
+| `resolveTools` | filter/merge modules into model-visible defs and executor |
+| `makeToolExecutorLayer` | provide resolved executor as `ToolExecutor` |
+| `EmptyToolParams` | no-arg tool schema |
+| `ToolAccess` | `read`, `write`, `destructive` |
+| `makeQuestionToolModule` | built-in question HITL tool |
+| `makeNonRecursiveTaskToolModule` | subagent task tool without recursion |
+| `modelVisibleToolError` | recoverable error visible to model |
+
+## Client
+
+`@yolk-sdk/agent/client`
+
+| Export | Purpose |
+| --- | --- |
+| `streamAgentEventsUntilTerminal` | start/consume HTTP stream until terminal event |
+| `streamAgentRunEventsUntilTerminal` | consume durable run tail |
+| `streamAgentRunHitlResponseEventsUntilTerminal` | resume HITL and consume stream |
+| `collectAgentEvents` | collect a stream into an array |
+| `submitToolApprovalResponse`, `submitQuestionResponse` | client resume helpers |
+| `cancelAgentRun` | call host cancel endpoint |
+| `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents` | client reducer helpers |
+| `toolRunsFromHitlRequests` | paused UI hydration |
+| `documentPartFromTextFile` | browser file helper |
+
+## React
+
+`@yolk-sdk/agent/react`
+
+| Export | Purpose |
+| --- | --- |
+| `useAgentChat` | headless chat hook |
+| `buildAgentChatItems` | render-friendly item model |
+| `applyAgentEventToChatProjection` | replay-safe durable projection |
+| `makeAgentChatEventProjectionState` | projection initial state |
+| `applyAgentEventToChatMessages` | ephemeral stream reducer |
+| `deleteChatTurn`, `editChatUserMessage`, `regenerateChatMessagesFrom` | chat editing helpers |
+
+## Providers
+
+| Subpath | Main exports |
+| --- | --- |
+| `@yolk-sdk/agent/providers/openai/provider` | `makeOpenAiProviderLayer`, `OpenAiProviderLayer` |
+| `@yolk-sdk/agent/providers/openai/codex-provider` | `makeOpenAiCodexProviderLayer` |
+| `@yolk-sdk/agent/providers/openai` | Codex OAuth/broker helpers |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer` |
+| `@yolk-sdk/agent/providers/anthropic` | Claude OAuth/broker helpers |

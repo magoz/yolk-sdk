@@ -1,0 +1,105 @@
+---
+title: Implement a session store
+description: Back append-mode runtime with a database or append log.
+---
+
+Use `SessionEventStore` when the server owns transcript state and clients resume by session/run id.
+
+## Store contract
+
+```ts
+import { Effect, Layer } from 'effect'
+import {
+  SessionEventStore,
+  appendRuntimeSessionEventsToLog,
+  type RuntimeSessionEventLog,
+  type SessionEventStoreApi
+} from '@yolk-sdk/agent/runtime'
+```
+
+The store has two methods:
+
+| Method | Purpose |
+| --- | --- |
+| `load(sessionId)` | read one session event log |
+| `append(input)` | append runtime events, optionally checking `expectedRevision` |
+
+## Minimal adapter shape
+
+```ts
+const makeSessionStoreLayer = (db: HostSessionDb) =>
+  Layer.succeed(
+    SessionEventStore,
+    SessionEventStore.of({
+      load: sessionId => db.loadSessionLog(sessionId),
+      append: input =>
+        db.withSerializableTransaction(
+          Effect.gen(function* () {
+            const current = yield* db.loadOrCreateSessionLog(input.sessionId)
+
+            if (
+              input.expectedRevision !== undefined &&
+              input.expectedRevision !== current.revision
+            ) {
+              return yield* db.failRevisionConflict(input.sessionId)
+            }
+
+            const next = appendRuntimeSessionEventsToLog(current, input)
+            yield* db.saveSessionLog(next)
+
+            return next
+          })
+        )
+    } satisfies SessionEventStoreApi)
+  )
+```
+
+`HostSessionDb` is app-owned. It should persist `RuntimeSessionEventLog` rows or an equivalent append-only representation.
+
+## Use append mode
+
+```ts
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+
+const events = runRuntime(
+  {
+    _tag: 'AppendInput',
+    sessionId,
+    runId,
+    input: userMessage,
+    expectedRevision
+  },
+  runtimeConfig
+)
+```
+
+The runtime loads the log, appends input/run events, streams the agent, then appends completed, awaiting-input, or failed run events.
+
+## Resume HITL
+
+```ts
+const events = runRuntime(
+  {
+    _tag: 'AppendHitlResponse',
+    sessionId,
+    runId,
+    response,
+    expectedRevision
+  },
+  runtimeConfig
+)
+```
+
+Your route must verify the response matches a pending request for the authenticated user/session before calling the runtime.
+
+## Recovery path
+
+On process restart, call `latestIncompleteRuntimeRun(log.events)`. If it returns a run, mark it interrupted or resume from your durable workflow/run system.
+
+## Production notes
+
+- Use `expectedRevision` to reject stale writes.
+- Store event ids/revisions monotonically.
+- Persist terminal states before telling clients the run is settled.
+- Never trust client-provided tool definitions or pending HITL ids.
+- Keep app auth and session ownership outside the SDK store.

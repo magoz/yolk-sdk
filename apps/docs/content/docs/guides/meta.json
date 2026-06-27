@@ -1,0 +1,13 @@
+{
+  "title": "Build guides",
+  "pages": [
+    "build-chat-route",
+    "add-tool",
+    "stream-react",
+    "react-chat-ui",
+    "persist-session",
+    "durable-session-store",
+    "hitl",
+    "testing"
+  ]
+}

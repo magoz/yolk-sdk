@@ -1,0 +1,47 @@
+---
+title: Stream to React
+description: Connect a browser chat UI to a Yolk route with client and React helpers.
+---
+
+Use `@yolk-sdk/agent/client` to consume a stream, then project events into UI state with `@yolk-sdk/agent/react`.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent@canary react react-dom effect
+```
+
+## Consume a route stream
+
+```ts
+import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
+
+for await (const event of streamAgentEventsUntilTerminal({
+  endpoint: '/api/agent',
+  sessionId: 'browser-session',
+  messages
+})) {
+  // project into UI state
+}
+```
+
+## Build replay-safe state
+
+```ts
+import {
+  applyAgentEventToChatProjection,
+  makeAgentChatEventProjectionState
+} from '@yolk-sdk/agent/react'
+
+let projection = makeAgentChatEventProjectionState()
+
+for await (const event of stream) {
+  projection = applyAgentEventToChatProjection(projection, event)
+}
+```
+
+Use projection state for durable streams where reconnect may replay overlapping events. Use simpler reducers only for ephemeral one-shot streams.
+
+## What your UI owns
+
+Yolk is headless. You render the input, message list, attachment UX, retry state, stop button, approval prompts, and question prompts.

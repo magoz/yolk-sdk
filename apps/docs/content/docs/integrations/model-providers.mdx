@@ -1,0 +1,95 @@
+---
+title: Model providers
+description: Available LLM provider adapters and OAuth helper surfaces.
+---
+
+Provider adapters implement `LLMProvider` for the agent loop. They translate Yolk messages/tools into vendor requests and normalize text, reasoning, tool calls, usage, retries, and provider errors back into Yolk events.
+
+For copy-paste provider layer setup, see [Use model providers](./provider-setup).
+
+## Available providers
+
+| Provider | Factory | Auth | Notes |
+| --- | --- | --- | --- |
+| OpenAI-compatible chat | `makeOpenAiProviderLayer` | API key | Chat Completions-style endpoint; `OpenAiProviderLayer` can read `OPENAI_API_KEY` through Effect Config. |
+| OpenAI Codex | `makeOpenAiCodexProviderLayer` | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers. |
+| Anthropic Claude Code | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers. |
+| Faux provider | `FauxProvider.layer(...)` | none | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`. |
+
+## OpenAI-compatible chat
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
+
+const ProviderLayer = makeOpenAiProviderLayer({
+  apiKey: Redacted.make(hostOpenAiApiKey),
+  maxCompletionTokens: 4_096
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+Use `chatCompletionsUrl` for OpenAI-compatible gateways.
+
+## OpenAI Codex
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
+
+const ProviderLayer = makeOpenAiCodexProviderLayer({
+  token: hostOAuthAccessToken,
+  defaultReasoningEffort: 'medium',
+  reasoningSummary: 'auto'
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+OAuth helpers live in `@yolk-sdk/agent/providers/openai`:
+
+- `makeOpenAiCodexBrokerRequest`
+- `makeOpenAiCodexTokenBrokerClient`
+- `toOpenAiCodexOAuthAccessToken`
+- `openAiCodexProviderId`
+- OpenAI Codex OAuth URLs/constants
+
+## Anthropic Claude Code
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
+
+const ProviderLayer = makeAnthropicClaudeProviderLayer({
+  token: hostOAuthAccessToken,
+  maxTokens: 8_192
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+OAuth helpers live in `@yolk-sdk/agent/providers/anthropic`:
+
+- `makeAnthropicClaudeAuthorizationUrl`
+- `makeAnthropicClaudeBrokerRequest`
+- `makeAnthropicClaudeTokenBrokerClient`
+- `parseAnthropicClaudeAuthorizationCode`
+- `toAnthropicClaudeOAuthAccessToken`
+- `anthropicClaudeProviderId`
+- Claude OAuth URLs/constants
+
+## Test provider
+
+```ts
+import { FauxProvider, Reply } from '@yolk-sdk/agent/loop/testing'
+
+const ProviderLayer = FauxProvider.layer(Reply.text('Hello from a deterministic test.'))
+```
+
+Use this in tests and examples only. It is not a runtime provider.
+
+## Host responsibilities
+
+- Store and refresh provider credentials.
+- Choose models per user/session/run.
+- Provide `HttpClient` and provider layers to the loop.
+- Keep raw provider error bodies and secrets out of protocol events.
+- Persist usage and typed provider failure metadata if your app needs it.

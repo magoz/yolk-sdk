@@ -1,0 +1,34 @@
+---
+title: Architecture
+description: Package boundaries and dependency direction.
+---
+
+Yolk packages are reusable mechanics. Apps provide product policy.
+
+```txt
+host app / runtime / UI
+  -> @yolk-sdk/agent
+  -> @yolk-sdk/mcp
+  -> @yolk-sdk/knowledge
+  -> @yolk-sdk/connectors
+  -> @yolk-sdk/sandbox
+  -> @yolk-sdk/vercel-workflows
+```
+
+Rules of thumb:
+
+- packages expose contracts and helpers
+- apps own auth, storage, prompts, providers, enabled tools, approvals, and UI
+- use explicit subpaths
+- keep provider/platform-specific code behind provider/platform subpaths
+
+## Dependency direction
+
+- `agent/protocol` is the shared wire vocabulary.
+- `agent/loop` is stateless and provider/tool-service driven.
+- `agent/runtime` adds generic session orchestration, not app persistence.
+- `mcp` adapts MCP tools/results to agent protocol, but the loop stays MCP-agnostic.
+- `knowledge`, `connectors`, and `sandbox` expose optional agent adapters behind explicit subpaths.
+- `vercel-workflows` stays generic over serializable `unknown` payloads and does not import agent protocol.
+
+Strict boundaries let the packages fit many hosts: Next.js, Workers, Durable Objects, Workflows, CLIs, and tests.

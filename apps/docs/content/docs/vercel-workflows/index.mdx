@@ -1,0 +1,72 @@
+---
+title: Vercel Workflows package
+description: Run durable agent loops with host-owned Workflow steps.
+---
+
+Use `@yolk-sdk/vercel-workflows` when an agent run can outlive one HTTP request and should resume through Vercel Workflows.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/vercel-workflows@canary effect workflow
+```
+
+## Wrap your Workflow
+
+Your Workflow function stays in your app. Pass host-owned step functions into the package loop.
+
+```ts
+import { createHook } from 'workflow'
+import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows'
+
+export async function runAgentWorkflow(input: { request: unknown; context: unknown }) {
+  'use workflow'
+
+  return await runVercelAgentWorkflow({
+    input,
+    runModelStep,
+    runToolBatchStep,
+    closeStream,
+    writeError,
+    awaitInput: async awaitingInput => {
+      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+      return await hook
+    }
+  })
+}
+```
+
+`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in those steps.
+
+## Resume HITL
+
+When `runToolBatchStep` returns `awaitingInput`, the package calls `awaitInput`, waits for the hook result, then reruns the same tool batch with accumulated HITL responses.
+
+Your app owns hook tokens, route auth, response validation, and request matching.
+
+## Emit replay-safe stream events
+
+Use `writeDurableAgentEvent` to add deterministic ids:
+
+```txt
+${streamId}:${turn}:${eventSequence}
+```
+
+Clients should de-dupe by `eventId` during resume/reconnect.
+
+## Commit before terminal events
+
+Durable streams should settle canonical host state before terminal events:
+
+```txt
+live events -> host durable commit -> terminal event -> close
+```
+
+Use `commitThenWriteTerminalEvent` when a step must commit host state before writing the terminal event.
+
+## Next pages
+
+- [Step contracts](./step-contracts)
+- [Routes](./routes)
+- [HITL resume](./hitl-resume)
+- [Testing](./testing)

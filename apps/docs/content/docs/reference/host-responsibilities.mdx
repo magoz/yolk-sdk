@@ -1,0 +1,20 @@
+---
+title: Host responsibilities
+description: What your app must provide around Yolk SDK contracts.
+---
+
+| Area | Host owns |
+| --- | --- |
+| Identity | users, workspaces, tenants, route ownership |
+| Storage | transcripts, append logs, DB schema, object storage, tokens |
+| Providers | model choice, credentials, refresh, broker routes, error UX |
+| Tools | enabled tools, approval policy, authorization, audit |
+| Knowledge | extraction, embeddings, search store, permissions, scopes |
+| Connectors | credential storage/encryption/refresh/revoke, OAuth callbacks |
+| Sandbox | session scope, env/secrets, cleanup, approval, diffs |
+| UI | chat rendering, uploads, HITL controls, retry/stop/error states |
+| Deployment | Next routes, Worker/DO wiring, Workflow steps/hooks, cron cleanup |
+
+Yolk does not model app users, billing, projects, product permissions, or persistence schema.
+
+Use app-owned adapters around SDK contracts instead.

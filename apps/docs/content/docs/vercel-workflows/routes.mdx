@@ -1,0 +1,113 @@
+---
+title: Routes
+description: Start, tail, resume, and cancel durable Workflow-backed agent runs.
+---
+
+Routes are app-owned. Yolk gives you workflow orchestration and client helpers; your app owns auth, run ownership, persistence, and response shape.
+
+## Start a run
+
+Next route fragment:
+
+```ts
+import { start } from 'workflow/api'
+import { runAgentWorkflow } from '@/workflows/run-agent-workflow'
+
+export async function POST(request: Request) {
+  const body = await request.json()
+  const input = await decodeStartRequest(body)
+  await assertCanStartRun(input)
+
+  const run = await start(runAgentWorkflow, [
+    {
+      request: input.request,
+      context: input.context
+    }
+  ])
+
+  return new Response(run.getReadable<Uint8Array>(), {
+    headers: {
+      'content-type': 'application/x-ndjson',
+      'x-workflow-run-id': run.runId
+    }
+  })
+}
+```
+
+`decodeStartRequest` and `assertCanStartRun` are host functions. Do not trust client-provided tools, provider config, or workflow context.
+
+## Tail an existing run
+
+```ts
+import { getRun } from 'workflow/api'
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ runId: string }> }
+) {
+  const { runId } = await params
+  await assertCanReadRun(runId)
+  const startIndex = startIndexFromRequest(request)
+
+  return new Response(getRun(runId).getReadable<Uint8Array>({ startIndex }), {
+    headers: { 'content-type': 'application/x-ndjson' }
+  })
+}
+```
+
+Clients can use `streamAgentRunEventsUntilTerminal` with this route.
+
+## Resume HITL
+
+```ts
+import { resumeHook } from 'workflow/api'
+
+export async function POST(request: Request) {
+  const body = await request.json()
+  const input = await decodeHitlResumeRequest(body)
+  await assertCanResumeRun(input.runId, input.response)
+
+  await resumeHook(input.hookToken, input.response)
+
+  return new Response(null, { status: 202 })
+}
+```
+
+The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
+
+## Cancel a run
+
+```ts
+import { getRun } from 'workflow/api'
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ runId: string }> }
+) {
+  const { runId } = await params
+  await assertCanCancelRun(runId)
+  await getRun(runId).cancel()
+
+  return new Response(null, { status: 204 })
+}
+```
+
+Cancellation is host/Vercel-owned. The package does not define a cancellation protocol event.
+
+## Client helpers
+
+| Client API | Route shape |
+| --- | --- |
+| `streamAgentEventsUntilTerminal` | starts run and follows continuation headers |
+| `streamAgentRunEventsUntilTerminal` | reads an existing run tail |
+| `streamAgentRunHitlResponseEventsUntilTerminal` | resumes HITL and follows returned/tail chunks |
+| `cancelAgentRun` | calls your cancel route |
+
+## Headers
+
+Use the SDK header helpers on the client:
+
+- `agentRunIdFromHeaders`
+- `agentRunStreamTailIndexFromHeaders`
+- `agentRunStreamStartIndexFromHeaders`
+- `agentRunEndpointWithStartIndex`

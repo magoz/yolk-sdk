@@ -1,0 +1,43 @@
+---
+title: Add sandbox execution
+description: Let an agent run commands inside a scoped sandbox session.
+---
+
+Use sandbox execution for coding agents, file generation, test runs, and previews.
+
+## Run a command
+
+```ts
+import { Effect, Layer } from 'effect'
+import { Sandbox } from '@yolk-sdk/sandbox'
+import { makeInMemorySandboxStateStoreLayer } from '@yolk-sdk/sandbox/testing'
+import { makeVercelSandboxLayer } from '@yolk-sdk/sandbox/vercel'
+
+const SandboxLayer = makeVercelSandboxLayer({
+  sandboxSessionId: 'user-session-123',
+  ports: [3000]
+}).pipe(Layer.provide(makeInMemorySandboxStateStoreLayer()))
+
+const result = await Effect.runPromise(
+  Effect.gen(function* () {
+    const sandbox = yield* Sandbox
+    return yield* sandbox.run({ command: 'pnpm test' })
+  }).pipe(Effect.provide(SandboxLayer))
+)
+```
+
+## Add the agent tool
+
+```ts
+import { Effect } from 'effect'
+import { makeSandboxToolModule } from '@yolk-sdk/sandbox/agent'
+
+const sandboxToolModule = await Effect.runPromise(
+  makeSandboxToolModule({
+    workspaceDescription: 'Temporary workspace for this run.',
+    previewPorts: [3000]
+  }).pipe(Effect.provide(SandboxLayer))
+)
+```
+
+The sandbox tool is `destructive`. Add approvals and audit logs before enabling it for broad use.

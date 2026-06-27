@@ -1,0 +1,149 @@
+---
+title: Troubleshooting
+description: Common setup, runtime, streaming, provider, MCP, sandbox, and workflow failures.
+---
+
+Use this page when a guide compiles but the app does not behave as expected.
+
+## Package and module errors
+
+### Cannot find an export
+
+Check that all `@yolk-sdk/*` packages use the same canary version:
+
+```bash
+pnpm list '@yolk-sdk/*'
+```
+
+Yolk packages release in lockstep. Do not mix canary versions.
+
+### Node or ESM errors
+
+Yolk packages are ESM-first and require Node 22 or newer.
+
+Use explicit public subpaths:
+
+```ts
+import { run } from '@yolk-sdk/agent/loop'
+import { makeTool } from '@yolk-sdk/agent/tools'
+```
+
+Do not import package-internal `src/*` files from an app.
+
+## Effect layer errors
+
+### Missing service
+
+Most runtime failures that mention a missing service mean an Effect layer was not provided.
+
+| Missing service | Provide |
+| --- | --- |
+| `LLMProvider` | model provider layer or `FauxProvider.layer(...)` |
+| `ToolExecutor` | `makeToolExecutorLayer(toolSet)` or host executor layer |
+| `LoopConfig` | `LoopConfig.defaultLayer` or custom loop config |
+| `ContextTransformer` | `ContextTransformer.identity` or compaction layer |
+| `HttpClient` | `FetchHttpClient.layer` or host HTTP layer |
+
+Build one app-level layer and provide it at the route/runtime boundary.
+
+## Provider errors
+
+### Missing OpenAI API key
+
+`OpenAiProviderLayer` reads `OPENAI_API_KEY` through Effect Config. If you do not want env config, use `makeOpenAiProviderLayer({ apiKey })` and provide an HTTP layer.
+
+### OAuth provider returns unauthorized
+
+Codex and Claude provider layers need a fresh `OAuthAccessToken`. Your host owns token storage, refresh, broker routes, account linking, and audit.
+
+### Media input rejected
+
+Set model capabilities to match the provider/model. The loop rejects unsupported image, document, or audio parts before provider execution.
+
+## Tool errors
+
+### Tool is not configured
+
+The model called a tool name not present in the resolved tool set. Resolve tools server-side and pass the same `toolSet.tools` and `toolSet.execute` into the run.
+
+### Tool input validation failed
+
+`makeTool` validates model input with Effect Schema. Return model-visible validation errors for recoverable cases. Keep thrown `ToolError`s safe and non-secret.
+
+### Approval pauses forever
+
+If a tool has manual approval, the loop emits `AgentAwaitingInput`. Your host must persist pending request ids and resume with matching HITL responses.
+
+## Streaming errors
+
+### Browser receives one big chunk
+
+Disable buffering at your platform/proxy and use streaming-friendly headers.
+
+For NDJSON routes, use `content-type: application/x-ndjson` and avoid middleware that buffers responses.
+
+### Client never completes
+
+Streams are logically complete only after `AgentEnd`, `AgentError`, or `AgentAwaitingInput`. Use `isTerminalAgentEvent` when writing custom consumers.
+
+## MCP errors
+
+### Remote MCP URL rejected
+
+Remote MCP requires HTTPS by default. `http://localhost` is only for development policy.
+
+### Local MCP fails in browser or edge runtime
+
+Stdio MCP is Node-only. Keep it behind `@yolk-sdk/mcp/client/node` and run it from a Node host.
+
+### Tool result shape differs from agent results
+
+Use the MCP client/server adapters so `structuredContent`, `isError`, and supported content blocks are preserved.
+
+## Knowledge errors
+
+### Search returns nothing
+
+Check collection scope, document ids, chunk ingestion, embedding dimensions, and host permission filters.
+
+### Ingestion compiles but fails at runtime
+
+The package defines contracts. Your host must provide extraction, chunking, embedding, summarization, and search-store layers.
+
+## Connector errors
+
+### Credential binding missing
+
+Every connector action declares credential slots. Bind each slot to a host credential ref with `makeCredentialBinding`.
+
+### Provider request fails
+
+Provide a `ConnectorHttpClient` layer. Preserve method, URL, headers, body, and content type exactly when adapting to your HTTP client.
+
+## Sandbox errors
+
+### Workspace resets unexpectedly
+
+Disposable sandbox lifecycle can recreate stale or max-expired sessions. Treat `workspaceReset: true` as a signal to refresh app UI/state.
+
+### Command cannot access a path
+
+Sandbox `cwd` is workspace-relative. Absolute paths and `..` escapes are rejected.
+
+### Command times out
+
+Timeout is owned by Yolk. Long-running commands may be killed and returned as command-result data, not stream failure.
+
+## Vercel Workflow errors
+
+### Duplicate or replayed events
+
+Durable clients should de-dupe by `eventId` when available and resume from the last known stream index.
+
+### HITL resume fails
+
+Your host owns hook tokens, route auth, run ownership, and pending request matching. The package only carries serializable awaiting-input state.
+
+### Terminal event missing
+
+Write live events first, commit durable host state, then write the terminal event and close the stream.

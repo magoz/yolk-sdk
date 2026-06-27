@@ -1,0 +1,55 @@
+---
+title: Add knowledge search
+description: Ingest documents, search them, and expose results as an agent tool.
+---
+
+Use this when agents need access to app documents, notes, files, or durable memory.
+
+## Ingest documents
+
+```ts
+import { Effect } from 'effect'
+import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
+
+await Effect.runPromise(
+  ingestKnowledgeDocument({
+    collectionId: 'workspace-docs',
+    documentId: 'doc_123',
+    source: loadedSource
+  }).pipe(Effect.provide(HostKnowledgeLayer))
+)
+```
+
+Your app provides extraction, chunking, embedding, summarization, and store layers.
+
+## Search
+
+```ts
+import { Effect } from 'effect'
+import { searchKnowledge } from '@yolk-sdk/knowledge/search'
+
+const results = await Effect.runPromise(
+  searchKnowledge({
+    scope,
+    query: 'How does HITL work?',
+    mode: 'hybrid',
+    limit: 5,
+    contextChunks: 1
+  }).pipe(Effect.provide(HostKnowledgeLayer))
+)
+```
+
+## Expose as tool
+
+```ts
+import { Effect } from 'effect'
+import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
+
+const tool = makeKnowledgeSearchTool(searcher, {
+  scope: context => Effect.succeed(context.knowledgeScope),
+  limit: 5,
+  contextChunks: 1
+})
+```
+
+Resolve the tool with `@yolk-sdk/agent/tools` and pass it to the loop.

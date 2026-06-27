@@ -1,0 +1,59 @@
+---
+title: Agent package
+description: Build streaming agents with messages, model providers, tools, clients, and React state.
+---
+
+Use `@yolk-sdk/agent` when you want to run model turns, execute tools, stream protocol events, and project those events into a UI.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+Import by subpath:
+
+```ts
+import { run } from '@yolk-sdk/agent/loop'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { makeTool } from '@yolk-sdk/agent/tools'
+```
+
+## Most common jobs
+
+| Job | API |
+| --- | --- |
+| Make a user message | `UserMessage.make({ content })` |
+| Run a model/tool loop | `run(...)` |
+| Run behind an HTTP/session boundary | `runRuntime(...)` |
+| Define schema-backed tools | `makeTool(...)` |
+| Stream from browser/client | `streamAgentEventsUntilTerminal(...)` |
+| Render headless React chat | `useAgentChat(...)` |
+| Build provider layers | provider subpaths |
+| Test without provider accounts | `FauxProvider`, `TestToolExecutor` |
+
+## Local test loop
+
+```ts
+import { Effect, Layer, Stream } from 'effect'
+import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const TestLayer = Layer.mergeAll(
+  FauxProvider.layer(Reply.text('Done.')),
+  TestToolExecutor.layer({}),
+  LoopConfig.defaultLayer,
+  ContextTransformer.identity
+)
+
+const events = await Effect.runPromise(run({
+  messages: [UserMessage.make({ content: 'Hello' })],
+  systemPrompt: 'Be helpful.',
+  tools: [],
+  model: 'test-model'
+}).pipe(Stream.runCollect, Effect.provide(TestLayer)))
+```
+
+Next: [add tools](./tools-hitl), [serve it with `runRuntime`](./loop-runtime), or [render it in React](./client-react).

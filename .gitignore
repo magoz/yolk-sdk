@@ -37,6 +37,9 @@ packages/*/dist/
 .turbo/
 **/.turbo/
 
+# generated docs source
+**/.source/
+
 # misc
 .DS_Store
 *.pem

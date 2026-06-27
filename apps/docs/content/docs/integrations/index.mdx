@@ -1,0 +1,48 @@
+---
+title: Available integrations
+description: "What Yolk ships today: model providers, connector modules, MCP, knowledge, sandbox, and workflow adapters."
+---
+
+Yolk integrations are package-owned adapters you can plug into your host-owned auth, storage, policy, and UI.
+
+## Model providers
+
+| Provider | Use when | Import |
+| --- | --- | --- |
+| OpenAI-compatible chat completions | You have an API key and want a generic OpenAI-compatible chat endpoint | `@yolk-sdk/agent/providers/openai/provider` |
+| OpenAI Codex | You use Codex OAuth/token-broker flows and the Responses API | `@yolk-sdk/agent/providers/openai/codex-provider` |
+| Anthropic Claude Code | You use Claude OAuth/token-broker flows and Claude Code-compatible requests | `@yolk-sdk/agent/providers/anthropic/claude-provider` |
+| Test provider | You need deterministic tests without network calls | `@yolk-sdk/agent/loop/testing` |
+
+See [Model providers](./model-providers).
+
+## Connector modules
+
+| Connector | Built-in actions | Import |
+| --- | --- | --- |
+| Figma | remote MCP auth data | `@yolk-sdk/connectors/figma` |
+| Google | Gmail and Calendar | `@yolk-sdk/connectors/google` |
+| LinkedIn search | Exa people search, Enrich Layer profile/email lookup | `@yolk-sdk/connectors/linkedin-search` |
+| Notion | search, pages, blocks, databases, data sources, users, comments | `@yolk-sdk/connectors/notion` |
+| Cloudflare R2 | presigned upload URL | `@yolk-sdk/connectors/r2-storage` |
+| Telegram | send message, validate bot/chat | `@yolk-sdk/connectors/telegram` |
+| Todoist | projects, tasks, labels | `@yolk-sdk/connectors/todoist` |
+| Custom connector | any Effect-native action set | `@yolk-sdk/connectors` |
+
+See [Connectors catalog](./connectors) and [Add connector tools](./connector-tool).
+
+## Runtime/platform integrations
+
+| Integration | What ships | Import |
+| --- | --- | --- |
+| MCP remote servers | list/call remote MCP tools over HTTP | `@yolk-sdk/mcp/client` |
+| MCP local stdio | Node-only stdio MCP client helpers | `@yolk-sdk/mcp/client/node` |
+| MCP tool server | expose Yolk tools as a tool-only MCP server | `@yolk-sdk/mcp/server` |
+| Knowledge search | records, ingestion, search contracts, agent search tool helper | `@yolk-sdk/knowledge/*` |
+| Sandbox execution | core sandbox service, one destructive agent tool | `@yolk-sdk/sandbox`, `@yolk-sdk/sandbox/agent` |
+| Vercel Sandbox | concrete sandbox provider layer | `@yolk-sdk/sandbox/vercel` |
+| Vercel Workflows | durable workflow loop contract | `@yolk-sdk/vercel-workflows` |
+
+## Not included
+
+Yolk does not ship database adapters, auth routes, token storage, vector database providers, product permissions, or UI components. Those stay host-owned so the SDK remains reusable.

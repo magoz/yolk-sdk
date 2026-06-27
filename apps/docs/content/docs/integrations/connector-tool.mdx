@@ -1,0 +1,55 @@
+---
+title: Add connector tools
+description: Turn typed external API actions into agent tools.
+---
+
+Use connectors when you want reusable actions over external services.
+
+See [Connectors catalog](./connectors) for built-in modules and action ids.
+
+## Build an integration
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { TelegramBotTokenSlot } from '@yolk-sdk/connectors/telegram'
+
+const integration = makeIntegration({
+  connectorId: 'telegram',
+  config: { chatId: '123456' },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: TelegramBotTokenSlot.id,
+      credentialRef: 'telegram-bot-token'
+    })
+  ]
+})
+```
+
+## Expose connector actions as tools
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { TelegramConnector } from '@yolk-sdk/connectors/telegram'
+
+const telegramTools = makeConnectorToolModule(TelegramConnector, {
+  integration,
+  layer: HostConnectorLayer,
+  access: action => action === 'telegram.send_message' ? 'write' : 'read'
+})
+```
+
+Your `HostConnectorLayer` provides credentials and HTTP execution.
+
+## Use directly without an agent
+
+```ts
+import { Effect } from 'effect'
+
+const result = await Effect.runPromise(
+  TelegramConnector.invoke({
+    integration,
+    action: 'telegram.send_message',
+    input: { message: 'Hello from Yolk' }
+  }).pipe(Effect.provide(HostConnectorLayer))
+)
+```

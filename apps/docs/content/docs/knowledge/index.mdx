@@ -1,0 +1,79 @@
+---
+title: Knowledge package
+description: Ingest documents, search them, and expose knowledge search as an agent tool.
+---
+
+Use `@yolk-sdk/knowledge` when your app needs agent-readable memory or searchable documents.
+
+For a concrete ingestion/search pipeline, see [Ingest knowledge](./ingestion-pipeline).
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
+```
+
+## Use pinned knowledge as context
+
+```ts
+import { buildKnowledgeContext } from '@yolk-sdk/knowledge'
+
+const context = buildKnowledgeContext({
+  items,
+  maxCharacters: 6000
+})
+```
+
+Add the resulting text to your system prompt or context transformer. Your app chooses which records are pinned.
+
+## Ingest a document into search
+
+`ingestKnowledgeDocument` runs extraction, chunking, embedding, summary generation, chunk replacement, and document status updates.
+
+```ts
+import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
+
+const program = ingestKnowledgeDocument({
+  collectionId: 'workspace-docs',
+  documentId: 'doc_123',
+  source: loadedSource
+})
+```
+
+Provide these layers from your app:
+
+- `SearchIndexStore`
+- `KnowledgeExtractor`
+- `KnowledgeChunker`
+- `KnowledgeEmbedder`
+- `KnowledgeSummarizer`
+
+## Search documents
+
+```ts
+import { searchKnowledge } from '@yolk-sdk/knowledge/search'
+
+const results = searchKnowledge({
+  scope,
+  query: 'How do agent tools work?',
+  limit: 5,
+  mode: 'hybrid',
+  contextChunks: 1
+})
+```
+
+The package defines the search contract. Your app implements the store and embedding provider.
+
+## Expose search as an agent tool
+
+```ts
+import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
+
+const searchTool = makeKnowledgeSearchTool(searcher, {
+  scope: context => context.knowledgeScope,
+  limit: 5,
+  contextChunks: 1
+})
+```
+
+Use this when you want the model to search configured app knowledge during a run. Your app still owns authorization and scope resolution.

@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private runnable apps live in `examples/*` and `cloudflare/*`.
+SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private product/docs apps live in `apps/*`; private runnable examples live in `examples/*` and `cloudflare/*`.
 
 ## CRITICAL RULES
 
@@ -9,15 +9,17 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private run
 - Run `pnpm lint` before finishing.
 - Run `pnpm test:run` before committing broad changes.
 - Run `pnpm packages:check` when touching `packages/*`.
+- Run `pnpm docs:check` when touching `apps/docs`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
 - Follow local `AGENTS.md` before editing scoped app/package areas; root owns repo-wide boundaries only.
-- Never commit generated `.next`, `.turbo`, `dist`, coverage, or env files.
+- Never commit generated `.next`, `.turbo`, `.source`, `dist`, coverage, or env files.
 
 ## MONOREPO STRATEGY
 
 | Area | Role |
 | --- | --- |
 | `packages/*` | Public `@yolk-sdk/*` SDK packages; domain-free, reusable, publishable |
+| `apps/docs` | Private Fumadocs/Next SDK documentation site |
 | `examples/next` | Private Next.js dogfood/reference app; consumes packages like users |
 | `cloudflare/agent` | Private Cloudflare Worker/Durable Object agent runtime |
 | `examples/next/lib/*` | App-owned adapters/services/domain functions for the Next example |
@@ -62,6 +64,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | --- | --- | --- |
 | Package code | `packages/*` | See `packages/AGENTS.md` |
 | Package release | `patterns/PACKAGE_DISTRIBUTION.md` | Changesets + canary flow |
+| Docs app/content | `apps/docs` | Fumadocs site; public package docs |
 | Next app/page/API | `examples/next/app` | See `examples/next/AGENTS.md` + nested docs |
 | Next patterns | `examples/next/patterns` | Pages, API routes, actions, nuqs, UX |
 | Server actions/domain | `examples/next/lib/core/*` | App-owned; see local docs |
@@ -75,7 +78,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 
 ## PACKAGE BOUNDARIES
 
-- `packages/*` must not import from `examples/*` or `cloudflare/*`.
+- `packages/*` must not import from `apps/*`, `examples/*`, or `cloudflare/*`.
 - Packages use `@yolk-sdk/*` names and explicit subpath exports.
 - Public packages release in lockstep via Changesets fixed group.
 - `@yolk-sdk/cloudflare-agent` stays private and ignored by Changesets.
@@ -84,6 +87,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 ## APP BOUNDARIES
 
 - App-owned code stays outside packages unless it becomes domain-free SDK surface.
+- Docs app content in `apps/docs` documents public package APIs; do not present app-owned example details as SDK APIs.
 - Next page/API/server-action/tool/auth/UI rules live under `examples/next/*` docs and patterns, not root.
 
 ## REFERENCE REPOS

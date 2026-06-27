@@ -1,0 +1,46 @@
+---
+title: Test an agent
+description: Use package fakes to test loops, tools, streams, and integrations without provider calls.
+---
+
+Use `@yolk-sdk/agent/loop/testing` for deterministic loop tests.
+
+## Test a text response
+
+```ts
+import { Effect, Layer, Stream } from 'effect'
+import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const TestLayer = Layer.mergeAll(
+  FauxProvider.layer(Reply.text('Hello.')),
+  TestToolExecutor.layer({}),
+  LoopConfig.defaultLayer,
+  ContextTransformer.identity
+)
+
+const events = await Effect.runPromise(
+  run({
+    messages: [UserMessage.make({ content: 'Hi' })],
+    systemPrompt: 'Be concise.',
+    tools: [],
+    model: 'test-model'
+  }).pipe(Stream.runCollect, Effect.provide(TestLayer))
+)
+```
+
+## Test tool calls
+
+Use `Reply.toolCall(...)` to make the fake provider request a tool, then use `TestToolExecutor.layer(...)` to return canned results.
+
+## Integration tests
+
+For package integrations, fake the boundary ports:
+
+- fake `ConnectorHttpClient`
+- fake `CredentialResolver`
+- fake `SearchIndexStore`
+- fake `KnowledgeEmbedder`
+- `makeFakeSandboxLayer`
+- `makeInMemorySandboxStateStoreLayer`

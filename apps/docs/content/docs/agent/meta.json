@@ -1,0 +1,11 @@
+{
+  "title": "Agent",
+  "pages": [
+    "index",
+    "protocol",
+    "loop-runtime",
+    "tools-hitl",
+    "client-react",
+    "providers-oauth"
+  ]
+}

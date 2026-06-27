@@ -1,0 +1,90 @@
+---
+title: Build a React chat UI
+description: Use headless React helpers for streaming, stop, retry, edit, regenerate, and HITL controls.
+---
+
+`@yolk-sdk/agent/react` is headless. It manages agent chat state; your app renders the UI.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect react react-dom
+```
+
+## Client component
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+import { Option } from 'effect'
+import { buildAgentChatItems, useAgentChat } from '@yolk-sdk/agent/react'
+
+export function AgentChat() {
+  const [input, setInput] = useState('')
+  const chat = useAgentChat({
+    sessionId: 'browser-session',
+    endpoint: '/api/agent',
+    model: 'gpt-5.5'
+  })
+  const items = buildAgentChatItems({
+    messages: chat.chatMessages,
+    isRunning: chat.isRunning,
+    activeToolLabel: Option.none(),
+    retryInfo: chat.state.retryInfo
+  })
+
+  return (
+    <form
+      onSubmit={event => {
+        event.preventDefault()
+        const result = chat.submitText(input)
+        if (result._tag === 'Submitted') setInput('')
+      }}
+    >
+      <ol>
+        {items.map(item => (
+          <li key={item.id}>{renderChatItem(item)}</li>
+        ))}
+      </ol>
+      {chat.error === null ? null : <p role="alert">{chat.error}</p>}
+      <input
+        value={input}
+        disabled={!chat.canSubmitText(input)}
+        onChange={event => setInput(event.target.value)}
+      />
+      <button type="submit" disabled={!chat.canSubmitText(input)}>
+        Send
+      </button>
+      <button type="button" disabled={!chat.isRunning} onClick={chat.stop}>
+        Stop
+      </button>
+    </form>
+  )
+}
+```
+
+`renderChatItem` is app-owned. Switch on `item._tag` and render your own message, tool, retry, status, and error components.
+
+## HITL controls
+
+When `chat.isWaiting` is true, render approval/question controls from tool run items and resume with:
+
+```ts
+chat.submitToolApprovalResponse(response)
+chat.submitQuestionResponse(response)
+```
+
+Build `response` values from `@yolk-sdk/agent/protocol` after matching the pending request id in your UI state.
+
+## Durable streams
+
+Use `useAgentChat` for normal browser chats. For replayed durable event logs, use `applyAgentEventToChatProjection` directly so overlapping chunks de-dupe by `eventId`.
+
+## UX checklist
+
+- Disable submit while running or awaiting HITL.
+- Keep stop local: it aborts the current browser stream. Server-side cancellation is a separate route.
+- Show retry state from `chat.state.retryInfo`.
+- Keep approval/question controls accessible and auditable.
+- Never render raw provider error bodies.

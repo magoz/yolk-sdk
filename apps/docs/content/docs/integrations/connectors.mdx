@@ -1,0 +1,110 @@
+---
+title: Connectors catalog
+description: Built-in connector modules, credential slots, config keys, and action ids.
+---
+
+Connectors are typed external API actions. Use them directly or adapt them into agent tools with `@yolk-sdk/connectors/agent`.
+
+## Summary
+
+| Connector | Import | Credential slots | Config keys | Actions |
+| --- | --- | --- | --- | --- |
+| Figma | `@yolk-sdk/connectors/figma` | `FigmaOAuthCredentialSlot` | `refreshToken`, `clientId`, `clientSecret` optional | `figma.mcp_auth` |
+| Google | `@yolk-sdk/connectors/google` | Google OAuth slots | none | Gmail + Calendar actions |
+| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot` | none | search, profile, email |
+| Notion | `@yolk-sdk/connectors/notion` | `NotionApiTokenSlot` | none | Notion workspace/content actions |
+| Cloudflare R2 | `@yolk-sdk/connectors/r2-storage` | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional | presigned upload URL |
+| Telegram | `@yolk-sdk/connectors/telegram` | `TelegramBotTokenSlot` | `chatId` | send, validate |
+| Todoist | `@yolk-sdk/connectors/todoist` | `TodoistApiTokenSlot` | none | project/task/label actions |
+
+## Figma
+
+Use Figma when you want to turn host-owned Figma OAuth credentials into remote MCP auth data.
+
+| Action id | What it does |
+| --- | --- |
+| `figma.mcp_auth` | builds Figma remote MCP server URL, tokens, and optional MCP client info |
+
+## Google
+
+Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots, and `GoogleCombinedOAuthCredentialSlot` for broad-consent hosts.
+
+### Gmail actions
+
+| Action id | What it does |
+| --- | --- |
+| `gmail.search` | search Gmail messages |
+| `gmail.get_message` | fetch one message |
+| `gmail.list` | list messages |
+| `gmail.list_drafts` | list drafts |
+| `gmail.get_thread` | fetch a thread |
+| `gmail.list_labels` | list labels |
+| `gmail.modify_labels` | add/remove labels |
+| `gmail.trash` | move a message to trash |
+| `gmail.untrash` | restore a trashed message |
+| `gmail.draft_compose` | create a draft |
+| `gmail.draft_update` | update a draft |
+| `gmail.draft_delete` | delete a draft |
+| `gmail.draft_reply` | create a reply draft |
+| `gmail.get_attachment` | fetch an attachment |
+| `gmail.list_send_as` | list send-as aliases |
+| `gmail.list_accounts` | list accessible Gmail accounts |
+
+### Calendar actions
+
+| Action id | What it does |
+| --- | --- |
+| `calendar.list_events` | list calendar events |
+| `calendar.create_event` | create an event |
+| `calendar.list_calendars` | list calendars |
+| `calendar.get_event` | fetch one event |
+| `calendar.update_event` | update an event |
+| `calendar.delete_event` | delete an event |
+| `calendar.list_accounts` | list accessible Calendar accounts |
+
+## LinkedIn search
+
+| Action id | What it does | Credential |
+| --- | --- | --- |
+| `linkedin_search.search` | search LinkedIn people results through Exa | `ExaApiKeySlot` |
+| `linkedin_search.profile` | fetch a LinkedIn profile through Enrich Layer | `EnrichLayerApiKeySlot` |
+| `linkedin_search.email` | fetch or queue a LinkedIn email lookup | `EnrichLayerApiKeySlot` |
+
+## Notion
+
+| Action family | Action ids |
+| --- | --- |
+| Search | `notion.search` |
+| Pages | `notion.get_page`, `notion.create_page`, `notion.update_page`, `notion.get_page_content`, `notion.get_page_property` |
+| Blocks | `notion.append_blocks`, `notion.update_block`, `notion.delete_block`, `notion.get_block` |
+| Databases | `notion.get_database`, `notion.query_database`, `notion.create_database`, `notion.update_database` |
+| Data sources | `notion.get_data_source`, `notion.query_data_source`, `notion.create_data_source`, `notion.update_data_source` |
+| Users | `notion.list_users`, `notion.get_user`, `notion.get_bot_user` |
+| Comments | `notion.create_comment`, `notion.list_comments` |
+
+## Cloudflare R2
+
+| Action id | What it does |
+| --- | --- |
+| `r2_storage.upload_url` | create a presigned PUT upload URL through a host-provided `R2Presigner` |
+
+R2 presigning is host-provided. The connector does not bundle an AWS SDK.
+
+## Telegram
+
+| Action id | What it does |
+| --- | --- |
+| `telegram.send_message` | send text to configured chat |
+| `telegram.validate` | validate bot token and chat config |
+
+## Todoist
+
+| Action family | Action ids |
+| --- | --- |
+| Tasks | `todoist.list_tasks`, `todoist.create_task`, `todoist.close_task`, `todoist.get_task`, `todoist.update_task`, `todoist.delete_task` |
+| Projects | `todoist.list_projects`, `todoist.create_project`, `todoist.get_project`, `todoist.update_project`, `todoist.delete_project` |
+| Labels | `todoist.list_labels` |
+
+## Custom connectors
+
+Use `defineConnector`, `defineAction`, `CredentialSlot`, and `makeIntegration` from `@yolk-sdk/connectors` to build app-specific connectors. Then expose them to agents with `makeConnectorToolModule`.

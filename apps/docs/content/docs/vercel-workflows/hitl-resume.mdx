@@ -1,0 +1,74 @@
+---
+title: HITL resume
+description: Pause a Workflow run for approvals/questions and resume with validated responses.
+---
+
+HITL in Vercel Workflows is a handoff between your tool step, the Workflow hook, and your resume route.
+
+## Pause from the tool step
+
+Return `awaitingInput` from `runToolBatchStep`:
+
+```ts
+return {
+  messages: [],
+  createdMessages: input.createdMessages,
+  awaitingInput: {
+    hookToken: `agent:${runId}:tool:${toolCallId}`,
+    requests: pendingRequests,
+    messages: input.createdMessages,
+    usage: input.usage,
+    turns: input.turn ?? 0,
+    eventSequence: nextEventSequence
+  },
+  eventSequence: nextEventSequence
+}
+```
+
+Persist enough state for your UI and resume route to verify the request.
+
+## Wait in the workflow
+
+```ts
+awaitInput: async awaitingInput => {
+  using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+  return await hook
+}
+```
+
+When the hook resolves, Yolk reruns the same tool batch with `hitlResponses` containing the decoded response.
+
+## Resume from a route
+
+```ts
+await assertPendingHitlRequest({
+  runId,
+  requestId: response.requestId,
+  toolCallId: response.toolCallId
+})
+
+await resumeHook(hookToken, response)
+```
+
+Do not resume only by hook token. Match run ownership, request id, tool call id, and response type.
+
+## Event sequence rule
+
+Carry `eventSequence` through awaiting state and resumed tool results:
+
+```txt
+model step eventSequence -> awaitingInput.eventSequence -> resumed tool result eventSequence -> next model state
+```
+
+This keeps durable `eventId`s monotonic across pause/resume.
+
+## Failure modes
+
+| Failure | Result |
+| --- | --- |
+| no `awaitInput` handler | `AwaitInputFailed` |
+| hook rejected | `AwaitInputFailed` |
+| resume route denied | workflow keeps waiting |
+| tool batch fails after resume | `ToolBatchStepFailed` |
+
+Call `writeError` with safe terminal error events. Never include raw provider/tool secrets in resume errors.

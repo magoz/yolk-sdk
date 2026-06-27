@@ -1,0 +1,72 @@
+---
+title: Connectors package
+description: Define external API actions and turn them into agent tools.
+---
+
+Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Google, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/connectors@canary effect
+```
+
+## Invoke a connector action
+
+```ts
+import { Effect } from 'effect'
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { TelegramBotTokenSlot, TelegramConnector } from '@yolk-sdk/connectors/telegram'
+
+const integration = makeIntegration({
+  connectorId: 'telegram',
+  config: { chatId: '123456' },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: TelegramBotTokenSlot.id,
+      credentialRef: 'telegram-bot-token'
+    })
+  ]
+})
+
+const program = TelegramConnector.invoke({
+  integration,
+  action: 'telegram.send_message',
+  input: { message: 'Hello from Yolk' }
+})
+
+const result = await Effect.runPromise(program.pipe(Effect.provide(HostConnectorLayer)))
+```
+
+`HostConnectorLayer` provides `CredentialResolver`, `ConnectorHttpClient`, and any provider-specific ports.
+
+## Turn connector actions into agent tools
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import { GoogleConnector } from '@yolk-sdk/connectors/google'
+
+const googleTools = makeConnectorToolModule(GoogleConnector, {
+  integration,
+  layer: HostConnectorLayer,
+  access: action => action.includes('create') ? 'write' : 'read'
+})
+```
+
+Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into the loop, and execute through the returned tool executor.
+
+## Provider modules
+
+| Subpath | Use for |
+| --- | --- |
+| `@yolk-sdk/connectors/figma` | Figma remote MCP auth data |
+| `@yolk-sdk/connectors/google` | Gmail and Calendar |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email |
+| `@yolk-sdk/connectors/notion` | Notion pages, blocks, databases, data sources, comments, users |
+| `@yolk-sdk/connectors/r2-storage` | R2 upload URL with host presigner |
+| `@yolk-sdk/connectors/telegram` | Telegram bot send/validate |
+| `@yolk-sdk/connectors/todoist` | Todoist projects, tasks, labels |
+
+## What the host provides
+
+Your app stores, encrypts, refreshes, revokes, and audits credentials. It also owns OAuth routes, callbacks, consent scopes, identity mapping, authorization, and HTTP execution policy.

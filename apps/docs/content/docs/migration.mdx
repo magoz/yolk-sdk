@@ -1,0 +1,85 @@
+---
+title: Migration and versioning
+description: Canary stability, lockstep package versions, upgrade checks, and migration workflow.
+---
+
+Yolk packages are canary-stage. APIs can change between canary releases.
+
+## Version rule
+
+Keep every public package on the same canary version:
+
+```bash
+pnpm add @yolk-sdk/agent@canary @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary
+```
+
+Check installed versions:
+
+```bash
+pnpm list '@yolk-sdk/*'
+```
+
+Do not mix versions unless a release note explicitly says it is safe.
+
+## Upgrade checklist
+
+1. Update all `@yolk-sdk/*` dependencies together.
+2. Run typecheck and tests in your host app.
+3. Search for changed subpath imports.
+4. Re-run one agent loop with the fake provider.
+5. Re-run one real provider smoke test.
+6. Re-run one tool call, one HITL pause/resume, and one stream reconnect path if your app uses them.
+7. Re-check connector credentials and OAuth scopes if connector packages changed.
+8. Re-check sandbox lifecycle and Workflow terminal-event ordering if platform packages changed.
+
+## What can break during canary
+
+| Area | Watch for |
+| --- | --- |
+| Protocol | event names, message fields, terminal state, tool/HITL payloads |
+| Loop/runtime | required Effect services, runtime request shapes, stream semantics |
+| Client/React | projection state, transport headers, resume helpers |
+| Providers | auth config, model capabilities, usage/error metadata |
+| Tools | registration metadata, access levels, approval semantics |
+| MCP | remote/local config, result adaptation, HTTPS policy |
+| Knowledge | store contracts, search request shape, agent tool options |
+| Connectors | action ids, input/output schemas, credential slots, config keys |
+| Sandbox | lifecycle defaults, command result shape, provider adapter options |
+| Workflows | callback contracts, terminal status, retry/default behavior |
+
+## Safe migration pattern
+
+Create one compatibility boundary in your app for each package area:
+
+| Boundary | Owns |
+| --- | --- |
+| Agent runtime adapter | provider layer, loop config, enabled tools, stream format |
+| Tool catalog | app-owned tools, connector tools, MCP tools, approvals |
+| Persistence adapter | transcript/session event store and replay repair |
+| Credential adapter | OAuth/API token resolution and refresh |
+| UI adapter | event projection, retry display, HITL controls |
+
+Then most package changes affect one adapter instead of the entire app.
+
+## Stable import habit
+
+Use public subpaths only:
+
+```ts
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
+import { GoogleConnector } from '@yolk-sdk/connectors/google'
+```
+
+Avoid root imports for feature APIs and never import from package `src/*` internals.
+
+## Before filing an issue
+
+Include:
+
+- exact package versions
+- Node version
+- runtime environment
+- relevant public subpath imports
+- minimal reproduction using `FauxProvider` when possible
+- terminal `AgentError` or typed provider/tool error metadata

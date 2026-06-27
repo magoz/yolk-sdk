@@ -1,0 +1,96 @@
+---
+title: MCP auth, local servers, and server policy
+description: Configure remote auth headers, Node-only local stdio, and tool-only MCP servers safely.
+---
+
+MCP is infrastructure. Your app owns server config, credentials, auth, product policy, and enabled tools.
+
+## Remote auth
+
+Pass host-resolved headers into remote config:
+
+```ts
+import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
+
+const tools = await Effect.runPromise(
+  listRemoteMcpServerTools({
+    name: 'figma',
+    type: 'remote',
+    url: 'https://mcp.figma.com/mcp',
+    headers: {
+      authorization: `Bearer ${figmaAccessToken}`
+    }
+  }).pipe(Effect.provide(FetchHttpClient.layer))
+)
+```
+
+Remote MCP requires HTTPS by default. `http://localhost` is only for explicit dev policy.
+
+## Local stdio
+
+Use `@yolk-sdk/mcp/client/node` only from Node hosts:
+
+```ts
+import { Effect } from 'effect'
+import { listLocalMcpServerToolsNode } from '@yolk-sdk/mcp/client/node'
+
+const tools = await Effect.runPromise(
+  listLocalMcpServerToolsNode(
+    {
+      name: 'local-files',
+      type: 'local',
+      command: 'npx -y @example/mcp-server',
+      environment: {
+        EXAMPLE_TOKEN: token
+      }
+    },
+    {
+      securityPolicy: {
+        allowLocalServers: true,
+        allowDevHttpLocalhost: false
+      }
+    }
+  )
+)
+```
+
+Local stdio uses explicit environment only. Do not pass the host process environment wholesale.
+
+## Tool name mapping
+
+MCP tool names become model-visible Yolk tool names by prefixing the sanitized server name:
+
+```txt
+server: docs
+mcp tool: search
+agent tool: docs_search
+```
+
+When executing a model tool call, map `call.name` back to the resolved MCP tool and call by raw `mcpToolName`.
+
+## Tool-only MCP server
+
+Expose app-approved Yolk tools over MCP:
+
+```ts
+import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
+
+const server = makeMcpToolServer({
+  name: 'yolk-tools',
+  version: '0.1.0',
+  tools: approvedTools
+})
+```
+
+The server supports `initialize`, `tools/list`, and `tools/call`. It does not own routes, auth, resources, prompts, OAuth, or deployment.
+
+## Policy checklist
+
+- Persist server config outside the SDK.
+- Resolve credentials server-side.
+- Filter enabled tools per user/session.
+- Keep local servers disabled unless a Node host explicitly allows them.
+- Audit tool calls and preserve MCP `isError` / `structuredContent`.
+- Never let browser clients submit arbitrary MCP server configs directly to execution.

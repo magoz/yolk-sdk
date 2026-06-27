@@ -1,0 +1,65 @@
+---
+title: Sandbox package
+description: Run commands in sandbox sessions and expose one destructive agent tool.
+---
+
+Use `@yolk-sdk/sandbox` when an agent needs an isolated workspace for commands, scripts, or generated files.
+
+For lifecycle, source, env, ports, and approval policy, see [Sandbox lifecycle and safety](./lifecycle-safety).
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/sandbox@canary effect
+```
+
+## Run a command
+
+```ts
+import { Effect, Layer } from 'effect'
+import { Sandbox } from '@yolk-sdk/sandbox'
+import { makeInMemorySandboxStateStoreLayer } from '@yolk-sdk/sandbox/testing'
+import { makeVercelSandboxLayer } from '@yolk-sdk/sandbox/vercel'
+
+const SandboxLayer = makeVercelSandboxLayer({ sandboxSessionId: 'user-session-123' }).pipe(
+  Layer.provide(makeInMemorySandboxStateStoreLayer())
+)
+
+const program = Effect.gen(function* () {
+  const sandbox = yield* Sandbox
+  return yield* sandbox.run({ command: 'node --version' })
+}).pipe(Effect.provide(SandboxLayer))
+
+const result = await Effect.runPromise(program)
+```
+
+Production apps should replace the in-memory state store with durable storage.
+
+## Add the agent tool
+
+```ts
+import { Effect } from 'effect'
+import { makeSandboxToolModule } from '@yolk-sdk/sandbox/agent'
+
+const sandboxTools = await Effect.runPromise(
+  makeSandboxToolModule({
+    workspaceDescription: 'A temporary Node.js workspace.',
+    lifecycleDescription: 'Disposable sandbox; files may reset after expiry.',
+    previewPorts: [3000]
+  }).pipe(Effect.provide(SandboxLayer))
+)
+```
+
+Resolve `sandboxTools` with `@yolk-sdk/agent/tools`, pass the tool definitions into the loop, and provide a `Sandbox` layer to the tool executor.
+
+## Command results
+
+Command failures are result data, not transport failures:
+
+- nonzero exit code returns a tool result with `isError`
+- timeout returns a tool result with `isError`
+- provider/config/state failures become safe `ToolError`s
+
+## What the host provides
+
+Your app owns the scoped `sandboxSessionId`, durable state store, env/secrets, source/snapshot/git policy, cleanup, auth, approvals, UI, diffs, commits, PRs, and audit logs.

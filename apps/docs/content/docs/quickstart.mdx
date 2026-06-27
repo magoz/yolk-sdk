@@ -1,0 +1,131 @@
+---
+title: Quickstart
+description: Run a complete Yolk agent loop with a typed tool and fake provider.
+---
+
+This guide runs one complete agent turn locally: user message → model tool call → host tool execution → final assistant message.
+
+It uses the fake provider, so you do not need provider credentials yet.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+## Create `index.ts`
+
+```ts
+import { Effect, Layer, Stream } from 'effect'
+import * as Schema from 'effect/Schema'
+import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply } from '@yolk-sdk/agent/loop/testing'
+import { assistantContent, ToolResult, UserMessage } from '@yolk-sdk/agent/protocol'
+import { makeTool, makeToolExecutorLayer, resolveTools } from '@yolk-sdk/agent/tools'
+
+const WeatherParams = Schema.Struct({
+  city: Schema.String
+})
+
+const weatherTool = makeTool({
+  name: 'get_weather',
+  description: 'Get the current weather for a city.',
+  parameters: WeatherParams,
+  access: 'read',
+  execute: input =>
+    Effect.succeed(
+      ToolResult.make({
+        toolCallId: input.call.id,
+        content: `Weather in ${input.params.city}: sunny`,
+        structuredContent: {
+          city: input.params.city,
+          condition: 'sunny'
+        }
+      })
+    )
+})
+
+const toolSet = await Effect.runPromise(
+  resolveTools([{ id: 'weather', tools: [weatherTool] }], {})
+)
+
+const AppAgentLayer = Layer.mergeAll(
+  FauxProvider.layer(
+    Reply.toolCall({
+      id: 'call_weather_1',
+      name: 'get_weather',
+      params: { city: 'Barcelona' }
+    }),
+    Reply.text('It is sunny in Barcelona.')
+  ),
+  makeToolExecutorLayer(toolSet),
+  LoopConfig.defaultLayer,
+  ContextTransformer.identity
+)
+
+const events = Array.from(
+  await Effect.runPromise(
+    run({
+      messages: [UserMessage.make({ content: 'What is the weather in Barcelona?' })],
+      systemPrompt: 'Use tools when useful. Be concise.',
+      tools: toolSet.tools,
+      model: 'test-model'
+    }).pipe(Stream.runCollect, Effect.provide(AppAgentLayer))
+  )
+)
+
+console.log(events.map(event => event._tag).join(' -> '))
+
+const assistant = events.find(event => event._tag === 'AssistantMessage')
+
+if (assistant !== undefined) {
+  console.log(assistantContent(assistant.message))
+}
+```
+
+## Run it
+
+```bash
+pnpm dlx tsx index.ts
+```
+
+You should see an event sequence ending in `AgentEnd`, plus the assistant answer:
+
+```txt
+AgentStart -> TurnStart -> ... -> ToolExecutionCompleted -> ... -> AgentEnd
+It is sunny in Barcelona.
+```
+
+## What happened
+
+1. `makeTool` built a schema-backed tool definition and executor.
+2. `resolveTools` produced the model-visible `ToolDef` list and host executor.
+3. `FauxProvider` simulated a model calling `get_weather`, then answering.
+4. `run` streamed protocol events for model output, tool execution, assistant messages, and terminal state.
+
+## Move to your host app
+
+In a real app you replace only the boundaries:
+
+| Boundary | Replace fake quickstart part with |
+| --- | --- |
+| Provider | `makeOpenAiProviderLayer`, `makeOpenAiCodexProviderLayer`, or `makeAnthropicClaudeProviderLayer` |
+| Tool executor | app-owned tools, connector tools, MCP tools, knowledge search, sandbox tool |
+| Transport | Next route, Worker, Durable Object, CLI, or Workflow stream |
+| Storage | database/session event log owned by your app |
+| UI | React client helpers or app-owned chat state |
+
+## Runtime choices
+
+| API | Use for |
+| --- | --- |
+| `run` | unit tests, direct loop control, custom runtimes |
+| `runRuntime` with `Transcript` | stateless HTTP route where client sends the transcript |
+| `runRuntime` with `AppendInput` | durable session log, Worker/Durable Object, database-backed chat |
+| `@yolk-sdk/vercel-workflows` | long-lived Vercel Workflow runs |
+
+Next steps:
+
+- [Build a chat route](./guides/build-chat-route)
+- [Add a tool](./guides/add-tool)
+- [Choose a model provider](./integrations/model-providers)

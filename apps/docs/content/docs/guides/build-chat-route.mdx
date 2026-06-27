@@ -1,0 +1,86 @@
+---
+title: Build a chat route
+description: Create a Next.js route that accepts Yolk messages and streams NDJSON agent events.
+---
+
+This guide builds the route your UI can call for a stateless chat turn.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+## Route shape
+
+Your route should:
+
+1. decode the request body into app-owned input
+2. resolve enabled tools for that user/session
+3. call `runRuntime` with `_tag: 'Transcript'`
+4. provide provider/tool Effect layers
+5. stream each `AgentEvent` as NDJSON
+
+## Minimal route
+
+```ts
+import { Effect, Stream } from 'effect'
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+
+const encoder = new TextEncoder()
+
+export async function POST(request: Request) {
+  const input = await request.json()
+
+  const events = runRuntime(
+    {
+      _tag: 'Transcript',
+      sessionId: input.sessionId,
+      messages: input.messages
+    },
+    {
+      systemPrompt: 'You are a helpful assistant.',
+      tools: input.tools,
+      model: input.model ?? 'gpt-5.5'
+    }
+  )
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      Effect.runPromise(
+        events.pipe(
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
+            })
+          ),
+          Effect.provide(AppAgentLayer)
+        )
+      ).then(
+        () => controller.close(),
+        error => controller.error(error)
+      )
+    }
+  })
+
+  return new Response(body, {
+    headers: { 'content-type': 'application/x-ndjson' }
+  })
+}
+```
+
+`AppAgentLayer` is yours. It usually provides `LLMProvider`, `ToolExecutor`, `LoopConfig`, and `ContextTransformer`.
+
+## Production checklist
+
+- validate `input.messages` before calling the runtime
+- choose tools from server-side policy, not client input
+- keep provider secrets server-side
+- map thrown stream errors to safe terminal `AgentError` events
+- set cache headers to disable buffering
+
+## Related APIs
+
+- `runRuntime` from `@yolk-sdk/agent/runtime`
+- `AgentEvent`, `AgentMessage` from `@yolk-sdk/agent/protocol`
+- `streamAgentEventsUntilTerminal` from `@yolk-sdk/agent/client`

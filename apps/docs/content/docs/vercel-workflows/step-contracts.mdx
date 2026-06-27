@@ -1,0 +1,129 @@
+---
+title: Step contracts
+description: Model, tool, stream, error, retry, and terminal contracts for Vercel Workflow agents.
+---
+
+`runVercelAgentWorkflow` is orchestration only. Your app provides all work as Workflow-safe callbacks.
+
+## Wrapper
+
+```ts
+import { createHook } from 'workflow'
+import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows'
+
+export async function runAgentWorkflow(input: { request: unknown; context: unknown }) {
+  'use workflow'
+
+  return await runVercelAgentWorkflow({
+    input,
+    maxTurns: 64,
+    runModelStep,
+    runToolBatchStep,
+    closeStream,
+    writeError,
+    awaitInput: async awaitingInput => {
+      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+      return await hook
+    }
+  })
+}
+```
+
+Keep provider calls, tool execution, persistence, telemetry, and Effect runtimes in `'use step'` callbacks, not in the `'use workflow'` body.
+
+## Callback table
+
+| Callback | Directive | Input | Output |
+| --- | --- | --- | --- |
+| `runModelStep` | `'use step'` | `{ context, state }` | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn` |
+| `runToolBatchStep` | `'use step'` | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool result messages or `awaitingInput` |
+| `awaitInput` | workflow body | awaiting-input payload | one host-decoded HITL response |
+| `closeStream` | `'use step'` | none | closes/flushed stream |
+| `writeError` | `'use step'` | unknown error | writes terminal host error |
+
+## Model step
+
+Fragment:
+
+```ts
+async function runModelStep(input: VercelAgentWorkflowModelStepInput) {
+  'use step'
+
+  return await runHostModelTurn(input.state)
+}
+```
+
+Rules:
+
+- Return `done: true` when no tool batch is needed; the workflow closes the stream.
+- Return `done: false` with ordered `toolCalls` when tools must run.
+- Put assistant/model-created messages in `createdMessages`.
+- Carry `eventSequence` if the model step wrote durable stream events.
+
+## Tool batch step
+
+Fragment:
+
+```ts
+async function runToolBatchStep(input: VercelAgentWorkflowToolBatchStepInput) {
+  'use step'
+
+  return await runHostToolBatch({
+    calls: input.calls,
+    hitlResponses: input.hitlResponses ?? [],
+    eventSequence: input.eventSequence ?? 0
+  })
+}
+```
+
+Rules:
+
+- Return one tool-result message per host tool call.
+- Preserve original model tool-call order.
+- Represent expected tool failures as result messages, not thrown step errors.
+- Return `awaitingInput` when approvals/questions must pause the workflow.
+
+## Run result tags
+
+| Tag | Meaning |
+| --- | --- |
+| `Completed` | model ended and `closeStream` succeeded |
+| `ModelStepFailed` | model step exhausted retries |
+| `ToolBatchStepFailed` | tool batch step exhausted retries |
+| `AwaitInputFailed` | HITL hook/resume failed or no `awaitInput` handler exists |
+| `CloseStreamFailed` | terminal model step succeeded but close failed |
+| `MaxTurnsExceeded` | loop exceeded `maxTurns` |
+
+## Retry policy
+
+Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Opt into retries per callback:
+
+```ts
+await runVercelAgentWorkflow({
+  input,
+  runModelStep,
+  runToolBatchStep,
+  closeStream,
+  writeError,
+  modelStepRetry: { maxAttempts: 2 },
+  toolBatchStepRetry: { maxAttempts: 2 }
+})
+```
+
+Only retry streamed steps if every event has a deterministic `eventId` and clients de-dupe replayed chunks.
+
+## Terminal barrier
+
+Use `commitThenWriteTerminalEvent` when terminal events imply durable state is settled:
+
+```ts
+const result = await commitThenWriteTerminalEvent({
+  terminal: agentEndEvent,
+  commit: () => persistRunState(),
+  write: event => writeEvent(event),
+  writeCommitError: error => writeEvent(toAgentErrorEvent(error)),
+  close: () => closeStreamWriter()
+})
+```
+
+The helper never writes success terminal before `commit` succeeds.

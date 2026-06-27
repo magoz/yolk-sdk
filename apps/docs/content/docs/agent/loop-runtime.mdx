@@ -1,0 +1,83 @@
+---
+title: Loop and runtime
+description: Choose `run` or `runRuntime` and stream agent events from your app.
+---
+
+Use the loop when you want direct control. Use runtime when you want a reusable HTTP/session boundary.
+
+| API | Use when |
+| --- | --- |
+| `run` | you already have messages/tools/provider layers and want a stream |
+| `runRuntime` + `Transcript` | the client sends the full transcript each turn |
+| `runRuntime` + `AppendInput` | your server stores an append log |
+| `runRuntime` + `AppendHitlResponse` | resuming a paused approval/question |
+
+## Direct loop
+
+```ts
+import { Stream } from 'effect'
+import { run } from '@yolk-sdk/agent/loop'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const stream = run({
+  messages: [UserMessage.make({ content: 'Draft a reply.' })],
+  systemPrompt: 'Be helpful.',
+  tools,
+  model: 'gpt-5.5'
+})
+
+const events = stream.pipe(Stream.runCollect)
+```
+
+Provide these Effect services from your host:
+
+- `LLMProvider`
+- `ToolExecutor`
+- `ContextTransformer`
+- `LoopConfig`
+
+## Stateless transcript runtime
+
+Use this when your route receives the whole transcript from a client:
+
+```ts
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const stream = runRuntime(
+  {
+    _tag: 'Transcript',
+    sessionId: 'browser-session',
+    messages: [UserMessage.make({ content: 'Hello' })]
+  },
+  {
+    systemPrompt: 'Be helpful.',
+    tools,
+    model: 'gpt-5.5'
+  }
+)
+```
+
+Your route converts the stream to NDJSON/SSE and provides provider/tool layers.
+
+## Append-backed runtime
+
+Use this when your server stores every input/run/result in `SessionEventStore`. This fits Durable Objects, databases, or other append logs:
+
+```ts
+const stream = runRuntime(
+  {
+    _tag: 'AppendInput',
+    sessionId: 'session_123',
+    input: UserMessage.make({ content: 'Continue' }),
+    runId: 'run_123'
+  },
+  runtimeConfig
+)
+```
+
+Production apps implement `SessionEventStore`; tests can use the in-memory layer.
+
+## Add compaction
+
+`@yolk-sdk/agent/compaction` provides helpers for budgets, token estimation, preview summaries, and window transforms. Use those helpers to build your `ContextTransformer` layer.

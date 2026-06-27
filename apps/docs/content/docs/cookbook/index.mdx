@@ -1,0 +1,61 @@
+---
+title: Cookbook
+description: Practical recipes for combining Yolk packages in an app.
+---
+
+## Build a stateless `/api/agent` route
+
+1. Accept a request containing `AgentMessage[]`.
+2. Decode/validate at the route boundary.
+3. Resolve enabled tools for the user/session.
+4. Call `runRuntime({ _tag: 'Transcript', ... }, config)`.
+5. Provide provider, loop, context transformer, and tool executor layers.
+6. Encode each `AgentEvent` as NDJSON or SSE.
+
+Use this shape for simple chat where the client sends the full transcript every turn.
+
+## Build a durable session runtime
+
+1. Implement `SessionEventStore` against your DB, Durable Object storage, or append log.
+2. On new input, call `runRuntime({ _tag: 'AppendInput', ... }, config)`.
+3. On approval/question response, call `runRuntime({ _tag: 'AppendHitlResponse', ... }, config)`.
+4. Replay stored events to rebuild transcript and client state.
+
+Use this shape when reconnect, resume, HITL, or server-owned transcript state matters.
+
+## Add remote MCP tools to an agent
+
+1. Load host-owned MCP server config.
+2. Call `listMcpTools` or `listRemoteMcpServerTools`.
+3. Pass returned `def` values into the loop.
+4. When the model calls one, call `callMcpServerTool`.
+5. Return the resulting Yolk `ToolResult` to the loop.
+
+Persist MCP server config and credentials outside the package.
+
+## Add knowledge search
+
+1. Implement `SearchIndexStore`.
+2. Provide extractor, chunker, embedder, and summarizer layers.
+3. Ingest documents with `ingestKnowledgeDocument`.
+4. Search with `searchKnowledge`.
+5. Optionally expose `makeKnowledgeSearchTool` to the agent.
+
+Resolve search scope from your authenticated app context.
+
+## Add external API actions
+
+1. Create or choose a connector.
+2. Build a `ConnectorIntegration` with config and credential refs.
+3. Provide `CredentialResolver` and `ConnectorHttpClient`.
+4. Invoke actions directly or expose them with `makeConnectorToolModule`.
+
+Store raw credentials only in host-owned secret storage.
+
+## Add command execution
+
+1. Choose a sandbox provider layer, such as Vercel Sandbox.
+2. Provide durable sandbox state storage.
+3. Scope `sandboxSessionId` to your user/session/run.
+4. Expose `makeSandboxToolModule` only where command execution is allowed.
+5. Add approval, audit, cleanup, and UI.

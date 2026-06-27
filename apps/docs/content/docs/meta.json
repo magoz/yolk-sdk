@@ -1,0 +1,21 @@
+{
+  "title": "Yolk SDK",
+  "pages": [
+    "index",
+    "installation",
+    "quickstart",
+    "guides",
+    "integrations",
+    "cookbook",
+    "agent",
+    "mcp",
+    "knowledge",
+    "connectors",
+    "sandbox",
+    "vercel-workflows",
+    "troubleshooting",
+    "migration",
+    "api-reference",
+    "reference"
+  ]
+}

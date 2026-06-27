@@ -1,0 +1,83 @@
+---
+title: Yolk SDK
+description: Build host-owned agent products with typed streams, tools, memory, integrations, sandbox execution, and durable runtimes.
+---
+
+Yolk SDK gives you the reusable parts of an agent product without taking over your app:
+
+- a typed agent transcript protocol
+- a streaming model/tool loop
+- schema-backed tools and HITL
+- browser/client state helpers
+- MCP adapters
+- knowledge ingestion/search contracts
+- connector actions
+- sandbox execution
+- Vercel Workflow orchestration helpers
+
+You bring your app: auth, routes, DB, storage, provider credentials, UI, and product policy.
+
+## Build your first agent in one file
+
+```ts
+import { Effect, Layer, Stream } from 'effect'
+import { ContextTransformer, LoopConfig, run } from '@yolk-sdk/agent/loop'
+import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const TestLayer = Layer.mergeAll(
+  FauxProvider.layer(Reply.text('Hello from Yolk.')),
+  TestToolExecutor.layer({}),
+  LoopConfig.defaultLayer,
+  ContextTransformer.identity
+)
+
+const events = await Effect.runPromise(
+  run({
+    messages: [UserMessage.make({ content: 'Say hello' })],
+    systemPrompt: 'Be concise.',
+    tools: [],
+    model: 'test-model'
+  }).pipe(Stream.runCollect, Effect.provide(TestLayer))
+)
+```
+
+This uses the test provider so you can learn the loop without a provider account. Swap in a real provider layer when your host app is ready.
+
+## What should I read?
+
+| I want to... | Read |
+| --- | --- |
+| run a first agent | [Quickstart](./quickstart) |
+| create a Next route | [Build a chat route](./guides/build-chat-route) |
+| add a typed tool | [Add a tool](./guides/add-tool) |
+| stream to React | [Stream to React](./guides/stream-react) |
+| persist sessions | [Persist a session](./guides/persist-session) |
+| choose model providers | [Model providers](./integrations/model-providers) |
+| see available integrations | [Available integrations](./integrations) |
+| add MCP tools | [Add MCP tools](./integrations/mcp-tools) |
+| add knowledge search | [Add knowledge search](./integrations/knowledge-search) |
+| run commands safely | [Add sandbox execution](./integrations/sandbox) |
+
+## Public packages
+
+| Package | Role |
+| --- | --- |
+| `@yolk-sdk/agent` | build and stream agent turns |
+| `@yolk-sdk/mcp` | use MCP tools or expose Yolk tools as MCP |
+| `@yolk-sdk/knowledge` | model, ingest, search, and pack agent knowledge |
+| `@yolk-sdk/connectors` | define reusable external API actions |
+| `@yolk-sdk/sandbox` | run commands in sandbox sessions |
+| `@yolk-sdk/vercel-workflows` | orchestrate durable agent loops on Vercel Workflows |
+
+## How docs are organized
+
+- **Quickstart** gets one agent loop running.
+- **Build guides** show the app surfaces most hosts need.
+- **Integrations** show how packages combine into tools and runtime capabilities.
+- **Reference** is for package maps, protocol terminology, and boundaries.
+
+## AI-readable docs
+
+- [`/llms.txt`](/llms.txt) lists the curated docs index for agents and coding assistants.
+- [`/llms-full.txt`](/llms-full.txt) includes processed Markdown for all docs pages.

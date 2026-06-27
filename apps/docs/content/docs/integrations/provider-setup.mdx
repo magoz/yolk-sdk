@@ -1,0 +1,101 @@
+---
+title: Use model providers
+description: Wire OpenAI-compatible, OpenAI Codex, or Anthropic Claude provider layers into an agent loop.
+---
+
+Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+## OpenAI-compatible chat
+
+Use this for OpenAI Chat Completions or compatible gateways.
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
+
+const OpenAiLayer = makeOpenAiProviderLayer({
+  apiKey: Redacted.make(hostOpenAiApiKey),
+  maxCompletionTokens: 4096
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+Use `chatCompletionsUrl` for OpenAI-compatible proxies or gateways.
+
+## OpenAI Codex
+
+Use this for Codex OAuth/token-broker flows and the Responses API.
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
+
+const CodexLayer = makeOpenAiCodexProviderLayer({
+  token: hostOAuthAccessToken,
+  defaultReasoningEffort: 'low',
+  reasoningSummary: 'auto'
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+OAuth helpers live in `@yolk-sdk/agent/providers/openai`.
+
+## Anthropic Claude Code
+
+Use this for Claude OAuth/token-broker flows and Claude Code-compatible requests.
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
+
+const ClaudeLayer = makeAnthropicClaudeProviderLayer({
+  token: hostOAuthAccessToken,
+  maxTokens: 8192
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+OAuth helpers live in `@yolk-sdk/agent/providers/anthropic`.
+
+## Provide the layer
+
+Merge the provider with your loop/tool layers:
+
+```ts
+import { Layer } from 'effect'
+import { ContextTransformer, LoopConfig } from '@yolk-sdk/agent/loop'
+import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
+
+const AppAgentLayer = Layer.mergeAll(
+  OpenAiLayer,
+  makeToolExecutorLayer(toolSet),
+  LoopConfig.defaultLayer,
+  ContextTransformer.identity
+)
+```
+
+Then provide `AppAgentLayer` to `run` or `runRuntime`.
+
+## Capability notes
+
+| Provider | Media notes |
+| --- | --- |
+| OpenAI-compatible | text, image URLs/data URLs, inline text documents |
+| OpenAI Codex | text, reasoning, tools, image URLs/data URLs, document data/files |
+| Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents |
+
+Set model capabilities in your request config so unsupported inputs fail before provider execution.
+
+## Host responsibilities
+
+- Store and refresh API keys/OAuth tokens.
+- Choose provider/model per run.
+- Provide `HttpClient` and provider layer at the server boundary.
+- Keep raw provider errors and secrets out of protocol events.
+- Persist typed usage and safe `ProviderErrorInfo` if your app needs accounting.

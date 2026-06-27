@@ -1,0 +1,58 @@
+---
+title: Client and React
+description: Connect browser UI to an agent stream and render replay-safe chat state.
+---
+
+Use `@yolk-sdk/agent/client` for transport helpers and `@yolk-sdk/agent/react` for headless chat state.
+
+## Stream events from an endpoint
+
+```ts
+import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
+
+for await (const event of streamAgentEventsUntilTerminal({
+  endpoint: '/api/agent',
+  sessionId: 'browser-session',
+  messages,
+})) {
+  // update state, persist event, or project into UI
+}
+```
+
+Use client helpers for:
+
+- NDJSON event streams
+- terminal-event detection
+- durable run continuation headers
+- HITL response submission
+- abort/cancel flows
+- typed error/retry state
+
+Durable transports may replay events. Prefer event ids and projection helpers for reconnect-safe UI.
+
+## Use React state
+
+`@yolk-sdk/agent/react` exports:
+
+- `useAgentChat`
+- `buildAgentChatItems`
+- `applyAgentEventToChatProjection`
+- chat reducer and selectors
+
+The package is headless. It does not ship Yolk UI components, styling, auth, uploads, or route handlers. Your UI owns the input box, message bubbles, attachments, voice controls, pending states, and errors.
+
+## Replay-safe projection
+
+```ts
+import {
+  applyAgentEventToChatProjection,
+  makeAgentChatEventProjectionState
+} from '@yolk-sdk/agent/react'
+
+const projection = events.reduce(
+  (state, event) => applyAgentEventToChatProjection(state, event),
+  makeAgentChatEventProjectionState()
+)
+```
+
+Use append-only projection for durable logs. Use simpler message reducers only for ephemeral local streams.

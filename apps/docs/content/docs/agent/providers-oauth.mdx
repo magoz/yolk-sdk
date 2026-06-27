@@ -1,0 +1,40 @@
+---
+title: Providers and OAuth
+description: Provide model layers and keep token storage in your host app.
+---
+
+Provider subpaths translate Yolk messages/tools into vendor requests and normalize stream events back into Yolk protocol.
+
+For the current provider catalog and setup snippets, see [Model providers](../integrations/model-providers).
+
+## Pick a provider subpath
+
+| Subpath | Purpose |
+| --- | --- |
+| `@yolk-sdk/agent/providers/openai` | Codex OAuth and token broker helpers |
+| `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible chat provider factory |
+| `@yolk-sdk/agent/providers/openai/codex-provider` | OpenAI Codex provider factory |
+| `@yolk-sdk/agent/providers/anthropic` | Claude OAuth and token broker helpers |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude provider factory |
+| `@yolk-sdk/agent/oauth` | Provider-neutral access-token and broker contracts |
+
+## Provide fresh credentials at runtime
+
+Provider packages may model vendor auth mechanics, but hosts own:
+
+- refresh token storage
+- encryption and rotation
+- broker routes
+- OAuth callbacks
+- account linking
+- policy and audit
+
+Give provider layers fresh access tokens at execution time. Do not store raw secrets in protocol messages, annotations, tool results, or docs examples.
+
+## What the provider gives the loop
+
+Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events.
+
+## Errors and retries
+
+Provider adapters classify safe metadata into `ProviderErrorInfo`. Raw provider response bodies stay out of protocol/UI. The loop owns bounded retry behavior and usage aggregation.

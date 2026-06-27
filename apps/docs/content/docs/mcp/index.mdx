@@ -1,0 +1,76 @@
+---
+title: MCP package
+description: List MCP tools, call them, or expose Yolk-compatible tools through MCP.
+---
+
+Use `@yolk-sdk/mcp` when your app needs to connect an agent to Model Context Protocol servers.
+
+For auth, local stdio, and server policy, see [MCP auth, local servers, and server policy](./auth-local-server).
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect
+```
+
+## List remote MCP tools
+
+```ts
+import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
+import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
+
+const config = {
+  name: 'docs',
+  type: 'remote',
+  url: 'https://example.com/mcp'
+} satisfies McpRemoteServerConfig
+
+const tools = await Effect.runPromise(
+  listRemoteMcpServerTools(config).pipe(Effect.provide(FetchHttpClient.layer))
+)
+```
+
+Each item contains:
+
+- `serverName`
+- original `mcpToolName`
+- Yolk `ToolDef` as `def`
+
+Pass `tools.map(tool => tool.def)` into the agent loop.
+
+## Call a remote MCP tool
+
+```ts
+import { callRemoteMcpServerTool } from '@yolk-sdk/mcp/client'
+
+const result = await Effect.runPromise(
+  callRemoteMcpServerTool({
+    config,
+    mcpToolName: 'search',
+    toolCallId: 'call_123',
+    params: { query: 'Yolk SDK' }
+  }).pipe(Effect.provide(FetchHttpClient.layer))
+)
+```
+
+The result is a Yolk `ToolResult`, ready to feed back into the agent loop.
+
+## Use local stdio MCP
+
+Use `@yolk-sdk/mcp/client/node` only in Node hosts:
+
+```ts
+import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'
+```
+
+Worker/browser code should stay on `@yolk-sdk/mcp/client`.
+
+## Expose tools through MCP
+
+Use `@yolk-sdk/mcp/server` to build a tool-only MCP server. Your app supplies HTTP routes, stdio entrypoints, auth, deployment, and tool policy.
+
+## Security defaults
+
+Remote MCP requires HTTPS by default. Localhost HTTP is an explicit dev policy. Local stdio receives explicit env only and does not inherit host process env by default.

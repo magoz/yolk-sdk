@@ -1,0 +1,53 @@
+---
+title: Integration APIs
+description: Public MCP, knowledge, connector, and sandbox APIs.
+---
+
+## MCP
+
+| Subpath | Main exports |
+| --- | --- |
+| `@yolk-sdk/mcp/client` | `listMcpTools`, `listRemoteMcpServerTools`, `callMcpServerTool`, `callRemoteMcpServerTool`, config and protocol adapters |
+| `@yolk-sdk/mcp/client/node` | `listMcpToolsNode`, `listLocalMcpServerToolsNode`, `callMcpServerToolNode`, `callLocalMcpServerToolNode` |
+| `@yolk-sdk/mcp/protocol` | JSON-RPC/MCP schemas and helpers |
+| `@yolk-sdk/mcp/server` | `makeMcpToolServer`, `runStdioMcpServer` |
+
+## Knowledge
+
+| Subpath | Main exports |
+| --- | --- |
+| `@yolk-sdk/knowledge` | `buildKnowledgeContext`, `KnowledgeStore`, `KnowledgeArtifactStore` |
+| `@yolk-sdk/knowledge/documents` | collection, document, chunk, search-scope schemas |
+| `@yolk-sdk/knowledge/search-store` | `SearchIndexStore` |
+| `@yolk-sdk/knowledge/ingestion` | `ingestKnowledgeDocument`, `makeIngestionPipeline` |
+| `@yolk-sdk/knowledge/search` | `searchKnowledge`, `packKnowledgeSearchContext` |
+| `@yolk-sdk/knowledge/chunking` | `DefaultKnowledgeChunkerLive`, `makeDefaultKnowledgeChunker` |
+| `@yolk-sdk/knowledge/embeddings` | `KnowledgeEmbedder` |
+| `@yolk-sdk/knowledge/extraction` | `KnowledgeExtractor` and source types |
+| `@yolk-sdk/knowledge/summarization` | `KnowledgeSummarizer`, `NoopKnowledgeSummarizerLive` |
+| `@yolk-sdk/knowledge/agent` | `makeKnowledgeSearchTool` |
+
+## Connectors
+
+| Subpath | Main exports |
+| --- | --- |
+| `@yolk-sdk/connectors` | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient` |
+| `@yolk-sdk/connectors/agent` | `makeConnectorToolModule` |
+| `@yolk-sdk/connectors/google` | `GoogleConnector`, Google OAuth slots, Gmail/Calendar actions |
+| `@yolk-sdk/connectors/notion` | `NotionConnector`, `NotionApiTokenSlot` |
+| `@yolk-sdk/connectors/todoist` | `TodoistConnector`, `TodoistApiTokenSlot` |
+| `@yolk-sdk/connectors/telegram` | `TelegramConnector`, `TelegramBotTokenSlot` |
+| `@yolk-sdk/connectors/figma` | `FigmaConnector`, `FigmaOAuthCredentialSlot` |
+| `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots |
+| `@yolk-sdk/connectors/r2-storage` | `R2StorageConnector`, `R2Presigner`, R2 credential slots |
+
+See [Connectors catalog](../integrations/connectors) for action ids.
+
+## Sandbox
+
+| Subpath | Main exports |
+| --- | --- |
+| `@yolk-sdk/sandbox` | `Sandbox`, `SandboxStateStore`, command/result/lifecycle/source schemas |
+| `@yolk-sdk/sandbox/agent` | `makeSandboxToolModule`, `makeSandboxToolModuleFromApi`, `sandboxToolName` |
+| `@yolk-sdk/sandbox/vercel` | `makeVercelSandboxLayer`, `makeVercelSandboxLayerWithClient` |
+| `@yolk-sdk/sandbox/testing` | `makeFakeSandboxLayer`, `makeInMemorySandboxStateStoreLayer` |

@@ -1,0 +1,57 @@
+---
+title: Add MCP tools
+description: List MCP server tools and feed them into a Yolk agent loop.
+---
+
+Use this when your app lets users configure remote or local MCP servers.
+
+## List tools
+
+```ts
+import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
+import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
+
+const server = {
+  name: 'docs',
+  type: 'remote',
+  url: 'https://example.com/mcp'
+} satisfies McpRemoteServerConfig
+
+const mcpTools = await Effect.runPromise(
+  listRemoteMcpServerTools(server).pipe(Effect.provide(FetchHttpClient.layer))
+)
+
+const toolDefs = mcpTools.map(tool => tool.def)
+const toolByName = new Map(mcpTools.map(tool => [tool.def.name, tool]))
+```
+
+Pass `toolDefs` into `run` or `runRuntime`.
+
+## Execute a tool call
+
+```ts
+import { callRemoteMcpServerTool } from '@yolk-sdk/mcp/client'
+
+const resolved = toolByName.get(call.name)
+
+if (resolved === undefined) {
+  throw new Error(`Unknown MCP tool: ${call.name}`)
+}
+
+const result = await Effect.runPromise(
+  callRemoteMcpServerTool({
+    config: server,
+    mcpToolName: resolved.mcpToolName,
+    toolCallId: call.id,
+    params: call.params
+  }).pipe(Effect.provide(FetchHttpClient.layer))
+)
+```
+
+Return `result` from your agent `ToolExecutor`.
+
+## Host responsibilities
+
+Persist server config, credentials, auth headers, and allow/deny policy in your app. Keep local stdio behind Node-only hosts via `@yolk-sdk/mcp/client/node`.

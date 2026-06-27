@@ -1,0 +1,61 @@
+---
+title: Workflow APIs
+description: Public Vercel Workflow orchestration exports.
+---
+
+Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath.
+
+## Loop exports
+
+| Export | Purpose |
+| --- | --- |
+| `runVercelAgentWorkflow` | orchestrate model/tool/HITL/close callbacks |
+| `defaultMaxWorkflowTurns` | default max turns, currently `500` |
+| `noWorkflowStepRetry` | default retry policy, `{ maxAttempts: 1 }` |
+| `retryWorkflowStep` | retry helper for Workflow callback promises |
+| `settleWorkflowStep` | convert a promise into `Success` / `Failure` result |
+
+## Durable event exports
+
+| Export | Purpose |
+| --- | --- |
+| `makeDurableAgentEventSequencerState` | initialize event sequence state |
+| `durableAgentEventId` | build `${streamId}:${turn}:${eventSequence}` |
+| `sequenceDurableAgentEvent` | add deterministic `eventId` without writing |
+| `writeDurableAgentEvent` | write sequenced NDJSON to a writer |
+| `commitThenWriteTerminalEvent` | commit durable state before writing terminal event |
+
+## Callback types
+
+| Type | Meaning |
+| --- | --- |
+| `VercelAgentWorkflowInput` | `{ request, context }` passed to workflow |
+| `SerializableWorkflowState` | persisted loop state between steps |
+| `VercelAgentWorkflowLoopConfig` | full config for `runVercelAgentWorkflow` |
+| `VercelAgentWorkflowModelStepInput` | model callback input |
+| `VercelAgentWorkflowModelStepResult` | model callback result |
+| `VercelAgentWorkflowToolBatchStepInput` | tool callback input |
+| `VercelAgentWorkflowToolBatchStepResult` | tool callback result |
+| `VercelAgentWorkflowAwaitingInput` | HITL hook payload |
+| `VercelAgentWorkflowRunResult` | terminal run result union |
+| `VercelAgentWorkflowStepRetryPolicy` | `{ maxAttempts }` |
+
+## Run result tags
+
+| Tag | Meaning |
+| --- | --- |
+| `Completed` | closed normally |
+| `ModelStepFailed` | model callback failed after retries |
+| `ToolBatchStepFailed` | tool callback failed after retries |
+| `AwaitInputFailed` | HITL hook failed or missing handler |
+| `CloseStreamFailed` | close callback failed |
+| `MaxTurnsExceeded` | exceeded `maxTurns` |
+
+## Terminal helper results
+
+| Tag | Meaning |
+| --- | --- |
+| `Committed` | commit, terminal write, and close path completed; close may report `CloseFailed` separately |
+| `CommitFailed` | commit failed and commit-error terminal write succeeded |
+| `TerminalWriteFailed` | commit succeeded but terminal write failed |
+| `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed |

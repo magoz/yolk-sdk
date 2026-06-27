@@ -1,0 +1,73 @@
+---
+title: Test Workflows
+description: Test pure Workflow contracts and directive behavior for durable agent runs.
+---
+
+Test two layers: pure callback contracts and real Workflow directive behavior.
+
+## Pure contract tests
+
+Use normal Vitest tests for `runVercelAgentWorkflow` with fake callbacks.
+
+```ts
+import { expect, it } from 'vitest'
+import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows'
+
+it('continues from tool results', async () => {
+  const result = await runVercelAgentWorkflow({
+    input: { request: 'request-1', context: 'ctx-1' },
+    runModelStep: async input =>
+      input.state.turn === 1
+        ? {
+            done: false,
+            messages: ['user', 'assistant'],
+            createdMessages: ['assistant'],
+            toolCalls: ['tool-a'],
+            usage: { turns: 1 },
+            turn: 1
+          }
+        : {
+            done: true,
+            messages: ['user', 'assistant', 'tool-result', 'final'],
+            createdMessages: ['assistant', 'tool-result', 'final'],
+            toolCalls: [],
+            usage: { turns: 2 },
+            turn: 2
+          },
+    runToolBatchStep: async input => ({
+      messages: ['tool-result'],
+      createdMessages: [...input.createdMessages, 'tool-result']
+    }),
+    closeStream: async () => undefined,
+    writeError: async () => undefined
+  })
+
+  expect(result._tag).toBe('Completed')
+})
+```
+
+## Directive tests
+
+Use `@workflow/vitest` for files that exercise `'use workflow'`, `'use step'`, hooks, streams, and cancellation.
+
+```ts
+import { getRun, resumeHook, start } from 'workflow/api'
+import { waitForHook } from '@workflow/vitest'
+```
+
+Cover:
+
+- starting workflow functions with `start`
+- reading stream chunks and replaying with `getRun(runId).getReadable({ startIndex })`
+- waiting for hooks with `waitForHook`
+- resuming with `resumeHook`
+- cancellation with `getRun(runId).cancel()`
+
+## Assertions to keep
+
+- One ordered tool-result message per tool call.
+- HITL reruns the same tool batch with accumulated responses.
+- Event sequence advances across model, tool, and HITL resume.
+- Default retries are disabled.
+- Retried streamed steps have de-dupe-ready event ids.
+- Terminal write happens only after durable commit succeeds.

@@ -1,0 +1,35 @@
+---
+title: Add human-in-the-loop
+description: Pause an agent for approvals or questions and resume with typed responses.
+---
+
+Yolk models HITL in protocol, not UI. That means the same loop can pause in Next.js, Workers, WebSockets, or Vercel Workflows.
+
+## How it works
+
+1. The model calls a tool requiring approval, or calls the built-in question tool.
+2. The loop emits `AgentAwaitingInput` with pending requests.
+3. Your UI renders approval/question controls.
+4. Your app resumes with typed `HitlResponse` values.
+
+## What the host owns
+
+- matching pending request ids
+- route auth
+- UI copy and controls
+- audit logs
+- approval policy
+- timeout/cancel UX
+
+## Runtime modes
+
+For stateless routes, include `hitlResponses` in the next `runRuntime` config. For durable sessions, use `_tag: 'AppendHitlResponse'` so the response is appended to the session event log.
+
+## Related APIs
+
+- `AgentAwaitingInput` from `@yolk-sdk/agent/protocol`
+- `ToolApprovalRequest` from `@yolk-sdk/agent/protocol`
+- `QuestionRequest` from `@yolk-sdk/agent/protocol`
+- `plainHitlResponse` from `@yolk-sdk/agent/protocol`
+- `questionResponseStructuredContent` from `@yolk-sdk/agent/protocol`
+- `toolRunsFromHitlRequests` from `@yolk-sdk/agent/client`

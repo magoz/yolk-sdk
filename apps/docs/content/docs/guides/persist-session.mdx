@@ -1,0 +1,55 @@
+---
+title: Persist a session
+description: Use append-backed runtime requests when the server owns transcript state.
+---
+
+Use append-backed runtime when a run must survive reconnects, browser reloads, or human-in-the-loop pauses.
+
+## Implement a store
+
+Production apps implement `SessionEventStore` against a database, Durable Object, or append log.
+
+```ts
+import { SessionEventStore } from '@yolk-sdk/agent/runtime'
+```
+
+The store must support loading a session event log and appending new events with revision checks.
+
+## Append user input
+
+```ts
+import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { UserMessage } from '@yolk-sdk/agent/protocol'
+
+const events = runRuntime(
+  {
+    _tag: 'AppendInput',
+    sessionId: 'session_123',
+    runId: 'run_123',
+    input: UserMessage.make({ content: 'Continue' })
+  },
+  runtimeConfig
+)
+```
+
+The runtime appends input, starts the run, replays prior messages, streams events, and appends terminal run state.
+
+## Resume HITL
+
+```ts
+const events = runRuntime(
+  {
+    _tag: 'AppendHitlResponse',
+    sessionId: 'session_123',
+    runId: 'run_124',
+    response
+  },
+  runtimeConfig
+)
+```
+
+The runtime verifies the response matches a pending request before continuing.
+
+## Client rule
+
+Durable clients should de-dupe events by `eventId` when available and resume from the last known stream index.

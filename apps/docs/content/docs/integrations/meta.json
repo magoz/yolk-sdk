@@ -1,0 +1,14 @@
+{
+  "title": "Integrations",
+  "pages": [
+    "index",
+    "model-providers",
+    "provider-setup",
+    "connectors",
+    "mcp-tools",
+    "knowledge-search",
+    "connector-tool",
+    "sandbox",
+    "vercel-workflow"
+  ]
+}

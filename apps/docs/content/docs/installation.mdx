@@ -1,0 +1,31 @@
+---
+title: Installation
+description: Install canary Yolk packages with matching lockstep versions.
+---
+
+Yolk packages currently publish on the `canary` channel and release in lockstep. Keep every `@yolk-sdk/*` dependency on the same version.
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+Add sibling packages as needed:
+
+```bash
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/knowledge@canary @yolk-sdk/connectors@canary
+pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary
+```
+
+## Runtime expectations
+
+| Requirement | Notes |
+| --- | --- |
+| Node | Packages declare `>=22` |
+| Module format | ESM only |
+| Effect | Runtime dependency during canary |
+| React | Optional peer only for `@yolk-sdk/agent/react` |
+| Workflow | Required only by `@yolk-sdk/vercel-workflows` hosts |
+
+## Canary policy
+
+Canary means APIs are useful but unstable. Expect breaking changes before `1.0.0`. Prefer explicit imports and small host adapters so package movement is easy to absorb.

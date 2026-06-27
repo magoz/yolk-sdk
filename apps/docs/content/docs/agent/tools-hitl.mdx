@@ -1,0 +1,75 @@
+---
+title: Tools and HITL
+description: Define typed tools, expose them to the loop, and pause for human input.
+---
+
+Tools are how the model asks your app to do something. Yolk gives you schema-backed registration and protocol events; your app decides which tools are available and how risky calls are approved.
+
+## Define a tool
+
+Use `makeTool` with Effect Schema so validation is the source of truth.
+
+```ts
+import { Effect, Schema } from 'effect'
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+import { makeTool } from '@yolk-sdk/agent/tools'
+
+const EchoParams = Schema.Struct({ text: Schema.String })
+
+export const echoTool = makeTool({
+  name: 'echo',
+  description: 'Echo text.',
+  parameters: EchoParams,
+  access: 'read',
+  execute: input =>
+    Effect.succeed(
+      ToolResult.make({
+        toolCallId: input.call.id,
+        content: input.params.text
+      })
+    )
+})
+```
+
+## Resolve tools for a request
+
+Group tools into modules, resolve them for a request context, then pass definitions to the loop.
+
+```ts
+import { Effect } from 'effect'
+import { resolveTools } from '@yolk-sdk/agent/tools'
+
+const module = { id: 'local', tools: [echoTool] }
+
+const toolSet = await Effect.runPromise(resolveTools([module], requestContext))
+```
+
+Pass `toolSet.tools` into `run`/`runRuntime`. Provide `toolSet.execute` through your `ToolExecutor` layer.
+
+## Choose access level
+
+Every tool declares one access level:
+
+| Access | Use for |
+| --- | --- |
+| `read` | search, fetch, inspect |
+| `write` | create/update external state |
+| `destructive` | delete, execute commands, send messages, mutate broadly |
+
+The SDK records access metadata. Your host enforces approval policy.
+
+## Ask a human
+
+Human-in-the-loop is protocol-level:
+
+- approval requests pause with `AgentAwaitingInput`
+- question tools pause with structured options
+- clients resume through typed HITL responses
+
+The SDK owns generic event and response shape. Hosts own UI, auth, request matching, audit, and policy.
+
+Use the built-in question tool when the model needs a user choice. Use approval policy when a normal tool call needs permission before execution.
+
+## Spawn a subagent
+
+The `task` tool contract is domain-free. Hosts provide subagent execution, prompts, models, tools, and recursion policy. Current v1 subagents should not receive the `task` tool recursively unless explicitly enabled in a future capability.
