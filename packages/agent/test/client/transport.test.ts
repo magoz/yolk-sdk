@@ -346,6 +346,77 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['LLMTextDelta', 'AgentEnd'])
   })
 
+  it('keeps polling durable HITL resumes after empty continuation chunks', async () => {
+    const response = ToolApprovalResponse.make({
+      requestId: 'approval:call_1',
+      toolCallId: 'call_1',
+      decision: 'approved',
+      source: 'user'
+    })
+    const requests: Array<CapturedRequest> = []
+    const events = await collectAsync(
+      streamAgentRunHitlResponseEventsUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        hitlResponses: [response],
+        continuationLimit: 2,
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            new Response('', {
+              headers: { 'x-workflow-stream-tail-index': '3' }
+            }),
+            new Response(''),
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=4',
+      '/api/agent/run_1?startIndex=4'
+    ])
+    expect(requests.map(item => item.request.method)).toEqual(['POST', 'GET', 'GET'])
+    expect(readCapturedBody(requests)).toBe(JSON.stringify({ hitlResponses: [response] }))
+    expect(events.map(event => event._tag)).toEqual(['AgentEnd'])
+  })
+
+  it('aborts empty continuation waits before polling again', async () => {
+    const controller = new AbortController()
+    const requests: Array<CapturedRequest> = []
+    const eventsPromise = collectAsync(
+      streamAgentRunEventsUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        continuationLimit: 2,
+        signal: controller.signal,
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [new Response(encodeEvents([AgentStart.make({})])), new Response('')],
+          requests
+        )
+      })
+    )
+
+    await waitForRequestCount(requests, 2)
+    controller.abort('stop')
+
+    await expect(
+      Promise.race([
+        eventsPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out waiting for abort')), 100)
+        )
+      ])
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=1'
+    ])
+  })
+
   it('rejects non-terminal start responses without a durable run id', async () => {
     const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
     const requests: Array<CapturedRequest> = []
@@ -397,6 +468,7 @@ describe('collectAgentEvents', () => {
       collectAsync(
         streamAgentRunEventsUntilTerminal({
           endpoint: '/api/agent/run_1',
+          continuationLimit: 1,
           httpClientLayer: makeHttpClientLayerFromResponses(
             [new Response(encodeEvents([AgentStart.make({})])), new Response('')],
             requests
@@ -668,6 +740,18 @@ const collectAsync = async <A>(items: AsyncIterable<A>) => {
 }
 
 const wait = () => new Promise(resolve => setTimeout(resolve, 0))
+
+const waitForRequestCount = async (requests: ReadonlyArray<CapturedRequest>, count: number) => {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (requests.length >= count) {
+      return
+    }
+
+    await wait()
+  }
+
+  throw new Error('Expected HTTP request count')
+}
 
 const waitForSocket = async () => {
   for (let attempt = 0; attempt < 10; attempt += 1) {

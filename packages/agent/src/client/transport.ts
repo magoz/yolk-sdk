@@ -740,6 +740,33 @@ const noProgressAgentRunContinuationError = (endpoint: string, startIndex: numbe
     cause: { endpoint, startIndex }
   })
 
+const noProgressAgentRunContinuationDelayMs = 250
+
+const waitForAgentRunContinuationProgress = (signal: AbortSignal | undefined) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal === undefined) {
+      setTimeout(resolve, noProgressAgentRunContinuationDelayMs)
+      return
+    }
+
+    if (signal.aborted) {
+      reject(abortSignalError(signal))
+      return
+    }
+
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, noProgressAgentRunContinuationDelayMs)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      reject(abortSignalError(signal))
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+
 const missingAgentRunTailIndexError = () =>
   new AgentTransportError({
     message: 'Agent run HITL response missing x-workflow-stream-tail-index',
@@ -796,7 +823,12 @@ const streamAgentRunContinuations = async function* (
     })
 
     if (chunk.count === 0 && !chunk.terminal) {
-      throw noProgressAgentRunContinuationError(endpoint, startIndex)
+      if (continuation >= limit - 1) {
+        throw noProgressAgentRunContinuationError(endpoint, startIndex)
+      }
+
+      await waitForAgentRunContinuationProgress(input.signal)
+      continue
     }
 
     terminal = chunk.terminal
