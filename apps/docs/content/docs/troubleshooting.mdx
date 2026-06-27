@@ -114,7 +114,7 @@ The package defines contracts. Your host must provide extraction, chunking, embe
 
 ### Credential binding missing
 
-Every connector action declares credential slots. Bind each slot to a host credential ref with `makeCredentialBinding`.
+Connector provider modules declare credential slots needed by their actions. Bind the slots required by your selected connector/actions to host credential refs with `makeCredentialBinding`.
 
 ### Provider request fails
 

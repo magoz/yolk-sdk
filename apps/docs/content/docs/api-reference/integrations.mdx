@@ -7,8 +7,8 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 
 | Subpath | Main exports |
 | --- | --- |
-| `@yolk-sdk/mcp/client` | `listMcpTools`, `listRemoteMcpServerTools`, `callMcpServerTool`, `callRemoteMcpServerTool`, config and protocol adapters |
-| `@yolk-sdk/mcp/client/node` | `listMcpToolsNode`, `listLocalMcpServerToolsNode`, `callMcpServerToolNode`, `callLocalMcpServerToolNode` |
+| `@yolk-sdk/mcp/client` | `listMcpTools`, `listMcpServerTools`, `listRemoteMcpServerTools`, `listLocalMcpServerTools`, `callMcpServerTool`, `callRemoteMcpServerTool`, `callLocalMcpServerTool`, config and protocol adapters |
+| `@yolk-sdk/mcp/client/node` | `listMcpToolsNode`, `listMcpServerToolsNode`, `listLocalMcpServerToolsNode`, `callMcpServerToolNode`, `callLocalMcpServerToolNode` |
 | `@yolk-sdk/mcp/protocol` | JSON-RPC/MCP schemas and helpers |
 | `@yolk-sdk/mcp/server` | `makeMcpToolServer`, `runStdioMcpServer` |
 
@@ -17,8 +17,17 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 | Subpath | Main exports |
 | --- | --- |
 | `@yolk-sdk/knowledge` | `buildKnowledgeContext`, `KnowledgeStore`, `KnowledgeArtifactStore` |
+| `@yolk-sdk/knowledge/records` | knowledge records, roles, lifecycle status, context policy, scopes |
+| `@yolk-sdk/knowledge/artifacts` | artifact schemas and blob-store contract |
+| `@yolk-sdk/knowledge/representations` | agent-readable/searchable representations |
+| `@yolk-sdk/knowledge/context` | pinned context assembly helpers |
+| `@yolk-sdk/knowledge/store` | knowledge record store lifecycle contract |
+| `@yolk-sdk/knowledge/errors` | shared knowledge error types |
+| `@yolk-sdk/knowledge/links` | typed record links |
+| `@yolk-sdk/knowledge/provenance` | provenance/source metadata |
 | `@yolk-sdk/knowledge/documents` | collection, document, chunk, search-scope schemas |
 | `@yolk-sdk/knowledge/search-store` | `SearchIndexStore` |
+| `@yolk-sdk/knowledge/vector-store` | vector-store compatibility aliases over search-store types |
 | `@yolk-sdk/knowledge/ingestion` | `ingestKnowledgeDocument`, `makeIngestionPipeline` |
 | `@yolk-sdk/knowledge/search` | `searchKnowledge`, `packKnowledgeSearchContext` |
 | `@yolk-sdk/knowledge/chunking` | `DefaultKnowledgeChunkerLive`, `makeDefaultKnowledgeChunker` |

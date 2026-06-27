@@ -24,13 +24,17 @@ Your route should:
 ## Minimal route
 
 ```ts
-import { Effect, Stream } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { makeToolExecutorLayer, resolveTools } from '@yolk-sdk/agent/tools'
 
 const encoder = new TextEncoder()
 
 export async function POST(request: Request) {
   const input = await request.json()
+  const toolSet = await Effect.runPromise(
+    resolveTools([HostToolModule], { sessionId: input.sessionId })
+  )
 
   const events = runRuntime(
     {
@@ -40,9 +44,14 @@ export async function POST(request: Request) {
     },
     {
       systemPrompt: 'You are a helpful assistant.',
-      tools: input.tools,
+      tools: toolSet.tools,
       model: input.model ?? 'gpt-5.5'
     }
+  )
+
+  const RuntimeLayer = Layer.mergeAll(
+    AppAgentLayerWithoutTools,
+    makeToolExecutorLayer(toolSet)
   )
 
   const body = new ReadableStream<Uint8Array>({
@@ -54,7 +63,7 @@ export async function POST(request: Request) {
               controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
             })
           ),
-          Effect.provide(AppAgentLayer)
+          Effect.provide(RuntimeLayer)
         )
       ).then(
         () => controller.close(),
@@ -69,7 +78,7 @@ export async function POST(request: Request) {
 }
 ```
 
-`AppAgentLayer` is yours. It usually provides `LLMProvider`, `ToolExecutor`, `LoopConfig`, and `ContextTransformer`.
+`HostToolModule` and `AppAgentLayerWithoutTools` are yours. Resolve tools from server-side policy, then provide `makeToolExecutorLayer(toolSet)` alongside your provider, loop config, and context transformer layers.
 
 ## Production checklist
 

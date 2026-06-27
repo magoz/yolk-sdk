@@ -16,11 +16,13 @@ pnpm add @yolk-sdk/agent@canary react react-dom effect
 ```ts
 import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
 
-for await (const event of streamAgentEventsUntilTerminal({
+const stream = streamAgentEventsUntilTerminal({
   endpoint: '/api/agent',
   sessionId: 'browser-session',
   messages
-})) {
+})
+
+for await (const event of stream) {
   // project into UI state
 }
 ```
@@ -32,8 +34,14 @@ import {
   applyAgentEventToChatProjection,
   makeAgentChatEventProjectionState
 } from '@yolk-sdk/agent/react'
+import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
 
 let projection = makeAgentChatEventProjectionState()
+const stream = streamAgentEventsUntilTerminal({
+  endpoint: '/api/agent',
+  sessionId: 'browser-session',
+  messages
+})
 
 for await (const event of stream) {
   projection = applyAgentEventToChatProjection(projection, event)

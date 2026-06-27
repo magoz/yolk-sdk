@@ -46,7 +46,7 @@ Your app owns hook tokens, route auth, response validation, and request matching
 
 ## Emit replay-safe stream events
 
-Use `writeDurableAgentEvent` to add deterministic ids:
+Use `sequenceDurableAgentEvent` to add deterministic ids without writing. Use `writeDurableAgentEvent` when you want the same sequencing plus an NDJSON write:
 
 ```txt
 ${streamId}:${turn}:${eventSequence}

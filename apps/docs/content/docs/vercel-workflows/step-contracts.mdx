@@ -37,7 +37,7 @@ Keep provider calls, tool execution, persistence, telemetry, and Effect runtimes
 | --- | --- | --- | --- |
 | `runModelStep` | `'use step'` | `{ context, state }` | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn` |
 | `runToolBatchStep` | `'use step'` | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool result messages or `awaitingInput` |
-| `awaitInput` | workflow body | awaiting-input payload | one host-decoded HITL response |
+| `awaitInput` | workflow body | awaiting-input payload | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
 | `closeStream` | `'use step'` | none | closes/flushed stream |
 | `writeError` | `'use step'` | unknown error | writes terminal host error |
 
@@ -106,9 +106,13 @@ await runVercelAgentWorkflow({
   closeStream,
   writeError,
   modelStepRetry: { maxAttempts: 2 },
-  toolBatchStepRetry: { maxAttempts: 2 }
+  toolBatchStepRetry: { maxAttempts: 2 },
+  awaitInputRetry: { maxAttempts: 2 },
+  closeStreamRetry: { maxAttempts: 2 }
 })
 ```
+
+`maxAttempts` is floored and clamped to at least `1`. Retries run immediately with no backoff. `writeError` is best-effort cleanup and is not retried.
 
 Only retry streamed steps if every event has a deterministic `eventId` and clients de-dupe replayed chunks.
 

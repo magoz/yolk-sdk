@@ -37,14 +37,15 @@ Group tools into modules, resolve them for a request context, then pass definiti
 
 ```ts
 import { Effect } from 'effect'
-import { resolveTools } from '@yolk-sdk/agent/tools'
+import { makeToolExecutorLayer, resolveTools } from '@yolk-sdk/agent/tools'
 
 const module = { id: 'local', tools: [echoTool] }
 
 const toolSet = await Effect.runPromise(resolveTools([module], requestContext))
+const ToolExecutorLayer = makeToolExecutorLayer(toolSet)
 ```
 
-Pass `toolSet.tools` into `run`/`runRuntime`. Provide `toolSet.execute` through your `ToolExecutor` layer.
+Pass `toolSet.tools` into `run`/`runRuntime`. Provide `ToolExecutorLayer` alongside your provider, loop config, and context transformer layers. Build a custom `ToolExecutor` layer only when you need advanced dispatch.
 
 ## Choose access level
 

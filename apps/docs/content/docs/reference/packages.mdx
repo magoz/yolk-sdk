@@ -5,7 +5,7 @@ description: Package roles and explicit public subpaths.
 
 | Package | Use for |
 | --- | --- |
-| `@yolk-sdk/agent` | agent protocol, loop, runtime, client, React, tools, providers, OAuth |
+| `@yolk-sdk/agent` | agent protocol, loop, runtime, client, React, tools, providers, OAuth, skillset, voice |
 | `@yolk-sdk/mcp` | MCP clients, protocol adapters, tool-only MCP server |
 | `@yolk-sdk/knowledge` | knowledge records, context, search, ingestion, agent search tools |
 | `@yolk-sdk/connectors` | external API actions, credentials, connector-to-agent-tool adapter |
@@ -27,8 +27,13 @@ Package roots stay tiny. Import feature APIs from explicit subpaths.
 | `@yolk-sdk/agent/tools` | tool registry, `makeTool`, question/task modules |
 | `@yolk-sdk/agent/react` | headless chat hook and projection helpers |
 | `@yolk-sdk/agent/oauth` | provider-neutral access-token and broker contracts |
-| `@yolk-sdk/agent/providers/openai/*` | OpenAI/Codex OAuth and provider factories |
-| `@yolk-sdk/agent/providers/anthropic/*` | Anthropic/Claude OAuth and provider factories |
+| `@yolk-sdk/agent/providers/openai` | Codex OAuth and token broker helpers |
+| `@yolk-sdk/agent/providers/openai/codex` | Codex request and auth helpers |
+| `@yolk-sdk/agent/providers/openai/codex-provider` | Codex LLM provider factory |
+| `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible LLM provider factory |
+| `@yolk-sdk/agent/providers/anthropic` | Claude OAuth and token broker helpers |
+| `@yolk-sdk/agent/providers/anthropic/claude` | Claude request and auth helpers |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory |
 | `@yolk-sdk/agent/skillset` | portable skills and slash-command parsing |
 | `@yolk-sdk/agent/voice` | voice tool-call bridge |
 

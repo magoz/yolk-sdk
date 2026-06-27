@@ -44,7 +44,7 @@ const CodexLayer = makeOpenAiCodexProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-OAuth helpers live in `@yolk-sdk/agent/providers/openai`.
+OAuth helpers live in `@yolk-sdk/agent/providers/openai` and `@yolk-sdk/agent/providers/openai/codex`.
 
 ## Anthropic Claude Code
 
@@ -61,7 +61,7 @@ const ClaudeLayer = makeAnthropicClaudeProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-OAuth helpers live in `@yolk-sdk/agent/providers/anthropic`.
+OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/providers/anthropic/claude`.
 
 ## Provide the layer
 

@@ -46,7 +46,7 @@ import { Effect } from 'effect'
 import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
 
 const tool = makeKnowledgeSearchTool(searcher, {
-  scope: context => Effect.succeed(context.knowledgeScope),
+  scope: context => Effect.succeed(context.knowledgeSearchScope),
   limit: 5,
   contextChunks: 1
 })

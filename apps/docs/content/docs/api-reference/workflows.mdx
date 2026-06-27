@@ -39,6 +39,18 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `VercelAgentWorkflowAwaitingInput` | HITL hook payload |
 | `VercelAgentWorkflowRunResult` | terminal run result union |
 | `VercelAgentWorkflowStepRetryPolicy` | `{ maxAttempts }` |
+| `WorkflowStepResult` | `Success` / `Failure` wrapper from `settleWorkflowStep` |
+
+## Durable event types
+
+| Type | Meaning |
+| --- | --- |
+| `DurableAgentEvent` | JSON event with deterministic `eventId` |
+| `DurableAgentEventIdInput` | input for `durableAgentEventId` |
+| `DurableAgentEventSequencerState` | current durable event sequence state |
+| `SequenceDurableAgentEventInput` | input for `sequenceDurableAgentEvent` |
+| `SequencedDurableAgentEvent` | event plus current/next sequence values |
+| `WriteDurableAgentEventInput` | sequenced event input plus stream writer |
 
 ## Run result tags
 
@@ -59,3 +71,5 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `CommitFailed` | commit failed and commit-error terminal write succeeded |
 | `TerminalWriteFailed` | commit succeeded but terminal write failed |
 | `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed |
+
+`TerminalEventCloseResult` reports close status as `Closed` or `CloseFailed`.

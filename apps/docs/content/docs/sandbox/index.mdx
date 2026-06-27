@@ -52,12 +52,20 @@ const sandboxTools = await Effect.runPromise(
 
 Resolve `sandboxTools` with `@yolk-sdk/agent/tools`, pass the tool definitions into the loop, and provide a `Sandbox` layer to the tool executor.
 
-## Command results
+## Core command results
 
-Command failures are result data, not transport failures:
+`Sandbox.run` returns `SandboxCommandResult`. Command failures are result data, not transport failures:
 
-- nonzero exit code returns a tool result with `isError`
-- timeout returns a tool result with `isError`
+- nonzero exit code sets `exitCode`
+- timeout sets `timedOut`
+- workspace recreation sets `workspaceReset`
+
+## Agent tool results
+
+The `@yolk-sdk/sandbox/agent` adapter converts command failures into agent tool results:
+
+- nonzero exit code returns a tool result with `isError: true`
+- timeout returns a tool result with `isError: true`
 - provider/config/state failures become safe `ToolError`s
 
 ## What the host provides

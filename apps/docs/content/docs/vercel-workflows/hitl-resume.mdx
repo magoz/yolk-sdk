@@ -36,21 +36,23 @@ awaitInput: async awaitingInput => {
 }
 ```
 
-When the hook resolves, Yolk reruns the same tool batch with `hitlResponses` containing the decoded response.
+When the hook resolves, Yolk appends the decoded response to accumulated `hitlResponses` and reruns the same tool batch.
 
 ## Resume from a route
 
 ```ts
+const hitlResponse = await decodeSingleHitlResponse(hitlResponses)
+
 await assertPendingHitlRequest({
   runId,
-  requestId: response.requestId,
-  toolCallId: response.toolCallId
+  requestId: hitlResponse.requestId,
+  toolCallId: hitlResponse.toolCallId
 })
 
-await resumeHook(hookToken, response)
+await resumeHook(hookToken, hitlResponse)
 ```
 
-Do not resume only by hook token. Match run ownership, request id, tool call id, and response type.
+`hitlResponses` is the `@yolk-sdk/agent/client` request body field. Do not resume only by hook token. Match run ownership, request id, tool call id, and response type.
 
 ## Event sequence rule
 

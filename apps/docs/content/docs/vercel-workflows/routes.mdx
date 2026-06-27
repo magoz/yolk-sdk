@@ -3,7 +3,7 @@ title: Routes
 description: Start, tail, resume, and cancel durable Workflow-backed agent runs.
 ---
 
-Routes are app-owned. Yolk gives you workflow orchestration and client helpers; your app owns auth, run ownership, persistence, and response shape.
+Routes are app-owned. `@yolk-sdk/vercel-workflows` gives workflow orchestration; `@yolk-sdk/agent/client` gives optional NDJSON transport helpers. Your app owns auth, run ownership, persistence, and response shape.
 
 ## Start a run
 
@@ -11,7 +11,7 @@ Next route fragment:
 
 ```ts
 import { start } from 'workflow/api'
-import { runAgentWorkflow } from '@/workflows/run-agent-workflow'
+import { runAgentWorkflow } from './host-run-agent-workflow'
 
 export async function POST(request: Request) {
   const body = await request.json()
@@ -60,20 +60,32 @@ Clients can use `streamAgentRunEventsUntilTerminal` with this route.
 ## Resume HITL
 
 ```ts
-import { resumeHook } from 'workflow/api'
+import { getRun, resumeHook } from 'workflow/api'
 
 export async function POST(request: Request) {
   const body = await request.json()
   const input = await decodeHitlResumeRequest(body)
-  await assertCanResumeRun(input.runId, input.response)
+  await assertCanResumeRun(input.runId, input.hitlResponses)
 
-  await resumeHook(input.hookToken, input.response)
+  const hitlResponse = await decodeSingleHitlResponse(input.hitlResponses)
+  const streamTailIndex = await readWorkflowStreamTailIndex(input.runId)
+  await resumeHook(input.hookToken, hitlResponse)
 
-  return new Response(null, { status: 202 })
+  return new Response(
+    getRun(input.runId).getReadable<Uint8Array>({ startIndex: streamTailIndex + 1 }),
+    {
+      headers: {
+        'content-type': 'application/x-ndjson',
+        'x-workflow-stream-tail-index': String(streamTailIndex)
+      }
+    }
+  )
 }
 ```
 
-The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
+The helper-compatible request body is `{ hitlResponses }`. The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
+
+If your resume route returns `202` with no body, do not use `streamAgentRunHitlResponseEventsUntilTerminal`. POST the resume yourself, then call `streamAgentRunEventsUntilTerminal` on the tail route.
 
 ## Cancel a run
 
@@ -96,6 +108,8 @@ Cancellation is host/Vercel-owned. The package does not define a cancellation pr
 
 ## Client helpers
 
+Import these from `@yolk-sdk/agent/client`.
+
 | Client API | Route shape |
 | --- | --- |
 | `streamAgentEventsUntilTerminal` | starts run and follows continuation headers |
@@ -105,9 +119,18 @@ Cancellation is host/Vercel-owned. The package does not define a cancellation pr
 
 ## Headers
 
-Use the SDK header helpers on the client:
+Use the SDK header helpers from `@yolk-sdk/agent/client` on the client:
 
 - `agentRunIdFromHeaders`
 - `agentRunStreamTailIndexFromHeaders`
 - `agentRunStreamStartIndexFromHeaders`
 - `agentRunEndpointWithStartIndex`
+
+Header meanings:
+
+| Header | Meaning |
+| --- | --- |
+| `x-workflow-run-id` | Vercel Workflow run id returned by your start route |
+| `x-workflow-stream-tail-index` | Vercel stream chunk index immediately before the response body starts |
+
+The stream tail index is for Vercel continuation chunks. It is distinct from durable agent `eventSequence`, which is part of replay-safe event ids.

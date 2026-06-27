@@ -51,15 +51,18 @@ Provide these layers from your app:
 ## Search documents
 
 ```ts
+import { Effect } from 'effect'
 import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
-const results = searchKnowledge({
-  scope,
-  query: 'How do agent tools work?',
-  limit: 5,
-  mode: 'hybrid',
-  contextChunks: 1
-})
+const results = await Effect.runPromise(
+  searchKnowledge({
+    scope,
+    query: 'How do agent tools work?',
+    limit: 5,
+    mode: 'hybrid',
+    contextChunks: 1
+  }).pipe(Effect.provide(HostKnowledgeSearchLayer))
+)
 ```
 
 The package defines the search contract. Your app implements the store and embedding provider.
@@ -67,10 +70,11 @@ The package defines the search contract. Your app implements the store and embed
 ## Expose search as an agent tool
 
 ```ts
+import { Effect } from 'effect'
 import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
 
 const searchTool = makeKnowledgeSearchTool(searcher, {
-  scope: context => context.knowledgeScope,
+  scope: context => Effect.succeed(context.knowledgeSearchScope),
   limit: 5,
   contextChunks: 1
 })

@@ -46,10 +46,31 @@ const result = await Effect.runPromise(program.pipe(Effect.provide(HostConnector
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import { GoogleConnector } from '@yolk-sdk/connectors/google'
 
+const destructiveGoogleActions = new Set([
+  'calendar.delete_event',
+  'gmail.trash',
+  'gmail.draft_delete'
+])
+
+const writingGoogleActions = new Set([
+  'calendar.create_event',
+  'calendar.update_event',
+  'gmail.modify_labels',
+  'gmail.untrash',
+  'gmail.draft_compose',
+  'gmail.draft_update',
+  'gmail.draft_reply'
+])
+
 const googleTools = makeConnectorToolModule(GoogleConnector, {
   integration,
   layer: HostConnectorLayer,
-  access: action => action.includes('create') ? 'write' : 'read'
+  access: action =>
+    destructiveGoogleActions.has(action)
+      ? 'destructive'
+      : writingGoogleActions.has(action)
+        ? 'write'
+        : 'read'
 })
 ```
 
