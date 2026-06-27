@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.28
+
+### Patch Changes
+
+- 90b0558: Fix Anthropic streamed usage deltas and include cache tokens in input totals.
+
 ## 0.1.0-canary.27
 
 ### Patch Changes
