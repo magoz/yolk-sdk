@@ -76,6 +76,7 @@
 - Question resume content must be model-visible text with selected answer labels plus structured answers; never replay only `answered`.
 - Use SDK HITL helpers for durable apps: `plainHitlResponse`, `questionResponseStructuredContent`, `hitlResponseEvent`, and `toolRunsFromHitlRequests`.
 - Client HTTP transport treats `AgentEnd`/`AgentError`/`AgentAwaitingInput` as logical end, but only pre-terminal consumer cancellation should abort the body.
+- Use `isTerminalAgentEvent` as the canonical protocol helper for `AgentEnd`/`AgentError`/`AgentAwaitingInput` checks.
 - Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
 
 ## Tests

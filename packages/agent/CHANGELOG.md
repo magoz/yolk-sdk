@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.29
+
+### Patch Changes
+
+- Expose terminal agent event detection and add Workflow terminal commit-barrier helpers.
+
 ## 0.1.0-canary.28
 
 ### Patch Changes
