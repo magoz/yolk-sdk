@@ -409,17 +409,17 @@ const AnthropicContentResponseBlock = Schema.Union([
 class AnthropicUsageResponse extends Schema.Class<AnthropicUsageResponse>('AnthropicUsageResponse')({
   input_tokens: Schema.Number,
   output_tokens: Schema.Number,
-  cache_read_input_tokens: Schema.optional(Schema.Number),
-  cache_creation_input_tokens: Schema.optional(Schema.Number)
+  cache_read_input_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+  cache_creation_input_tokens: Schema.optional(Schema.NullOr(Schema.Number))
 }) {}
 
 class AnthropicStreamUsageResponse extends Schema.Class<AnthropicStreamUsageResponse>(
   'AnthropicStreamUsageResponse'
 )({
-  input_tokens: Schema.optional(Schema.Number),
-  output_tokens: Schema.optional(Schema.Number),
-  cache_read_input_tokens: Schema.optional(Schema.Number),
-  cache_creation_input_tokens: Schema.optional(Schema.Number)
+  input_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+  output_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+  cache_read_input_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+  cache_creation_input_tokens: Schema.optional(Schema.NullOr(Schema.Number))
 }) {}
 
 class AnthropicMessageResponse extends Schema.Class<AnthropicMessageResponse>(
@@ -966,57 +966,104 @@ const parseToolParams = (raw: string) => {
   return decodeJsonString(trimmed, 'Invalid Anthropic Claude tool arguments JSON')
 }
 
+type AnthropicUsageComponents = {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens: number
+  readonly cacheCreationInputTokens: number
+}
+
+const zeroAnthropicUsageComponents: AnthropicUsageComponents = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0
+}
+
+const positiveOrUndefined = (value: number) => (value > 0 ? value : undefined)
+
+const toAgentUsageFromComponents = (usage: AnthropicUsageComponents) =>
+  AgentUsage.make({
+    input: AgentInputUsage.make({
+      total: usage.inputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      uncached: positiveOrUndefined(usage.inputTokens),
+      cacheRead: positiveOrUndefined(usage.cacheReadInputTokens),
+      cacheWrite: positiveOrUndefined(usage.cacheCreationInputTokens)
+    }),
+    output: AgentOutputUsage.make({
+      total: usage.outputTokens,
+      text: positiveOrUndefined(usage.outputTokens)
+    })
+  })
+
 const toAgentUsage = (usage: AnthropicUsageResponse) =>
-  AgentUsage.make({
-    input: AgentInputUsage.make({
-      total: usage.input_tokens,
-      uncached:
-        usage.input_tokens -
-        (usage.cache_read_input_tokens ?? 0) -
-        (usage.cache_creation_input_tokens ?? 0),
-      cacheRead: usage.cache_read_input_tokens,
-      cacheWrite: usage.cache_creation_input_tokens
-    }),
-    output: AgentOutputUsage.make({
-      total: usage.output_tokens,
-      text: usage.output_tokens
-    })
+  toAgentUsageFromComponents({
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadInputTokens: usage.cache_read_input_tokens ?? 0,
+    cacheCreationInputTokens: usage.cache_creation_input_tokens ?? 0
   })
 
-const toPartialAgentUsage = (usage: AnthropicStreamUsageResponse) =>
-  AgentUsage.make({
-    input: AgentInputUsage.make({
-      total: usage.input_tokens ?? 0,
-      uncached:
-        usage.input_tokens === undefined
-          ? undefined
-          : usage.input_tokens -
-            (usage.cache_read_input_tokens ?? 0) -
-            (usage.cache_creation_input_tokens ?? 0),
-      cacheRead: usage.cache_read_input_tokens,
-      cacheWrite: usage.cache_creation_input_tokens
-    }),
-    output: AgentOutputUsage.make({
-      total: usage.output_tokens ?? 0,
-      text: usage.output_tokens
-    })
-  })
+const nextAnthropicUsageSnapshot = (
+  previous: AnthropicUsageComponents,
+  usage: AnthropicStreamUsageResponse
+): AnthropicUsageComponents => ({
+  inputTokens: usage.input_tokens ?? previous.inputTokens,
+  outputTokens: usage.output_tokens ?? previous.outputTokens,
+  cacheReadInputTokens: usage.cache_read_input_tokens ?? previous.cacheReadInputTokens,
+  cacheCreationInputTokens:
+    usage.cache_creation_input_tokens ?? previous.cacheCreationInputTokens
+})
 
-const usageEventFromUnknown = (usage: unknown) => {
+const usageComponentDelta = (previous: number, next: number) => Math.max(0, next - previous)
+
+const anthropicUsageDelta = (
+  previous: AnthropicUsageComponents,
+  next: AnthropicUsageComponents
+): AnthropicUsageComponents => ({
+  inputTokens: usageComponentDelta(previous.inputTokens, next.inputTokens),
+  outputTokens: usageComponentDelta(previous.outputTokens, next.outputTokens),
+  cacheReadInputTokens: usageComponentDelta(
+    previous.cacheReadInputTokens,
+    next.cacheReadInputTokens
+  ),
+  cacheCreationInputTokens: usageComponentDelta(
+    previous.cacheCreationInputTokens,
+    next.cacheCreationInputTokens
+  )
+})
+
+const hasAnthropicUsage = (usage: AnthropicUsageComponents) =>
+  usage.inputTokens > 0 ||
+  usage.outputTokens > 0 ||
+  usage.cacheReadInputTokens > 0 ||
+  usage.cacheCreationInputTokens > 0
+
+type AnthropicStreamUsageStep = {
+  readonly snapshot: AnthropicUsageComponents
+  readonly events: ReadonlyArray<LLMEvent>
+}
+
+const usageStepFromUnknown = (
+  usage: unknown,
+  previous: AnthropicUsageComponents
+): AnthropicStreamUsageStep => {
   const parsed = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usage)
 
   if (parsed._tag === 'None') {
-    return []
+    return { snapshot: previous, events: [] }
   }
 
   const value = parsed.value
-  const hasUsage =
-    value.input_tokens !== undefined ||
-    value.output_tokens !== undefined ||
-    value.cache_read_input_tokens !== undefined ||
-    value.cache_creation_input_tokens !== undefined
+  const snapshot = nextAnthropicUsageSnapshot(previous, value)
+  const delta = anthropicUsageDelta(previous, snapshot)
 
-  return hasUsage ? [LLMUsage.make({ usage: toPartialAgentUsage(value) })] : []
+  return {
+    snapshot,
+    events: hasAnthropicUsage(delta)
+      ? [LLMUsage.make({ usage: toAgentUsageFromComponents(delta) })]
+      : []
+  }
 }
 
 const toLlmEvents = (
@@ -1073,6 +1120,7 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
+  readonly usage: AnthropicUsageComponents
 }
 
 type AnthropicSseStep = {
@@ -1088,7 +1136,8 @@ type AnthropicBodyState = {
 
 const initialSseState: AnthropicSseState = {
   hasToolCall: false,
-  hasDone: false
+  hasDone: false,
+  usage: zeroAnthropicUsageComponents
 }
 
 const initialBodyState: AnthropicBodyState = {
@@ -1130,7 +1179,9 @@ const makeAnthropicStreamEmitter = () => {
 
     if (type === 'message_start') {
       const message = field(data, 'message')
-      return Effect.succeed({ state, events: usageEventFromUnknown(field(message, 'usage')) })
+      const step = usageStepFromUnknown(field(message, 'usage'), state.usage)
+
+      return Effect.succeed({ state: { ...state, usage: step.snapshot }, events: step.events })
     }
 
     if (type === 'content_block_start') {
@@ -1208,7 +1259,9 @@ const makeAnthropicStreamEmitter = () => {
     }
 
     if (type === 'message_delta') {
-      return Effect.succeed({ state, events: usageEventFromUnknown(field(data, 'usage')) })
+      const step = usageStepFromUnknown(field(data, 'usage'), state.usage)
+
+      return Effect.succeed({ state: { ...state, usage: step.snapshot }, events: step.events })
     }
 
     if (type === 'message_stop') {

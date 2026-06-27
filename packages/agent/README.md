@@ -119,6 +119,13 @@ policy and emits protocol-visible retry/error state:
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
 
+## Usage accounting
+
+Provider `LLMUsage` events are additive deltas. Adapters normalize vendor counters before emitting;
+for example, Anthropic stream snapshots become deltas and cached input tokens count toward input
+totals. The loop aggregates usage and emits protocol `UsageUpdate` / terminal usage for hosts to
+persist or display.
+
 ## Context compaction
 
 `@yolk-sdk/agent/compaction` provides pure scaffolding only. It does not call a model, persist

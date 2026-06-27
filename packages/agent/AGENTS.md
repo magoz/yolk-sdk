@@ -61,7 +61,9 @@
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
-- Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw usage; loop owns retry/usage aggregation.
+- Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
+  usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
+  Loop owns retry/usage aggregation.
 - Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
 - `@yolk-sdk/agent/compaction` provides pure planning/estimation/transformer helpers only; hosts own thresholds, summary wording, LLM summarization, overflow retry, and checkpoints.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.

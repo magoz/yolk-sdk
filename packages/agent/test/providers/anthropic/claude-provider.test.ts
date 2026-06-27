@@ -606,6 +606,61 @@ describe('Anthropic Claude provider', () => {
       expect(events[2]).toMatchObject({ usage: { input: { total: 2 }, output: { total: 3 } } })
     }))
 
+  it.effect('maps Anthropic cache usage into total input usage', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const response = new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'hello' }],
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 2,
+            cache_read_input_tokens: 5,
+            cache_creation_input_tokens: 3,
+            output_tokens: 4
+          }
+        }),
+        { status: 200 }
+      )
+      const eventsChunk = yield* collectProviderEvents(response, requests)
+      const events = Array.from(eventsChunk)
+
+      expect(events[2]).toMatchObject({
+        usage: {
+          input: { total: 10, uncached: 2, cacheRead: 5, cacheWrite: 3 },
+          output: { total: 4 }
+        }
+      })
+    }))
+
+  it.effect('treats null Anthropic cache usage fields as zero', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const response = new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'hello' }],
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 2,
+            cache_read_input_tokens: null,
+            cache_creation_input_tokens: null,
+            output_tokens: 4
+          }
+        }),
+        { status: 200 }
+      )
+      const eventsChunk = yield* collectProviderEvents(response, requests)
+      const events = Array.from(eventsChunk)
+      const usageEvent = events[2]
+
+      expect(usageEvent).toMatchObject({
+        usage: { input: { total: 2, uncached: 2 }, output: { total: 4 } }
+      })
+      if (usageEvent?._tag !== 'Usage') expect.fail('Expected usage event')
+      expect(usageEvent.usage.input.cacheRead).toBeUndefined()
+      expect(usageEvent.usage.input.cacheWrite).toBeUndefined()
+    }))
+
   it.effect('streams Anthropic tool calls from partial JSON deltas', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
@@ -649,13 +704,13 @@ describe('Anthropic Claude provider', () => {
       })
     }))
 
-  it.effect('emits Anthropic streaming usage when output-only usage arrives', () =>
+  it.effect('emits Anthropic streaming usage deltas when output snapshots arrive', () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get('https://example.com')
       const response = HttpClientResponse.fromWeb(
         request,
         responseFromChunks([
-          'data: {"type":"message_start","message":{"usage":{"input_tokens":4,"output_tokens":1}}}\n\n',
+          'data: {"type":"message_start","message":{"usage":{"input_tokens":4,"cache_read_input_tokens":3,"cache_creation_input_tokens":2,"output_tokens":1}}}\n\n',
           'data: {"type":"message_delta","usage":{"output_tokens":7}}\n\n',
           'data: {"type":"message_stop"}\n\n'
         ])
@@ -664,8 +719,32 @@ describe('Anthropic Claude provider', () => {
       const events = Array.from(eventsChunk)
 
       expect(events.map(event => event._tag)).toEqual(['Usage', 'Usage', 'Done'])
+      expect(events[0]).toMatchObject({
+        usage: {
+          input: { total: 9, uncached: 4, cacheRead: 3, cacheWrite: 2 },
+          output: { total: 1 }
+        }
+      })
+      expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 6 } } })
+    }))
+
+  it.effect('parses null Anthropic streaming usage fields without dropping output usage', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"message_start","message":{"usage":{"input_tokens":4,"cache_read_input_tokens":null,"cache_creation_input_tokens":null,"output_tokens":1}}}\n\n',
+          'data: {"type":"message_delta","usage":{"input_tokens":null,"cache_read_input_tokens":null,"cache_creation_input_tokens":null,"output_tokens":7}}\n\n',
+          'data: {"type":"message_stop"}\n\n'
+        ])
+      )
+      const eventsChunk = yield* streamAnthropicClaudeResponse(response).pipe(Stream.runCollect)
+      const events = Array.from(eventsChunk)
+
+      expect(events.map(event => event._tag)).toEqual(['Usage', 'Usage', 'Done'])
       expect(events[0]).toMatchObject({ usage: { input: { total: 4 }, output: { total: 1 } } })
-      expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 7 } } })
+      expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 6 } } })
     }))
 
   it.effect('maps Anthropic overloaded stream errors to retryable metadata', () =>
