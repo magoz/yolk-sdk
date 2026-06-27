@@ -231,7 +231,7 @@ describe('AnthropicClaudeProviderLayer', () => {
       expect(events[2]).toMatchObject({ stopReason: 'tool_use' })
       expect(events[3]).toMatchObject({
         usage: {
-          input: { total: 10, uncached: 5, cacheRead: 3, cacheWrite: 2 },
+          input: { total: 15, uncached: 10, cacheRead: 3, cacheWrite: 2 },
           output: { total: 4, text: 4 }
         }
       })
