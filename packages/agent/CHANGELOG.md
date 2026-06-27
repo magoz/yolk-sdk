@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.30
+
+### Patch Changes
+
+- 4148be9: Poll empty durable run continuation chunks and abort promptly while waiting.
+
 ## 0.1.0-canary.29
 
 ### Patch Changes
