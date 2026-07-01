@@ -1,11 +1,22 @@
 ---
 title: Knowledge package
-description: Ingest documents, search them, and expose knowledge search as an agent tool.
+description: Store simple durable knowledge, inject pinned context, search chunks, and expose lookup/manage tools.
 ---
 
-Use `@yolk-sdk/knowledge` when your app needs agent-readable memory or searchable documents.
+Use `@yolk-sdk/knowledge` when your app needs durable agent-readable knowledge.
 
-For a concrete ingestion/search pipeline, see [Ingest knowledge](./ingestion-pipeline).
+Knowledge is intentionally small:
+
+```txt
+KnowledgeDocument
+  slug
+  title
+  purpose
+  origin
+  content
+  status: processing | ready | error
+  availability: pinned | searchable | archived
+```
 
 Install:
 
@@ -19,22 +30,22 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
 import { buildKnowledgeContext } from '@yolk-sdk/knowledge'
 
 const context = buildKnowledgeContext({
-  items,
+  documents,
   maxCharacters: 6000
 })
 ```
 
-Add the resulting text to your system prompt or context transformer. Your app chooses which records are pinned.
+Add the resulting text to your system prompt. Your app chooses which documents are pinned.
 
 ## Ingest a document into search
 
-`ingestKnowledgeDocument` runs extraction, chunking, embedding, summary generation, chunk replacement, and document status updates.
+`ingestKnowledgeDocument` extracts, chunks, embeds, summarizes, replaces chunks, and updates document status.
 
 ```ts
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 
 const program = ingestKnowledgeDocument({
-  collectionId: 'workspace-docs',
+  scopeId: 'workspace-docs',
   documentId: 'doc_123',
   source: loadedSource
 })
@@ -56,7 +67,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 const results = await Effect.runPromise(
   searchKnowledge({
-    scope,
+    scope: { _tag: 'KnowledgeScope', id: 'workspace-docs' },
     query: 'How do agent tools work?',
     limit: 5,
     mode: 'hybrid',
@@ -67,17 +78,13 @@ const results = await Effect.runPromise(
 
 The package defines the search contract. Your app implements the store and embedding provider.
 
-## Expose search as an agent tool
+## Expose tools
 
 ```ts
-import { Effect } from 'effect'
-import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
+import { makeKnowledgeLookupTool, makeKnowledgeManageTool } from '@yolk-sdk/knowledge/agent'
 
-const searchTool = makeKnowledgeSearchTool(searcher, {
-  scope: context => Effect.succeed(context.knowledgeSearchScope),
-  limit: 5,
-  contextChunks: 1
-})
+const lookupTool = makeKnowledgeLookupTool(lookupHandlers)
+const manageTool = makeKnowledgeManageTool(manageHandlers)
 ```
 
-Use this when you want the model to search configured app knowledge during a run. Your app still owns authorization and scope resolution.
+Use `knowledge_lookup` for search/get and `knowledge_manage` for explicit saves, pins, archives, renames, or deletes. Your app owns authorization and scope resolution.

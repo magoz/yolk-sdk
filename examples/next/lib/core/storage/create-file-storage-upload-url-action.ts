@@ -51,7 +51,7 @@ export const createFileStorageUploadUrlAction = async (input: {
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.catchTag('ValidationError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeArtifactError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
+      Effect.catchTag('KnowledgeFileError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
       Effect.tapError(error => reportError(error, { operation: 'action.storage.createFileUploadUrl' })),
       Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not create upload URL' }))
     )

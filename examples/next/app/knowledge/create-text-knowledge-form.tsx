@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { createTextKnowledgeRecordAction } from '@/lib/core/knowledge/create-text-knowledge-record-action'
+import { createTextKnowledgeDocumentAction } from '@/lib/core/knowledge/create-text-knowledge-document-action'
 
 export function CreateTextKnowledgeForm() {
   const [title, setTitle] = useState('')
@@ -17,17 +17,17 @@ export function CreateTextKnowledgeForm() {
   return (
     <form
       className="space-y-4 rounded-xl border bg-card p-5 text-card-foreground shadow-xs"
-      action={() => {
-        startTransition(() => {
-          void createTextKnowledgeRecordAction({ title, content, pinned }).then(result => {
-            if (result._tag === 'Success') {
-              setTitle('')
-              setContent('')
-              setMessage('Saved knowledge')
-            } else {
-              setMessage(result.message)
-            }
-          })
+      onSubmit={event => {
+        event.preventDefault()
+        startTransition(async () => {
+          const result = await createTextKnowledgeDocumentAction({ title, content, pinned })
+          if (result._tag === 'Success') {
+            setTitle('')
+            setContent('')
+            setMessage('Saved knowledge')
+          } else {
+            setMessage(result.message)
+          }
         })
       }}
     >

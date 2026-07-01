@@ -143,7 +143,7 @@ function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps)
 // Usage
 <EmptyState
   icon={Building2}
-  title="No knowledge records yet"
+  title="No knowledge documents yet"
   description="Add records so agents can ground answers in your own context."
   action={
     <Button onClick={openCreateModal}>

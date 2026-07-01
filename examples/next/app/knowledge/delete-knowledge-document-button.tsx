@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
-import { deleteKnowledgeRecordAction } from '@/lib/core/knowledge/delete-knowledge-record-action'
+import { deleteKnowledgeDocumentAction } from '@/lib/core/knowledge/delete-knowledge-document-action'
 
-export function DeleteKnowledgeRecordButton({
+export function DeleteKnowledgeDocumentButton({
   id,
   label,
   onDeleteOptimistic
@@ -27,7 +27,7 @@ export function DeleteKnowledgeRecordButton({
         onClick={() => {
           startTransition(async () => {
             onDeleteOptimistic(id)
-            const result = await deleteKnowledgeRecordAction(id)
+            const result = await deleteKnowledgeDocumentAction(id)
             if (result._tag === 'Error') {
               setMessage(result.message)
               return

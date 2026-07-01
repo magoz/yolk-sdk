@@ -13,7 +13,7 @@ import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
 
 await Effect.runPromise(
   ingestKnowledgeDocument({
-    collectionId: 'workspace-docs',
+    scopeId: 'workspace-docs',
     documentId: 'doc_123',
     source: loadedSource
   }).pipe(Effect.provide(HostKnowledgeLayer))
@@ -43,13 +43,9 @@ const results = await Effect.runPromise(
 
 ```ts
 import { Effect } from 'effect'
-import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
+import { makeKnowledgeLookupTool } from '@yolk-sdk/knowledge/agent'
 
-const tool = makeKnowledgeSearchTool(searcher, {
-  scope: context => Effect.succeed(context.knowledgeSearchScope),
-  limit: 5,
-  contextChunks: 1
-})
+const tool = makeKnowledgeLookupTool(HostKnowledgeLookupHandlers)
 ```
 
 Resolve the tool with `@yolk-sdk/agent/tools` and pass it to the loop.

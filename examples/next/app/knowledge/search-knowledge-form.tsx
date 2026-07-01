@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { searchUserKnowledgeAction } from '@/lib/core/knowledge/search-user-knowledge-action'
-import type { KnowledgeSearchActionResult } from '@/lib/core/knowledge/search-user-knowledge-action'
+import type { KnowledgeSearchActionResult } from '@/lib/core/knowledge/search-user-knowledge-action-result'
 
 type SearchResult = Extract<KnowledgeSearchActionResult, { readonly _tag: 'Success' }>['results'][number]
 
@@ -25,23 +25,23 @@ export function SearchKnowledgeForm() {
       </div>
       <form
         className="flex flex-col gap-3 sm:flex-row sm:items-end"
-        action={() => {
+        onSubmit={event => {
+          event.preventDefault()
           const trimmed = query.trim()
           if (trimmed.length === 0) {
             setMessage('Enter a query')
             return
           }
 
-          startTransition(() => {
-            void searchUserKnowledgeAction({ query: trimmed, limit: 6 }).then(result => {
-              if (result._tag === 'Success') {
-                setResults(result.results)
-                setMessage(result.results.length === 0 ? 'No matches' : `${result.results.length} matches`)
-              } else {
-                setResults([])
-                setMessage(result.message)
-              }
-            })
+          startTransition(async () => {
+            const result = await searchUserKnowledgeAction({ query: trimmed, limit: 6 })
+            if (result._tag === 'Success') {
+              setResults(result.results)
+              setMessage(result.results.length === 0 ? 'No matches' : `${result.results.length} matches`)
+            } else {
+              setResults([])
+              setMessage(result.message)
+            }
           })
         }}
       >
@@ -62,11 +62,12 @@ export function SearchKnowledgeForm() {
       {results.length > 0 ? (
         <ol className="space-y-3">
           {results.map(result => (
-            <li key={`${result.recordId}-${result.chunkId}`} className="rounded-lg border bg-muted/20 p-4">
+            <li key={`${result.documentId}-${result.chunkId}`} className="rounded-lg border bg-muted/20 p-4">
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{result.title}</span>
-                <span>{result.role}</span>
-                <span>{result.contextPolicy}</span>
+                <span>{result.purpose}</span>
+                <span>{result.origin}</span>
+                <span>{result.availability}</span>
                 <span>score {formatScore(result.score)}</span>
                 {result.vectorScore === undefined ? null : <span>vector {formatScore(result.vectorScore)}</span>}
                 {result.textScore === undefined ? null : <span>text {formatScore(result.textScore)}</span>}

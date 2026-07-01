@@ -194,7 +194,7 @@ Keep separate.
 Rationale:
 
 - Optional RAG/knowledge substrate, not required for basic agents.
-- Distinct concepts: records, artifacts, provenance, links, representations, chunks, embeddings, search, context policy.
+- Distinct concepts: documents, files, chunks, embeddings, search, pinned context, and availability.
 - Has tokenizer weight.
 - Extractors, provider adapters, object storage, DB, permissions, and file parsing remain host/app-owned.
 

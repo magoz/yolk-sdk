@@ -13,17 +13,16 @@ import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { KnowledgeExtractor } from '@yolk-sdk/knowledge/extraction'
 import { NoopKnowledgeSummarizerLive } from '@yolk-sdk/knowledge/summarization'
 import { KnowledgeEmbeddingError, KnowledgeExtractionError, SearchIndexStoreError } from '@yolk-sdk/knowledge/errors'
-import { SearchIndexStore } from '@yolk-sdk/knowledge/search-store'
+import { SearchIndexStore } from '@yolk-sdk/knowledge/store'
 import type {
   SearchIndexStoreApi,
-  UpsertKnowledgeDocumentInput
-} from '@yolk-sdk/knowledge/search-store'
+  UpsertIndexedKnowledgeDocumentInput
+} from '@yolk-sdk/knowledge/store'
 import type {
   ExtractedKnowledgeDocument,
+  IndexedKnowledgeDocument,
   KnowledgeChunk,
-  KnowledgeDocument,
   KnowledgeMetadata,
-  KnowledgeCollection,
   KnowledgeSource
 } from '@yolk-sdk/knowledge/documents'
 import { Db } from '@/lib/services/db/live-layer'
@@ -96,26 +95,12 @@ const sourceFromRows = (input: {
   }
 }
 
-const toKnowledgeCollection = (row: typeof dbSchema.knowledgeCollection.$inferSelect): KnowledgeCollection => ({
-  id: row.id,
-  label: row.label ?? undefined,
-  embeddingConfig: {
-    model: row.embeddingModel,
-    dimensions: row.embeddingDimensions
-  },
-  chunkingConfig: {
-    strategy: row.chunkingStrategy,
-    maxTokens: row.chunkMaxTokens
-  },
-  metadata: row.metadata
-})
-
 const toKnowledgeDocument = (input: {
   readonly document: typeof dbSchema.knowledgeDocument.$inferSelect
   readonly storage: typeof dbSchema.storageObject.$inferSelect
-}): KnowledgeDocument => ({
+}): IndexedKnowledgeDocument => ({
   id: input.document.id,
-  collectionId: input.document.collectionId,
+  scopeId: input.document.collectionId,
   source: sourceFromRows({
     sourceType: input.storage.sourceType,
     r2Key: input.storage.r2Key,
@@ -135,7 +120,7 @@ const toKnowledgeDocument = (input: {
 
 const toKnowledgeChunk = (row: typeof dbSchema.knowledgeChunk.$inferSelect): KnowledgeChunk => ({
   id: row.id,
-  collectionId: row.collectionId,
+  scopeId: row.collectionId,
   documentId: row.documentId,
   content: row.content,
   position: row.position,
@@ -143,7 +128,7 @@ const toKnowledgeChunk = (row: typeof dbSchema.knowledgeChunk.$inferSelect): Kno
   metadata: row.metadata
 })
 
-const storageObjectIdForDocument = (input: UpsertKnowledgeDocumentInput) =>
+const storageObjectIdForDocument = (input: UpsertIndexedKnowledgeDocumentInput) =>
   metadataString(input.document.metadata, 'storageObjectId') ?? input.document.id
 
 const notFound = (label: string) => new SearchIndexStoreError({ message: `${label} not found` })
@@ -217,56 +202,6 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
       )
 
     const api: SearchIndexStoreApi = {
-      upsertSet: set =>
-        Effect.gen(function* () {
-          const [row] = yield* db
-            .insert(dbSchema.knowledgeCollection)
-            .values({
-              id: set.id,
-              userId: metadataString(set.metadata, 'userId') ?? set.id,
-              label: set.label,
-              embeddingModel: set.embeddingConfig.model,
-              embeddingDimensions: set.embeddingConfig.dimensions,
-              chunkingStrategy: set.chunkingConfig.strategy,
-              chunkMaxTokens: set.chunkingConfig.maxTokens,
-              metadata: set.metadata ?? {}
-            })
-            .onConflictDoUpdate({
-              target: dbSchema.knowledgeCollection.id,
-              set: {
-                label: set.label,
-                embeddingModel: set.embeddingConfig.model,
-                embeddingDimensions: set.embeddingConfig.dimensions,
-                chunkingStrategy: set.chunkingConfig.strategy,
-                chunkMaxTokens: set.chunkingConfig.maxTokens,
-                metadata: set.metadata ?? {},
-                updatedAt: sql`CURRENT_TIMESTAMP`
-              }
-            })
-            .returning()
-
-          if (row === undefined) {
-            return yield* Effect.fail(new SearchIndexStoreError({ message: 'Could not upsert knowledge collection' }))
-          }
-
-          return toKnowledgeCollection(row)
-        }).pipe(
-          Effect.withSpan('SearchIndexStore.upsertSet'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
-        ),
-
-      getSet: id =>
-        Effect.gen(function* () {
-          const [row] = yield* db.select().from(dbSchema.knowledgeCollection).where(eq(dbSchema.knowledgeCollection.id, id))
-          if (row === undefined) {
-            return yield* Effect.fail(notFound('knowledge collection'))
-          }
-          return toKnowledgeCollection(row)
-        }).pipe(
-          Effect.withSpan('SearchIndexStore.getSet'),
-          Effect.catch(error => Effect.fail(mapStoreError(error)))
-        ),
-
       upsertDocument: input =>
         Effect.gen(function* () {
           const storageObjectId = storageObjectIdForDocument(input)
@@ -274,7 +209,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .insert(dbSchema.knowledgeDocument)
             .values({
               id: input.document.id,
-              collectionId: input.document.collectionId,
+              collectionId: input.document.scopeId,
               storageObjectId,
               sourceType: sourceTypeFromKnowledgeSource(input.document.source),
               status: input.document.status,
@@ -318,7 +253,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .where(
               and(
                 eq(dbSchema.knowledgeDocument.id, input.documentId),
-                eq(dbSchema.knowledgeDocument.collectionId, input.collectionId)
+                eq(dbSchema.knowledgeDocument.collectionId, input.scopeId)
               )
             )
           return yield* getDocument(input.documentId)
@@ -336,7 +271,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
                 .where(
                   and(
                     eq(dbSchema.knowledgeChunk.documentId, input.documentId),
-                    eq(dbSchema.knowledgeChunk.collectionId, input.collectionId)
+                    eq(dbSchema.knowledgeChunk.collectionId, input.scopeId)
                   )
                 )
 
@@ -347,7 +282,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
               yield* tx.insert(dbSchema.knowledgeChunk).values(
                 input.chunks.map(item => ({
                   id: item.chunk.id,
-                  collectionId: input.collectionId,
+                  collectionId: input.scopeId,
                   documentId: input.documentId,
                   content: item.chunk.content,
                   embedding: Array.from(item.embedding),
@@ -381,7 +316,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .where(
               and(
                 eq(dbSchema.knowledgeDocument.id, input.documentId),
-                eq(dbSchema.knowledgeDocument.collectionId, input.collectionId)
+                eq(dbSchema.knowledgeDocument.collectionId, input.scopeId)
               )
             )
             .returning()
@@ -404,7 +339,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .where(
               and(
                 eq(dbSchema.knowledgeDocument.id, input.documentId),
-                eq(dbSchema.knowledgeDocument.collectionId, input.collectionId)
+                eq(dbSchema.knowledgeDocument.collectionId, input.scopeId)
               )
             )
         }).pipe(
@@ -419,7 +354,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .where(
               and(
                 eq(dbSchema.knowledgeDocument.id, input.documentId),
-                eq(dbSchema.knowledgeDocument.collectionId, input.collectionId)
+                eq(dbSchema.knowledgeDocument.collectionId, input.scopeId)
               )
             )
         }).pipe(
@@ -431,7 +366,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
         Effect.gen(function* () {
           const distance = cosineDistance(dbSchema.knowledgeChunk.embedding, Array.from(input.embedding))
           const score = sql<number>`1 - (${distance})`
-          const scopeIds = input.scope._tag === 'KnowledgeCollection' ? [input.scope.id] : [...input.scope.ids]
+          const scopeIds = input.scope._tag === 'KnowledgeScope' ? [input.scope.id] : [...input.scope.ids]
           const scopeCondition =
             scopeIds.length === 1
               ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
@@ -469,7 +404,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
 
       searchChunksByText: input =>
         Effect.gen(function* () {
-          const scopeIds = input.scope._tag === 'KnowledgeCollection' ? [input.scope.id] : [...input.scope.ids]
+          const scopeIds = input.scope._tag === 'KnowledgeScope' ? [input.scope.id] : [...input.scope.ids]
           const scopeCondition =
             scopeIds.length === 1
               ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
@@ -517,7 +452,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             .from(dbSchema.knowledgeChunk)
             .where(
               and(
-                eq(dbSchema.knowledgeChunk.collectionId, input.collectionId),
+                eq(dbSchema.knowledgeChunk.collectionId, input.scopeId),
                 eq(dbSchema.knowledgeChunk.documentId, input.documentId),
                 gte(dbSchema.knowledgeChunk.position, Math.max(0, input.position - input.contextChunks)),
                 lte(dbSchema.knowledgeChunk.position, input.position + input.contextChunks)

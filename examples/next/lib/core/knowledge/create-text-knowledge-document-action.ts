@@ -8,14 +8,14 @@ import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import { createTextKnowledgeRecord } from './create-text-knowledge-record'
+import { createTextKnowledgeDocument } from './create-text-knowledge-document'
 
 const CreateTextKnowledgeActionLayer = Layer.mergeAll(
   AppLayer,
   AppKnowledgeSearchLayer.pipe(Layer.provide(AppLayer))
 )
 
-export const createTextKnowledgeRecordAction = async (input: {
+export const createTextKnowledgeDocumentAction = async (input: {
   readonly title: string
   readonly content: string
   readonly pinned: boolean
@@ -30,7 +30,7 @@ export const createTextKnowledgeRecordAction = async (input: {
         'knowledge.title': input.title,
         'knowledge.pinned': input.pinned
       })
-      yield* createTextKnowledgeRecord({
+      yield* createTextKnowledgeDocument({
         userId: session.user.id,
         title: input.title,
         content: input.content,
@@ -54,7 +54,7 @@ export const createTextKnowledgeRecordAction = async (input: {
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.createText' })),
       Effect.catch(() =>
-        Effect.succeed({ _tag: 'Error' as const, message: 'Could not create knowledge record' })
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not create knowledge document' })
       )
     )
   )

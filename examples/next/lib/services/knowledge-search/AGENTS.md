@@ -31,7 +31,7 @@ App-owned concrete adapters for the domain-free knowledge search contracts.
 - `searchChunks` filters ready documents only and uses pgvector cosine distance.
 - `searchChunksByText` filters ready documents only and uses Postgres full-text search over chunk content.
 - `searchKnowledge` defaults to hybrid search: vector and text candidate searches are fused with reciprocal rank fusion before context expansion.
-- `getContextChunks` expands adjacent chunks by `(collectionId, documentId, position)`.
+- `getContextChunks` expands adjacent chunks by `(scopeId, documentId, position)`.
 
 ## Tests
 

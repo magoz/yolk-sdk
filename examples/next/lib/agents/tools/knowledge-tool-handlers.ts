@@ -3,11 +3,12 @@ import { ToolError } from '@yolk-sdk/agent/loop'
 import { ModelVisibleToolError, modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import type { NotFoundError, ValidationError } from '@/lib/core/errors'
 import { getKnowledgeContext } from '@/lib/core/knowledge/get-knowledge-context'
-import { listUserKnowledgeRecords } from '@/lib/core/knowledge/list-user-knowledge-records'
+import { listUserKnowledgeDocuments } from '@/lib/core/knowledge/list-user-knowledge-documents'
 import { searchUserKnowledge } from '@/lib/core/knowledge/search-user-knowledge'
 import { Db } from '@/lib/services/db/live-layer'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { makeKnowledgeToolModule } from './knowledge-tool.ts'
+import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 
 const KnowledgeToolLayer = Layer.mergeAll(Db.layer, AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer)))
 
@@ -27,13 +28,13 @@ const fatalToolError = (tool: string, error: unknown) =>
 const listKnowledgeForAgent = (input: {
   readonly userId: string
   readonly query?: string
-  readonly policy?: 'archived' | 'pinned' | 'routable' | 'searchable'
+  readonly availability?: KnowledgeAvailability
   readonly limit: number
 }) =>
-  listUserKnowledgeRecords(input).pipe(
-    Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('list_knowledge_records', error))),
+  listUserKnowledgeDocuments(input).pipe(
+    Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('list_knowledge_documents', error))),
     Effect.provide(KnowledgeToolLayer),
-    Effect.mapError(error => fatalToolError('list_knowledge_records', error))
+    Effect.mapError(error => fatalToolError('list_knowledge_documents', error))
   )
 
 const searchKnowledgeForAgent = (input: {
@@ -51,14 +52,22 @@ const searchKnowledgeForAgent = (input: {
 
 const getKnowledgeContextForAgent = (input: {
   readonly userId: string
-  readonly recordId: string
+  readonly documentId: string
   readonly chunkId?: string
   readonly position?: number
   readonly before: number
   readonly after: number
   readonly maxChars: number
 }) =>
-  getKnowledgeContext(input).pipe(
+  getKnowledgeContext({
+    userId: input.userId,
+    documentId: input.documentId,
+    chunkId: input.chunkId,
+    position: input.position,
+    before: input.before,
+    after: input.after,
+    maxChars: input.maxChars
+  }).pipe(
     Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('get_knowledge_context', error))),
     Effect.catchTag('NotFoundError', error => Effect.fail(notFoundToolError('get_knowledge_context', error))),
     Effect.provide(KnowledgeToolLayer),

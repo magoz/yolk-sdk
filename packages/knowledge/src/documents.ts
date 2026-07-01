@@ -1,14 +1,100 @@
-import { Schema } from 'effect'
+import * as Schema from 'effect/Schema'
 
-const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
-const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
-const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+export const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+export const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+export const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 
 export const KnowledgeMetadataSchema = Schema.Record(Schema.String, Schema.Unknown)
 export type KnowledgeMetadata = Schema.Schema.Type<typeof KnowledgeMetadataSchema>
 
-export const KnowledgeDocumentStatusSchema = Schema.Literals(['pending', 'processing', 'ready', 'error'])
+export const KnowledgeAvailabilitySchema = Schema.Literals(['pinned', 'searchable', 'archived'])
+export type KnowledgeAvailability = Schema.Schema.Type<typeof KnowledgeAvailabilitySchema>
+
+export const KnowledgeDocumentStatusSchema = Schema.Literals(['processing', 'ready', 'error'])
 export type KnowledgeDocumentStatus = Schema.Schema.Type<typeof KnowledgeDocumentStatusSchema>
+
+export const KnowledgeScopeSchema = Schema.Struct({
+  id: NonEmptyTrimmedString,
+  kind: Schema.optional(NonEmptyTrimmedString)
+})
+export type KnowledgeScope = Schema.Schema.Type<typeof KnowledgeScopeSchema>
+
+export const KnowledgeDocumentSchema = Schema.Struct({
+  id: NonEmptyTrimmedString,
+  slug: NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
+  purpose: NonEmptyTrimmedString,
+  origin: NonEmptyTrimmedString,
+  content: NonEmptyTrimmedString,
+  status: KnowledgeDocumentStatusSchema,
+  availability: KnowledgeAvailabilitySchema,
+  summary: Schema.optional(Schema.String),
+  errorMessage: Schema.optional(Schema.String),
+  reviewedAt: Schema.optional(Schema.DateTimeUtc),
+  metadata: Schema.optional(KnowledgeMetadataSchema),
+  createdAt: Schema.DateTimeUtc,
+  updatedAt: Schema.DateTimeUtc
+})
+export type KnowledgeDocument = Schema.Schema.Type<typeof KnowledgeDocumentSchema>
+
+export const CreateKnowledgeDocumentInputSchema = Schema.Struct({
+  scope: KnowledgeScopeSchema,
+  slug: NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
+  purpose: NonEmptyTrimmedString,
+  origin: NonEmptyTrimmedString,
+  content: NonEmptyTrimmedString,
+  availability: KnowledgeAvailabilitySchema,
+  summary: Schema.optional(Schema.String),
+  metadata: Schema.optional(KnowledgeMetadataSchema)
+})
+export type CreateKnowledgeDocumentInput = Schema.Schema.Type<typeof CreateKnowledgeDocumentInputSchema>
+
+export const UpdateKnowledgeDocumentInputSchema = Schema.Struct({
+  scope: KnowledgeScopeSchema,
+  id: NonEmptyTrimmedString,
+  slug: Schema.optional(NonEmptyTrimmedString),
+  title: Schema.optional(NonEmptyTrimmedString),
+  purpose: Schema.optional(NonEmptyTrimmedString),
+  origin: Schema.optional(NonEmptyTrimmedString),
+  content: Schema.optional(NonEmptyTrimmedString),
+  status: Schema.optional(KnowledgeDocumentStatusSchema),
+  availability: Schema.optional(KnowledgeAvailabilitySchema),
+  summary: Schema.optional(Schema.String),
+  errorMessage: Schema.optional(Schema.String),
+  reviewedAt: Schema.optional(Schema.DateTimeUtc),
+  metadata: Schema.optional(KnowledgeMetadataSchema)
+})
+export type UpdateKnowledgeDocumentInput = Schema.Schema.Type<typeof UpdateKnowledgeDocumentInputSchema>
+
+export const KnowledgeFileSchema = Schema.Struct({
+  id: NonEmptyTrimmedString,
+  documentId: NonEmptyTrimmedString,
+  storageKey: NonEmptyTrimmedString,
+  mediaType: Schema.optional(NonEmptyTrimmedString),
+  byteSize: Schema.optional(NonNegativeInteger),
+  checksum: Schema.optional(NonEmptyTrimmedString),
+  metadata: Schema.optional(KnowledgeMetadataSchema),
+  createdAt: Schema.DateTimeUtc
+})
+export type KnowledgeFile = Schema.Schema.Type<typeof KnowledgeFileSchema>
+
+export const KnowledgeChunkSchema = Schema.Struct({
+  id: NonEmptyTrimmedString,
+  scopeId: NonEmptyTrimmedString,
+  documentId: NonEmptyTrimmedString,
+  content: NonEmptyTrimmedString,
+  position: NonNegativeInteger,
+  tokenCount: PositiveInteger,
+  metadata: Schema.optional(KnowledgeMetadataSchema)
+})
+export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
+
+export const KnowledgeSearchScopeSchema = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal('KnowledgeScope'), id: NonEmptyTrimmedString }),
+  Schema.Struct({ _tag: Schema.Literal('KnowledgeScopes'), ids: Schema.Array(NonEmptyTrimmedString) })
+])
+export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>
 
 export const KnowledgeSourceSchema = Schema.Union([
   Schema.Struct({
@@ -28,30 +114,9 @@ export const KnowledgeSourceSchema = Schema.Union([
 ])
 export type KnowledgeSource = Schema.Schema.Type<typeof KnowledgeSourceSchema>
 
-export const KnowledgeEmbeddingConfigSchema = Schema.Struct({
-  model: NonEmptyTrimmedString,
-  dimensions: PositiveInteger
-})
-export type KnowledgeEmbeddingConfig = Schema.Schema.Type<typeof KnowledgeEmbeddingConfigSchema>
-
-export const KnowledgeChunkingConfigSchema = Schema.Struct({
-  strategy: Schema.Literal('sentence-token'),
-  maxTokens: PositiveInteger
-})
-export type KnowledgeChunkingConfig = Schema.Schema.Type<typeof KnowledgeChunkingConfigSchema>
-
-export const KnowledgeCollectionSchema = Schema.Struct({
+export const IndexedKnowledgeDocumentSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
-  label: Schema.optional(NonEmptyTrimmedString),
-  embeddingConfig: KnowledgeEmbeddingConfigSchema,
-  chunkingConfig: KnowledgeChunkingConfigSchema,
-  metadata: Schema.optional(KnowledgeMetadataSchema)
-})
-export type KnowledgeCollection = Schema.Schema.Type<typeof KnowledgeCollectionSchema>
-
-export const KnowledgeDocumentSchema = Schema.Struct({
-  id: NonEmptyTrimmedString,
-  collectionId: NonEmptyTrimmedString,
+  scopeId: NonEmptyTrimmedString,
   source: KnowledgeSourceSchema,
   status: KnowledgeDocumentStatusSchema,
   title: Schema.optional(NonEmptyTrimmedString),
@@ -62,18 +127,7 @@ export const KnowledgeDocumentSchema = Schema.Struct({
   chunkCount: Schema.optional(NonNegativeInteger),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
-export type KnowledgeDocument = Schema.Schema.Type<typeof KnowledgeDocumentSchema>
-
-export const KnowledgeChunkSchema = Schema.Struct({
-  id: NonEmptyTrimmedString,
-  collectionId: NonEmptyTrimmedString,
-  documentId: NonEmptyTrimmedString,
-  content: NonEmptyTrimmedString,
-  position: NonNegativeInteger,
-  tokenCount: PositiveInteger,
-  metadata: Schema.optional(KnowledgeMetadataSchema)
-})
-export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
+export type IndexedKnowledgeDocument = Schema.Schema.Type<typeof IndexedKnowledgeDocumentSchema>
 
 export const ExtractedKnowledgeDocumentSchema = Schema.Struct({
   content: NonEmptyTrimmedString,
@@ -83,27 +137,4 @@ export const ExtractedKnowledgeDocumentSchema = Schema.Struct({
 })
 export type ExtractedKnowledgeDocument = Schema.Schema.Type<typeof ExtractedKnowledgeDocumentSchema>
 
-export const KnowledgeSearchScopeSchema = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal('KnowledgeCollection'), id: NonEmptyTrimmedString }),
-  Schema.Struct({ _tag: Schema.Literal('KnowledgeCollections'), ids: Schema.Array(NonEmptyTrimmedString) })
-])
-export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>
-
-export const defaultKnowledgeChunkingConfig: KnowledgeChunkingConfig = {
-  strategy: 'sentence-token',
-  maxTokens: 512
-}
-
-export const makeKnowledgeCollection = (input: {
-  readonly id: string
-  readonly label?: string
-  readonly embeddingConfig: KnowledgeEmbeddingConfig
-  readonly chunkingConfig?: KnowledgeChunkingConfig
-  readonly metadata?: KnowledgeMetadata
-}): KnowledgeCollection => ({
-  id: input.id,
-  label: input.label,
-  embeddingConfig: input.embeddingConfig,
-  chunkingConfig: input.chunkingConfig ?? defaultKnowledgeChunkingConfig,
-  metadata: input.metadata
-})
+export const defaultKnowledgeChunkMaxTokens = 512

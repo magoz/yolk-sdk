@@ -7,20 +7,26 @@ import { AppLayer } from '@/lib/layers'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
-import { updateKnowledgeContextPolicy } from './update-knowledge-context-policy'
+import { updateKnowledgeAvailability } from './update-knowledge-availability'
+import type { KnowledgeAvailability } from './availability'
 
-export const updateKnowledgeContextPolicyAction = async (input: {
+export const updateKnowledgeAvailabilityAction = async (input: {
   readonly id: string
-  readonly contextPolicy: 'pinned' | 'routable' | 'searchable' | 'archived'
+  readonly availability: KnowledgeAvailability
 }) => {
   await cookies()
 
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
-      yield* updateKnowledgeContextPolicy({ userId: session.user.id, ...input })
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'knowledge.document_id': input.id,
+        'knowledge.availability': input.availability
+      })
+      yield* updateKnowledgeAvailability({ userId: session.user.id, ...input })
     }).pipe(
-      Effect.withSpan('action.knowledge.updateContextPolicy'),
+      Effect.withSpan('action.knowledge.updateAvailability'),
       Effect.provide(AppLayer),
       Effect.scoped,
       Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
@@ -29,8 +35,8 @@ export const updateKnowledgeContextPolicyAction = async (input: {
       Effect.catchTag('NotFoundError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
-      Effect.tapError(error => reportError(error, { operation: 'action.knowledge.updateContextPolicy' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge record' }))
+      Effect.tapError(error => reportError(error, { operation: 'action.knowledge.updateAvailability' })),
+      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge availability' }))
     )
   )
 }

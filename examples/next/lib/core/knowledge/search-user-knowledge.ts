@@ -6,13 +6,12 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
 export type KnowledgeSearchResult = {
-  readonly record: typeof schema.knowledgeRecord.$inferSelect
-  readonly representation: typeof schema.knowledgeRepresentation.$inferSelect
-  readonly chunk: typeof schema.knowledgeRepresentationChunk.$inferSelect
+  readonly document: typeof schema.userKnowledgeDocument.$inferSelect
+  readonly chunk: typeof schema.userKnowledgeChunk.$inferSelect
   readonly score: number
   readonly vectorScore?: number
   readonly textScore?: number
-  readonly context: ReadonlyArray<typeof schema.knowledgeRepresentationChunk.$inferSelect>
+  readonly context: ReadonlyArray<typeof schema.userKnowledgeChunk.$inferSelect>
 }
 
 type Match = Omit<KnowledgeSearchResult, 'context'>
@@ -71,51 +70,45 @@ export const searchUserKnowledge = (input: {
     const db = yield* Db
     const embedder = yield* KnowledgeEmbedder
     const embedding = yield* embedder.embedQuery(query)
-    const distance = cosineDistance(schema.knowledgeRepresentationChunk.embedding, Array.from(embedding))
+    const distance = cosineDistance(schema.userKnowledgeChunk.embedding, Array.from(embedding))
     const vectorScore = sql<number>`1 - (${distance})`
     const minScoreCondition = input.minScore === undefined ? undefined : lte(distance, 1 - input.minScore)
 
     const vectorMatches = yield* db
       .select({
-        record: schema.knowledgeRecord,
-        representation: schema.knowledgeRepresentation,
-        chunk: schema.knowledgeRepresentationChunk,
+        document: schema.userKnowledgeDocument,
+        chunk: schema.userKnowledgeChunk,
         score: vectorScore
       })
-      .from(schema.knowledgeRepresentationChunk)
-      .innerJoin(schema.knowledgeRecord, eq(schema.knowledgeRecord.id, schema.knowledgeRepresentationChunk.recordId))
-      .innerJoin(schema.knowledgeRepresentation, eq(schema.knowledgeRepresentation.id, schema.knowledgeRepresentationChunk.representationId))
+      .from(schema.userKnowledgeChunk)
+      .innerJoin(schema.userKnowledgeDocument, eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId))
       .where(
         and(
-          eq(schema.knowledgeRecord.userId, input.userId),
-          ne(schema.knowledgeRecord.contextPolicy, 'archived'),
-          eq(schema.knowledgeRecord.status, 'ready'),
-          eq(schema.knowledgeRepresentation.status, 'ready'),
+          eq(schema.userKnowledgeDocument.userId, input.userId),
+          ne(schema.userKnowledgeDocument.availability, 'archived'),
+          eq(schema.userKnowledgeDocument.status, 'ready'),
           minScoreCondition
         )
       )
       .orderBy(asc(distance))
       .limit(limit)
 
-    const searchVector = sql`to_tsvector('english', ${schema.knowledgeRepresentationChunk.content})`
+    const searchVector = sql`to_tsvector('english', ${schema.userKnowledgeChunk.content})`
     const searchQuery = sql`websearch_to_tsquery('english', ${query})`
     const textScore = sql<number>`ts_rank_cd(${searchVector}, ${searchQuery})`
     const textMatches = yield* db
       .select({
-        record: schema.knowledgeRecord,
-        representation: schema.knowledgeRepresentation,
-        chunk: schema.knowledgeRepresentationChunk,
+        document: schema.userKnowledgeDocument,
+        chunk: schema.userKnowledgeChunk,
         score: textScore
       })
-      .from(schema.knowledgeRepresentationChunk)
-      .innerJoin(schema.knowledgeRecord, eq(schema.knowledgeRecord.id, schema.knowledgeRepresentationChunk.recordId))
-      .innerJoin(schema.knowledgeRepresentation, eq(schema.knowledgeRepresentation.id, schema.knowledgeRepresentationChunk.representationId))
+      .from(schema.userKnowledgeChunk)
+      .innerJoin(schema.userKnowledgeDocument, eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId))
       .where(
         and(
-          eq(schema.knowledgeRecord.userId, input.userId),
-          ne(schema.knowledgeRecord.contextPolicy, 'archived'),
-          eq(schema.knowledgeRecord.status, 'ready'),
-          eq(schema.knowledgeRepresentation.status, 'ready'),
+          eq(schema.userKnowledgeDocument.userId, input.userId),
+          ne(schema.userKnowledgeDocument.availability, 'archived'),
+          eq(schema.userKnowledgeDocument.status, 'ready'),
           sql`${searchVector} @@ ${searchQuery}`
         )
       )
@@ -133,15 +126,15 @@ export const searchUserKnowledge = (input: {
     return yield* Effect.forEach(matches, match =>
       db
         .select()
-        .from(schema.knowledgeRepresentationChunk)
+        .from(schema.userKnowledgeChunk)
         .where(
           and(
-            eq(schema.knowledgeRepresentationChunk.representationId, match.chunk.representationId),
-            gte(schema.knowledgeRepresentationChunk.position, Math.max(0, match.chunk.position - contextChunks)),
-            lte(schema.knowledgeRepresentationChunk.position, match.chunk.position + contextChunks)
+            eq(schema.userKnowledgeChunk.documentId, match.chunk.documentId),
+            gte(schema.userKnowledgeChunk.position, Math.max(0, match.chunk.position - contextChunks)),
+            lte(schema.userKnowledgeChunk.position, match.chunk.position + contextChunks)
           )
         )
-        .orderBy(asc(schema.knowledgeRepresentationChunk.position))
+        .orderBy(asc(schema.userKnowledgeChunk.position))
         .pipe(Effect.map(context => ({ ...match, context })))
     )
   }).pipe(Effect.withSpan('knowledge.searchUserKnowledge'))

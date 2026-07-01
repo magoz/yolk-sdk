@@ -18,71 +18,15 @@ import { createId } from '@paralleldrive/cuid2'
 
 export const storageSourceType = pgEnum('StorageSourceType', ['file', 'url', 'text'])
 export const knowledgeDocumentStatus = pgEnum('KnowledgeDocumentStatus', [
-  'pending',
   'processing',
   'ready',
   'error'
 ])
 export const knowledgeChunkingStrategy = pgEnum('KnowledgeChunkingStrategy', ['sentence-token'])
-export const knowledgeRecordRole = pgEnum('KnowledgeRecordRole', [
-  'source',
-  'note',
-  'operating_protocol',
-  'knowledge_map',
-  'compiled_truth',
-  'decision'
-])
-export const knowledgeContextPolicy = pgEnum('KnowledgeContextPolicy', [
+export const knowledgeAvailability = pgEnum('KnowledgeAvailability', [
   'pinned',
-  'routable',
   'searchable',
   'archived'
-])
-export const knowledgeLifecycleStatus = pgEnum('KnowledgeLifecycleStatus', [
-  'draft',
-  'processing',
-  'ready',
-  'error',
-  'archived',
-  'deleted'
-])
-export const knowledgeArtifactKind = pgEnum('KnowledgeArtifactKind', [
-  'original',
-  'extracted_text',
-  'thumbnail',
-  'transcript',
-  'caption',
-  'structured'
-])
-export const knowledgeRepresentationModality = pgEnum('KnowledgeRepresentationModality', [
-  'text',
-  'image',
-  'audio',
-  'video',
-  'table'
-])
-export const knowledgeRepresentationStatus = pgEnum('KnowledgeRepresentationStatus', [
-  'pending',
-  'processing',
-  'ready',
-  'error'
-])
-export const knowledgeProvenanceSourceKind = pgEnum('KnowledgeProvenanceSourceKind', [
-  'upload',
-  'user_statement',
-  'url',
-  'generated',
-  'imported',
-  'external_api'
-])
-export const knowledgeLinkType = pgEnum('KnowledgeLinkType', [
-  'cites',
-  'supports',
-  'contradicts',
-  'supersedes',
-  'mentions',
-  'derived_from',
-  'related_to'
 ])
 
 ////////////////////////////////////////////////////////////////////////
@@ -373,7 +317,7 @@ export const knowledgeDocument = pgTable(
       .notNull()
       .references(() => storageObject.id, { onDelete: 'cascade' }),
     sourceType: storageSourceType('sourceType').notNull(),
-    status: knowledgeDocumentStatus('status').notNull().default('pending'),
+    status: knowledgeDocumentStatus('status').notNull().default('processing'),
     title: text('title'),
     summary: text('summary'),
     errorMessage: text('errorMessage'),
@@ -448,8 +392,8 @@ export type InsertKnowledgeChunk = typeof knowledgeChunk.$inferInsert
 // KNOWLEDGE
 ////////////////////////////////////////////////////////////////////////
 
-export const knowledgeRecord = pgTable(
-  'knowledgeRecord',
+export const userKnowledgeDocument = pgTable(
+  'userKnowledgeDocument',
   {
     id: text('id')
       .primaryKey()
@@ -457,11 +401,16 @@ export const knowledgeRecord = pgTable(
     userId: text('userId')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    role: knowledgeRecordRole('role').notNull(),
+    slug: text('slug').notNull(),
     title: text('title').notNull(),
-    status: knowledgeLifecycleStatus('status').notNull().default('draft'),
-    contextPolicy: knowledgeContextPolicy('contextPolicy').notNull().default('searchable'),
+    purpose: text('purpose').notNull(),
+    origin: text('origin').notNull(),
+    content: text('content').notNull(),
+    status: knowledgeDocumentStatus('status').notNull().default('ready'),
+    availability: knowledgeAvailability('availability').notNull().default('searchable'),
     summary: text('summary'),
+    errorMessage: text('errorMessage'),
+    reviewedAt: timestamp('reviewedAt'),
     metadata: jsonb('metadata')
       .$type<Record<string, unknown>>()
       .default(sql`'{}'::jsonb`)
@@ -473,32 +422,40 @@ export const knowledgeRecord = pgTable(
       .$onUpdate(() => new Date())
   },
   table => [
-    index('knowledgeRecord_userId_createdAt_idx').using(
+    index('userKnowledgeDocument_userId_createdAt_idx').using(
       'btree',
       table.userId.asc().nullsLast(),
       table.createdAt.asc().nullsLast()
     ),
-    index('knowledgeRecord_userId_contextPolicy_idx').using(
+    index('userKnowledgeDocument_userId_availability_idx').using(
       'btree',
       table.userId.asc().nullsLast(),
-      table.contextPolicy.asc().nullsLast()
+      table.availability.asc().nullsLast()
     ),
-    check('knowledgeRecord_title_nonempty_check', sql`length(${table.title}) > 0`)
+    uniqueIndex('userKnowledgeDocument_userId_slug_key').using(
+      'btree',
+      table.userId.asc().nullsLast(),
+      table.slug.asc().nullsLast()
+    ),
+    check('userKnowledgeDocument_slug_nonempty_check', sql`length(${table.slug}) > 0`),
+    check('userKnowledgeDocument_title_nonempty_check', sql`length(${table.title}) > 0`),
+    check('userKnowledgeDocument_purpose_nonempty_check', sql`length(${table.purpose}) > 0`),
+    check('userKnowledgeDocument_origin_nonempty_check', sql`length(${table.origin}) > 0`),
+    check('userKnowledgeDocument_content_nonempty_check', sql`length(${table.content}) > 0`)
   ]
 )
-export type KnowledgeRecord = typeof knowledgeRecord.$inferSelect
-export type InsertKnowledgeRecord = typeof knowledgeRecord.$inferInsert
+export type UserKnowledgeDocument = typeof userKnowledgeDocument.$inferSelect
+export type InsertUserKnowledgeDocument = typeof userKnowledgeDocument.$inferInsert
 
-export const knowledgeArtifact = pgTable(
-  'knowledgeArtifact',
+export const userKnowledgeFile = pgTable(
+  'userKnowledgeFile',
   {
     id: text('id')
       .primaryKey()
       .$defaultFn(() => createId()),
-    recordId: text('recordId')
+    documentId: text('documentId')
       .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    kind: knowledgeArtifactKind('kind').notNull(),
+      .references(() => userKnowledgeDocument.id, { onDelete: 'cascade' }),
     storageKey: text('storageKey').notNull(),
     mediaType: text('mediaType'),
     byteSize: integer('byteSize'),
@@ -510,65 +467,25 @@ export const knowledgeArtifact = pgTable(
     createdAt: timestamp('createdAt').notNull().defaultNow()
   },
   table => [
-    index('knowledgeArtifact_recordId_idx').using('btree', table.recordId.asc().nullsLast()),
-    uniqueIndex('knowledgeArtifact_storageKey_key').using('btree', table.storageKey.asc().nullsLast()),
-    check('knowledgeArtifact_storageKey_nonempty_check', sql`length(${table.storageKey}) > 0`),
-    check('knowledgeArtifact_byteSize_check', sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
+    index('userKnowledgeFile_documentId_idx').using('btree', table.documentId.asc().nullsLast()),
+    uniqueIndex('userKnowledgeFile_storageKey_key').using('btree', table.storageKey.asc().nullsLast()),
+    check('userKnowledgeFile_storageKey_nonempty_check', sql`length(${table.storageKey}) > 0`),
+    check('userKnowledgeFile_byteSize_check', sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
   ]
 )
-export type KnowledgeArtifact = typeof knowledgeArtifact.$inferSelect
-export type InsertKnowledgeArtifact = typeof knowledgeArtifact.$inferInsert
+export type UserKnowledgeFile = typeof userKnowledgeFile.$inferSelect
+export type InsertUserKnowledgeFile = typeof userKnowledgeFile.$inferInsert
 
-export const knowledgeRepresentation = pgTable(
-  'knowledgeRepresentation',
+export const userKnowledgeChunk = pgTable(
+  'userKnowledgeChunk',
   {
     id: text('id')
       .primaryKey()
       .$defaultFn(() => createId()),
-    recordId: text('recordId')
+    scopeId: text('scopeId').notNull(),
+    documentId: text('documentId')
       .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    artifactId: text('artifactId').references(() => knowledgeArtifact.id, { onDelete: 'set null' }),
-    modality: knowledgeRepresentationModality('modality').notNull(),
-    status: knowledgeRepresentationStatus('status').notNull().default('pending'),
-    contentText: text('contentText'),
-    summary: text('summary'),
-    model: text('model'),
-    errorMessage: text('errorMessage'),
-    metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
-      .default(sql`'{}'::jsonb`)
-      .notNull(),
-    createdAt: timestamp('createdAt').notNull().defaultNow(),
-    updatedAt: timestamp('updatedAt')
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date())
-  },
-  table => [
-    index('knowledgeRepresentation_recordId_status_idx').using(
-      'btree',
-      table.recordId.asc().nullsLast(),
-      table.status.asc().nullsLast()
-    ),
-    index('knowledgeRepresentation_artifactId_idx').using('btree', table.artifactId.asc().nullsLast())
-  ]
-)
-export type KnowledgeRepresentation = typeof knowledgeRepresentation.$inferSelect
-export type InsertKnowledgeRepresentation = typeof knowledgeRepresentation.$inferInsert
-
-export const knowledgeRepresentationChunk = pgTable(
-  'knowledgeRepresentationChunk',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    recordId: text('recordId')
-      .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    representationId: text('representationId')
-      .notNull()
-      .references(() => knowledgeRepresentation.id, { onDelete: 'cascade' }),
+      .references(() => userKnowledgeDocument.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
     embedding: vector('embedding', { dimensions: 1536 }).notNull(),
     position: integer('position').notNull(),
@@ -580,77 +497,21 @@ export const knowledgeRepresentationChunk = pgTable(
     createdAt: timestamp('createdAt').notNull().defaultNow()
   },
   table => [
-    index('knowledgeRepresentationChunk_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
-    index('knowledgeRepresentationChunk_content_fts_idx').using(
+    index('userKnowledgeChunk_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
+    index('userKnowledgeChunk_content_fts_idx').using(
       'gin',
       sql`to_tsvector('english', ${table.content})`
     ),
-    index('knowledgeRepresentationChunk_recordId_idx').using('btree', table.recordId.asc().nullsLast()),
-    unique('knowledgeRepresentationChunk_representationId_position_key').on(table.representationId, table.position),
-    check('knowledgeRepresentationChunk_content_nonempty_check', sql`length(${table.content}) > 0`),
-    check('knowledgeRepresentationChunk_position_check', sql`${table.position} >= 0`),
-    check('knowledgeRepresentationChunk_tokenCount_check', sql`${table.tokenCount} >= 0`)
+    index('userKnowledgeChunk_scopeId_idx').using('btree', table.scopeId.asc().nullsLast()),
+    index('userKnowledgeChunk_documentId_idx').using('btree', table.documentId.asc().nullsLast()),
+    unique('userKnowledgeChunk_documentId_position_key').on(table.documentId, table.position),
+    check('userKnowledgeChunk_content_nonempty_check', sql`length(${table.content}) > 0`),
+    check('userKnowledgeChunk_position_check', sql`${table.position} >= 0`),
+    check('userKnowledgeChunk_tokenCount_check', sql`${table.tokenCount} >= 0`)
   ]
 )
-export type KnowledgeRepresentationChunk = typeof knowledgeRepresentationChunk.$inferSelect
-export type InsertKnowledgeRepresentationChunk = typeof knowledgeRepresentationChunk.$inferInsert
-
-export const knowledgeProvenance = pgTable(
-  'knowledgeProvenance',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    recordId: text('recordId')
-      .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    artifactId: text('artifactId').references(() => knowledgeArtifact.id, { onDelete: 'set null' }),
-    sourceKind: knowledgeProvenanceSourceKind('sourceKind').notNull(),
-    sourceLabel: text('sourceLabel').notNull(),
-    sourceUrl: text('sourceUrl'),
-    observedAt: timestamp('observedAt'),
-    metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
-      .default(sql`'{}'::jsonb`)
-      .notNull(),
-    createdAt: timestamp('createdAt').notNull().defaultNow()
-  },
-  table => [
-    index('knowledgeProvenance_recordId_idx').using('btree', table.recordId.asc().nullsLast()),
-    check('knowledgeProvenance_sourceLabel_nonempty_check', sql`length(${table.sourceLabel}) > 0`)
-  ]
-)
-export type KnowledgeProvenance = typeof knowledgeProvenance.$inferSelect
-export type InsertKnowledgeProvenance = typeof knowledgeProvenance.$inferInsert
-
-export const knowledgeLink = pgTable(
-  'knowledgeLink',
-  {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    fromRecordId: text('fromRecordId')
-      .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    toRecordId: text('toRecordId')
-      .notNull()
-      .references(() => knowledgeRecord.id, { onDelete: 'cascade' }),
-    type: knowledgeLinkType('type').notNull(),
-    metadata: jsonb('metadata')
-      .$type<Record<string, unknown>>()
-      .default(sql`'{}'::jsonb`)
-      .notNull(),
-    createdAt: timestamp('createdAt').notNull().defaultNow()
-  },
-  table => [
-    index('knowledgeLink_fromRecordId_idx').using('btree', table.fromRecordId.asc().nullsLast()),
-    index('knowledgeLink_toRecordId_idx').using('btree', table.toRecordId.asc().nullsLast()),
-    unique('knowledgeLink_edge_key').on(table.fromRecordId, table.toRecordId, table.type),
-    check('knowledgeLink_no_self_link_check', sql`${table.fromRecordId} <> ${table.toRecordId}`)
-  ]
-)
-export type KnowledgeLink = typeof knowledgeLink.$inferSelect
-export type InsertKnowledgeLink = typeof knowledgeLink.$inferInsert
+export type UserKnowledgeChunk = typeof userKnowledgeChunk.$inferSelect
+export type InsertUserKnowledgeChunk = typeof userKnowledgeChunk.$inferInsert
 
 export const relations = defineRelations(
   {
@@ -665,12 +526,9 @@ export const relations = defineRelations(
     knowledgeCollection,
     knowledgeDocument,
     knowledgeChunk,
-    knowledgeRecord,
-    knowledgeArtifact,
-    knowledgeRepresentation,
-    knowledgeRepresentationChunk,
-    knowledgeProvenance,
-    knowledgeLink
+    userKnowledgeDocument,
+    userKnowledgeFile,
+    userKnowledgeChunk
   },
   () => ({})
 )

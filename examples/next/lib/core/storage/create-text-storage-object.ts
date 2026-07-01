@@ -40,8 +40,9 @@ export const createTextStorageObject = (input: {
     }
 
     yield* ingestKnowledgeDocument({
-      collectionId: collection.id,
+      scopeId: collection.id,
       documentId: object.id,
+      maxTokens: collection.chunkMaxTokens,
       source: {
         source: { _tag: 'Text', label: object.filename ?? undefined },
         content: trimmedContent,

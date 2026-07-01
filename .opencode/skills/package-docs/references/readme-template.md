@@ -85,7 +85,7 @@ Document remote client, local stdio client, `client/node` Node-only boundary, se
 
 ### Knowledge
 
-Document records, artifacts, representations, provenance, links, context policy, collection/document/chunk/search contracts, ingestion, context packing, and host-owned adapters/stores/permissions.
+Document documents, files, chunks, scopes, availability/status semantics, pinned context, search contracts, ingestion, lookup/manage tools, and host-owned adapters/stores/permissions.
 
 ### Sandbox
 

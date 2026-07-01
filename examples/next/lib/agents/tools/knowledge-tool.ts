@@ -9,13 +9,14 @@ import {
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
-import type { KnowledgeRecordSummary } from '@/lib/core/knowledge/list-user-knowledge-records'
+import type { KnowledgeDocumentSummary } from '@/lib/core/knowledge/list-user-knowledge-documents'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
+import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 import type { AgentToolContext } from './tool-context.ts'
 
 type KnowledgeToolError = ToolError | ModelVisibleToolError
 
-const knowledgeListToolName = 'list_knowledge_records'
+const knowledgeListToolName = 'list_knowledge_documents'
 const knowledgeSearchToolName = 'search_knowledge'
 const knowledgeContextToolName = 'get_knowledge_context'
 const defaultLimit = 8
@@ -31,22 +32,21 @@ const maxTraversalChunks = 20
 const defaultMaxChars = 20_000
 const maxMaxChars = 60_000
 
-const KnowledgeContextPolicy = Schema.Union([
+const KnowledgeAvailabilitySchema = Schema.Union([
   Schema.Literal('pinned'),
-  Schema.Literal('routable'),
   Schema.Literal('searchable'),
   Schema.Literal('archived')
 ])
 
 const KnowledgeListParams = Schema.Struct({
   query: Schema.optional(Schema.NullOr(Schema.String)).pipe(
-    Schema.annotate({ description: 'Optional title filter for knowledge records.' })
+    Schema.annotate({ description: 'Optional title filter for knowledge documents.' })
   ),
-  policy: Schema.optional(Schema.NullOr(KnowledgeContextPolicy)).pipe(
-    Schema.annotate({ description: 'Optional context policy filter.' })
+  availability: Schema.optional(Schema.NullOr(KnowledgeAvailabilitySchema)).pipe(
+    Schema.annotate({ description: 'Optional availability filter.' })
   ),
   limit: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Maximum records to return. Defaults to 20; capped at 50.' })
+    Schema.annotate({ description: 'Maximum documents to return. Defaults to 20; capped at 50.' })
   )
 })
 
@@ -66,8 +66,8 @@ const KnowledgeSearchParams = Schema.Struct({
 })
 
 const KnowledgeContextParams = Schema.Struct({
-  recordId: Schema.String.pipe(
-    Schema.annotate({ description: 'Knowledge record ID from search_knowledge citations.' })
+  documentId: Schema.String.pipe(
+    Schema.annotate({ description: 'Knowledge document ID from search_knowledge citations.' })
   ),
   chunkId: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Optional chunk ID from search_knowledge. Use this to expand a specific citation.' })
@@ -93,9 +93,9 @@ type KnowledgeContextParams = typeof KnowledgeContextParams.Type
 export type KnowledgeListHandler = (input: {
   readonly userId: string
   readonly query?: string
-  readonly policy?: typeof KnowledgeContextPolicy.Type
+  readonly availability?: KnowledgeAvailability
   readonly limit: number
-}) => Effect.Effect<ReadonlyArray<KnowledgeRecordSummary>, KnowledgeToolError>
+}) => Effect.Effect<ReadonlyArray<KnowledgeDocumentSummary>, KnowledgeToolError>
 
 export type KnowledgeSearchHandler = (input: {
   readonly userId: string
@@ -107,7 +107,7 @@ export type KnowledgeSearchHandler = (input: {
 
 export type KnowledgeContextHandler = (input: {
   readonly userId: string
-  readonly recordId: string
+  readonly documentId: string
   readonly chunkId?: string
   readonly position?: number
   readonly before: number
@@ -213,15 +213,15 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
 const normalizeListParams = (params: KnowledgeListParams) =>
   Effect.gen(function* () {
     const limit = yield* normalizeNamedInteger({ value: params.limit, defaultValue: defaultListLimit, maxValue: maxListLimit, minimum: 1, name: 'limit', tool: knowledgeListToolName })
-    return { query: optionalText(params.query), policy: params.policy ?? undefined, limit }
+    return { query: optionalText(params.query), availability: params.availability ?? undefined, limit }
   })
 
 const normalizeContextParams = (params: KnowledgeContextParams) =>
   Effect.gen(function* () {
-    const recordId = params.recordId.trim()
-    if (recordId.length === 0) {
+    const documentId = params.documentId.trim()
+    if (documentId.length === 0) {
       return yield* Effect.fail(
-        makeModelVisibleError(knowledgeContextToolName, 'recordId must not be empty')
+        makeModelVisibleError(knowledgeContextToolName, 'documentId must not be empty')
       )
     }
     const chunkId = params.chunkId?.trim()
@@ -240,7 +240,7 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
     const before = yield* normalizeNamedInteger({ value: params.before, defaultValue: defaultBefore, maxValue: maxTraversalChunks, minimum: 0, name: 'before', tool: knowledgeContextToolName })
     const after = yield* normalizeNamedInteger({ value: params.after, defaultValue: defaultAfter, maxValue: maxTraversalChunks, minimum: 0, name: 'after', tool: knowledgeContextToolName })
     const maxChars = yield* normalizeNamedInteger({ value: params.maxChars, defaultValue: defaultMaxChars, maxValue: maxMaxChars, minimum: 1, name: 'maxChars', tool: knowledgeContextToolName })
-    return { recordId, chunkId, position, before, after, maxChars }
+    return { documentId, chunkId, position, before, after, maxChars }
   })
 
 const resultText = (result: KnowledgeSearchResult) => result.context.map(chunk => chunk.content).join('\n\n')
@@ -255,10 +255,11 @@ const formatResults = (query: string, results: ReadonlyArray<KnowledgeSearchResu
     ...results.map((result, index) =>
       [
         `Citation [${index + 1}]`,
-        `Record: ${result.record.title}`,
-        `Record ID: ${result.record.id}`,
-        `Role: ${result.record.role}`,
-        `Policy: ${result.record.contextPolicy}`,
+        `Document: ${result.document.title}`,
+        `Document ID: ${result.document.id}`,
+        `Purpose: ${result.document.purpose}`,
+        `Origin: ${result.document.origin}`,
+        `Availability: ${result.document.availability}`,
         `Chunk: ${result.chunk.id}`,
         `Score: ${result.score.toFixed(3)}`,
         result.vectorScore === undefined ? undefined : `Vector score: ${result.vectorScore.toFixed(3)}`,
@@ -276,52 +277,53 @@ const structuredResult = (query: string, results: ReadonlyArray<KnowledgeSearchR
     score: result.score,
     vectorScore: result.vectorScore,
     textScore: result.textScore,
-    recordId: result.record.id,
-    title: result.record.title,
-    role: result.record.role,
-    contextPolicy: result.record.contextPolicy,
+    documentId: result.document.id,
+    title: result.document.title,
+    purpose: result.document.purpose,
+    origin: result.document.origin,
+    availability: result.document.availability,
     chunkId: result.chunk.id,
     text: resultText(result)
   }))
 })
 
-const formatRecordSummaries = (records: ReadonlyArray<KnowledgeRecordSummary>) => {
-  if (records.length === 0) {
-    return 'No knowledge records found.'
+const formatDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSummary>) => {
+  if (documents.length === 0) {
+    return 'No knowledge documents found.'
   }
 
   return [
-    'Knowledge records',
+    'Knowledge documents',
     '',
-    ...records.map((record, index) =>
+    ...documents.map((document, index) =>
       [
-        `Record [${index + 1}]`,
-        `Title: ${record.title}`,
-        `ID: ${record.id}`,
-        `Role: ${record.role}`,
-        `Status: ${record.status}`,
-        `Policy: ${record.contextPolicy}`,
-        `Representations: ${record.representationCount}`,
-        `Artifacts: ${record.artifactCount}`,
-        `Chunks: ${record.chunkCount}`,
-        `Updated: ${record.updatedAt.toISOString()}`,
-        record.summary === undefined ? undefined : `Summary: ${record.summary}`,
-        record.artifacts.length === 0
+        `Document [${index + 1}]`,
+        `Title: ${document.title}`,
+        `ID: ${document.id}`,
+        `Slug: ${document.slug}`,
+        `Purpose: ${document.purpose}`,
+        `Origin: ${document.origin}`,
+        `Status: ${document.status}`,
+        `Availability: ${document.availability}`,
+        `Files: ${document.fileCount}`,
+        `Chunks: ${document.chunkCount}`,
+        `Updated: ${document.updatedAt.toISOString()}`,
+        document.summary === undefined ? undefined : `Summary: ${document.summary}`,
+        document.files.length === 0
           ? undefined
-          : `Artifact IDs: ${record.artifacts.map(artifact => artifact.id).join(', ')}`
+          : `File IDs: ${document.files.map(file => file.id).join(', ')}`
       ].filter(line => line !== undefined).join('\n')
     )
   ].join('\n\n')
 }
 
-const structuredRecordSummaries = (records: ReadonlyArray<KnowledgeRecordSummary>) => ({ records })
+const structuredDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSummary>) => ({ documents })
 
 const formatContextWindow = (window: KnowledgeContextWindow) =>
   [
-    `Knowledge context: ${window.record.title}`,
+    `Knowledge context: ${window.document.title}`,
     '',
-    `Record ID: ${window.record.id}`,
-    `Representation ID: ${window.representation.id}`,
+    `Document ID: ${window.document.id}`,
     `Anchor chunk: ${window.anchor.id}`,
     `Anchor position: ${window.anchor.position}`,
     `Positions: ${window.startPosition}-${window.endPosition}`,
@@ -334,9 +336,8 @@ const formatContextWindow = (window: KnowledgeContextWindow) =>
   ].join('\n')
 
 const structuredContextWindow = (window: KnowledgeContextWindow) => ({
-  recordId: window.record.id,
-  title: window.record.title,
-  representationId: window.representation.id,
+  documentId: window.document.id,
+  title: window.document.title,
   anchorChunkId: window.anchor.id,
   anchorPosition: window.anchor.position,
   startPosition: window.startPosition,
@@ -394,7 +395,7 @@ const searchTool = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext
 const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
     name: knowledgeListToolName,
-    description: 'List durable user knowledge records and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge record IDs are unclear.',
+    description: 'List durable user knowledge documents and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge document IDs are unclear.',
     parameters: KnowledgeListParams,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
@@ -402,12 +403,12 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeListParams(params)
-        const records = yield* list({ userId: context.userId, ...normalized })
+        const documents = yield* list({ userId: context.userId, ...normalized })
 
         return ToolResult.make({
           toolCallId: call.id,
-          content: formatRecordSummaries(records),
-          structuredContent: structuredRecordSummaries(records)
+          content: formatDocumentSummaries(documents),
+          structuredContent: structuredDocumentSummaries(documents)
         })
       }).pipe(
         Effect.mapError(error =>
@@ -421,7 +422,7 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
 const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
     name: knowledgeContextToolName,
-    description: 'Read surrounding chunks from a specific durable knowledge record. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
+    description: 'Read surrounding chunks from a specific durable knowledge document. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
     parameters: KnowledgeContextParams,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,

@@ -1,24 +1,26 @@
 import { Array as Arr, Effect } from 'effect'
 import { KnowledgeChunker } from './chunking.ts'
+import { defaultKnowledgeChunkMaxTokens } from './documents.ts'
 import { KnowledgeEmbedder } from './embeddings.ts'
 import { KnowledgeExtractor } from './extraction.ts'
 import { KnowledgeSummarizer } from './summarization.ts'
 import type { LoadedKnowledgeSource } from './extraction.ts'
 import { KnowledgeIngestionError } from './errors.ts'
-import { SearchIndexStore } from './search-store.ts'
+import { SearchIndexStore } from './store.ts'
 
 export type IngestKnowledgeDocumentInput = {
-  readonly collectionId: string
+  readonly scopeId: string
   readonly documentId: string
   readonly source: LoadedKnowledgeSource
   readonly contentHash?: string
+  readonly maxTokens?: number
 }
 
 const markErrorBestEffort = (input: IngestKnowledgeDocumentInput, error: KnowledgeIngestionError) =>
   Effect.gen(function* () {
     const store = yield* SearchIndexStore
     yield* store.markDocumentError({
-      collectionId: input.collectionId,
+      scopeId: input.scopeId,
       documentId: input.documentId,
       message: error.message
     })
@@ -27,7 +29,7 @@ const markErrorBestEffort = (input: IngestKnowledgeDocumentInput, error: Knowled
 export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
   Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({
-      'knowledge_search.set_id': input.collectionId,
+      'knowledge_search.scope_id': input.scopeId,
       'knowledge_search.document_id': input.documentId,
       'knowledge_search.source_type': input.source.source._tag
     })
@@ -36,19 +38,12 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
     const chunker = yield* KnowledgeChunker
     const embedder = yield* KnowledgeEmbedder
     const summarizer = yield* KnowledgeSummarizer
-    const collection = yield* store
-      .getSet(input.collectionId)
-      .pipe(
-        Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
-        )
-      )
 
     yield* store
       .upsertDocument({
         document: {
           id: input.documentId,
-          collectionId: input.collectionId,
+          scopeId: input.scopeId,
           source: input.source.source,
           status: 'processing',
           metadata: input.source.metadata
@@ -70,10 +65,10 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
 
     const chunks = yield* chunker
       .chunk({
-        collectionId: input.collectionId,
+        scopeId: input.scopeId,
         documentId: input.documentId,
         content: extracted.content,
-        maxTokens: collection.chunkingConfig.maxTokens,
+        maxTokens: input.maxTokens ?? defaultKnowledgeChunkMaxTokens,
         metadata: extracted.metadata
       })
       .pipe(
@@ -117,7 +112,7 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
     }))
     yield* store
       .replaceDocumentChunks({
-        collectionId: input.collectionId,
+        scopeId: input.scopeId,
         documentId: input.documentId,
         chunks: indexedChunks
       })
@@ -130,7 +125,7 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
     const tokenCount = chunks.reduce((total, chunk) => total + chunk.tokenCount, 0)
     return yield* store
       .markDocumentReady({
-        collectionId: input.collectionId,
+        scopeId: input.scopeId,
         documentId: input.documentId,
         title: indexed.summary.title ?? extracted.title,
         summary: indexed.summary.summary ?? extracted.summary,

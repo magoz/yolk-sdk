@@ -46,8 +46,8 @@ export class KnowledgeStoreError extends Schema.TaggedErrorClass<KnowledgeStoreE
   }
 ) {}
 
-export class KnowledgeArtifactError extends Schema.TaggedErrorClass<KnowledgeArtifactError>()(
-  'KnowledgeArtifactError',
+export class KnowledgeFileError extends Schema.TaggedErrorClass<KnowledgeFileError>()(
+  'KnowledgeFileError',
   {
     message: Schema.String,
     cause: Schema.optional(Schema.Unknown)

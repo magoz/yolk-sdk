@@ -73,26 +73,26 @@ export function CreateFileKnowledgeForm() {
   return (
     <form
       className="space-y-4 rounded-xl border bg-card p-5 text-card-foreground shadow-xs"
-      action={() => {
+      onSubmit={event => {
+        event.preventDefault()
         const files = selectedFiles
         if (files.length === 0) {
           setMessage('Choose files')
           return
         }
 
-        startTransition(() => {
-          void Promise.all(files.map(file => uploadFile(file, pinned))).then(results => {
-            const failures = results.filter(result => result._tag === 'Error')
-            if (failures.length === 0) {
-              setSelectedFiles([])
-              setMessage(files.length === 1 ? 'Saved file knowledge' : `Saved ${files.length} files`)
-              if (inputRef.current !== null) {
-                inputRef.current.value = ''
-              }
-            } else {
-              setMessage(`${failures.length} failed: ${failures[0]?.message ?? 'Could not save files'}`)
+        startTransition(async () => {
+          const results = await Promise.all(files.map(file => uploadFile(file, pinned)))
+          const failures = results.filter(result => result._tag === 'Error')
+          if (failures.length === 0) {
+            setSelectedFiles([])
+            setMessage(files.length === 1 ? 'Saved file knowledge' : `Saved ${files.length} files`)
+            if (inputRef.current !== null) {
+              inputRef.current.value = ''
             }
-          })
+          } else {
+            setMessage(`${failures.length} failed: ${failures[0]?.message ?? 'Could not save files'}`)
+          }
         })
       }}
     >

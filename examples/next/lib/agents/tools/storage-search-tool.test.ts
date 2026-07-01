@@ -9,7 +9,7 @@ import { makeStorageSearchToolModule } from './storage-search-tool'
 const searchResult: KnowledgeSearchResult = {
   chunk: {
     id: 'chunk_1',
-    collectionId: 'set_1',
+    scopeId: 'set_1',
     documentId: 'doc_1',
     content: 'matched chunk',
     position: 0,
@@ -18,7 +18,7 @@ const searchResult: KnowledgeSearchResult = {
   score: 0.87,
   document: {
     id: 'doc_1',
-    collectionId: 'set_1',
+    scopeId: 'set_1',
     source: { _tag: 'Text', label: 'Project note' },
     status: 'ready',
     title: 'Project note'
@@ -26,7 +26,7 @@ const searchResult: KnowledgeSearchResult = {
   context: [
     {
       id: 'chunk_1',
-      collectionId: 'set_1',
+      scopeId: 'set_1',
       documentId: 'doc_1',
       content: 'context chunk',
       position: 0,

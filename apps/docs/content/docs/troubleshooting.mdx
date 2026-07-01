@@ -104,11 +104,11 @@ Use the MCP client/server adapters so `structuredContent`, `isError`, and suppor
 
 ### Search returns nothing
 
-Check collection scope, document ids, chunk ingestion, embedding dimensions, and host permission filters.
+Check search scope, document ids, chunk ingestion, embedding dimensions, and host permission filters.
 
 ### Ingestion compiles but fails at runtime
 
-The package defines contracts. Your host must provide extraction, chunking, embedding, summarization, and search-store layers.
+The package defines contracts. Your host must provide extraction, chunking, embedding, summarization, and `SearchIndexStore` layers.
 
 ## Connector errors
 

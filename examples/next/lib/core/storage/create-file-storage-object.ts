@@ -38,8 +38,9 @@ export const createFileStorageObject = (input: {
     }
 
     yield* ingestKnowledgeDocument({
-      collectionId: collection.id,
+      scopeId: collection.id,
       documentId: object.id,
+      maxTokens: collection.chunkMaxTokens,
       source: {
         source: {
           _tag: 'File',

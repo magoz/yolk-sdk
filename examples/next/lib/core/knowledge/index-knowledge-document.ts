@@ -6,9 +6,9 @@ import { PersistenceError } from '@/lib/core/errors'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
-export const indexKnowledgeRepresentation = (input: {
-  readonly recordId: string
-  readonly representationId: string
+export const indexKnowledgeDocument = (input: {
+  readonly userId: string
+  readonly documentId: string
   readonly content: string
   readonly metadata?: Record<string, unknown>
 }) =>
@@ -18,35 +18,35 @@ export const indexKnowledgeRepresentation = (input: {
     const embedder = yield* KnowledgeEmbedder
 
     yield* db
-      .update(schema.knowledgeRepresentation)
+      .update(schema.userKnowledgeDocument)
       .set({ status: 'processing', errorMessage: null, updatedAt: sql`CURRENT_TIMESTAMP` })
-      .where(eq(schema.knowledgeRepresentation.id, input.representationId))
+      .where(eq(schema.userKnowledgeDocument.id, input.documentId))
 
     const chunks = yield* chunker.chunk({
-      collectionId: input.recordId,
-      documentId: input.representationId,
+      scopeId: input.userId,
+      documentId: input.documentId,
       content: input.content,
       metadata: input.metadata
     })
     const embeddings = yield* embedder.embedTexts(chunks.map(chunk => chunk.content))
 
     if (embeddings.length !== chunks.length) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Embedding count did not match chunk count', entity: 'knowledgeRepresentationChunk' }))
+      return yield* Effect.fail(new PersistenceError({ message: 'Embedding count did not match chunk count', entity: 'userKnowledgeChunk' }))
     }
 
-    yield* db.transaction(tx =>
+    return yield* db.transaction(tx =>
       Effect.gen(function* () {
         yield* tx
-          .delete(schema.knowledgeRepresentationChunk)
-          .where(eq(schema.knowledgeRepresentationChunk.representationId, input.representationId))
+          .delete(schema.userKnowledgeChunk)
+          .where(eq(schema.userKnowledgeChunk.documentId, input.documentId))
 
         const indexedChunks = Arr.zip(chunks, embeddings)
         if (indexedChunks.length > 0) {
-          yield* tx.insert(schema.knowledgeRepresentationChunk).values(
+          yield* tx.insert(schema.userKnowledgeChunk).values(
             indexedChunks.map(([chunk, embedding]) => ({
               id: chunk.id,
-              recordId: input.recordId,
-              representationId: input.representationId,
+              scopeId: input.userId,
+              documentId: input.documentId,
               content: chunk.content,
               embedding: Array.from(embedding),
               position: chunk.position,
@@ -56,21 +56,29 @@ export const indexKnowledgeRepresentation = (input: {
           )
         }
 
-        yield* tx
-          .update(schema.knowledgeRepresentation)
+        return yield* tx
+          .update(schema.userKnowledgeDocument)
           .set({ status: 'ready', errorMessage: null, updatedAt: sql`CURRENT_TIMESTAMP` })
-          .where(eq(schema.knowledgeRepresentation.id, input.representationId))
+          .where(eq(schema.userKnowledgeDocument.id, input.documentId))
+          .returning()
+          .pipe(
+            Effect.flatMap(([document]) =>
+              document === undefined
+                ? Effect.fail(new PersistenceError({ message: 'Could not mark knowledge document ready', entity: 'userKnowledgeDocument' }))
+                : Effect.succeed(document)
+            )
+          )
       })
     )
   }).pipe(
-    Effect.withSpan('knowledge.indexKnowledgeRepresentation'),
+    Effect.withSpan('knowledge.indexKnowledgeDocument'),
     Effect.catch(error =>
       Effect.gen(function* () {
         const db = yield* Db
         yield* db
-          .update(schema.knowledgeRepresentation)
+          .update(schema.userKnowledgeDocument)
           .set({ status: 'error', errorMessage: error instanceof Error ? error.message : String(error), updatedAt: sql`CURRENT_TIMESTAMP` })
-          .where(eq(schema.knowledgeRepresentation.id, input.representationId))
+          .where(eq(schema.userKnowledgeDocument.id, input.documentId))
         return yield* Effect.fail(error)
       })
     )

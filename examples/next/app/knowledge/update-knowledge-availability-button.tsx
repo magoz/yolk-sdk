@@ -1,21 +1,18 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { updateKnowledgeContextPolicyAction } from '@/lib/core/knowledge/update-knowledge-context-policy-action'
+import { updateKnowledgeAvailabilityAction } from '@/lib/core/knowledge/update-knowledge-availability-action'
+import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 
-type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archived'
-
-const policies: ReadonlyArray<{ readonly value: KnowledgeContextPolicy; readonly label: string }> = [
+const availabilities: ReadonlyArray<{ readonly value: KnowledgeAvailability; readonly label: string }> = [
   { value: 'pinned', label: 'Pinned' },
-  { value: 'routable', label: 'Routable' },
   { value: 'searchable', label: 'Searchable' },
   { value: 'archived', label: 'Archived' }
 ]
 
-const policyFromValue = (value: string): KnowledgeContextPolicy | undefined => {
+const availabilityFromValue = (value: string): KnowledgeAvailability | undefined => {
   switch (value) {
     case 'pinned':
-    case 'routable':
     case 'searchable':
     case 'archived':
       return value
@@ -24,17 +21,17 @@ const policyFromValue = (value: string): KnowledgeContextPolicy | undefined => {
   }
 }
 
-export function UpdateKnowledgeContextPolicyButton({
+export function UpdateKnowledgeAvailabilityButton({
   id,
   label,
-  contextPolicy
+  availability
 }: {
   readonly id: string
   readonly label: string
-  readonly contextPolicy: KnowledgeContextPolicy
+  readonly availability: KnowledgeAvailability
 }) {
   const [message, setMessage] = useState<string | undefined>()
-  const [selectedPolicy, setSelectedPolicy] = useState(contextPolicy)
+  const [selectedAvailability, setSelectedAvailability] = useState(availability)
   const [isPending, startTransition] = useTransition()
 
   return (
@@ -42,20 +39,20 @@ export function UpdateKnowledgeContextPolicyButton({
       <select
         className="h-8 rounded-md border border-input bg-background px-2 text-sm shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
         disabled={isPending}
-        aria-label={`Set context policy for ${label}`}
-        value={selectedPolicy}
+        aria-label={`Set availability for ${label}`}
+        value={selectedAvailability}
         onChange={event => {
-          const nextPolicy = policyFromValue(event.currentTarget.value)
-          if (nextPolicy === undefined) {
-            setMessage('Invalid policy')
+          const nextAvailability = availabilityFromValue(event.currentTarget.value)
+          if (nextAvailability === undefined) {
+            setMessage('Invalid availability')
             return
           }
-          setSelectedPolicy(nextPolicy)
+          setSelectedAvailability(nextAvailability)
           startTransition(() => {
-            void updateKnowledgeContextPolicyAction({ id, contextPolicy: nextPolicy }).then(result => {
+            void updateKnowledgeAvailabilityAction({ id, availability: nextAvailability }).then(result => {
               if (result._tag === 'Error') {
                 setMessage(result.message)
-                setSelectedPolicy(contextPolicy)
+                setSelectedAvailability(availability)
               } else {
                 setMessage(undefined)
               }
@@ -63,7 +60,7 @@ export function UpdateKnowledgeContextPolicyButton({
           })
         }}
       >
-        {policies.map(policy => <option key={policy.value} value={policy.value}>{policy.label}</option>)}
+        {availabilities.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
       {message ? <span className="text-xs text-destructive">{message}</span> : null}
     </div>

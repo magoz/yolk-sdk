@@ -5,42 +5,33 @@ import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
 import { resolveAgentToolSet } from './resolve-toolset'
 import { makeKnowledgeToolModule } from './knowledge-tool'
 import type { KnowledgeContextWindow } from '@/lib/core/knowledge/get-knowledge-context'
-import type { KnowledgeRecordSummary } from '@/lib/core/knowledge/list-user-knowledge-records'
+import type { KnowledgeDocumentSummary } from '@/lib/core/knowledge/list-user-knowledge-documents'
 import type { KnowledgeSearchResult } from '@/lib/core/knowledge/search-user-knowledge'
 
 const date = new Date('2026-05-18T00:00:00.000Z')
 
 const searchResult: KnowledgeSearchResult = {
-  record: {
+  document: {
     id: 'object_1',
     userId: 'user_1',
-    role: 'note',
+    slug: 'project-memory-object_1',
     title: 'Project memory',
+    purpose: 'User knowledge note',
+    origin: 'manual_text',
+    content: 'Full text',
     status: 'ready',
-    contextPolicy: 'searchable',
+    availability: 'searchable',
     summary: 'Useful memory',
-    metadata: {},
-    createdAt: date,
-    updatedAt: date
-  },
-  representation: {
-    id: 'representation_1',
-    recordId: 'object_1',
-    artifactId: null,
-    modality: 'text',
-    status: 'ready',
-    contentText: 'Full text',
-    summary: null,
-    model: null,
     errorMessage: null,
+    reviewedAt: null,
     metadata: {},
     createdAt: date,
     updatedAt: date
   },
   chunk: {
     id: 'chunk_1',
-    recordId: 'object_1',
-    representationId: 'representation_1',
+    scopeId: 'user_1',
+    documentId: 'object_1',
     content: 'matched durable fact',
     embedding: Array.from({ length: 1536 }, () => 0),
     position: 0,
@@ -54,8 +45,8 @@ const searchResult: KnowledgeSearchResult = {
   context: [
     {
       id: 'chunk_1',
-      recordId: 'object_1',
-      representationId: 'representation_1',
+      scopeId: 'user_1',
+      documentId: 'object_1',
       content: 'matched durable fact',
       embedding: Array.from({ length: 1536 }, () => 0),
       position: 0,
@@ -67,8 +58,7 @@ const searchResult: KnowledgeSearchResult = {
 }
 
 const contextWindow: KnowledgeContextWindow = {
-  record: searchResult.record,
-  representation: searchResult.representation,
+  document: searchResult.document,
   anchor: searchResult.chunk,
   chunks: searchResult.context,
   startPosition: 0,
@@ -80,33 +70,34 @@ const contextWindow: KnowledgeContextWindow = {
   textCharacters: 20
 }
 
-const objectSummary: KnowledgeRecordSummary = {
+const documentSummary: KnowledgeDocumentSummary = {
   id: 'object_1',
+  slug: 'project-memory-object_1',
   title: 'Project memory',
-  role: 'note',
+  purpose: 'User knowledge note',
+  origin: 'manual_text',
   status: 'ready',
-  contextPolicy: 'searchable',
+  availability: 'searchable',
   summary: 'Useful memory',
-  representationCount: 1,
-  artifactCount: 0,
+  fileCount: 0,
   chunkCount: 1,
-  artifacts: [],
+  files: [],
   createdAt: date,
   updatedAt: date
 }
 
 describe('knowledge tool', () => {
-  it.effect('lists authenticated user knowledge records', () => {
+  it.effect('lists authenticated user knowledge documents', () => {
     const calls: Array<{
       readonly userId: string
       readonly query?: string
-      readonly policy?: 'archived' | 'pinned' | 'routable' | 'searchable'
+      readonly availability?: 'archived' | 'pinned' | 'searchable'
       readonly limit: number
     }> = []
     const toolModule = makeKnowledgeToolModule({
       list: input => Effect.sync(() => {
         calls.push(input)
-        return [objectSummary]
+        return [documentSummary]
       }),
       search: () => Effect.succeed([])
     })
@@ -119,15 +110,15 @@ describe('knowledge tool', () => {
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
-          name: 'list_knowledge_records',
-          params: { query: ' memory ', policy: 'searchable', limit: 100 }
+          name: 'list_knowledge_documents',
+          params: { query: ' memory ', availability: 'searchable', limit: 100 }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', query: 'memory', policy: 'searchable', limit: 50 }
+        { userId: 'user_1', query: 'memory', availability: 'searchable', limit: 50 }
       ])
-      expect(result.content).toContain('Knowledge records')
+      expect(result.content).toContain('Knowledge documents')
       expect(result.content).toContain('Project memory')
       expect(result.content).toContain('Chunks: 1')
     })
@@ -166,7 +157,7 @@ describe('knowledge tool', () => {
       ])
       expect(result.content).toContain('Knowledge search results for: memory')
       expect(result.content).toContain('Citation [1]')
-      expect(result.content).toContain('Record: Project memory')
+      expect(result.content).toContain('Document: Project memory')
       expect(result.content).toContain('matched durable fact')
     })
   })
@@ -222,7 +213,7 @@ describe('knowledge tool', () => {
   it.effect('reads surrounding knowledge context', () => {
     const calls: Array<{
       readonly userId: string
-      readonly recordId: string
+      readonly documentId: string
       readonly chunkId?: string
       readonly before: number
       readonly after: number
@@ -245,12 +236,12 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { recordId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
+          params: { documentId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', recordId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
+        { userId: 'user_1', documentId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
       ])
       expect(result.content).toContain('Knowledge context: Project memory')
       expect(result.content).toContain('Has after: yes')
@@ -260,7 +251,7 @@ describe('knowledge tool', () => {
 
   it.effect('accepts null optional knowledge context params', () => {
     const calls: Array<{
-      readonly recordId: string
+      readonly documentId: string
       readonly position?: number
       readonly before: number
       readonly after: number
@@ -283,12 +274,12 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { recordId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
+          params: { documentId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', recordId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
+        { userId: 'user_1', documentId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
       ])
     })
   })
@@ -298,7 +289,7 @@ describe('knowledge tool', () => {
       search: () => Effect.succeed([]),
       getContext: () => Effect.fail(modelVisibleToolError({
         tool: 'get_knowledge_context',
-        message: 'Knowledge record not found',
+        message: 'Knowledge document not found',
         reason: 'not_found'
       }))
     })
@@ -312,13 +303,13 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { recordId: 'missing_record' }
+          params: { documentId: 'missing_document' }
         })
       )
 
       expect(result).toMatchObject({
         toolCallId: 'call_1',
-        content: 'Knowledge record not found',
+        content: 'Knowledge document not found',
         isError: true
       })
     })

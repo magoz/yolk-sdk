@@ -8,7 +8,7 @@ const PARAGRAPH_BREAK_PATTERN = /(\n{2,})/
 const WORD_PATTERN = /\S+\s*/g
 
 export type ChunkKnowledgeDocumentInput = {
-  readonly collectionId: string
+  readonly scopeId: string
   readonly documentId: string
   readonly content: string
   readonly maxTokens?: number
@@ -158,7 +158,7 @@ export const chunkKnowledgeText = (input: ChunkKnowledgeDocumentInput, maxTokens
 
     return contents.map((content, position) => ({
       id: `${input.documentId}:chunk:${position}`,
-      collectionId: input.collectionId,
+      scopeId: input.scopeId,
       documentId: input.documentId,
       content,
       position,

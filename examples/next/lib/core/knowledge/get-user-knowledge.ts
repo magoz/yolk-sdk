@@ -8,13 +8,11 @@ export const getUserKnowledge = (input: { readonly userId: string }) =>
     const db = yield* Db
     return yield* db
       .select({
-        object: schema.knowledgeRecord,
-        representation: schema.knowledgeRepresentation,
-        artifact: schema.knowledgeArtifact
+        document: schema.userKnowledgeDocument,
+        file: schema.userKnowledgeFile
       })
-      .from(schema.knowledgeRecord)
-      .leftJoin(schema.knowledgeRepresentation, eq(schema.knowledgeRepresentation.recordId, schema.knowledgeRecord.id))
-      .leftJoin(schema.knowledgeArtifact, eq(schema.knowledgeArtifact.id, schema.knowledgeRepresentation.artifactId))
-      .where(eq(schema.knowledgeRecord.userId, input.userId))
-      .orderBy(desc(schema.knowledgeRecord.updatedAt))
+      .from(schema.userKnowledgeDocument)
+      .leftJoin(schema.userKnowledgeFile, eq(schema.userKnowledgeFile.documentId, schema.userKnowledgeDocument.id))
+      .where(eq(schema.userKnowledgeDocument.userId, input.userId))
+      .orderBy(desc(schema.userKnowledgeDocument.updatedAt))
   }).pipe(Effect.withSpan('knowledge.getUserKnowledge'))

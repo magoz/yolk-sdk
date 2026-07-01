@@ -17,7 +17,7 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
 
 | Service | Host provides |
 | --- | --- |
-| `SearchIndexStore` | collection/document/chunk persistence and search |
+| `SearchIndexStore` | scope/document/chunk persistence and search |
 | `KnowledgeExtractor` | source loading and text extraction |
 | `KnowledgeChunker` | text chunking; `DefaultKnowledgeChunkerLive` is available |
 | `KnowledgeEmbedder` | embedding provider |
@@ -41,7 +41,7 @@ const KnowledgeLayer = Layer.mergeAll(
 
 await Effect.runPromise(
   ingestKnowledgeDocument({
-    collectionId: 'workspace-docs',
+    scopeId: 'workspace-docs',
     documentId: 'doc_123',
     source: loadedSource,
     contentHash: 'sha256:...'
@@ -53,13 +53,12 @@ await Effect.runPromise(
 
 ## What ingestion does
 
-1. Loads the collection config.
-2. Marks the document `processing`.
-3. Extracts source text and metadata.
-4. Chunks text using collection max-token config.
-5. Embeds chunks and summarizes concurrently.
-6. Replaces document chunks atomically.
-7. Marks the document `ready` with title, summary, token count, and chunk count.
+1. Marks the document `processing`.
+2. Extracts source text and metadata.
+3. Chunks text using `maxTokens` or the default chunk size.
+4. Embeds chunks and summarizes concurrently.
+5. Replaces document chunks atomically.
+6. Marks the document `ready` with title, summary, token count, and chunk count.
 
 On failure, it best-effort marks the document `error` with a stage: `store`, `extract`, `chunk`, `embed`, or `summarize`.
 
@@ -70,7 +69,7 @@ import { searchKnowledge } from '@yolk-sdk/knowledge/search'
 
 const results = await Effect.runPromise(
   searchKnowledge({
-    scope: { _tag: 'KnowledgeCollections', ids: ['workspace-docs'] },
+    scope: { _tag: 'KnowledgeScope', id: 'workspace-docs' },
     query: 'How do approvals work?',
     mode: 'hybrid',
     limit: 5,
@@ -85,13 +84,9 @@ Hybrid mode combines vector and text search with reciprocal-rank fusion.
 
 ```ts
 import { Effect } from 'effect'
-import { makeKnowledgeSearchTool } from '@yolk-sdk/knowledge/agent'
+import { makeKnowledgeLookupTool } from '@yolk-sdk/knowledge/agent'
 
-const searchTool = makeKnowledgeSearchTool(searcher, {
-  scope: context => Effect.succeed(context.knowledgeSearchScope),
-  limit: 5,
-  contextChunks: 1
-})
+const lookupTool = makeKnowledgeLookupTool(HostKnowledgeLookupHandlers)
 ```
 
 Resolve this tool with `@yolk-sdk/agent/tools` and pass it to the loop.
@@ -99,7 +94,7 @@ Resolve this tool with `@yolk-sdk/agent/tools` and pass it to the loop.
 ## Production notes
 
 - Check permissions before choosing `scope`.
-- Keep collection ids tenant-safe and host-owned.
-- Store embedding model/dimensions in collection config.
+- Keep scope ids tenant-safe and host-owned.
+- Store embedding model/dimensions in host-owned config.
 - Re-ingest on content hash changes.
 - Treat archived knowledge as retained but normally excluded from active search.

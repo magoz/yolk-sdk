@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/knowledge",
   "version": "0.1.0-canary.30",
-  "description": "Domain-free knowledge record, artifact, search, provenance, and context contracts for Yolk agents.",
+  "description": "Domain-free durable knowledge document, file, search, context, and tool contracts for Yolk agents.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -18,7 +18,7 @@
     "knowledge",
     "agents",
     "context",
-    "provenance",
+    "search",
     "effect"
   ],
   "engines": {
@@ -33,10 +33,6 @@
     "./agent": {
       "types": "./src/agent.ts",
       "default": "./src/agent.ts"
-    },
-    "./artifacts": {
-      "types": "./src/artifacts.ts",
-      "default": "./src/artifacts.ts"
     },
     "./context": {
       "types": "./src/context.ts",
@@ -58,6 +54,10 @@
       "types": "./src/extraction.ts",
       "default": "./src/extraction.ts"
     },
+    "./files": {
+      "types": "./src/files.ts",
+      "default": "./src/files.ts"
+    },
     "./ingestion": {
       "types": "./src/ingestion.ts",
       "default": "./src/ingestion.ts"
@@ -65,26 +65,6 @@
     "./documents": {
       "types": "./src/documents.ts",
       "default": "./src/documents.ts"
-    },
-    "./search-store": {
-      "types": "./src/search-store.ts",
-      "default": "./src/search-store.ts"
-    },
-    "./links": {
-      "types": "./src/links.ts",
-      "default": "./src/links.ts"
-    },
-    "./records": {
-      "types": "./src/records.ts",
-      "default": "./src/records.ts"
-    },
-    "./provenance": {
-      "types": "./src/provenance.ts",
-      "default": "./src/provenance.ts"
-    },
-    "./representations": {
-      "types": "./src/representations.ts",
-      "default": "./src/representations.ts"
     },
     "./search": {
       "types": "./src/search.ts",
@@ -97,10 +77,6 @@
     "./summarization": {
       "types": "./src/summarization.ts",
       "default": "./src/summarization.ts"
-    },
-    "./vector-store": {
-      "types": "./src/vector-store.ts",
-      "default": "./src/vector-store.ts"
     }
   },
   "files": [
@@ -124,11 +100,6 @@
         "types": "./dist/agent.d.mts",
         "import": "./dist/agent.mjs",
         "default": "./dist/agent.mjs"
-      },
-      "./artifacts": {
-        "types": "./dist/artifacts.d.mts",
-        "import": "./dist/artifacts.mjs",
-        "default": "./dist/artifacts.mjs"
       },
       "./context": {
         "types": "./dist/context.d.mts",
@@ -155,6 +126,11 @@
         "import": "./dist/extraction.mjs",
         "default": "./dist/extraction.mjs"
       },
+      "./files": {
+        "types": "./dist/files.d.mts",
+        "import": "./dist/files.mjs",
+        "default": "./dist/files.mjs"
+      },
       "./ingestion": {
         "types": "./dist/ingestion.d.mts",
         "import": "./dist/ingestion.mjs",
@@ -164,31 +140,6 @@
         "types": "./dist/documents.d.mts",
         "import": "./dist/documents.mjs",
         "default": "./dist/documents.mjs"
-      },
-      "./search-store": {
-        "types": "./dist/search-store.d.mts",
-        "import": "./dist/search-store.mjs",
-        "default": "./dist/search-store.mjs"
-      },
-      "./links": {
-        "types": "./dist/links.d.mts",
-        "import": "./dist/links.mjs",
-        "default": "./dist/links.mjs"
-      },
-      "./records": {
-        "types": "./dist/records.d.mts",
-        "import": "./dist/records.mjs",
-        "default": "./dist/records.mjs"
-      },
-      "./provenance": {
-        "types": "./dist/provenance.d.mts",
-        "import": "./dist/provenance.mjs",
-        "default": "./dist/provenance.mjs"
-      },
-      "./representations": {
-        "types": "./dist/representations.d.mts",
-        "import": "./dist/representations.mjs",
-        "default": "./dist/representations.mjs"
       },
       "./search": {
         "types": "./dist/search.d.mts",
@@ -204,11 +155,6 @@
         "types": "./dist/summarization.d.mts",
         "import": "./dist/summarization.mjs",
         "default": "./dist/summarization.mjs"
-      },
-      "./vector-store": {
-        "types": "./dist/vector-store.d.mts",
-        "import": "./dist/vector-store.mjs",
-        "default": "./dist/vector-store.mjs"
       }
     }
   },

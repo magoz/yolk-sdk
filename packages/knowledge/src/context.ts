@@ -1,32 +1,34 @@
 import { Array as Arr } from 'effect'
-import type { KnowledgeRecord } from './records.ts'
-import type { KnowledgeRepresentation } from './representations.ts'
-
-export type KnowledgeContextItem = {
-  readonly record: KnowledgeRecord
-  readonly representation?: KnowledgeRepresentation
-}
+import type { KnowledgeDocument } from './documents.ts'
 
 export type BuildKnowledgeContextInput = {
-  readonly items: ReadonlyArray<KnowledgeContextItem>
+  readonly documents: ReadonlyArray<KnowledgeDocument>
   readonly maxCharacters: number
 }
 
 const truncationMarker = '\n\n[truncated: pinned knowledge exceeded context budget]'
 
-const recordHeader = (record: KnowledgeRecord) =>
-  `## ${record.title}\nrole: ${record.role}\nstatus: ${record.status}\ncontext: ${record.contextPolicy}`
+const documentHeader = (document: KnowledgeDocument) =>
+  [
+    `## ${document.title}`,
+    `slug: ${document.slug}`,
+    `purpose: ${document.purpose}`,
+    `origin: ${document.origin}`,
+    `status: ${document.status}`,
+    `availability: ${document.availability}`,
+    document.reviewedAt === undefined ? undefined : `reviewed_at: ${document.reviewedAt.toString()}`
+  ]
+    .filter(line => line !== undefined && line.trim().length > 0)
+    .join('\n')
 
-const itemBody = (item: KnowledgeContextItem) => {
-  const representationText = item.representation?.summary ?? item.representation?.contentText
-  return [recordHeader(item.record), item.record.summary, representationText]
+const documentBody = (document: KnowledgeDocument) =>
+  [documentHeader(document), document.summary, document.content]
     .filter(section => section !== undefined && section.trim().length > 0)
     .join('\n')
-}
 
 export const buildKnowledgeContext = (input: BuildKnowledgeContextInput) => {
-  const sections = Arr.map(input.items, itemBody).filter(section => section.trim().length > 0)
-  const header = '# Pinned knowledge\nUse this durable user knowledge as high-priority context. Cite knowledge records when relevant.'
+  const sections = Arr.map(input.documents, documentBody).filter(section => section.trim().length > 0)
+  const header = '# Pinned knowledge\nUse this durable knowledge as high-priority context.'
   const body = sections.join('\n\n')
   const context = body.length === 0 ? '' : `${header}\n\n${body}`
 

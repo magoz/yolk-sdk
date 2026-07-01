@@ -1,40 +1,37 @@
 'use client'
 
 import { useOptimistic } from 'react'
-import { DeleteKnowledgeRecordButton } from './delete-knowledge-record-button'
-import { UpdateKnowledgeContextPolicyButton } from './update-knowledge-context-policy-button'
+import { DeleteKnowledgeDocumentButton } from './delete-knowledge-document-button'
+import { UpdateKnowledgeAvailabilityButton } from './update-knowledge-availability-button'
+import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 
-type KnowledgeContextPolicy = 'pinned' | 'routable' | 'searchable' | 'archived'
-
-type KnowledgeRecordListItem = {
-  readonly object: {
+type KnowledgeDocumentListItem = {
+  readonly document: {
     readonly id: string
     readonly title: string
-    readonly role: string
+    readonly purpose: string
+    readonly origin: string
+    readonly content: string
     readonly summary: string | null
-    readonly contextPolicy: KnowledgeContextPolicy
+    readonly availability: KnowledgeAvailability
+    readonly status: string
+    readonly errorMessage: string | null
     readonly createdAt: Date
     readonly updatedAt: Date
   }
-  readonly artifact: {
+  readonly file: {
     readonly id: string
-    readonly kind: string
     readonly mediaType: string | null
     readonly byteSize: number | null
     readonly storageKey: string
-  } | null
-  readonly representation: {
-    readonly contentText: string | null
-    readonly status: string
-    readonly errorMessage: string | null
   } | null
 }
 
 const formatDate = (date: Date) =>
   new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 
-const previewText = (item: KnowledgeRecordListItem) => {
-  const text = item.representation?.contentText ?? item.object.summary
+const previewText = (item: KnowledgeDocumentListItem) => {
+  const text = item.document.content ?? item.document.summary
   if (text === null || text === undefined) return undefined
 
   const trimmed = text.trim()
@@ -43,12 +40,10 @@ const previewText = (item: KnowledgeRecordListItem) => {
   return trimmed.length <= 500 ? trimmed : `${trimmed.slice(0, 500)}…`
 }
 
-const policyClassName = (policy: string) => {
-  switch (policy) {
+const availabilityClassName = (availability: KnowledgeAvailability) => {
+  switch (availability) {
     case 'pinned':
       return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
-    case 'routable':
-      return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300'
     case 'archived':
       return 'border-muted bg-muted text-muted-foreground'
     default:
@@ -69,8 +64,6 @@ const statusClassName = (status: string | undefined) => {
       return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
     case 'processing':
       return 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-300'
-    case 'pending':
-      return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300'
     case 'error':
       return 'border-destructive/30 bg-destructive/10 text-destructive'
     default:
@@ -78,13 +71,13 @@ const statusClassName = (status: string | undefined) => {
   }
 }
 
-const artifactDownloadHref = (input: { readonly recordId: string; readonly artifactId: string }) =>
-  `/api/knowledge/artifacts?recordId=${encodeURIComponent(input.recordId)}&artifactId=${encodeURIComponent(input.artifactId)}`
+const fileDownloadHref = (input: { readonly documentId: string; readonly fileId: string }) =>
+  `/api/knowledge/files?documentId=${encodeURIComponent(input.documentId)}&fileId=${encodeURIComponent(input.fileId)}`
 
-export function KnowledgeRecordList({ items }: { readonly items: ReadonlyArray<KnowledgeRecordListItem> }) {
+export function KnowledgeDocumentList({ items }: { readonly items: ReadonlyArray<KnowledgeDocumentListItem> }) {
   const [optimisticItems, removeOptimisticItem] = useOptimistic(
     items,
-    (state, deletedId: string) => state.filter(item => item.object.id !== deletedId)
+    (state, deletedId: string) => state.filter(item => item.document.id !== deletedId)
   )
 
   if (optimisticItems.length === 0) {
@@ -94,23 +87,23 @@ export function KnowledgeRecordList({ items }: { readonly items: ReadonlyArray<K
   return (
     <ul className="overflow-hidden rounded-xl border bg-card shadow-xs">
       {optimisticItems.map(item => (
-        <li key={item.object.id} className="border-b last:border-b-0">
+        <li key={item.document.id} className="border-b last:border-b-0">
           <div className="p-4">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_170px_auto] md:items-center">
               <div className="min-w-0 space-y-1">
-                <p className="truncate font-medium">{item.object.title}</p>
+                <p className="truncate font-medium">{item.document.title}</p>
                 <p className="text-sm text-muted-foreground">
-                  {[item.object.role, item.artifact?.kind, item.artifact?.mediaType, formatBytes(item.artifact?.byteSize)].filter(Boolean).join(' · ')}
+                  {[item.document.purpose, item.document.origin, item.file?.mediaType, formatBytes(item.file?.byteSize)].filter(Boolean).join(' · ')}
                 </p>
                 {previewText(item) ? <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">{previewText(item)}</p> : null}
               </div>
-              <div className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${policyClassName(item.object.contextPolicy)}`}>
-                {item.object.contextPolicy}
+              <div className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${availabilityClassName(item.document.availability)}`}>
+                {item.document.availability}
               </div>
-              <p className="text-sm text-muted-foreground">{formatDate(item.object.updatedAt)}</p>
+              <p className="text-sm text-muted-foreground">{formatDate(item.document.updatedAt)}</p>
               <div className="flex flex-wrap items-center gap-2">
-                <UpdateKnowledgeContextPolicyButton id={item.object.id} label={item.object.title} contextPolicy={item.object.contextPolicy} />
-                <DeleteKnowledgeRecordButton id={item.object.id} label={item.object.title} onDeleteOptimistic={removeOptimisticItem} />
+                <UpdateKnowledgeAvailabilityButton id={item.document.id} label={item.document.title} availability={item.document.availability} />
+                <DeleteKnowledgeDocumentButton id={item.document.id} label={item.document.title} onDeleteOptimistic={removeOptimisticItem} />
               </div>
             </div>
           </div>
@@ -118,30 +111,30 @@ export function KnowledgeRecordList({ items }: { readonly items: ReadonlyArray<K
             <summary className="cursor-pointer text-sm font-medium">Details</summary>
             <div className="mt-3 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
               <div className="space-y-1">
-                <p>ID <span className="font-mono">{item.object.id}</span></p>
-                <p>Created {formatDate(item.object.createdAt)}</p>
-                <p>Updated {formatDate(item.object.updatedAt)}</p>
+                <p>ID <span className="font-mono">{item.document.id}</span></p>
+                <p>Created {formatDate(item.document.createdAt)}</p>
+                <p>Updated {formatDate(item.document.updatedAt)}</p>
                 <p>
                   Index{' '}
-                  <span className={`rounded-full border px-2 py-0.5 text-xs ${statusClassName(item.representation?.status)}`}>
-                    {item.representation?.status ?? 'none'}
+                  <span className={`rounded-full border px-2 py-0.5 text-xs ${statusClassName(item.document.status)}`}>
+                    {item.document.status}
                   </span>
                 </p>
-                {item.representation?.errorMessage ? <p className="text-destructive">{item.representation.errorMessage}</p> : null}
+                {item.document.errorMessage ? <p className="text-destructive">{item.document.errorMessage}</p> : null}
               </div>
               <div className="space-y-1">
-                {item.artifact ? (
+                {item.file ? (
                   <>
-                    <p>Artifact <span className="font-mono">{item.artifact.id}</span></p>
-                    <p>Storage key <span className="font-mono">{item.artifact.storageKey}</span></p>
-                    <p>{[item.artifact.kind, item.artifact.mediaType, formatBytes(item.artifact.byteSize)].filter(Boolean).join(' · ')}</p>
+                    <p>File <span className="font-mono">{item.file.id}</span></p>
+                    <p>Storage key <span className="font-mono">{item.file.storageKey}</span></p>
+                    <p>{[item.file.mediaType, formatBytes(item.file.byteSize)].filter(Boolean).join(' · ')}</p>
                     <p>
-                      <a className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground" href={artifactDownloadHref({ recordId: item.object.id, artifactId: item.artifact.id })}>
-                        Download artifact
+                      <a className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground" href={fileDownloadHref({ documentId: item.document.id, fileId: item.file.id })}>
+                        Download file
                       </a>
                     </p>
                   </>
-                ) : <p>No artifact</p>}
+                ) : <p>No file</p>}
               </div>
             </div>
             {previewText(item) ? (

@@ -15,7 +15,7 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier/state cookie names; keep constants out of `'use server'` files |
 | `agent/AGENTS.md`            | Agent OAuth, skill/command, connector contracts |
 | `storage/AGENTS.md`          | Storage source ingestion contracts             |
-| `knowledge/*`                | `/knowledge` domain functions/actions; file/text records + search/context policy |
+| `knowledge/*`                | `/knowledge` domain functions/actions; file/text documents + availability policy |
 | `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search ingestion |
 | `errors/index.ts`            | Shared domain errors                           |
 

@@ -7,7 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 import { Db } from '@/lib/services/db/live-layer'
 
 const title = 'E2E knowledge note alpha'
-const content = 'E2E durable knowledge alpha marker for search and policy smoke.'
+const content = 'E2E durable knowledge alpha marker for search and availability smoke.'
 
 test.describe('knowledge UI', () => {
   test.describe.configure({ mode: 'serial' })
@@ -21,17 +21,17 @@ test.describe('knowledge UI', () => {
     await Effect.gen(function* () {
       const db = yield* Db
       yield* db
-        .delete(schema.knowledgeRecord)
+        .delete(schema.userKnowledgeDocument)
         .where(
           and(
-            eq(schema.knowledgeRecord.userId, TEST_USER_ID),
-            eq(schema.knowledgeRecord.title, title)
+            eq(schema.userKnowledgeDocument.userId, TEST_USER_ID),
+            eq(schema.userKnowledgeDocument.title, title)
           )
         )
     }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
   })
 
-  test('creates, searches, updates policy, and deletes text knowledge', async ({ authedPage }) => {
+  test('creates, searches, updates availability, and deletes text knowledge', async ({ authedPage }) => {
     await authedPage.goto('/knowledge', { waitUntil: 'domcontentloaded' })
     await expect(authedPage.getByRole('heading', { name: 'Knowledge', level: 1 })).toBeVisible({
       timeout: 15_000
@@ -57,7 +57,7 @@ test.describe('knowledge UI', () => {
     })
     await expect(searchResults.getByText(title)).toBeVisible()
 
-    await item.getByLabel(`Set context policy for ${title}`).selectOption('archived')
+    await item.getByLabel(`Set availability for ${title}`).selectOption('archived')
     await expect(item.getByText('archived', { exact: true }).filter({ visible: true })).toHaveCount(
       1,
       {

@@ -1,6 +1,6 @@
 # API Routes
 
-HTTP boundaries for auth, agent text/Workflow/commands/Realtime, knowledge artifacts, and internal Cloudflare bridges. CRUD/product mutations belong in server actions, not routes.
+HTTP boundaries for auth, agent text/Workflow/commands/Realtime, knowledge files, and internal Cloudflare bridges. CRUD/product mutations belong in server actions, not routes.
 
 See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route pattern.
 
@@ -16,7 +16,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | `agent/commands/route.ts`                      | Agent command list/render        |
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
-| `knowledge/artifacts/route.ts`                 | Authenticated knowledge artifact download |
+| `knowledge/files/route.ts`                     | Authenticated knowledge file download     |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
 | `internal/cloudflare/AGENTS.md`                | Bridge auth/header/token contracts |

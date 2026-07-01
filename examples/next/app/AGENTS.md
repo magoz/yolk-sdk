@@ -10,7 +10,7 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 | `(auth)/`     | Login, OTP, logout, auth error UI        |
 | `agent/`      | Text+image/PDF + voice agent playground UI |
 | `storage/`    | Storage source ingestion/list UI         |
-| `knowledge/`  | Agent-native knowledge record management |
+| `knowledge/`  | Agent-native knowledge document management |
 | `api/`        | HTTP boundaries; see `examples/next/app/api/AGENTS.md` |
 | `globals.css` | Tailwind 4 globals/theme                 |
 

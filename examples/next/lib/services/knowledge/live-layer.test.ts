@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { knowledgeArtifactStorageKey } from './live-layer'
+import { knowledgeFileStorageKey } from './live-layer'
 
-describe('knowledgeArtifactStorageKey', () => {
-  it('builds stable original artifact keys', () => {
+describe('knowledgeFileStorageKey', () => {
+  it('builds stable original file keys', () => {
     expect(
-      knowledgeArtifactStorageKey({ recordId: 'obj_1', artifactId: 'art_1', kind: 'original' })
-    ).toBe('knowledge/obj_1/original/art_1')
+      knowledgeFileStorageKey({ documentId: 'obj_1', fileId: 'file_1', kind: 'original' })
+    ).toBe('knowledge/obj_1/original/file_1')
   })
 
-  it('builds stable derived artifact keys', () => {
+  it('builds stable derived file keys', () => {
     expect(
-      knowledgeArtifactStorageKey({ recordId: 'obj_1', artifactId: 'art_2', kind: 'extracted_text' })
-    ).toBe('knowledge/obj_1/derived/text/art_2.txt')
+      knowledgeFileStorageKey({ documentId: 'obj_1', fileId: 'file_2', kind: 'extracted_text' })
+    ).toBe('knowledge/obj_1/derived/text/file_2.txt')
     expect(
-      knowledgeArtifactStorageKey({ recordId: 'obj_1', artifactId: 'art_3', kind: 'thumbnail', extension: '.webp' })
-    ).toBe('knowledge/obj_1/derived/thumb/art_3.webp')
+      knowledgeFileStorageKey({ documentId: 'obj_1', fileId: 'file_3', kind: 'thumbnail', extension: '.webp' })
+    ).toBe('knowledge/obj_1/derived/thumb/file_3.webp')
   })
 })

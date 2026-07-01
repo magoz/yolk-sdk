@@ -51,7 +51,7 @@ const searchStorageForAgent = (input: {
 
     return yield* searchAppKnowledge({
       userId: input.userId,
-      scope: { _tag: 'KnowledgeCollection', id: collection.id },
+      scope: { _tag: 'KnowledgeScope', id: collection.id },
       query: input.query,
       options: {
         limit: input.limit,

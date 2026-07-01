@@ -3,13 +3,13 @@
 import { Effect, Layer } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
-import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
+import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
 import { AppLayer } from '@/lib/layers'
 import { ValidationError } from '@/lib/core/errors'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
-import { R2KnowledgeArtifactStoreLayer } from '@/lib/services/knowledge/live-layer'
+import { R2KnowledgeFileBlobStoreLayer } from '@/lib/services/knowledge/live-layer'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { createFileStorageObject } from './create-file-storage-object'
@@ -19,7 +19,7 @@ const maxFileBytes = 2_000_000
 const CompleteFileStorageUploadActionLayer = Layer.mergeAll(
   AppLayer,
   AppKnowledgeSearchLayer.pipe(Layer.provide(AppLayer)),
-  R2KnowledgeArtifactStoreLayer,
+  R2KnowledgeFileBlobStoreLayer,
   FileExtractor.layer
 )
 
@@ -34,7 +34,7 @@ export const completeFileStorageUploadAction = async (input: {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
-      const artifactStore = yield* KnowledgeArtifactStore
+      const fileStore = yield* KnowledgeFileBlobStore
       const allowedPrefix = `uploads/storage/${session.user.id}/`
 
       if (!input.storageKey.startsWith(allowedPrefix)) {
@@ -45,7 +45,7 @@ export const completeFileStorageUploadAction = async (input: {
         return yield* Effect.fail(new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' }))
       }
 
-      const bytes = yield* artifactStore.getArtifact({ storageKey: input.storageKey })
+      const bytes = yield* fileStore.getFile({ storageKey: input.storageKey })
 
       if (bytes.byteLength !== input.byteSize) {
         return yield* Effect.fail(new ValidationError({ field: 'file', message: 'Uploaded file size mismatch' }))
@@ -56,7 +56,7 @@ export const completeFileStorageUploadAction = async (input: {
         filename: input.filename,
         mediaType: input.mediaType,
         bytes
-      }).pipe(Effect.ensuring(artifactStore.deleteArtifact({ storageKey: input.storageKey }).pipe(Effect.ignore)))
+      }).pipe(Effect.ensuring(fileStore.deleteFile({ storageKey: input.storageKey }).pipe(Effect.ignore)))
     }).pipe(
       Effect.withSpan('action.storage.completeFileUpload'),
       Effect.provide(CompleteFileStorageUploadActionLayer),
@@ -67,7 +67,7 @@ export const completeFileStorageUploadAction = async (input: {
       Effect.catchTag('ValidationError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
       Effect.catchTag('UnsupportedFileFormatError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
       Effect.catchTag('FileExtractionError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeArtifactError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
+      Effect.catchTag('KnowledgeFileError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
       Effect.tapError(error => reportError(error, { operation: 'action.storage.completeFileUpload' })),
       Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not index uploaded file' }))
     )

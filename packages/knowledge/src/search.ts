@@ -1,8 +1,8 @@
 import { Effect } from 'effect'
-import type { KnowledgeChunk, KnowledgeDocument, KnowledgeSearchScope } from './documents.ts'
+import type { IndexedKnowledgeDocument, KnowledgeChunk, KnowledgeSearchScope } from './documents.ts'
 import { KnowledgeEmbedder } from './embeddings.ts'
 import { KnowledgeSearchError } from './errors.ts'
-import { SearchIndexStore } from './search-store.ts'
+import { SearchIndexStore } from './store.ts'
 
 export type KnowledgeSearchInput = {
   readonly scope: KnowledgeSearchScope
@@ -26,7 +26,7 @@ export type KnowledgeSearchScores = {
 export type KnowledgeSearchResult = {
   readonly chunk: KnowledgeChunk
   readonly score: number
-  readonly document: KnowledgeDocument
+  readonly document: IndexedKnowledgeDocument
   readonly context?: ReadonlyArray<KnowledgeChunk>
   readonly scores?: KnowledgeSearchScores
 }
@@ -55,9 +55,9 @@ export const packKnowledgeSearchContext = (query: string, results: ReadonlyArray
 
 const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
   switch (scope._tag) {
-    case 'KnowledgeCollection':
+    case 'KnowledgeScope':
       return [scope.id]
-    case 'KnowledgeCollections':
+    case 'KnowledgeScopes':
       return scope.ids
   }
 }
@@ -255,7 +255,7 @@ export const searchKnowledge = (input: KnowledgeSearchInput) =>
     return yield* Effect.forEach(results, result =>
       store
         .getContextChunks({
-          collectionId: result.chunk.collectionId,
+          scopeId: result.chunk.scopeId,
           documentId: result.chunk.documentId,
           position: result.chunk.position,
           contextChunks: valid.contextChunks

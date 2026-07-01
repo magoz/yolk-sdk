@@ -29,7 +29,7 @@ ordering lives in the linked boundary patterns.
 
 | Area | Current examples |
 | --- | --- |
-| Knowledge records/files | `examples/next/lib/core/knowledge/*`, `examples/next/app/knowledge/*` |
+| Knowledge documents/files | `examples/next/lib/core/knowledge/*`, `examples/next/app/knowledge/*` |
 | Storage source ingestion | `examples/next/app/storage/*` |
 | Upload/object storage service | `examples/next/lib/services/knowledge/*` |
 | Search/index services | `examples/next/lib/services/knowledge-search/*` |

@@ -36,7 +36,7 @@ Map changed code to docs that must be inspected or updated.
 
 | Change | Docs |
 | --- | --- |
-| records/context policy | `knowledge/index.mdx`, `reference/host-responsibilities.mdx` |
+| documents/availability | `knowledge/index.mdx`, `reference/host-responsibilities.mdx` |
 | ingestion pipeline | `knowledge/ingestion-pipeline.mdx`, `integrations/knowledge-search.mdx` |
 | search behavior | `integrations/knowledge-search.mdx`, `knowledge/ingestion-pipeline.mdx` |
 | agent tool | `integrations/knowledge-search.mdx`, `api-reference/integrations.mdx` |

@@ -41,7 +41,7 @@ const packages: ReadonlyArray<PackageShape> = [
   },
   {
     name: '@yolk-sdk/knowledge',
-    exports: ['.', './agent', './artifacts', './chunking', './context', './embeddings', './errors', './extraction', './ingestion', './search-store', './documents', './links', './records', './provenance', './representations', './search', './store', './summarization', './vector-store']
+    exports: ['.', './agent', './chunking', './context', './documents', './embeddings', './errors', './extraction', './files', './ingestion', './search', './store', './summarization']
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },

@@ -12,7 +12,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 | `skill` | yes | no | bootstrap-injected; generated fallback | project skill command/runtime tool |
 | `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
 | `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
-| `list_knowledge_records` / `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge discovery, search, and chunk-window traversal |
+| `list_knowledge_documents` / `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge discovery, search, and chunk-window traversal |
 | `search_storage` / `list_storage_sources` / `get_storage_source` | yes | yes | no | authenticated user storage search and source reads |
 | `telegram_send_message` | yes | yes | no | optional Telegram connector tool; requires user config; available to task subagents |
 | remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
@@ -29,7 +29,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 - Tool modules receive context `{ surface, route, userId, sessionId?, subagent?, skillset? }`; add policy via `isEnabled`.
 - `just_bash` accepts script/cwd/stdin/timeout only; pass ad hoc data through stdin or script heredocs, not host files.
 - Storage tools are Next/Workflow/voice only; they use app knowledge search/DB adapters from route runtime wiring, not Cloudflare bootstrap.
-- Knowledge tools are Next/Workflow/voice only; use `list_knowledge_records` to discover files/records, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
+- Knowledge tools are Next/Workflow/voice only; use `list_knowledge_documents` to discover files/documents, then `search_knowledge`, then `get_knowledge_context` to expand/continue nearby chunks.
 - `manage_skills` is Next/Workflow-only; it uses app DB skill adapters from route runtime wiring, not Cloudflare bootstrap; UI refreshes slash commands after completed runs.
 - Text task execution also receives `sessionId`; subagent runs set `subagent: true` and intentionally omit task from their own tool modules.
 - Resolve caller-provided modules through `resolveAgentToolSet`; do not hide tools in globals.

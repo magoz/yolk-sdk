@@ -5,7 +5,7 @@ Extracts uploaded file text for `/storage` and `/knowledge` ingestion.
 ## Scope
 
 - Supports text, markdown, CSV, JSON, PDF, DOCX, XLSX, and PPTX.
-- Returns sanitized text plus format metadata for storage/knowledge record metadata and knowledge search document metadata.
+- Returns sanitized text plus format metadata for storage/knowledge document metadata and knowledge search document metadata.
 - Empty extracted content fails with `FileExtractionError`.
 - Unknown formats fail with `UnsupportedFileFormatError`.
 - PDF extraction can detach/transfer input buffers; callers that need original bytes must clone before extraction.

@@ -8,28 +8,12 @@ import { getSession } from '@/lib/services/auth/get-session'
 import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import { searchUserKnowledge } from './search-user-knowledge'
+import type { KnowledgeSearchActionResult } from './search-user-knowledge-action-result'
 
 const SearchKnowledgeActionLayer = Layer.mergeAll(
   AppLayer,
   AppKnowledgeSearchLayer.pipe(Layer.provide(AppLayer))
 )
-
-export type KnowledgeSearchActionResult =
-  | {
-      readonly _tag: 'Success'
-      readonly results: ReadonlyArray<{
-        readonly recordId: string
-        readonly title: string
-        readonly role: string
-        readonly contextPolicy: string
-        readonly score: number
-        readonly vectorScore?: number
-        readonly textScore?: number
-        readonly chunkId: string
-        readonly text: string
-      }>
-    }
-  | { readonly _tag: 'Error'; readonly message: string }
 
 export const searchUserKnowledgeAction = async (input: {
   readonly query: string
@@ -40,6 +24,11 @@ export const searchUserKnowledgeAction = async (input: {
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'knowledge.query_length': input.query.length,
+        'knowledge.limit': input.limit ?? 6
+      })
       const results = yield* searchUserKnowledge({
         userId: session.user.id,
         query: input.query,
@@ -50,10 +39,11 @@ export const searchUserKnowledgeAction = async (input: {
       return {
         _tag: 'Success' as const,
         results: results.map(result => ({
-          recordId: result.record.id,
-          title: result.record.title,
-          role: result.record.role,
-          contextPolicy: result.record.contextPolicy,
+          documentId: result.document.id,
+          title: result.document.title,
+          purpose: result.document.purpose,
+          origin: result.document.origin,
+          availability: result.document.availability,
           score: result.score,
           vectorScore: result.vectorScore,
           textScore: result.textScore,

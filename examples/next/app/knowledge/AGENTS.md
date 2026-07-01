@@ -1,15 +1,15 @@
 # Knowledge UI
 
-User-facing knowledge record management UI.
+User-facing knowledge document management UI.
 
 ## Current scope
 
 - `/knowledge` is dynamic/session-gated.
-- V0 supports manual text and file knowledge records.
-- Pinned records are injected into text agent startup context.
-- Searchable/routable records are available through the `search_knowledge` agent tool.
-- Original file artifacts can be downloaded through the authenticated artifact route.
-- File upload uses server-action presigned R2 PUT URLs, then a finalize action stores artifact metadata and indexes bytes; no `FormData` upload through Next.
+- V0 supports manual text and file knowledge documents.
+- Pinned documents are injected into text agent startup context.
+- Searchable documents are available through the `search_knowledge` agent tool.
+- Original files can be downloaded through the authenticated file route.
+- File upload uses server-action presigned R2 PUT URLs, then a finalize action stores file metadata and indexes bytes; no `FormData` upload through Next.
 - Knowledge mutations use server actions in `examples/next/lib/core/knowledge/*-action.ts`.
 
 ## Boundaries

@@ -4,15 +4,15 @@ import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { DefaultKnowledgeChunkerLive } from '@yolk-sdk/knowledge/chunking'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
-import { KnowledgeArtifactStore } from '@yolk-sdk/knowledge/artifacts'
-import { KnowledgeArtifactError } from '@yolk-sdk/knowledge/errors'
-import type { PutKnowledgeArtifactInput } from '@yolk-sdk/knowledge/artifacts'
+import { KnowledgeFileBlobStore } from '@yolk-sdk/knowledge/files'
+import { KnowledgeFileError } from '@yolk-sdk/knowledge/errors'
+import type { PutKnowledgeFileInput } from '@yolk-sdk/knowledge/files'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { FileExtractor } from '@/lib/services/file-extractor/live-layer'
 import { FileExtractionError } from '@/lib/services/file-extractor/errors'
-import { createFileKnowledgeRecord } from './create-file-knowledge-record'
-import { deleteKnowledgeRecord } from './delete-knowledge-record'
+import { createFileKnowledgeDocument } from './create-file-knowledge-document'
+import { deleteKnowledgeDocument } from './delete-knowledge-document'
 import { getKnowledgeContext } from './get-knowledge-context'
 import { searchUserKnowledge } from './search-user-knowledge'
 
@@ -20,10 +20,10 @@ const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
 const embedding = (activeIndex: 0 | 1) =>
   Array.from({ length: 1536 }, (_, index) => (index === activeIndex ? 1 : 0))
 
-describeWithDb('createFileKnowledgeRecord', () => {
-  it.effect('stores original artifact and extracted representation', () => {
+describeWithDb('createFileKnowledgeDocument', () => {
+  it.effect('stores original file and chunks extracted content', () => {
     const userId = createId()
-    const puts: Array<PutKnowledgeArtifactInput> = []
+    const puts: Array<PutKnowledgeFileInput> = []
 
     const cleanup = Effect.gen(function* () {
       const db = yield* Db
@@ -41,7 +41,7 @@ describeWithDb('createFileKnowledgeRecord', () => {
       })
 
       const bytes = new TextEncoder().encode('  Alpha file knowledge.  ')
-      const object = yield* createFileKnowledgeRecord({
+      const document = yield* createFileKnowledgeDocument({
         userId,
         filename: 'alpha.txt',
         mediaType: 'text/plain',
@@ -49,69 +49,53 @@ describeWithDb('createFileKnowledgeRecord', () => {
         pinned: true
       })
 
-      const artifacts = yield* db
+      const files = yield* db
         .select()
-        .from(schema.knowledgeArtifact)
-        .where(eq(schema.knowledgeArtifact.recordId, object.id))
-      const representations = yield* db
-        .select()
-        .from(schema.knowledgeRepresentation)
-        .where(eq(schema.knowledgeRepresentation.recordId, object.id))
-      const provenance = yield* db
-        .select()
-        .from(schema.knowledgeProvenance)
-        .where(eq(schema.knowledgeProvenance.recordId, object.id))
+        .from(schema.userKnowledgeFile)
+        .where(eq(schema.userKnowledgeFile.documentId, document.id))
       const chunks = yield* db
         .select()
-        .from(schema.knowledgeRepresentationChunk)
-        .where(eq(schema.knowledgeRepresentationChunk.recordId, object.id))
+        .from(schema.userKnowledgeChunk)
+        .where(eq(schema.userKnowledgeChunk.documentId, document.id))
       const results = yield* searchUserKnowledge({ userId, query: 'Alpha file knowledge', limit: 4 })
-      const context = yield* getKnowledgeContext({ userId, recordId: object.id, position: 0, before: 2, after: 2 })
+      const context = yield* getKnowledgeContext({ userId, documentId: document.id, position: 0, before: 2, after: 2 })
       const otherUserResults = yield* searchUserKnowledge({ userId: createId(), query: 'Alpha file knowledge', limit: 4 })
       yield* db
-        .update(schema.knowledgeRecord)
-        .set({ contextPolicy: 'archived' })
-        .where(eq(schema.knowledgeRecord.id, object.id))
+        .update(schema.userKnowledgeDocument)
+        .set({ availability: 'archived' })
+        .where(eq(schema.userKnowledgeDocument.id, document.id))
       const archivedResults = yield* searchUserKnowledge({ userId, query: 'Alpha file knowledge', limit: 4 })
 
-      expect(object.userId).toBe(userId)
-      expect(object.role).toBe('source')
-      expect(object.status).toBe('ready')
-      expect(object.contextPolicy).toBe('pinned')
-      expect(object.title).toBe('alpha.txt')
+      expect(document.userId).toBe(userId)
+      expect(document.status).toBe('ready')
+      expect(document.availability).toBe('pinned')
+      expect(document.title).toBe('alpha.txt')
+      expect(document.origin).toBe('file_upload')
+      expect(document.content).toBe('Alpha file knowledge.')
       expect(puts).toHaveLength(1)
       expect(puts[0]?.mediaType).toBe('text/plain')
       expect(Array.from(puts[0]?.bytes ?? [])).toEqual(Array.from(bytes))
-      expect(puts[0]?.storageKey).toMatch(new RegExp(`^knowledge/${object.id}/original/`))
-      expect(artifacts).toHaveLength(1)
-      expect(artifacts[0]?.kind).toBe('original')
-      expect(artifacts[0]?.storageKey).toBe(puts[0]?.storageKey)
-      expect(artifacts[0]?.byteSize).toBe(bytes.byteLength)
-      expect(representations).toHaveLength(1)
-      expect(representations[0]?.artifactId).toBe(artifacts[0]?.id)
-      expect(representations[0]?.contentText).toBe('Alpha file knowledge.')
-      expect(representations[0]?.status).toBe('ready')
+      expect(puts[0]?.storageKey).toMatch(new RegExp(`^knowledge/${document.id}/original/`))
+      expect(files).toHaveLength(1)
+      expect(files[0]?.storageKey).toBe(puts[0]?.storageKey)
+      expect(files[0]?.byteSize).toBe(bytes.byteLength)
       expect(chunks).toHaveLength(1)
       expect(chunks[0]?.content).toBe('Alpha file knowledge.')
-      expect(results.map(result => result.record.id)).toEqual([object.id])
-      expect(context.record.id).toBe(object.id)
+      expect(results.map(result => result.document.id)).toEqual([document.id])
+      expect(context.document.id).toBe(document.id)
       expect(context.anchor.position).toBe(0)
       expect(context.text).toBe('Alpha file knowledge.')
       expect(otherUserResults).toEqual([])
       expect(archivedResults).toEqual([])
-      expect(provenance).toHaveLength(1)
-      expect(provenance[0]?.artifactId).toBe(artifacts[0]?.id)
-      expect(provenance[0]?.sourceKind).toBe('upload')
-      expect(provenance[0]?.sourceLabel).toBe('alpha.txt')
     }).pipe(
       Effect.ensuring(cleanup),
       Effect.provide(
-        Layer.succeed(KnowledgeArtifactStore, {
-          putArtifact: input => Effect.sync(() => {
+        Layer.succeed(KnowledgeFileBlobStore, {
+          putFile: input => Effect.sync(() => {
             puts.push(input)
           }),
-          getArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected getArtifact ${input.storageKey}` })),
-          deleteArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected deleteArtifact ${input.storageKey}` }))
+          getFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })),
+          deleteFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` }))
         })
       ),
       Effect.provide(
@@ -129,7 +113,7 @@ describeWithDb('createFileKnowledgeRecord', () => {
 
   it.effect('keeps upload bytes when extraction detaches its input buffer', () => {
     const userId = createId()
-    const puts: Array<PutKnowledgeArtifactInput> = []
+    const puts: Array<PutKnowledgeFileInput> = []
 
     const cleanup = Effect.gen(function* () {
       const db = yield* Db
@@ -147,7 +131,7 @@ describeWithDb('createFileKnowledgeRecord', () => {
       })
 
       const bytes = new Uint8Array([37, 80, 68, 70])
-      const object = yield* createFileKnowledgeRecord({
+      const document = yield* createFileKnowledgeDocument({
         userId,
         filename: 'detached.pdf',
         mediaType: 'application/pdf',
@@ -155,23 +139,23 @@ describeWithDb('createFileKnowledgeRecord', () => {
         pinned: false
       })
 
-      const artifacts = yield* db
+      const files = yield* db
         .select()
-        .from(schema.knowledgeArtifact)
-        .where(eq(schema.knowledgeArtifact.recordId, object.id))
+        .from(schema.userKnowledgeFile)
+        .where(eq(schema.userKnowledgeFile.documentId, document.id))
 
       expect(puts).toHaveLength(1)
       expect(Array.from(puts[0]?.bytes ?? [])).toEqual([37, 80, 68, 70])
-      expect(artifacts[0]?.byteSize).toBe(4)
+      expect(files[0]?.byteSize).toBe(4)
     }).pipe(
       Effect.ensuring(cleanup),
       Effect.provide(
-        Layer.succeed(KnowledgeArtifactStore, {
-          putArtifact: input => Effect.sync(() => {
+        Layer.succeed(KnowledgeFileBlobStore, {
+          putFile: input => Effect.sync(() => {
             puts.push(input)
           }),
-          getArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected getArtifact ${input.storageKey}` })),
-          deleteArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected deleteArtifact ${input.storageKey}` }))
+          getFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })),
+          deleteFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected deleteFile ${input.storageKey}` }))
         })
       ),
       Effect.provide(
@@ -179,7 +163,7 @@ describeWithDb('createFileKnowledgeRecord', () => {
           extract: input => Effect.sync(() => {
             if (input.bytes.buffer instanceof ArrayBuffer) {
               structuredClone(input.bytes.buffer, { transfer: [input.bytes.buffer] })
-              return { content: 'Detached PDF text.', metadata: { format: 'pdf' as const, title: input.filename } }
+              return { content: 'Detached PDF text.', metadata: { format: 'pdf', title: input.filename } }
             }
 
             throw new FileExtractionError({ message: 'Expected ArrayBuffer input', format: 'pdf' })
@@ -198,11 +182,11 @@ describeWithDb('createFileKnowledgeRecord', () => {
     )
   }, 30_000)
 
-  it.effect('deletes owned artifacts before deleting object rows', () => {
+  it.effect('deletes owned files before deleting document rows', () => {
     const userId = createId()
-    const recordId = createId()
-    const artifactId = createId()
-    const storageKey = `knowledge/${recordId}/original/${artifactId}`
+    const documentId = createId()
+    const fileId = createId()
+    const storageKey = `knowledge/${documentId}/original/${fileId}`
     const deleted: Array<string> = []
 
     const cleanup = Effect.gen(function* () {
@@ -219,46 +203,48 @@ describeWithDb('createFileKnowledgeRecord', () => {
         email: `${userId}@example.test`,
         emailVerified: true
       })
-      yield* db.insert(schema.knowledgeRecord).values({
-        id: recordId,
+      yield* db.insert(schema.userKnowledgeDocument).values({
+        id: documentId,
         userId,
-        role: 'source',
+        slug: `delete-me-${documentId}`,
         title: 'Delete me',
+        purpose: 'Delete test',
+        origin: 'test',
+        content: 'Delete me',
         status: 'ready',
-        contextPolicy: 'searchable',
+        availability: 'searchable',
         metadata: {}
       })
-      yield* db.insert(schema.knowledgeArtifact).values({
-        id: artifactId,
-        recordId,
-        kind: 'original',
+      yield* db.insert(schema.userKnowledgeFile).values({
+        id: fileId,
+        documentId,
         storageKey,
         mediaType: 'text/plain',
         byteSize: 5,
         metadata: {}
       })
 
-      yield* deleteKnowledgeRecord({ userId, id: recordId })
+      yield* deleteKnowledgeDocument({ userId, id: documentId })
 
-      const objects = yield* db
+      const documents = yield* db
         .select()
-        .from(schema.knowledgeRecord)
-        .where(eq(schema.knowledgeRecord.id, recordId))
-      const artifacts = yield* db
+        .from(schema.userKnowledgeDocument)
+        .where(eq(schema.userKnowledgeDocument.id, documentId))
+      const files = yield* db
         .select()
-        .from(schema.knowledgeArtifact)
-        .where(eq(schema.knowledgeArtifact.id, artifactId))
+        .from(schema.userKnowledgeFile)
+        .where(eq(schema.userKnowledgeFile.id, fileId))
 
       expect(deleted).toEqual([storageKey])
-      expect(objects).toEqual([])
-      expect(artifacts).toEqual([])
+      expect(documents).toEqual([])
+      expect(files).toEqual([])
     }).pipe(
       Effect.ensuring(cleanup),
       Effect.provide(
-        Layer.succeed(KnowledgeArtifactStore, {
-          putArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected putArtifact ${input.storageKey}` })),
-          getArtifact: input => Effect.fail(new KnowledgeArtifactError({ message: `Unexpected getArtifact ${input.storageKey}` })),
-          deleteArtifact: input => Effect.sync(() => {
+        Layer.succeed(KnowledgeFileBlobStore, {
+          putFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected putFile ${input.storageKey}` })),
+          getFile: input => Effect.fail(new KnowledgeFileError({ message: `Unexpected getFile ${input.storageKey}` })),
+          deleteFile: input => Effect.sync(() => {
             deleted.push(input.storageKey)
           })
         })

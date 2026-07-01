@@ -23,9 +23,9 @@ export type SearchAppKnowledgeOptions = {
 
 const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
   switch (scope._tag) {
-    case 'KnowledgeCollection':
+    case 'KnowledgeScope':
       return [scope.id]
-    case 'KnowledgeCollections':
+    case 'KnowledgeScopes':
       return scope.ids
   }
 }

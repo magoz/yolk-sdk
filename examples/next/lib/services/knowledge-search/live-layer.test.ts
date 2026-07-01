@@ -2,10 +2,9 @@ import { createId } from '@paralleldrive/cuid2'
 import { eq } from 'drizzle-orm'
 import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { makeKnowledgeCollection } from '@yolk-sdk/knowledge/documents'
 import { KnowledgeEmbedder } from '@yolk-sdk/knowledge/embeddings'
 import { KnowledgeExtractor } from '@yolk-sdk/knowledge/extraction'
-import { SearchIndexStore } from '@yolk-sdk/knowledge/search-store'
+import { SearchIndexStore } from '@yolk-sdk/knowledge/store'
 import { NoopKnowledgeSummarizerLive } from '@yolk-sdk/knowledge/summarization'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
@@ -68,15 +67,16 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
         emailVerified: true
       })
 
-      const set = yield* store.upsertSet(
-        makeKnowledgeCollection({
-          id: collectionId,
-          label: 'test storage',
-          embeddingConfig: { model: 'test-embedding', dimensions: 1536 },
-          chunkingConfig: { strategy: 'sentence-token', maxTokens: 8 },
-          metadata: { userId }
-        })
-      )
+      yield* db.insert(schema.knowledgeCollection).values({
+        id: collectionId,
+        userId,
+        label: 'test storage',
+        embeddingModel: 'test-embedding',
+        embeddingDimensions: 1536,
+        chunkingStrategy: 'sentence-token',
+        chunkMaxTokens: 8,
+        metadata: { userId }
+      })
 
       const [storageObject] = yield* db
         .insert(schema.storageObject)
@@ -98,7 +98,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       const processing = yield* store.upsertDocument({
         document: {
           id: documentId,
-          collectionId: set.id,
+          scopeId: collectionId,
           source: { _tag: 'Text', label: 'Test note' },
           status: 'processing',
           metadata: { storageObjectId }
@@ -106,13 +106,13 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       })
 
       yield* store.replaceDocumentChunks({
-        collectionId: set.id,
+        scopeId: collectionId,
         documentId,
         chunks: [
           {
             chunk: {
               id: `${documentId}:chunk:0`,
-              collectionId: set.id,
+              scopeId: collectionId,
               documentId,
               content: 'alpha before',
               position: 0,
@@ -123,7 +123,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
           {
             chunk: {
               id: `${documentId}:chunk:1`,
-              collectionId: set.id,
+              scopeId: collectionId,
               documentId,
               content: 'alpha match',
               position: 1,
@@ -134,7 +134,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
           {
             chunk: {
               id: `${documentId}:chunk:2`,
-              collectionId: set.id,
+              scopeId: collectionId,
               documentId,
               content: 'beta after',
               position: 2,
@@ -146,7 +146,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       })
 
       const ready = yield* store.markDocumentReady({
-        collectionId: set.id,
+        scopeId: collectionId,
         documentId,
         title: 'Test note',
         summary: 'Test summary',
@@ -156,26 +156,26 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       })
 
       const results = yield* store.searchChunks({
-        scope: { _tag: 'KnowledgeCollection', id: set.id },
+        scope: { _tag: 'KnowledgeScope', id: collectionId },
         embedding: embedding(0),
         limit: 2,
         minScore: 0.8
       })
       const textResults = yield* store.searchChunksByText({
-        scope: { _tag: 'KnowledgeCollection', id: set.id },
+        scope: { _tag: 'KnowledgeScope', id: collectionId },
         query: 'beta after',
         limit: 2
       })
 
       const context = yield* store.getContextChunks({
-        collectionId: set.id,
+        scopeId: collectionId,
         documentId,
         position: 1,
         contextChunks: 1
       })
-      const listed = yield* getKnowledgeDocuments({ userId, collectionId: set.id })
+      const listed = yield* getKnowledgeDocuments({ userId, collectionId })
       const document = yield* getKnowledgeDocument({ userId, documentId })
-      const withContent = yield* getKnowledgeDocumentsContent({ userId, collectionId: set.id })
+      const withContent = yield* getKnowledgeDocumentsContent({ userId, collectionId })
       const chunks = yield* getKnowledgeChunks({ userId, chunkIds: [`${documentId}:chunk:1`] })
       const updated = yield* updateKnowledgeDocument({
         userId,
@@ -184,7 +184,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
       })
       const appSearchResults = yield* searchAppKnowledge({
         userId,
-        scope: { _tag: 'KnowledgeCollection', id: set.id },
+        scope: { _tag: 'KnowledgeScope', id: collectionId },
         query: 'alpha',
         options: { limit: 1, contextChunks: 1 }
       })
@@ -201,9 +201,9 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
         chunkIds: [`${documentId}:chunk:1`]
       })
 
-      yield* store.deleteDocument({ collectionId: set.id, documentId })
+      yield* store.deleteDocument({ scopeId: collectionId, documentId })
       const afterDelete = yield* store.searchChunks({
-        scope: { _tag: 'KnowledgeCollection', id: set.id },
+        scope: { _tag: 'KnowledgeScope', id: collectionId },
         embedding: embedding(0),
         limit: 2,
         minScore: 0.8
