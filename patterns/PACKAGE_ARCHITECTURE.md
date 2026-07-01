@@ -30,7 +30,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/client/node`
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
-- `@yolk-sdk/knowledge` owns knowledge search/chunking/embedding/vector-store contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
+- `@yolk-sdk/knowledge` owns knowledge document/file/context/search contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; agent integration lives behind `@yolk-sdk/sandbox/agent`, and Vercel provider code lives behind `@yolk-sdk/sandbox/vercel`.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, while hosts own concrete Workflow directives.

@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.31
+
+### Patch Changes
+
+- Simplify knowledge to document, file, chunk, context, and search contracts.
+
 ## 0.1.0-canary.30
 
 ## 0.1.0-canary.29

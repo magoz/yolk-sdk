@@ -53,4 +53,4 @@
 - Reject empty ids/slugs/titles/purpose/origin/content and invalid numeric counts.
 - Keep root exports explicit; do not use broad `export *` barrels.
 - Keep package APIs generic; host apps own all policy and IO.
-- Do not reintroduce record/artifact/representation/provenance/link graph concepts into core knowledge without explicit product need.
+- Do not reintroduce previous graph-model concepts into core knowledge without explicit product need.

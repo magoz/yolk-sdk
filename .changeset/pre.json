@@ -9,10 +9,12 @@
     "@yolk-sdk/knowledge": "0.0.0",
     "@yolk-sdk/mcp": "0.0.0",
     "@yolk-sdk/vercel-workflows": "0.0.0",
-    "@yolk-sdk/sandbox": "0.1.0-canary.17"
+    "@yolk-sdk/sandbox": "0.1.0-canary.17",
+    "@yolk-docs/site": "0.0.0"
   },
   "changesets": [
     "brave-hitl-rules",
+    "bright-knowledge-documents",
     "brisk-claude-streams",
     "curvy-claude-headers",
     "durable-runs-follow",
