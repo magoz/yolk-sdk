@@ -40,3 +40,4 @@ export {
   VoiceUserTranscriptDelta,
   VoiceUserTranscriptFinal
 } from './protocol.ts'
+export { VoiceTransport, type VoiceTransportApi } from './transport.ts'

@@ -24,7 +24,8 @@
 | `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers           |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory               |
 | `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog  |
-| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice tool-call bridge   |
+| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contract, tool-call bridge |
+| `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport            |
 
 ## Boundaries
 
@@ -40,6 +41,7 @@
 - Tools depend on protocol + loop only.
 - OAuth and skillset depend on Effect only.
 - Voice depends on protocol + loop only.
+- `voice/browser` is the only DOM/WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes.
 - React depends on client + protocol only.
 - Providers depend on protocol + loop + oauth only; `providers/openai/realtime` may also depend on voice for provider-event-to-`VoiceEvent` mapping.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.

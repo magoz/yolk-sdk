@@ -33,7 +33,8 @@ const packages: ReadonlyArray<PackageShape> = [
       './runtime',
       './skillset',
       './tools',
-      './voice'
+      './voice',
+      './voice/browser'
     ]
   },
   {

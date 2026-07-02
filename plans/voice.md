@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phase 1 (protocol + OpenAI codecs) implemented.
+Execution status: IN PROGRESS. Phases 1-2 implemented (protocol, OpenAI codecs, browser WebRTC transport).
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -381,9 +381,9 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### WebRTC
 
-- [ ] VOICE-30 Add browser WebRTC transport.
-- [ ] VOICE-31 Add fake WebRTC seam.
-- [ ] VOICE-32 Add lifecycle cleanup tests.
+- [x] VOICE-30 Add browser WebRTC transport.
+- [x] VOICE-31 Add fake WebRTC seam.
+- [x] VOICE-32 Add lifecycle cleanup tests.
 - [ ] VOICE-33 Add example route integration for SDP/token flow.
 
 ### Tools/HITL

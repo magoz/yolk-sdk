@@ -106,6 +106,10 @@
     "./voice": {
       "types": "./src/voice/index.ts",
       "default": "./src/voice/index.ts"
+    },
+    "./voice/browser": {
+      "types": "./src/voice/browser/index.ts",
+      "default": "./src/voice/browser/index.ts"
     }
   },
   "files": [
@@ -219,6 +223,11 @@
         "types": "./dist/voice/index.d.mts",
         "import": "./dist/voice/index.mjs",
         "default": "./dist/voice/index.mjs"
+      },
+      "./voice/browser": {
+        "types": "./dist/voice/browser/index.d.mts",
+        "import": "./dist/voice/browser/index.mjs",
+        "default": "./dist/voice/browser/index.mjs"
       }
     }
   },
