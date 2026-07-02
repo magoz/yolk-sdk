@@ -44,3 +44,4 @@ export {
   type OpenAiRealtimeVoice
 } from './session-config.ts'
 export { openAiRealtimeServerEventToVoiceEvents } from './to-voice.ts'
+export { openAiRealtimeVoiceClientCodec } from './client-codec.ts'

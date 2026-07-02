@@ -32,12 +32,29 @@ export {
   VoiceStopAudioInput,
   VoiceSubmitHitlResponse,
   VoiceSubmitToolOutput,
+  VoiceToolCall,
+  VoiceToolCallApprovalRequiredOutcome,
   VoiceToolCallCompleted,
+  VoiceToolCallExecutedOutcome,
   VoiceToolCallExecuting,
   VoiceToolCallFailed,
-  VoiceToolCallRequested,
+  VoiceToolCallOutcome,
+  VoiceToolCallsRequested,
+  VoiceSessionToolCallRequest,
   VoiceTurnDetection,
   VoiceUserTranscriptDelta,
   VoiceUserTranscriptFinal
 } from './protocol.ts'
 export { VoiceTransport, type VoiceTransportApi } from './transport.ts'
+export { type VoiceClientCodec } from './client-codec.ts'
+export {
+  makeVoiceController,
+  type VoiceControllerApi,
+  type VoiceControllerOptions
+} from './controller.ts'
+export {
+  decideVoiceToolCall,
+  handleVoiceToolCall,
+  voiceApprovalRequestId,
+  type VoiceToolCallDecision
+} from './tool-server.ts'

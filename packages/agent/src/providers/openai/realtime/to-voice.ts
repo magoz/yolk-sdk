@@ -4,7 +4,8 @@ import {
   VoiceErrorEvent,
   VoiceInterrupted,
   VoiceSessionOpened,
-  VoiceToolCallRequested,
+  VoiceToolCall,
+  VoiceToolCallsRequested,
   VoiceUserTranscriptDelta,
   VoiceUserTranscriptFinal,
   type VoiceEvent
@@ -49,14 +50,19 @@ export const openAiRealtimeServerEventToVoiceEvents = (
       return event.status === 'cancelled'
         ? [VoiceInterrupted.make({ responseId: event.responseId })]
         : []
-    case 'FunctionCalls':
-      return event.calls.map(call =>
-        VoiceToolCallRequested.make({
+    case 'FunctionCalls': {
+      const [first, ...rest] = event.calls.map(call =>
+        VoiceToolCall.make({
           callId: call.callId,
           name: call.name,
           argumentsJson: call.argumentsJson
         })
       )
+
+      return first === undefined
+        ? []
+        : [VoiceToolCallsRequested.make({ calls: [first, ...rest] })]
+    }
     case 'Error':
       return [VoiceErrorEvent.make({ code: 'provider_error', message: event.message })]
     case 'Ignored':

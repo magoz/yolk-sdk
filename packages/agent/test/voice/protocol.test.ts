@@ -15,7 +15,8 @@ import {
   VoiceSendText,
   VoiceSessionConfig,
   VoiceSubmitHitlResponse,
-  VoiceToolCallRequested,
+  VoiceToolCall,
+  VoiceToolCallsRequested,
   VoiceUserTranscriptFinal
 } from '../../src/voice/index.ts'
 
@@ -37,10 +38,14 @@ describe('voice protocol', () => {
     Effect.gen(function* () {
       const events: ReadonlyArray<VoiceEvent> = [
         VoiceUserTranscriptFinal.make({ itemId: 'item_1', text: 'Hello' }),
-        VoiceToolCallRequested.make({
-          callId: 'call_1',
-          name: 'web_search',
-          argumentsJson: '{"query":"weather"}'
+        VoiceToolCallsRequested.make({
+          calls: [
+            VoiceToolCall.make({
+              callId: 'call_1',
+              name: 'web_search',
+              argumentsJson: '{"query":"weather"}'
+            })
+          ]
         })
       ]
 

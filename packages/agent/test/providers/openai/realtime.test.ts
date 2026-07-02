@@ -135,7 +135,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
     ])
   })
 
-  it('maps function calls to tool call requests', () => {
+  it('maps same-turn function calls to one tool call batch', () => {
     expect(
       decodeToVoice(
         JSON.stringify({
@@ -149,8 +149,13 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      { _tag: 'ToolCallRequested', callId: 'call_1', name: 'a', argumentsJson: '{}' },
-      { _tag: 'ToolCallRequested', callId: 'call_2', name: 'b', argumentsJson: '{}' }
+      {
+        _tag: 'ToolCallsRequested',
+        calls: [
+          { callId: 'call_1', name: 'a', argumentsJson: '{}' },
+          { callId: 'call_2', name: 'b', argumentsJson: '{}' }
+        ]
+      }
     ])
   })
 

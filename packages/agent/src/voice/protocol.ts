@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { HitlRequest, HitlResponse } from '@yolk-sdk/agent/protocol'
+import { HitlRequest, HitlResponse, ToolApprovalRequest } from '@yolk-sdk/agent/protocol'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -197,15 +197,24 @@ export class VoiceInterrupted extends Schema.TaggedClass<VoiceInterrupted>()('In
 }) {}
 
 /**
- * Provider requested a host tool call mid-session. Arguments stay a raw JSON
- * string; the server-side tool bridge parses/validates before execution.
+ * One provider-requested host tool call. Arguments stay a raw JSON string;
+ * the server-side tool bridge parses/validates before execution.
  */
-export class VoiceToolCallRequested extends Schema.TaggedClass<VoiceToolCallRequested>()(
-  'ToolCallRequested',
+export class VoiceToolCall extends Schema.Class<VoiceToolCall>('VoiceToolCall')({
+  callId: NonEmptyTrimmedString,
+  name: NonEmptyTrimmedString,
+  argumentsJson: Schema.String
+}) {}
+
+/**
+ * Provider requested one or more host tool calls in the same model turn.
+ * Same-turn calls form one batch: outputs are submitted per call and the
+ * follow-up response turn is requested once per batch.
+ */
+export class VoiceToolCallsRequested extends Schema.TaggedClass<VoiceToolCallsRequested>()(
+  'ToolCallsRequested',
   {
-    callId: NonEmptyTrimmedString,
-    name: NonEmptyTrimmedString,
-    argumentsJson: Schema.String
+    calls: Schema.NonEmptyArray(VoiceToolCall)
   }
 ) {}
 
@@ -259,7 +268,7 @@ export const VoiceEvent = Schema.Union([
   VoiceAssistantAudioStarted,
   VoiceAssistantAudioStopped,
   VoiceInterrupted,
-  VoiceToolCallRequested,
+  VoiceToolCallsRequested,
   VoiceToolCallExecuting,
   VoiceToolCallCompleted,
   VoiceToolCallFailed,
@@ -267,3 +276,46 @@ export const VoiceEvent = Schema.Union([
   VoiceErrorEvent
 ])
 export type VoiceEvent = typeof VoiceEvent.Type
+
+// --- Tool call outcomes ------------------------------------------------------
+
+/** Server executed the tool; `output` is the model-visible JSON string. */
+export class VoiceToolCallExecutedOutcome extends Schema.TaggedClass<VoiceToolCallExecutedOutcome>()(
+  'Executed',
+  {
+    callId: NonEmptyTrimmedString,
+    output: Schema.String
+  }
+) {}
+
+/**
+ * Tool policy requires manual approval. The tool has not executed; the host
+ * surfaces the protocol approval request and resumes through HITL responses.
+ */
+export class VoiceToolCallApprovalRequiredOutcome extends Schema.TaggedClass<VoiceToolCallApprovalRequiredOutcome>()(
+  'ApprovalRequired',
+  {
+    request: ToolApprovalRequest
+  }
+) {}
+
+/** Server-side voice tool endpoint response contract. */
+export const VoiceToolCallOutcome = Schema.Union([
+  VoiceToolCallExecutedOutcome,
+  VoiceToolCallApprovalRequiredOutcome
+])
+export type VoiceToolCallOutcome = typeof VoiceToolCallOutcome.Type
+
+/**
+ * Server-side voice tool endpoint request contract. `sessionId` binds the
+ * call to a server-created voice session; hosts must authenticate the caller
+ * and re-resolve tool policy for that session before execution.
+ */
+export class VoiceSessionToolCallRequest extends Schema.Class<VoiceSessionToolCallRequest>(
+  'VoiceSessionToolCallRequest'
+)({
+  sessionId: NonEmptyTrimmedString,
+  callId: NonEmptyTrimmedString,
+  name: NonEmptyTrimmedString,
+  argumentsJson: Schema.String
+}) {}

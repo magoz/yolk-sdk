@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phases 1-2 implemented (protocol, OpenAI codecs, browser WebRTC transport).
+Execution status: IN PROGRESS. Phases 1-3 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler).
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -369,7 +369,7 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 - [x] VOICE-10 Add voice command/event/config schemas.
 - [x] VOICE-11 Add voice error schemas.
-- [ ] VOICE-12 Add voice controller service contracts.
+- [x] VOICE-12 Add voice controller service contracts.
 - [ ] VOICE-13 Add transcript projector contract.
 
 ### OpenAI realtime
@@ -388,13 +388,13 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### Tools/HITL
 
-- [ ] VOICE-40 Bind voice tool calls to sessions.
-- [ ] VOICE-41 Enforce voice tool policy server-side.
+- [ ] VOICE-40 Bind voice tool calls to sessions (contract shipped; example route wiring pending).
+- [x] VOICE-41 Enforce voice tool policy server-side (`decideVoiceToolCall`/`handleVoiceToolCall`; approval-gated tools never execute).
 - [ ] VOICE-42 Add manual approval flow with persisted pending state.
 - [ ] VOICE-43 Document voice `question` deferral.
-- [ ] VOICE-44 Add duplicate/idempotent tool-call handling.
+- [x] VOICE-44 Add duplicate/idempotent tool-call handling (client controller de-dupe; durable server de-dupe lands with Phase 5 log).
 - [ ] VOICE-45 Add approve-after-session-death resume path.
-- [ ] VOICE-46 Define server tool endpoint contract replacing generic `/api/agent/realtime/tool`.
+- [x] VOICE-46 Define server tool endpoint contract (`VoiceSessionToolCallRequest` / `VoiceToolCallOutcome`).
 
 ### Durability
 
