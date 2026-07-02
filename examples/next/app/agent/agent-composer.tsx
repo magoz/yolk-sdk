@@ -14,6 +14,7 @@ import Image from 'next/image'
 import { Array as Arr, Option } from 'effect'
 import {
   ArrowUpIcon,
+  AudioLinesIcon,
   BrainIcon,
   ChevronDownIcon,
   FileTextIcon,
@@ -24,10 +25,11 @@ import {
   PhoneOffIcon,
   SquareIcon,
   TerminalIcon,
+  Volume2Icon,
+  VolumeXIcon,
   XIcon
 } from 'lucide-react'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
-import type { VoiceInputMode } from './voice-input-mode'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -91,9 +93,10 @@ type AgentComposerProps = {
   readonly isVoiceMode: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
-  readonly voiceInputMode: VoiceInputMode
   readonly isHoldRecording: boolean
   readonly isHoldTranscribing: boolean
+  readonly ttsEnabled: boolean
+  readonly isTtsSpeaking: boolean
   readonly imageInputSupported: boolean
   readonly documentInputSupported: boolean
   readonly textModel: AgentTextModel
@@ -115,6 +118,7 @@ type AgentComposerProps = {
   readonly onToggleVoice: () => void
   readonly onHoldStart: () => void
   readonly onHoldEnd: () => void
+  readonly onToggleTts: () => void
 }
 
 export function AgentComposer({
@@ -124,9 +128,10 @@ export function AgentComposer({
   isVoiceMode,
   isVoiceConnecting,
   isVoiceLive,
-  voiceInputMode,
   isHoldRecording,
   isHoldTranscribing,
+  ttsEnabled,
+  isTtsSpeaking,
   imageInputSupported,
   documentInputSupported,
   textModel,
@@ -147,7 +152,8 @@ export function AgentComposer({
   onStop,
   onToggleVoice,
   onHoldStart,
-  onHoldEnd
+  onHoldEnd,
+  onToggleTts
 }: AgentComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -321,7 +327,7 @@ export function AgentComposer({
   const hint = isVoiceMode
     ? 'Voice mode active'
     : isHoldRecording
-      ? 'Recording · release to send'
+      ? 'Recording · release to transcribe into the input'
       : isHoldTranscribing
         ? 'Transcribing'
         : isRunning
@@ -584,55 +590,72 @@ export function AgentComposer({
               <ImageIcon />
               <span className="sr-only">Attach files</span>
             </Button>
-            {voiceInputMode === 'hold' ? (
-              <Button
-                type="button"
-                size="icon-lg"
-                variant={isHoldRecording ? 'destructive' : 'outline'}
-                disabled={isRunning || isHoldTranscribing}
-                aria-pressed={isHoldRecording}
-                title="Hold to speak"
-                className="size-10 touch-none select-none rounded-full"
-                onPointerDown={event => {
-                  event.preventDefault()
-                  event.currentTarget.setPointerCapture(event.pointerId)
-                  onHoldStart()
-                }}
-                onPointerUp={onHoldEnd}
-                onPointerCancel={onHoldEnd}
-                onContextMenu={event => event.preventDefault()}
-              >
-                {isHoldTranscribing ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : (
-                  <MicIcon className={isHoldRecording ? 'animate-pulse' : undefined} />
-                )}
-                <span className="sr-only">
-                  {isHoldRecording ? 'Release to send' : 'Hold to speak'}
-                </span>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="icon-lg"
-                variant={isVoiceMode ? 'destructive' : 'outline'}
-                onClick={onToggleVoice}
-                disabled={isRunning}
-                aria-pressed={isVoiceMode}
-                className="size-10 rounded-full"
-              >
-                {isVoiceConnecting ? (
-                  <LoaderCircleIcon className="animate-spin" />
-                ) : isVoiceLive ? (
-                  <PhoneOffIcon />
-                ) : (
-                  <MicIcon />
-                )}
-                <span className="sr-only">
-                  {isVoiceMode ? 'Stop voice mode' : 'Start voice mode'}
-                </span>
-              </Button>
-            )}
+            <Button
+              type="button"
+              size="icon-lg"
+              variant={isHoldRecording ? 'destructive' : 'outline'}
+              disabled={isVoiceMode || isHoldTranscribing}
+              aria-pressed={isHoldRecording}
+              title="Hold to speak · transcription lands in the input"
+              className="size-10 touch-none select-none rounded-full"
+              onPointerDown={event => {
+                event.preventDefault()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                onHoldStart()
+              }}
+              onPointerUp={onHoldEnd}
+              onPointerCancel={onHoldEnd}
+              onContextMenu={event => event.preventDefault()}
+            >
+              {isHoldTranscribing ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <MicIcon className={isHoldRecording ? 'animate-pulse' : undefined} />
+              )}
+              <span className="sr-only">
+                {isHoldRecording ? 'Release to transcribe' : 'Hold to speak'}
+              </span>
+            </Button>
+            <Button
+              type="button"
+              size="icon-lg"
+              variant={isVoiceMode ? 'destructive' : 'outline'}
+              onClick={onToggleVoice}
+              disabled={isRunning || isHoldRecording || isHoldTranscribing}
+              aria-pressed={isVoiceMode}
+              title="Realtime voice conversation"
+              className="size-10 rounded-full"
+            >
+              {isVoiceConnecting ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : isVoiceLive ? (
+                <PhoneOffIcon />
+              ) : (
+                <AudioLinesIcon />
+              )}
+              <span className="sr-only">
+                {isVoiceMode ? 'Stop realtime voice' : 'Start realtime voice'}
+              </span>
+            </Button>
+            <Button
+              type="button"
+              size="icon-lg"
+              variant={ttsEnabled ? 'secondary' : 'outline'}
+              onClick={onToggleTts}
+              disabled={isVoiceMode}
+              aria-pressed={ttsEnabled}
+              title={ttsEnabled ? 'Stop speaking replies' : 'Speak replies aloud'}
+              className="size-10 rounded-full"
+            >
+              {ttsEnabled ? (
+                <Volume2Icon className={isTtsSpeaking ? 'animate-pulse' : undefined} />
+              ) : (
+                <VolumeXIcon />
+              )}
+              <span className="sr-only">
+                {ttsEnabled ? 'Disable spoken replies' : 'Enable spoken replies'}
+              </span>
+            </Button>
             {isRunning ? (
               <Button
                 type="button"

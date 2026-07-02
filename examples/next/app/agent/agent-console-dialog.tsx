@@ -6,7 +6,6 @@ import type { AgentRunStatus } from '@yolk-sdk/agent/client'
 import type { AgentReasoningEffort, AgentUsage } from '@yolk-sdk/agent/protocol'
 import type { AgentTextModel } from '@/lib/agents/text-agent-config'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
-import type { VoiceInputMode } from './voice-input-mode'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import type { VoiceStatus } from './use-realtime-voice'
@@ -49,15 +48,12 @@ type AgentConsoleDialogProps = {
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
   readonly transcriptionModelDisabled: boolean
-  readonly voiceInputMode: VoiceInputMode
-  readonly voiceInputModeDisabled: boolean
   readonly showInlineTools: boolean
   readonly showReasoning: boolean
   readonly onOpenChange: (open: boolean) => void
   readonly onTextModelChange: (model: AgentTextModel) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
   readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
-  readonly onVoiceInputModeChange: (mode: VoiceInputMode) => void
   readonly onShowInlineToolsChange: (checked: boolean) => void
   readonly onShowReasoningChange: (checked: boolean) => void
 }
@@ -79,15 +75,12 @@ export function AgentConsoleDialog({
   reasoningEffortDisabled,
   transcriptionModel,
   transcriptionModelDisabled,
-  voiceInputMode,
-  voiceInputModeDisabled,
   showInlineTools,
   showReasoning,
   onOpenChange,
   onTextModelChange,
   onReasoningEffortChange,
   onTranscriptionModelChange,
-  onVoiceInputModeChange,
   onShowInlineToolsChange,
   onShowReasoningChange
 }: AgentConsoleDialogProps) {
@@ -173,12 +166,9 @@ export function AgentConsoleDialog({
           reasoningEffortDisabled={reasoningEffortDisabled}
           transcriptionModel={transcriptionModel}
           transcriptionModelDisabled={transcriptionModelDisabled}
-          voiceInputMode={voiceInputMode}
-          voiceInputModeDisabled={voiceInputModeDisabled}
           onTextModelChange={onTextModelChange}
           onReasoningEffortChange={onReasoningEffortChange}
           onTranscriptionModelChange={onTranscriptionModelChange}
-          onVoiceInputModeChange={onVoiceInputModeChange}
         />
       </div>
     </dialog>

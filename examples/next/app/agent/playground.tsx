@@ -59,7 +59,6 @@ import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
-import { type VoiceInputMode } from './voice-input-mode'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
@@ -564,11 +563,11 @@ export function AgentPlayground({
   }, [recordActivity, runtime, workflowRunId])
   const agentTransport = cloudflareTransport ?? workflowTransport
 
-  const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>('realtime')
-  const speakNextRunRef = useRef(false)
-  const submitTranscriptRef = useRef<(text: string) => void>(() => {})
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const ttsEnabledRef = useRef(false)
+  const appendTranscriptRef = useRef<(text: string) => void>(() => {})
   const holdToSpeak = useHoldToSpeak({
-    onTranscript: text => submitTranscriptRef.current(text),
+    onTranscript: text => appendTranscriptRef.current(text),
     onError: message =>
       recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
   })
@@ -577,20 +576,9 @@ export function AgentPlayground({
     (event: AgentEvent) => {
       recordAgentEvent(event)
 
-      if (!speakNextRunRef.current) {
+      if (!ttsEnabledRef.current || event._tag !== 'AgentEnd') {
         return
       }
-
-      if (event._tag === 'AgentError') {
-        speakNextRunRef.current = false
-        return
-      }
-
-      if (event._tag !== 'AgentEnd') {
-        return
-      }
-
-      speakNextRunRef.current = false
 
       const lastAssistant = Arr.findLast(event.messages, message => message._tag === 'Assistant')
 
@@ -639,7 +627,6 @@ export function AgentPlayground({
     userDraft: voiceUserDraft,
     isConnecting: isVoiceConnecting,
     isLive: isVoiceLive,
-    stopSession: stopVoiceSession,
     toggleSession: toggleVoice
   } = useRealtimeVoice({
     sessionId,
@@ -651,50 +638,40 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
-  const isHoldBusy = holdToSpeak.isRecording || holdToSpeak.isTranscribing
 
   useEffect(() => {
-    submitTranscriptRef.current = text => {
-      const result = submitMessage(UserMessage.make({ content: text }))
+    appendTranscriptRef.current = text => {
+      setInput(current => {
+        const trimmed = current.trimEnd()
 
-      if (result._tag === 'Submitted') {
-        speakNextRunRef.current = true
-        recordActivity({
-          title: 'Hold to speak transcript',
-          detail: truncate(text),
-          tone: 'neutral'
-        })
-        return
-      }
-
+        return trimmed.length === 0 ? text : `${trimmed} ${text}`
+      })
       recordActivity({
-        title: 'Hold to speak transcript ignored',
+        title: 'Hold to speak transcript',
         detail: truncate(text),
-        tone: 'error'
+        tone: 'neutral'
       })
     }
-  }, [recordActivity, submitMessage])
+  }, [recordActivity])
 
-  const handleVoiceInputModeChange = useCallback(
-    (mode: VoiceInputMode) => {
-      setVoiceInputMode(mode)
+  const stopTtsPlayback = holdToSpeak.stopPlayback
+  const handleToggleTts = useCallback(() => {
+    setTtsEnabled(current => {
+      const next = !current
+      ttsEnabledRef.current = next
 
-      if (mode === 'hold' && (isVoiceConnecting || isVoiceLive)) {
-        stopVoiceSession()
+      if (!next) {
+        stopTtsPlayback()
       }
 
-      if (mode === 'realtime') {
-        speakNextRunRef.current = false
-        holdToSpeak.stopPlayback()
-      }
-    },
-    [holdToSpeak, isVoiceConnecting, isVoiceLive, stopVoiceSession]
-  )
+      return next
+    })
+  }, [stopTtsPlayback])
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const documentInputSupported = agentTextCapabilities.input.document
-  const submitDisabled = isTextBusy || isVoiceMode || isHoldBusy
-  const messageActionsDisabled = isTextBusy || isVoiceMode || isHoldBusy
+  const submitDisabled = isTextBusy || isVoiceMode
+  const messageActionsDisabled = isTextBusy || isVoiceMode
   const hitlActionsDisabled = isRunning || isWorkflowResuming || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
@@ -1182,9 +1159,10 @@ export function AgentPlayground({
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
-            voiceInputMode={voiceInputMode}
             isHoldRecording={holdToSpeak.isRecording}
             isHoldTranscribing={holdToSpeak.isTranscribing}
+            ttsEnabled={ttsEnabled}
+            isTtsSpeaking={holdToSpeak.isSpeaking}
             imageInputSupported={imageInputSupported}
             documentInputSupported={documentInputSupported}
             textModel={textModel}
@@ -1206,6 +1184,7 @@ export function AgentPlayground({
             onToggleVoice={toggleVoice}
             onHoldStart={holdToSpeak.startRecording}
             onHoldEnd={holdToSpeak.stopRecording}
+            onToggleTts={handleToggleTts}
           />
         </section>
       </div>
@@ -1225,16 +1204,13 @@ export function AgentPlayground({
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isTextBusy}
         transcriptionModel={transcriptionModel}
-        transcriptionModelDisabled={isVoiceMode || voiceInputMode === 'hold'}
-        voiceInputMode={voiceInputMode}
-        voiceInputModeDisabled={isVoiceMode || isHoldBusy}
+        transcriptionModelDisabled={isVoiceMode}
         showInlineTools={showInlineTools}
         showReasoning={showReasoning}
         onOpenChange={handleConsoleOpenChange}
         onTextModelChange={setTextModel}
         onReasoningEffortChange={setReasoningEffort}
         onTranscriptionModelChange={setTranscriptionModel}
-        onVoiceInputModeChange={handleVoiceInputModeChange}
         onShowInlineToolsChange={handleInlineToolsChange}
         onShowReasoningChange={handleReasoningChange}
       />
