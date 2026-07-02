@@ -18,7 +18,7 @@
     "start:docs": "pnpm --filter @yolk-docs/site start",
     "docs:typegen": "pnpm --filter @yolk-docs/site typegen",
     "docs:check": "pnpm --filter @yolk-docs/site check",
-    "tsc": "pnpm docs:typegen && tsc --noEmit",
+    "tsc": "pnpm docs:check && tsc --noEmit",
     "lint": "eslint .",
     "check": "pnpm tsc && pnpm lint && pnpm docs:check && pnpm --filter './packages/*' check && pnpm cloudflare:check",
     "packages:build": "pnpm --filter './packages/*' build",

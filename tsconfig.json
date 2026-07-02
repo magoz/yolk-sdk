@@ -41,5 +41,5 @@
     "examples/*/.next/types/**/*.ts",
     "examples/*/.next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", ".repos", "apps/*/.next"]
+  "exclude": ["node_modules", ".repos", "apps/*/.next", "apps/docs"]
 }
