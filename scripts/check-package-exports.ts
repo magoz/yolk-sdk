@@ -32,6 +32,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './providers/openai/codex-provider',
       './providers/openai/provider',
       './providers/openai/realtime',
+      './providers/openai/speech',
       './react',
       './runtime',
       './skillset',

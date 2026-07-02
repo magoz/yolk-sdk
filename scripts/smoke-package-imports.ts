@@ -29,6 +29,7 @@ const packages: ReadonlyArray<PackageShape> = [
       './providers/openai/codex-provider',
       './providers/openai/provider',
       './providers/openai/realtime',
+      './providers/openai/speech',
       './react',
       './runtime',
       './skillset',

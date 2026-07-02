@@ -1,0 +1,141 @@
+import { Effect, Layer, Redacted } from 'effect'
+import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
+import { describe, expect, it } from '@effect/vitest'
+import {
+  speechResultToAudioPart,
+  VoiceSpeechRequest,
+  VoiceSpeechSynthesizer,
+  VoiceTranscriber
+} from '@yolk-sdk/agent/voice'
+import {
+  makeOpenAiSpeechSynthesizerLayer,
+  makeOpenAiTranscriberLayer
+} from '../../../src/providers/openai/speech.ts'
+
+type CapturedRequest = {
+  readonly request: HttpClientRequest.HttpClientRequest
+}
+
+const makeHttpClientLayer = (
+  makeResponse: () => Response,
+  requests: Array<CapturedRequest>
+): Layer.Layer<HttpClient.HttpClient> =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request =>
+      Effect.sync(() => {
+        requests.push({ request })
+
+        return HttpClientResponse.fromWeb(request, makeResponse())
+      })
+    )
+  )
+
+const config = { apiKey: Redacted.make('test-key') }
+
+describe('makeOpenAiSpeechSynthesizerLayer', () => {
+  it.effect('synthesizes audio and maps output format to a MIME type', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const audioBytes = new Uint8Array([1, 2, 3, 4])
+      const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
+        Layer.provide(
+          makeHttpClientLayer(
+            () => new Response(audioBytes.slice().buffer, { status: 200 }),
+            requests
+          )
+        )
+      )
+      const result = yield* Effect.gen(function* () {
+        const synthesizer = yield* VoiceSpeechSynthesizer
+
+        return yield* synthesizer.synthesize(
+          VoiceSpeechRequest.make({ text: 'Hello world', voice: 'marin' })
+        )
+      }).pipe(Effect.provide(layer))
+
+      expect(result.mimeType).toBe('audio/mpeg')
+      expect([...result.audio]).toEqual([1, 2, 3, 4])
+      expect(requests[0]?.request.url).toBe('https://api.openai.com/v1/audio/speech')
+      expect(requests[0]?.request.headers.authorization).toBe('Bearer test-key')
+
+      const part = speechResultToAudioPart(result, { filename: 'hello.mp3' })
+
+      expect(part._tag).toBe('Audio')
+      expect(part.mimeType).toBe('audio/mpeg')
+      expect(part.source._tag).toBe('InlineBase64')
+    })
+  )
+
+  it.effect('fails with a safe provider error on non-2xx responses', () =>
+    Effect.gen(function* () {
+      const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
+        Layer.provide(makeHttpClientLayer(() => new Response('nope', { status: 429 }), []))
+      )
+      const error = yield* Effect.gen(function* () {
+        const synthesizer = yield* VoiceSpeechSynthesizer
+
+        return yield* synthesizer.synthesize(VoiceSpeechRequest.make({ text: 'Hello' }))
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({ code: 'provider_error' })
+      expect(error.message).toContain('429')
+      expect(error.message).not.toContain('nope')
+    })
+  )
+})
+
+describe('makeOpenAiTranscriberLayer', () => {
+  it.effect('transcribes audio with verbose json metadata', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiTranscriberLayer(config).pipe(
+        Layer.provide(
+          makeHttpClientLayer(
+            () =>
+              Response.json({
+                text: 'Hello there',
+                language: 'english',
+                duration: 1.5,
+                segments: [{ text: 'Hello there', start: 0, end: 1.5 }]
+              }),
+            requests
+          )
+        )
+      )
+      const result = yield* Effect.gen(function* () {
+        const transcriber = yield* VoiceTranscriber
+
+        return yield* transcriber.transcribe({
+          audio: new Uint8Array([9, 9]),
+          mimeType: 'audio/mpeg',
+          language: 'en'
+        })
+      }).pipe(Effect.provide(layer))
+
+      expect(result.text).toBe('Hello there')
+      expect(result.language).toBe('english')
+      expect(result.durationSeconds).toBe(1.5)
+      expect(result.segments?.[0]).toMatchObject({ text: 'Hello there', startSeconds: 0 })
+      expect(requests[0]?.request.url).toBe('https://api.openai.com/v1/audio/transcriptions')
+    })
+  )
+
+  it.effect('fails with a safe provider error for malformed responses', () =>
+    Effect.gen(function* () {
+      const layer = makeOpenAiTranscriberLayer(config).pipe(
+        Layer.provide(
+          makeHttpClientLayer(() => Response.json({ transcriptText: 'wrong shape' }), [])
+        )
+      )
+      const error = yield* Effect.gen(function* () {
+        const transcriber = yield* VoiceTranscriber
+
+        return yield* transcriber.transcribe({ audio: new Uint8Array([1]), mimeType: 'audio/wav' })
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({ code: 'provider_error' })
+      expect(error.message).toContain('unexpected shape')
+    })
+  )
+})

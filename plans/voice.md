@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phases 1-6 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids, `useYolkVoice` React hook + Next example migration). Next: Phase 7 WebSocket transport, Phase 8 STT/TTS, Phase 9 docs.
+Execution status: IN PROGRESS. Phases 1-8 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids, `useYolkVoice` React hook + Next example migration, Effect WebSocket transport, OpenAI TTS/STT adapters). Next: Phase 9 docs/release readiness.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -411,9 +411,9 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### WebSocket/STT/TTS
 
-- [ ] VOICE-70 Add Effect WebSocket voice transport.
-- [ ] VOICE-71 Add OpenAI speech adapter.
-- [ ] VOICE-72 Add OpenAI transcription adapter.
+- [x] VOICE-70 Add Effect WebSocket voice transport (`makeWebSocketVoiceTransport` over Effect Socket).
+- [x] VOICE-71 Add OpenAI speech adapter (`makeOpenAiSpeechSynthesizerLayer`).
+- [x] VOICE-72 Add OpenAI transcription adapter (`makeOpenAiTranscriberLayer`).
 
 ### Docs/checks
 

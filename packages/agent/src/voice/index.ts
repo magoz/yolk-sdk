@@ -47,6 +47,22 @@ export {
   VoiceUserTranscriptFinal
 } from './protocol.ts'
 export { VoiceTransport, type VoiceTransportApi } from './transport.ts'
+export {
+  makeWebSocketVoiceTransport,
+  type WebSocketVoiceTransportOptions
+} from './websocket.ts'
+export {
+  speechResultToAudioPart,
+  VoiceSpeechError,
+  VoiceSpeechErrorCode,
+  VoiceSpeechRequest,
+  VoiceSpeechSynthesizer,
+  VoiceTranscriber,
+  VoiceTranscriptionResult,
+  VoiceTranscriptionSegment,
+  type VoiceSpeechResult,
+  type VoiceTranscriptionRequest
+} from './speech.ts'
 export { type VoiceClientCodec } from './client-codec.ts'
 export {
   makeVoiceController,

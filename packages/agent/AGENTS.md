@@ -20,6 +20,7 @@
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                |
 | `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory    |
 | `@yolk-sdk/agent/providers/openai/realtime`           | `src/providers/openai/realtime`              | OpenAI Realtime session config + event codecs |
+| `@yolk-sdk/agent/providers/openai/speech`             | `src/providers/openai/speech.ts`             | OpenAI TTS/STT service adapters           |
 | `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers           |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory               |
@@ -47,7 +48,7 @@
 - Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
 - If a voice session ends while awaiting approval, the approval stays pending host-side and the event stream completes; durable resume is host/session-log policy.
 - React depends on client + protocol only.
-- Providers depend on protocol + loop + oauth only; `providers/openai/realtime` may also depend on voice for provider-event-to-`VoiceEvent` mapping.
+- Providers depend on protocol + loop + oauth only; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk-sdk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
