@@ -123,6 +123,37 @@ describe('makeOpenAiTranscriberLayer', () => {
       const file = body?._tag === 'FormData' ? body.formData.get('file') : null
 
       expect(file instanceof File ? file.name : null).toBe('audio.mp3')
+      expect(body?._tag === 'FormData' ? body.formData.get('response_format') : null).toBe('json')
+    })
+  )
+
+  it.effect('requests verbose_json only for whisper models', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiTranscriberLayer(config).pipe(
+        Layer.provide(
+          makeHttpClientLayer(
+            () => Response.json({ text: 'ok', language: 'english', duration: 1 }),
+            requests
+          )
+        )
+      )
+
+      yield* Effect.gen(function* () {
+        const transcriber = yield* VoiceTranscriber
+
+        return yield* transcriber.transcribe({
+          audio: new Uint8Array([1]),
+          mimeType: 'audio/mpeg',
+          model: 'whisper-1'
+        })
+      }).pipe(Effect.provide(layer))
+
+      const body = requests[0]?.request.body
+
+      expect(body?._tag === 'FormData' ? body.formData.get('response_format') : null).toBe(
+        'verbose_json'
+      )
     })
   )
 

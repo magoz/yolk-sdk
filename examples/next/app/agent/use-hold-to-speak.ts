@@ -107,6 +107,10 @@ type ActiveRecording = {
   readonly chunks: Array<Blob>
 }
 
+type PendingStart = {
+  cancelled: boolean
+}
+
 /**
  * Hold-to-speak voice input: record while held, transcribe on release through
  * the app STT route, and speak assistant replies through the app TTS route.
@@ -117,6 +121,7 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
   const [status, setStatus] = useState<HoldToSpeakStatus>('idle')
   const [isSpeaking, setIsSpeaking] = useState(false)
   const activeRecordingRef = useRef<ActiveRecording | null>(null)
+  const pendingStartRef = useRef<PendingStart | null>(null)
   const audioElementRef = useRef<HTMLAudioElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
   const callbacksRef = useRef({ onTranscript, onError })
@@ -148,7 +153,11 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
   }, [])
 
   const startRecording = useCallback(() => {
-    if (activeRecordingRef.current !== null || status === 'transcribing') {
+    if (
+      activeRecordingRef.current !== null ||
+      pendingStartRef.current !== null ||
+      status === 'transcribing'
+    ) {
       return
     }
 
@@ -165,9 +174,26 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
 
     stopPlayback()
 
+    const pending: PendingStart = { cancelled: false }
+    pendingStartRef.current = pending
+    setStatus('recording')
+
     navigator.mediaDevices
       .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
       .then(stream => {
+        pendingStartRef.current = null
+
+        // Released (or unmounted) while the permission prompt was open:
+        // never start a recorder nobody will stop.
+        if (pending.cancelled) {
+          for (const track of stream.getTracks()) {
+            track.stop()
+          }
+
+          setStatus('idle')
+          return
+        }
+
         const recorder = new MediaRecorder(stream, { mimeType })
         const recording: ActiveRecording = {
           recorder,
@@ -183,14 +209,22 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
         })
         activeRecordingRef.current = recording
         recorder.start()
-        setStatus('recording')
       })
       .catch((error: unknown) => {
+        pendingStartRef.current = null
+        setStatus('idle')
         callbacksRef.current.onError(`Microphone access failed: ${unknownToMessage(error)}`)
       })
   }, [status, stopPlayback])
 
   const stopRecording = useCallback(() => {
+    const pending = pendingStartRef.current
+
+    if (pending !== null) {
+      pending.cancelled = true
+      return
+    }
+
     const recording = activeRecordingRef.current
 
     if (recording === null) {
@@ -286,6 +320,10 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
 
   useEffect(
     () => () => {
+      if (pendingStartRef.current !== null) {
+        pendingStartRef.current.cancelled = true
+      }
+
       const recording = activeRecordingRef.current
       activeRecordingRef.current = null
 

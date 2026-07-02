@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Array as Arr, Effect, Option } from 'effect'
 import {
   UserMessage,
@@ -568,8 +569,10 @@ export function AgentPlayground({
   const appendTranscriptRef = useRef<(text: string) => void>(() => {})
   const holdToSpeak = useHoldToSpeak({
     onTranscript: text => appendTranscriptRef.current(text),
-    onError: message =>
+    onError: message => {
+      toast.error(truncate(message))
       recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
+    }
   })
   const speakAssistantReply = holdToSpeak.speak
   const handleAgentEvent = useCallback(

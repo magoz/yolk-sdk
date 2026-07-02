@@ -66,6 +66,11 @@ const statusFailure = (operation: string, status: number) =>
     message: `OpenAI ${operation} returned ${status}`
   })
 
+// `verbose_json` (language/duration/segments) is only supported by whisper
+// models; gpt-4o transcribe models reject it and support plain `json`.
+const transcriptionResponseFormat = (model: string) =>
+  model.startsWith('whisper') ? 'verbose_json' : 'json'
+
 const OpenAiTranscriptionResponse = Schema.Struct({
   text: Schema.String,
   language: Schema.optional(Schema.String),
@@ -162,11 +167,10 @@ export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
               new Blob([request.audio.slice().buffer], { type: request.mimeType }),
               transcriptionFilename(request.mimeType)
             )
-            formData.set(
-              'model',
+            const model =
               request.model ?? config.defaultTranscriptionModel ?? defaultTranscriptionModel
-            )
-            formData.set('response_format', 'verbose_json')
+            formData.set('model', model)
+            formData.set('response_format', transcriptionResponseFormat(model))
 
             if (request.language !== undefined) {
               formData.set('language', request.language)
