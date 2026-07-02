@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: PLANNING. Initial decisions resolved; no implementation started.
+Execution status: IN PROGRESS. Phase 1 (protocol + OpenAI codecs) implemented.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -367,17 +367,17 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### Protocol/core
 
-- [ ] VOICE-10 Add voice command/event/config schemas.
-- [ ] VOICE-11 Add voice error schemas.
+- [x] VOICE-10 Add voice command/event/config schemas.
+- [x] VOICE-11 Add voice error schemas.
 - [ ] VOICE-12 Add voice controller service contracts.
 - [ ] VOICE-13 Add transcript projector contract.
 
 ### OpenAI realtime
 
-- [ ] VOICE-20 Move OpenAI session config builder to provider subpath.
-- [ ] VOICE-21 Add OpenAI realtime event decoder.
-- [ ] VOICE-22 Add OpenAI realtime command encoder.
-- [ ] VOICE-23 Add codec tests for transcript/tool/error/interruption events.
+- [x] VOICE-20 Move OpenAI session config builder to provider subpath.
+- [x] VOICE-21 Add OpenAI realtime event decoder.
+- [x] VOICE-22 Add OpenAI realtime command encoder.
+- [x] VOICE-23 Add codec tests for transcript/tool/error/interruption events.
 
 ### WebRTC
 

@@ -83,6 +83,10 @@
       "types": "./src/providers/openai/provider.ts",
       "default": "./src/providers/openai/provider.ts"
     },
+    "./providers/openai/realtime": {
+      "types": "./src/providers/openai/realtime/index.ts",
+      "default": "./src/providers/openai/realtime/index.ts"
+    },
     "./providers/anthropic": {
       "types": "./src/providers/anthropic/index.ts",
       "default": "./src/providers/anthropic/index.ts"
@@ -185,6 +189,11 @@
         "types": "./dist/providers/openai/provider.d.mts",
         "import": "./dist/providers/openai/provider.mjs",
         "default": "./dist/providers/openai/provider.mjs"
+      },
+      "./providers/openai/realtime": {
+        "types": "./dist/providers/openai/realtime/index.d.mts",
+        "import": "./dist/providers/openai/realtime/index.mjs",
+        "default": "./dist/providers/openai/realtime/index.mjs"
       },
       "./providers/anthropic": {
         "types": "./dist/providers/anthropic/index.d.mts",

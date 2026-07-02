@@ -31,11 +31,12 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                           |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                      |
 | `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                          |
+| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                 |
 | `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                       |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                 |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                     |
 | `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs               |
-| `@yolk-sdk/agent/voice`                               | Provider-neutral voice tool-call bridge                         |
+| `@yolk-sdk/agent/voice`                               | Provider-neutral voice protocol and tool-call bridge            |
 
 ## Imports
 

@@ -22,7 +22,7 @@ mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
 agent/react -> agent/client + agent/protocol + optional React peer
 agent/compaction -> agent/protocol + agent/loop
-agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
+agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect; agent/providers/openai/realtime may also use agent/voice
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 sandbox root -> Effect only; sandbox/agent -> agent tools/protocol/loop; sandbox/vercel -> @vercel/sandbox only
 vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
