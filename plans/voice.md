@@ -4,6 +4,8 @@ Execution status: IMPLEMENTED. All phases (1-9) landed: provider-neutral voice p
 
 Remaining follow-ups are tracked as future questions: durable pending-approval persistence through the example app's session log (package contracts shipped; example has no voice session store yet), voice usage events, second provider, telephony, voice `question`.
 
+Follow-up shipped: the Next example now offers two voice input modes — `realtime` (existing fluid conversation) and `hold` (hold-to-speak: MediaRecorder -> `/api/agent/voice/transcribe` STT -> normal text runtime with full toolset/HITL -> `/api/agent/voice/speak` TTS reply). OpenAI transcription uploads now carry MIME-derived filenames so container detection works for webm/mp4 recordings.
+
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
 ## Goal

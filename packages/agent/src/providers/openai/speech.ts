@@ -33,6 +33,30 @@ const audioMimeTypes: Readonly<Record<string, string>> = {
   pcm: 'audio/pcm'
 }
 
+// OpenAI transcription detects the container format from the uploaded file
+// extension, so the multipart filename must match the audio MIME type.
+const transcriptionFileExtensions: Readonly<Record<string, string>> = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/mp4': 'mp4',
+  'audio/m4a': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/opus': 'ogg',
+  'audio/flac': 'flac',
+  'audio/mpga': 'mpga'
+}
+
+const transcriptionFilename = (mimeType: string) => {
+  const bareMimeType = mimeType.split(';')[0]?.trim().toLowerCase() ?? mimeType
+  const extension = transcriptionFileExtensions[bareMimeType] ?? 'mp3'
+
+  return `audio.${extension}`
+}
+
 const httpFailure = (message: string) => (error: { readonly message: string }) =>
   new VoiceSpeechError({ code: 'provider_error', message: `${message}: ${error.message}` })
 
@@ -136,7 +160,7 @@ export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
             formData.set(
               'file',
               new Blob([request.audio.slice().buffer], { type: request.mimeType }),
-              'audio'
+              transcriptionFilename(request.mimeType)
             )
             formData.set(
               'model',

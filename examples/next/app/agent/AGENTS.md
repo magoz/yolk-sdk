@@ -80,9 +80,13 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 
 ## Voice lifecycle
 
-- Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
-- Completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
+- Two voice input modes selected in console status: `realtime` (fluid speech-to-speech over OpenAI Realtime) and `hold` (hold-to-speak walkie-talkie over STT + text runtime + TTS).
+- Realtime: guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
+- Realtime: completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
 - Voice tool calls route through `/api/agent/realtime/tool`; do not execute tools in the browser hook.
+- Hold-to-speak (`use-hold-to-speak.ts`): MediaRecorder while held, `/api/agent/voice/transcribe` on release, transcript submits through the normal text runtime (`submitMessage`), and the final assistant text of that run plays back via `/api/agent/voice/speak`. Sub-300ms holds are discarded.
+- Hold-to-speak turns get the full text toolset/HITL because they are ordinary text runs; TTS speaks only the run's final assistant message and is cancelled by starting a new recording or switching modes.
+- Switching to `hold` stops any live realtime session; switching to `realtime` stops TTS playback and clears the speak-next flag.
 
 ## References
 

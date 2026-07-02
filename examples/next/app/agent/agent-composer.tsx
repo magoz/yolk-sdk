@@ -27,6 +27,7 @@ import {
   XIcon
 } from 'lucide-react'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
+import type { VoiceInputMode } from './voice-input-mode'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -90,6 +91,9 @@ type AgentComposerProps = {
   readonly isVoiceMode: boolean
   readonly isVoiceConnecting: boolean
   readonly isVoiceLive: boolean
+  readonly voiceInputMode: VoiceInputMode
+  readonly isHoldRecording: boolean
+  readonly isHoldTranscribing: boolean
   readonly imageInputSupported: boolean
   readonly documentInputSupported: boolean
   readonly textModel: AgentTextModel
@@ -109,6 +113,8 @@ type AgentComposerProps = {
   readonly onSubmit: () => void
   readonly onStop: () => void
   readonly onToggleVoice: () => void
+  readonly onHoldStart: () => void
+  readonly onHoldEnd: () => void
 }
 
 export function AgentComposer({
@@ -118,6 +124,9 @@ export function AgentComposer({
   isVoiceMode,
   isVoiceConnecting,
   isVoiceLive,
+  voiceInputMode,
+  isHoldRecording,
+  isHoldTranscribing,
   imageInputSupported,
   documentInputSupported,
   textModel,
@@ -136,7 +145,9 @@ export function AgentComposer({
   onSlashCommandSubmit,
   onSubmit,
   onStop,
-  onToggleVoice
+  onToggleVoice,
+  onHoldStart,
+  onHoldEnd
 }: AgentComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -169,7 +180,8 @@ export function AgentComposer({
 
   const isSupportedPasteFile = (file: File) =>
     (imageInputSupported && file.type.startsWith('image/')) ||
-    (documentInputSupported && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')))
+    (documentInputSupported &&
+      (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')))
 
   const handleTextModelChange = (value: string) => {
     const option = agentTextModelOptions.find(candidate => candidate.model === value)
@@ -308,11 +320,15 @@ export function AgentComposer({
 
   const hint = isVoiceMode
     ? 'Voice mode active'
-    : isRunning
-      ? 'Streaming response'
-      : attachmentInputSupported
-        ? 'Enter to send · Shift Enter newline · attach PDFs/images'
-        : 'Enter to send · Shift Enter newline'
+    : isHoldRecording
+      ? 'Recording · release to send'
+      : isHoldTranscribing
+        ? 'Transcribing'
+        : isRunning
+          ? 'Streaming response'
+          : attachmentInputSupported
+            ? 'Enter to send · Shift Enter newline · attach PDFs/images'
+            : 'Enter to send · Shift Enter newline'
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -495,9 +511,7 @@ export function AgentComposer({
                 <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-64">
-                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                  Model
-                </div>
+                <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Model</div>
                 <DropdownMenuRadioGroup value={textModel} onValueChange={handleTextModelChange}>
                   {agentTextModelOptions.map(option => (
                     <DropdownMenuRadioItem key={option.model} value={option.model}>
@@ -560,32 +574,65 @@ export function AgentComposer({
               variant="outline"
               onClick={handleAttachClick}
               disabled={dropDisabled}
-              title={attachmentInputSupported ? 'Attach files' : 'Current model does not support attachments'}
+              title={
+                attachmentInputSupported
+                  ? 'Attach files'
+                  : 'Current model does not support attachments'
+              }
               className="size-10 rounded-full"
             >
               <ImageIcon />
               <span className="sr-only">Attach files</span>
             </Button>
-            <Button
-              type="button"
-              size="icon-lg"
-              variant={isVoiceMode ? 'destructive' : 'outline'}
-              onClick={onToggleVoice}
-              disabled={isRunning}
-              aria-pressed={isVoiceMode}
-              className="size-10 rounded-full"
-            >
-              {isVoiceConnecting ? (
-                <LoaderCircleIcon className="animate-spin" />
-              ) : isVoiceLive ? (
-                <PhoneOffIcon />
-              ) : (
-                <MicIcon />
-              )}
-              <span className="sr-only">
-                {isVoiceMode ? 'Stop voice mode' : 'Start voice mode'}
-              </span>
-            </Button>
+            {voiceInputMode === 'hold' ? (
+              <Button
+                type="button"
+                size="icon-lg"
+                variant={isHoldRecording ? 'destructive' : 'outline'}
+                disabled={isRunning || isHoldTranscribing}
+                aria-pressed={isHoldRecording}
+                title="Hold to speak"
+                className="size-10 touch-none select-none rounded-full"
+                onPointerDown={event => {
+                  event.preventDefault()
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                  onHoldStart()
+                }}
+                onPointerUp={onHoldEnd}
+                onPointerCancel={onHoldEnd}
+                onContextMenu={event => event.preventDefault()}
+              >
+                {isHoldTranscribing ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : (
+                  <MicIcon className={isHoldRecording ? 'animate-pulse' : undefined} />
+                )}
+                <span className="sr-only">
+                  {isHoldRecording ? 'Release to send' : 'Hold to speak'}
+                </span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="icon-lg"
+                variant={isVoiceMode ? 'destructive' : 'outline'}
+                onClick={onToggleVoice}
+                disabled={isRunning}
+                aria-pressed={isVoiceMode}
+                className="size-10 rounded-full"
+              >
+                {isVoiceConnecting ? (
+                  <LoaderCircleIcon className="animate-spin" />
+                ) : isVoiceLive ? (
+                  <PhoneOffIcon />
+                ) : (
+                  <MicIcon />
+                )}
+                <span className="sr-only">
+                  {isVoiceMode ? 'Stop voice mode' : 'Start voice mode'}
+                </span>
+              </Button>
+            )}
             {isRunning ? (
               <Button
                 type="button"

@@ -17,6 +17,7 @@ import {
   openAiRealtimeModel
 } from '@/lib/agents/realtime/openai-realtime'
 import type { OpenAiRealtimeTranscriptionModel } from '@/lib/agents/realtime/openai-realtime'
+import { voiceInputModeOptions, type VoiceInputMode } from './voice-input-mode'
 import { AnthropicClaudeAuthPanel } from './anthropic-claude-auth-panel'
 import { OpenAiCodexAuthPanel } from './openai-codex-auth-panel'
 import { AgentUsagePanel, type AgentCompactionState } from './agent-usage-meter'
@@ -64,9 +65,12 @@ type AgentStatusPanelProps = {
   readonly reasoningEffortDisabled: boolean
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
   readonly transcriptionModelDisabled: boolean
+  readonly voiceInputMode: VoiceInputMode
+  readonly voiceInputModeDisabled: boolean
   readonly onTextModelChange: (model: AgentTextModel) => void
   readonly onReasoningEffortChange: (effort: AgentReasoningEffort) => void
   readonly onTranscriptionModelChange: (model: OpenAiRealtimeTranscriptionModel) => void
+  readonly onVoiceInputModeChange: (mode: VoiceInputMode) => void
 }
 
 function StatusRow({ label, children }: { readonly label: string; readonly children: ReactNode }) {
@@ -131,6 +135,34 @@ function ReasoningEffortControl({ value, disabled, onChange }: ReasoningEffortCo
   )
 }
 
+type VoiceInputModeControlProps = {
+  readonly value: VoiceInputMode
+  readonly disabled: boolean
+  readonly onChange: (mode: VoiceInputMode) => void
+}
+
+function VoiceInputModeControl({ value, disabled, onChange }: VoiceInputModeControlProps) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {voiceInputModeOptions.map(option => (
+        <Button
+          key={option.mode}
+          type="button"
+          size="sm"
+          variant={value === option.mode ? 'secondary' : 'outline'}
+          disabled={disabled}
+          className="min-h-11 px-2 text-[11px]"
+          title={option.description}
+          aria-pressed={value === option.mode}
+          onClick={() => onChange(option.mode)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 type TranscriptionModelControlProps = {
   readonly value: OpenAiRealtimeTranscriptionModel
   readonly disabled: boolean
@@ -175,9 +207,12 @@ export function AgentStatusPanel({
   reasoningEffortDisabled,
   transcriptionModel,
   transcriptionModelDisabled,
+  voiceInputMode,
+  voiceInputModeDisabled,
   onTextModelChange,
   onReasoningEffortChange,
-  onTranscriptionModelChange
+  onTranscriptionModelChange,
+  onVoiceInputModeChange
 }: AgentStatusPanelProps) {
   return (
     <div className="space-y-4">
@@ -235,6 +270,13 @@ export function AgentStatusPanel({
           >
             Manage
           </Link>
+        </StatusRow>
+        <StatusRow label="Voice input">
+          <VoiceInputModeControl
+            value={voiceInputMode}
+            disabled={voiceInputModeDisabled}
+            onChange={onVoiceInputModeChange}
+          />
         </StatusRow>
         <StatusRow label="Voice model">
           <Badge variant="outline">{openAiRealtimeModel}</Badge>

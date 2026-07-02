@@ -16,6 +16,8 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | `agent/commands/route.ts`                      | Agent command list/render        |
 | `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange     |
 | `agent/realtime/tool/route.ts`                 | Voice tool execution bridge      |
+| `agent/voice/transcribe/route.ts`              | Hold-to-speak STT                |
+| `agent/voice/speak/route.ts`                   | Hold-to-speak TTS                |
 | `knowledge/files/route.ts`                     | Authenticated knowledge file download     |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge         |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |

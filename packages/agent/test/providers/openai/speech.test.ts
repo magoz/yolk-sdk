@@ -118,6 +118,34 @@ describe('makeOpenAiTranscriberLayer', () => {
       expect(result.durationSeconds).toBe(1.5)
       expect(result.segments?.[0]).toMatchObject({ text: 'Hello there', startSeconds: 0 })
       expect(requests[0]?.request.url).toBe('https://api.openai.com/v1/audio/transcriptions')
+
+      const body = requests[0]?.request.body
+      const file = body?._tag === 'FormData' ? body.formData.get('file') : null
+
+      expect(file instanceof File ? file.name : null).toBe('audio.mp3')
+    })
+  )
+
+  it.effect('names the uploaded file after the audio MIME type for format detection', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const layer = makeOpenAiTranscriberLayer(config).pipe(
+        Layer.provide(makeHttpClientLayer(() => Response.json({ text: 'ok' }), requests))
+      )
+
+      yield* Effect.gen(function* () {
+        const transcriber = yield* VoiceTranscriber
+
+        return yield* transcriber.transcribe({
+          audio: new Uint8Array([1]),
+          mimeType: 'audio/webm;codecs=opus'
+        })
+      }).pipe(Effect.provide(layer))
+
+      const body = requests[0]?.request.body
+      const file = body?._tag === 'FormData' ? body.formData.get('file') : null
+
+      expect(file instanceof File ? file.name : null).toBe('audio.webm')
     })
   )
 

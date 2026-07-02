@@ -5,6 +5,8 @@ import { Array as Arr, Effect, Option } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
+  assistantContent,
+  contentPreview,
   zeroAgentUsage,
   type AgentEvent,
   type QuestionResponse,
@@ -55,7 +57,9 @@ import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
 import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
+import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
+import { type VoiceInputMode } from './voice-input-mode'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
@@ -560,12 +564,55 @@ export function AgentPlayground({
   }, [recordActivity, runtime, workflowRunId])
   const agentTransport = cloudflareTransport ?? workflowTransport
 
+  const [voiceInputMode, setVoiceInputMode] = useState<VoiceInputMode>('realtime')
+  const speakNextRunRef = useRef(false)
+  const submitTranscriptRef = useRef<(text: string) => void>(() => {})
+  const holdToSpeak = useHoldToSpeak({
+    onTranscript: text => submitTranscriptRef.current(text),
+    onError: message =>
+      recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
+  })
+  const speakAssistantReply = holdToSpeak.speak
+  const handleAgentEvent = useCallback(
+    (event: AgentEvent) => {
+      recordAgentEvent(event)
+
+      if (!speakNextRunRef.current) {
+        return
+      }
+
+      if (event._tag === 'AgentError') {
+        speakNextRunRef.current = false
+        return
+      }
+
+      if (event._tag !== 'AgentEnd') {
+        return
+      }
+
+      speakNextRunRef.current = false
+
+      const lastAssistant = Arr.findLast(event.messages, message => message._tag === 'Assistant')
+
+      if (Option.isNone(lastAssistant) || lastAssistant.value._tag !== 'Assistant') {
+        return
+      }
+
+      const text = contentPreview(assistantContent(lastAssistant.value))
+
+      if (text.trim().length > 0) {
+        speakAssistantReply(text)
+      }
+    },
+    [recordAgentEvent, speakAssistantReply]
+  )
+
   const agentChat = useAgentChat({
     sessionId,
     model: textModel,
     reasoningEffort,
     transport: agentTransport,
-    onEvent: recordAgentEvent,
+    onEvent: handleAgentEvent,
     onError: recordAgentError,
     onAbort: recordAgentAbort
   })
@@ -592,6 +639,7 @@ export function AgentPlayground({
     userDraft: voiceUserDraft,
     isConnecting: isVoiceConnecting,
     isLive: isVoiceLive,
+    stopSession: stopVoiceSession,
     toggleSession: toggleVoice
   } = useRealtimeVoice({
     sessionId,
@@ -603,11 +651,50 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
+  const isHoldBusy = holdToSpeak.isRecording || holdToSpeak.isTranscribing
+
+  useEffect(() => {
+    submitTranscriptRef.current = text => {
+      const result = submitMessage(UserMessage.make({ content: text }))
+
+      if (result._tag === 'Submitted') {
+        speakNextRunRef.current = true
+        recordActivity({
+          title: 'Hold to speak transcript',
+          detail: truncate(text),
+          tone: 'neutral'
+        })
+        return
+      }
+
+      recordActivity({
+        title: 'Hold to speak transcript ignored',
+        detail: truncate(text),
+        tone: 'error'
+      })
+    }
+  }, [recordActivity, submitMessage])
+
+  const handleVoiceInputModeChange = useCallback(
+    (mode: VoiceInputMode) => {
+      setVoiceInputMode(mode)
+
+      if (mode === 'hold' && (isVoiceConnecting || isVoiceLive)) {
+        stopVoiceSession()
+      }
+
+      if (mode === 'realtime') {
+        speakNextRunRef.current = false
+        holdToSpeak.stopPlayback()
+      }
+    },
+    [holdToSpeak, isVoiceConnecting, isVoiceLive, stopVoiceSession]
+  )
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const documentInputSupported = agentTextCapabilities.input.document
-  const submitDisabled = isTextBusy || isVoiceMode
-  const messageActionsDisabled = isTextBusy || isVoiceMode
+  const submitDisabled = isTextBusy || isVoiceMode || isHoldBusy
+  const messageActionsDisabled = isTextBusy || isVoiceMode || isHoldBusy
   const hitlActionsDisabled = isRunning || isWorkflowResuming || isVoiceMode
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
@@ -1034,6 +1121,7 @@ export function AgentPlayground({
   return (
     <main className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem),linear-gradient(135deg,var(--color-background),var(--color-muted))] p-2 sm:p-4 md:p-6">
       <audio ref={audioRef} autoPlay className="sr-only" />
+      <audio ref={holdToSpeak.attachAudioElement} className="sr-only" />
       <div className="mx-auto h-full max-w-5xl overflow-hidden rounded-[2rem] border border-foreground/10 bg-background/85 shadow-2xl shadow-foreground/10 backdrop-blur">
         <section className="flex h-full min-h-0 min-w-0 flex-col bg-card/80">
           <AgentConversationHeader
@@ -1094,6 +1182,9 @@ export function AgentPlayground({
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
+            voiceInputMode={voiceInputMode}
+            isHoldRecording={holdToSpeak.isRecording}
+            isHoldTranscribing={holdToSpeak.isTranscribing}
             imageInputSupported={imageInputSupported}
             documentInputSupported={documentInputSupported}
             textModel={textModel}
@@ -1113,6 +1204,8 @@ export function AgentPlayground({
             onSubmit={handleSubmit}
             onStop={handleStop}
             onToggleVoice={toggleVoice}
+            onHoldStart={holdToSpeak.startRecording}
+            onHoldEnd={holdToSpeak.stopRecording}
           />
         </section>
       </div>
@@ -1132,13 +1225,16 @@ export function AgentPlayground({
         reasoningEffort={reasoningEffort}
         reasoningEffortDisabled={isTextBusy}
         transcriptionModel={transcriptionModel}
-        transcriptionModelDisabled={isVoiceMode}
+        transcriptionModelDisabled={isVoiceMode || voiceInputMode === 'hold'}
+        voiceInputMode={voiceInputMode}
+        voiceInputModeDisabled={isVoiceMode || isHoldBusy}
         showInlineTools={showInlineTools}
         showReasoning={showReasoning}
         onOpenChange={handleConsoleOpenChange}
         onTextModelChange={setTextModel}
         onReasoningEffortChange={setReasoningEffort}
         onTranscriptionModelChange={setTranscriptionModel}
+        onVoiceInputModeChange={handleVoiceInputModeChange}
         onShowInlineToolsChange={handleInlineToolsChange}
         onShowReasoningChange={handleReasoningChange}
       />
