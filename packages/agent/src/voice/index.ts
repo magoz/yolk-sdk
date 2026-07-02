@@ -60,3 +60,18 @@ export {
   voiceToolDenialOutput,
   type VoiceToolCallDecision
 } from './tool-server.ts'
+export {
+  dedupeStoredVoiceEvents,
+  emptyVoiceProjectionState,
+  initialVoiceEventSequencerState,
+  makeVoiceEventId,
+  projectVoiceEvent,
+  protocolToolCallFromVoice,
+  sequenceVoiceEvent,
+  StoredVoiceEvent,
+  voiceSeedTextsFromMessages,
+  type VoiceEventSequencerState,
+  type VoiceProjectionResult,
+  type VoiceProjectionState,
+  type VoiceSeedText
+} from './projection.ts'

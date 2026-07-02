@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phases 1-4 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL pause/resume).
+Execution status: IN PROGRESS. Phases 1-5 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids). Next: Phase 6 React hook + example migration.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -370,7 +370,7 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 - [x] VOICE-10 Add voice command/event/config schemas.
 - [x] VOICE-11 Add voice error schemas.
 - [x] VOICE-12 Add voice controller service contracts.
-- [ ] VOICE-13 Add transcript projector contract.
+- [x] VOICE-13 Add transcript projector contract.
 
 ### OpenAI realtime
 
@@ -398,10 +398,10 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### Durability
 
-- [ ] VOICE-50 Project transcripts to `AgentMessage`.
-- [ ] VOICE-51 Project tool calls/results without dangling calls.
-- [ ] VOICE-52 Append normalized voice events through `SessionEventStore` with `eventId`.
-- [ ] VOICE-53 Add reconnect replay path with client de-dupe.
+- [x] VOICE-50 Project transcripts to `AgentMessage`.
+- [x] VOICE-51 Project tool calls/results without dangling calls (unsettled calls dropped; pending HITL lives in session log).
+- [x] VOICE-52 Add `StoredVoiceEvent` + sequencer for durable `eventId` appends (host wires `SessionEventStore` in example/Phase 6).
+- [x] VOICE-53 Add reconnect seed helper (`voiceSeedTextsFromMessages`) + `dedupeStoredVoiceEvents` client de-dupe.
 
 ### React/example
 
