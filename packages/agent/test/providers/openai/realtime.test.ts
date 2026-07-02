@@ -159,12 +159,38 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
     ])
   })
 
-  it('maps session.created to SessionOpened and cancelled responses to Interrupted', () => {
+  it('maps session config events to SessionOpened and cancelled responses to Interrupted', () => {
     expect(
       decodeToVoice(
         JSON.stringify({ type: 'session.created', session: { model: 'gpt-realtime-2' } })
       )
-    ).toEqual([{ _tag: 'SessionOpened', model: 'gpt-realtime-2' }])
+    ).toEqual([
+      {
+        _tag: 'SessionOpened',
+        model: 'gpt-realtime-2',
+        transcriptionModel: null,
+        transcriptionLanguage: null
+      }
+    ])
+
+    expect(
+      decodeToVoice(
+        JSON.stringify({
+          type: 'session.updated',
+          session: {
+            model: 'gpt-realtime-2',
+            audio: { input: { transcription: { model: 'gpt-4o-transcribe', language: 'en' } } }
+          }
+        })
+      )
+    ).toEqual([
+      {
+        _tag: 'SessionOpened',
+        model: 'gpt-realtime-2',
+        transcriptionModel: 'gpt-4o-transcribe',
+        transcriptionLanguage: 'en'
+      }
+    ])
 
     expect(
       decodeToVoice(

@@ -38,6 +38,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs               |
 | `@yolk-sdk/agent/voice`                               | Provider-neutral voice protocol and tool-call bridge            |
 | `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                  |
+| `@yolk-sdk/agent/voice/react`                         | Headless browser voice React hook                               |
 
 ## Imports
 

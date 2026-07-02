@@ -475,20 +475,6 @@ export function AgentPlayground({
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
       switch (event._tag) {
-        case 'TransportReady':
-          recordActivity({
-            title: 'Voice transport ready',
-            detail: `peer=${event.peerConnectionState} · data=${event.dataChannelState}`,
-            tone: 'success'
-          })
-          return
-        case 'SessionOpened':
-          recordActivity({
-            title: 'Voice session opened',
-            detail: `${event.seededMessageCount} seeded messages`,
-            tone: 'neutral'
-          })
-          return
         case 'SessionConfigured':
           recordActivity({
             title: `Realtime ${event.eventType}`,
@@ -511,13 +497,6 @@ export function AgentPlayground({
           recordActivity({
             title: `Output transcript ${event.responseId ?? 'unknown response'}`,
             detail: truncate(event.transcript),
-            tone: 'neutral'
-          })
-          return
-        case 'ResponseDone':
-          recordActivity({
-            title: `Realtime response ${event.responseId ?? 'unknown'}`,
-            detail: `status=${event.status ?? 'unknown'}`,
             tone: 'neutral'
           })
           return
@@ -615,6 +594,7 @@ export function AgentPlayground({
     isLive: isVoiceLive,
     toggleSession: toggleVoice
   } = useRealtimeVoice({
+    sessionId,
     messages: agentChat.messages,
     transcriptionModel,
     onAgentEvent: applyEvent,

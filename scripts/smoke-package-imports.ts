@@ -34,7 +34,8 @@ const packages: ReadonlyArray<PackageShape> = [
       './skillset',
       './tools',
       './voice',
-      './voice/browser'
+      './voice/browser',
+      './voice/react'
     ]
   },
   {

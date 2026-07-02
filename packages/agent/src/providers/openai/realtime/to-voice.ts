@@ -43,9 +43,13 @@ export const openAiRealtimeServerEventToVoiceEvents = (
         })
       ]
     case 'SessionConfigured':
-      return event.eventType === 'session.created'
-        ? [VoiceSessionOpened.make({ model: event.model })]
-        : []
+      return [
+        VoiceSessionOpened.make({
+          model: event.model,
+          transcriptionModel: event.transcriptionModel,
+          transcriptionLanguage: event.transcriptionLanguage
+        })
+      ]
     case 'ResponseDone':
       return event.status === 'cancelled'
         ? [VoiceInterrupted.make({ responseId: event.responseId })]

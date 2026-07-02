@@ -115,7 +115,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   {
     packageDir: 'packages/agent/src/voice',
-    forbiddenImports: agentCoreForbiddenImports
+    forbiddenImports: agentCoreForbiddenImports,
+    excludedDirs: ['packages/agent/src/voice/react.ts']
+  },
+  {
+    packageDir: 'packages/agent/src/voice/react.ts',
+    forbiddenImports: [...retiredImports, '@yolk-sdk/knowledge', '@yolk-sdk/mcp', 'next', 'node:']
   },
   {
     packageDir: 'packages/agent/src/react',
@@ -159,10 +164,17 @@ const walk = (dir: string): ReadonlyArray<string> => {
 
 const packageExists = (packageDir: string) => {
   try {
-    return statSync(join(workspaceRoot, packageDir)).isDirectory()
+    const stats = statSync(join(workspaceRoot, packageDir))
+    return stats.isDirectory() || (stats.isFile() && isTypescriptFile(packageDir))
   } catch {
     return false
   }
+}
+
+const rulePathFiles = (packageDir: string): ReadonlyArray<string> => {
+  const absolutePath = join(workspaceRoot, packageDir)
+
+  return statSync(absolutePath).isFile() ? [absolutePath] : walk(absolutePath)
 }
 
 const isExcludedFile = (file: string, excludedDirs: ReadonlyArray<string> = []) =>
@@ -196,7 +208,7 @@ const violations = rules.flatMap(rule => {
     return []
   }
 
-  return walk(join(workspaceRoot, rule.packageDir)).filter(file => !isExcludedFile(file, rule.excludedDirs)).flatMap(file => {
+  return rulePathFiles(rule.packageDir).filter(file => !isExcludedFile(file, rule.excludedDirs)).flatMap(file => {
     const source = readFileSync(file, 'utf8')
     return importsFrom(source).flatMap(specifier =>
       rule.forbiddenImports

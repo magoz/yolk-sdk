@@ -110,6 +110,10 @@
     "./voice/browser": {
       "types": "./src/voice/browser/index.ts",
       "default": "./src/voice/browser/index.ts"
+    },
+    "./voice/react": {
+      "types": "./src/voice/react.ts",
+      "default": "./src/voice/react.ts"
     }
   },
   "files": [
@@ -228,6 +232,11 @@
         "types": "./dist/voice/browser/index.d.mts",
         "import": "./dist/voice/browser/index.mjs",
         "default": "./dist/voice/browser/index.mjs"
+      },
+      "./voice/react": {
+        "types": "./dist/voice/react.d.mts",
+        "import": "./dist/voice/react.mjs",
+        "default": "./dist/voice/react.mjs"
       }
     }
   },

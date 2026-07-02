@@ -1,6 +1,6 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phases 1-5 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids). Next: Phase 6 React hook + example migration.
+Execution status: IN PROGRESS. Phases 1-6 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids, `useYolkVoice` React hook + Next example migration). Next: Phase 7 WebSocket transport, Phase 8 STT/TTS, Phase 9 docs.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -384,11 +384,11 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 - [x] VOICE-30 Add browser WebRTC transport.
 - [x] VOICE-31 Add fake WebRTC seam.
 - [x] VOICE-32 Add lifecycle cleanup tests.
-- [ ] VOICE-33 Add example route integration for SDP/token flow.
+- [x] VOICE-33 Add example route integration for SDP/token flow.
 
 ### Tools/HITL
 
-- [ ] VOICE-40 Bind voice tool calls to sessions (contract shipped; example route wiring pending).
+- [x] VOICE-40 Bind voice tool calls to sessions (`VoiceSessionToolCallRequest` wired through example route/tool context).
 - [x] VOICE-41 Enforce voice tool policy server-side (`decideVoiceToolCall`/`handleVoiceToolCall`; approval-gated tools never execute).
 - [x] VOICE-42 Add manual approval flow (controller pause/resume + server approval application; durable pending persistence lands with Phase 5 log).
 - [x] VOICE-43 Document voice `question` deferral.
@@ -405,9 +405,9 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### React/example
 
-- [ ] VOICE-60 Add headless React voice hook.
-- [ ] VOICE-61 Migrate Next example voice UI.
-- [ ] VOICE-62 Add UI/HITL projection tests.
+- [x] VOICE-60 Add headless React voice hook (`useYolkVoice` under `@yolk-sdk/agent/voice/react`).
+- [x] VOICE-61 Migrate Next example voice UI (adapter over package hook; app WebRTC/tool HTTP glue deleted).
+- [x] VOICE-62 Add UI/HITL projection tests (hook lifecycle, drafts, approvals, errors, seeding).
 
 ### WebSocket/STT/TTS
 

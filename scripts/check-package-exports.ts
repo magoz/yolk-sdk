@@ -37,7 +37,8 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './skillset',
       './tools',
       './voice',
-      './voice/browser'
+      './voice/browser',
+      './voice/react'
     ],
     tinyRoot: true
   },

@@ -1,9 +1,14 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 import { Data, Effect } from 'effect'
-import { VoiceToolCallRequest, executeVoiceToolCall } from '@yolk-sdk/agent/voice'
+import * as Schema from 'effect/Schema'
+import {
+  handleVoiceToolCall,
+  VoiceSessionToolCallRequest,
+  VoiceToolCall,
+  VoiceToolCallOutcome
+} from '@yolk-sdk/agent/voice'
 import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
 import { AppLayer } from '@/lib/layers'
-import { toOpenAiRealtimeToolExecutionResponse } from '@/lib/agents/realtime/tool-bridge'
 import { nodeVoiceToolModules, resolveAgentToolSet } from '@/lib/agents/tools/registry'
 import { makeAppStorageKnowledgeSearchToolModule } from '@/lib/agents/tools/storage-tool-handlers'
 import { makeAppKnowledgeToolModule } from '@/lib/agents/tools/knowledge-tool-handlers'
@@ -19,9 +24,11 @@ class RealtimeToolRouteError extends Data.TaggedError('RealtimeToolRouteError')<
   readonly cause?: unknown
 }> {}
 
+const encodeOutcome = Schema.encodeEffect(VoiceToolCallOutcome)
+
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
-  const input = yield* HttpServerRequest.schemaBodyJson(VoiceToolCallRequest)
+  const input = yield* HttpServerRequest.schemaBodyJson(VoiceSessionToolCallRequest)
   const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
   const telegramToolModules = telegramConnectorConfig === undefined
     ? []
@@ -36,15 +43,22 @@ const handler = Effect.gen(function* () {
     context: {
       surface: 'voice',
       route: '/agent',
-      userId: session.user.id
+      userId: session.user.id,
+      sessionId: input.sessionId
     }
   })
-  const result = yield* executeVoiceToolCall(input).pipe(
-    Effect.provide(makeToolExecutorLayer(toolSet))
-  )
-  const response = toOpenAiRealtimeToolExecutionResponse(result)
+  const outcome = yield* handleVoiceToolCall({
+    call: VoiceToolCall.make({
+      callId: input.callId,
+      name: input.name,
+      argumentsJson: input.argumentsJson
+    }),
+    tools: toolSet.tools,
+    approval: input.approval
+  }).pipe(Effect.provide(makeToolExecutorLayer(toolSet)))
+  const encoded = yield* encodeOutcome(outcome)
 
-  return yield* HttpServerResponse.json(response, {
+  return yield* HttpServerResponse.json(encoded, {
     headers: {
       'cache-control': 'no-store',
       'x-content-type-options': 'nosniff'

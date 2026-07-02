@@ -26,11 +26,12 @@
 | `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog  |
 | `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contract, tool-call bridge |
 | `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport            |
+| `@yolk-sdk/agent/voice/react`                         | `src/voice/react.ts`                         | Headless browser voice React hook         |
 
 ## Boundaries
 
 - Core subpaths have no React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
-- `src/react` is the only React-using area; React is an optional peer.
+- `src/react` and `src/voice/react.ts` are the only React-using areas; React is an optional peer.
 - Provider subpaths own vendor mechanics only; hosts still own token storage/refresh and app policy.
 - Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, or app packages from agent subpaths.
 - Protocol has no package dependencies except Effect.

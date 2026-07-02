@@ -131,8 +131,14 @@ export class VoiceSessionOpening extends Schema.TaggedClass<VoiceSessionOpening>
   {}
 ) {}
 
+/**
+ * Provider session was created or its effective config updated. Optional
+ * fields carry provider-confirmed session config when available.
+ */
 export class VoiceSessionOpened extends Schema.TaggedClass<VoiceSessionOpened>()('SessionOpened', {
-  model: Schema.NullOr(Schema.String)
+  model: Schema.NullOr(Schema.String),
+  transcriptionModel: Schema.optional(Schema.NullOr(Schema.String)),
+  transcriptionLanguage: Schema.optional(Schema.NullOr(Schema.String))
 }) {}
 
 export class VoiceSessionClosed extends Schema.TaggedClass<VoiceSessionClosed>()('SessionClosed', {
