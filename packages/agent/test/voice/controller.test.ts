@@ -1,17 +1,19 @@
-import { Effect, Queue, Stream, type Cause } from 'effect'
+import { Effect, Fiber, Queue, Stream, type Cause } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolApprovalPolicy, ToolApprovalRequest, ToolCall } from '@yolk-sdk/agent/protocol'
+import { ToolApprovalPolicy, ToolApprovalRequest, ToolApprovalResponse, ToolCall } from '@yolk-sdk/agent/protocol'
 import {
   makeVoiceController,
   VoiceSessionError,
   VoiceSessionOpened,
   VoiceToolCall,
   VoiceToolCallApprovalRequiredOutcome,
+  VoiceToolCallDeniedOutcome,
   VoiceToolCallExecutedOutcome,
   VoiceToolCallsRequested,
   VoiceUserTranscriptFinal,
+  voiceApprovalRequestId,
+  type VoiceControllerApi,
   type VoiceEvent,
-  type VoiceToolCallOutcome,
   type VoiceTransportApi
 } from '../../src/voice/index.ts'
 import type { VoiceClientCodec } from '../../src/voice/index.ts'
@@ -51,6 +53,57 @@ const testCodec: VoiceClientCodec = {
 
 const toolCall = (callId: string, name = 'web_search') =>
   VoiceToolCall.make({ callId, name, argumentsJson: '{"q":"x"}' })
+
+const approvalRequiredOutcome = (callId: string) =>
+  VoiceToolCallApprovalRequiredOutcome.make({
+    request: ToolApprovalRequest.make({
+      requestId: voiceApprovalRequestId(callId),
+      toolCallId: callId,
+      call: ToolCall.make({ id: callId, name: 'sandbox', params: {} }),
+      policy: ToolApprovalPolicy.make({ mode: 'manual' })
+    })
+  })
+
+const approvalResponse = (decision: 'approved' | 'denied', reason?: string) =>
+  ToolApprovalResponse.make({
+    requestId: voiceApprovalRequestId('call_1'),
+    toolCallId: 'call_1',
+    decision,
+    source: 'user',
+    ...(reason === undefined ? {} : { reason })
+  })
+
+type EventCollector = {
+  readonly seen: Array<VoiceEvent>
+  readonly fiber: Fiber.Fiber<void, VoiceSessionError>
+}
+
+const collectEvents = (controller: VoiceControllerApi): Effect.Effect<EventCollector> =>
+  Effect.gen(function* () {
+    const seen: Array<VoiceEvent> = []
+    const fiber = yield* Effect.forkChild(
+      Stream.runForEach(controller.events, event =>
+        Effect.sync(() => {
+          seen.push(event)
+        })
+      )
+    )
+
+    return { seen, fiber }
+  })
+
+const awaitEventTag = (collector: EventCollector, tag: VoiceEvent['_tag']) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      if (collector.seen.some(event => event._tag === tag)) {
+        return
+      }
+
+      yield* Effect.yieldNow
+    }
+
+    return yield* Effect.die(new Error(`Event ${tag} was not observed`))
+  })
 
 describe('makeVoiceController', () => {
   it.effect('forwards tool batches to the server and submits outputs plus one turn', () =>
@@ -147,31 +200,143 @@ describe('makeVoiceController', () => {
     })
   )
 
-  it.effect('surfaces approval-required outcomes as unexecuted failed calls', () =>
+  it.effect('pauses approval-gated calls and executes after approval', () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
-      const outcome: VoiceToolCallOutcome = VoiceToolCallApprovalRequiredOutcome.make({
-        request: ToolApprovalRequest.make({
-          requestId: 'approval:call_1',
-          toolCallId: 'call_1',
-          call: ToolCall.make({ id: 'call_1', name: 'sandbox', params: {} }),
-          policy: ToolApprovalPolicy.make({ mode: 'manual' })
-        })
-      })
+      const approvals: Array<string> = []
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
-        executeToolCall: () => Effect.succeed(outcome)
+        executeToolCall: (call, approval) => {
+          if (approval === undefined) {
+            return Effect.succeed(approvalRequiredOutcome('call_1'))
+          }
+
+          approvals.push(approval.decision)
+
+          return Effect.succeed(
+            VoiceToolCallExecutedOutcome.make({ callId: call.callId, output: '{"ok":true}' })
+          )
+        }
       })
+      const collector = yield* collectEvents(controller)
 
       yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
+      yield* awaitEventTag(collector, 'AwaitingInput')
+      yield* controller.submitHitlResponse(approvalResponse('approved'))
       yield* fake.end
+      yield* Fiber.join(collector.fiber)
 
-      const events = yield* Stream.runCollect(controller.events)
-      const failed = [...events].find(event => event._tag === 'ToolCallFailed')
+      expect(collector.seen.map(event => event._tag)).toEqual([
+        'ToolCallsRequested',
+        'ToolCallExecuting',
+        'AwaitingInput',
+        'ToolCallCompleted'
+      ])
+      expect(approvals).toEqual(['approved'])
+      expect(fake.sent).toEqual(['tool-output:call_1:{"ok":true}', 'response-turn'])
+    })
+  )
 
-      expect(failed).toMatchObject({ callId: 'call_1' })
-      expect(fake.sent[0]).toContain('requires approval')
+  it.effect('submits denial output without executing when approval is denied', () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeTransport()
+      const resumeDecisions: Array<string> = []
+      const controller = yield* makeVoiceController({
+        transport: fake.transport,
+        codec: testCodec,
+        executeToolCall: (call, approval) => {
+          if (approval === undefined) {
+            return Effect.succeed(approvalRequiredOutcome('call_1'))
+          }
+
+          resumeDecisions.push(approval.decision)
+
+          return Effect.succeed(
+            VoiceToolCallDeniedOutcome.make({
+              callId: call.callId,
+              output: '{"error":"denied by user"}',
+              reason: 'denied by user'
+            })
+          )
+        }
+      })
+      const collector = yield* collectEvents(controller)
+
+      yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
+      yield* awaitEventTag(collector, 'AwaitingInput')
+      yield* controller.submitHitlResponse(approvalResponse('denied', 'denied by user'))
+      yield* fake.end
+      yield* Fiber.join(collector.fiber)
+
+      const failed = collector.seen.find(event => event._tag === 'ToolCallFailed')
+
+      expect(failed).toMatchObject({ callId: 'call_1', message: 'Tool was denied: denied by user' })
+      expect(resumeDecisions).toEqual(['denied'])
+      expect(fake.sent[0]).toContain('denied by user')
+    })
+  )
+
+  it.effect('ignores duplicate and unknown approval responses', () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeTransport()
+      const serverCalls: Array<string> = []
+      const controller = yield* makeVoiceController({
+        transport: fake.transport,
+        codec: testCodec,
+        executeToolCall: (call, approval) => {
+          serverCalls.push(approval === undefined ? 'initial' : 'resume')
+
+          return approval === undefined
+            ? Effect.succeed(approvalRequiredOutcome('call_1'))
+            : Effect.succeed(
+                VoiceToolCallExecutedOutcome.make({ callId: call.callId, output: '{}' })
+              )
+        }
+      })
+      const collector = yield* collectEvents(controller)
+
+      yield* controller.submitHitlResponse(approvalResponse('approved'))
+      yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
+      yield* awaitEventTag(collector, 'AwaitingInput')
+      yield* controller.submitHitlResponse(approvalResponse('approved'))
+      yield* controller.submitHitlResponse(approvalResponse('denied'))
+      yield* fake.end
+      yield* Fiber.join(collector.fiber)
+
+      expect(serverCalls).toEqual(['initial', 'resume'])
+      expect(collector.seen.filter(event => event._tag === 'ToolCallCompleted')).toHaveLength(1)
+      expect(collector.seen.filter(event => event._tag === 'ToolCallFailed')).toHaveLength(0)
+    })
+  )
+
+  it.effect('completes the stream and keeps approval pending when the session ends', () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeTransport()
+      const serverCalls: Array<string> = []
+      const controller = yield* makeVoiceController({
+        transport: fake.transport,
+        codec: testCodec,
+        executeToolCall: (_, approval) => {
+          serverCalls.push(approval === undefined ? 'initial' : 'resume')
+
+          return Effect.succeed(approvalRequiredOutcome('call_1'))
+        }
+      })
+      const collector = yield* collectEvents(controller)
+
+      yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
+      yield* awaitEventTag(collector, 'AwaitingInput')
+      yield* fake.end
+      yield* Fiber.join(collector.fiber)
+
+      expect(collector.seen.map(event => event._tag)).toEqual([
+        'ToolCallsRequested',
+        'ToolCallExecuting',
+        'AwaitingInput'
+      ])
+      expect(serverCalls).toEqual(['initial'])
+      expect(fake.sent.filter(payload => payload.startsWith('tool-output'))).toHaveLength(0)
     })
   )
 

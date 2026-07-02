@@ -35,6 +35,7 @@ export {
   VoiceToolCall,
   VoiceToolCallApprovalRequiredOutcome,
   VoiceToolCallCompleted,
+  VoiceToolCallDeniedOutcome,
   VoiceToolCallExecutedOutcome,
   VoiceToolCallExecuting,
   VoiceToolCallFailed,
@@ -56,5 +57,6 @@ export {
   decideVoiceToolCall,
   handleVoiceToolCall,
   voiceApprovalRequestId,
+  voiceToolDenialOutput,
   type VoiceToolCallDecision
 } from './tool-server.ts'

@@ -1,5 +1,10 @@
 import * as Schema from 'effect/Schema'
-import { HitlRequest, HitlResponse, ToolApprovalRequest } from '@yolk-sdk/agent/protocol'
+import {
+  HitlRequest,
+  HitlResponse,
+  ToolApprovalRequest,
+  ToolApprovalResponse
+} from '@yolk-sdk/agent/protocol'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
@@ -299,17 +304,30 @@ export class VoiceToolCallApprovalRequiredOutcome extends Schema.TaggedClass<Voi
   }
 ) {}
 
+/** Tool call was denied by policy or an explicit approval denial. */
+export class VoiceToolCallDeniedOutcome extends Schema.TaggedClass<VoiceToolCallDeniedOutcome>()(
+  'Denied',
+  {
+    callId: NonEmptyTrimmedString,
+    /** Model-visible denial output JSON string. */
+    output: Schema.String,
+    reason: Schema.optional(Schema.String)
+  }
+) {}
+
 /** Server-side voice tool endpoint response contract. */
 export const VoiceToolCallOutcome = Schema.Union([
   VoiceToolCallExecutedOutcome,
-  VoiceToolCallApprovalRequiredOutcome
+  VoiceToolCallApprovalRequiredOutcome,
+  VoiceToolCallDeniedOutcome
 ])
 export type VoiceToolCallOutcome = typeof VoiceToolCallOutcome.Type
 
 /**
  * Server-side voice tool endpoint request contract. `sessionId` binds the
  * call to a server-created voice session; hosts must authenticate the caller
- * and re-resolve tool policy for that session before execution.
+ * and re-resolve tool policy for that session before execution. `approval`
+ * carries the HITL response when resuming an approval-gated call.
  */
 export class VoiceSessionToolCallRequest extends Schema.Class<VoiceSessionToolCallRequest>(
   'VoiceSessionToolCallRequest'
@@ -317,5 +335,6 @@ export class VoiceSessionToolCallRequest extends Schema.Class<VoiceSessionToolCa
   sessionId: NonEmptyTrimmedString,
   callId: NonEmptyTrimmedString,
   name: NonEmptyTrimmedString,
-  argumentsJson: Schema.String
+  argumentsJson: Schema.String,
+  approval: Schema.optional(ToolApprovalResponse)
 }) {}

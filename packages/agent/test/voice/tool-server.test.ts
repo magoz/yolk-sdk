@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolApprovalPolicy, ToolDef } from '@yolk-sdk/agent/protocol'
+import { ToolApprovalPolicy, ToolApprovalResponse, ToolDef } from '@yolk-sdk/agent/protocol'
 import { TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import {
   decideVoiceToolCall,
@@ -97,6 +97,71 @@ describe('handleVoiceToolCall', () => {
       expect(outcome).toMatchObject({
         _tag: 'ApprovalRequired',
         request: { requestId: voiceApprovalRequestId('call_1'), toolCallId: 'call_1' }
+      })
+    })
+  )
+
+  it.effect('executes gated tools with a matching approved response', () =>
+    Effect.gen(function* () {
+      const outcome = yield* handleVoiceToolCall({
+        call: VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '{}' }),
+        tools: [sandboxTool],
+        approval: ToolApprovalResponse.make({
+          requestId: voiceApprovalRequestId('call_1'),
+          toolCallId: 'call_1',
+          decision: 'approved',
+          source: 'user'
+        })
+      }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
+
+      expect(outcome).toMatchObject({
+        _tag: 'Executed',
+        callId: 'call_1',
+        output: JSON.stringify({ result: 'ran' })
+      })
+    })
+  )
+
+  it.effect('returns denied with model-visible output for denied responses', () =>
+    Effect.gen(function* () {
+      const outcome = yield* handleVoiceToolCall({
+        call: VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '{}' }),
+        tools: [sandboxTool],
+        approval: ToolApprovalResponse.make({
+          requestId: voiceApprovalRequestId('call_1'),
+          toolCallId: 'call_1',
+          decision: 'denied',
+          source: 'user',
+          reason: 'not allowed'
+        })
+      }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
+
+      expect(outcome).toMatchObject({
+        _tag: 'Denied',
+        callId: 'call_1',
+        reason: 'not allowed'
+      })
+      expect(outcome._tag === 'Denied' && outcome.output).toContain('denied')
+      expect(outcome._tag === 'Denied' && outcome.output).toContain('Do not retry')
+    })
+  )
+
+  it.effect('rejects mismatched approvals and never executes the tool', () =>
+    Effect.gen(function* () {
+      const outcome = yield* handleVoiceToolCall({
+        call: VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '{}' }),
+        tools: [sandboxTool],
+        approval: ToolApprovalResponse.make({
+          requestId: voiceApprovalRequestId('other_call'),
+          toolCallId: 'other_call',
+          decision: 'approved',
+          source: 'user'
+        })
+      }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
+
+      expect(outcome).toMatchObject({
+        _tag: 'ApprovalRequired',
+        request: { requestId: voiceApprovalRequestId('call_1') }
       })
     })
   )

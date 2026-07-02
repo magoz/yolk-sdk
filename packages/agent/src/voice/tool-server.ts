@@ -1,9 +1,15 @@
 import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolExecutor } from '@yolk-sdk/agent/loop'
-import { ToolApprovalRequest, ToolCall, type ToolDef } from '@yolk-sdk/agent/protocol'
+import {
+  ToolApprovalRequest,
+  ToolCall,
+  type ToolApprovalResponse,
+  type ToolDef
+} from '@yolk-sdk/agent/protocol'
 import {
   VoiceToolCallApprovalRequiredOutcome,
+  VoiceToolCallDeniedOutcome,
   VoiceToolCallExecutedOutcome,
   type VoiceToolCall,
   type VoiceToolCallOutcome
@@ -71,25 +77,60 @@ const executeCall = (call: VoiceToolCall) =>
     )
   )
 
+const encodeDenialOutput = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+
+/** Model-visible denial output for a denied voice tool call. */
+export const voiceToolDenialOutput = (call: VoiceToolCall, reason?: string) =>
+  encodeDenialOutput({
+    error: `Tool ${call.name} was denied${reason === undefined ? '' : `: ${reason}`}. Do not retry it.`
+  }).pipe(Effect.orElseSucceed(() => '{"error":"Tool was denied. Do not retry it."}'))
+
+const approvalMatchesCall = (approval: ToolApprovalResponse, call: VoiceToolCall) =>
+  approval.toolCallId === call.callId &&
+  approval.requestId === voiceApprovalRequestId(call.callId)
+
 /**
  * Server-side voice tool handler: applies approval policy from the session's
- * resolved toolset, then executes through the ambient `ToolExecutor`. Hosts
- * own authentication, session binding, toolset resolution, and persistence
- * around this call.
+ * resolved toolset, then executes through the ambient `ToolExecutor`.
+ *
+ * Approval resume: when the call requires manual approval, a matching
+ * approved `approval` response executes the tool and a matching denial
+ * returns a `Denied` outcome with model-visible output. Missing or
+ * mismatched responses return `ApprovalRequired` again; the tool never
+ * executes without a valid matching approval. Hosts own authentication,
+ * session binding, toolset resolution, and persistence around this call.
  */
 export const handleVoiceToolCall = (input: {
   readonly call: VoiceToolCall
   readonly tools: ReadonlyArray<ToolDef>
+  readonly approval?: ToolApprovalResponse
 }): Effect.Effect<VoiceToolCallOutcome, never, ToolExecutor> =>
   Effect.suspend((): Effect.Effect<VoiceToolCallOutcome, never, ToolExecutor> => {
     const decision = decideVoiceToolCall(input.tools, input.call)
 
     switch (decision._tag) {
-      case 'RequireApproval':
-        return Effect.succeed(
-          VoiceToolCallApprovalRequiredOutcome.make({ request: decision.request })
-        )
       case 'Execute':
         return executeCall(input.call)
+      case 'RequireApproval': {
+        if (input.approval === undefined || !approvalMatchesCall(input.approval, input.call)) {
+          return Effect.succeed(
+            VoiceToolCallApprovalRequiredOutcome.make({ request: decision.request })
+          )
+        }
+
+        if (input.approval.decision === 'denied') {
+          return voiceToolDenialOutput(input.call, input.approval.reason).pipe(
+            Effect.map(output =>
+              VoiceToolCallDeniedOutcome.make({
+                callId: input.call.callId,
+                output,
+                reason: input.approval?.reason
+              })
+            )
+          )
+        }
+
+        return executeCall(input.call)
+      }
     }
   })

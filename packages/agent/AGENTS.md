@@ -42,6 +42,9 @@
 - OAuth and skillset depend on Effect only.
 - Voice depends on protocol + loop only.
 - `voice/browser` is the only DOM/WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes.
+- Voice tools execute server-side only: the client `makeVoiceController` forwards provider tool calls to a host endpoint (`VoiceSessionToolCallRequest` in, `VoiceToolCallOutcome` out); `handleVoiceToolCall` applies `ToolDef.approval` policy before the executor and never runs approval-gated tools without a matching approved response.
+- Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
+- If a voice session ends while awaiting approval, the approval stays pending host-side and the event stream completes; durable resume is host/session-log policy.
 - React depends on client + protocol only.
 - Providers depend on protocol + loop + oauth only; `providers/openai/realtime` may also depend on voice for provider-event-to-`VoiceEvent` mapping.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
