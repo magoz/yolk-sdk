@@ -100,20 +100,9 @@ describe('Workflow run route model', () => {
     })
   })
 
-  it('cancels a run by id', async () => {
-    const cancelledRuns: Array<string> = []
-    const getRun: WorkflowRunResolver = runId =>
-      makeRun({
-        runId,
-        text: '',
-        onCancel: () => {
-          cancelledRuns.push(runId)
-        }
-      })
+  it('returns cancel success JSON', async () => {
+    const response = workflowCancelResponse()
 
-    const response = await workflowCancelResponse('wrun_123', getRun)
-
-    expect(cancelledRuns).toEqual(['wrun_123'])
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ ok: true })
   })

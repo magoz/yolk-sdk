@@ -18,6 +18,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Host app supplies product route/auth/provider/tool wiring; package-owned `'use workflow'` / `'use step'` exports are allowed only with `@workflow/vitest` coverage.
 - Keep Effect runtime work out of workflow orchestration helpers; Effect may run inside host/package step callbacks.
 - Import Workflow orchestration APIs from `@yolk-sdk/vercel-workflows`; `./workflow` remains an explicit equivalent subpath.
+- Effect-native host route adapters live under `./effect` and wrap only public `workflow/api` calls.
 
 ## Design Rules
 
@@ -34,6 +35,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - `runVercelAgentWorkflow` returns structured terminal status (`Completed`, step failures, `AwaitInputFailed`, `CloseStreamFailed`, `MaxTurnsExceeded`) even after writing errors.
 - Destructure callback config before invoking workflow steps/hooks; hook suspension may serialize functions otherwise.
 - Test observable runtime contract, not Vercel SDK implementation details.
+- `./effect` tests must include fake SDK unit tests plus `@workflow/vitest` directive integration coverage.
 
 ## Tests
 

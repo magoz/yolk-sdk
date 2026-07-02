@@ -5,7 +5,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 ## Boundaries
 
 - Package owns generic durable model/tool step loop contract.
-- App imports `runVercelAgentWorkflow` from `@yolk-sdk/vercel-workflows`; Vercel SDK runtime APIs come from `workflow` / `workflow/api` only at app boundaries.
+- App imports `runVercelAgentWorkflow` from `@yolk-sdk/vercel-workflows`; route boundaries use `@yolk-sdk/vercel-workflows/effect` around public `workflow/api` calls.
 - App owns concrete `'use workflow'` / `'use step'` functions because auth, providers, tools, prompt policy, and telemetry are app-specific.
 - Keep Effect runtime work inside `'use step'` functions only; orchestration body must not call `Effect.runPromise`.
 - Workflow args/state are plain wire data; decode with Schema inside steps.

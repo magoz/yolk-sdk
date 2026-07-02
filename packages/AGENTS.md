@@ -11,7 +11,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 | `@yolk-sdk/knowledge` | Knowledge document/file/context/search contracts | `packages/knowledge/AGENTS.md` |
 | `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
 | `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, testing fakes | `packages/sandbox/AGENTS.md` |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract | `packages/vercel-workflows/AGENTS.md` |
+| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract + Effect host wrappers | `packages/vercel-workflows/AGENTS.md` |
 
 ## Dependency direction
 
@@ -25,7 +25,7 @@ agent/compaction -> agent/protocol + agent/loop
 agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 sandbox root -> Effect only; sandbox/agent -> agent tools/protocol/loop; sandbox/vercel -> @vercel/sandbox only
-vercel-workflows -> workflow runtime APIs only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
+vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 agent/voice -> agent/loop + agent/protocol
 ```
 

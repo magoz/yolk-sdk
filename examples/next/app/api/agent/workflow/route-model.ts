@@ -19,10 +19,15 @@ export const workflowNdjsonHeaders = (runId: string, tailIndex?: number) => ({
   ...(tailIndex === undefined ? {} : { 'x-workflow-stream-tail-index': String(tailIndex) })
 })
 
-export const workflowReadableTailIndex = (readable: WorkflowReadableStream) =>
-  typeof readable.getTailIndex === 'function'
-    ? readable.getTailIndex()
-    : Promise.resolve<number | undefined>(undefined)
+export const workflowReadableResponse = (
+  runId: string,
+  readable: ReadableStream<Uint8Array>,
+  tailIndex?: number
+) =>
+  new Response(readable, {
+    status: 200,
+    headers: workflowNdjsonHeaders(runId, tailIndex)
+  })
 
 export const workflowStreamResponse = (
   run: WorkflowReadableRun,
@@ -30,8 +35,5 @@ export const workflowStreamResponse = (
 ) => {
   const readableOptions = options?.startIndex === undefined ? undefined : { startIndex: options.startIndex }
 
-  return new Response(run.getReadable(readableOptions), {
-    status: 200,
-    headers: workflowNdjsonHeaders(run.runId, options?.tailIndex)
-  })
+  return workflowReadableResponse(run.runId, run.getReadable(readableOptions), options?.tailIndex)
 }

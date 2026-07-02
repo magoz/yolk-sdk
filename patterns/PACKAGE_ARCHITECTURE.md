@@ -33,7 +33,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - `@yolk-sdk/knowledge` owns knowledge document/file/context/search contracts; agent integration lives behind `@yolk-sdk/knowledge/agent`.
 - `@yolk-sdk/connectors` is a sibling connector package; agent integration lives behind `@yolk-sdk/connectors/agent`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; agent integration lives behind `@yolk-sdk/sandbox/agent`, and Vercel provider code lives behind `@yolk-sdk/sandbox/vercel`.
-- `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, while hosts own concrete Workflow directives.
+- `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, and hosts own concrete Workflow directives.
 - OpenAI/Codex and Anthropic/Claude provider mechanics live under `@yolk-sdk/agent/providers/*`.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -58,7 +58,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> @vercel/sandbox
-@yolk-sdk/vercel-workflows -> workflow runtime APIs only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
+@yolk-sdk/vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}

@@ -92,7 +92,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/vercel-workflows',
     packageName: '@yolk-sdk/vercel-workflows',
-    expectedExports: ['./package.json', '.', './workflow'],
+    expectedExports: ['./package.json', '.', './effect', './workflow'],
     tinyRoot: false
   }
 ]

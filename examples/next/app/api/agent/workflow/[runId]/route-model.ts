@@ -1,4 +1,5 @@
 import {
+  workflowReadableResponse,
   workflowStreamResponse,
   type WorkflowReadableOptions,
   type WorkflowReadableRun
@@ -51,11 +52,13 @@ export const workflowResumeResponse = (
   options?: WorkflowReadableOptions & { readonly tailIndex?: number }
 ) => workflowStreamResponse(getRun(runId), options)
 
+export const workflowResumeReadableResponse = (
+  runId: string,
+  readable: ReadableStream<Uint8Array>,
+  options?: { readonly tailIndex?: number }
+) => workflowReadableResponse(runId, readable, options?.tailIndex)
+
 export const workflowResumeStartIndexAfterTail = (tailIndex: number | undefined) =>
   tailIndex === undefined ? undefined : tailIndex + 1
 
-export const workflowCancelResponse = async (runId: string, getRun: WorkflowRunResolver) => {
-  await getRun(runId).cancel()
-
-  return Response.json({ ok: true })
-}
+export const workflowCancelResponse = () => Response.json({ ok: true })

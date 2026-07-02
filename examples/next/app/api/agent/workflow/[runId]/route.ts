@@ -1,20 +1,20 @@
-import { Data, Effect } from 'effect'
+import { Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
-import { getRun, resumeHook } from 'workflow/api'
+import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AppLayer } from '@/lib/layers'
 import { agentWorkflowHitlHookToken } from '@/lib/agents/workflow-runtime/run-agent-workflow'
 import { getSession } from '@/lib/services/auth/get-session'
 import { reportError } from '@/lib/services/telemetry/report-error'
 import {
   workflowCancelResponse,
-  workflowResumeResponse,
-  workflowResumeStartIndexFromUrl,
-  workflowResumeStartIndexAfterTail
+  workflowResumeReadableResponse,
+  workflowResumeStartIndexFromUrl
 } from './route-model'
-import { workflowReadableTailIndex } from '../route-model'
 
 export const dynamic = 'force-dynamic'
+
+const WorkflowRunRouteLayer = Layer.merge(AppLayer, VercelWorkflows.layer)
 
 type RouteContext = {
   readonly params: Promise<{ readonly runId: string }>
@@ -82,24 +82,18 @@ const parseStartIndex = (request: Request) => {
   )
 }
 
-const currentWorkflowTailIndex = (runId: string) =>
-  Effect.tryPromise({
-    try: () => workflowReadableTailIndex(getRun(runId).getReadable<Uint8Array>({ startIndex: -1 })),
-    catch: error =>
-      new AgentWorkflowRunRouteError({ message: 'Workflow stream cursor failed', cause: error })
-  })
-
-const requireWorkflowTailIndex = (tailIndex: number | undefined) =>
-  tailIndex === undefined
-    ? Effect.fail(new AgentWorkflowRunRouteError({ message: 'Workflow stream cursor missing' }))
-    : Effect.succeed(tailIndex)
-
 const resumeProgram = (request: Request, context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
+    const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
     const startIndex = yield* parseStartIndex(request)
-    return workflowResumeResponse(runId, getRun, { startIndex })
+    const readable = yield* workflows.getReadable<Uint8Array>(
+      runId,
+      startIndex === undefined ? undefined : { startIndex }
+    )
+
+    return workflowResumeReadableResponse(runId, readable)
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.get'),
     Effect.catchTag('UnauthenticatedError', () =>
@@ -124,24 +118,26 @@ const resumeProgram = (request: Request, context: RouteContext) =>
         Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
       )
     ),
-    Effect.provide(AppLayer)
+    Effect.provide(WorkflowRunRouteLayer)
   )
 
 const hitlResumeProgram = (request: Request, context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
+    const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
     const body = yield* decodeHitlRequest(request)
     const response = yield* hitlResponse(body)
     const encodedResponse = yield* encodeHitlResponse(response)
-    const tailIndex = yield* currentWorkflowTailIndex(runId).pipe(
-      Effect.flatMap(requireWorkflowTailIndex)
-    )
+    const tailIndex = yield* workflows.tailIndex(runId)
 
-    yield* Effect.promise(() => resumeHook(agentWorkflowHitlHookToken({ runId }), encodedResponse))
+    yield* workflows.resumeHook(agentWorkflowHitlHookToken({ runId }), encodedResponse)
 
-    return workflowResumeResponse(runId, getRun, {
-      startIndex: workflowResumeStartIndexAfterTail(tailIndex),
+    const readable = yield* workflows.getReadable<Uint8Array>(runId, {
+      startIndex: tailIndex + 1
+    })
+
+    return workflowResumeReadableResponse(runId, readable, {
       tailIndex
     })
   }).pipe(
@@ -168,14 +164,17 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
         Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
       )
     ),
-    Effect.provide(AppLayer)
+    Effect.provide(WorkflowRunRouteLayer)
   )
 
 const cancelProgram = (context: RouteContext) =>
   Effect.gen(function* () {
     yield* getSession()
+    const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
-    return yield* Effect.promise(() => workflowCancelResponse(runId, getRun))
+    yield* workflows.cancel(runId)
+
+    return workflowCancelResponse()
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.delete'),
     Effect.catchTag('UnauthenticatedError', () =>
@@ -192,7 +191,7 @@ const cancelProgram = (context: RouteContext) =>
         Effect.andThen(Effect.succeed(Response.json({ error: 'Internal error' }, { status: 500 })))
       )
     ),
-    Effect.provide(AppLayer)
+    Effect.provide(WorkflowRunRouteLayer)
   )
 
 export const GET = (request: Request, context: RouteContext) =>

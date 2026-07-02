@@ -55,6 +55,19 @@ export async function packageStreamWorkflow(): Promise<string> {
   return 'stream-complete'
 }
 
+export async function packageStreamHitlWorkflow(): Promise<string> {
+  'use workflow'
+
+  await packageWriteStreamStep('before-hitl')
+  using hook = createHook<string>({ token: 'package-stream-hitl-hook' })
+  const response = await hook
+
+  await packageWriteStreamStep(`after-${response}`)
+  await packageCloseStreamStep()
+
+  return response
+}
+
 export async function packageCancellableWorkflow(): Promise<string> {
   'use workflow'
 

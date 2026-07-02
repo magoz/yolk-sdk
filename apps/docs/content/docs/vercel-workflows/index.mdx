@@ -38,6 +38,27 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 
 `runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in those steps.
 
+## Use Effect at route boundaries
+
+Host routes can use `@yolk-sdk/vercel-workflows/effect` to start, replay, resume, and cancel runs with typed Effect errors while keeping Vercel's SDK underneath.
+
+```ts
+import { Effect } from 'effect'
+import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
+
+const program = Effect.gen(function* () {
+  const workflows = yield* VercelWorkflows
+  const run = yield* workflows.start(runAgentWorkflow, [{ request, context }])
+  const readable = yield* run.getReadable<Uint8Array>()
+
+  return new Response(readable, {
+    headers: { 'x-workflow-run-id': run.runId }
+  })
+}).pipe(Effect.provide(VercelWorkflows.layer))
+```
+
+Do not use the Effect API inside a `'use workflow'` function. Keep it in routes, actions, services, or tests.
+
 ## Resume HITL
 
 When `runToolBatchStep` returns `awaitingInput`, the package calls `awaitInput`, waits for the hook result, then reruns the same tool batch with accumulated HITL responses.

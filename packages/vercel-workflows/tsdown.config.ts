@@ -10,6 +10,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   deps: {
-    neverBundle: [/^@yolk-sdk\//, /^@effect\//, /^effect$/, /^react$/, /^workflow$/]
+    neverBundle: [/^@yolk-sdk\//, /^@effect\//, /^effect$/, /^react$/, /^workflow(\/.*)?$/]
   }
 })

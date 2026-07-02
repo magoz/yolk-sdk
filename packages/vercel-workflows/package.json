@@ -33,6 +33,10 @@
     "./workflow": {
       "types": "./src/workflow.ts",
       "default": "./src/workflow.ts"
+    },
+    "./effect": {
+      "types": "./src/effect.ts",
+      "default": "./src/effect.ts"
     }
   },
   "files": [
@@ -56,6 +60,11 @@
         "types": "./dist/workflow.d.mts",
         "import": "./dist/workflow.mjs",
         "default": "./dist/workflow.mjs"
+      },
+      "./effect": {
+        "types": "./dist/effect.d.mts",
+        "import": "./dist/effect.mjs",
+        "default": "./dist/effect.mjs"
       }
     }
   },

@@ -3,7 +3,7 @@ title: Workflow APIs
 description: Public Vercel Workflow orchestration exports.
 ---
 
-Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath.
+Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath for orchestration. Use `@yolk-sdk/vercel-workflows/effect` for Effect-native host route wrappers around public `workflow/api` calls.
 
 ## Loop exports
 
@@ -24,6 +24,34 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `sequenceDurableAgentEvent` | add deterministic `eventId` without writing |
 | `writeDurableAgentEvent` | write sequenced NDJSON to a writer |
 | `commitThenWriteTerminalEvent` | commit durable state before writing terminal event |
+
+## Effect API exports
+
+Import from `@yolk-sdk/vercel-workflows/effect`.
+
+| Export | Purpose |
+| --- | --- |
+| `VercelWorkflows` | Effect service for start/read/replay/resume/cancel operations |
+| `VercelWorkflowsClient` | service shape for injected fakes/custom layers |
+| `VercelWorkflowsError` | tagged error for public Workflow SDK failures |
+| `VercelWorkflowsSdk` | injectable low-level SDK dependency for tests/custom hosts |
+| `VercelWorkflowFunction` | Workflow function type accepted by `start` |
+| `VercelWorkflowRun` | Effect-native run handle returned by `start`/`getRun` |
+| `VercelWorkflowReadableOptions` | readable stream options, including `startIndex` |
+| `VercelWorkflowReadableStream` | native Workflow readable stream type |
+
+`VercelWorkflows` methods:
+
+| Method | Purpose |
+| --- | --- |
+| `start(workflow, args)` | start a Workflow and return an Effect-native run handle |
+| `getRun(runId)` | create an Effect-native handle for an existing run |
+| `getReadable(runId, options?)` | read/replay a run stream |
+| `tailIndex(runId)` | read current stream tail index |
+| `resumeHook(token, payload)` | resume a pending Workflow hook |
+| `cancel(runId)` | cancel a run |
+
+The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP, queue, hook, or stream internals.
 
 ## Callback types
 

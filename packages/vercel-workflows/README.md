@@ -16,6 +16,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | --- | --- |
 | `@yolk-sdk/vercel-workflows` | Workflow-safe agent loop orchestration APIs |
 | `@yolk-sdk/vercel-workflows/workflow` | Explicit equivalent subpath |
+| `@yolk-sdk/vercel-workflows/effect` | Effect-native wrapper around public `workflow/api` APIs |
 
 ## Imports
 
@@ -32,6 +33,23 @@ import {
 ```
 
 The `./workflow` subpath is also exported for explicit imports.
+
+Use `./effect` at host boundaries that start, replay, resume, or cancel Workflow runs:
+
+```ts
+import { Effect } from 'effect'
+import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
+
+const program = Effect.gen(function* () {
+  const workflows = yield* VercelWorkflows
+  const run = yield* workflows.start(runAgentWorkflow, [{ request, context }])
+
+  return yield* run.getReadable<Uint8Array>()
+}).pipe(Effect.provide(VercelWorkflows.layer))
+```
+
+The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP,
+queues, hooks, or stream storage.
 
 ## Runtime model
 

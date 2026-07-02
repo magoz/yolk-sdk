@@ -1,7 +1,7 @@
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
-import { Data, Effect } from 'effect'
+import { Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
-import { start } from 'workflow/api'
+import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AppLayer } from '@/lib/layers'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import { getSession } from '@/lib/services/auth/get-session'
@@ -18,13 +18,15 @@ class AgentWorkflowRouteError extends Data.TaggedError('AgentWorkflowRouteError'
 
 const handler = Effect.gen(function* () {
   const session = yield* getSession()
+  const workflows = yield* VercelWorkflows
   const request = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
   const workflowRequest = yield* Schema.encodeUnknownEffect(AgentRouteRequest)(request)
-  const run = yield* Effect.promise(() =>
-    start(runAgentWorkflow, [{ userId: session.user.id, request: workflowRequest }])
-  )
+  const run = yield* workflows.start(runAgentWorkflow, [
+    { userId: session.user.id, request: workflowRequest }
+  ])
+  const readable = yield* run.getReadable<Uint8Array>()
 
-  return HttpServerResponse.raw(run.getReadable<Uint8Array>(), {
+  return HttpServerResponse.raw(readable, {
     status: 200,
     headers: workflowNdjsonHeaders(run.runId)
   })
@@ -57,6 +59,8 @@ const handler = Effect.gen(function* () {
   )
 )
 
-const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(handler, AppLayer)
+const WorkflowRouteLayer = Layer.merge(AppLayer, VercelWorkflows.layer)
+
+const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(handler, WorkflowRouteLayer)
 
 export const POST = (request: Request) => effectHandler(request)
