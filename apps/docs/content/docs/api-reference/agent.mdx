@@ -166,8 +166,28 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 
 | Export | Purpose |
 | --- | --- |
-| `executeVoiceToolCall` | execute a voice-session tool call through the agent tool contract |
-| `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError` | voice bridge contracts |
+| `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError` | provider-neutral voice protocol |
+| `makeVoiceController` | client controller: tool forwarding, approval pause/resume, batching |
+| `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput` | server-side tool policy/execution |
+| `VoiceSessionToolCallRequest`, `VoiceToolCallOutcome` | server tool endpoint wire contracts |
+| `executeVoiceToolCall`, `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError` | tool bridge over `ToolExecutor` |
+| `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages` | transcript projection and reconnect seeds |
+| `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId` | replay-safe durable voice events |
+| `makeWebSocketVoiceTransport` | Effect Socket voice transport for Node/server runtimes |
+| `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, `speechResultToAudioPart` | one-shot TTS/STT contracts |
+| `VoiceTransport` | transport service contract |
+
+`@yolk-sdk/agent/voice/browser`
+
+| Export | Purpose |
+| --- | --- |
+| `makeWebRtcVoiceTransport`, `defaultWebRtcVoiceRuntime` | browser WebRTC transport with fake-able runtime seam |
+
+`@yolk-sdk/agent/voice/react`
+
+| Export | Purpose |
+| --- | --- |
+| `useYolkVoice` | headless browser voice hook: lifecycle, drafts, approvals, audio attach |
 
 ## Providers
 
@@ -177,6 +197,8 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 | `@yolk-sdk/agent/providers/openai/codex` | Codex request, auth, OAuth token, and broker helpers |
 | `@yolk-sdk/agent/providers/openai/codex-provider` | `makeOpenAiCodexProviderLayer` |
 | `@yolk-sdk/agent/providers/openai` | Codex OAuth/broker helpers |
+| `@yolk-sdk/agent/providers/openai/realtime` | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
+| `@yolk-sdk/agent/providers/openai/speech` | `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer` |
 | `@yolk-sdk/agent/providers/anthropic/claude` | Claude request, auth, OAuth token, authorization URL, and broker helpers |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer` |
 | `@yolk-sdk/agent/providers/anthropic` | Claude OAuth/broker helpers |

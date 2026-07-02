@@ -304,6 +304,26 @@ for await (const event of streamAgentEventsUntilTerminal({
 The SDK client does not own durable route auth, run ownership, Workflow hook-token routing, or HITL
 request matching. Hosts expose the run endpoints and validate access/response identity server-side.
 
+## Voice
+
+Voice is a first-class modality: browser WebRTC transport, client controller, server tool
+handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
+
+- `useYolkVoice` (`@yolk-sdk/agent/voice/react`) owns browser session lifecycle, user drafts,
+  and pending approvals; provider codecs come from `@yolk-sdk/agent/providers/openai/realtime`.
+- Tools execute server-side only: the controller forwards provider tool calls as
+  `VoiceSessionToolCallRequest` to your endpoint; `handleVoiceToolCall` applies
+  `ToolDef.approval` policy and never runs approval-gated tools without a matching approved
+  response.
+- Approval-gated calls pause with `AwaitingInput`; approvals/denials resume through
+  `submitHitlResponse`. Voice `question` is deferred in v1.
+- `projectVoiceEvent` turns voice events into protocol messages with no dangling host tool
+  calls; `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` give replay-safe durable event ids;
+  `voiceSeedTextsFromMessages` seeds new provider sessions after reconnect.
+- `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
+  `@yolk-sdk/agent/providers/openai/speech` provides `VoiceSpeechSynthesizer` /
+  `VoiceTranscriber` layers.
+
 ## Task subagents
 
 `task` is the package-owned contract for subagent delegation. The SDK provides schema,

@@ -1,6 +1,8 @@
 # First-class Yolk voice
 
-Execution status: IN PROGRESS. Phases 1-8 implemented (protocol, OpenAI codecs, browser WebRTC transport, client controller + server tool handler, voice approval HITL, transcript projection + durable event ids, `useYolkVoice` React hook + Next example migration, Effect WebSocket transport, OpenAI TTS/STT adapters). Next: Phase 9 docs/release readiness.
+Execution status: IMPLEMENTED. All phases (1-9) landed: provider-neutral voice protocol, OpenAI Realtime codecs + client codec, browser WebRTC transport, client controller with approval HITL pause/resume, server tool handler with policy gating, transcript projection + durable event ids, `useYolkVoice` React hook, Next example migration, Effect WebSocket transport, OpenAI TTS/STT adapters, docs, and release gates (build, publint, smoke, exports, boundaries, tsc, lint, tests, docs).
+
+Remaining follow-ups are tracked as future questions: durable pending-approval persistence through the example app's session log (package contracts shipped; example has no voice session store yet), voice usage events, second provider, telephony, voice `question`.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -393,7 +395,7 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 - [x] VOICE-42 Add manual approval flow (controller pause/resume + server approval application; durable pending persistence lands with Phase 5 log).
 - [x] VOICE-43 Document voice `question` deferral.
 - [x] VOICE-44 Add duplicate/idempotent tool-call handling (client controller de-dupe; durable server de-dupe lands with Phase 5 log).
-- [ ] VOICE-45 Add approve-after-session-death resume path.
+- [x] VOICE-45 Add approve-after-session-death resume path (controller keeps approval pending on session end; `voiceSeedTextsFromMessages` + stored HITL responses resume on reconnect; example-app durable store wiring is a future follow-up).
 - [x] VOICE-46 Define server tool endpoint contract (`VoiceSessionToolCallRequest` / `VoiceToolCallOutcome`).
 
 ### Durability
@@ -417,11 +419,11 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### Docs/checks
 
-- [ ] VOICE-80 Update package README/export docs.
-- [ ] VOICE-81 Update docs site package reference.
-- [ ] VOICE-82 Add voice quickstart.
-- [ ] VOICE-83 Add voice HITL guide.
-- [ ] VOICE-84 Run package gates.
+- [x] VOICE-80 Update package README/export docs.
+- [x] VOICE-81 Update docs site package reference (`reference/packages`, `api-reference/agent`).
+- [x] VOICE-82 Add voice docs page (`docs/agent/voice`) with hook/server/speech usage.
+- [x] VOICE-83 Add voice HITL guidance (approvals section in voice docs page).
+- [x] VOICE-84 Run package gates (build, publint, smoke, exports, boundaries, tsc, lint, tests, docs).
 
 ## Open questions
 

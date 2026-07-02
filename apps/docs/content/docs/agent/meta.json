@@ -6,6 +6,7 @@
     "loop-runtime",
     "tools-hitl",
     "client-react",
+    "voice",
     "providers-oauth"
   ]
 }

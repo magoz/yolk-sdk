@@ -1,0 +1,125 @@
+---
+title: Voice
+description: Build live browser voice agents with Yolk tools, approvals, and durable transcripts.
+---
+
+Use the voice subpaths when you want a speech-to-speech agent session that runs your normal Yolk tools with server-side policy, HITL approvals, and transcript projection into protocol messages.
+
+Install:
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect
+```
+
+Add `react` for `@yolk-sdk/agent/voice/react`.
+
+## Subpaths
+
+| Subpath | Use for |
+| --- | --- |
+| `@yolk-sdk/agent/voice` | voice events/commands, controller, server tool handler, transcript projection, speech contracts |
+| `@yolk-sdk/agent/voice/browser` | browser WebRTC transport |
+| `@yolk-sdk/agent/voice/react` | headless `useYolkVoice` hook |
+| `@yolk-sdk/agent/providers/openai/realtime` | OpenAI Realtime session config + event codecs |
+| `@yolk-sdk/agent/providers/openai/speech` | OpenAI one-shot TTS/STT service layers |
+
+## Architecture
+
+Browser owns media and transport. Your server owns tools, policy, HITL state, and durability.
+
+```txt
+useYolkVoice
+  -> WebRTC transport (mic, audio, provider data channel)
+  -> voice controller (events, tool forwarding, approval pause/resume)
+  -> your server tool endpoint -> ToolExecutor
+```
+
+Tools never execute in the browser. The controller forwards each provider tool call to your authenticated endpoint as a `VoiceSessionToolCallRequest` and submits the returned output back to the provider.
+
+## Browser hook
+
+This fragment shows the host-owned wiring; `negotiate` posts SDP to your session route and `executeToolCall` posts to your tool route.
+
+```tsx
+'use client'
+
+import { useYolkVoice } from '@yolk-sdk/agent/voice/react'
+import {
+  decodeOpenAiRealtimeServerEvent,
+  openAiRealtimeServerEventToVoiceEvents,
+  openAiRealtimeVoiceClientCodec
+} from '@yolk-sdk/agent/providers/openai/realtime'
+
+const voice = useYolkVoice({
+  negotiate: offerSdp => postSdpToYourSessionRoute(offerSdp),
+  executeToolCall: (call, approval) => postToYourToolRoute(call, approval),
+  codec: openAiRealtimeVoiceClientCodec,
+  decodeMessage: raw =>
+    openAiRealtimeServerEventToVoiceEvents(decodeOpenAiRealtimeServerEvent(raw)),
+  dataChannelLabel: 'oai-events',
+  onEvent: projectIntoYourChatState
+})
+
+// voice.start() / voice.stop() / voice.userDraft / voice.pendingApprovals
+// voice.approveTool(requestId, toolCallId) / voice.denyTool(...)
+// <audio ref={voice.attachAudioElement} autoPlay />
+```
+
+## Server tool endpoint
+
+Resolve your voice toolset per session, then apply approval policy and execute:
+
+```ts
+import { handleVoiceToolCall, VoiceSessionToolCallRequest, VoiceToolCall } from '@yolk-sdk/agent/voice'
+import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
+
+const outcome = yield* handleVoiceToolCall({
+  call: VoiceToolCall.make({ callId, name, argumentsJson }),
+  tools: toolSet.tools,
+  approval
+}).pipe(Effect.provide(makeToolExecutorLayer(toolSet)))
+```
+
+`handleVoiceToolCall` never executes a tool whose `ToolDef.approval` is `manual` without a matching approved response. Denials return model-visible denial output.
+
+## Approvals in voice
+
+Approval-gated calls pause: the controller emits `AwaitingInput`, the hook exposes `pendingApprovals`, and `approveTool`/`denyTool` resume through your tool endpoint. If the session ends while waiting, the approval stays pending host-side; reconnect replays context and applies the stored response. The package `question` tool is deferred for voice sessions in v1.
+
+## Durable transcripts
+
+Project voice events into protocol messages with `projectVoiceEvent`; final user/assistant transcripts and settled tool call/result pairs become normal `AgentMessage`s with no dangling host tool calls. Use `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` for replay-safe durable event ids and `voiceSeedTextsFromMessages` to seed a new provider session after reconnect. Reconnect never resumes a provider session.
+
+## One-shot speech and transcription
+
+```ts
+import { VoiceSpeechRequest, VoiceSpeechSynthesizer, VoiceTranscriber } from '@yolk-sdk/agent/voice'
+import {
+  makeOpenAiSpeechSynthesizerLayer,
+  makeOpenAiTranscriberLayer
+} from '@yolk-sdk/agent/providers/openai/speech'
+
+const speech = yield* (yield* VoiceSpeechSynthesizer).synthesize(
+  VoiceSpeechRequest.make({ text: 'Hello!' })
+)
+const transcript = yield* (yield* VoiceTranscriber).transcribe({
+  audio: speech.audio,
+  mimeType: speech.mimeType
+})
+```
+
+Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`.
+
+## Host responsibilities
+
+- Own the SDP/session route, auth, and provider API keys.
+- Resolve voice toolsets per session with `{ surface: 'voice' }` context.
+- Persist projected messages and pending approvals in your session log.
+- Own audio element rendering, mic permission UX, and reconnect policy.
+
+## Limitations
+
+- OpenAI Realtime is the only packaged realtime provider in v1.
+- Provider sessions do not resume; reconnect is a new session plus context seeding.
+- Voice `question` HITL is deferred; approvals only.
+- Browsers require user-gesture mic permission and may block autoplay; keep the audio element mounted and user-initiated start.
