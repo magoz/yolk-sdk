@@ -1,6 +1,6 @@
 # @yolk-sdk/agent
 
-Domain-free agent protocol, loop, runtime, client, compaction, tools, providers, OAuth, React, skillset, and voice primitives.
+Domain-free agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice primitives.
 
 Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 
@@ -331,7 +331,7 @@ aborts, and implementation bugs outside typed tool execution.
 
 ## Host responsibilities
 
-- Choose models/providers and map provider streams into protocol events.
+- Choose models/providers and provide an LLM provider layer, using SDK provider subpaths or host adapters.
 - Persist sessions, transcripts, and append logs.
 - Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.

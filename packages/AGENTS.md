@@ -6,12 +6,12 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 | Package | Role | Local docs |
 | --- | --- | --- |
-| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, voice | `packages/agent/AGENTS.md` |
-| `@yolk-sdk/mcp` | MCP client/server/protocol package | `packages/mcp/AGENTS.md` |
-| `@yolk-sdk/knowledge` | Knowledge document/file/context/search contracts | `packages/knowledge/AGENTS.md` |
-| `@yolk-sdk/connectors` | Effect-native connector/integration/action primitives | `packages/connectors/AGENTS.md` |
-| `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, testing fakes | `packages/sandbox/AGENTS.md` |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract + Effect host wrappers | `packages/vercel-workflows/AGENTS.md` |
+| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md` |
+| `@yolk-sdk/mcp` | MCP client/server/protocol adapters | `packages/mcp/AGENTS.md` |
+| `@yolk-sdk/knowledge` | Knowledge document/file/context/search contracts and lookup/manage tool helpers | `packages/knowledge/AGENTS.md` |
+| `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives | `packages/connectors/AGENTS.md` |
+| `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes | `packages/sandbox/AGENTS.md` |
+| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers | `packages/vercel-workflows/AGENTS.md` |
 
 ## Dependency direction
 

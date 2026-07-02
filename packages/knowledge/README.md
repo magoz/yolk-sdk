@@ -1,6 +1,6 @@
 # @yolk-sdk/knowledge
 
-Simple durable knowledge documents for agents: pinned, searchable, or archived.
+Domain-free knowledge document, file, context, search, and lookup/manage tool contracts for agents.
 
 ## Install
 

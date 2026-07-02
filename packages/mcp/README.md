@@ -1,6 +1,6 @@
 # @yolk-sdk/mcp
 
-Domain-free Model Context Protocol client/server package.
+Domain-free Model Context Protocol client/server/protocol adapters.
 
 Root export is intentionally tiny. Import client, protocol, and server APIs from explicit subpaths.
 

@@ -1,11 +1,11 @@
 # @yolk-sdk/connectors
 
-Effect-native connector primitives for hosts that bring their own auth, storage, and policy.
+Effect-native connector, integration, credential, and action primitives for hosts that bring their own auth, storage, and policy.
 
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary effect
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.

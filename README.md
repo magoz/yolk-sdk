@@ -30,7 +30,7 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | `@yolk-sdk/knowledge` | Knowledge document/file/context/search contracts and lookup/manage tool helpers |
 | `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives |
 | `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract |
+| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers |
 
 Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 
