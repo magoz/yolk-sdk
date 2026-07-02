@@ -46,7 +46,10 @@ export type WebRtcPeerConnectionLike = {
   addTrack(track: WebRtcTrackLike, stream: WebRtcMediaStreamLike): unknown
   createOffer(): Promise<WebRtcSessionDescriptionLike>
   setLocalDescription(description: WebRtcSessionDescriptionLike): Promise<void>
-  setRemoteDescription(description: { readonly type: 'answer'; readonly sdp: string }): Promise<void>
+  setRemoteDescription(description: {
+    readonly type: 'answer'
+    readonly sdp: string
+  }): Promise<void>
   close(): void
   addEventListener(type: string, listener: (event: WebRtcTrackEventLike) => void): void
   removeEventListener(type: string, listener: (event: WebRtcTrackEventLike) => void): void

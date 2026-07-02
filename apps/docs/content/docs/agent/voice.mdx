@@ -15,13 +15,13 @@ Add `react` for `@yolk-sdk/agent/voice/react`.
 
 ## Subpaths
 
-| Subpath | Use for |
-| --- | --- |
-| `@yolk-sdk/agent/voice` | voice events/commands, controller, server tool handler, transcript projection, speech contracts |
-| `@yolk-sdk/agent/voice/browser` | browser WebRTC transport |
-| `@yolk-sdk/agent/voice/react` | headless `useYolkVoice` hook |
-| `@yolk-sdk/agent/providers/openai/realtime` | OpenAI Realtime session config + event codecs |
-| `@yolk-sdk/agent/providers/openai/speech` | OpenAI one-shot TTS/STT service layers |
+| Subpath                                     | Use for                                                                                         |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/voice`                     | voice events/commands, controller, server tool handler, transcript projection, speech contracts |
+| `@yolk-sdk/agent/voice/browser`             | browser WebRTC transport                                                                        |
+| `@yolk-sdk/agent/voice/react`               | headless `useYolkVoice` hook                                                                    |
+| `@yolk-sdk/agent/providers/openai/realtime` | OpenAI Realtime session config + event codecs                                                   |
+| `@yolk-sdk/agent/providers/openai/speech`   | OpenAI one-shot TTS/STT service layers                                                          |
 
 ## Architecture
 
@@ -70,14 +70,20 @@ const voice = useYolkVoice({
 Resolve your voice toolset per session, then apply approval policy and execute:
 
 ```ts
-import { handleVoiceToolCall, VoiceSessionToolCallRequest, VoiceToolCall } from '@yolk-sdk/agent/voice'
+import {
+  handleVoiceToolCall,
+  VoiceSessionToolCallRequest,
+  VoiceToolCall
+} from '@yolk-sdk/agent/voice'
 import { makeToolExecutorLayer } from '@yolk-sdk/agent/tools'
 
-const outcome = yield* handleVoiceToolCall({
-  call: VoiceToolCall.make({ callId, name, argumentsJson }),
-  tools: toolSet.tools,
-  approval
-}).pipe(Effect.provide(makeToolExecutorLayer(toolSet)))
+const outcome =
+  yield *
+  handleVoiceToolCall({
+    call: VoiceToolCall.make({ callId, name, argumentsJson }),
+    tools: toolSet.tools,
+    approval
+  }).pipe(Effect.provide(makeToolExecutorLayer(toolSet)))
 ```
 
 `handleVoiceToolCall` never executes a tool whose `ToolDef.approval` is `manual` without a matching approved response. Denials return model-visible denial output.
@@ -99,13 +105,14 @@ import {
   makeOpenAiTranscriberLayer
 } from '@yolk-sdk/agent/providers/openai/speech'
 
-const speech = yield* (yield* VoiceSpeechSynthesizer).synthesize(
-  VoiceSpeechRequest.make({ text: 'Hello!' })
-)
-const transcript = yield* (yield* VoiceTranscriber).transcribe({
-  audio: speech.audio,
-  mimeType: speech.mimeType
-})
+const speech =
+  yield * (yield * VoiceSpeechSynthesizer).synthesize(VoiceSpeechRequest.make({ text: 'Hello!' }))
+const transcript =
+  yield *
+  (yield * VoiceTranscriber).transcribe({
+    audio: speech.audio,
+    mimeType: speech.mimeType
+  })
 ```
 
 Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`.

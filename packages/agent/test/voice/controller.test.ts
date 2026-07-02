@@ -1,6 +1,11 @@
 import { Effect, Fiber, Queue, Stream, type Cause } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolApprovalPolicy, ToolApprovalRequest, ToolApprovalResponse, ToolCall } from '@yolk-sdk/agent/protocol'
+import {
+  ToolApprovalPolicy,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
+  ToolCall
+} from '@yolk-sdk/agent/protocol'
 import {
   makeVoiceController,
   VoiceSessionError,

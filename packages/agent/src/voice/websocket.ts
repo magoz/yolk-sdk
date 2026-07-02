@@ -42,11 +42,7 @@ const socketErrorToVoiceError = (error: Socket.SocketError) =>
  */
 export const makeWebSocketVoiceTransport = (
   options: WebSocketVoiceTransportOptions
-): Effect.Effect<
-  VoiceTransportApi,
-  VoiceSessionError,
-  Scope.Scope | Socket.WebSocketConstructor
-> =>
+): Effect.Effect<VoiceTransportApi, VoiceSessionError, Scope.Scope | Socket.WebSocketConstructor> =>
   Effect.gen(function* () {
     const queue = yield* Queue.unbounded<VoiceEvent, VoiceSessionError | Cause.Done>()
 
@@ -74,47 +70,41 @@ export const makeWebSocketVoiceTransport = (
       Effect.asVoid
     )
 
-    yield* socket
-      .runString(handleMessage, { onOpen })
-      .pipe(
-        Effect.matchCauseEffect({
-          onFailure: cause => {
-            const failure = Cause.squash(cause)
+    yield* socket.runString(handleMessage, { onOpen }).pipe(
+      Effect.matchCauseEffect({
+        onFailure: cause => {
+          const failure = Cause.squash(cause)
 
-            return Effect.gen(function* () {
-              const message =
-                Socket.isSocketError(failure)
-                  ? socketErrorToVoiceError(failure).message
-                  : 'Voice WebSocket failed'
+          return Effect.gen(function* () {
+            const message = Socket.isSocketError(failure)
+              ? socketErrorToVoiceError(failure).message
+              : 'Voice WebSocket failed'
 
-              Deferred.doneUnsafe(
-                ready,
-                Effect.fail(new VoiceSessionError({ code: 'transport_failed', message }))
+            Deferred.doneUnsafe(
+              ready,
+              Effect.fail(new VoiceSessionError({ code: 'transport_failed', message }))
+            )
+            yield* Queue.offer(queue, VoiceErrorEvent.make({ code: 'transport_failed', message }))
+            yield* Queue.end(queue)
+          })
+        },
+        onSuccess: () =>
+          Effect.gen(function* () {
+            Deferred.doneUnsafe(
+              ready,
+              Effect.fail(
+                new VoiceSessionError({
+                  code: 'transport_failed',
+                  message: 'Voice WebSocket closed before ready'
+                })
               )
-              yield* Queue.offer(
-                queue,
-                VoiceErrorEvent.make({ code: 'transport_failed', message })
-              )
-              yield* Queue.end(queue)
-            })
-          },
-          onSuccess: () =>
-            Effect.gen(function* () {
-              Deferred.doneUnsafe(
-                ready,
-                Effect.fail(
-                  new VoiceSessionError({
-                    code: 'transport_failed',
-                    message: 'Voice WebSocket closed before ready'
-                  })
-                )
-              )
-              yield* Queue.offer(queue, VoiceSessionClosed.make({ reason: 'socket_closed' }))
-              yield* Queue.end(queue)
-            })
-        }),
-        Effect.forkScoped
-      )
+            )
+            yield* Queue.offer(queue, VoiceSessionClosed.make({ reason: 'socket_closed' }))
+            yield* Queue.end(queue)
+          })
+      }),
+      Effect.forkScoped
+    )
 
     yield* Deferred.await(ready).pipe(
       Effect.timeoutOrElse({

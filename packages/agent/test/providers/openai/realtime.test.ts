@@ -100,7 +100,9 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       )
     ).toMatchObject({ _tag: 'Error', message: 'session expired' })
     expect(decodeOpenAiRealtimeServerEvent('not json')).toMatchObject({ _tag: 'Ignored' })
-    expect(decodeOpenAiRealtimeServerEvent(JSON.stringify({ type: 'rate_limits.updated' }))).toMatchObject({
+    expect(
+      decodeOpenAiRealtimeServerEvent(JSON.stringify({ type: 'rate_limits.updated' }))
+    ).toMatchObject({
       _tag: 'Ignored'
     })
   })
@@ -131,7 +133,12 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      { _tag: 'AssistantTranscriptFinal', itemId: 'item_2', responseId: 'resp_1', text: 'Hi there.' }
+      {
+        _tag: 'AssistantTranscriptFinal',
+        itemId: 'item_2',
+        responseId: 'resp_1',
+        text: 'Hi there.'
+      }
     ])
   })
 
@@ -212,9 +219,9 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
   })
 
   it('maps provider errors to voice error events', () => {
-    expect(
-      decodeToVoice(JSON.stringify({ type: 'error', error: { message: 'boom' } }))
-    ).toEqual([{ _tag: 'Error', code: 'provider_error', message: 'boom' }])
+    expect(decodeToVoice(JSON.stringify({ type: 'error', error: { message: 'boom' } }))).toEqual([
+      { _tag: 'Error', code: 'provider_error', message: 'boom' }
+    ])
   })
 })
 

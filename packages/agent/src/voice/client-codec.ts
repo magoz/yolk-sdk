@@ -15,9 +15,7 @@ export type VoiceClientCodec = {
   /** Request the provider to produce the next response turn. */
   readonly encodeResponseTurn: () => Effect.Effect<ReadonlyArray<string>, VoiceSessionError>
   /** Encode a user text message as conversation context. */
-  readonly encodeUserText: (
-    text: string
-  ) => Effect.Effect<ReadonlyArray<string>, VoiceSessionError>
+  readonly encodeUserText: (text: string) => Effect.Effect<ReadonlyArray<string>, VoiceSessionError>
   /** Encode an assistant text message as conversation context (replay seed). */
   readonly encodeAssistantText: (
     text: string

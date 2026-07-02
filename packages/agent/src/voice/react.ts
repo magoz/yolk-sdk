@@ -15,7 +15,12 @@ import {
 } from './browser/index.ts'
 import type { VoiceClientCodec } from './client-codec.ts'
 import { makeVoiceController, type VoiceControllerApi } from './controller.ts'
-import { VoiceSessionError, type VoiceEvent, type VoiceToolCall, type VoiceToolCallOutcome } from './protocol.ts'
+import {
+  VoiceSessionError,
+  type VoiceEvent,
+  type VoiceToolCall,
+  type VoiceToolCallOutcome
+} from './protocol.ts'
 import { voiceSeedTextsFromMessages, type VoiceSeedText } from './projection.ts'
 
 export type YolkVoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
@@ -92,9 +97,7 @@ const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState =>
     case 'UserTranscriptFinal':
       return { ...state, userDraft: '' }
     case 'AwaitingInput': {
-      const approvals = event.requests.filter(
-        request => request._tag === 'ToolApprovalRequest'
-      )
+      const approvals = event.requests.filter(request => request._tag === 'ToolApprovalRequest')
 
       return approvals.length === 0
         ? state
@@ -243,7 +246,9 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       yield* Effect.forEach(
         seeds,
         seed =>
-          seed.role === 'user' ? session.seedUserText(seed.text) : session.seedAssistantText(seed.text),
+          seed.role === 'user'
+            ? session.seedUserText(seed.text)
+            : session.seedAssistantText(seed.text),
         { discard: true }
       )
 
@@ -310,9 +315,9 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
     }
 
     Effect.runFork(
-      controller.sendText(text).pipe(
-        Effect.catch(error => Effect.sync(() => optionsRef.current.onError?.(error)))
-      )
+      controller
+        .sendText(text)
+        .pipe(Effect.catch(error => Effect.sync(() => optionsRef.current.onError?.(error))))
     )
   }, [])
 

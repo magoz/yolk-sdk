@@ -86,8 +86,7 @@ export const voiceToolDenialOutput = (call: VoiceToolCall, reason?: string) =>
   }).pipe(Effect.orElseSucceed(() => '{"error":"Tool was denied. Do not retry it."}'))
 
 const approvalMatchesCall = (approval: ToolApprovalResponse, call: VoiceToolCall) =>
-  approval.toolCallId === call.callId &&
-  approval.requestId === voiceApprovalRequestId(call.callId)
+  approval.toolCallId === call.callId && approval.requestId === voiceApprovalRequestId(call.callId)
 
 /**
  * Server-side voice tool handler: applies approval policy from the session's

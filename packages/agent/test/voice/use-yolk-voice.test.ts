@@ -15,7 +15,12 @@ import {
   type VoiceEvent,
   type VoiceToolCallOutcome
 } from '../../src/voice/index.ts'
-import { ToolApprovalPolicy, ToolApprovalRequest, ToolCall, type ToolApprovalResponse } from '@yolk-sdk/agent/protocol'
+import {
+  ToolApprovalPolicy,
+  ToolApprovalRequest,
+  ToolCall,
+  type ToolApprovalResponse
+} from '@yolk-sdk/agent/protocol'
 import { useYolkVoice, type UseYolkVoiceOptions, type YolkVoiceApi } from '../../src/voice/react.ts'
 import { makeFakeWorld, type FakeWorld } from './helpers/fake-webrtc.ts'
 

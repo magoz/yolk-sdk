@@ -126,9 +126,7 @@ const negotiateRealtimeSdp = (
     )
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
-const encodeToolCallBody = Schema.encodeEffect(
-  Schema.fromJsonString(VoiceSessionToolCallRequest)
-)
+const encodeToolCallBody = Schema.encodeEffect(Schema.fromJsonString(VoiceSessionToolCallRequest))
 const decodeToolCallOutcome = Schema.decodeUnknownEffect(VoiceToolCallOutcome)
 
 const executeVoiceToolCallOnServer = (

@@ -12,6 +12,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 | `@yolk-sdk/agent/client` | HTTP/WS response submission helpers |
 | `@yolk-sdk/agent/tools` | Domain-free `question` tool contract |
 | `@yolk-sdk/agent/react` | Headless waiting/tool/question render state |
+| `@yolk-sdk/agent/voice` | Voice approval gating (`handleVoiceToolCall`), controller pause/resume, `AwaitingInput` voice events |
 | App adapters | Storage, auth, concrete routes, hooks, buttons/forms |
 
 ## Semantics
@@ -27,6 +28,8 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Submitted HITL responses can be mapped to optimistic UI/protocol events with `hitlResponseEvent`.
 - Replay stays provider-neutral through normal assistant tool calls and tool result messages.
 - Same-turn sibling tools may yield multiple pending requests; submit responses one at a time unless a runtime adds batching later.
+- Voice sessions support tool approvals only in v1; the `question` tool is deferred for voice and voice `submitHitlResponse` ignores question responses.
+- Voice approvals never execute server-side without a matching approved response (`requestId` = `approval:<callId>`, matching `toolCallId`); denials return model-visible denial output.
 
 ## Runtime adapters
 
@@ -35,6 +38,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 | Stateless Next | Client sends full transcript plus `hitlResponses` to `/api/agent` |
 | Cloudflare DO | WebSocket accepts typed HITL response input; append log persists `RunAwaitingInput` and `HitlResponseAppended` |
 | Vercel Workflow | Tool step writes `AgentAwaitingInput`, waits on `createHook`, route resumes with `resumeHook` |
+| Voice session | Server tool endpoint returns `ApprovalRequired`; controller emits voice `AwaitingInput` and resumes by re-posting the call with the approval response; session death keeps the approval pending host-side |
 
 ## UI rules
 

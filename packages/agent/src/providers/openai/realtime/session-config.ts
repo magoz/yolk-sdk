@@ -1,3 +1,4 @@
+import { Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
 import type { VoiceSessionConfig } from '@yolk-sdk/agent/voice'
@@ -150,7 +151,7 @@ export const openAiRealtimeSessionConfigFromVoice = (
 ): OpenAiRealtimeSessionConfig => {
   const transcriptionModel =
     config.inputTranscription === undefined
-      ? undefined
+      ? Option.none<OpenAiRealtimeTranscriptionModel>()
       : decodeTranscriptionModel(config.inputTranscription.model)
 
   return makeOpenAiRealtimeSessionConfig({
@@ -159,9 +160,6 @@ export const openAiRealtimeSessionConfigFromVoice = (
     model: config.model,
     voice:
       config.voice !== undefined && isOpenAiRealtimeVoice(config.voice) ? config.voice : undefined,
-    transcriptionModel:
-      transcriptionModel !== undefined && transcriptionModel._tag === 'Some'
-        ? transcriptionModel.value
-        : undefined
+    transcriptionModel: Option.getOrUndefined(transcriptionModel)
   })
 }

@@ -51,9 +51,7 @@ export const protocolToolCallFromVoice = (call: VoiceToolCall): ToolCall =>
     params: toolCallParams(call.argumentsJson)
   })
 
-const settledToolMessages = (
-  state: VoiceProjectionState
-): ReadonlyArray<AgentMessage> => {
+const settledToolMessages = (state: VoiceProjectionState): ReadonlyArray<AgentMessage> => {
   const settledIds = new Set(state.turnToolResults.map(result => result.toolCallId))
   const settledCalls = state.turnToolCalls.filter(call => settledIds.has(call.id))
 

@@ -218,11 +218,7 @@ export const makeVoiceController = (
         yield* emit(event)
         yield* Effect.forEach(calls, call => runToolCall(call), { discard: true })
         yield* send(options.codec.encodeResponseTurn()).pipe(Effect.catch(() => Effect.void))
-      }).pipe(
-        Effect.catch(error =>
-          Queue.failCause(out, Cause.fail(error)).pipe(Effect.asVoid)
-        )
-      )
+      }).pipe(Effect.catch(error => Queue.failCause(out, Cause.fail(error)).pipe(Effect.asVoid)))
 
     const dispatch = (event: VoiceEvent): Effect.Effect<void, never, Scope.Scope> => {
       if (event._tag !== 'ToolCallsRequested') {

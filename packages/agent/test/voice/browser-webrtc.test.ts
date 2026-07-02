@@ -95,7 +95,10 @@ describe('makeWebRtcVoiceTransport', () => {
           ...makeTransportOptions(world),
           negotiate: () =>
             Effect.fail(
-              new VoiceSessionError({ code: 'session_setup_failed', message: 'SDP exchange failed' })
+              new VoiceSessionError({
+                code: 'session_setup_failed',
+                message: 'SDP exchange failed'
+              })
             )
         })
       ).pipe(Effect.flip)
