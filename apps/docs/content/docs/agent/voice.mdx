@@ -117,6 +117,10 @@ const transcript =
 
 Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`.
 
+### Hold-to-speak pattern
+
+The one-shot services compose into a second voice mode alongside realtime: record while a button is held, transcribe on release, submit the transcript through your normal text agent runtime, and speak the final assistant reply with TTS. This trades realtime's low latency for the full text stack — any model provider, the complete toolset, and `question`/`task` HITL. The Next example implements both modes (host integration, not SDK API): STT/TTS routes wrap the OpenAI layers, and a hold-to-speak hook drives MediaRecorder capture and reply playback.
+
 ## Host responsibilities
 
 - Own the SDP/session route, auth, and provider API keys.
