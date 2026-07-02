@@ -88,6 +88,13 @@ Voice should make these Yolk capabilities available through speech, not bypass t
 19. Keep `VoiceEvent` separate from `AgentEvent`; provide projection helpers into protocol events/messages.
 20. Put browser transport behind an explicit browser subpath to contain DOM/WebRTC globals.
 21. Keep live provider/WebRTC smoke opt-in; default tests use fakes.
+22. Tools execute server-side only. Browser controller forwards provider tool calls to a host server endpoint; server resolves policy, executes through `ToolExecutor`, and returns provider tool output. The browser never holds tools, credentials, or executor layers.
+23. Use `VoiceSessionBroker` instead of a token-only broker. MVP OpenAI WebRTC uses server-proxied SDP exchange; token minting is a broker capability for ephemeral-token/WS providers later.
+24. Pending HITL approvals persist in the session log. If the provider session dies while awaiting input, the approval stays pending; on reconnect the host replays context and executes/denies the tool from the stored response. Session death never silently denies.
+25. Reuse runtime `SessionEventStore` append-log contracts for voice durability; do not define a parallel `VoiceSessionStore` unless a voice-specific need appears.
+26. Durable voice events carry `eventId` and clients de-dupe by id, matching text runtime replay rules.
+27. Voice usage accounting is deferred from MVP; when added, provider usage maps to protocol `UsageUpdate` semantics.
+28. Mic device selection and mute UI are host-owned; package exposes start/stop capture and accepts a host-provided `MediaStream`.
 
 ## Non-goals
 
@@ -101,18 +108,22 @@ Voice should make these Yolk capabilities available through speech, not bypass t
 
 ## Target architecture
 
+Browser owns media/transport/UI state. Server owns tools, policy, HITL state, and durability.
+
 ```txt
 Browser
   useYolkVoice
-    -> VoiceController
+    -> VoiceController (client state machine)
     -> VoiceTransport(WebRTC)
     -> Stream<VoiceEvent>
+    -> forwards tool calls to host tool endpoint
 
 Server routes / host app
   auth/session/tool policy
-  VoiceTokenBroker
-  ToolExecutor
-  VoiceSessionStore
+  VoiceSessionBroker (SDP proxy now; token minting later)
+  voice tool endpoint -> ToolExecutor
+  HITL pending state
+  SessionEventStore append log
 
 Packages
   @yolk-sdk/agent/voice
@@ -135,9 +146,10 @@ Core flow:
 
 ```txt
 VoiceCommand -> VoiceController -> VoiceTransport -> provider
-provider event -> provider codec -> VoiceEvent -> Yolk runtime/client/UI
-provider tool call -> Yolk tool policy/HITL -> ToolExecutor -> provider tool output
-final transcripts/tool events -> AgentMessage projection -> append log
+provider event -> provider codec -> VoiceEvent -> client state/UI
+provider tool call -> browser forwards to server tool endpoint
+server: policy/HITL -> ToolExecutor -> tool output -> browser -> provider
+final transcripts/tool events -> AgentMessage projection -> append log (eventId, de-duped)
 ```
 
 ## Proposed public model
@@ -196,22 +208,19 @@ VoiceTransport
   send
   events
 
-VoiceTokenBroker
-  mint
+VoiceSessionBroker
+  openSession        server-side; SDP proxy for OpenAI WebRTC MVP
+  mintToken          later; ephemeral-token/WS providers
 
 VoiceToolController
-  handleToolCall
+  handleToolCall     server-side; policy + HITL + ToolExecutor
   submitToolOutput
 
 VoiceTranscriptProjector
   projectVoiceEvent
-
-VoiceSessionStore
-  create
-  append
-  load
-  close
 ```
+
+Durability reuses `@yolk-sdk/agent/runtime` `SessionEventStore`; no new store contract.
 
 Use `Context.Service`, `Layer`, `Stream`, `Queue`, `Scope.acquireRelease`, `Schema.TaggedClass`, `Schema.TaggedErrorClass`, and `effect/unstable/http` clients where applicable.
 
@@ -239,22 +248,26 @@ Use `Context.Service`, `Layer`, `Stream`, `Queue`, `Scope.acquireRelease`, `Sche
 
 ### Phase 3 — Voice controller and tool bridge
 
-- Build `VoiceController` over `VoiceTransport`, `ToolExecutor`, and tool policy.
+- Build client `VoiceController` over `VoiceTransport`; no tools/credentials in browser.
+- Build server-side `VoiceToolController` over `ToolExecutor` and tool policy.
+- Define the host tool endpoint contract replacing today's generic `/api/agent/realtime/tool`: authenticated session id, toolset revision/hash, tool call id, tool name, args; server re-resolves policy before execution.
 - Route provider tool calls through Yolk `ToolCall` and `ToolResult`.
 - Preserve current `executeVoiceToolCall` semantics but bind to sessions.
 - Add idempotency by tool call id.
 - Add model-visible safe failure results.
 - Enforce voice toolset resolution by host context `{ surface: 'voice' }`.
-- Remove or harden generic `/api/agent/realtime/tool` behavior in example.
+- Define interruption-vs-pending-tool behavior: pending execution completes server-side; output submission is skipped if the call was cancelled by the provider, and the result is still logged.
 
 ### Phase 4 — Voice HITL
 
 - Support manual tool approval during voice sessions.
 - Document package `question` deferral for voice sessions.
 - Emit `AwaitingInput` voice events mapped from protocol HITL requests.
+- Persist pending approval requests in the session log before surfacing to UI.
 - Resume tool call after approve/deny response.
 - Return denial output as provider tool output.
-- Add tests for approve, deny, cancel, duplicate response, and disconnect while waiting.
+- Handle session timeout while awaiting input: approval stays pending in log; reconnect replays context and applies the stored response; never silently deny on session death.
+- Add tests for approve, deny, cancel, duplicate response, disconnect while waiting, and approve-after-session-death.
 
 ### Phase 5 — Transcript projection and durability
 
@@ -262,9 +275,10 @@ Use `Context.Service`, `Layer`, `Stream`, `Queue`, `Scope.acquireRelease`, `Sche
 - Map final assistant transcript to `AssistantMessage`.
 - Map tool call/result pairs to normal protocol messages.
 - Represent interruption/partial assistant output without creating dangling tool calls.
-- Append normalized events/messages to host session log.
+- Append normalized events/messages through runtime `SessionEventStore`.
+- Assign `eventId` to durable voice events; clients de-dupe by id per text runtime replay rules.
 - On reconnect, start a new provider session and seed compacted Yolk transcript/context.
-- Add projection tests and append-log replay tests.
+- Add projection tests, append-log replay tests, and duplicate-event de-dupe tests.
 
 ### Phase 6 — React hook and example UI
 
@@ -294,6 +308,10 @@ Use `Context.Service`, `Layer`, `Stream`, `Queue`, `Scope.acquireRelease`, `Sche
 ### Phase 9 — Docs and release readiness
 
 - Update package READMEs/subpaths.
+- Update `exports`, `publishConfig.exports`, `scripts/check-package-exports.ts`, and `scripts/smoke-package-imports.ts` together for every new subpath.
+- Update `packages/agent/AGENTS.md` subpath/dependency tables: voice gains controller/react/browser subpaths beyond "protocol + loop only".
+- Update `packages/AGENTS.md` dependency direction for new voice subpaths.
+- Verify agent package tsconfig covers DOM lib types for `voice/browser` without leaking DOM into core subpaths.
 - Update docs package reference pages.
 - Add quickstart: live voice agent with tools.
 - Add guide: voice HITL approval.
@@ -315,6 +333,8 @@ Voice tool calls must be bound to a server-created session:
 - approval state if needed
 
 Server must re-resolve policy before execution. Client or provider-supplied tool output must never be trusted as execution proof.
+
+Verification mechanism for MVP: server-side session state keyed by authenticated session id; the server stores the resolved toolset revision at session open and validates every tool call against it. HMAC-signed call envelopes are a later option for stateless hosts, not required while session state is server-owned.
 
 ## Testing strategy
 
@@ -340,6 +360,10 @@ Server must re-resolve policy before execution. Client or provider-supplied tool
 - [x] VOICE-06 Decide `VoiceEvent` relation to `AgentEvent`: separate with projection helpers.
 - [x] VOICE-07 Decide browser transport boundary: explicit browser subpath.
 - [x] VOICE-08 Decide live smoke policy: opt-in only.
+- [x] VOICE-09a Decide tool execution split: server-side only; browser forwards.
+- [x] VOICE-09b Decide session broker: `VoiceSessionBroker`, SDP proxy MVP.
+- [x] VOICE-09c Decide HITL timeout behavior: pending persists; apply on reconnect.
+- [x] VOICE-09d Decide durability store: reuse runtime `SessionEventStore`.
 
 ### Protocol/core
 
@@ -366,16 +390,18 @@ Server must re-resolve policy before execution. Client or provider-supplied tool
 
 - [ ] VOICE-40 Bind voice tool calls to sessions.
 - [ ] VOICE-41 Enforce voice tool policy server-side.
-- [ ] VOICE-42 Add manual approval flow.
+- [ ] VOICE-42 Add manual approval flow with persisted pending state.
 - [ ] VOICE-43 Document voice `question` deferral.
 - [ ] VOICE-44 Add duplicate/idempotent tool-call handling.
+- [ ] VOICE-45 Add approve-after-session-death resume path.
+- [ ] VOICE-46 Define server tool endpoint contract replacing generic `/api/agent/realtime/tool`.
 
 ### Durability
 
 - [ ] VOICE-50 Project transcripts to `AgentMessage`.
 - [ ] VOICE-51 Project tool calls/results without dangling calls.
-- [ ] VOICE-52 Append normalized voice events to session log.
-- [ ] VOICE-53 Add reconnect replay path.
+- [ ] VOICE-52 Append normalized voice events through `SessionEventStore` with `eventId`.
+- [ ] VOICE-53 Add reconnect replay path with client de-dupe.
 
 ### React/example
 
@@ -407,3 +433,5 @@ Future questions:
 - When to promote WebSocket Node transport beyond browser MVP?
 - When to add voice `question`?
 - When to add telephony bridge?
+- When to add voice usage/cost events mapped to `UsageUpdate`?
+- When to add HMAC-signed tool call envelopes for stateless hosts?
