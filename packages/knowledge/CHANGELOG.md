@@ -1,5 +1,13 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.32
+
+### Patch Changes
+
+- Add Effect-native Vercel Workflow host wrappers and refresh package documentation.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.32
+
 ## 0.1.0-canary.31
 
 ### Patch Changes
