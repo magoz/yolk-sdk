@@ -59,6 +59,7 @@ import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
+import { playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
@@ -700,13 +701,30 @@ export function AgentPlayground({
     isVoiceModeRef.current = isVoiceMode
   }, [isVoiceMode])
 
+  // Speech during the connecting window is not captured; chime on the live
+  // rising edge so users know exactly when the mic is hot.
+  const wasVoiceLiveRef = useRef(false)
+  useEffect(() => {
+    if (isVoiceLive && !wasVoiceLiveRef.current) {
+      playVoiceReadyEarcon()
+    }
+
+    wasVoiceLiveRef.current = isVoiceLive
+  }, [isVoiceLive])
+
   const handleToggleVoice = useCallback(() => {
-    // Starting realtime: force TTS off so only one narration plays.
-    if (!isVoiceMode && ttsEnabledRef.current) {
-      ttsEnabledRef.current = false
-      setTtsEnabled(false)
-      speechChunkerStateRef.current = emptySpeechChunkerState
-      resetTtsSpeech()
+    if (!isVoiceMode) {
+      // Web Audio needs a user gesture; prime here so the ready chime can
+      // play when the session goes live later.
+      primeVoiceEarcon()
+
+      // Starting realtime: force TTS off so only one narration plays.
+      if (ttsEnabledRef.current) {
+        ttsEnabledRef.current = false
+        setTtsEnabled(false)
+        speechChunkerStateRef.current = emptySpeechChunkerState
+        resetTtsSpeech()
+      }
     }
 
     toggleVoice()
