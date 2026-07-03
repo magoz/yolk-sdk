@@ -6,8 +6,6 @@ import { Array as Arr, Effect, Option } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
-  assistantContent,
-  contentPreview,
   zeroAgentUsage,
   type AgentEvent,
   type QuestionResponse,
@@ -56,6 +54,7 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
+import { appendSpeechTextDelta, emptySpeechChunkerState, flushSpeechText } from './speech-chunker'
 import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useHoldToSpeak } from './use-hold-to-speak'
@@ -566,6 +565,7 @@ export function AgentPlayground({
 
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const ttsEnabledRef = useRef(false)
+  const speechChunkerStateRef = useRef(emptySpeechChunkerState)
   const appendTranscriptRef = useRef<(text: string) => void>(() => {})
   const holdToSpeak = useHoldToSpeak({
     onTranscript: text => appendTranscriptRef.current(text),
@@ -574,28 +574,78 @@ export function AgentPlayground({
       recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
     }
   })
-  const speakAssistantReply = holdToSpeak.speak
+  const enqueueTtsSpeech = holdToSpeak.enqueueSpeech
+  const resetTtsSpeech = holdToSpeak.resetSpeech
+  const flushTtsSpeech = useCallback(() => {
+    const result = flushSpeechText(speechChunkerStateRef.current)
+    speechChunkerStateRef.current = result.state
+
+    if (result.chunks.length > 0) {
+      enqueueTtsSpeech(result.chunks)
+    }
+  }, [enqueueTtsSpeech])
   const handleAgentEvent = useCallback(
     (event: AgentEvent) => {
       recordAgentEvent(event)
 
-      if (!ttsEnabledRef.current || event._tag !== 'AgentEnd') {
-        return
-      }
+      switch (event._tag) {
+        case 'AgentStart':
+          speechChunkerStateRef.current = emptySpeechChunkerState
+          resetTtsSpeech()
+          return
+        case 'AgentError':
+        case 'AgentRetry':
+          speechChunkerStateRef.current = emptySpeechChunkerState
+          resetTtsSpeech()
+          return
+        case 'AgentAwaitingInput':
+        case 'AgentEnd':
+          if (ttsEnabledRef.current) {
+            flushTtsSpeech()
+          } else {
+            speechChunkerStateRef.current = emptySpeechChunkerState
+          }
+          return
+        case 'LLMTextDelta': {
+          if (!ttsEnabledRef.current) {
+            return
+          }
 
-      const lastAssistant = Arr.findLast(event.messages, message => message._tag === 'Assistant')
+          const result = appendSpeechTextDelta(speechChunkerStateRef.current, event.text)
+          speechChunkerStateRef.current = result.state
 
-      if (Option.isNone(lastAssistant) || lastAssistant.value._tag !== 'Assistant') {
-        return
-      }
+          if (result.chunks.length > 0) {
+            enqueueTtsSpeech(result.chunks)
+          }
 
-      const text = contentPreview(assistantContent(lastAssistant.value))
-
-      if (text.trim().length > 0) {
-        speakAssistantReply(text)
+          return
+        }
+        case 'AssistantMessage':
+        case 'CompactionEnd':
+        case 'CompactionStart':
+        case 'LLMReasoningDelta':
+        case 'LLMStreamEnd':
+        case 'LLMStreamStart':
+        case 'ProviderToolResult':
+        case 'QuestionAnswered':
+        case 'QuestionCancelled':
+        case 'QuestionRequested':
+        case 'ToolApprovalDenied':
+        case 'ToolApprovalGranted':
+        case 'ToolApprovalRequested':
+        case 'ToolExecutionCompleted':
+        case 'ToolExecutionError':
+        case 'ToolExecutionStarted':
+        case 'ToolInputDelta':
+        case 'ToolInputEnd':
+        case 'ToolInputStart':
+        case 'TurnEnd':
+        case 'TurnStart':
+        case 'UsageUpdate':
+          return
       }
     },
-    [recordAgentEvent, speakAssistantReply]
+    [enqueueTtsSpeech, flushTtsSpeech, recordAgentEvent, resetTtsSpeech]
   )
 
   const agentChat = useAgentChat({
@@ -657,19 +707,19 @@ export function AgentPlayground({
     }
   }, [recordActivity])
 
-  const stopTtsPlayback = holdToSpeak.stopPlayback
   const handleToggleTts = useCallback(() => {
     setTtsEnabled(current => {
       const next = !current
       ttsEnabledRef.current = next
 
       if (!next) {
-        stopTtsPlayback()
+        speechChunkerStateRef.current = emptySpeechChunkerState
+        resetTtsSpeech()
       }
 
       return next
     })
-  }, [stopTtsPlayback])
+  }, [resetTtsSpeech])
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const documentInputSupported = agentTextCapabilities.input.document
@@ -912,6 +962,8 @@ export function AgentPlayground({
 
     workflowResumeAbortRef.current?.abort('Workflow stream stopped')
     workflowResumeAbortRef.current = null
+    speechChunkerStateRef.current = emptySpeechChunkerState
+    resetTtsSpeech()
     stop()
 
     if (runtime._tag !== 'Workflow' || runId === null) {
@@ -929,7 +981,7 @@ export function AgentPlayground({
         const message = error instanceof Error ? error.message : 'Workflow cancel failed'
         recordActivity({ title: 'Workflow cancel failed', detail: message, tone: 'error' })
       })
-  }, [recordActivity, runtime, stop, workflowRunId])
+  }, [recordActivity, resetTtsSpeech, runtime, stop, workflowRunId])
 
   const handleEditUserMessage = useCallback(
     (messageId: string, content: string) => {

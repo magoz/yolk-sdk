@@ -19,6 +19,25 @@ type UseHoldToSpeakInput = {
   readonly onError: (message: string) => void
 }
 
+type SpeechAudio = {
+  readonly audio: ArrayBuffer
+  readonly contentType: string
+}
+
+type SpeechRequestOutcome =
+  | {
+      readonly _tag: 'Success'
+      readonly speech: SpeechAudio
+    }
+  | {
+      readonly _tag: 'Failure'
+      readonly error: unknown
+    }
+
+type PlaybackCancel = {
+  cancel: () => void
+}
+
 const minRecordingMs = 300
 
 class HoldToSpeakError extends Error {}
@@ -65,7 +84,7 @@ const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
 
 const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
 
-const requestSpeech = (text: string) =>
+const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakError> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const body = yield* encodeSpeakBody({ text }).pipe(
@@ -86,6 +105,19 @@ const requestSpeech = (text: string) =>
 
     return { audio, contentType }
   }).pipe(Effect.provide(FetchHttpClient.layer))
+
+const speechRequestSuccess = (speech: SpeechAudio): SpeechRequestOutcome => ({
+  _tag: 'Success',
+  speech
+})
+
+const speechRequestFailure = (error: unknown): SpeechRequestOutcome => ({
+  _tag: 'Failure',
+  error
+})
+
+const requestSpeechOutcome = (text: string): Promise<SpeechRequestOutcome> =>
+  Effect.runPromise(requestSpeech(text)).then(speechRequestSuccess, speechRequestFailure)
 
 const pickRecorderMimeType = () => {
   if (typeof MediaRecorder === 'undefined') {
@@ -124,27 +156,182 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
   const pendingStartRef = useRef<PendingStart | null>(null)
   const audioElementRef = useRef<HTMLAudioElement | null>(null)
   const objectUrlRef = useRef<string | null>(null)
+  const speechQueueRef = useRef<Array<string>>([])
+  const speechRunIdRef = useRef(0)
+  const speechPumpRunIdRef = useRef<number | null>(null)
+  const cancelPlaybackRef = useRef<(() => void) | null>(null)
   const callbacksRef = useRef({ onTranscript, onError })
 
   useEffect(() => {
     callbacksRef.current = { onTranscript, onError }
   }, [onTranscript, onError])
 
-  const stopPlayback = useCallback(() => {
+  const revokeObjectUrl = useCallback(() => {
+    if (objectUrlRef.current !== null) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+  }, [])
+
+  const stopCurrentAudio = useCallback(() => {
+    const cancelPlayback = cancelPlaybackRef.current
+
+    cancelPlaybackRef.current = null
+    cancelPlayback?.()
+
     const element = audioElementRef.current
 
     if (element !== null) {
       element.pause()
       element.src = ''
+      element.onended = null
+      element.onerror = null
     }
 
-    if (objectUrlRef.current !== null) {
-      URL.revokeObjectURL(objectUrlRef.current)
-      objectUrlRef.current = null
-    }
+    revokeObjectUrl()
+  }, [revokeObjectUrl])
+
+  const resetSpeech = useCallback(() => {
+    speechRunIdRef.current += 1
+    speechQueueRef.current = []
+    stopCurrentAudio()
 
     setIsSpeaking(false)
-  }, [])
+  }, [stopCurrentAudio])
+
+  const playSpeechAudio = useCallback(
+    (speech: SpeechAudio, runId: number) =>
+      new Promise<void>((resolve, reject) => {
+        const element = audioElementRef.current
+
+        if (element === null || speechRunIdRef.current !== runId) {
+          resolve()
+          return
+        }
+
+        stopCurrentAudio()
+
+        const url = URL.createObjectURL(new Blob([speech.audio], { type: speech.contentType }))
+        let settled = false
+        const playback: PlaybackCancel = { cancel: () => undefined }
+        const settle = (error: Error | null) => {
+          if (settled) {
+            return
+          }
+
+          settled = true
+
+          if (cancelPlaybackRef.current === playback.cancel) {
+            cancelPlaybackRef.current = null
+          }
+
+          element.onended = null
+          element.onerror = null
+
+          if (objectUrlRef.current === url) {
+            URL.revokeObjectURL(url)
+            objectUrlRef.current = null
+          }
+
+          if (error === null) {
+            resolve()
+            return
+          }
+
+          reject(error)
+        }
+
+        playback.cancel = () => settle(null)
+        cancelPlaybackRef.current = playback.cancel
+        objectUrlRef.current = url
+        element.src = url
+        element.onended = () => settle(null)
+        element.onerror = () => settle(new HoldToSpeakError('Audio playback failed'))
+
+        void element.play().catch((error: unknown) => {
+          settle(new HoldToSpeakError(`Audio playback failed: ${unknownToMessage(error)}`))
+        })
+      }),
+    [stopCurrentAudio]
+  )
+
+  const startSpeechPump = useCallback(() => {
+    const runId = speechRunIdRef.current
+
+    if (speechPumpRunIdRef.current === runId) {
+      return
+    }
+
+    speechPumpRunIdRef.current = runId
+    setIsSpeaking(true)
+
+    void (async () => {
+      let prefetchedSpeech: Promise<SpeechRequestOutcome> | null = null
+
+      try {
+        while (speechRunIdRef.current === runId && speechPumpRunIdRef.current === runId) {
+          let speechPromise: Promise<SpeechRequestOutcome>
+
+          if (prefetchedSpeech !== null) {
+            speechPromise = prefetchedSpeech
+            prefetchedSpeech = null
+          } else {
+            const nextText = speechQueueRef.current.shift()
+
+            if (nextText === undefined) {
+              break
+            }
+
+            speechPromise = requestSpeechOutcome(nextText)
+          }
+
+          const followingText = speechQueueRef.current.shift()
+
+          if (followingText !== undefined) {
+            prefetchedSpeech = requestSpeechOutcome(followingText)
+          }
+
+          const outcome = await speechPromise
+
+          if (outcome._tag === 'Failure') {
+            throw outcome.error
+          }
+
+          if (speechRunIdRef.current !== runId || speechPumpRunIdRef.current !== runId) {
+            break
+          }
+
+          await playSpeechAudio(outcome.speech, runId)
+        }
+      } catch (error) {
+        if (speechRunIdRef.current === runId && speechPumpRunIdRef.current === runId) {
+          callbacksRef.current.onError(unknownToMessage(error))
+        }
+      } finally {
+        if (speechPumpRunIdRef.current === runId) {
+          speechPumpRunIdRef.current = null
+          setIsSpeaking(false)
+        }
+      }
+    })()
+  }, [playSpeechAudio])
+
+  const enqueueSpeech = useCallback(
+    (chunks: ReadonlyArray<string>) => {
+      for (const chunk of chunks) {
+        const text = chunk.trim()
+
+        if (text.length > 0) {
+          speechQueueRef.current.push(text)
+        }
+      }
+
+      if (speechQueueRef.current.length > 0) {
+        startSpeechPump()
+      }
+    },
+    [startSpeechPump]
+  )
 
   const releaseRecording = useCallback((recording: ActiveRecording) => {
     for (const track of recording.stream.getTracks()) {
@@ -172,7 +359,7 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
       return
     }
 
-    stopPlayback()
+    resetSpeech()
 
     const pending: PendingStart = { cancelled: false }
     pendingStartRef.current = pending
@@ -215,7 +402,7 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
         setStatus('idle')
         callbacksRef.current.onError(`Microphone access failed: ${unknownToMessage(error)}`)
       })
-  }, [status, stopPlayback])
+  }, [resetSpeech, status])
 
   const stopRecording = useCallback(() => {
     const pending = pendingStartRef.current
@@ -271,49 +458,6 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
     recording.recorder.stop()
   }, [releaseRecording])
 
-  const speak = useCallback(
-    (text: string) => {
-      if (text.trim().length === 0) {
-        return
-      }
-
-      stopPlayback()
-      setIsSpeaking(true)
-
-      Effect.runFork(
-        requestSpeech(text).pipe(
-          Effect.matchEffect({
-            onFailure: error =>
-              Effect.sync(() => {
-                setIsSpeaking(false)
-                callbacksRef.current.onError(unknownToMessage(error))
-              }),
-            onSuccess: ({ audio, contentType }) =>
-              Effect.sync(() => {
-                const element = audioElementRef.current
-
-                if (element === null) {
-                  setIsSpeaking(false)
-                  return
-                }
-
-                const url = URL.createObjectURL(new Blob([audio], { type: contentType }))
-                objectUrlRef.current = url
-                element.src = url
-                element.onended = () => stopPlayback()
-                element.onerror = () => stopPlayback()
-                void element.play().catch((error: unknown) => {
-                  stopPlayback()
-                  callbacksRef.current.onError(`Audio playback failed: ${unknownToMessage(error)}`)
-                })
-              })
-          })
-        )
-      )
-    },
-    [stopPlayback]
-  )
-
   const attachAudioElement = useCallback((element: HTMLAudioElement | null) => {
     audioElementRef.current = element
   }, [])
@@ -335,9 +479,9 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
         }
       }
 
-      stopPlayback()
+      resetSpeech()
     },
-    [stopPlayback]
+    [resetSpeech]
   )
 
   return {
@@ -347,8 +491,8 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
     isSpeaking,
     startRecording,
     stopRecording,
-    speak,
-    stopPlayback,
+    enqueueSpeech,
+    resetSpeech,
     attachAudioElement
   }
 }
