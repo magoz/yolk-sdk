@@ -4,8 +4,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Current Mode
 
-- `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF input and mic voice mode.
-- Text `/api/agent` route, Workflow text `/api/agent/workflow` route, and Realtime voice `/api/agent/realtime/*` routes.
+- `/agent` runtime chooser; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF input, hold-to-speak STT, realtime voice, and TTS controls.
+- Text `/api/agent` route, Workflow text `/api/agent/workflow` route, Realtime voice `/api/agent/realtime/*`, and one-shot voice `/api/agent/voice/{transcribe,speak}` routes.
 - Default text prompt says tools run in parallel and distinguishes durable user knowledge from storage sources.
 - Next text runtime has no durable transcript: client sends full protocol transcript each turn.
 - Workflow text runtime has durable execution/streaming; product transcript is still client-owned per turn in v1.
@@ -16,16 +16,16 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Map
 
-| Area | Docs |
-| --- | --- |
-| Providers | `providers/AGENTS.md` |
-| Tools | `tools/AGENTS.md` |
-| MCP config source | `mcp/AGENTS.md` |
-| Skillset sources | `skillset/AGENTS.md` |
-| Workflow runtime | `workflow-runtime/AGENTS.md` |
-| Realtime voice adapters | `realtime/AGENTS.md` |
-| Agent UI | `examples/next/app/agent/AGENTS.md` |
-| Agent API routes | `examples/next/app/api/agent/AGENTS.md` |
+| Area                    | Docs                                    |
+| ----------------------- | --------------------------------------- |
+| Providers               | `providers/AGENTS.md`                   |
+| Tools                   | `tools/AGENTS.md`                       |
+| MCP config source       | `mcp/AGENTS.md`                         |
+| Skillset sources        | `skillset/AGENTS.md`                    |
+| Workflow runtime        | `workflow-runtime/AGENTS.md`            |
+| Realtime voice adapters | `realtime/AGENTS.md`                    |
+| Agent UI                | `examples/next/app/agent/AGENTS.md`     |
+| Agent API routes        | `examples/next/app/api/agent/AGENTS.md` |
 
 ## Models + Providers
 
@@ -48,7 +48,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Task results include structured subagent metadata for status, timing, model, and ids.
 - Parallel task execution requires multiple `task` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
 - Workflow text runtime exposes run id in Activity; replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response; stop calls `DELETE`.
-- Voice seeds current protocol transcript into Realtime via `conversation.item.create`.
+- Realtime voice seeds current protocol transcript via `conversation.item.create`; hold-to-speak routes use OpenAI speech adapters and the normal text runtime. TTS and realtime are mutually exclusive in the UI.
 
 ## JSON Boundaries
 

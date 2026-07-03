@@ -85,6 +85,8 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Realtime: completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
 - Voice tool calls route through `/api/agent/realtime/tool`; do not execute tools in the browser hook.
 - Hold-to-speak (`use-hold-to-speak.ts`): MediaRecorder while held, `/api/agent/voice/transcribe` on release, and the transcript is appended into the composer input for review/edit before the user sends. It never auto-submits. Sub-300ms holds are discarded.
+- `speech-chunker.ts` owns pure sentence chunking/flush rules; keep tests there when changing streamed TTS boundaries.
+- `use-hold-to-speak.ts` owns STT recording plus the sequential TTS playback queue/prefetch/reset lifecycle; `playground.tsx` decides when chunks are enqueued (`ttsEnabled && !isVoiceMode`).
 - TTS toggle: while enabled, assistant `LLMTextDelta` output is sentence-chunked and queued through `/api/agent/voice/speak`; `AgentEnd` flushes the final partial chunk. Disabling stops playback. Speaker/hold controls are disabled while realtime is active, and realtime is disabled while holding/transcribing.
 - TTS and realtime are mutually exclusive: starting realtime force-disables the TTS toggle, and the event handler additionally ignores TTS chunking while voice mode is active (realtime pipes projected `LLMTextDelta`/`AgentEnd` through the same `onEvent` path and narrates natively — two narrations otherwise).
 - Hold-to-speak sends go through the normal text runtime, so they get the full toolset and HITL.

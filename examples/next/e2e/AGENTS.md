@@ -30,16 +30,21 @@ streaming, redirect, and gotcha guidance.
 
 ## Files
 
-| Path | Role |
-| --- | --- |
-| `playwright.config.ts` | App-local runner; loads `.env.test`; starts fixed-port app server |
-| `e2e/global-setup.ts` | Reset DB, seed test user, create signed session |
-| `e2e/global-teardown.ts` | TRUNCATE CASCADE cleanup |
-| `e2e/fixtures.ts` | `authedContext`, `authedPage`, `apiContext` |
-| `e2e/test-ids.ts` | Deterministic IDs shared by setup/specs |
-| `e2e/utils/*` | Test DB/auth/session/context helpers |
-| `e2e/ui/*` | Browser specs |
-| `e2e/assets/*` | Checked-in audio fixtures |
+| Path                     | Role                                                              |
+| ------------------------ | ----------------------------------------------------------------- |
+| `playwright.config.ts`   | App-local runner; loads `.env.test`; starts fixed-port app server |
+| `e2e/global-setup.ts`    | Reset DB, seed test user, create signed session                   |
+| `e2e/global-teardown.ts` | TRUNCATE CASCADE cleanup                                          |
+| `e2e/fixtures.ts`        | `authedContext`, `authedPage`, `apiContext`                       |
+| `e2e/test-ids.ts`        | Deterministic IDs shared by setup/specs                           |
+| `e2e/utils/*`            | Test DB/auth/session/context helpers                              |
+| `e2e/ui/*`               | Browser specs                                                     |
+| `e2e/assets/*`           | Checked-in audio fixtures                                         |
+
+## Voice E2E
+
+- `e2e/ui/agent-voice.spec.ts` mocks Realtime SDP/WebRTC; keep assertions below live provider behavior.
+- `e2e/ui/agent-voice-live.spec.ts` is live OpenAI Realtime coverage, skips without `OPENAI_API_KEY`, and uses `e2e/assets/voice-alpha-beta-gamma-delayed.wav`.
 
 ## Commands
 

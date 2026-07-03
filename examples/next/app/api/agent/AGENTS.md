@@ -1,6 +1,6 @@
 # Agent API Routes
 
-Route-local contracts for text, Workflow, commands, and Realtime agent endpoints.
+Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice endpoints.
 
 ## Routes
 
@@ -35,12 +35,13 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 
-## Commands + Realtime
+## Commands + Voice
 
 - Commands require auth and render command macros as prompt text; no model/provider calls here.
 - Realtime `/call` uses `OPENAI_API_KEY` and raw SDP.
 - Realtime `/tool` uses `@yolk-sdk/agent/voice` (`handleVoiceToolCall` with `VoiceSessionToolCallRequest`/`VoiceToolCallOutcome`, including approval resume); current voice toolset is `web_fetch` + `web_search` + knowledge + storage + optional Telegram.
-- `voice/transcribe` accepts a raw `audio/*` body (15MB cap) and returns `VoiceTranscriptionResult` JSON; `voice/speak` accepts `{ text, voice? }` (4k char cap), defaults TTS voice to `marin` with app-owned delivery instructions, and returns audio bytes. Both require auth and `OPENAI_API_KEY`; provider failures map to 502 with safe bodies.
+- `voice/transcribe` accepts a raw `audio/*` body (15MB cap), uses OpenAI speech adapter defaults (`gpt-4o-mini-transcribe`, English), and returns `VoiceTranscriptionResult` JSON; console Realtime transcription selection does not affect hold-to-speak STT.
+- `voice/speak` accepts `{ text, voice? }` (4k char cap), defaults TTS voice to `marin` with app-owned delivery instructions, and returns audio bytes. Both one-shot voice routes require auth and `OPENAI_API_KEY`; provider failures map to 502 with safe bodies.
 
 ## Tests
 
