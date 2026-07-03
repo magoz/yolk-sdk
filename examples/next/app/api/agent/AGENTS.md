@@ -42,6 +42,7 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 - Realtime `/tool` uses `@yolk-sdk/agent/voice` (`handleVoiceToolCall` with `VoiceSessionToolCallRequest`/`VoiceToolCallOutcome`, including approval resume); current voice toolset is `web_fetch` + `web_search` + knowledge + storage + optional Telegram.
 - `voice/transcribe` accepts a raw `audio/*` body (15MB cap), uses OpenAI speech adapter defaults (`gpt-4o-mini-transcribe`, English), and returns `VoiceTranscriptionResult` JSON; console Realtime transcription selection does not affect hold-to-speak STT.
 - `voice/speak` accepts `{ text, voice? }` (4k char cap), defaults TTS voice to `marin` with app-owned delivery instructions, and returns audio bytes. Both one-shot voice routes require auth and `OPENAI_API_KEY`; provider failures map to 502 with safe bodies.
+- Realtime `/call` and both one-shot voice routes map upstream OpenAI 429 (rate limit or `insufficient_quota` credits) to a distinct 429 `OpenAI quota or rate limit exceeded` body; other upstream failures stay generic 502. Voice hooks parse `{ "error": ... }` bodies for display.
 
 ## Tests
 

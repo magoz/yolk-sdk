@@ -74,12 +74,32 @@ const handler = Effect.gen(function* () {
     HttpServerResponse.json({ error: error.message }, { status: 400 })
   ),
   Effect.catchTag('VoiceSpeechError', error =>
-    reportError(new VoiceSpeakRouteError({ message: 'Speech synthesis failed', cause: error }), {
-      operation: 'agent.voice.speak',
-      status: 502
-    }).pipe(
-      Effect.andThen(HttpServerResponse.json({ error: 'Speech synthesis failed' }, { status: 502 }))
-    )
+    error.code === 'rate_limited'
+      ? reportError(
+          new VoiceSpeakRouteError({ message: 'Speech synthesis failed', cause: error }),
+          {
+            operation: 'agent.voice.speak',
+            status: 429
+          }
+        ).pipe(
+          Effect.andThen(
+            HttpServerResponse.json(
+              { error: 'OpenAI quota or rate limit exceeded' },
+              { status: 429 }
+            )
+          )
+        )
+      : reportError(
+          new VoiceSpeakRouteError({ message: 'Speech synthesis failed', cause: error }),
+          {
+            operation: 'agent.voice.speak',
+            status: 502
+          }
+        ).pipe(
+          Effect.andThen(
+            HttpServerResponse.json({ error: 'Speech synthesis failed' }, { status: 502 })
+          )
+        )
   ),
   Effect.catch(error =>
     reportError(new VoiceSpeakRouteError({ message: 'Voice speech failed', cause: error }), {

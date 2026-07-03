@@ -6,6 +6,8 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 
 export const VoiceSpeechErrorCode = Schema.Literals([
   'invalid_request',
+  /** Provider rate limit or exhausted quota/credits (HTTP 429). */
+  'rate_limited',
   'provider_error',
   'unknown'
 ])

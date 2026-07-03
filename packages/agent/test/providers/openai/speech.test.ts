@@ -114,7 +114,7 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
   it.effect('fails with a safe provider error on non-2xx responses', () =>
     Effect.gen(function* () {
       const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
-        Layer.provide(makeHttpClientLayer(() => new Response('nope', { status: 429 }), []))
+        Layer.provide(makeHttpClientLayer(() => new Response('nope', { status: 500 }), []))
       )
       const error = yield* Effect.gen(function* () {
         const synthesizer = yield* VoiceSpeechSynthesizer
@@ -123,8 +123,25 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
       }).pipe(Effect.provide(layer), Effect.flip)
 
       expect(error).toMatchObject({ code: 'provider_error' })
-      expect(error.message).toContain('429')
+      expect(error.message).toContain('500')
       expect(error.message).not.toContain('nope')
+    })
+  )
+
+  it.effect('marks 429 responses as rate_limited so hosts can surface quota exhaustion', () =>
+    Effect.gen(function* () {
+      const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
+        Layer.provide(makeHttpClientLayer(() => new Response('quota', { status: 429 }), []))
+      )
+      const error = yield* Effect.gen(function* () {
+        const synthesizer = yield* VoiceSpeechSynthesizer
+
+        return yield* synthesizer.synthesize(VoiceSpeechRequest.make({ text: 'Hello' }))
+      }).pipe(Effect.provide(layer), Effect.flip)
+
+      expect(error).toMatchObject({ code: 'rate_limited' })
+      expect(error.message).toContain('429')
+      expect(error.message).not.toContain('quota')
     })
   )
 })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -45,6 +45,22 @@ class HoldToSpeakError extends Error {}
 const toRequestError = (message: string) => (error: HttpClientError.HttpClientError) =>
   new HoldToSpeakError(`${message}: ${error.message}`)
 
+const decodeErrorBody = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ error: Schema.String }))
+)
+
+// Route error bodies are `{ "error": "..." }`; toast the message, not raw JSON.
+const errorBodyMessage = (body: string, status: number) => {
+  if (body.length === 0) {
+    return `Request failed with ${status}`
+  }
+
+  return Option.match(decodeErrorBody(body), {
+    onNone: () => body,
+    onSome: decoded => decoded.error
+  })
+}
+
 const ensureOkResponse = (response: HttpClientResponse.HttpClientResponse) => {
   if (response.status >= 200 && response.status < 300) {
     return Effect.succeed(response)
@@ -53,9 +69,7 @@ const ensureOkResponse = (response: HttpClientResponse.HttpClientResponse) => {
   return response.text.pipe(
     Effect.mapError(toRequestError('Could not read response body')),
     Effect.flatMap(body =>
-      Effect.fail(
-        new HoldToSpeakError(body.length > 0 ? body : `Request failed with ${response.status}`)
-      )
+      Effect.fail(new HoldToSpeakError(errorBodyMessage(body, response.status)))
     )
   )
 }

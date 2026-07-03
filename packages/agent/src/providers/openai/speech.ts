@@ -66,9 +66,11 @@ const transcriptionFilename = (mimeType: string) => {
 const httpFailure = (message: string) => (error: { readonly message: string }) =>
   new VoiceSpeechError({ code: 'provider_error', message: `${message}: ${error.message}` })
 
+// 429 covers both rate limits and exhausted credits (`insufficient_quota`);
+// hosts surface it distinctly so users don't read quota exhaustion as an outage.
 const statusFailure = (operation: string, status: number) =>
   new VoiceSpeechError({
-    code: 'provider_error',
+    code: status === 429 ? 'rate_limited' : 'provider_error',
     message: `OpenAI ${operation} returned ${status}`
   })
 

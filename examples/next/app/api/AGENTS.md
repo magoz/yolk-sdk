@@ -37,6 +37,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 - Unauthenticated: `401`.
 - Invalid body/schema: `400`.
 - Missing/invalid provider auth: `409`.
+- Upstream provider quota/rate limit (OpenAI 429 incl. `insufficient_quota`): `429` with a distinct message.
 - Upstream OAuth/provider failure: `502`.
 - Unknown boundary failure: `500` with generic body.
 

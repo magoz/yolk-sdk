@@ -74,12 +74,26 @@ const handler = Effect.gen(function* () {
     HttpServerResponse.json({ error: error.message }, { status: 400 })
   ),
   Effect.catchTag('VoiceSpeechError', error =>
-    reportError(new VoiceTranscribeRouteError({ message: 'Transcription failed', cause: error }), {
-      operation: 'agent.voice.transcribe',
-      status: 502
-    }).pipe(
-      Effect.andThen(HttpServerResponse.json({ error: 'Transcription failed' }, { status: 502 }))
-    )
+    error.code === 'rate_limited'
+      ? reportError(
+          new VoiceTranscribeRouteError({ message: 'Transcription failed', cause: error }),
+          { operation: 'agent.voice.transcribe', status: 429 }
+        ).pipe(
+          Effect.andThen(
+            HttpServerResponse.json(
+              { error: 'OpenAI quota or rate limit exceeded' },
+              { status: 429 }
+            )
+          )
+        )
+      : reportError(
+          new VoiceTranscribeRouteError({ message: 'Transcription failed', cause: error }),
+          { operation: 'agent.voice.transcribe', status: 502 }
+        ).pipe(
+          Effect.andThen(
+            HttpServerResponse.json({ error: 'Transcription failed' }, { status: 502 })
+          )
+        )
   ),
   Effect.catch(error =>
     reportError(

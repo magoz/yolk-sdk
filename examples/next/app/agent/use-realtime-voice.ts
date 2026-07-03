@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, type Ref } from 'react'
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -80,10 +80,26 @@ type UseRealtimeVoiceInput = {
 const toBrowserHttpError = (message: string) => (error: HttpClientError.HttpClientError) =>
   new VoiceSessionError({ code: 'transport_failed', message: `${message}: ${error.message}` })
 
+const decodeErrorBody = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ error: Schema.String }))
+)
+
+// Route error bodies are `{ "error": "..." }`; show the message, not raw JSON.
+const errorBodyMessage = (body: string, status: number) => {
+  if (body.length === 0) {
+    return `Request failed with ${status}`
+  }
+
+  return Option.match(decodeErrorBody(body), {
+    onNone: () => body,
+    onSome: decoded => decoded.error
+  })
+}
+
 const responseErrorMessageEffect = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(
     Effect.mapError(toBrowserHttpError('Could not read response body')),
-    Effect.map(body => (body.length > 0 ? body : `Request failed with ${response.status}`))
+    Effect.map(body => errorBodyMessage(body, response.status))
   )
 
 const ensureOkResponse = (response: HttpClientResponse.HttpClientResponse) => {
