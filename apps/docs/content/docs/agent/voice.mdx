@@ -115,7 +115,7 @@ const transcript =
   })
 ```
 
-Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`.
+Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`. `VoiceSpeechRequest.instructions` (or `defaultInstructions` in the OpenAI layer config) steers delivery style — tone, pacing, emotion — per synthesis request; OpenAI's `tts-1`/`tts-1-hd` reject instructions, so leave it unset for those models.
 
 ### Hold-to-speak pattern
 

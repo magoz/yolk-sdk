@@ -16,6 +16,12 @@ export type OpenAiSpeechConfig = {
   readonly defaultSpeechModel?: string
   readonly defaultTranscriptionModel?: string
   readonly defaultVoice?: string
+  /**
+   * Default delivery-style instructions for synthesis. Only sent when
+   * resolved (request overrides config); `tts-1`/`tts-1-hd` reject
+   * instructions, so leave unset when using those models.
+   */
+  readonly defaultInstructions?: string
 }
 
 const defaultSpeechUrl = 'https://api.openai.com/v1/audio/speech'
@@ -105,11 +111,13 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
         synthesize: request =>
           Effect.gen(function* () {
             const outputFormat = request.outputFormat ?? 'mp3'
+            const instructions = request.instructions ?? config.defaultInstructions
             const body = yield* encodeSpeechBody({
               model: request.model ?? config.defaultSpeechModel ?? defaultSpeechModel,
               input: request.text,
               voice: request.voice ?? config.defaultVoice ?? defaultVoice,
-              response_format: outputFormat
+              response_format: outputFormat,
+              ...(instructions === undefined ? {} : { instructions })
             }).pipe(
               Effect.mapError(
                 () =>

@@ -27,7 +27,12 @@ export class VoiceSpeechRequest extends Schema.Class<VoiceSpeechRequest>('VoiceS
   voice: Schema.optional(Schema.String),
   /** Provider output format hint, e.g. `mp3`, `wav`, `opus`. */
   outputFormat: Schema.optional(Schema.String),
-  language: Schema.optional(Schema.String)
+  language: Schema.optional(Schema.String),
+  /**
+   * Delivery-style steering (tone, pacing, emotion), not content. Providers
+   * that do not support instruction-steered synthesis ignore it.
+   */
+  instructions: Schema.optional(Schema.String)
 }) {}
 
 export type VoiceSpeechResult = {

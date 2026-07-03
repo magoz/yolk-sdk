@@ -16,6 +16,12 @@ export const dynamic = 'force-dynamic'
 
 const maxSpeechCharacters = 4_000
 const defaultTtsVoice = 'marin'
+// Applied per synthesis request; keeps prosody consistent across the
+// sentence-chunked TTS stream. Steers delivery only, never content.
+const defaultTtsInstructions =
+  'Speak in a warm, natural, conversational tone, like a helpful assistant talking to a colleague. ' +
+  'Medium pace, relaxed delivery. Read technical terms, code identifiers, and URLs plainly without ' +
+  'dramatization. No radio-announcer energy.'
 
 class VoiceSpeakRouteError extends Data.TaggedError('VoiceSpeakRouteError')<{
   readonly message: string
@@ -41,7 +47,8 @@ const handler = Effect.gen(function* () {
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const synthesizerLayer = makeOpenAiSpeechSynthesizerLayer({
     apiKey,
-    defaultVoice: defaultTtsVoice
+    defaultVoice: defaultTtsVoice,
+    defaultInstructions: defaultTtsInstructions
   }).pipe(Layer.provide(FetchHttpClient.layer))
   const result = yield* Effect.gen(function* () {
     const synthesizer = yield* VoiceSpeechSynthesizer

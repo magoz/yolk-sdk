@@ -67,6 +67,50 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
     })
   )
 
+  it.effect('sends instructions only when resolved from request or config', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const httpLayer = makeHttpClientLayer(
+        () => new Response(new Uint8Array([1]).slice().buffer, { status: 200 }),
+        requests
+      )
+      const bodyJson = (index: number) => {
+        const body = requests[index]?.request.body
+
+        return body?._tag === 'Uint8Array' ? new TextDecoder().decode(body.body) : ''
+      }
+
+      yield* Effect.gen(function* () {
+        const synthesizer = yield* VoiceSpeechSynthesizer
+
+        yield* synthesizer.synthesize(VoiceSpeechRequest.make({ text: 'No steering' }))
+      }).pipe(
+        Effect.provide(makeOpenAiSpeechSynthesizerLayer(config).pipe(Layer.provide(httpLayer)))
+      )
+
+      yield* Effect.gen(function* () {
+        const synthesizer = yield* VoiceSpeechSynthesizer
+
+        yield* synthesizer.synthesize(VoiceSpeechRequest.make({ text: 'Config default' }))
+        yield* synthesizer.synthesize(
+          VoiceSpeechRequest.make({ text: 'Request wins', instructions: 'Whisper softly.' })
+        )
+      }).pipe(
+        Effect.provide(
+          makeOpenAiSpeechSynthesizerLayer({
+            ...config,
+            defaultInstructions: 'Speak calmly.'
+          }).pipe(Layer.provide(httpLayer))
+        )
+      )
+
+      expect(bodyJson(0)).not.toContain('instructions')
+      expect(bodyJson(1)).toContain('Speak calmly.')
+      expect(bodyJson(2)).toContain('Whisper softly.')
+      expect(bodyJson(2)).not.toContain('Speak calmly.')
+    })
+  )
+
   it.effect('fails with a safe provider error on non-2xx responses', () =>
     Effect.gen(function* () {
       const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
