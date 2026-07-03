@@ -318,11 +318,16 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
 - Approval-gated calls pause with `AwaitingInput`; approvals/denials resume through
   `submitHitlResponse`. Voice `question` is deferred in v1.
 - `projectVoiceEvent` turns voice events into protocol messages with no dangling host tool
-  calls; `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` give replay-safe durable event ids;
-  `voiceSeedTextsFromMessages` seeds new provider sessions after reconnect.
+  calls. Assistant drafts are keyed per provider output item (falling back to response id), so
+  back-to-back responses, multi-item responses, and duplicate final transcript event families
+  never concatenate, wipe, or duplicate messages. `sequenceVoiceEvent`/`dedupeStoredVoiceEvents`
+  give replay-safe durable event ids; `voiceSeedTextsFromMessages` seeds new provider sessions
+  after reconnect.
 - `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
   `@yolk-sdk/agent/providers/openai/speech` provides `VoiceSpeechSynthesizer` /
-  `VoiceTranscriber` layers.
+  `VoiceTranscriber` layers. `VoiceSpeechRequest.instructions` steers delivery style only, and
+  provider 429s (rate limit or exhausted credits) surface as `VoiceSpeechError` code
+  `rate_limited` so hosts can distinguish quota from outage.
 
 ## Task subagents
 

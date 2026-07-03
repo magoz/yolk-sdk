@@ -65,6 +65,8 @@ const voice = useYolkVoice({
 // <audio ref={voice.attachAudioElement} autoPlay />
 ```
 
+When projecting into chat state built on `@yolk-sdk/agent/react`, emit each projected assistant message as an `AssistantMessage` event — it deterministically replaces the streamed bubble — before any `AgentEnd` status event. Realtime ordering (late user transcript finals, duplicate final event families, back-to-back responses) breaks the text-runtime assumptions behind `AgentEnd`'s fallback append and can duplicate messages.
+
 ## Server tool endpoint
 
 Resolve your voice toolset per session, then apply approval policy and execute:
@@ -94,7 +96,7 @@ Approval-gated calls pause: the controller emits `AwaitingInput`, the hook expos
 
 ## Durable transcripts
 
-Project voice events into protocol messages with `projectVoiceEvent`; final user/assistant transcripts and settled tool call/result pairs become normal `AgentMessage`s with no dangling host tool calls. Use `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` for replay-safe durable event ids and `voiceSeedTextsFromMessages` to seed a new provider session after reconnect. Reconnect never resumes a provider session.
+Project voice events into protocol messages with `projectVoiceEvent`; final user/assistant transcripts and settled tool call/result pairs become normal `AgentMessage`s with no dangling host tool calls. Assistant drafts are keyed per provider output item (falling back to response id): back-to-back responses, multi-item responses, and duplicate final transcript event families never concatenate, wipe, or duplicate messages, and finals for already-flushed items project nothing. Use `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` for replay-safe durable event ids and `voiceSeedTextsFromMessages` to seed a new provider session after reconnect. Reconnect never resumes a provider session.
 
 ## One-shot speech and transcription
 
