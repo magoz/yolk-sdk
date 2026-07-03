@@ -62,7 +62,40 @@ describe('projectVoiceEvent', () => {
         parts: [AssistantTextPart.make({ content: 'Hello there.' })]
       })
     ])
-    expect(state).toEqual({ ...emptyVoiceProjectionState, finalizedResponseIds: ['r'] })
+    expect(state).toEqual({ ...emptyVoiceProjectionState, finalizedKeys: ['i'] })
+  })
+
+  it('keeps later items streaming when a mid-response item final arrives', () => {
+    // One response, two output items: item_1's final must not wipe or
+    // suppress item_2, and item_2's final must still project.
+    const { messages } = project([
+      VoiceAssistantTranscriptDelta.make({
+        itemId: 'item_1',
+        responseId: 'r',
+        delta: 'First sentence.'
+      }),
+      VoiceAssistantTranscriptDelta.make({ itemId: 'item_2', responseId: 'r', delta: 'Second ' }),
+      VoiceAssistantTranscriptFinal.make({
+        itemId: 'item_1',
+        responseId: 'r',
+        text: 'First sentence.'
+      }),
+      VoiceAssistantTranscriptDelta.make({ itemId: 'item_2', responseId: 'r', delta: 'sentence.' }),
+      VoiceAssistantTranscriptFinal.make({
+        itemId: 'item_2',
+        responseId: 'r',
+        text: 'Second sentence.'
+      })
+    ])
+
+    expect(messages).toEqual([
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'First sentence.' })]
+      }),
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'Second sentence.' })]
+      })
+    ])
   })
 
   it('projects nothing for duplicate final transcript event families', () => {

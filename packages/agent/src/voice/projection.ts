@@ -14,27 +14,30 @@ import {
 import { VoiceEvent, type VoiceToolCall } from './protocol.ts'
 
 export type VoiceAssistantDraft = {
-  readonly responseId: string | null
+  /** Segment key: provider item id when present, else response id. */
+  readonly key: string | null
   readonly text: string
 }
 
 /**
  * Pure projection state for turning a voice event stream into protocol
- * messages. Assistant text accumulates as per-response drafts so overlapping
- * or back-to-back provider responses never concatenate into one message;
- * tool call/result pairs accumulate per turn and flush together with the
+ * messages. Assistant text accumulates as per-segment drafts — keyed by
+ * provider item id (finals fire per output item, and one response can carry
+ * several items), falling back to response id — so overlapping or
+ * back-to-back segments never concatenate into or wipe one another; tool
+ * call/result pairs accumulate per turn and flush together with the
  * assistant transcript so projected transcripts never contain dangling host
  * tool calls.
  */
 export type VoiceProjectionState = {
-  /** Open assistant drafts keyed by provider response id, in arrival order. */
+  /** Open assistant drafts by segment key, in arrival order. */
   readonly assistantDrafts: ReadonlyArray<VoiceAssistantDraft>
   /**
-   * Response ids already flushed. Providers can emit multiple final
-   * transcript event families (legacy + current names) for one response;
-   * replays of a finalized id project no messages.
+   * Segment keys already flushed. Providers can emit multiple final
+   * transcript event families (legacy + current names) for one segment;
+   * replays of a finalized key project no messages.
    */
-  readonly finalizedResponseIds: ReadonlyArray<string>
+  readonly finalizedKeys: ReadonlyArray<string>
   /** Tool calls of the current turn, in provider order. */
   readonly turnToolCalls: ReadonlyArray<ToolCall>
   /** One result message per settled tool call of the current turn. */
@@ -49,10 +52,21 @@ export type VoiceProjectionResult = {
 
 export const emptyVoiceProjectionState: VoiceProjectionState = {
   assistantDrafts: [],
-  finalizedResponseIds: [],
+  finalizedKeys: [],
   turnToolCalls: [],
   turnToolResults: []
 }
+
+/**
+ * Providers emit transcript finals per output item (`itemId`), and one
+ * response can carry several items; keying by item id keeps a mid-response
+ * item final from wiping later items of the same response. Deltas/finals of
+ * the same segment must carry the same ids for keys to match.
+ */
+const segmentKey = (event: {
+  readonly itemId: string | null
+  readonly responseId: string | null
+}): string | null => event.itemId ?? event.responseId
 
 const decodeParamsOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
@@ -99,21 +113,21 @@ const assistantTextMessages = (texts: ReadonlyArray<string>): ReadonlyArray<Agen
   )
 
 const markFinalized = (
-  finalizedResponseIds: ReadonlyArray<string>,
+  finalizedKeys: ReadonlyArray<string>,
   drafts: ReadonlyArray<VoiceAssistantDraft>
 ): ReadonlyArray<string> => [
-  ...finalizedResponseIds,
-  ...drafts.flatMap(draft => (draft.responseId === null ? [] : [draft.responseId]))
+  ...finalizedKeys,
+  ...drafts.flatMap(draft => (draft.key === null ? [] : [draft.key]))
 ]
 
-const isFinalized = (state: VoiceProjectionState, responseId: string | null) =>
-  responseId !== null && state.finalizedResponseIds.includes(responseId)
+const isFinalized = (state: VoiceProjectionState, key: string | null) =>
+  key !== null && state.finalizedKeys.includes(key)
 
 /** Flush every open draft plus settled tool pairs; ends the turn. */
 const flushAllDrafts = (state: VoiceProjectionState): VoiceProjectionResult => ({
   state: {
     ...emptyVoiceProjectionState,
-    finalizedResponseIds: markFinalized(state.finalizedResponseIds, state.assistantDrafts)
+    finalizedKeys: markFinalized(state.finalizedKeys, state.assistantDrafts)
   },
   messages: [
     ...settledToolMessages(state),
@@ -121,23 +135,20 @@ const flushAllDrafts = (state: VoiceProjectionState): VoiceProjectionResult => (
   ]
 })
 
-/** Flush one response's transcript plus settled tool pairs; keeps other drafts open. */
-const flushResponse = (
+/** Flush one segment's transcript plus settled tool pairs; keeps other drafts open. */
+const flushSegment = (
   state: VoiceProjectionState,
-  responseId: string | null,
+  key: string | null,
   transcript: string | null
 ): VoiceProjectionResult => {
-  const draft = state.assistantDrafts.find(entry => entry.responseId === responseId)
-  const remainingDrafts = state.assistantDrafts.filter(entry => entry.responseId !== responseId)
+  const draft = state.assistantDrafts.find(entry => entry.key === key)
+  const remainingDrafts = state.assistantDrafts.filter(entry => entry.key !== key)
   const text = transcript ?? draft?.text ?? ''
 
   return {
     state: {
       assistantDrafts: remainingDrafts,
-      finalizedResponseIds:
-        responseId === null
-          ? state.finalizedResponseIds
-          : [...state.finalizedResponseIds, responseId],
+      finalizedKeys: key === null ? state.finalizedKeys : [...state.finalizedKeys, key],
       turnToolCalls: [],
       turnToolResults: []
     },
@@ -146,24 +157,24 @@ const flushResponse = (
 }
 
 /**
- * Deltas for a new response id close every other open draft first: the
- * previous response is complete from the transcript's perspective even if its
- * final event has not arrived (or never arrives). Flushed ids are marked
+ * Deltas for a new segment key close every other open draft first: the
+ * previous segment is complete from the transcript's perspective even if its
+ * final event has not arrived (or never arrives). Flushed keys are marked
  * finalized so their late final events project nothing.
  */
 const appendDraftDelta = (
   state: VoiceProjectionState,
-  responseId: string | null,
+  key: string | null,
   delta: string
 ): VoiceProjectionResult => {
-  const otherDrafts = state.assistantDrafts.filter(entry => entry.responseId !== responseId)
-  const currentDraft = state.assistantDrafts.find(entry => entry.responseId === responseId)
+  const otherDrafts = state.assistantDrafts.filter(entry => entry.key !== key)
+  const currentDraft = state.assistantDrafts.find(entry => entry.key === key)
 
   return {
     state: {
       ...state,
-      assistantDrafts: [{ responseId, text: `${currentDraft?.text ?? ''}${delta}` }],
-      finalizedResponseIds: markFinalized(state.finalizedResponseIds, otherDrafts)
+      assistantDrafts: [{ key, text: `${currentDraft?.text ?? ''}${delta}` }],
+      finalizedKeys: markFinalized(state.finalizedKeys, otherDrafts)
     },
     messages: assistantTextMessages(otherDrafts.map(draft => draft.text))
   }
@@ -173,13 +184,14 @@ const appendDraftDelta = (
  * Project one voice event into durable protocol messages.
  *
  * - `UserTranscriptFinal` becomes a `UserMessage`.
- * - `AssistantTranscriptDelta` accumulates per response id; a delta for a new
- *   response id flushes the previous response's draft first so back-to-back
- *   responses never concatenate into one message.
- * - `AssistantTranscriptFinal` flushes its response: settled tool call/result
+ * - `AssistantTranscriptDelta` accumulates per segment key (item id, falling
+ *   back to response id); a delta for a new segment flushes the previous
+ *   segment's draft first so back-to-back segments never concatenate into
+ *   one message.
+ * - `AssistantTranscriptFinal` flushes its segment: settled tool call/result
  *   pairs first, then the assistant text message. Finals for already-flushed
- *   response ids project nothing (providers can emit duplicate final event
- *   families for one response).
+ *   segments project nothing (providers can emit duplicate final event
+ *   families for one segment).
  * - `Interrupted` and `SessionClosed` flush all partial drafts so nothing is
  *   lost and no dangling host tool calls are produced.
  * - Other lifecycle events only update state.
@@ -196,13 +208,13 @@ export const projectVoiceEvent = (
     case 'UserTranscriptFinal':
       return { state, messages: [UserMessage.make({ content: event.text })] }
     case 'AssistantTranscriptDelta':
-      return isFinalized(state, event.responseId)
+      return isFinalized(state, segmentKey(event))
         ? { state, messages: [] }
-        : appendDraftDelta(state, event.responseId, event.delta)
+        : appendDraftDelta(state, segmentKey(event), event.delta)
     case 'AssistantTranscriptFinal':
-      return isFinalized(state, event.responseId)
+      return isFinalized(state, segmentKey(event))
         ? { state, messages: [] }
-        : flushResponse(state, event.responseId, event.text)
+        : flushSegment(state, segmentKey(event), event.text)
     case 'Interrupted':
     case 'SessionClosed':
       return flushAllDrafts(state)
