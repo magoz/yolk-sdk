@@ -83,6 +83,7 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Composer exposes three voice controls side by side: hold-to-speak mic (STT into the input field), realtime toggle (fluid speech-to-speech), and a TTS speaker toggle (speak assistant replies aloud). No settings visit required.
 - Realtime: guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
 - Realtime: completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
+- Realtime assistant finals are emitted as `AssistantMessage` events (replace the streamed bubble deterministically) followed by `AgentEnd` for status; never rely on the `AgentEnd` fallback append alone — its ordering guard breaks under realtime races (late whisper user finals, duplicate final event families, back-to-back responses) and duplicates messages.
 - Voice tool calls route through `/api/agent/realtime/tool`; do not execute tools in the browser hook.
 - Hold-to-speak (`use-hold-to-speak.ts`): MediaRecorder while held, `/api/agent/voice/transcribe` on release, and the transcript is appended into the composer input for review/edit before the user sends. It never auto-submits. Sub-300ms holds are discarded.
 - `speech-chunker.ts` owns pure sentence chunking/flush rules; keep tests there when changing streamed TTS boundaries.

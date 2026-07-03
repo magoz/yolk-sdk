@@ -62,7 +62,45 @@ describe('projectVoiceEvent', () => {
         parts: [AssistantTextPart.make({ content: 'Hello there.' })]
       })
     ])
-    expect(state).toEqual(emptyVoiceProjectionState)
+    expect(state).toEqual({ ...emptyVoiceProjectionState, finalizedResponseIds: ['r'] })
+  })
+
+  it('projects nothing for duplicate final transcript event families', () => {
+    const { messages } = project([
+      VoiceAssistantTranscriptDelta.make({ itemId: 'i', responseId: 'r', delta: 'Hello' }),
+      VoiceAssistantTranscriptFinal.make({ itemId: 'i', responseId: 'r', text: 'Hello there.' }),
+      VoiceAssistantTranscriptFinal.make({ itemId: 'i', responseId: 'r', text: 'Hello there.' })
+    ])
+
+    expect(messages).toEqual([
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'Hello there.' })]
+      })
+    ])
+  })
+
+  it('flushes the previous response when deltas switch response ids', () => {
+    const { messages } = project([
+      VoiceAssistantTranscriptDelta.make({
+        itemId: 'i1',
+        responseId: 'r1',
+        delta: 'First answer.'
+      }),
+      VoiceAssistantTranscriptDelta.make({ itemId: 'i2', responseId: 'r2', delta: 'Second ' }),
+      VoiceAssistantTranscriptDelta.make({ itemId: 'i2', responseId: 'r2', delta: 'answer.' }),
+      VoiceAssistantTranscriptFinal.make({
+        itemId: 'i2',
+        responseId: 'r2',
+        text: 'Second answer.'
+      }),
+      // Late final for the already-flushed first response must project nothing.
+      VoiceAssistantTranscriptFinal.make({ itemId: 'i1', responseId: 'r1', text: 'First answer.' })
+    ])
+
+    expect(messages).toEqual([
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'First answer.' })] }),
+      AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'Second answer.' })] })
+    ])
   })
 
   it('flushes settled tool pairs before the assistant text without dangling calls', () => {

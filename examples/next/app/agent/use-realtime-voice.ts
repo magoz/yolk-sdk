@@ -12,6 +12,7 @@ import {
 } from 'effect/unstable/http'
 import {
   AgentEnd,
+  AssistantMessageEvent,
   LLMTextDelta,
   type ToolCall,
   ToolExecutionCompleted,
@@ -234,6 +235,22 @@ export const useRealtimeVoice = ({
     return result.messages
   }, [])
 
+  // Projected assistant messages replace their streamed bubble
+  // deterministically (`AssistantMessage` -> appendOrReplace), instead of
+  // relying on the `AgentEnd` fallback append whose ordering guard breaks
+  // under realtime races (late user transcripts, double final event
+  // families, back-to-back responses) and produced duplicated messages.
+  const emitProjectedAssistantMessages = useCallback(
+    (projected: ReadonlyArray<AgentMessage>) => {
+      for (const message of projected) {
+        if (message._tag === 'Assistant') {
+          emitAgentEvent(AssistantMessageEvent.make({ message }))
+        }
+      }
+    },
+    [emitAgentEvent]
+  )
+
   const handleVoiceEvent = useCallback(
     (event: VoiceEvent) => {
       switch (event._tag) {
@@ -259,10 +276,15 @@ export const useRealtimeVoice = ({
           callbacksRef.current.onUserMessage(UserMessage.make({ content: event.text }))
           flushBufferedEvents()
           return
-        case 'AssistantTranscriptDelta':
-          project(event)
+        case 'AssistantTranscriptDelta': {
+          // A delta for a new response id flushes the previous response's
+          // draft; emitting it as AssistantMessage closes that bubble so the
+          // next delta opens a fresh one instead of concatenating.
+          const projected = project(event)
+          emitProjectedAssistantMessages(projected)
           emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
           return
+        }
         case 'AssistantTranscriptFinal': {
           callbacksRef.current.onDebug({
             _tag: 'OutputTranscript',
@@ -271,6 +293,7 @@ export const useRealtimeVoice = ({
             transcript: event.text ?? ''
           })
           const projected = project(event)
+          emitProjectedAssistantMessages(projected)
 
           if (projected.length > 0) {
             emitAgentEvent(assistantEndEvent(projected))
@@ -281,6 +304,7 @@ export const useRealtimeVoice = ({
         case 'Interrupted':
         case 'SessionClosed': {
           const projected = project(event)
+          emitProjectedAssistantMessages(projected)
 
           if (projected.length > 0) {
             emitAgentEvent(assistantEndEvent(projected))
@@ -351,7 +375,7 @@ export const useRealtimeVoice = ({
           return
       }
     },
-    [emitAgentEvent, flushBufferedEvents, project]
+    [emitAgentEvent, emitProjectedAssistantMessages, flushBufferedEvents, project]
   )
 
   const voice = useYolkVoice({

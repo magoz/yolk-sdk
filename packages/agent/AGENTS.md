@@ -48,6 +48,7 @@
 - Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
 - If a voice session ends while awaiting approval, the approval stays pending host-side and the event stream completes; durable resume is host/session-log policy.
 - One-shot speech contracts live in voice: `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, and `speechResultToAudioPart`. `VoiceSpeechRequest.instructions` is delivery-style steering only (tone, pacing), not model-visible content instructions.
+- `projectVoiceEvent` keeps assistant drafts per provider `responseId`: a delta for a new response id flushes the previous draft, and finals for already-flushed ids project nothing (providers emit duplicate final event families and back-to-back responses; without this, transcripts concatenate or duplicate).
 - React depends on client + protocol only.
 - Providers depend on protocol + loop + oauth only; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
