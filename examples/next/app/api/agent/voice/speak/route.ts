@@ -15,6 +15,7 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 export const dynamic = 'force-dynamic'
 
 const maxSpeechCharacters = 4_000
+const defaultTtsVoice = 'marin'
 
 class VoiceSpeakRouteError extends Data.TaggedError('VoiceSpeakRouteError')<{
   readonly message: string
@@ -38,9 +39,10 @@ const handler = Effect.gen(function* () {
   }
 
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-  const synthesizerLayer = makeOpenAiSpeechSynthesizerLayer({ apiKey }).pipe(
-    Layer.provide(FetchHttpClient.layer)
-  )
+  const synthesizerLayer = makeOpenAiSpeechSynthesizerLayer({
+    apiKey,
+    defaultVoice: defaultTtsVoice
+  }).pipe(Layer.provide(FetchHttpClient.layer))
   const result = yield* Effect.gen(function* () {
     const synthesizer = yield* VoiceSpeechSynthesizer
 
