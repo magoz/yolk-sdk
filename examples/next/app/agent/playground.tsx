@@ -565,6 +565,10 @@ export function AgentPlayground({
 
   const [ttsEnabled, setTtsEnabled] = useState(false)
   const ttsEnabledRef = useRef(false)
+  // Realtime narrates natively; TTS must never run alongside it or the
+  // assistant is narrated twice. Guarded per event because realtime pipes
+  // projected LLMTextDelta/AgentEnd through the same onEvent path.
+  const isVoiceModeRef = useRef(false)
   const speechChunkerStateRef = useRef(emptySpeechChunkerState)
   const appendTranscriptRef = useRef<(text: string) => void>(() => {})
   const holdToSpeak = useHoldToSpeak({
@@ -600,14 +604,14 @@ export function AgentPlayground({
           return
         case 'AgentAwaitingInput':
         case 'AgentEnd':
-          if (ttsEnabledRef.current) {
+          if (ttsEnabledRef.current && !isVoiceModeRef.current) {
             flushTtsSpeech()
           } else {
             speechChunkerStateRef.current = emptySpeechChunkerState
           }
           return
         case 'LLMTextDelta': {
-          if (!ttsEnabledRef.current) {
+          if (!ttsEnabledRef.current || isVoiceModeRef.current) {
             return
           }
 
@@ -691,6 +695,22 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
+
+  useEffect(() => {
+    isVoiceModeRef.current = isVoiceMode
+  }, [isVoiceMode])
+
+  const handleToggleVoice = useCallback(() => {
+    // Starting realtime: force TTS off so only one narration plays.
+    if (!isVoiceMode && ttsEnabledRef.current) {
+      ttsEnabledRef.current = false
+      setTtsEnabled(false)
+      speechChunkerStateRef.current = emptySpeechChunkerState
+      resetTtsSpeech()
+    }
+
+    toggleVoice()
+  }, [isVoiceMode, resetTtsSpeech, toggleVoice])
 
   useEffect(() => {
     appendTranscriptRef.current = text => {
@@ -1236,7 +1256,7 @@ export function AgentPlayground({
             onSlashCommandSubmit={handleSlashCommandSubmit}
             onSubmit={handleSubmit}
             onStop={handleStop}
-            onToggleVoice={toggleVoice}
+            onToggleVoice={handleToggleVoice}
             onHoldStart={holdToSpeak.startRecording}
             onHoldEnd={holdToSpeak.stopRecording}
             onToggleTts={handleToggleTts}
