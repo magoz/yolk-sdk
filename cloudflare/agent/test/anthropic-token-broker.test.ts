@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { OAuthAccessToken, TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
-import { anthropicClaudeProviderId, anthropicClaudeRefreshBufferMs } from '@yolk-sdk/agent/providers/anthropic/claude'
+import {
+  anthropicClaudeProviderId,
+  anthropicClaudeRefreshBufferMs
+} from '@yolk-sdk/agent/providers/anthropic/claude'
 import {
   anthropicTokenRefreshBufferMs,
   anthropicTokenToProviderToken,

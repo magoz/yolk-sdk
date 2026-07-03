@@ -212,7 +212,9 @@ const imagePartFromBlock = (block: GenericContentBlock): Option.Option<ContentPa
     data: stringProperty(block, 'data'),
     mimeType: stringProperty(block, 'mimeType')
   }).pipe(
-    Option.map(({ data, mimeType }) => ImagePart.make({ source: inlineBase64Source(data), mimeType }))
+    Option.map(({ data, mimeType }) =>
+      ImagePart.make({ source: inlineBase64Source(data), mimeType })
+    )
   )
 
 const audioPartFromBlock = (block: GenericContentBlock): Option.Option<ContentPart> =>
@@ -220,7 +222,9 @@ const audioPartFromBlock = (block: GenericContentBlock): Option.Option<ContentPa
     data: stringProperty(block, 'data'),
     mimeType: stringProperty(block, 'mimeType')
   }).pipe(
-    Option.map(({ data, mimeType }) => AudioPart.make({ source: inlineBase64Source(data), mimeType }))
+    Option.map(({ data, mimeType }) =>
+      AudioPart.make({ source: inlineBase64Source(data), mimeType })
+    )
   )
 
 const contentPartFromBlock = (block: GenericContentBlock): ContentPart => {

@@ -40,7 +40,12 @@ const normalizeInteger = (input: {
 }) => {
   const value = input.value ?? input.defaultValue
   if (!Number.isInteger(value) || value < input.minimum) {
-    return Effect.fail(new ValidationError({ field: input.field, message: `${input.field} must be an integer >= ${input.minimum}` }))
+    return Effect.fail(
+      new ValidationError({
+        field: input.field,
+        message: `${input.field} must be an integer >= ${input.minimum}`
+      })
+    )
   }
   return Effect.succeed(Math.min(value, input.maxValue))
 }
@@ -64,14 +69,35 @@ export const getKnowledgeContext = (input: {
 }) =>
   Effect.gen(function* () {
     const documentId = yield* normalizeId(input.documentId, 'documentId')
-    const chunkId = input.chunkId === undefined ? undefined : yield* normalizeId(input.chunkId, 'chunkId')
+    const chunkId =
+      input.chunkId === undefined ? undefined : yield* normalizeId(input.chunkId, 'chunkId')
     if (chunkId !== undefined && input.position !== undefined) {
-      return yield* Effect.fail(new ValidationError({ field: 'position', message: 'Use chunkId or position, not both' }))
+      return yield* Effect.fail(
+        new ValidationError({ field: 'position', message: 'Use chunkId or position, not both' })
+      )
     }
 
-    const before = yield* normalizeInteger({ value: input.before, defaultValue: defaultBefore, maxValue: maxContextChunks, minimum: 0, field: 'before' })
-    const after = yield* normalizeInteger({ value: input.after, defaultValue: defaultAfter, maxValue: maxContextChunks, minimum: 0, field: 'after' })
-    const maxChars = yield* normalizeInteger({ value: input.maxChars, defaultValue: defaultMaxChars, maxValue: maxMaxChars, minimum: 1, field: 'maxChars' })
+    const before = yield* normalizeInteger({
+      value: input.before,
+      defaultValue: defaultBefore,
+      maxValue: maxContextChunks,
+      minimum: 0,
+      field: 'before'
+    })
+    const after = yield* normalizeInteger({
+      value: input.after,
+      defaultValue: defaultAfter,
+      maxValue: maxContextChunks,
+      minimum: 0,
+      field: 'after'
+    })
+    const maxChars = yield* normalizeInteger({
+      value: input.maxChars,
+      defaultValue: defaultMaxChars,
+      maxValue: maxMaxChars,
+      minimum: 1,
+      field: 'maxChars'
+    })
     const db = yield* Db
 
     const [document] = yield* db
@@ -88,33 +114,46 @@ export const getKnowledgeContext = (input: {
       .limit(1)
 
     if (document === undefined) {
-      return yield* Effect.fail(new NotFoundError({ entity: 'userKnowledgeDocument', id: documentId, message: 'Knowledge document not found' }))
+      return yield* Effect.fail(
+        new NotFoundError({
+          entity: 'userKnowledgeDocument',
+          id: documentId,
+          message: 'Knowledge document not found'
+        })
+      )
     }
 
-    const [anchor] = chunkId === undefined
-      ? yield* db
-        .select()
-        .from(schema.userKnowledgeChunk)
-        .where(
-          and(
-            eq(schema.userKnowledgeChunk.documentId, document.id),
-            eq(schema.userKnowledgeChunk.position, input.position ?? 0)
-          )
-        )
-        .limit(1)
-      : yield* db
-        .select()
-        .from(schema.userKnowledgeChunk)
-        .where(
-          and(
-            eq(schema.userKnowledgeChunk.id, chunkId),
-            eq(schema.userKnowledgeChunk.documentId, document.id)
-          )
-        )
-        .limit(1)
+    const [anchor] =
+      chunkId === undefined
+        ? yield* db
+            .select()
+            .from(schema.userKnowledgeChunk)
+            .where(
+              and(
+                eq(schema.userKnowledgeChunk.documentId, document.id),
+                eq(schema.userKnowledgeChunk.position, input.position ?? 0)
+              )
+            )
+            .limit(1)
+        : yield* db
+            .select()
+            .from(schema.userKnowledgeChunk)
+            .where(
+              and(
+                eq(schema.userKnowledgeChunk.id, chunkId),
+                eq(schema.userKnowledgeChunk.documentId, document.id)
+              )
+            )
+            .limit(1)
 
     if (anchor === undefined) {
-      return yield* Effect.fail(new NotFoundError({ entity: 'userKnowledgeChunk', id: chunkId ?? String(input.position ?? 0), message: 'Knowledge chunk not found' }))
+      return yield* Effect.fail(
+        new NotFoundError({
+          entity: 'userKnowledgeChunk',
+          id: chunkId ?? String(input.position ?? 0),
+          message: 'Knowledge chunk not found'
+        })
+      )
     }
 
     const startPosition = Math.max(0, anchor.position - before)

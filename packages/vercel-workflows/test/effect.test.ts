@@ -100,7 +100,10 @@ class RecordingWorkflowSdk implements VercelWorkflowsSdkClient {
   }
 }
 
-const runWithSdk = <A, E>(effect: Effect.Effect<A, E, VercelWorkflows>, sdk: VercelWorkflowsSdkClient) =>
+const runWithSdk = <A, E>(
+  effect: Effect.Effect<A, E, VercelWorkflows>,
+  sdk: VercelWorkflowsSdkClient
+) =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(VercelWorkflows.layerFromSdk),

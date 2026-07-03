@@ -108,7 +108,11 @@ describe('AnthropicClaudeProviderLayer', () => {
         messages: [{ role: 'user', content: 'Be brief.\n\nhello' }],
         tools: [{ name: 'mcp_Weather', description: 'Get weather.', input_schema: {} }]
       })
-      expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done', 'Usage'])
+      expect(Array.from(eventsChunk).map(event => event._tag)).toEqual([
+        'TextDelta',
+        'Done',
+        'Usage'
+      ])
     })
   )
 
@@ -223,7 +227,12 @@ describe('AnthropicClaudeProviderLayer', () => {
       }).pipe(Effect.provide(layer))
 
       const events = Array.from(eventsChunk)
-      expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'ToolCall', 'Done', 'Usage'])
+      expect(events.map(event => event._tag)).toEqual([
+        'ReasoningDelta',
+        'ToolCall',
+        'Done',
+        'Usage'
+      ])
       expect(events[0]).toMatchObject({ text: 'check tool' })
       expect(events[1]).toMatchObject({
         call: { id: 'call_1', name: 'weather', params: { city: 'Paris' } }

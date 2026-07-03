@@ -4,12 +4,12 @@ Next-only routes called by the Cloudflare Worker/DO. Never expose these contract
 
 ## Routes
 
-| Route | Role |
-| --- | --- |
-| `codex-token/route.ts` | Exchange bridge secret + provider request for fresh OAuth access token |
-| `codex-token/route-model.ts` | Token request/response schema helpers and tests |
-| `codex-responses/route.ts` | Proxy Codex Responses HTTP stream from DO to ChatGPT backend |
-| `codex-responses/route-model.ts` | Header allowlist + response contract helpers |
+| Route                            | Role                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `codex-token/route.ts`           | Exchange bridge secret + provider request for fresh OAuth access token |
+| `codex-token/route-model.ts`     | Token request/response schema helpers and tests                        |
+| `codex-responses/route.ts`       | Proxy Codex Responses HTTP stream from DO to ChatGPT backend           |
+| `codex-responses/route-model.ts` | Header allowlist + response contract helpers                           |
 
 ## Rules
 

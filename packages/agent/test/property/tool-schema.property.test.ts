@@ -58,7 +58,8 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: EmptyToolParams,
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'emptyStruct':
       return makeTool({
@@ -66,7 +67,8 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: Schema.Struct({}),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'flatRequired':
       return makeTool({
@@ -74,7 +76,8 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: Schema.Struct({ text: Schema.String, count: Schema.Number }),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'flatOptional':
       return makeTool({
@@ -82,15 +85,19 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: Schema.Struct({ text: Schema.String, note: Schema.optional(Schema.String) }),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'nestedStruct':
       return makeTool({
         name: 'schema_probe',
         description: 'Probe schema output.',
-        parameters: Schema.Struct({ child: Schema.Struct({ id: Schema.String, active: Schema.Boolean }) }),
+        parameters: Schema.Struct({
+          child: Schema.Struct({ id: Schema.String, active: Schema.Boolean })
+        }),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'arrayOfStruct':
       return makeTool({
@@ -98,7 +105,8 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String })) }),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
     case 'literalField':
       return makeTool({
@@ -106,7 +114,8 @@ const providerSafeTool = (variant: typeof schemaVariant.Type) => {
         description: 'Probe schema output.',
         parameters: Schema.Struct({ mode: Schema.Literals(['read', 'write']) }),
         access: 'read',
-        execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
+        execute: ({ call }) =>
+          Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
   }
 }

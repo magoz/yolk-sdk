@@ -12,9 +12,9 @@ Current architecture lives in:
 
 Preservation map:
 
-| Old topic | Current owner |
-| --- | --- |
-| Package split/dependency direction | `patterns/PACKAGE_ARCHITECTURE.md` |
-| Package map | `packages/AGENTS.md` |
-| App-owned product boundaries | `examples/next/AGENTS.md` |
-| Agent loop/runtime/client details | `packages/agent/AGENTS.md` + package source READMEs |
+| Old topic                          | Current owner                                       |
+| ---------------------------------- | --------------------------------------------------- |
+| Package split/dependency direction | `patterns/PACKAGE_ARCHITECTURE.md`                  |
+| Package map                        | `packages/AGENTS.md`                                |
+| App-owned product boundaries       | `examples/next/AGENTS.md`                           |
+| Agent loop/runtime/client details  | `packages/agent/AGENTS.md` + package source READMEs |

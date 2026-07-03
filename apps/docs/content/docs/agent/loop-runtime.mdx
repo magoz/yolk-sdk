@@ -5,12 +5,12 @@ description: Choose `run` or `runRuntime` and stream agent events from your app.
 
 Use the loop when you want direct control. Use runtime when you want a reusable HTTP/session boundary.
 
-| API | Use when |
-| --- | --- |
-| `run` | you already have messages/tools/provider layers and want a stream |
-| `runRuntime` + `Transcript` | the client sends the full transcript each turn |
-| `runRuntime` + `AppendInput` | your server stores an append log |
-| `runRuntime` + `AppendHitlResponse` | resuming a paused approval/question |
+| API                                 | Use when                                                          |
+| ----------------------------------- | ----------------------------------------------------------------- |
+| `run`                               | you already have messages/tools/provider layers and want a stream |
+| `runRuntime` + `Transcript`         | the client sends the full transcript each turn                    |
+| `runRuntime` + `AppendInput`        | your server stores an append log                                  |
+| `runRuntime` + `AppendHitlResponse` | resuming a paused approval/question                               |
 
 ## Direct loop
 

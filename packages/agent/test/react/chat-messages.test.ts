@@ -54,7 +54,11 @@ describe('agent chat messages', () => {
             content: [
               TextPart.make({ text: 'describe this' }),
               ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-              DocumentPart.make({ source: inlineBase64Source('def='), mimeType: 'application/pdf', filename: 'brief.pdf' })
+              DocumentPart.make({
+                source: inlineBase64Source('def='),
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf'
+              })
             ],
             state: 'done'
           }
@@ -68,7 +72,11 @@ describe('agent chat messages', () => {
         content: [
           TextPart.make({ text: 'describe this' }),
           ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-          DocumentPart.make({ source: inlineBase64Source('def='), mimeType: 'application/pdf', filename: 'brief.pdf' })
+          DocumentPart.make({
+            source: inlineBase64Source('def='),
+            mimeType: 'application/pdf',
+            filename: 'brief.pdf'
+          })
         ]
       }
     ])
@@ -325,7 +333,8 @@ describe('agent chat messages', () => {
 
     expect(resultMessage).toMatchObject({
       toolCallId: call.id,
-      content: 'User has answered your question: Pick one: A. Continue with the user\'s answers in mind.'
+      content:
+        "User has answered your question: Pick one: A. Continue with the user's answers in mind."
     })
     expect(resultMessage.structuredContent).toStrictEqual({
       type: 'question_response',
@@ -362,7 +371,9 @@ describe('agent chat messages', () => {
   })
 
   it('finalizes assistant messages when awaiting input', () => {
-    const assistant = AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] })
+    const assistant = AssistantAgentMessage.make({
+      parts: [AssistantTextPart.make({ content: 'ok' })]
+    })
     const messages = applyAgentEventToChatMessages(
       [],
       AgentAwaitingInput.make({

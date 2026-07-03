@@ -2,7 +2,12 @@ import { Effect } from 'effect'
 import type { Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { makeTool, type ToolAccess, type ToolModule, type ToolRegistration } from '@yolk-sdk/agent/tools'
+import {
+  makeTool,
+  type ToolAccess,
+  type ToolModule,
+  type ToolRegistration
+} from '@yolk-sdk/agent/tools'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import type { Connector } from './connector.ts'
 import type { ConnectorIntegration } from './integration.ts'
@@ -22,7 +27,10 @@ export type MakeConnectorToolModuleOptions<Context, Env> = {
   readonly access?: ConnectorToolAccessResolver
 }
 
-const resolveIntegration = <Context>(resolver: ConnectorIntegrationResolver<Context>, context: Context) => {
+const resolveIntegration = <Context>(
+  resolver: ConnectorIntegrationResolver<Context>,
+  context: Context
+) => {
   if (typeof resolver === 'function') {
     return resolver(context)
   }
@@ -30,7 +38,10 @@ const resolveIntegration = <Context>(resolver: ConnectorIntegrationResolver<Cont
   return Effect.succeed(resolver)
 }
 
-const resolveAccess = (resolver: ConnectorToolAccessResolver | undefined, actionId: string): ToolAccess => {
+const resolveAccess = (
+  resolver: ConnectorToolAccessResolver | undefined,
+  actionId: string
+): ToolAccess => {
   if (typeof resolver === 'function') {
     return resolver(actionId)
   }
@@ -76,11 +87,13 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     execute: ({ call, context, params }) =>
       resolveIntegration(options.integration, context).pipe(
         Effect.flatMap(integration =>
-          connector.invoke({
-            integration,
-            action: actionId,
-            input: params
-          }).pipe(Effect.provide(options.layer))
+          connector
+            .invoke({
+              integration,
+              action: actionId,
+              input: params
+            })
+            .pipe(Effect.provide(options.layer))
         ),
         Effect.map(result => {
           switch (result._tag) {
@@ -116,5 +129,7 @@ export const makeConnectorToolModule = <Context, Env = never, Error = never>(
   options: MakeConnectorToolModuleOptions<Context, Env>
 ): ToolModule<Context> => ({
   id: options.moduleId ?? connector.id,
-  tools: connector.actions.map(action => makeConnectorToolRegistration(connector, action.id, options))
+  tools: connector.actions.map(action =>
+    makeConnectorToolRegistration(connector, action.id, options)
+  )
 })

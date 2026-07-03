@@ -9,62 +9,62 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 
 `@yolk-sdk/agent/protocol`
 
-| Export | Purpose |
-| --- | --- |
-| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage` | transcript messages |
-| `AgentEvent` | stream event union |
-| `ToolDef`, `ToolCall`, `ToolResult` | tool protocol |
-| `ToolApprovalRequest`, `ToolApprovalResponse` | approval HITL |
-| `QuestionRequest`, `QuestionResponse` | question HITL |
-| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent` | durable/client HITL helpers |
-| `isTerminalAgentEvent` | terminal event guard |
-| `assistantContent`, `contentText`, `contentParts` | content helpers |
-| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart` | multimodal content parts |
-| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource` | attachment source helpers |
+| Export                                                                                                                    | Purpose                        |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `UserMessage`, `AssistantAgentMessage`, `ToolResultMessage`                                                               | transcript messages            |
+| `AgentEvent`                                                                                                              | stream event union             |
+| `ToolDef`, `ToolCall`, `ToolResult`                                                                                       | tool protocol                  |
+| `ToolApprovalRequest`, `ToolApprovalResponse`                                                                             | approval HITL                  |
+| `QuestionRequest`, `QuestionResponse`                                                                                     | question HITL                  |
+| `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                             | durable/client HITL helpers    |
+| `isTerminalAgentEvent`                                                                                                    | terminal event guard           |
+| `assistantContent`, `contentText`, `contentParts`                                                                         | content helpers                |
+| `ImagePart`, `DocumentPart`, `AudioPart`, `TextPart`                                                                      | multimodal content parts       |
+| `urlAttachmentSource`, `inlineBase64AttachmentSource`, `refAttachmentSource`                                              | attachment source helpers      |
 | `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities` | model input capability helpers |
-| `ProviderErrorInfo`, `ProviderFailureKind` | safe provider error metadata |
-| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage` | usage accounting helpers |
-| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls` | transcript invariant helpers |
+| `ProviderErrorInfo`, `ProviderFailureKind`                                                                                | safe provider error metadata   |
+| `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                           | usage accounting helpers       |
+| `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers   |
 
 ## Loop
 
 `@yolk-sdk/agent/loop`
 
-| Export | Purpose |
-| --- | --- |
-| `run` | stateless agent loop, returns `Stream<AgentEvent>` |
-| `runModelTurn`, `runToolBatch` | lower-level model/tool-turn primitives |
-| `LLMProvider` | provider service contract |
-| `ToolExecutor` | host tool execution service |
-| `ContextTransformer` | host context compaction/injection service |
-| `LoopConfig` | loop limits/retry config service |
-| `LLMError`, `ToolError` | safe loop/provider/tool failures |
-| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers |
+| Export                                                                              | Purpose                                            |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `run`                                                                               | stateless agent loop, returns `Stream<AgentEvent>` |
+| `runModelTurn`, `runToolBatch`                                                      | lower-level model/tool-turn primitives             |
+| `LLMProvider`                                                                       | provider service contract                          |
+| `ToolExecutor`                                                                      | host tool execution service                        |
+| `ContextTransformer`                                                                | host context compaction/injection service          |
+| `LoopConfig`                                                                        | loop limits/retry config service                   |
+| `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                   |
+| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                         |
 
 Testing: `@yolk-sdk/agent/loop/testing`
 
-| Export | Purpose |
-| --- | --- |
-| `FauxProvider` | deterministic test provider layer |
-| `Reply` | fake model replies: text, reasoning, tool calls, usage |
-| `TestToolExecutor` | canned tool results |
+| Export             | Purpose                                                |
+| ------------------ | ------------------------------------------------------ |
+| `FauxProvider`     | deterministic test provider layer                      |
+| `Reply`            | fake model replies: text, reasoning, tool calls, usage |
+| `TestToolExecutor` | canned tool results                                    |
 
 ## Runtime
 
 `@yolk-sdk/agent/runtime`
 
-| Export | Purpose |
-| --- | --- |
-| `runRuntime` | transcript or append-backed runtime stream |
-| `RuntimeConfig`, `RuntimeRequest`, `TranscriptRuntimeRequest`, `AppendInputRuntimeRequest`, `AppendHitlResponseRuntimeRequest` | typed runtime inputs/config |
-| `SessionEventStore` | append-log service contract |
-| `makeInMemorySessionEventStoreLayer` | test/local store layer |
-| `InputAppended`, `HitlResponseAppended`, `RunStarted`, `RunCompleted`, `RunAwaitingInput`, `RunFailed`, `RunInterrupted` | runtime log events |
-| `appendRuntimeSessionEventsToLog` | append helper for adapters |
-| `replayRuntimeSessionEvents`, `replayRuntimeHitlResponses` | rebuild transcript/responses from log |
-| `latestIncompleteRuntimeRun` | detect interrupted active run |
-| `runtimeErrorToAgentError` | map runtime errors to protocol `AgentError` |
-| `SessionConflictError`, `SessionLoadError`, `SessionNotFoundError`, `SessionSaveError` | runtime/session error types |
+| Export                                                                                                                         | Purpose                                     |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `runRuntime`                                                                                                                   | transcript or append-backed runtime stream  |
+| `RuntimeConfig`, `RuntimeRequest`, `TranscriptRuntimeRequest`, `AppendInputRuntimeRequest`, `AppendHitlResponseRuntimeRequest` | typed runtime inputs/config                 |
+| `SessionEventStore`                                                                                                            | append-log service contract                 |
+| `makeInMemorySessionEventStoreLayer`                                                                                           | test/local store layer                      |
+| `InputAppended`, `HitlResponseAppended`, `RunStarted`, `RunCompleted`, `RunAwaitingInput`, `RunFailed`, `RunInterrupted`       | runtime log events                          |
+| `appendRuntimeSessionEventsToLog`                                                                                              | append helper for adapters                  |
+| `replayRuntimeSessionEvents`, `replayRuntimeHitlResponses`                                                                     | rebuild transcript/responses from log       |
+| `latestIncompleteRuntimeRun`                                                                                                   | detect interrupted active run               |
+| `runtimeErrorToAgentError`                                                                                                     | map runtime errors to protocol `AgentError` |
+| `SessionConflictError`, `SessionLoadError`, `SessionNotFoundError`, `SessionSaveError`                                         | runtime/session error types                 |
 
 Runtime request tags:
 
@@ -76,16 +76,16 @@ Runtime request tags:
 
 `@yolk-sdk/agent/tools`
 
-| Export | Purpose |
-| --- | --- |
-| `makeTool` | schema-backed tool registration |
-| `resolveTools` | filter/merge modules into model-visible defs and executor |
-| `makeToolExecutorLayer` | provide resolved executor as `ToolExecutor` |
-| `EmptyToolParams` | no-arg tool schema |
-| `ToolAccess` | `read`, `write`, `destructive` |
-| `makeQuestionToolModule` | built-in question HITL tool |
-| `makeNonRecursiveTaskToolModule` | subagent task tool without recursion |
-| `modelVisibleToolError` | recoverable error visible to model |
+| Export                           | Purpose                                                   |
+| -------------------------------- | --------------------------------------------------------- |
+| `makeTool`                       | schema-backed tool registration                           |
+| `resolveTools`                   | filter/merge modules into model-visible defs and executor |
+| `makeToolExecutorLayer`          | provide resolved executor as `ToolExecutor`               |
+| `EmptyToolParams`                | no-arg tool schema                                        |
+| `ToolAccess`                     | `read`, `write`, `destructive`                            |
+| `makeQuestionToolModule`         | built-in question HITL tool                               |
+| `makeNonRecursiveTaskToolModule` | subagent task tool without recursion                      |
+| `modelVisibleToolError`          | recoverable error visible to model                        |
 
 Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolResult`, `taskToolName`, `makeQuestionToolDef`, `questionToolName`.
 
@@ -93,112 +93,112 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 
 `@yolk-sdk/agent/client`
 
-| Export | Purpose |
-| --- | --- |
-| `streamAgentEventsUntilTerminal` | start/consume HTTP stream until terminal event |
-| `streamAgentRunEventsUntilTerminal` | consume durable run tail |
-| `streamAgentRunHitlResponseEventsUntilTerminal` | resume HITL and consume stream |
-| `streamAgentEvents`, `streamAgentEventStream` | one-shot NDJSON stream variants |
-| `streamAgentRunEvents`, `streamAgentRunEventStream` | durable tail stream variants |
-| `streamAgentRunHitlResponseEvents`, `streamAgentRunHitlResponseEventStream` | durable HITL stream variants |
-| `streamCloudflareAgentEvents`, `streamCloudflareAgentEventStream` | Cloudflare WebSocket stream helpers |
-| `collectAgentEvents` | collect a stream into an array |
-| `submitToolApprovalResponse`, `submitQuestionResponse` | client resume helpers |
-| `cancelAgentRun` | call host cancel endpoint |
-| `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers |
-| `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents` | client reducer helpers |
-| `toolRunsFromHitlRequests` | paused UI hydration |
-| `documentPartFromTextFile` | browser file helper |
-| `AgentTransportError` | transport and decoding failure |
+| Export                                                                                                                                 | Purpose                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `streamAgentEventsUntilTerminal`                                                                                                       | start/consume HTTP stream until terminal event |
+| `streamAgentRunEventsUntilTerminal`                                                                                                    | consume durable run tail                       |
+| `streamAgentRunHitlResponseEventsUntilTerminal`                                                                                        | resume HITL and consume stream                 |
+| `streamAgentEvents`, `streamAgentEventStream`                                                                                          | one-shot NDJSON stream variants                |
+| `streamAgentRunEvents`, `streamAgentRunEventStream`                                                                                    | durable tail stream variants                   |
+| `streamAgentRunHitlResponseEvents`, `streamAgentRunHitlResponseEventStream`                                                            | durable HITL stream variants                   |
+| `streamCloudflareAgentEvents`, `streamCloudflareAgentEventStream`                                                                      | Cloudflare WebSocket stream helpers            |
+| `collectAgentEvents`                                                                                                                   | collect a stream into an array                 |
+| `submitToolApprovalResponse`, `submitQuestionResponse`                                                                                 | client resume helpers                          |
+| `cancelAgentRun`                                                                                                                       | call host cancel endpoint                      |
+| `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers                   |
+| `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents`                                                                      | client reducer helpers                         |
+| `toolRunsFromHitlRequests`                                                                                                             | paused UI hydration                            |
+| `documentPartFromTextFile`                                                                                                             | browser file helper                            |
+| `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
 
 ## React
 
 `@yolk-sdk/agent/react`
 
-| Export | Purpose |
-| --- | --- |
-| `useAgentChat` | headless chat hook |
-| `buildAgentChatItems` | render-friendly item model |
-| `applyAgentEventToChatProjection` | replay-safe durable projection |
-| `makeAgentChatEventProjectionState` | projection initial state |
-| `applyAgentEventToChatMessages` | ephemeral stream reducer |
-| `buildAgentChatMessages`, `toAgentMessages` | convert chat UI messages to protocol messages |
-| `getActiveChatToolParts`, `getCompletedChatToolParts`, `getAgentChatLiveActivityCount` | chat projection selectors |
-| `deleteChatTurn`, `editChatUserMessage`, `regenerateChatMessagesFrom` | chat editing helpers |
-| `AgentChatSessionEvent`, `UserMessageSubmitted`, `ProtocolMessageAppended`, `MessagesRegenerated`, `TurnDeleted`, `UserMessageEdited` | chat session event helpers |
+| Export                                                                                                                                | Purpose                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `useAgentChat`                                                                                                                        | headless chat hook                            |
+| `buildAgentChatItems`                                                                                                                 | render-friendly item model                    |
+| `applyAgentEventToChatProjection`                                                                                                     | replay-safe durable projection                |
+| `makeAgentChatEventProjectionState`                                                                                                   | projection initial state                      |
+| `applyAgentEventToChatMessages`                                                                                                       | ephemeral stream reducer                      |
+| `buildAgentChatMessages`, `toAgentMessages`                                                                                           | convert chat UI messages to protocol messages |
+| `getActiveChatToolParts`, `getCompletedChatToolParts`, `getAgentChatLiveActivityCount`                                                | chat projection selectors                     |
+| `deleteChatTurn`, `editChatUserMessage`, `regenerateChatMessagesFrom`                                                                 | chat editing helpers                          |
+| `AgentChatSessionEvent`, `UserMessageSubmitted`, `ProtocolMessageAppended`, `MessagesRegenerated`, `TurnDeleted`, `UserMessageEdited` | chat session event helpers                    |
 
 ## Compaction
 
 `@yolk-sdk/agent/compaction`
 
-| Export | Purpose |
-| --- | --- |
-| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio` | budget helpers |
-| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens` | token estimation helpers |
-| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages` | window compaction helpers |
-| `makeWindowCompactionTransformer` | `ContextTransformer` layer helper |
+| Export                                                                                                     | Purpose                           |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio`                                      | budget helpers                    |
+| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens` | token estimation helpers          |
+| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                     | window compaction helpers         |
+| `makeWindowCompactionTransformer`                                                                          | `ContextTransformer` layer helper |
 
 ## OAuth
 
 `@yolk-sdk/agent/oauth`
 
-| Export | Purpose |
-| --- | --- |
-| `OAuthAccessToken`, `TokenBrokerRequest`, `TokenBrokerResponse` | provider-neutral token contracts |
-| `credentialSourceFromBroker` | turn a host token broker into a credential source |
-| `isTokenFresh`, `shouldRefreshToken`, `tokenRemainingTtlMs` | token freshness helpers |
-| `OAuthError` | safe OAuth error |
+| Export                                                          | Purpose                                           |
+| --------------------------------------------------------------- | ------------------------------------------------- |
+| `OAuthAccessToken`, `TokenBrokerRequest`, `TokenBrokerResponse` | provider-neutral token contracts                  |
+| `credentialSourceFromBroker`                                    | turn a host token broker into a credential source |
+| `isTokenFresh`, `shouldRefreshToken`, `tokenRemainingTtlMs`     | token freshness helpers                           |
+| `OAuthError`                                                    | safe OAuth error                                  |
 
 ## Skillset
 
 `@yolk-sdk/agent/skillset`
 
-| Export | Purpose |
-| --- | --- |
-| `SkillInfo`, `parseSkillMarkdown`, `formatAvailableSkills` | portable skill parsing/rendering |
-| `CommandInfo`, `parseCommandMarkdown`, `parseCommandArguments`, `renderCommand` | slash-command parsing/rendering |
-| `SkillsetManifest`, `emptySkillsetManifest`, `mergeSkillsets` | skillset catalog helpers |
-| `validateSkillsetName`, `validateDirectoryName` | safe skillset names |
+| Export                                                                          | Purpose                          |
+| ------------------------------------------------------------------------------- | -------------------------------- |
+| `SkillInfo`, `parseSkillMarkdown`, `formatAvailableSkills`                      | portable skill parsing/rendering |
+| `CommandInfo`, `parseCommandMarkdown`, `parseCommandArguments`, `renderCommand` | slash-command parsing/rendering  |
+| `SkillsetManifest`, `emptySkillsetManifest`, `mergeSkillsets`                   | skillset catalog helpers         |
+| `validateSkillsetName`, `validateDirectoryName`                                 | safe skillset names              |
 
 ## Voice
 
 `@yolk-sdk/agent/voice`
 
-| Export | Purpose |
-| --- | --- |
-| `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError` | provider-neutral voice protocol |
-| `makeVoiceController` | client controller: tool forwarding, approval pause/resume, batching |
-| `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput` | server-side tool policy/execution |
-| `VoiceSessionToolCallRequest`, `VoiceToolCallOutcome` | server tool endpoint wire contracts |
-| `executeVoiceToolCall`, `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError` | tool bridge over `ToolExecutor` |
-| `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages` | transcript projection and reconnect seeds |
-| `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId` | replay-safe durable voice events |
-| `makeWebSocketVoiceTransport` | Effect Socket voice transport for Node/server runtimes |
-| `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, `speechResultToAudioPart` | one-shot TTS/STT contracts |
-| `VoiceTransport` | transport service contract |
+| Export                                                                                             | Purpose                                                             |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError`                            | provider-neutral voice protocol                                     |
+| `makeVoiceController`                                                                              | client controller: tool forwarding, approval pause/resume, batching |
+| `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput`    | server-side tool policy/execution                                   |
+| `VoiceSessionToolCallRequest`, `VoiceToolCallOutcome`                                              | server tool endpoint wire contracts                                 |
+| `executeVoiceToolCall`, `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError` | tool bridge over `ToolExecutor`                                     |
+| `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages`                     | transcript projection and reconnect seeds                           |
+| `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId`            | replay-safe durable voice events                                    |
+| `makeWebSocketVoiceTransport`                                                                      | Effect Socket voice transport for Node/server runtimes              |
+| `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, `speechResultToAudioPart`      | one-shot TTS/STT contracts                                          |
+| `VoiceTransport`                                                                                   | transport service contract                                          |
 
 `@yolk-sdk/agent/voice/browser`
 
-| Export | Purpose |
-| --- | --- |
+| Export                                                  | Purpose                                              |
+| ------------------------------------------------------- | ---------------------------------------------------- |
 | `makeWebRtcVoiceTransport`, `defaultWebRtcVoiceRuntime` | browser WebRTC transport with fake-able runtime seam |
 
 `@yolk-sdk/agent/voice/react`
 
-| Export | Purpose |
-| --- | --- |
+| Export         | Purpose                                                                 |
+| -------------- | ----------------------------------------------------------------------- |
 | `useYolkVoice` | headless browser voice hook: lifecycle, drafts, approvals, audio attach |
 
 ## Providers
 
-| Subpath | Main exports |
-| --- | --- |
-| `@yolk-sdk/agent/providers/openai/provider` | `makeOpenAiProviderLayer`, `OpenAiProviderLayer` |
-| `@yolk-sdk/agent/providers/openai/codex` | Codex request, auth, OAuth token, and broker helpers |
-| `@yolk-sdk/agent/providers/openai/codex-provider` | `makeOpenAiCodexProviderLayer` |
-| `@yolk-sdk/agent/providers/openai` | Codex OAuth/broker helpers |
-| `@yolk-sdk/agent/providers/openai/realtime` | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
-| `@yolk-sdk/agent/providers/openai/speech` | `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer` |
-| `@yolk-sdk/agent/providers/anthropic/claude` | Claude request, auth, OAuth token, authorization URL, and broker helpers |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer` |
-| `@yolk-sdk/agent/providers/anthropic` | Claude OAuth/broker helpers |
+| Subpath                                               | Main exports                                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`                                 |
+| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                             |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`                                                   |
+| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                       |
+| `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
+| `@yolk-sdk/agent/providers/openai/speech`             | `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`                 |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers         |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`                                               |
+| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                      |

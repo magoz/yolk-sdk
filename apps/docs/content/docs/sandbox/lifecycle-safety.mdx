@@ -32,26 +32,26 @@ Replace the in-memory state store with durable app storage in production.
 
 ## Lifecycle defaults
 
-| Setting | Default |
-| --- | --- |
-| lifecycle | disposable |
-| idle TTL | 30 minutes |
-| max lifetime | 45 minutes |
-| command timeout | 120 seconds |
-| max command timeout | 600 seconds |
-| ports | `3000`, `5173`, `4321`, `8000` |
-| workspace root | `/vercel/sandbox` |
+| Setting             | Default                        |
+| ------------------- | ------------------------------ |
+| lifecycle           | disposable                     |
+| idle TTL            | 30 minutes                     |
+| max lifetime        | 45 minutes                     |
+| command timeout     | 120 seconds                    |
+| max command timeout | 600 seconds                    |
+| ports               | `3000`, `5173`, `4321`, `8000` |
+| workspace root      | `/vercel/sandbox`              |
 
 Expired disposable state recreates before command execution and returns `workspaceReset: true`.
 
 ## Source options
 
-| Source | Use for |
-| --- | --- |
-| `EmptySandboxInitialSource` | blank workspace |
-| `GitSandboxInitialSource` | clone a public or tokenized repository |
-| `SnapshotSandboxInitialSource` | restore a provider snapshot |
-| `TarballSandboxInitialSource` | hydrate from an archive |
+| Source                         | Use for                                |
+| ------------------------------ | -------------------------------------- |
+| `EmptySandboxInitialSource`    | blank workspace                        |
+| `GitSandboxInitialSource`      | clone a public or tokenized repository |
+| `SnapshotSandboxInitialSource` | restore a provider snapshot            |
+| `TarballSandboxInitialSource`  | hydrate from an archive                |
 
 Choose source per trusted server policy, not from raw client input.
 
@@ -86,12 +86,12 @@ The tool is named `sandbox` and has `destructive` access.
 
 Command failures are result data:
 
-| Result field | Meaning |
-| --- | --- |
-| `exitCode` | `null` for timeout/unknown, otherwise process exit code |
-| `timedOut` | command exceeded timeout and was killed |
-| `workspaceReset` | state was recreated before command |
-| `previewUrls` | provider preview URLs for configured ports |
-| `backgroundId` | long-running background command id |
+| Result field     | Meaning                                                 |
+| ---------------- | ------------------------------------------------------- |
+| `exitCode`       | `null` for timeout/unknown, otherwise process exit code |
+| `timedOut`       | command exceeded timeout and was killed                 |
+| `workspaceReset` | state was recreated before command                      |
+| `previewUrls`    | provider preview URLs for configured ports              |
+| `backgroundId`   | long-running background command id                      |
 
 Provider/state/config failures become safe `ToolError`s that the agent loop renders as failed tool results.

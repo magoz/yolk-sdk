@@ -53,7 +53,9 @@ export const createPost = (input: { readonly title: string; readonly userId: str
     const title = input.title.trim()
 
     if (title.length === 0) {
-      return yield* Effect.fail(new ValidationError({ message: 'Title is required', field: 'title' }))
+      return yield* Effect.fail(
+        new ValidationError({ message: 'Title is required', field: 'title' })
+      )
     }
 
     const [post] = yield* db

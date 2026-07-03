@@ -34,7 +34,7 @@ async function Content() {
                 Durable agent context: vision, decisions, notes, and source-backed knowledge.
               </p>
             </div>
-              <p className="text-sm text-muted-foreground tabular-nums">{items.length} documents</p>
+            <p className="text-sm text-muted-foreground tabular-nums">{items.length} documents</p>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <CreateTextKnowledgeForm />
@@ -45,7 +45,9 @@ async function Content() {
             <div className="flex items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-medium">Knowledge documents</h2>
-                <p className="text-sm text-muted-foreground">Pinned documents load into agent context.</p>
+                <p className="text-sm text-muted-foreground">
+                  Pinned documents load into agent context.
+                </p>
               </div>
               <p className="text-sm text-muted-foreground tabular-nums">{items.length} total</p>
             </div>

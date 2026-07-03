@@ -16,8 +16,7 @@ export const anthropicClaudeScopes = [
   'user:mcp_servers',
   'user:file_upload'
 ].join(' ')
-export const anthropicClaudeOAuthUserAgent =
-  `claude-cli/${anthropicClaudeCodeVersion} (external, ${anthropicClaudeCodeEntrypoint})`
+export const anthropicClaudeOAuthUserAgent = `claude-cli/${anthropicClaudeCodeVersion} (external, ${anthropicClaudeCodeEntrypoint})`
 export const anthropicClaudeRefreshBufferMs = 5 * 60 * 1000
 
 export class AnthropicClaudeOAuthToken extends Schema.Class<AnthropicClaudeOAuthToken>(

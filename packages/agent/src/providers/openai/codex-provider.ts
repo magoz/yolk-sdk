@@ -260,26 +260,31 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
 
 const userPartToCodexInputPart = (
   part: ContentPart
-): Effect.Effect<OpenAiCodexInputTextPart | OpenAiCodexInputImagePart | OpenAiCodexInputFilePart, LLMError> => {
+): Effect.Effect<
+  OpenAiCodexInputTextPart | OpenAiCodexInputImagePart | OpenAiCodexInputFilePart,
+  LLMError
+> => {
   switch (part._tag) {
     case 'Text':
       return Effect.succeed({ type: 'input_text', text: part.text })
     case 'Image':
       return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
         onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
-        onSome: url => Effect.succeed({
-          type: 'input_image',
-          image_url: url
-        })
+        onSome: url =>
+          Effect.succeed({
+            type: 'input_image',
+            image_url: url
+          })
       })
     case 'Document':
       return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
         onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
-        onSome: url => Effect.succeed({
-          type: 'input_file',
-          filename: part.filename,
-          file_data: url
-        })
+        onSome: url =>
+          Effect.succeed({
+            type: 'input_file',
+            filename: part.filename,
+            file_data: url
+          })
       })
     case 'Audio':
       return Effect.fail(unsupportedContentError('User audio'))
@@ -986,7 +991,9 @@ export const streamOpenAiCodexResponse = (
     Ref.make(initialBodyState).pipe(
       Effect.map(bodyStateRef => {
         const chunks = response.stream.pipe(
-          Stream.mapError(toHttpClientLlmError('Could not read OpenAI Codex stream', true, 'stream')),
+          Stream.mapError(
+            toHttpClientLlmError('Could not read OpenAI Codex stream', true, 'stream')
+          ),
           Stream.decodeText,
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {

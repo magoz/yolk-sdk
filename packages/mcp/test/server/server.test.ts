@@ -50,7 +50,11 @@ const richResultServer = makeMcpToolServer({
             content: [
               TextPart.make({ text: 'hello' }),
               ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-              DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief v1.pdf' }),
+              DocumentPart.make({
+                source: inlineBase64Source('ghi='),
+                mimeType: 'application/pdf',
+                filename: 'brief v1.pdf'
+              }),
               AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' })
             ],
             isError: true,

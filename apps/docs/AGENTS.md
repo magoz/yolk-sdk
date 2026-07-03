@@ -38,12 +38,12 @@ Private Fumadocs/Next site for public `@yolk-sdk/*` package documentation.
 
 ## Content types
 
-| Type | Reader need | Yolk location | Rule |
-| --- | --- | --- | --- |
-| Tutorial | Learn by completing first success | `quickstart` | Must be runnable end-to-end. |
-| How-to | Solve a concrete task | `guides/*`, `integrations/*` | Must include prerequisites, steps, verification, next links. |
-| Reference | Look up exact facts | `reference/*`, package pages | Must be complete, terse, and synchronized with exports. |
-| Explanation | Understand tradeoffs/mental model | reference/concept sections | Must not block first success. |
+| Type        | Reader need                       | Yolk location                | Rule                                                         |
+| ----------- | --------------------------------- | ---------------------------- | ------------------------------------------------------------ |
+| Tutorial    | Learn by completing first success | `quickstart`                 | Must be runnable end-to-end.                                 |
+| How-to      | Solve a concrete task             | `guides/*`, `integrations/*` | Must include prerequisites, steps, verification, next links. |
+| Reference   | Look up exact facts               | `reference/*`, package pages | Must be complete, terse, and synchronized with exports.      |
+| Explanation | Understand tradeoffs/mental model | reference/concept sections   | Must not block first success.                                |
 
 ## Writing style
 

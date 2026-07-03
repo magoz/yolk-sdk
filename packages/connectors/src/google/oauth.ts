@@ -9,8 +9,7 @@ export const googleGmailReadonlyScope = 'https://www.googleapis.com/auth/gmail.r
 export const googleGmailSendScope = 'https://www.googleapis.com/auth/gmail.send'
 export const googleGmailComposeScope = 'https://www.googleapis.com/auth/gmail.compose'
 export const googleGmailModifyScope = 'https://www.googleapis.com/auth/gmail.modify'
-export const googleGmailSettingsBasicScope =
-  'https://www.googleapis.com/auth/gmail.settings.basic'
+export const googleGmailSettingsBasicScope = 'https://www.googleapis.com/auth/gmail.settings.basic'
 export const googleCalendarReadonlyScope = 'https://www.googleapis.com/auth/calendar.readonly'
 export const googleCalendarEventsScope = 'https://www.googleapis.com/auth/calendar.events'
 

@@ -14,7 +14,10 @@ import {
   type StorageSourceSummary
 } from './storage-search-tool.ts'
 
-const KnowledgeSearchToolLayer = Layer.mergeAll(Db.layer, AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer)))
+const KnowledgeSearchToolLayer = Layer.mergeAll(
+  Db.layer,
+  AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer))
+)
 
 const storageSourceName = (source: {
   readonly filename: string | null
@@ -108,7 +111,9 @@ const getStorageSourceForAgent = (input: {
         ...text
       } satisfies StorageSourceDetail
     }),
-    Effect.catchTag('NotFoundError', error => Effect.fail(notFoundToolError('get_storage_source', error))),
+    Effect.catchTag('NotFoundError', error =>
+      Effect.fail(notFoundToolError('get_storage_source', error))
+    ),
     Effect.provide(Db.layer),
     Effect.mapError(error => fatalToolError('get_storage_source', error))
   )

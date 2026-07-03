@@ -4,7 +4,11 @@ import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/u
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import { describe, expect, it } from '@effect/vitest'
 import { join } from 'node:path'
-import { listLocalMcpServerTools, callRemoteMcpServerTool, listRemoteMcpServerTools } from '../../src/client'
+import {
+  listLocalMcpServerTools,
+  callRemoteMcpServerTool,
+  listRemoteMcpServerTools
+} from '../../src/client'
 import {
   callLocalMcpServerToolNode,
   listLocalMcpServerToolsNode,
@@ -362,7 +366,9 @@ describe('MCP client', () => {
           type: 'local',
           command: [process.execPath, tsxCliPath, stdioFixturePath]
         }
-        const options = { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+        const options = {
+          securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false }
+        }
 
         const tools = yield* listLocalMcpServerToolsNode(config, options)
         expect(tools.map(tool => tool.def.name)).toEqual(['local_echo'])

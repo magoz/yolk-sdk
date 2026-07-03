@@ -460,7 +460,9 @@ describe('makeAgentPostResponse', () => {
           sessionId: 'session_1',
           messages: [
             UserMessage.make({
-              content: [ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/svg+xml' })]
+              content: [
+                ImagePart.make({ source: inlineBase64Source('aaaa'), mimeType: 'image/svg+xml' })
+              ]
             })
           ]
         }),
@@ -481,7 +483,9 @@ describe('makeAgentPostResponse', () => {
           sessionId: 'session_1',
           messages: [
             UserMessage.make({
-              content: [ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })]
+              content: [
+                ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
+              ]
             })
           ]
         }),
@@ -583,7 +587,11 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                DocumentPart.make({ source: inlineBase64Source('eGxz'), mimeType: 'text/plain', filename: 'brief.txt' })
+                DocumentPart.make({
+                  source: inlineBase64Source('eGxz'),
+                  mimeType: 'text/plain',
+                  filename: 'brief.txt'
+                })
               ]
             })
           ]
@@ -593,7 +601,10 @@ describe('makeAgentPostResponse', () => {
 
       expect(result).toMatchObject({
         _tag: 'Failure',
-        failure: { _tag: 'AgentDocumentLimitError', message: 'Unsupported document type: text/plain' }
+        failure: {
+          _tag: 'AgentDocumentLimitError',
+          message: 'Unsupported document type: text/plain'
+        }
       })
     })
   )
@@ -606,7 +617,11 @@ describe('makeAgentPostResponse', () => {
           messages: [
             UserMessage.make({
               content: [
-                DocumentPart.make({ source: inlineBase64Source('abc'), mimeType: 'application/pdf', filename: 'brief.pdf' })
+                DocumentPart.make({
+                  source: inlineBase64Source('abc'),
+                  mimeType: 'application/pdf',
+                  filename: 'brief.pdf'
+                })
               ]
             })
           ]

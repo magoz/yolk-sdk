@@ -81,9 +81,11 @@ const collectAgentEvents = <E, R>(stream: Stream.Stream<AgentEvent, E, R>) =>
     const events: Array<AgentEvent> = []
 
     yield* stream.pipe(
-      Stream.runForEach(event => Effect.sync(() => {
-        events.push(event)
-      }))
+      Stream.runForEach(event =>
+        Effect.sync(() => {
+          events.push(event)
+        })
+      )
     )
 
     return events
@@ -161,9 +163,7 @@ const runQuestionBatch = (
   ).pipe(Effect.provide(testLayer))
 
 const toolExecutionStartedIds = (events: ReadonlyArray<AgentEvent>) =>
-  events.flatMap(event =>
-    event._tag === 'ToolExecutionStarted' ? [event.call.id] : []
-  )
+  events.flatMap(event => (event._tag === 'ToolExecutionStarted' ? [event.call.id] : []))
 
 describe('HITL property tests', () => {
   it.effect.prop(

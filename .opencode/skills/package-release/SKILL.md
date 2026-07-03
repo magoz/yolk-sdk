@@ -9,11 +9,11 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
 
 ## In This Skill
 
-| File | Purpose |
-| --- | --- |
-| [references/versioning.md](./references/versioning.md) | SemVer, canary, Changesets rules |
-| [references/publishing.md](./references/publishing.md) | GitHub Actions publish flow |
-| [references/troubleshooting.md](./references/troubleshooting.md) | Common release failures |
+| File                                                             | Purpose                          |
+| ---------------------------------------------------------------- | -------------------------------- |
+| [references/versioning.md](./references/versioning.md)           | SemVer, canary, Changesets rules |
+| [references/publishing.md](./references/publishing.md)           | GitHub Actions publish flow      |
+| [references/troubleshooting.md](./references/troubleshooting.md) | Common release failures          |
 
 ## Quick Start
 
@@ -58,8 +58,8 @@ pnpm changeset:version
 
 `pnpm changeset:version` already runs `pnpm install --lockfile-only` in this repo.
 
-   - If no files change, stop: there is no new version to publish.
-   - Never tell user to run the GitHub Action until bumped versions/changelogs are committed and pushed.
+- If no files change, stop: there is no new version to publish.
+- Never tell user to run the GitHub Action until bumped versions/changelogs are committed and pushed.
 
 6. Inspect generated release files.
    - Package `package.json` versions.
@@ -191,9 +191,9 @@ Yolk should mirror Effect + MCP SDK:
 
 ## Reading Order
 
-| Task | Files |
-| --- | --- |
-| Decide version | SKILL.md → versioning.md |
-| Publish canary | SKILL.md → publishing.md |
-| Add CI release | SKILL.md → publishing.md |
-| Debug failure | SKILL.md → troubleshooting.md |
+| Task           | Files                         |
+| -------------- | ----------------------------- |
+| Decide version | SKILL.md → versioning.md      |
+| Publish canary | SKILL.md → publishing.md      |
+| Add CI release | SKILL.md → publishing.md      |
+| Debug failure  | SKILL.md → troubleshooting.md |

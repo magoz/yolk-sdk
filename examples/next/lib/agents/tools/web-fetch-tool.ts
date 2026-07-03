@@ -22,7 +22,9 @@ const maxRedirects = 5
 
 const WebFetchFormat = Schema.Literals(['markdown', 'text', 'html'])
 const WebFetchParams = Schema.Struct({
-  url: Schema.String.pipe(Schema.annotate({ description: 'Fully-qualified public http(s) URL to fetch.' })),
+  url: Schema.String.pipe(
+    Schema.annotate({ description: 'Fully-qualified public http(s) URL to fetch.' })
+  ),
   format: Schema.optional(WebFetchFormat).pipe(
     Schema.annotate({ description: 'Output format. Defaults to markdown.' })
   ),
@@ -193,7 +195,9 @@ export const ensurePublicUrlWithoutDns = (url: URL) => {
 
 export const ensureResolvedAddressesArePublic = (addresses: ReadonlyArray<string>) =>
   addresses.length === 0 || addresses.some(isBlockedAddress)
-    ? Effect.fail(makeModelVisibleError('URL host resolves to a private or reserved address', 'permission'))
+    ? Effect.fail(
+        makeModelVisibleError('URL host resolves to a private or reserved address', 'permission')
+      )
     : Effect.void
 
 const requestHeaders = {
@@ -226,7 +230,10 @@ export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
       headers: response.headers,
       body: response.arrayBuffer.pipe(
         Effect.mapError(error =>
-          makeModelVisibleError(`Could not read response body: ${unknownToMessage(error)}`, 'unavailable')
+          makeModelVisibleError(
+            `Could not read response body: ${unknownToMessage(error)}`,
+            'unavailable'
+          )
         )
       )
     }
@@ -253,7 +260,10 @@ const fetchWithRedirects = (
   url: URL,
   timeoutMs: number,
   remainingRedirects: number
-): Effect.Effect<{ readonly url: URL; readonly response: WebFetchHttpResponse }, WebFetchToolError> =>
+): Effect.Effect<
+  { readonly url: URL; readonly response: WebFetchHttpResponse },
+  WebFetchToolError
+> =>
   Effect.gen(function* () {
     yield* deps.ensurePublicUrl(url)
     const response = yield* deps.request(url, timeoutMs)
@@ -432,7 +442,9 @@ export const fetchWebPage = (params: WebFetchParams, deps: WebFetchToolDependenc
     const contentType = headerValue(response.headers, 'content-type')
     const mime = contentTypeMime(contentType)
     if (!isTextLikeMime(mime)) {
-      return yield* Effect.fail(makeModelVisibleError(`Unsupported content type: ${mime}`, 'unavailable'))
+      return yield* Effect.fail(
+        makeModelVisibleError(`Unsupported content type: ${mime}`, 'unavailable')
+      )
     }
 
     const arrayBuffer = yield* response.body
@@ -474,18 +486,19 @@ export const executeWebFetchTool = (call: ToolCall, deps: WebFetchToolDependenci
 
 export const makeWebFetchToolRegistration = (
   deps: WebFetchToolDependencies
-): ToolRegistration<AgentToolContext> => makeTool({
-  name: webFetchToolName,
-  description: webFetchToolDescription,
-  parameters: WebFetchParams,
-  access: 'read',
-  isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
-  invalidParamsMessage: error => `Invalid web fetch arguments: ${unknownToMessage(error)}`,
-  execute: ({ call, params }) =>
-    fetchWebPage(params, deps).pipe(
-      Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
-    )
-})
+): ToolRegistration<AgentToolContext> =>
+  makeTool({
+    name: webFetchToolName,
+    description: webFetchToolDescription,
+    parameters: WebFetchParams,
+    access: 'read',
+    isEnabled: context => Effect.succeed(context.surface === 'text' || context.surface === 'voice'),
+    invalidParamsMessage: error => `Invalid web fetch arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, params }) =>
+      fetchWebPage(params, deps).pipe(
+        Effect.map(content => ToolResult.make({ toolCallId: call.id, content }))
+      )
+  })
 
 export const makeWebFetchToolModule = (
   deps: WebFetchToolDependencies

@@ -1,10 +1,7 @@
 import path from 'node:path'
 import { test, expect } from '../fixtures'
 
-const fakeMicAudioPath = path.join(
-  process.cwd(),
-  'e2e/assets/voice-alpha-beta-gamma-delayed.wav'
-)
+const fakeMicAudioPath = path.join(process.cwd(), 'e2e/assets/voice-alpha-beta-gamma-delayed.wav')
 
 test.use({
   launchOptions: {

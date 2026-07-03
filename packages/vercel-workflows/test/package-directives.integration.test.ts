@@ -50,9 +50,7 @@ const startWorkflow = <TArgs extends unknown[], TResult>(
     })
   )
 
-const workflowsEffect = <A, E>(
-  run: (api: VercelWorkflowsClient) => Effect.Effect<A, E>
-) =>
+const workflowsEffect = <A, E>(run: (api: VercelWorkflowsClient) => Effect.Effect<A, E>) =>
   runWorkflows(
     Effect.gen(function* () {
       const workflows = yield* VercelWorkflows
@@ -77,10 +75,9 @@ describe('package-owned workflow directives', () => {
 
     await expect(Effect.runPromise(run.returnValue)).resolves.toBe('stream-complete')
 
-    await expect(Effect.runPromise(run.getReadable<string>()).then(collectReadable)).resolves.toEqual([
-      'first',
-      'second'
-    ])
+    await expect(
+      Effect.runPromise(run.getReadable<string>()).then(collectReadable)
+    ).resolves.toEqual(['first', 'second'])
     await expect(
       workflowsEffect(api => api.getReadable<string>(run.runId, { startIndex: 1 })).then(
         collectReadable
@@ -117,9 +114,9 @@ describe('package-owned workflow directives', () => {
     await workflowsEffect(api => api.resumeHook(hook.token, 'approved'))
     await expect(Effect.runPromise(run.returnValue)).resolves.toBe('approved')
     await expect(
-      workflowsEffect(api => api.getReadable<string>(run.runId, { startIndex: tailIndex + 1 })).then(
-        collectReadable
-      )
+      workflowsEffect(api =>
+        api.getReadable<string>(run.runId, { startIndex: tailIndex + 1 })
+      ).then(collectReadable)
     ).resolves.toEqual(['after-approved'])
   })
 

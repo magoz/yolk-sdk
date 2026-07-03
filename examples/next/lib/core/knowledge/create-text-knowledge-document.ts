@@ -17,11 +17,15 @@ export const createTextKnowledgeDocument = (input: {
     const content = input.content.trim()
 
     if (title.length === 0) {
-      return yield* Effect.fail(new ValidationError({ message: 'Knowledge title is empty', field: 'title' }))
+      return yield* Effect.fail(
+        new ValidationError({ message: 'Knowledge title is empty', field: 'title' })
+      )
     }
 
     if (content.length === 0) {
-      return yield* Effect.fail(new ValidationError({ message: 'Knowledge content is empty', field: 'content' }))
+      return yield* Effect.fail(
+        new ValidationError({ message: 'Knowledge content is empty', field: 'content' })
+      )
     }
 
     const db = yield* Db
@@ -44,7 +48,12 @@ export const createTextKnowledgeDocument = (input: {
       .returning()
 
     if (document === undefined) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge document', entity: 'userKnowledgeDocument' }))
+      return yield* Effect.fail(
+        new PersistenceError({
+          message: 'Could not create knowledge document',
+          entity: 'userKnowledgeDocument'
+        })
+      )
     }
 
     return yield* indexKnowledgeDocument({

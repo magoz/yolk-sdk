@@ -30,10 +30,13 @@ const token = new TokenBrokerResponse({
   accountId: 'account'
 })
 
-const events = (result: WsResult) => (result._tag === 'Events' || result._tag === 'Done' ? result.events : [])
-const errorMessage = (result: WsResult) => (result._tag === 'Error' ? result.error.message : undefined)
+const events = (result: WsResult) =>
+  result._tag === 'Events' || result._tag === 'Done' ? result.events : []
+const errorMessage = (result: WsResult) =>
+  result._tag === 'Error' ? result.error.message : undefined
 const errorCause = (result: WsResult) => (result._tag === 'Error' ? result.error.cause : undefined)
-const errorRetryable = (result: WsResult) => (result._tag === 'Error' ? result.error.retryable : undefined)
+const errorRetryable = (result: WsResult) =>
+  result._tag === 'Error' ? result.error.retryable : undefined
 
 const request = {
   model: 'gpt-5.4',
@@ -186,7 +189,9 @@ describe('Codex WS proxy fallback', () => {
     let fallbackCalls = 0
     const direct = LLMProvider.of({
       stream: () =>
-        Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(Stream.concat(Stream.fail(directError)))
+        Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(
+          Stream.concat(Stream.fail(directError))
+        )
     })
     const fallback = LLMProvider.of({
       stream: () => {
@@ -196,7 +201,9 @@ describe('Codex WS proxy fallback', () => {
     })
     const provider = makePreStreamFallbackProvider(direct, fallback, () => {})
 
-    const result = await Effect.runPromise(provider.stream(request).pipe(Stream.runCollect, Effect.result))
+    const result = await Effect.runPromise(
+      provider.stream(request).pipe(Stream.runCollect, Effect.result)
+    )
 
     expect(fallbackCalls).toBe(0)
     expect(result).toMatchObject({

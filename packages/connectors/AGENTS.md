@@ -13,24 +13,24 @@
 
 ## Public model
 
-| Export area | Purpose |
-| --- | --- |
-| `connector` | connector definition and action dispatch |
-| `agent` | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules |
-| `integration` | configured invokable connector instance data |
-| `action` | typed action definitions over Effect Schema |
-| `config` | required/optional string config helpers for integration config |
-| `credential` | slots, bindings, host resolver service, runtime credential values |
-| `http` | host-provided HTTP request/response port; not a connector |
-| `result` | value-level success/failure results for expected upstream failures |
-| `error` | typed package/runtime failures |
-| `figma` | Figma remote MCP auth data action and OAuth constants |
-| `google` | Gmail/Calendar actions plus Google OAuth slot constants |
-| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions |
-| `notion` | Notion page/block/database/data-source/comment/user actions plus API token slot constants |
-| `r2-storage` | Cloudflare R2 upload URL action with host-provided presigner |
-| `telegram` | Telegram bot send/validate actions |
-| `todoist` | Todoist project/task/label actions plus API token slot constants |
+| Export area       | Purpose                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| `connector`       | connector definition and action dispatch                                                  |
+| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                |
+| `integration`     | configured invokable connector instance data                                              |
+| `action`          | typed action definitions over Effect Schema                                               |
+| `config`          | required/optional string config helpers for integration config                            |
+| `credential`      | slots, bindings, host resolver service, runtime credential values                         |
+| `http`            | host-provided HTTP request/response port; not a connector                                 |
+| `result`          | value-level success/failure results for expected upstream failures                        |
+| `error`           | typed package/runtime failures                                                            |
+| `figma`           | Figma remote MCP auth data action and OAuth constants                                     |
+| `google`          | Gmail/Calendar actions plus Google OAuth slot constants                                   |
+| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                 |
+| `notion`          | Notion page/block/database/data-source/comment/user actions plus API token slot constants |
+| `r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                              |
+| `telegram`        | Telegram bot send/validate actions                                                        |
+| `todoist`         | Todoist project/task/label actions plus API token slot constants                          |
 
 ## Design rules
 

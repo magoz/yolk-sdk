@@ -4,7 +4,13 @@ import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { deleteStorageObjectAction } from '@/lib/core/storage/delete-storage-object-action'
 
-export function DeleteStorageSourceButton({ id, label }: { readonly id: string; readonly label: string }) {
+export function DeleteStorageSourceButton({
+  id,
+  label
+}: {
+  readonly id: string
+  readonly label: string
+}) {
   const [message, setMessage] = useState<string | undefined>()
   const [isPending, startTransition] = useTransition()
 
@@ -22,7 +28,9 @@ export function DeleteStorageSourceButton({ id, label }: { readonly id: string; 
         disabled={isPending}
         aria-label={`Delete ${label}`}
         onClick={() => {
-          const confirmed = window.confirm(`Delete “${label}”? This removes it from storage search.`)
+          const confirmed = window.confirm(
+            `Delete “${label}”? This removes it from storage search.`
+          )
           if (!confirmed) {
             return
           }

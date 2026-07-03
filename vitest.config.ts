@@ -9,7 +9,12 @@ const workspaceRoot = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [
-    tsconfigPaths({ projects: [join(workspaceRoot, 'tsconfig.json'), join(workspaceRoot, 'examples/next/tsconfig.json')] }),
+    tsconfigPaths({
+      projects: [
+        join(workspaceRoot, 'tsconfig.json'),
+        join(workspaceRoot, 'examples/next/tsconfig.json')
+      ]
+    }),
     react()
   ],
   test: {

@@ -130,22 +130,21 @@ const runMinimalProviderRequest = (
       ...(input.extraHeaders === undefined ? {} : { extraHeaders: input.extraHeaders })
     }).pipe(
       Layer.provide(
-        makeHttpClientLayer(
-          input.response ?? new Response('', { status: 200 }),
-          requests
-        )
+        makeHttpClientLayer(input.response ?? new Response('', { status: 200 }), requests)
       )
     )
 
     yield* Effect.gen(function* () {
       const provider = yield* LLMProvider
 
-      yield* provider.stream({
-        model: input.model ?? 'claude-sonnet-4-6',
-        systemPrompt: '',
-        messages: [UserMessage.make({ content: 'hello' })],
-        tools: []
-      }).pipe(Stream.runCollect)
+      yield* provider
+        .stream({
+          model: input.model ?? 'claude-sonnet-4-6',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: []
+        })
+        .pipe(Stream.runCollect)
     }).pipe(Effect.provide(providerLayer))
   })
 
@@ -162,12 +161,14 @@ const collectProviderEvents = (response: Response, requests: Array<CapturedReque
     return yield* Effect.gen(function* () {
       const provider = yield* LLMProvider
 
-      return yield* provider.stream({
-        model: 'claude-sonnet-4-6',
-        systemPrompt: '',
-        messages: [UserMessage.make({ content: 'hello' })],
-        tools: []
-      }).pipe(Stream.runCollect)
+      return yield* provider
+        .stream({
+          model: 'claude-sonnet-4-6',
+          systemPrompt: '',
+          messages: [UserMessage.make({ content: 'hello' })],
+          tools: []
+        })
+        .pipe(Stream.runCollect)
     }).pipe(Effect.provide(providerLayer))
   })
 
@@ -252,9 +253,12 @@ describe('Anthropic Claude provider', () => {
           }
         ],
         max_tokens: 123,
-        tools: [{ name: 'mcp_Search', description: 'Search docs', input_schema: { type: 'object' } }]
+        tools: [
+          { name: 'mcp_Search', description: 'Search docs', input_schema: { type: 'object' } }
+        ]
       })
-    }))
+    })
+  )
 
   it.effect('rejects dangling host tool calls before Anthropic request lowering', () =>
     Effect.gen(function* () {
@@ -281,7 +285,8 @@ describe('Anthropic Claude provider', () => {
         retryable: false
       })
       expect(error.message).toContain('search (call-1)')
-    }))
+    })
+  )
 
   it.effect('normalizes Anthropic tool input schemas to provider-safe root objects', () =>
     Effect.gen(function* () {
@@ -369,7 +374,8 @@ describe('Anthropic Claude provider', () => {
         required: ['first', 'second'],
         $defs: {}
       })
-    }))
+    })
+  )
 
   it.effect('inlines text documents for Claude Messages input', () =>
     Effect.gen(function* () {
@@ -488,7 +494,8 @@ describe('Anthropic Claude provider', () => {
       expect(headers['x-stainless-lang']).toBe('js')
       expect(headers.accept).toBe('text/event-stream')
       expect(body).toContain('"stream":true')
-    }))
+    })
+  )
 
   it.effect('sanitizes known OpenCode prompt fingerprints', () =>
     Effect.gen(function* () {
@@ -507,7 +514,8 @@ describe('Anthropic Claude provider', () => {
         role: 'user',
         content: 'Environment context you are running in: if the assistant honestly\n\nhello'
       })
-    }))
+    })
+  )
 
   it.effect('omits interleaved thinking beta for Haiku', () =>
     Effect.gen(function* () {
@@ -519,7 +527,8 @@ describe('Anthropic Claude provider', () => {
       expect(headers['anthropic-beta']).toBe(
         'claude-code-20250219,oauth-2025-04-20,prompt-caching-scope-2026-01-05,context-management-2025-06-27,advisor-tool-2026-03-01'
       )
-    }))
+    })
+  )
 
   it.effect('lets extraHeaders override Anthropic default headers', () =>
     Effect.gen(function* () {
@@ -540,7 +549,8 @@ describe('Anthropic Claude provider', () => {
       expect(headers['anthropic-beta']).toBe('custom-beta')
       expect(headers['anthropic-version']).toBe('custom-version')
       expect(headers['x-app']).toBe('custom-app')
-    }))
+    })
+  )
 
   it.effect('streams Anthropic text deltas as they arrive', () =>
     Effect.gen(function* () {
@@ -558,18 +568,21 @@ describe('Anthropic Claude provider', () => {
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
 
-        return yield* provider.stream({
-          model: 'claude-sonnet-4-6',
-          systemPrompt: '',
-          messages: [UserMessage.make({ content: 'hello' })],
-          tools: []
-        }).pipe(Stream.take(1), Stream.runCollect)
+        return yield* provider
+          .stream({
+            model: 'claude-sonnet-4-6',
+            systemPrompt: '',
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: []
+          })
+          .pipe(Stream.take(1), Stream.runCollect)
       }).pipe(Effect.provide(providerLayer))
       const events = Array.from(eventsChunk)
 
       expect(events.map(event => event._tag)).toEqual(['TextDelta'])
       expect(events[0]).toMatchObject({ text: 'hel' })
-    }))
+    })
+  )
 
   it.effect('parses chunked CRLF Anthropic SSE streams', () =>
     Effect.gen(function* () {
@@ -585,7 +598,8 @@ describe('Anthropic Claude provider', () => {
       expect(events.map(event => event._tag)).toEqual(['TextDelta', 'TextDelta', 'Done'])
       expect(events[0]).toMatchObject({ text: 'hel' })
       expect(events[1]).toMatchObject({ text: 'lo' })
-    }))
+    })
+  )
 
   it.effect('supports non-streaming Anthropic JSON responses', () =>
     Effect.gen(function* () {
@@ -604,7 +618,8 @@ describe('Anthropic Claude provider', () => {
       expect(events.map(event => event._tag)).toEqual(['TextDelta', 'Done', 'Usage'])
       expect(events[0]).toMatchObject({ text: 'hello' })
       expect(events[2]).toMatchObject({ usage: { input: { total: 2 }, output: { total: 3 } } })
-    }))
+    })
+  )
 
   it.effect('maps Anthropic cache usage into total input usage', () =>
     Effect.gen(function* () {
@@ -631,7 +646,8 @@ describe('Anthropic Claude provider', () => {
           output: { total: 4 }
         }
       })
-    }))
+    })
+  )
 
   it.effect('treats null Anthropic cache usage fields as zero', () =>
     Effect.gen(function* () {
@@ -659,7 +675,8 @@ describe('Anthropic Claude provider', () => {
       if (usageEvent?._tag !== 'Usage') expect.fail('Expected usage event')
       expect(usageEvent.usage.input.cacheRead).toBeUndefined()
       expect(usageEvent.usage.input.cacheWrite).toBeUndefined()
-    }))
+    })
+  )
 
   it.effect('streams Anthropic tool calls from partial JSON deltas', () =>
     Effect.gen(function* () {
@@ -681,7 +698,8 @@ describe('Anthropic Claude provider', () => {
         call: { id: 'toolu_1', name: 'search', params: { query: 'yolk' } }
       })
       expect(events[1]).toMatchObject({ stopReason: 'tool_use' })
-    }))
+    })
+  )
 
   it.effect('preserves StructuredOutput casing when unprefixing Claude tool calls', () =>
     Effect.gen(function* () {
@@ -702,7 +720,8 @@ describe('Anthropic Claude provider', () => {
       expect(events[0]).toMatchObject({
         call: { id: 'toolu_1', name: 'StructuredOutput', params: { ok: true } }
       })
-    }))
+    })
+  )
 
   it.effect('emits Anthropic streaming usage deltas when output snapshots arrive', () =>
     Effect.gen(function* () {
@@ -726,7 +745,8 @@ describe('Anthropic Claude provider', () => {
         }
       })
       expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 6 } } })
-    }))
+    })
+  )
 
   it.effect('parses null Anthropic streaming usage fields without dropping output usage', () =>
     Effect.gen(function* () {
@@ -745,7 +765,8 @@ describe('Anthropic Claude provider', () => {
       expect(events.map(event => event._tag)).toEqual(['Usage', 'Usage', 'Done'])
       expect(events[0]).toMatchObject({ usage: { input: { total: 4 }, output: { total: 1 } } })
       expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 6 } } })
-    }))
+    })
+  )
 
   it.effect('maps Anthropic overloaded stream errors to retryable metadata', () =>
     Effect.gen(function* () {
@@ -771,7 +792,8 @@ describe('Anthropic Claude provider', () => {
           providerCode: 'overloaded_error'
         }
       })
-    }))
+    })
+  )
 
   it.effect('marks Anthropic stream read failures retryable', () =>
     Effect.gen(function* () {
@@ -787,5 +809,6 @@ describe('Anthropic Claude provider', () => {
         retryable: true,
         provider: { provider: 'anthropic_claude', kind: 'stream' }
       })
-    }))
+    })
+  )
 })

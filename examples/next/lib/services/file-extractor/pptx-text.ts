@@ -11,8 +11,14 @@ const slideXmlFile = /^ppt\/slides\/slide(\d+)\.xml$/
 const notesXmlFile = /^ppt\/notesSlides\/notesSlide(\d+)\.xml$/
 const xmlName = '[A-Za-z_][\\w.-]*'
 const optionalXmlPrefix = `(?:${xmlName}:)?`
-const paragraphXml = new RegExp(`<${optionalXmlPrefix}p\\b[^>]*>[\\s\\S]*?<\/${optionalXmlPrefix}p>`, 'g')
-const textXml = new RegExp(`<${optionalXmlPrefix}t\\b[^>]*>([\\s\\S]*?)<\/${optionalXmlPrefix}t>`, 'g')
+const paragraphXml = new RegExp(
+  `<${optionalXmlPrefix}p\\b[^>]*>[\\s\\S]*?<\/${optionalXmlPrefix}p>`,
+  'g'
+)
+const textXml = new RegExp(
+  `<${optionalXmlPrefix}t\\b[^>]*>([\\s\\S]*?)<\/${optionalXmlPrefix}t>`,
+  'g'
+)
 const lineBreakXml = new RegExp(`<${optionalXmlPrefix}br\\b[^>]*/>`, 'g')
 const tabXml = new RegExp(`<${optionalXmlPrefix}tab\\b[^>]*/>`, 'g')
 const xmlEntity = /&([^;]+);/g
@@ -49,9 +55,15 @@ const pptxXmlFile = (fileName: string, bytes: Uint8Array): PptxXmlFile | undefin
 }
 
 const comparePptxXmlFiles = (left: PptxXmlFile, right: PptxXmlFile) =>
-  left.group - right.group || left.index - right.index || left.fileName.localeCompare(right.fileName)
+  left.group - right.group ||
+  left.index - right.index ||
+  left.fileName.localeCompare(right.fileName)
 
-const extractMatches = (text: string, pattern: RegExp, groupIndex: number): ReadonlyArray<string> => {
+const extractMatches = (
+  text: string,
+  pattern: RegExp,
+  groupIndex: number
+): ReadonlyArray<string> => {
   const matches: Array<string> = []
 
   for (const match of text.matchAll(pattern)) {

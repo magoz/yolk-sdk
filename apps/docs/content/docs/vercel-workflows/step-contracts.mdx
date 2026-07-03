@@ -33,13 +33,13 @@ Keep provider calls, tool execution, persistence, telemetry, and Effect runtimes
 
 ## Callback table
 
-| Callback | Directive | Input | Output |
-| --- | --- | --- | --- |
-| `runModelStep` | `'use step'` | `{ context, state }` | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn` |
-| `runToolBatchStep` | `'use step'` | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool result messages or `awaitingInput` |
-| `awaitInput` | workflow body | awaiting-input payload | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
-| `closeStream` | `'use step'` | none | closes/flushed stream |
-| `writeError` | `'use step'` | unknown error | writes terminal host error |
+| Callback           | Directive     | Input                                                                                     | Output                                                                                 |
+| ------------------ | ------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `runModelStep`     | `'use step'`  | `{ context, state }`                                                                      | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn`  |
+| `runToolBatchStep` | `'use step'`  | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool result messages or `awaitingInput`                                                |
+| `awaitInput`       | workflow body | awaiting-input payload                                                                    | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
+| `closeStream`      | `'use step'`  | none                                                                                      | closes/flushed stream                                                                  |
+| `writeError`       | `'use step'`  | unknown error                                                                             | writes terminal host error                                                             |
 
 ## Model step
 
@@ -85,14 +85,14 @@ Rules:
 
 ## Run result tags
 
-| Tag | Meaning |
-| --- | --- |
-| `Completed` | model ended and `closeStream` succeeded |
-| `ModelStepFailed` | model step exhausted retries |
-| `ToolBatchStepFailed` | tool batch step exhausted retries |
-| `AwaitInputFailed` | HITL hook/resume failed or no `awaitInput` handler exists |
-| `CloseStreamFailed` | terminal model step succeeded but close failed |
-| `MaxTurnsExceeded` | loop exceeded `maxTurns` |
+| Tag                   | Meaning                                                   |
+| --------------------- | --------------------------------------------------------- |
+| `Completed`           | model ended and `closeStream` succeeded                   |
+| `ModelStepFailed`     | model step exhausted retries                              |
+| `ToolBatchStepFailed` | tool batch step exhausted retries                         |
+| `AwaitInputFailed`    | HITL hook/resume failed or no `awaitInput` handler exists |
+| `CloseStreamFailed`   | terminal model step succeeded but close failed            |
+| `MaxTurnsExceeded`    | loop exceeded `maxTurns`                                  |
 
 ## Retry policy
 

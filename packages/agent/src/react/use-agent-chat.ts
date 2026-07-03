@@ -308,7 +308,12 @@ export function useAgentChat({
 
   const editUserMessage = useCallback(
     (messageId: string, content: Content): AgentChatEditUserMessageResult => {
-      if (isContentEmpty(content) || isRunning || isWaiting || abortControllerRef.current !== null) {
+      if (
+        isContentEmpty(content) ||
+        isRunning ||
+        isWaiting ||
+        abortControllerRef.current !== null
+      ) {
         return { _tag: 'Ignored' }
       }
 

@@ -4,7 +4,7 @@ Use this structure for public `packages/*/README.md` files.
 
 ## Standard outline
 
-```md
+````md
 # @yolk-sdk/<name>
 
 One sentence: what this package provides.
@@ -14,14 +14,15 @@ One sentence: what this package provides.
 ```bash
 pnpm add @yolk-sdk/<name>@canary [related @yolk-sdk deps] effect
 ```
+````
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/<name>/foo` | ... |
+| Subpath                | Purpose |
+| ---------------------- | ------- |
+| `@yolk-sdk/<name>/foo` | ...     |
 
 ## Imports
 
@@ -42,6 +43,7 @@ import { thing } from '@yolk-sdk/<name>'
 ## Boundaries
 
 - No app/product/framework concepts owned here.
+
 ```
 
 ## Package-specific notes
@@ -102,3 +104,4 @@ Import Vercel Workflow APIs from `@yolk-sdk/vercel-workflows`.
 - Examples must compile conceptually and use existing exported names.
 - Say “host owns …” instead of describing app internals.
 - Mention canary instability once near install.
+```

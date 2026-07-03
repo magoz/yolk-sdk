@@ -22,20 +22,16 @@ describe('agent protocol events', () => {
       policy: ToolApprovalPolicy.make({ mode: 'manual', reason: 'Approve?' })
     })
 
-    expect(
-      isTerminalAgentEvent(
-        AgentEnd.make({ messages, turns: 1, usage: zeroAgentUsage })
-      )
-    ).toBe(true)
+    expect(isTerminalAgentEvent(AgentEnd.make({ messages, turns: 1, usage: zeroAgentUsage }))).toBe(
+      true
+    )
     expect(
       isTerminalAgentEvent(
         AgentAwaitingInput.make({ requests: [request], messages, turns: 1, usage: zeroAgentUsage })
       )
     ).toBe(true)
     expect(
-      isTerminalAgentEvent(
-        AgentError.make({ code: 'unknown', message: 'Nope', retryable: false })
-      )
+      isTerminalAgentEvent(AgentError.make({ code: 'unknown', message: 'Nope', retryable: false }))
     ).toBe(true)
     expect(isTerminalAgentEvent(AgentStart.make({}))).toBe(false)
   })

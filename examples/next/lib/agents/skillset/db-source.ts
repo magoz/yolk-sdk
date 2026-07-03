@@ -1,6 +1,11 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { Effect } from 'effect'
-import { commandHints, type CommandInfo, type SkillInfo, type SkillsetManifest } from '@yolk-sdk/agent/skillset'
+import {
+  commandHints,
+  type CommandInfo,
+  type SkillInfo,
+  type SkillsetManifest
+} from '@yolk-sdk/agent/skillset'
 import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
@@ -71,7 +76,9 @@ export const loadUserSkillsetManifest = (input: { readonly userId: string }) =>
         template: schema.agentCommand.template
       })
       .from(schema.agentCommand)
-      .where(and(eq(schema.agentCommand.userId, input.userId), eq(schema.agentCommand.enabled, true)))
+      .where(
+        and(eq(schema.agentCommand.userId, input.userId), eq(schema.agentCommand.enabled, true))
+      )
       .orderBy(asc(schema.agentCommand.name))
 
     return agentRowsToManifest(skillRows, commandRows)

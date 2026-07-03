@@ -9,9 +9,9 @@ import {
 
 describe('durable workflow agent events', () => {
   it('builds stable event ids from stream, turn, and sequence', () => {
-    expect(
-      durableAgentEventId({ streamId: 'workflow:run-1', turn: 2, eventSequence: 3 })
-    ).toBe('workflow:run-1:2:3')
+    expect(durableAgentEventId({ streamId: 'workflow:run-1', turn: 2, eventSequence: 3 })).toBe(
+      'workflow:run-1:2:3'
+    )
   })
 
   it('sequences normal events monotonically', () => {
@@ -83,9 +83,7 @@ describe('durable workflow agent events', () => {
     if (firstChunk === undefined) throw new Error('Missing NDJSON chunk')
 
     expect(result.event.eventId).toBe('workflow:run-1:1:0')
-    expect(new TextDecoder().decode(firstChunk)).toBe(
-      `${JSON.stringify(result.event)}\n`
-    )
+    expect(new TextDecoder().decode(firstChunk)).toBe(`${JSON.stringify(result.event)}\n`)
   })
 
   it('commits before writing terminal events', async () => {

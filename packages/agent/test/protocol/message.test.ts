@@ -11,7 +11,11 @@ import {
 } from '../../src/protocol'
 
 const searchCall = ToolCall.make({ id: 'call_search', name: 'search', params: { query: 'yolk' } })
-const fetchCall = ToolCall.make({ id: 'call_fetch', name: 'fetch', params: { url: 'https://yolk.ai' } })
+const fetchCall = ToolCall.make({
+  id: 'call_fetch',
+  name: 'fetch',
+  params: { url: 'https://yolk.ai' }
+})
 
 const assistantWithToolCalls = AssistantAgentMessage.make({
   parts: [HostToolCallPart.make({ call: searchCall }), HostToolCallPart.make({ call: fetchCall })]
@@ -25,9 +29,7 @@ describe('message transcript helpers', () => {
       UserMessage.make({ content: 'continue' })
     ])
 
-    expect(dangling).toEqual([
-      { call: fetchCall, assistantMessageIndex: 0, beforeMessageIndex: 2 }
-    ])
+    expect(dangling).toEqual([{ call: fetchCall, assistantMessageIndex: 0, beforeMessageIndex: 2 }])
     expect(validateNoDanglingHostToolCalls([assistantWithToolCalls])).toMatchObject({
       _tag: 'DanglingHostToolCalls',
       calls: [

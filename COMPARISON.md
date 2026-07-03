@@ -33,20 +33,20 @@ evals/*
 
 Eve compiles this to `.eve/` artifacts and, on Vercel builds, `.vercel/output`.
 
-| Axis | Eve | Yolk |
-| --- | --- | --- |
-| Shape | Framework/product | SDK/substrate |
-| Authoring | Filesystem conventions, path-derived names | Explicit package APIs and app wiring |
-| Runtime | Workflow-backed durable sessions by default | Stateless loop + generic runtime + host adapters |
-| Persistence | Workflow snapshots/state | Append-only event log + revisions |
-| HITL | Built-in approvals/questions, channel-rendered | Protocol-level approvals/questions, app-rendered |
-| Tools | `defineTool`, Standard Schema/Zod/JSON Schema | Effect Schema `makeTool`, explicit names |
-| Channels | First-class HTTP/Slack/GitHub/Discord/etc | App-owned Next/Workflow/Cloudflare transports |
-| Evals | `defineEval`, `eve eval`, reporters, fixture e2e | Vitest/property/e2e; no eval product yet |
-| Providers | AI SDK / AI Gateway centered | Effect `LLMProvider`, provider-neutral |
-| Sandbox | Productized workspace + seed/prewarm | Domain-free contract + Vercel adapter |
-| Type posture | Strong public DX, pragmatic internals | Stricter no-`any`/no-casts policy |
-| Portability | Claims anywhere; Vercel/Nitro/Workflow centered | Next + Vercel + Cloudflare paths are explicit |
+| Axis         | Eve                                              | Yolk                                             |
+| ------------ | ------------------------------------------------ | ------------------------------------------------ |
+| Shape        | Framework/product                                | SDK/substrate                                    |
+| Authoring    | Filesystem conventions, path-derived names       | Explicit package APIs and app wiring             |
+| Runtime      | Workflow-backed durable sessions by default      | Stateless loop + generic runtime + host adapters |
+| Persistence  | Workflow snapshots/state                         | Append-only event log + revisions                |
+| HITL         | Built-in approvals/questions, channel-rendered   | Protocol-level approvals/questions, app-rendered |
+| Tools        | `defineTool`, Standard Schema/Zod/JSON Schema    | Effect Schema `makeTool`, explicit names         |
+| Channels     | First-class HTTP/Slack/GitHub/Discord/etc        | App-owned Next/Workflow/Cloudflare transports    |
+| Evals        | `defineEval`, `eve eval`, reporters, fixture e2e | Vitest/property/e2e; no eval product yet         |
+| Providers    | AI SDK / AI Gateway centered                     | Effect `LLMProvider`, provider-neutral           |
+| Sandbox      | Productized workspace + seed/prewarm             | Domain-free contract + Vercel adapter            |
+| Type posture | Strong public DX, pragmatic internals            | Stricter no-`any`/no-casts policy                |
+| Portability  | Claims anywhere; Vercel/Nitro/Workflow centered  | Next + Vercel + Cloudflare paths are explicit    |
 
 Eve advantages:
 
@@ -226,14 +226,14 @@ export default async function ({ init, payload, env }: FlueContext) {
 
 ## Message Model
 
-|                   | Yolk                                              | Pi                                                        | OpenCode                                                 | Flue                                                                                    |
-| ----------------- | ------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **Message types** | 3 (User, Assistant, ToolResult)                   | 3 base + 4 custom via declaration merging                 | 2 (User, Assistant)                                      | Pi `AgentMessage` in history + `SessionEntry` wrappers                                  |
+|                   | Yolk                                                          | Pi                                                        | OpenCode                                                 | Flue                                                                                    |
+| ----------------- | ------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Message types** | 3 (User, Assistant, ToolResult)                               | 3 base + 4 custom via declaration merging                 | 2 (User, Assistant)                                      | Pi `AgentMessage` in history + `SessionEntry` wrappers                                  |
 | **Content model** | Multimodal `ContentPart` (Text \| Image \| Document \| Audio) | `TextContent \| ImageContent`                             | 12 Part types (Text, File, Tool, Reasoning, etc.)        | Pi blocks (`text`, `thinking`, `toolCall`, `toolResult`); public `prompt(text)` only    |
-| **Audio**         | First-class (`Audio` content part)                | None                                                      | Schema acknowledges, all models `audio: false`           | None model-native; MCP audio becomes text placeholder                                   |
-| **Extensibility** | Closed union. Consumer converts at boundary.      | Open via `declare module` on `CustomAgentMessages`        | Closed. Escape hatch via `metadata: Record<string, any>` | No public message extension; stores compaction/branch summaries outside LLM messages    |
-| **LLM bridge**    | Harness-internal `toLLMMessages` (trivial)        | Consumer-provided `convertToLlm()` with exhaustive switch | Internal `toModelMessagesEffect` (~250 lines)            | Pi handles provider conversion; Flue rebuilds context from `SessionHistory`             |
-| **Schema**        | Effect Schema                                     | Plain TypeScript interfaces                               | Effect Schema + Zod interop                              | JSON Schema/TypeBox-ish for tools; Valibot for typed results; payload compile-time only |
+| **Audio**         | First-class (`Audio` content part)                            | None                                                      | Schema acknowledges, all models `audio: false`           | None model-native; MCP audio becomes text placeholder                                   |
+| **Extensibility** | Closed union. Consumer converts at boundary.                  | Open via `declare module` on `CustomAgentMessages`        | Closed. Escape hatch via `metadata: Record<string, any>` | No public message extension; stores compaction/branch summaries outside LLM messages    |
+| **LLM bridge**    | Harness-internal `toLLMMessages` (trivial)                    | Consumer-provided `convertToLlm()` with exhaustive switch | Internal `toModelMessagesEffect` (~250 lines)            | Pi handles provider conversion; Flue rebuilds context from `SessionHistory`             |
+| **Schema**        | Effect Schema                                                 | Plain TypeScript interfaces                               | Effect Schema + Zod interop                              | JSON Schema/TypeBox-ish for tools; Valibot for typed results; payload compile-time only |
 
 **Yolk** content model:
 

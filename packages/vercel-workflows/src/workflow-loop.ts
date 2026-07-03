@@ -140,7 +140,9 @@ const writeErrorSafely = (writeError: (error: unknown) => Promise<void>, error: 
   writeError(error).catch(() => undefined)
 
 const missingAwaitInputHandlerError = () =>
-  new Error('Vercel agent workflow awaiting input requested but no awaitInput handler is configured')
+  new Error(
+    'Vercel agent workflow awaiting input requested but no awaitInput handler is configured'
+  )
 
 const maxRetryAttempts = (policy: VercelAgentWorkflowStepRetryPolicy | undefined) =>
   Math.max(1, Math.floor(policy?.maxAttempts ?? noWorkflowStepRetry.maxAttempts))
@@ -191,10 +193,7 @@ export async function runVercelAgentWorkflow(
 
   for (let step = 0; step < maxTurns; step++) {
     const modelResult = await settleWorkflowStep(
-      retryWorkflowStep(
-        () => runModelStep({ context: input.context, state }),
-        modelStepRetry
-      )
+      retryWorkflowStep(() => runModelStep({ context: input.context, state }), modelStepRetry)
     )
 
     if (modelResult._tag === 'Failure') {
@@ -208,9 +207,7 @@ export async function runVercelAgentWorkflow(
     }
 
     if (modelResult.value.done) {
-      const closeResult = await settleWorkflowStep(
-        retryWorkflowStep(closeStream, closeStreamRetry)
-      )
+      const closeResult = await settleWorkflowStep(retryWorkflowStep(closeStream, closeStreamRetry))
 
       if (closeResult._tag === 'Failure') {
         await writeErrorSafely(writeError, closeResult.error)
@@ -269,19 +266,17 @@ export async function runVercelAgentWorkflow(
       }
 
       const awaitingInput = toolsResult.value.awaitingInput
-      toolEventSequence = awaitingInput.eventSequence ?? toolsResult.value.eventSequence ?? toolEventSequence
+      toolEventSequence =
+        awaitingInput.eventSequence ?? toolsResult.value.eventSequence ?? toolEventSequence
 
       const hitlResponse = await settleWorkflowStep(
-        retryWorkflowStep(
-          () => {
-            if (awaitInput === undefined) {
-              return Promise.reject(missingAwaitInputHandlerError())
-            }
+        retryWorkflowStep(() => {
+          if (awaitInput === undefined) {
+            return Promise.reject(missingAwaitInputHandlerError())
+          }
 
-            return awaitInput(awaitingInput)
-          },
-          awaitInputRetry
-        )
+          return awaitInput(awaitingInput)
+        }, awaitInputRetry)
       )
 
       if (hitlResponse._tag === 'Failure') {

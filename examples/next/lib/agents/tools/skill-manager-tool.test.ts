@@ -58,11 +58,7 @@ describe('skill manager tool', () => {
   it.effect('returns model-visible errors for missing create fields', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
-        [
-          makeSkillManagerToolModule(() =>
-            Effect.succeed({ message: 'unused', data: {} })
-          )
-        ],
+        [makeSkillManagerToolModule(() => Effect.succeed({ message: 'unused', data: {} }))],
         context
       )
       const result = yield* toolSet.execute(

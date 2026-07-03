@@ -34,7 +34,7 @@ import { TelegramConnector } from '@yolk-sdk/connectors/telegram'
 const telegramTools = makeConnectorToolModule(TelegramConnector, {
   integration,
   layer: HostConnectorLayer,
-  access: action => action === 'telegram.send_message' ? 'write' : 'read'
+  access: action => (action === 'telegram.send_message' ? 'write' : 'read')
 })
 ```
 

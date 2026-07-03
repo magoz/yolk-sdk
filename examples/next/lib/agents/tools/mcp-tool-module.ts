@@ -8,7 +8,11 @@ import {
   listRemoteMcpServerTools,
   sanitizeMcpName
 } from '@yolk-sdk/mcp/client'
-import type { McpRemoteServerConfig, McpResolvedTool, McpSecurityPolicy } from '@yolk-sdk/mcp/client'
+import type {
+  McpRemoteServerConfig,
+  McpResolvedTool,
+  McpSecurityPolicy
+} from '@yolk-sdk/mcp/client'
 import type { ToolModule, ToolRegistration } from '@yolk-sdk/agent/tools'
 import type { AgentToolContext } from './tool-context.ts'
 

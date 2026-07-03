@@ -180,12 +180,12 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
       const anthropicClaudeConnected = yield* hasAnthropicClaudeAuth(session.user.id)
       const sessionId = `agent-${runtime}-${session.user.id}`
-      const runtimeDetails = yield* (runtime === 'cloudflare'
+      const runtimeDetails = yield* runtime === 'cloudflare'
         ? Effect.map(
             bootstrapCloudflareAgent({ sessionId, userId: session.user.id }),
             cloudflareRuntimeInfo
           )
-        : Effect.succeed(runtime === 'workflow' ? workflowRuntimeInfo : nextRuntimeInfo))
+        : Effect.succeed(runtime === 'workflow' ? workflowRuntimeInfo : nextRuntimeInfo)
 
       return (
         <AgentPlayground

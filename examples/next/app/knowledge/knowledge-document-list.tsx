@@ -74,14 +74,21 @@ const statusClassName = (status: string | undefined) => {
 const fileDownloadHref = (input: { readonly documentId: string; readonly fileId: string }) =>
   `/api/knowledge/files?documentId=${encodeURIComponent(input.documentId)}&fileId=${encodeURIComponent(input.fileId)}`
 
-export function KnowledgeDocumentList({ items }: { readonly items: ReadonlyArray<KnowledgeDocumentListItem> }) {
-  const [optimisticItems, removeOptimisticItem] = useOptimistic(
-    items,
-    (state, deletedId: string) => state.filter(item => item.document.id !== deletedId)
+export function KnowledgeDocumentList({
+  items
+}: {
+  readonly items: ReadonlyArray<KnowledgeDocumentListItem>
+}) {
+  const [optimisticItems, removeOptimisticItem] = useOptimistic(items, (state, deletedId: string) =>
+    state.filter(item => item.document.id !== deletedId)
   )
 
   if (optimisticItems.length === 0) {
-    return <p className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">No knowledge yet.</p>
+    return (
+      <p className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+        No knowledge yet.
+      </p>
+    )
   }
 
   return (
@@ -93,17 +100,38 @@ export function KnowledgeDocumentList({ items }: { readonly items: ReadonlyArray
               <div className="min-w-0 space-y-1">
                 <p className="truncate font-medium">{item.document.title}</p>
                 <p className="text-sm text-muted-foreground">
-                  {[item.document.purpose, item.document.origin, item.file?.mediaType, formatBytes(item.file?.byteSize)].filter(Boolean).join(' · ')}
+                  {[
+                    item.document.purpose,
+                    item.document.origin,
+                    item.file?.mediaType,
+                    formatBytes(item.file?.byteSize)
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </p>
-                {previewText(item) ? <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">{previewText(item)}</p> : null}
+                {previewText(item) ? (
+                  <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">
+                    {previewText(item)}
+                  </p>
+                ) : null}
               </div>
-              <div className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${availabilityClassName(item.document.availability)}`}>
+              <div
+                className={`w-fit rounded-full border px-2.5 py-1 text-xs font-medium ${availabilityClassName(item.document.availability)}`}
+              >
                 {item.document.availability}
               </div>
               <p className="text-sm text-muted-foreground">{formatDate(item.document.updatedAt)}</p>
               <div className="flex flex-wrap items-center gap-2">
-                <UpdateKnowledgeAvailabilityButton id={item.document.id} label={item.document.title} availability={item.document.availability} />
-                <DeleteKnowledgeDocumentButton id={item.document.id} label={item.document.title} onDeleteOptimistic={removeOptimisticItem} />
+                <UpdateKnowledgeAvailabilityButton
+                  id={item.document.id}
+                  label={item.document.title}
+                  availability={item.document.availability}
+                />
+                <DeleteKnowledgeDocumentButton
+                  id={item.document.id}
+                  label={item.document.title}
+                  onDeleteOptimistic={removeOptimisticItem}
+                />
               </div>
             </div>
           </div>
@@ -111,30 +139,52 @@ export function KnowledgeDocumentList({ items }: { readonly items: ReadonlyArray
             <summary className="cursor-pointer text-sm font-medium">Details</summary>
             <div className="mt-3 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
               <div className="space-y-1">
-                <p>ID <span className="font-mono">{item.document.id}</span></p>
+                <p>
+                  ID <span className="font-mono">{item.document.id}</span>
+                </p>
                 <p>Created {formatDate(item.document.createdAt)}</p>
                 <p>Updated {formatDate(item.document.updatedAt)}</p>
                 <p>
                   Index{' '}
-                  <span className={`rounded-full border px-2 py-0.5 text-xs ${statusClassName(item.document.status)}`}>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-xs ${statusClassName(item.document.status)}`}
+                  >
                     {item.document.status}
                   </span>
                 </p>
-                {item.document.errorMessage ? <p className="text-destructive">{item.document.errorMessage}</p> : null}
+                {item.document.errorMessage ? (
+                  <p className="text-destructive">{item.document.errorMessage}</p>
+                ) : null}
               </div>
               <div className="space-y-1">
                 {item.file ? (
                   <>
-                    <p>File <span className="font-mono">{item.file.id}</span></p>
-                    <p>Storage key <span className="font-mono">{item.file.storageKey}</span></p>
-                    <p>{[item.file.mediaType, formatBytes(item.file.byteSize)].filter(Boolean).join(' · ')}</p>
                     <p>
-                      <a className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground" href={fileDownloadHref({ documentId: item.document.id, fileId: item.file.id })}>
+                      File <span className="font-mono">{item.file.id}</span>
+                    </p>
+                    <p>
+                      Storage key <span className="font-mono">{item.file.storageKey}</span>
+                    </p>
+                    <p>
+                      {[item.file.mediaType, formatBytes(item.file.byteSize)]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                    <p>
+                      <a
+                        className="font-medium text-foreground underline underline-offset-4 hover:text-muted-foreground"
+                        href={fileDownloadHref({
+                          documentId: item.document.id,
+                          fileId: item.file.id
+                        })}
+                      >
                         Download file
                       </a>
                     </p>
                   </>
-                ) : <p>No file</p>}
+                ) : (
+                  <p>No file</p>
+                )}
               </div>
             </div>
             {previewText(item) ? (

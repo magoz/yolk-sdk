@@ -12,12 +12,12 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/sandbox` | Core `Sandbox` service, state store, models, lifecycle helpers, errors |
-| `@yolk-sdk/sandbox/agent` | One destructive `sandbox` tool module for `@yolk-sdk/agent/tools` |
-| `@yolk-sdk/sandbox/vercel` | Vercel Sandbox provider layer |
-| `@yolk-sdk/sandbox/testing` | Fake sandbox + in-memory state store layers |
+| Subpath                     | Purpose                                                                |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `@yolk-sdk/sandbox`         | Core `Sandbox` service, state store, models, lifecycle helpers, errors |
+| `@yolk-sdk/sandbox/agent`   | One destructive `sandbox` tool module for `@yolk-sdk/agent/tools`      |
+| `@yolk-sdk/sandbox/vercel`  | Vercel Sandbox provider layer                                          |
+| `@yolk-sdk/sandbox/testing` | Fake sandbox + in-memory state store layers                            |
 
 ## Imports
 

@@ -66,11 +66,11 @@ This keeps durable `eventId`s monotonic across pause/resume.
 
 ## Failure modes
 
-| Failure | Result |
-| --- | --- |
-| no `awaitInput` handler | `AwaitInputFailed` |
-| hook rejected | `AwaitInputFailed` |
-| resume route denied | workflow keeps waiting |
-| tool batch fails after resume | `ToolBatchStepFailed` |
+| Failure                       | Result                 |
+| ----------------------------- | ---------------------- |
+| no `awaitInput` handler       | `AwaitInputFailed`     |
+| hook rejected                 | `AwaitInputFailed`     |
+| resume route denied           | workflow keeps waiting |
+| tool batch fails after resume | `ToolBatchStepFailed`  |
 
 Call `writeError` with safe terminal error events. Never include raw provider/tool secrets in resume errors.

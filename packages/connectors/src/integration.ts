@@ -4,7 +4,9 @@ import { CredentialBinding } from './credential.ts'
 export const IntegrationConfig = Schema.Record(Schema.String, Schema.Unknown)
 export type IntegrationConfig = typeof IntegrationConfig.Type
 
-export class ConnectorIntegration extends Schema.Class<ConnectorIntegration>('ConnectorIntegration')({
+export class ConnectorIntegration extends Schema.Class<ConnectorIntegration>(
+  'ConnectorIntegration'
+)({
   id: Schema.optional(Schema.String),
   connectorId: Schema.String,
   config: IntegrationConfig,

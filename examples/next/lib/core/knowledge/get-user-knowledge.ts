@@ -12,7 +12,10 @@ export const getUserKnowledge = (input: { readonly userId: string }) =>
         file: schema.userKnowledgeFile
       })
       .from(schema.userKnowledgeDocument)
-      .leftJoin(schema.userKnowledgeFile, eq(schema.userKnowledgeFile.documentId, schema.userKnowledgeDocument.id))
+      .leftJoin(
+        schema.userKnowledgeFile,
+        eq(schema.userKnowledgeFile.documentId, schema.userKnowledgeDocument.id)
+      )
       .where(eq(schema.userKnowledgeDocument.userId, input.userId))
       .orderBy(desc(schema.userKnowledgeDocument.updatedAt))
   }).pipe(Effect.withSpan('knowledge.getUserKnowledge'))

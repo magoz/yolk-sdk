@@ -28,7 +28,11 @@ export const toggleAgentCommandAction = async (input: {
         'agent_command.id': input.id,
         'agent_command.enabled': input.enabled
       })
-      yield* setAgentCommandEnabled({ id: input.id, enabled: input.enabled, userId: session.user.id })
+      yield* setAgentCommandEnabled({
+        id: input.id,
+        enabled: input.enabled,
+        userId: session.user.id
+      })
     }).pipe(
       Effect.withSpan('action.agentCommand.toggle'),
       Effect.provide(AppLayer),
@@ -50,7 +54,9 @@ export const toggleAgentCommandAction = async (input: {
         })
       ),
       Effect.as({ _tag: 'Success' as const }),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update command' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not update command' })
+      )
     )
   )
 }

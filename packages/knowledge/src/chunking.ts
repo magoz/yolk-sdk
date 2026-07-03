@@ -146,7 +146,9 @@ export const chunkKnowledgeText = (input: ChunkKnowledgeDocumentInput, maxTokens
 
     const sanitized = sanitizeText(input.content)
     if (sanitized.length === 0) {
-      return yield* Effect.fail(new KnowledgeChunkingError({ message: 'Cannot chunk empty content' }))
+      return yield* Effect.fail(
+        new KnowledgeChunkingError({ message: 'Cannot chunk empty content' })
+      )
     }
 
     const units = splitUnitsBySize(splitSentences(sanitized), maxTokens)
@@ -167,9 +169,12 @@ export const chunkKnowledgeText = (input: ChunkKnowledgeDocumentInput, maxTokens
     })) satisfies ReadonlyArray<KnowledgeChunk>
   })
 
-export const makeDefaultKnowledgeChunker = (input: { readonly maxTokens: number }): KnowledgeChunkerApi => ({
+export const makeDefaultKnowledgeChunker = (input: {
+  readonly maxTokens: number
+}): KnowledgeChunkerApi => ({
   chunk: document => chunkKnowledgeText(document, document.maxTokens ?? input.maxTokens)
 })
 
-export const DefaultKnowledgeChunkerLive = (input: { readonly maxTokens: number } = { maxTokens: 512 }) =>
-  Layer.succeed(KnowledgeChunker, makeDefaultKnowledgeChunker(input))
+export const DefaultKnowledgeChunkerLive = (
+  input: { readonly maxTokens: number } = { maxTokens: 512 }
+) => Layer.succeed(KnowledgeChunker, makeDefaultKnowledgeChunker(input))

@@ -15,7 +15,10 @@ export const deleteStorageObjectAction = async (input: { readonly id: string }) 
   return await NextEffect.runPromise(
     Effect.gen(function* () {
       const session = yield* getSession()
-      yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id, 'storage.object_id': input.id })
+      yield* Effect.annotateCurrentSpan({
+        'user.id': session.user.id,
+        'storage.object_id': input.id
+      })
       yield* deleteStorageObject({ id: input.id, userId: session.user.id })
     }).pipe(
       Effect.withSpan('action.storage.delete'),

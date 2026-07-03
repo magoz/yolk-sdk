@@ -4,12 +4,12 @@
 
 ## Subpaths
 
-| Subpath | Source | Role |
-| --- | --- | --- |
-| `@yolk-sdk/sandbox` | `src/index.ts` | Core service, state, lifecycle, source, errors |
-| `@yolk-sdk/sandbox/agent` | `src/agent.ts` | One trusted `sandbox` tool module over `@yolk-sdk/agent/tools` |
-| `@yolk-sdk/sandbox/vercel` | `src/vercel` | Vercel Sandbox provider layer and test seam |
-| `@yolk-sdk/sandbox/testing` | `src/testing` | Fake sandbox and in-memory state store layers |
+| Subpath                     | Source         | Role                                                           |
+| --------------------------- | -------------- | -------------------------------------------------------------- |
+| `@yolk-sdk/sandbox`         | `src/index.ts` | Core service, state, lifecycle, source, errors                 |
+| `@yolk-sdk/sandbox/agent`   | `src/agent.ts` | One trusted `sandbox` tool module over `@yolk-sdk/agent/tools` |
+| `@yolk-sdk/sandbox/vercel`  | `src/vercel`   | Vercel Sandbox provider layer and test seam                    |
+| `@yolk-sdk/sandbox/testing` | `src/testing`  | Fake sandbox and in-memory state store layers                  |
 
 ## Boundaries
 

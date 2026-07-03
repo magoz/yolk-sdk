@@ -106,7 +106,11 @@ type AnthropicToolResultBlock = {
   readonly is_error?: boolean
 }
 
-type AnthropicUserBlock = AnthropicTextBlock | AnthropicImageBlock | AnthropicDocumentBlock | AnthropicToolResultBlock
+type AnthropicUserBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicDocumentBlock
+  | AnthropicToolResultBlock
 type AnthropicAssistantBlock = AnthropicTextBlock | AnthropicToolUseBlock
 
 type AnthropicMessage =
@@ -287,14 +291,16 @@ const makeAnthropicClaudeBillingSystemBlock = (
     cch: computeAnthropicClaudeCch(text),
     suffix: computeAnthropicClaudeVersionSuffix(text)
   }).pipe(
-    Effect.map(({ cch, suffix }): AnthropicSystemBlock => ({
-      type: 'text',
-      text:
-        `${anthropicClaudeBillingPrefix} ` +
-        `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
-        `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
-        `cch=${cch};`
-    }))
+    Effect.map(
+      ({ cch, suffix }): AnthropicSystemBlock => ({
+        type: 'text',
+        text:
+          `${anthropicClaudeBillingPrefix} ` +
+          `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
+          `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
+          `cch=${cch};`
+      })
+    )
   )
 }
 
@@ -406,12 +412,14 @@ const AnthropicContentResponseBlock = Schema.Union([
   AnthropicToolUseResponseBlock
 ])
 
-class AnthropicUsageResponse extends Schema.Class<AnthropicUsageResponse>('AnthropicUsageResponse')({
-  input_tokens: Schema.Number,
-  output_tokens: Schema.Number,
-  cache_read_input_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
-  cache_creation_input_tokens: Schema.optional(Schema.NullOr(Schema.Number))
-}) {}
+class AnthropicUsageResponse extends Schema.Class<AnthropicUsageResponse>('AnthropicUsageResponse')(
+  {
+    input_tokens: Schema.Number,
+    output_tokens: Schema.Number,
+    cache_read_input_tokens: Schema.optional(Schema.NullOr(Schema.Number)),
+    cache_creation_input_tokens: Schema.optional(Schema.NullOr(Schema.Number))
+  }
+) {}
 
 class AnthropicStreamUsageResponse extends Schema.Class<AnthropicStreamUsageResponse>(
   'AnthropicStreamUsageResponse'
@@ -534,8 +542,8 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
       return isTextDocumentMimeType(part.mimeType)
         ? textDocumentToAnthropicBlock(part)
         : part.mimeType === 'application/pdf'
-        ? pdfDocumentToAnthropicBlock(part)
-        : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
+          ? pdfDocumentToAnthropicBlock(part)
+          : Effect.fail(unsupportedContentError(`Document ${part.mimeType}`))
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio'))
   }
@@ -544,7 +552,9 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
 const contentToUserContent = (
   content: Content
 ): Effect.Effect<string | ReadonlyArray<AnthropicUserBlock>, LLMError> =>
-  typeof content === 'string' ? Effect.succeed(content) : Effect.forEach(content, contentPartToUserBlock)
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, contentPartToUserBlock)
 
 const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
   switch (part._tag) {
@@ -585,9 +595,8 @@ const topLevelJsonSchemaCombinatorKeys: ReadonlyArray<TopLevelJsonSchemaCombinat
   'allOf'
 ]
 
-const isTopLevelJsonSchemaCombinatorKey = (
-  key: string
-): key is TopLevelJsonSchemaCombinatorKey => key === 'anyOf' || key === 'oneOf' || key === 'allOf'
+const isTopLevelJsonSchemaCombinatorKey = (key: string): key is TopLevelJsonSchemaCombinatorKey =>
+  key === 'anyOf' || key === 'oneOf' || key === 'allOf'
 
 const topLevelJsonSchemaCombinator = (
   schema: JsonObject
@@ -697,7 +706,9 @@ const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
     return mergedEnum
   }
 
-  return { anyOf: uniqueUnknownArray([...jsonSchemaAnyOfItems(left), ...jsonSchemaAnyOfItems(right)]) }
+  return {
+    anyOf: uniqueUnknownArray([...jsonSchemaAnyOfItems(left), ...jsonSchemaAnyOfItems(right)])
+  }
 }
 
 const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject => {
@@ -763,7 +774,10 @@ const flattenTopLevelCombinatorToolSchema = (
     type: 'object',
     properties: mergeJsonSchemaObjects(objectVariants.map(jsonSchemaProperties)),
     required: mergeJsonSchemaRequired(combinator.key, objectVariants),
-    $defs: mergeJsonSchemaObjects([jsonSchemaDefinitions(schema), ...objectVariants.map(jsonSchemaDefinitions)])
+    $defs: mergeJsonSchemaObjects([
+      jsonSchemaDefinitions(schema),
+      ...objectVariants.map(jsonSchemaDefinitions)
+    ])
   }
 
   if (additionalProperties === undefined) {
@@ -1011,8 +1025,7 @@ const nextAnthropicUsageSnapshot = (
   inputTokens: usage.input_tokens ?? previous.inputTokens,
   outputTokens: usage.output_tokens ?? previous.outputTokens,
   cacheReadInputTokens: usage.cache_read_input_tokens ?? previous.cacheReadInputTokens,
-  cacheCreationInputTokens:
-    usage.cache_creation_input_tokens ?? previous.cacheCreationInputTokens
+  cacheCreationInputTokens: usage.cache_creation_input_tokens ?? previous.cacheCreationInputTokens
 })
 
 const usageComponentDelta = (previous: number, next: number) => Math.max(0, next - previous)
@@ -1107,7 +1120,9 @@ const decodeAnthropicMessageResponse = (json: unknown) =>
     )
   )
 
-const parseAnthropicJsonResponse = (raw: string): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
+const parseAnthropicJsonResponse = (
+  raw: string
+): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const json = yield* decodeJsonString(raw, 'Could not parse Anthropic Claude response JSON')
     const parsed = yield* decodeAnthropicMessageResponse(json)
@@ -1398,7 +1413,9 @@ export const streamAnthropicClaudeResponse = (
       Effect.map(bodyStateRef => {
         const emitData = makeAnthropicStreamEmitter()
         const chunks = response.stream.pipe(
-          Stream.mapError(toHttpClientLlmError('Could not read Anthropic Claude stream', true, 'stream')),
+          Stream.mapError(
+            toHttpClientLlmError('Could not read Anthropic Claude stream', true, 'stream')
+          ),
           Stream.decodeText,
           Stream.mapEffect(chunk =>
             Effect.gen(function* () {
@@ -1412,9 +1429,7 @@ export const streamAnthropicClaudeResponse = (
         )
         const finalEvents = Stream.fromEffect(
           Ref.get(bodyStateRef).pipe(Effect.flatMap(state => finalizeBodyState(emitData, state)))
-        ).pipe(
-          Stream.flatMap(events => Stream.fromIterable(events))
-        )
+        ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
 
         return chunks.pipe(Stream.concat(finalEvents))
       })
@@ -1429,8 +1444,13 @@ const sendAnthropicClaudeRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
-    const serializedBody = yield* encodeJsonString(body, 'Could not serialize Anthropic Claude request')
-    const httpRequest = HttpClientRequest.post(config.messagesUrl ?? anthropicClaudeMessagesUrl).pipe(
+    const serializedBody = yield* encodeJsonString(
+      body,
+      'Could not serialize Anthropic Claude request'
+    )
+    const httpRequest = HttpClientRequest.post(
+      config.messagesUrl ?? anthropicClaudeMessagesUrl
+    ).pipe(
       HttpClientRequest.setHeaders({
         accept: 'text/event-stream',
         ...anthropicClaudeAuthorizationHeaders(config.token),

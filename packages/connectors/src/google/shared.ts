@@ -98,13 +98,21 @@ export const providerFailureFromResponse = (input: {
 
 export const isSuccessStatus = (status: number) => status >= 200 && status < 300
 
-export const appendSearchParam = (params: URLSearchParams, key: string, value: string | undefined) => {
+export const appendSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: string | undefined
+) => {
   if (value !== undefined && value.trim() !== '') {
     params.set(key, value)
   }
 }
 
-export const appendNumberSearchParam = (params: URLSearchParams, key: string, value: number | undefined) => {
+export const appendNumberSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: number | undefined
+) => {
   if (value !== undefined) {
     params.set(key, String(value))
   }

@@ -393,7 +393,7 @@ export const mapWsMessage = (
           ? (getString(error, 'message') ?? 'Codex response failed')
           : 'Codex response failed'
       const providerCode =
-        error !== undefined ? getString(error, 'code') ?? getString(error, 'type') : undefined
+        error !== undefined ? (getString(error, 'code') ?? getString(error, 'type')) : undefined
 
       return {
         _tag: 'Error',

@@ -3,10 +3,7 @@ export {
   VercelSandboxClient,
   VercelSandboxClientLive
 } from './client.ts'
-export {
-  makeVercelSandboxLayer,
-  makeVercelSandboxLayerWithClient
-} from './layer.ts'
+export { makeVercelSandboxLayer, makeVercelSandboxLayerWithClient } from './layer.ts'
 export type {
   VercelCommandOutput,
   VercelCommandSignal,

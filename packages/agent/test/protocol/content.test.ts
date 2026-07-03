@@ -32,7 +32,11 @@ describe('content helpers', () => {
     const content = [
       TextPart.make({ text: 'hello ' }),
       ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-      DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      DocumentPart.make({
+        source: inlineBase64Source('ghi='),
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      }),
       TextPart.make({ text: 'world' }),
       AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/wav' })
     ]
@@ -44,7 +48,11 @@ describe('content helpers', () => {
     const content = [
       TextPart.make({ text: 'look' }),
       ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
-      DocumentPart.make({ source: inlineBase64Source('ghi='), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      DocumentPart.make({
+        source: inlineBase64Source('ghi='),
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      }),
       AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' })
     ]
 
@@ -54,8 +62,18 @@ describe('content helpers', () => {
   it('treats media parts as non-empty content', () => {
     expect(isContentEmpty('')).toBe(true)
     expect(isContentEmpty([TextPart.make({ text: '' })])).toBe(true)
-    expect(isContentEmpty([ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })])).toBe(false)
-    expect(isContentEmpty([DocumentPart.make({ source: inlineBase64Source('abc='), mimeType: 'application/pdf', filename: 'brief.pdf' })])).toBe(false)
+    expect(
+      isContentEmpty([ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })])
+    ).toBe(false)
+    expect(
+      isContentEmpty([
+        DocumentPart.make({
+          source: inlineBase64Source('abc='),
+          mimeType: 'application/pdf',
+          filename: 'brief.pdf'
+        })
+      ])
+    ).toBe(false)
   })
 
   it('normalizes string content to text parts', () => {
@@ -65,7 +83,10 @@ describe('content helpers', () => {
   it('appends text while preserving content shape', () => {
     expect(appendTextToContent('hel', 'lo')).toBe('hello')
     expect(
-      appendTextToContent([ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })], 'caption')
+      appendTextToContent(
+        [ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })],
+        'caption'
+      )
     ).toEqual([
       ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
       TextPart.make({ text: 'caption' })
@@ -81,10 +102,16 @@ describe('content helpers', () => {
     const ref = refAttachmentSource('artifact_123')
 
     expect(attachmentSourceBase64(inline)).toEqual(Option.some('abc'))
-    expect(attachmentSourceDataUrl(inline, 'image/png')).toEqual(Option.some('data:image/png;base64,abc'))
-    expect(attachmentSourceUrl(inline, 'image/png')).toEqual(Option.some('data:image/png;base64,abc'))
+    expect(attachmentSourceDataUrl(inline, 'image/png')).toEqual(
+      Option.some('data:image/png;base64,abc')
+    )
+    expect(attachmentSourceUrl(inline, 'image/png')).toEqual(
+      Option.some('data:image/png;base64,abc')
+    )
     expect(attachmentSourceBase64(url)).toEqual(Option.none())
-    expect(attachmentSourceUrl(url, 'image/png')).toEqual(Option.some('https://example.com/image.png'))
+    expect(attachmentSourceUrl(url, 'image/png')).toEqual(
+      Option.some('https://example.com/image.png')
+    )
     expect(attachmentSourceDataUrl(ref, 'image/png')).toEqual(Option.none())
     expect(attachmentSourceUrl(ref, 'image/png')).toEqual(Option.none())
     expect(attachmentSourcePreview(inline)).toBe('inline')
@@ -109,14 +136,18 @@ describe('content helpers', () => {
       expect(isTextDocumentMimeType('application/pdf')).toBe(false)
       expect(textDocumentMimeTypeFromFilename('company.identity.md')).toBe('text/markdown')
       expect(textDocumentMimeTypeFromFilename('events.jsonl')).toBe('application/x-ndjson')
-      expect(inferTextDocumentMimeType({ filename: 'data.json', mimeType: '' })).toBe('application/json')
-      expect(inferTextDocumentMimeType({ filename: 'data.jsonl', mimeType: 'application/octet-stream' })).toBe(
-        'application/x-ndjson'
+      expect(inferTextDocumentMimeType({ filename: 'data.json', mimeType: '' })).toBe(
+        'application/json'
       )
-      expect(inferTextDocumentMimeType({ filename: 'fake.txt', mimeType: 'image/png' })).toBeUndefined()
-      expect(inferTextDocumentMimeType({ filename: 'data.bin', mimeType: 'TEXT/PLAIN; charset=utf-8' })).toBe(
-        'text/plain'
-      )
+      expect(
+        inferTextDocumentMimeType({ filename: 'data.jsonl', mimeType: 'application/octet-stream' })
+      ).toBe('application/x-ndjson')
+      expect(
+        inferTextDocumentMimeType({ filename: 'fake.txt', mimeType: 'image/png' })
+      ).toBeUndefined()
+      expect(
+        inferTextDocumentMimeType({ filename: 'data.bin', mimeType: 'TEXT/PLAIN; charset=utf-8' })
+      ).toBe('text/plain')
       expect(textToBase64Utf8('# Identity')).toBe('IyBJZGVudGl0eQ==')
       expect(
         documentPartFromText({
@@ -151,7 +182,8 @@ describe('content helpers', () => {
           filename: 'company.identity'
         })
       )
-    }))
+    })
+  )
 
   it.effect('resolves attachment sources while preserving part metadata', () =>
     Effect.gen(function* () {
@@ -213,5 +245,6 @@ describe('content helpers', () => {
           durationMs: 1200
         })
       ])
-    }))
+    })
+  )
 })

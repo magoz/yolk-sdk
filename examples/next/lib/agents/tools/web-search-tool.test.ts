@@ -143,9 +143,7 @@ describe('web_search tool', () => {
 
   it.effect('returns model-visible errors for blank queries', () =>
     Effect.gen(function* () {
-      const { deps, requested } = makeDependencies(() =>
-        Effect.succeed(mcpResult('unused'))
-      )
+      const { deps, requested } = makeDependencies(() => Effect.succeed(mcpResult('unused')))
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -177,7 +175,12 @@ describe('web_search tool', () => {
         userId: 'user_1'
       })
 
-      expect(textTools.tools.map(tool => tool.name)).toEqual(['question', 'web_fetch', 'web_search', 'just_bash'])
+      expect(textTools.tools.map(tool => tool.name)).toEqual([
+        'question',
+        'web_fetch',
+        'web_search',
+        'just_bash'
+      ])
       expect(voiceTools.tools.map(tool => tool.name)).toEqual(['web_fetch', 'web_search'])
     })
   )

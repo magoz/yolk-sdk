@@ -2,7 +2,12 @@ import { Effect, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolExecutor } from '@yolk-sdk/agent/loop'
 import { ToolDef, ToolResult } from '@yolk-sdk/agent/protocol'
-import { makeToolExecutorLayer, resolveTools, type ToolModule, type ToolRegistration } from '../../src/tools'
+import {
+  makeToolExecutorLayer,
+  resolveTools,
+  type ToolModule,
+  type ToolRegistration
+} from '../../src/tools'
 import { propertyOptions } from './property-options'
 
 type TestContext = {
@@ -38,10 +43,13 @@ const makeTool = (spec: typeof toolSpec.Type): ToolRegistration<TestContext> => 
   def: makeToolDef(spec.name),
   access: spec.access,
   ...(spec.gated ? { isEnabled: (context: TestContext) => Effect.succeed(context.enabled) } : {}),
-  execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
+  execute: ({ call }) =>
+    Effect.succeed(ToolResult.make({ toolCallId: call.id, content: spec.name }))
 })
 
-const modulesFromSpecs = (specs: ReadonlyArray<typeof toolSpec.Type>): ReadonlyArray<ToolModule<TestContext>> => {
+const modulesFromSpecs = (
+  specs: ReadonlyArray<typeof toolSpec.Type>
+): ReadonlyArray<ToolModule<TestContext>> => {
   const byModule = new Map<typeof moduleId.Type, Array<ToolRegistration<TestContext>>>()
 
   for (const spec of specs) {

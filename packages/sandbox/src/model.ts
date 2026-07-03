@@ -5,9 +5,7 @@ const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEq
 const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 const PositiveNumber = Schema.Number.pipe(Schema.check(Schema.isGreaterThan(0)))
 
-export class SandboxCommandInput extends Schema.Class<SandboxCommandInput>(
-  'SandboxCommandInput'
-)({
+export class SandboxCommandInput extends Schema.Class<SandboxCommandInput>('SandboxCommandInput')({
   command: Schema.String,
   cwd: Schema.optional(Schema.String),
   stdin: Schema.optional(Schema.String),
@@ -20,16 +18,13 @@ export class SandboxPreviewUrl extends Schema.Class<SandboxPreviewUrl>('SandboxP
   url: NonEmptyTrimmedString
 }) {}
 
-export class VercelSandboxState extends Schema.TaggedClass<VercelSandboxState>()(
-  'Vercel',
-  {
-    name: NonEmptyTrimmedString,
-    createdAtMs: NonNegativeInteger,
-    lastUsedAtMs: NonNegativeInteger,
-    expiresAtMs: NonNegativeInteger,
-    maxExpiresAtMs: NonNegativeInteger
-  }
-) {}
+export class VercelSandboxState extends Schema.TaggedClass<VercelSandboxState>()('Vercel', {
+  name: NonEmptyTrimmedString,
+  createdAtMs: NonNegativeInteger,
+  lastUsedAtMs: NonNegativeInteger,
+  expiresAtMs: NonNegativeInteger,
+  maxExpiresAtMs: NonNegativeInteger
+}) {}
 
 export const SandboxState = Schema.Union([VercelSandboxState])
 export type SandboxState = typeof SandboxState.Type
@@ -91,16 +86,13 @@ export class SnapshotSandboxInitialSource extends Schema.TaggedClass<SnapshotSan
   }
 ) {}
 
-export class GitSandboxInitialSource extends Schema.TaggedClass<GitSandboxInitialSource>()(
-  'Git',
-  {
-    url: NonEmptyTrimmedString,
-    username: Schema.optional(NonEmptyTrimmedString),
-    password: Schema.optional(NonEmptyTrimmedString),
-    depth: Schema.optional(PositiveInteger),
-    revision: Schema.optional(NonEmptyTrimmedString)
-  }
-) {}
+export class GitSandboxInitialSource extends Schema.TaggedClass<GitSandboxInitialSource>()('Git', {
+  url: NonEmptyTrimmedString,
+  username: Schema.optional(NonEmptyTrimmedString),
+  password: Schema.optional(NonEmptyTrimmedString),
+  depth: Schema.optional(PositiveInteger),
+  revision: Schema.optional(NonEmptyTrimmedString)
+}) {}
 
 export class TarballSandboxInitialSource extends Schema.TaggedClass<TarballSandboxInitialSource>()(
   'Tarball',

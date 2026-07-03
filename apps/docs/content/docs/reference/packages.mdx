@@ -3,53 +3,53 @@ title: Packages
 description: Package roles and explicit public subpaths.
 ---
 
-| Package | Use for |
-| --- | --- |
-| `@yolk-sdk/agent` | agent protocol, loop, runtime, client, React, tools, providers, OAuth, skillset, voice |
-| `@yolk-sdk/mcp` | MCP clients, protocol adapters, tool-only MCP server |
-| `@yolk-sdk/knowledge` | knowledge documents, pinned context, search, ingestion, lookup/manage tools |
-| `@yolk-sdk/connectors` | external API actions, credentials, connector-to-agent-tool adapter |
-| `@yolk-sdk/sandbox` | sandbox execution plane, Vercel adapter, agent sandbox tool |
-| `@yolk-sdk/vercel-workflows` | durable Workflow orchestration contracts |
+| Package                      | Use for                                                                                |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent`            | agent protocol, loop, runtime, client, React, tools, providers, OAuth, skillset, voice |
+| `@yolk-sdk/mcp`              | MCP clients, protocol adapters, tool-only MCP server                                   |
+| `@yolk-sdk/knowledge`        | knowledge documents, pinned context, search, ingestion, lookup/manage tools            |
+| `@yolk-sdk/connectors`       | external API actions, credentials, connector-to-agent-tool adapter                     |
+| `@yolk-sdk/sandbox`          | sandbox execution plane, Vercel adapter, agent sandbox tool                            |
+| `@yolk-sdk/vercel-workflows` | durable Workflow orchestration contracts                                               |
 
 Package roots stay tiny. Import feature APIs from explicit subpaths.
 
 ## `@yolk-sdk/agent`
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/agent/protocol` | wire messages, events, content, tools, usage, HITL |
-| `@yolk-sdk/agent/loop` | stateless LLM/tool loop and services |
-| `@yolk-sdk/agent/loop/testing` | faux provider and test tool executor |
-| `@yolk-sdk/agent/runtime` | transcript and append-backed runtime orchestration |
-| `@yolk-sdk/agent/client` | HTTP/NDJSON transport and client reducer helpers |
-| `@yolk-sdk/agent/compaction` | context budget and window compaction helpers |
-| `@yolk-sdk/agent/tools` | tool registry, `makeTool`, question/task modules |
-| `@yolk-sdk/agent/react` | headless chat hook and projection helpers |
-| `@yolk-sdk/agent/oauth` | provider-neutral access-token and broker contracts |
-| `@yolk-sdk/agent/providers/openai` | Codex OAuth and token broker helpers |
-| `@yolk-sdk/agent/providers/openai/codex` | Codex request and auth helpers |
-| `@yolk-sdk/agent/providers/openai/codex-provider` | Codex LLM provider factory |
-| `@yolk-sdk/agent/providers/openai/provider` | OpenAI-compatible LLM provider factory |
-| `@yolk-sdk/agent/providers/openai/realtime` | OpenAI Realtime session config and event codecs |
-| `@yolk-sdk/agent/providers/openai/speech` | OpenAI text-to-speech and transcription adapters |
-| `@yolk-sdk/agent/providers/anthropic` | Claude OAuth and token broker helpers |
-| `@yolk-sdk/agent/providers/anthropic/claude` | Claude request and auth helpers |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory |
-| `@yolk-sdk/agent/skillset` | portable skills and slash-command parsing |
-| `@yolk-sdk/agent/voice` | voice protocol, controller, tool handler, projection, speech contracts |
-| `@yolk-sdk/agent/voice/browser` | browser WebRTC voice transport |
-| `@yolk-sdk/agent/voice/react` | headless `useYolkVoice` React hook |
+| Subpath                                               | Purpose                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                            | wire messages, events, content, tools, usage, HITL                     |
+| `@yolk-sdk/agent/loop`                                | stateless LLM/tool loop and services                                   |
+| `@yolk-sdk/agent/loop/testing`                        | faux provider and test tool executor                                   |
+| `@yolk-sdk/agent/runtime`                             | transcript and append-backed runtime orchestration                     |
+| `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport and client reducer helpers                       |
+| `@yolk-sdk/agent/compaction`                          | context budget and window compaction helpers                           |
+| `@yolk-sdk/agent/tools`                               | tool registry, `makeTool`, question/task modules                       |
+| `@yolk-sdk/agent/react`                               | headless chat hook and projection helpers                              |
+| `@yolk-sdk/agent/oauth`                               | provider-neutral access-token and broker contracts                     |
+| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth and token broker helpers                                   |
+| `@yolk-sdk/agent/providers/openai/codex`              | Codex request and auth helpers                                         |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                             |
+| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                                 |
+| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                        |
+| `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters                       |
+| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth and token broker helpers                                  |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                        |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                            |
+| `@yolk-sdk/agent/skillset`                            | portable skills and slash-command parsing                              |
+| `@yolk-sdk/agent/voice`                               | voice protocol, controller, tool handler, projection, speech contracts |
+| `@yolk-sdk/agent/voice/browser`                       | browser WebRTC voice transport                                         |
+| `@yolk-sdk/agent/voice/react`                         | headless `useYolkVoice` React hook                                     |
 
 ## Other public subpaths
 
-| Package | Subpaths |
-| --- | --- |
-| `@yolk-sdk/mcp` | `client`, `client/node`, `protocol`, `server` |
-| `@yolk-sdk/knowledge` | `agent`, `context`, `store`, `search`, `documents`, `files`, `chunking`, `embeddings`, `errors`, `extraction`, `ingestion`, `summarization` |
-| `@yolk-sdk/connectors` | `agent`, `figma`, `google`, `linkedin-search`, `notion`, `r2-storage`, `telegram`, `todoist` |
-| `@yolk-sdk/sandbox` | `agent`, `vercel`, `testing` |
-| `@yolk-sdk/vercel-workflows` | root, `workflow`, `effect` |
+| Package                      | Subpaths                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/mcp`              | `client`, `client/node`, `protocol`, `server`                                                                                               |
+| `@yolk-sdk/knowledge`        | `agent`, `context`, `store`, `search`, `documents`, `files`, `chunking`, `embeddings`, `errors`, `extraction`, `ingestion`, `summarization` |
+| `@yolk-sdk/connectors`       | `agent`, `figma`, `google`, `linkedin-search`, `notion`, `r2-storage`, `telegram`, `todoist`                                                |
+| `@yolk-sdk/sandbox`          | `agent`, `vercel`, `testing`                                                                                                                |
+| `@yolk-sdk/vercel-workflows` | root, `workflow`, `effect`                                                                                                                  |
 
 ## Import rule
 

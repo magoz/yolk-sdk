@@ -318,7 +318,11 @@ const appendSearchParam = (params: URLSearchParams, key: string, value: string |
   }
 }
 
-const appendNumberSearchParam = (params: URLSearchParams, key: string, value: number | undefined) => {
+const appendNumberSearchParam = (
+  params: URLSearchParams,
+  key: string,
+  value: number | undefined
+) => {
   if (value !== undefined) {
     params.set(key, String(value))
   }
@@ -351,7 +355,10 @@ const requireTodoistProjectId = (
     )
   })
 
-const requireTodoistTaskId = (input: TodoistTaskIdInput | TodoistUpdateTaskInput, actionId: string) =>
+const requireTodoistTaskId = (
+  input: TodoistTaskIdInput | TodoistUpdateTaskInput,
+  actionId: string
+) =>
   Effect.gen(function* () {
     const taskId = todoistTaskId(input)
     if (taskId !== undefined) return taskId
@@ -554,9 +561,7 @@ export const todoistCloseTaskAction = defineAction({
         })
       }
 
-      return ActionResult.success(
-        TodoistCloseTaskOutput.make({ id: taskId, closed: true })
-      )
+      return ActionResult.success(TodoistCloseTaskOutput.make({ id: taskId, closed: true }))
     })
 })
 

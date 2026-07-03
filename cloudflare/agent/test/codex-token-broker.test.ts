@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
-import { openAiCodexProviderId, openAiCodexRefreshBufferMs } from '@yolk-sdk/agent/providers/openai/codex'
+import {
+  openAiCodexProviderId,
+  openAiCodexRefreshBufferMs
+} from '@yolk-sdk/agent/providers/openai/codex'
 import {
   codexTokenRefreshBufferMs,
   codexTokenToProviderToken,

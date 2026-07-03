@@ -1,5 +1,5 @@
 ---
-"@yolk-sdk/sandbox": minor
+'@yolk-sdk/sandbox': minor
 ---
 
 Add sandbox execution plane package.

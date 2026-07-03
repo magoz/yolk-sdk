@@ -13,7 +13,13 @@ import {
   ToolDef,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
-import { ContextTransformer, LLMDone, LLMToolCall, LoopConfig, type LLMRequest } from '@yolk-sdk/agent/loop'
+import {
+  ContextTransformer,
+  LLMDone,
+  LLMToolCall,
+  LoopConfig,
+  type LLMRequest
+} from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import {
   makeInMemorySessionEventStoreLayer,
@@ -302,9 +308,7 @@ const commandResponse = (input: typeof approvalCommand.Type) => {
       ? 'approval:stale'
       : 'approval:call_1'
   const toolCallId =
-    input.kind === 'stale' || input.kind === 'mismatchedToolCallId'
-      ? 'stale'
-      : 'call_1'
+    input.kind === 'stale' || input.kind === 'mismatchedToolCallId' ? 'stale' : 'call_1'
 
   return ToolApprovalResponse.make({
     requestId,
@@ -336,9 +340,7 @@ const questionCommandResponse = (input: typeof questionCommand.Type) => {
       ? 'question:stale'
       : 'question:call_question'
   const toolCallId =
-    input.kind === 'stale' || input.kind === 'mismatchedToolCallId'
-      ? 'stale'
-      : 'call_question'
+    input.kind === 'stale' || input.kind === 'mismatchedToolCallId' ? 'stale' : 'call_question'
 
   return QuestionResponse.make({
     requestId,
@@ -773,7 +775,11 @@ describe('runtime HITL property tests', () => {
           mixedRuntimeConfig
         ).pipe(Stream.runCollect, Effect.result)
         const afterDuplicate = yield* store.load('session_1')
-        expectConflictNoMutation({ result: duplicateResult, before: afterFirst, after: afterDuplicate })
+        expectConflictNoMutation({
+          result: duplicateResult,
+          before: afterFirst,
+          after: afterDuplicate
+        })
 
         yield* runRuntime(
           {
@@ -835,7 +841,8 @@ describe('runtime HITL property tests', () => {
             runIndex += 1
           } else {
             const pending = latestPendingRequests(before)
-            const response = stateMachineResponse({ command, pending, lastAccepted }) ??
+            const response =
+              stateMachineResponse({ command, pending, lastAccepted }) ??
               staleStateMachineResponse(command)
             const shouldAccept = pending.some(request =>
               responseMatchesPendingRequest(response, request)
@@ -851,9 +858,9 @@ describe('runtime HITL property tests', () => {
               },
               mixedRuntimeConfig
             ).pipe(Stream.runCollect, Effect.result)
-            const after = yield* store.load('session_1').pipe(
-              Effect.catchTag('SessionNotFoundError', () => Effect.succeed(before))
-            )
+            const after = yield* store
+              .load('session_1')
+              .pipe(Effect.catchTag('SessionNotFoundError', () => Effect.succeed(before)))
 
             if (shouldAccept) {
               expect(result).toMatchObject({ _tag: 'Success' })

@@ -81,7 +81,9 @@ describe('task tool', () => {
         }
       })
 
-      expect(result.content).toBe('<task_result>\nsession_1:explore:Find auth:Explore auth flow\n</task_result>')
+      expect(result.content).toBe(
+        '<task_result>\nsession_1:explore:Find auth:Explore auth flow\n</task_result>'
+      )
     })
   )
 
@@ -171,8 +173,12 @@ describe('task tool', () => {
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
       })
 
-      const disabledTopLevelTools = yield* resolveTools([taskModule], { sessionId: 'disabled_session' })
-      const enabledTopLevelTools = yield* resolveTools([taskModule], { sessionId: 'enabled_session' })
+      const disabledTopLevelTools = yield* resolveTools([taskModule], {
+        sessionId: 'disabled_session'
+      })
+      const enabledTopLevelTools = yield* resolveTools([taskModule], {
+        sessionId: 'enabled_session'
+      })
       const enabledSubagentTools = yield* resolveTools([taskModule], {
         sessionId: 'enabled_session',
         subagent: true

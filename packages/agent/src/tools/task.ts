@@ -22,10 +22,13 @@ import {
 export const taskToolName = 'task'
 
 const TaskToolParams = Schema.Struct({
-  description: Schema.String.pipe(Schema.annotate({ description: 'A short 3-5 word description of the task.' })),
+  description: Schema.String.pipe(
+    Schema.annotate({ description: 'A short 3-5 word description of the task.' })
+  ),
   prompt: Schema.String.pipe(
     Schema.annotate({
-      description: 'The complete task instructions for the subagent, including all context it needs.'
+      description:
+        'The complete task instructions for the subagent, including all context it needs.'
     })
   ),
   subagent_type: Schema.String.pipe(
@@ -88,11 +91,16 @@ const trimmedTaskParams = (params: TaskToolParams) => ({
   subagent_type: params.subagent_type.trim()
 })
 
-const validateTaskParams = (params: TaskToolParams): Effect.Effect<{
-  readonly description: string
-  readonly prompt: string
-  readonly subagent_type: string
-}, ModelVisibleToolError> => {
+const validateTaskParams = (
+  params: TaskToolParams
+): Effect.Effect<
+  {
+    readonly description: string
+    readonly prompt: string
+    readonly subagent_type: string
+  },
+  ModelVisibleToolError
+> => {
   const trimmed = trimmedTaskParams(params)
 
   if (trimmed.description.length === 0) {
@@ -142,25 +150,29 @@ const taskToolDescription = (subagents: ReadonlyArray<TaskSubagentDefinition>) =
 
 export const makeTaskToolRegistration = <Context>(
   options: TaskToolOptions<Context>
-): ToolRegistration<Context> => makeTool({
-  name: taskToolName,
-  description: taskToolDescription(options.subagents),
-  parameters: TaskToolParams,
-  access: 'read',
-  isEnabled: options.isEnabled,
-  invalidParamsMessage: error => `Invalid task arguments: ${error instanceof Error ? error.message : String(error)}`,
-  execute: ({ call, context, params }) =>
-    Effect.gen(function* () {
-      if (call.name !== taskToolName) {
-        return yield* Effect.fail(taskToolError(`Tool is not configured: ${call.name}`, 'not_found'))
-      }
+): ToolRegistration<Context> =>
+  makeTool({
+    name: taskToolName,
+    description: taskToolDescription(options.subagents),
+    parameters: TaskToolParams,
+    access: 'read',
+    isEnabled: options.isEnabled,
+    invalidParamsMessage: error =>
+      `Invalid task arguments: ${error instanceof Error ? error.message : String(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        if (call.name !== taskToolName) {
+          return yield* Effect.fail(
+            taskToolError(`Tool is not configured: ${call.name}`, 'not_found')
+          )
+        }
 
-      const normalizedParams = yield* validateTaskParams(params)
-      yield* requireKnownSubagent(options.subagents, normalizedParams.subagent_type)
+        const normalizedParams = yield* validateTaskParams(params)
+        yield* requireKnownSubagent(options.subagents, normalizedParams.subagent_type)
 
-      return yield* options.execute({ call, context, params: normalizedParams })
-    })
-})
+        return yield* options.execute({ call, context, params: normalizedParams })
+      })
+  })
 
 export const makeTaskToolDef = (subagents: ReadonlyArray<TaskSubagentDefinition>) =>
   makeTaskToolRegistration({
@@ -168,23 +180,28 @@ export const makeTaskToolDef = (subagents: ReadonlyArray<TaskSubagentDefinition>
     execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
   }).def
 
-export const makeTaskToolModule = <Context>(options: TaskToolOptions<Context>): ToolModule<Context> => ({
+export const makeTaskToolModule = <Context>(
+  options: TaskToolOptions<Context>
+): ToolModule<Context> => ({
   id: 'task',
   tools: [makeTaskToolRegistration(options)]
 })
 
 export const makeNonRecursiveTaskToolModule = <Context extends TaskSubagentContext>(
   options: TaskToolOptions<Context>
-): ToolModule<Context> => makeTaskToolModule({
-  ...options,
-  isEnabled: context => context.subagent === true
-    ? Effect.succeed(false)
-    : options.isEnabled === undefined
-      ? Effect.succeed(true)
-      : options.isEnabled(context)
-})
+): ToolModule<Context> =>
+  makeTaskToolModule({
+    ...options,
+    isEnabled: context =>
+      context.subagent === true
+        ? Effect.succeed(false)
+        : options.isEnabled === undefined
+          ? Effect.succeed(true)
+          : options.isEnabled(context)
+  })
 
-export const formatTaskResult = (output: string) => ['<task_result>', output, '</task_result>'].join('\n')
+export const formatTaskResult = (output: string) =>
+  ['<task_result>', output, '</task_result>'].join('\n')
 
 export const taskSubagentRunId = makeSubagentRunId
 
@@ -201,18 +218,19 @@ export const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
   return text.length === 0 ? 'Subagent completed without a final text response.' : text
 }
 
-export const makeTaskToolResult = (input: TaskToolResultInput) => ToolResult.make({
-  toolCallId: input.callId,
-  content: formatTaskResult(input.output),
-  isError: input.isError,
-  structuredContent: {
-    subagent_run_id: input.subagentRunId,
-    subagent_type: input.subagentType,
-    description: input.description,
-    started_at_ms: input.startedAtMs,
-    ended_at_ms: input.endedAtMs,
-    duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
-    status: input.isError === true ? 'error' : 'completed',
-    model: input.model
-  }
-})
+export const makeTaskToolResult = (input: TaskToolResultInput) =>
+  ToolResult.make({
+    toolCallId: input.callId,
+    content: formatTaskResult(input.output),
+    isError: input.isError,
+    structuredContent: {
+      subagent_run_id: input.subagentRunId,
+      subagent_type: input.subagentType,
+      description: input.description,
+      started_at_ms: input.startedAtMs,
+      ended_at_ms: input.endedAtMs,
+      duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
+      status: input.isError === true ? 'error' : 'completed',
+      model: input.model
+    }
+  })

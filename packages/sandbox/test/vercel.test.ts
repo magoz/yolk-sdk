@@ -46,9 +46,12 @@ const makeHandle = (input: {
   },
   runDetachedCommand: command => {
     input.commands.push(command)
-    return Promise.resolve(detachedCommand({ id: 'cmd_1', exitCode: input.background === true ? null : 0 }))
+    return Promise.resolve(
+      detachedCommand({ id: 'cmd_1', exitCode: input.background === true ? null : 0 })
+    )
   },
-  getCommand: id => Promise.resolve(detachedCommand({ id, exitCode: input.background === true ? null : 0 })),
+  getCommand: id =>
+    Promise.resolve(detachedCommand({ id, exitCode: input.background === true ? null : 0 })),
   extendTimeout: () => Promise.resolve(),
   delete: () => {
     input.deleted.push(input.name)
@@ -144,7 +147,9 @@ describe('vercel sandbox layer', () => {
         expiresAtMs: 0,
         maxExpiresAtMs: 0
       })
-      const stateLayer = makeInMemorySandboxStateStoreLayer([{ sandboxSessionId, state: expiredState }])
+      const stateLayer = makeInMemorySandboxStateStoreLayer([
+        { sandboxSessionId, state: expiredState }
+      ])
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(
         Layer.provide(Layer.mergeAll(clientLayer, stateLayer))
       )

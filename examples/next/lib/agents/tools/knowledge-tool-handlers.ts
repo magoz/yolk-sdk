@@ -10,9 +10,13 @@ import { AppKnowledgeSearchLayer } from '@/lib/services/knowledge-search/live-la
 import { makeKnowledgeToolModule } from './knowledge-tool.ts'
 import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 
-const KnowledgeToolLayer = Layer.mergeAll(Db.layer, AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer)))
+const KnowledgeToolLayer = Layer.mergeAll(
+  Db.layer,
+  AppKnowledgeSearchLayer.pipe(Layer.provide(Db.layer))
+)
 
-const unknownToMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
 const validationToolError = (tool: string, error: ValidationError) =>
   modelVisibleToolError({ tool, message: error.message, reason: 'validation' })
@@ -32,7 +36,9 @@ const listKnowledgeForAgent = (input: {
   readonly limit: number
 }) =>
   listUserKnowledgeDocuments(input).pipe(
-    Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('list_knowledge_documents', error))),
+    Effect.catchTag('ValidationError', error =>
+      Effect.fail(validationToolError('list_knowledge_documents', error))
+    ),
     Effect.provide(KnowledgeToolLayer),
     Effect.mapError(error => fatalToolError('list_knowledge_documents', error))
   )
@@ -45,7 +51,9 @@ const searchKnowledgeForAgent = (input: {
   readonly contextChunks: number
 }) =>
   searchUserKnowledge(input).pipe(
-    Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('search_knowledge', error))),
+    Effect.catchTag('ValidationError', error =>
+      Effect.fail(validationToolError('search_knowledge', error))
+    ),
     Effect.provide(KnowledgeToolLayer),
     Effect.mapError(error => fatalToolError('search_knowledge', error))
   )
@@ -68,8 +76,12 @@ const getKnowledgeContextForAgent = (input: {
     after: input.after,
     maxChars: input.maxChars
   }).pipe(
-    Effect.catchTag('ValidationError', error => Effect.fail(validationToolError('get_knowledge_context', error))),
-    Effect.catchTag('NotFoundError', error => Effect.fail(notFoundToolError('get_knowledge_context', error))),
+    Effect.catchTag('ValidationError', error =>
+      Effect.fail(validationToolError('get_knowledge_context', error))
+    ),
+    Effect.catchTag('NotFoundError', error =>
+      Effect.fail(notFoundToolError('get_knowledge_context', error))
+    ),
     Effect.provide(KnowledgeToolLayer),
     Effect.mapError(error => fatalToolError('get_knowledge_context', error))
   )

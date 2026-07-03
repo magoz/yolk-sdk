@@ -255,19 +255,19 @@ Platform runtimes should stay separate named packages when they become publishab
 
 ## Proposed import migration
 
-| Current | Target |
-| --- | --- |
-| `@yolk-sdk/react` | `@yolk-sdk/agent/react` |
-| `@yolk-sdk/oauth` | `@yolk-sdk/agent/oauth` |
-| `@yolk-sdk/openai` | `@yolk-sdk/agent/providers/openai` |
-| `@yolk-sdk/openai/codex` | `@yolk-sdk/agent/providers/openai/codex` |
-| `@yolk-sdk/openai/codex-provider` | `@yolk-sdk/agent/providers/openai/codex-provider` |
-| `@yolk-sdk/openai/provider` | `@yolk-sdk/agent/providers/openai/provider` |
-| `@yolk-sdk/anthropic` | `@yolk-sdk/agent/providers/anthropic` |
-| `@yolk-sdk/anthropic/claude` | `@yolk-sdk/agent/providers/anthropic/claude` |
+| Current                               | Target                                                |
+| ------------------------------------- | ----------------------------------------------------- |
+| `@yolk-sdk/react`                     | `@yolk-sdk/agent/react`                               |
+| `@yolk-sdk/oauth`                     | `@yolk-sdk/agent/oauth`                               |
+| `@yolk-sdk/openai`                    | `@yolk-sdk/agent/providers/openai`                    |
+| `@yolk-sdk/openai/codex`              | `@yolk-sdk/agent/providers/openai/codex`              |
+| `@yolk-sdk/openai/codex-provider`     | `@yolk-sdk/agent/providers/openai/codex-provider`     |
+| `@yolk-sdk/openai/provider`           | `@yolk-sdk/agent/providers/openai/provider`           |
+| `@yolk-sdk/anthropic`                 | `@yolk-sdk/agent/providers/anthropic`                 |
+| `@yolk-sdk/anthropic/claude`          | `@yolk-sdk/agent/providers/anthropic/claude`          |
 | `@yolk-sdk/anthropic/claude-provider` | `@yolk-sdk/agent/providers/anthropic/claude-provider` |
-| `@yolk-sdk/skillset` | `@yolk-sdk/agent/skillset` |
-| `@yolk-sdk/voice-runtime` | `@yolk-sdk/agent/voice` |
+| `@yolk-sdk/skillset`                  | `@yolk-sdk/agent/skillset`                            |
+| `@yolk-sdk/voice-runtime`             | `@yolk-sdk/agent/voice`                               |
 
 Unchanged:
 

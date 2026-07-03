@@ -52,7 +52,10 @@ export const ensureUserKnowledgeCollection = (input: { readonly userId: string }
 
     if (afterConflict === undefined) {
       return yield* Effect.fail(
-        new PersistenceError({ message: 'Could not create storage knowledge collection', entity: 'knowledgeCollection' })
+        new PersistenceError({
+          message: 'Could not create storage knowledge collection',
+          entity: 'knowledgeCollection'
+        })
       )
     }
 

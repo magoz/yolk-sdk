@@ -1,5 +1,9 @@
 import { Effect } from 'effect'
-import { mergeSkillsets, type MergedSkillset, type SkillsetManifest } from '@yolk-sdk/agent/skillset'
+import {
+  mergeSkillsets,
+  type MergedSkillset,
+  type SkillsetManifest
+} from '@yolk-sdk/agent/skillset'
 import { loadConfigSkillsetManifest } from './config-source'
 import { loadUserSkillsetManifest } from './db-source'
 import { loadProjectSkillset as loadProjectFileSkillset } from './file-source'
@@ -21,7 +25,10 @@ export const loadProjectSkillset = (rootDirectory = process.cwd()) =>
     ])
   })
 
-export const loadRuntimeSkillset = (input: { readonly userId: string; readonly rootDirectory?: string }) =>
+export const loadRuntimeSkillset = (input: {
+  readonly userId: string
+  readonly rootDirectory?: string
+}) =>
   Effect.gen(function* () {
     const dbManifest = yield* loadUserSkillsetManifest({ userId: input.userId })
     const configManifest = yield* loadConfigSkillsetManifest()

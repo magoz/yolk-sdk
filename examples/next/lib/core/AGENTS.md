@@ -4,20 +4,20 @@ Domain actions and Effect functions. App routes/pages call here; services remain
 
 ## Structure
 
-| Path                         | Role                                           |
-| ---------------------------- | ---------------------------------------------- |
-| `agent/*-action.ts`          | Provider OAuth, skill/command, connector server actions |
-| `agent/openai-codex-auth.ts` | Codex token persistence + refresh helpers      |
-| `agent/anthropic-claude-auth.ts` | Claude token persistence + refresh helpers |
-| `agent/agent-skill.ts`      | User-owned DB skill CRUD and validation        |
-| `agent/agent-command.ts`    | User-owned DB command CRUD and validation      |
-| `agent/telegram-connector.ts` | User-owned Telegram connector credential helpers |
+| Path                                     | Role                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------- |
+| `agent/*-action.ts`                      | Provider OAuth, skill/command, connector server actions                             |
+| `agent/openai-codex-auth.ts`             | Codex token persistence + refresh helpers                                           |
+| `agent/anthropic-claude-auth.ts`         | Claude token persistence + refresh helpers                                          |
+| `agent/agent-skill.ts`                   | User-owned DB skill CRUD and validation                                             |
+| `agent/agent-command.ts`                 | User-owned DB command CRUD and validation                                           |
+| `agent/telegram-connector.ts`            | User-owned Telegram connector credential helpers                                    |
 | `agent/anthropic-claude-oauth-cookie.ts` | Claude PKCE verifier/state cookie names; keep constants out of `'use server'` files |
-| `agent/AGENTS.md`            | Agent OAuth, skill/command, connector contracts |
-| `storage/AGENTS.md`          | Storage source ingestion contracts             |
-| `knowledge/*`                | `/knowledge` domain functions/actions; file/text documents + availability policy |
-| `storage/*`                  | `/storage` domain functions/actions; source ingestion + knowledge search ingestion |
-| `errors/index.ts`            | Shared domain errors                           |
+| `agent/AGENTS.md`                        | Agent OAuth, skill/command, connector contracts                                     |
+| `storage/AGENTS.md`                      | Storage source ingestion contracts                                                  |
+| `knowledge/*`                            | `/knowledge` domain functions/actions; file/text documents + availability policy    |
+| `storage/*`                              | `/storage` domain functions/actions; source ingestion + knowledge search ingestion  |
+| `errors/index.ts`                        | Shared domain errors                                                                |
 
 ## Server Actions
 

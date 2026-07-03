@@ -84,12 +84,16 @@ export function CreateFileStorageForm() {
               const failures = results.filter(result => result._tag === 'Error')
               if (failures.length === 0) {
                 setSelectedFiles([])
-                setFileMessage(files.length === 1 ? 'Indexed file' : `Indexed ${files.length} files`)
+                setFileMessage(
+                  files.length === 1 ? 'Indexed file' : `Indexed ${files.length} files`
+                )
                 if (inputRef.current !== null) {
                   inputRef.current.value = ''
                 }
               } else {
-                setFileMessage(`${failures.length} failed: ${failures[0]?.message ?? 'Could not index files'}`)
+                setFileMessage(
+                  `${failures.length} failed: ${failures[0]?.message ?? 'Could not index files'}`
+                )
               }
             })
           })
@@ -97,7 +101,9 @@ export function CreateFileStorageForm() {
       >
         <div>
           <h2 className="font-medium">Add sources</h2>
-          <p className="text-sm text-muted-foreground">Drag files here or browse from your computer.</p>
+          <p className="text-sm text-muted-foreground">
+            Drag files here or browse from your computer.
+          </p>
         </div>
         <div
           className={`rounded-xl border border-dashed p-6 text-center ${isDragging ? 'border-primary bg-primary/5' : 'border-border bg-muted/20'}`}
@@ -143,7 +149,10 @@ export function CreateFileStorageForm() {
         {selectedFiles.length > 0 ? (
           <ul className="max-h-40 space-y-2 overflow-auto rounded-lg border p-2">
             {selectedFiles.map(file => (
-              <li key={fileKey(file)} className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm">
+              <li
+                key={fileKey(file)}
+                className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm"
+              >
                 <div className="min-w-0">
                   <p className="truncate font-medium">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{formatBytes(file.size)}</p>
@@ -152,7 +161,9 @@ export function CreateFileStorageForm() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSelectedFiles(files => files.filter(item => fileKey(item) !== fileKey(file)))}
+                  onClick={() =>
+                    setSelectedFiles(files => files.filter(item => fileKey(item) !== fileKey(file)))
+                  }
                 >
                   Remove
                 </Button>
@@ -168,7 +179,11 @@ export function CreateFileStorageForm() {
                 ? 'Index 1 file'
                 : `Index ${selectedFiles.length} files`}
           </Button>
-          {fileMessage ? <p className="text-sm text-muted-foreground" aria-live="polite">{fileMessage}</p> : null}
+          {fileMessage ? (
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {fileMessage}
+            </p>
+          ) : null}
         </div>
       </form>
     </div>

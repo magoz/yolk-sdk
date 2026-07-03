@@ -13,7 +13,7 @@ import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
 for await (const event of streamAgentEventsUntilTerminal({
   endpoint: '/api/agent',
   sessionId: 'browser-session',
-  messages,
+  messages
 })) {
   // update state, persist event, or project into UI
 }

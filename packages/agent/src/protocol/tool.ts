@@ -48,9 +48,7 @@ export const makeErrorToolResult = (input: ErrorToolResultInput) =>
     toolCallId: input.toolCallId,
     content: input.content,
     isError: true,
-    ...(input.structuredContent === undefined
-      ? {}
-      : { structuredContent: input.structuredContent })
+    ...(input.structuredContent === undefined ? {} : { structuredContent: input.structuredContent })
   })
 
 export class ToolApprovalRequest extends Schema.TaggedClass<ToolApprovalRequest>()(

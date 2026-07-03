@@ -47,35 +47,19 @@ const agentCoreForbiddenImports = [
 const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'examples/next/app',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'examples/next/lib',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'cloudflare/agent/src',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'examples/next/e2e',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'packages/agent/src/protocol',
@@ -128,7 +112,14 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   {
     packageDir: 'packages/knowledge/src',
-    forbiddenImports: [...retiredImports, '@yolk-sdk/agent/react', '@yolk-sdk/mcp', 'next', 'react', 'node:']
+    forbiddenImports: [
+      ...retiredImports,
+      '@yolk-sdk/agent/react',
+      '@yolk-sdk/mcp',
+      'next',
+      'react',
+      'node:'
+    ]
   },
   {
     packageDir: 'packages/sandbox/src',
@@ -208,17 +199,21 @@ const violations = rules.flatMap(rule => {
     return []
   }
 
-  return rulePathFiles(rule.packageDir).filter(file => !isExcludedFile(file, rule.excludedDirs)).flatMap(file => {
-    const source = readFileSync(file, 'utf8')
-    return importsFrom(source).flatMap(specifier =>
-      rule.forbiddenImports
-        .filter(forbidden => violates(specifier, forbidden))
-        .map(forbidden => ({ file, specifier, forbidden }))
-    )
-  })
+  return rulePathFiles(rule.packageDir)
+    .filter(file => !isExcludedFile(file, rule.excludedDirs))
+    .flatMap(file => {
+      const source = readFileSync(file, 'utf8')
+      return importsFrom(source).flatMap(specifier =>
+        rule.forbiddenImports
+          .filter(forbidden => violates(specifier, forbidden))
+          .map(forbidden => ({ file, specifier, forbidden }))
+      )
+    })
 })
 
-const retiredDirViolations = retiredPackages.filter(retiredPackage => packageExists(retiredPackage.dir))
+const retiredDirViolations = retiredPackages.filter(retiredPackage =>
+  packageExists(retiredPackage.dir)
+)
 
 if (retiredDirViolations.length > 0) {
   console.error('Retired package directories found:')

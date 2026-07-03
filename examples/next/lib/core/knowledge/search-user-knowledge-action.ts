@@ -63,7 +63,9 @@ export const searchUserKnowledgeAction = async (input: {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.search' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not search knowledge' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not search knowledge' })
+      )
     )
   )
 }

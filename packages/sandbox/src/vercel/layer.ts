@@ -245,9 +245,7 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
       const deleteNamedSandbox = (sandboxName: string) =>
         tryProvider('get', () => client.get({ name: sandboxName })).pipe(
           Effect.flatMap(handle =>
-            handle === null
-              ? Effect.void
-              : tryProvider('delete', () => handle.delete())
+            handle === null ? Effect.void : tryProvider('delete', () => handle.delete())
           )
         )
 
@@ -395,9 +393,9 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
               cwd: absoluteSandboxCwd(workspaceRoot, normalizedCwd)
             })
           )
-          const output = yield* (input.background === true
+          const output = yield* input.background === true
             ? probeBackgroundCommand(active.handle, command)
-            : waitForegroundCommand(command, timeoutMs))
+            : waitForegroundCommand(command, timeoutMs)
           const endedAtMs = yield* Clock.currentTimeMillis
           const urls = yield* previewUrls(active.handle, ports)
 

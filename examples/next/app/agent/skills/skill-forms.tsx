@@ -217,14 +217,21 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
               disabled={pending}
               onClick={() => {
                 startTransition(() => {
-                  void toggleAgentSkillAction({ id: skill.id, enabled: !skill.enabled }).then(result => {
-                    setState({
-                      message: result._tag === 'Success' ? (skill.enabled ? 'Disabled' : 'Enabled') : result.message
-                    })
-                    if (result._tag === 'Success') {
-                      router.refresh()
+                  void toggleAgentSkillAction({ id: skill.id, enabled: !skill.enabled }).then(
+                    result => {
+                      setState({
+                        message:
+                          result._tag === 'Success'
+                            ? skill.enabled
+                              ? 'Disabled'
+                              : 'Enabled'
+                            : result.message
+                      })
+                      if (result._tag === 'Success') {
+                        router.refresh()
+                      }
                     }
-                  })
+                  )
                 })
               }}
             >
@@ -261,7 +268,9 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
 
 export function SkillList({ skills }: { readonly skills: ReadonlyArray<AgentSkill> }) {
   return skills.length === 0 ? (
-    <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">No skills yet.</p>
+    <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+      No skills yet.
+    </p>
   ) : (
     <div className="space-y-4">
       {skills.map(skill => (

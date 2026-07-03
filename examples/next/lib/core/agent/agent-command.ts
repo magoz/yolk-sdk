@@ -102,12 +102,18 @@ export const updateAgentCommand = (input: AgentCommandUpdateInput & { readonly u
     const [command] = yield* db
       .update(schema.agentCommand)
       .set({ ...values, enabled: input.enabled })
-      .where(and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId)))
+      .where(
+        and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId))
+      )
       .returning()
 
     if (command === undefined) {
       return yield* Effect.fail(
-        new NotFoundError({ message: 'Agent command not found', entity: 'agentCommand', id: input.id })
+        new NotFoundError({
+          message: 'Agent command not found',
+          entity: 'agentCommand',
+          id: input.id
+        })
       )
     }
 
@@ -124,12 +130,18 @@ export const setAgentCommandEnabled = (input: {
     const [command] = yield* db
       .update(schema.agentCommand)
       .set({ enabled: input.enabled })
-      .where(and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId)))
+      .where(
+        and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId))
+      )
       .returning()
 
     if (command === undefined) {
       return yield* Effect.fail(
-        new NotFoundError({ message: 'Agent command not found', entity: 'agentCommand', id: input.id })
+        new NotFoundError({
+          message: 'Agent command not found',
+          entity: 'agentCommand',
+          id: input.id
+        })
       )
     }
 
@@ -141,12 +153,18 @@ export const deleteAgentCommand = (input: { readonly id: string; readonly userId
     const db = yield* Db
     const [command] = yield* db
       .delete(schema.agentCommand)
-      .where(and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId)))
+      .where(
+        and(eq(schema.agentCommand.id, input.id), eq(schema.agentCommand.userId, input.userId))
+      )
       .returning({ id: schema.agentCommand.id })
 
     if (command === undefined) {
       return yield* Effect.fail(
-        new NotFoundError({ message: 'Agent command not found', entity: 'agentCommand', id: input.id })
+        new NotFoundError({
+          message: 'Agent command not found',
+          entity: 'agentCommand',
+          id: input.id
+        })
       )
     }
 

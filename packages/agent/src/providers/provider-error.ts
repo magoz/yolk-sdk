@@ -79,8 +79,10 @@ export const retryAfterMsFromHeaders = (headers: HeaderMap | undefined) => {
     return undefined
   }
 
-  return parseRetryAfterMs(headerValue(headers, 'retry-after-ms')) ??
+  return (
+    parseRetryAfterMs(headerValue(headers, 'retry-after-ms')) ??
     parseRetryAfter(headerValue(headers, 'retry-after'))
+  )
 }
 
 const kindFromStatus = (status: number | undefined): ProviderFailureKind | undefined => {
@@ -151,10 +153,7 @@ const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | unde
 }
 
 export const providerFailureKind = (input: ProviderFailureInput): ProviderFailureKind =>
-  kindFromSignal(input) ??
-  kindFromStatus(input.status) ??
-  input.fallbackKind ??
-  'unknown'
+  kindFromSignal(input) ?? kindFromStatus(input.status) ?? input.fallbackKind ?? 'unknown'
 
 export const providerFailureRetryable = (kind: ProviderFailureKind) => {
   switch (kind) {

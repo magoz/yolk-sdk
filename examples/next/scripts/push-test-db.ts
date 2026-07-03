@@ -30,14 +30,10 @@ if (setupResult.status !== 0) {
   process.exit()
 }
 
-const pushResult = spawnSync(
-  'drizzle-kit',
-  ['push', '--config', 'drizzle.config.ts', '--force'],
-  {
-    stdio: 'inherit',
-    env: { ...process.env, NODE_ENV: 'test' }
-  }
-)
+const pushResult = spawnSync('drizzle-kit', ['push', '--config', 'drizzle.config.ts', '--force'], {
+  stdio: 'inherit',
+  env: { ...process.env, NODE_ENV: 'test' }
+})
 
 if (pushResult.error !== undefined) throw pushResult.error
 

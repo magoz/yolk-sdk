@@ -59,8 +59,12 @@ describe('tool batch property tests', () => {
           Effect.provide(LoopConfig.defaultLayer)
         )
         const eventArray = Array.from(events)
-        const startedIds = eventArray.flatMap(event => event._tag === 'ToolExecutionStarted' ? [event.call.id] : [])
-        const completed = eventArray.flatMap(event => event._tag === 'ToolExecutionCompleted' ? [event] : [])
+        const startedIds = eventArray.flatMap(event =>
+          event._tag === 'ToolExecutionStarted' ? [event.call.id] : []
+        )
+        const completed = eventArray.flatMap(event =>
+          event._tag === 'ToolExecutionCompleted' ? [event] : []
+        )
 
         expect(startedIds).toEqual(calls.map(call => call.id))
         expect(completed.map(event => event.call.id)).toEqual(calls.map(call => call.id))
@@ -85,9 +89,11 @@ describe('tool batch property tests', () => {
         const call = toolCallFromSpec(missing)
         const events: Array<AgentEvent> = []
         const result = yield* runToolBatch({ calls: [call] }).pipe(
-          Stream.runForEach(event => Effect.sync(() => {
-            events.push(event)
-          })),
+          Stream.runForEach(event =>
+            Effect.sync(() => {
+              events.push(event)
+            })
+          ),
           Effect.provide(executorLayer),
           Effect.provide(LoopConfig.defaultLayer),
           Effect.result

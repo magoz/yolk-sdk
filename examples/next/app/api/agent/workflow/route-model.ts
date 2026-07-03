@@ -33,7 +33,8 @@ export const workflowStreamResponse = (
   run: WorkflowReadableRun,
   options?: WorkflowReadableOptions & { readonly tailIndex?: number }
 ) => {
-  const readableOptions = options?.startIndex === undefined ? undefined : { startIndex: options.startIndex }
+  const readableOptions =
+    options?.startIndex === undefined ? undefined : { startIndex: options.startIndex }
 
   return workflowReadableResponse(run.runId, run.getReadable(readableOptions), options?.tailIndex)
 }

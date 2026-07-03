@@ -133,7 +133,7 @@ const expectedReplayMessages = (
   }, [])
 
 const expectedHitlResponses = (commands: ReadonlyArray<typeof sessionCommand.Type>) =>
-  commands.flatMap(command => command.kind === 'hitl' ? [approvalResponse] : [])
+  commands.flatMap(command => (command.kind === 'hitl' ? [approvalResponse] : []))
 
 const terminalKinds = new Set(['complete', 'await', 'fail', 'interrupt'])
 
@@ -168,9 +168,7 @@ describe('session event property tests', () => {
       })
 
       expect(log.revision).toBe(commands.length)
-      expect(log.events.map(event => event.revision)).toEqual(
-        commands.map((_, index) => index + 1)
-      )
+      expect(log.events.map(event => event.revision)).toEqual(commands.map((_, index) => index + 1))
       expect(log.events.map(event => event.id)).toEqual(
         commands.map((_, index) => `session_1:${index + 1}`)
       )
@@ -194,11 +192,13 @@ describe('session event property tests', () => {
           events: eventsForCommands(input.initialEvents)
         })
         const staleRevision = initialLog.revision + Math.abs(input.staleRevision) + 1
-        const result = yield* store.append({
-          sessionId: 'session_1',
-          expectedRevision: staleRevision,
-          events: [InputAppended.make({ message: UserMessage.make({ content: 'rejected' }) })]
-        }).pipe(Effect.result)
+        const result = yield* store
+          .append({
+            sessionId: 'session_1',
+            expectedRevision: staleRevision,
+            events: [InputAppended.make({ message: UserMessage.make({ content: 'rejected' }) })]
+          })
+          .pipe(Effect.result)
         const after = yield* store.load('session_1')
 
         expect(result).toMatchObject({
@@ -219,17 +219,20 @@ describe('session event property tests', () => {
         let expectedLog = emptyLog()
 
         for (const [index, command] of commands.entries()) {
-          const expectedRevision = command.expectation === 'none'
-            ? undefined
-            : command.expectation === 'current'
-              ? expectedLog.revision
-              : expectedLog.revision + 1
+          const expectedRevision =
+            command.expectation === 'none'
+              ? undefined
+              : command.expectation === 'current'
+                ? expectedLog.revision
+                : expectedLog.revision + 1
           const events = [eventForCommand(command.event, index)]
-          const result = yield* store.append({
-            sessionId: 'session_1',
-            ...(expectedRevision === undefined ? {} : { expectedRevision }),
-            events
-          }).pipe(Effect.result)
+          const result = yield* store
+            .append({
+              sessionId: 'session_1',
+              ...(expectedRevision === undefined ? {} : { expectedRevision }),
+              events
+            })
+            .pipe(Effect.result)
 
           if (command.expectation === 'stale') {
             expect(result).toMatchObject({

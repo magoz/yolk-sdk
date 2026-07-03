@@ -4,14 +4,19 @@ import { describe, expect, it } from '@effect/vitest'
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
 
 const taskToolStart = source.indexOf('const taskToolModule = makeNonRecursiveTaskToolModule')
-const taskExecuteSource = source.slice(taskToolStart, source.indexOf('const toolModules', taskToolStart))
+const taskExecuteSource = source.slice(
+  taskToolStart,
+  source.indexOf('const toolModules', taskToolStart)
+)
 
 describe('makeAgentTextRuntime task tool wiring', () => {
   it('adds task tool to top-level text runtime', () => {
     expect(taskToolStart).toBeGreaterThanOrEqual(0)
     expect(source).toContain('const knowledgeToolModule = makeAppKnowledgeToolModule()')
     expect(source).toContain('const storageToolModule = makeAppStorageKnowledgeSearchToolModule()')
-    expect(source).toContain('const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [')
+    expect(source).toContain(
+      'const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = ['
+    )
     expect(source).toContain('const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [')
     expect(source).toContain('storageToolModule')
     expect(source).toContain('knowledgeToolModule')

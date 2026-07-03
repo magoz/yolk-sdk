@@ -121,7 +121,8 @@ export type KnowledgeManageHandlers<Context> = {
   }) => Effect.Effect<KnowledgeSavedDocument, ToolError>
 }
 
-const unknownToMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
 const optionalValue = <Value>(value: Value | null | undefined) => value ?? undefined
 
@@ -168,7 +169,9 @@ const formatSearchResults = (results: ReadonlyArray<KnowledgeLookupResult>) =>
         .join('\n\n')
 
 const formatSaved = (verb: string, document: KnowledgeSavedDocument) =>
-  [verb, `title: ${document.title}`, `slug: ${document.slug}`, `document_id: ${document.id}`].join('\n')
+  [verb, `title: ${document.title}`, `slug: ${document.slug}`, `document_id: ${document.id}`].join(
+    '\n'
+  )
 
 export const makeKnowledgeLookupTool = <Context>(
   handlers: KnowledgeLookupHandlers<Context>,
@@ -235,7 +238,10 @@ export const makeKnowledgeManageTool = <Context>(
               content: params.content,
               availability: params.availability
             })
-            return ToolResult.make({ toolCallId: call.id, content: formatSaved('Knowledge upserted', document) })
+            return ToolResult.make({
+              toolCallId: call.id,
+              content: formatSaved('Knowledge upserted', document)
+            })
           }
           case 'set_availability': {
             const document = yield* handlers.setAvailability({
@@ -254,16 +260,29 @@ export const makeKnowledgeManageTool = <Context>(
               target: targetFromParams(params.target),
               nextSlug: params.nextSlug
             })
-            return ToolResult.make({ toolCallId: call.id, content: formatSaved('Knowledge slug renamed', document) })
+            return ToolResult.make({
+              toolCallId: call.id,
+              content: formatSaved('Knowledge slug renamed', document)
+            })
           }
           case 'delete': {
-            const document = yield* handlers.delete({ context, target: targetFromParams(params.target) })
-            return ToolResult.make({ toolCallId: call.id, content: formatSaved('Knowledge deleted', document) })
+            const document = yield* handlers.delete({
+              context,
+              target: targetFromParams(params.target)
+            })
+            return ToolResult.make({
+              toolCallId: call.id,
+              content: formatSaved('Knowledge deleted', document)
+            })
           }
         }
 
         return yield* Effect.fail(
-          new ToolError({ tool: call.name, message: 'Unsupported knowledge operation', cause: 'validation' })
+          new ToolError({
+            tool: call.name,
+            message: 'Unsupported knowledge operation',
+            cause: 'validation'
+          })
         )
       })
   })

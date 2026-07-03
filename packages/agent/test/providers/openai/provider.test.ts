@@ -13,14 +13,19 @@ import {
   urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { makeOpenAiProviderLayer, toOpenAiRequestBody } from '../../../src/providers/openai/provider.ts'
+import {
+  makeOpenAiProviderLayer,
+  toOpenAiRequestBody
+} from '../../../src/providers/openai/provider.ts'
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
 }
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
-  makeOpenAiProviderLayer({ apiKey: Redacted.make('test-key') }).pipe(Layer.provide(httpClientLayer))
+  makeOpenAiProviderLayer({ apiKey: Redacted.make('test-key') }).pipe(
+    Layer.provide(httpClientLayer)
+  )
 
 const makeHttpClientLayer = (
   response: Response,
@@ -65,7 +70,8 @@ describe('OpenAI provider', () => {
           { type: 'text', text: 'Document: company.identity.md\n\n# Identity\n\nSpeldosa docs.' }
         ]
       })
-    }))
+    })
+  )
 
   it.effect('passes image URLs through for Chat Completions input', () =>
     Effect.gen(function* () {
@@ -93,7 +99,8 @@ describe('OpenAI provider', () => {
           { type: 'image_url', image_url: { url: 'https://cdn.example.com/image.webp' } }
         ]
       })
-    }))
+    })
+  )
 
   it.effect('rejects non-text documents for Chat Completions input', () =>
     Effect.gen(function* () {

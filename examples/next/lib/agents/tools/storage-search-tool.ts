@@ -28,17 +28,23 @@ const maxSourceMaxChars = 40_000
 const StorageSearchParams = Schema.Struct({
   queries: Schema.Array(Schema.String).pipe(
     Schema.annotate({
-      description: 'One to five targeted storage search queries. Use one item for simple searches; use multiple query rewrites for broad or high-recall searches.'
+      description:
+        'One to five targeted storage search queries. Use one item for simple searches; use multiple query rewrites for broad or high-recall searches.'
     })
   ),
   limit: Schema.optional(Schema.Number).pipe(
     Schema.annotate({ description: 'Maximum chunks per query. Defaults to 8; capped at 20.' })
   ),
   minScore: Schema.optional(Schema.Number).pipe(
-    Schema.annotate({ description: 'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.' })
+    Schema.annotate({
+      description:
+        'Optional vector similarity threshold from 0 to 1. Hybrid keyword matches may still contribute.'
+    })
   ),
   contextChunks: Schema.optional(Schema.Number).pipe(
-    Schema.annotate({ description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.' })
+    Schema.annotate({
+      description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.'
+    })
   )
 })
 
@@ -46,10 +52,15 @@ const StorageListSourcesParams = EmptyToolParams
 
 const StorageGetSourceParams = Schema.Struct({
   id: Schema.String.pipe(
-    Schema.annotate({ description: 'Storage source ID from search citations or list_storage_sources.' })
+    Schema.annotate({
+      description: 'Storage source ID from search citations or list_storage_sources.'
+    })
   ),
   maxChars: Schema.optional(Schema.Number).pipe(
-    Schema.annotate({ description: 'Maximum extracted text characters to return. Defaults to 12000; capped at 40000.' })
+    Schema.annotate({
+      description:
+        'Maximum extracted text characters to return. Defaults to 12000; capped at 40000.'
+    })
   )
 })
 
@@ -202,7 +213,9 @@ const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
   Effect.gen(function* () {
     const id = params.id.trim()
     if (id.length === 0) {
-      return yield* Effect.fail(makeModelVisibleError('id must not be empty', storageGetSourceToolName))
+      return yield* Effect.fail(
+        makeModelVisibleError('id must not be empty', storageGetSourceToolName)
+      )
     }
 
     const maxChars = yield* normalizeInteger({
@@ -250,10 +263,16 @@ const formatResults = (query: string, results: ReadonlyArray<KnowledgeSearchResu
         `Document: ${result.document.id}`,
         `Chunk: ${result.chunk.id}`,
         `Score: ${result.score.toFixed(3)}`,
-        result.scores?.vector === undefined ? undefined : `Vector score: ${result.scores.vector.toFixed(3)}`,
-        result.scores?.text === undefined ? undefined : `Text score: ${result.scores.text.toFixed(3)}`,
+        result.scores?.vector === undefined
+          ? undefined
+          : `Vector score: ${result.scores.vector.toFixed(3)}`,
+        result.scores?.text === undefined
+          ? undefined
+          : `Text score: ${result.scores.text.toFixed(3)}`,
         resultText(result)
-      ].filter(line => line !== undefined).join('\n')
+      ]
+        .filter(line => line !== undefined)
+        .join('\n')
     )
   ].join('\n\n')
 }
@@ -272,7 +291,10 @@ const structuredResult = (query: string, results: ReadonlyArray<KnowledgeSearchR
 })
 
 const formatSearchResults = (
-  items: ReadonlyArray<{ readonly query: string; readonly results: ReadonlyArray<KnowledgeSearchResult> }>
+  items: ReadonlyArray<{
+    readonly query: string
+    readonly results: ReadonlyArray<KnowledgeSearchResult>
+  }>
 ) =>
   [
     'Storage search results',
@@ -281,7 +303,10 @@ const formatSearchResults = (
   ].join('\n\n')
 
 const structuredSearchResult = (
-  items: ReadonlyArray<{ readonly query: string; readonly results: ReadonlyArray<KnowledgeSearchResult> }>
+  items: ReadonlyArray<{
+    readonly query: string
+    readonly results: ReadonlyArray<KnowledgeSearchResult>
+  }>
 ) => ({
   queries: items.map(item => structuredResult(item.query, item.results))
 })
@@ -305,7 +330,9 @@ const formatSources = (sources: ReadonlyArray<StorageSourceSummary>) => {
         source.tokenCount === undefined ? undefined : `Tokens: ${source.tokenCount}`,
         `Created: ${source.createdAt}`,
         source.summary === undefined ? undefined : `Summary: ${source.summary}`
-      ].filter(line => line !== undefined).join('\n')
+      ]
+        .filter(line => line !== undefined)
+        .join('\n')
     )
   ].join('\n\n')
 }
@@ -328,113 +355,123 @@ const formatSourceDetail = (source: StorageSourceDetail) =>
       ? `Extracted text (${source.text.length}/${source.textCharacters} chars, truncated)`
       : `Extracted text (${source.textCharacters} chars)`,
     source.text
-  ].filter(line => line !== undefined).join('\n')
+  ]
+    .filter(line => line !== undefined)
+    .join('\n')
 
-const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>['tools'][number] => makeTool({
-  name: storageSearchToolName,
-  description: storageSearchToolDescription,
-  parameters: StorageSearchParams,
-  access: 'read',
-  isEnabled: isStorageToolEnabled,
-  invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
-  execute: ({ call, context, params }) =>
-    Effect.gen(function* () {
-      const normalizedParams = yield* normalizeStorageSearchParams(params)
-      const items = yield* Effect.forEach(
-        normalizedParams.queries,
-        query =>
-          search({
-            userId: context.userId,
-            query,
-            limit: normalizedParams.limit,
-            minScore: normalizedParams.minScore,
-            contextChunks: normalizedParams.contextChunks
-          }).pipe(Effect.map(results => ({ query, results }))),
-        { concurrency: 'unbounded' }
-      )
+const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
+    name: storageSearchToolName,
+    description: storageSearchToolDescription,
+    parameters: StorageSearchParams,
+    access: 'read',
+    isEnabled: isStorageToolEnabled,
+    invalidParamsMessage: error => `Invalid storage search arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        const normalizedParams = yield* normalizeStorageSearchParams(params)
+        const items = yield* Effect.forEach(
+          normalizedParams.queries,
+          query =>
+            search({
+              userId: context.userId,
+              query,
+              limit: normalizedParams.limit,
+              minScore: normalizedParams.minScore,
+              contextChunks: normalizedParams.contextChunks
+            }).pipe(Effect.map(results => ({ query, results }))),
+          { concurrency: 'unbounded' }
+        )
 
-      return ToolResult.make({
-        toolCallId: call.id,
-        content: formatSearchResults(items),
-        structuredContent: structuredSearchResult(items)
-      })
-    }).pipe(
-      Effect.mapError(error =>
-        error instanceof ToolError
-          ? error
-          : error instanceof ModelVisibleToolError
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatSearchResults(items),
+          structuredContent: structuredSearchResult(items)
+        })
+      }).pipe(
+        Effect.mapError(error =>
+          error instanceof ToolError
             ? error
-            : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
+            : error instanceof ModelVisibleToolError
+              ? error
+              : makeToolError(`Storage search failed: ${unknownToMessage(error)}`, 'execution')
+        )
       )
-    )
-})
+  })
 
 const listSourcesTool = (
   listSources: StorageListSourcesHandler
-): ToolModule<AgentToolContext>['tools'][number] => makeTool({
-  name: storageListSourcesToolName,
-  description: storageListSourcesToolDescription,
-  parameters: StorageListSourcesParams,
-  access: 'read',
-  isEnabled: isStorageToolEnabled,
-  execute: ({ call, context }) =>
-    listSources({ userId: context.userId }).pipe(
-      Effect.map(sources =>
-        ToolResult.make({
-          toolCallId: call.id,
-          content: formatSources(sources),
-          structuredContent: { sources }
-        })
-      ),
-      Effect.mapError(error =>
-        error instanceof ToolError
-          ? error
-          : makeToolError(
-              `Storage source listing failed: ${unknownToMessage(error)}`,
-              'execution',
-              storageListSourcesToolName
-            )
-      )
-    )
-})
-
-const getSourceTool = (getSource: StorageGetSourceHandler): ToolModule<AgentToolContext>['tools'][number] => makeTool({
-  name: storageGetSourceToolName,
-  description: storageGetSourceToolDescription,
-  parameters: StorageGetSourceParams,
-  access: 'read',
-  isEnabled: isStorageToolEnabled,
-  invalidParamsMessage: error => `Invalid storage source read arguments: ${unknownToMessage(error)}`,
-  execute: ({ call, context, params }) =>
-    Effect.gen(function* () {
-      const normalizedParams = yield* normalizeStorageGetSourceParams(params)
-      const source = yield* getSource({
-        userId: context.userId,
-        id: normalizedParams.id,
-        maxChars: normalizedParams.maxChars
-      })
-
-      return ToolResult.make({
-        toolCallId: call.id,
-        content: formatSourceDetail(source),
-        structuredContent: { source }
-      })
-    }).pipe(
-      Effect.mapError(error =>
-        error instanceof ToolError
-          ? error
-          : error instanceof ModelVisibleToolError
+): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
+    name: storageListSourcesToolName,
+    description: storageListSourcesToolDescription,
+    parameters: StorageListSourcesParams,
+    access: 'read',
+    isEnabled: isStorageToolEnabled,
+    execute: ({ call, context }) =>
+      listSources({ userId: context.userId }).pipe(
+        Effect.map(sources =>
+          ToolResult.make({
+            toolCallId: call.id,
+            content: formatSources(sources),
+            structuredContent: { sources }
+          })
+        ),
+        Effect.mapError(error =>
+          error instanceof ToolError
             ? error
             : makeToolError(
-              `Storage source read failed: ${unknownToMessage(error)}`,
-              'execution',
-              storageGetSourceToolName
-            )
+                `Storage source listing failed: ${unknownToMessage(error)}`,
+                'execution',
+                storageListSourcesToolName
+              )
+        )
       )
-    )
-})
+  })
 
-const storageTools = (handlers: StorageKnowledgeSearchToolHandlers): ToolModule<AgentToolContext>['tools'] => {
+const getSourceTool = (
+  getSource: StorageGetSourceHandler
+): ToolModule<AgentToolContext>['tools'][number] =>
+  makeTool({
+    name: storageGetSourceToolName,
+    description: storageGetSourceToolDescription,
+    parameters: StorageGetSourceParams,
+    access: 'read',
+    isEnabled: isStorageToolEnabled,
+    invalidParamsMessage: error =>
+      `Invalid storage source read arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        const normalizedParams = yield* normalizeStorageGetSourceParams(params)
+        const source = yield* getSource({
+          userId: context.userId,
+          id: normalizedParams.id,
+          maxChars: normalizedParams.maxChars
+        })
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: formatSourceDetail(source),
+          structuredContent: { source }
+        })
+      }).pipe(
+        Effect.mapError(error =>
+          error instanceof ToolError
+            ? error
+            : error instanceof ModelVisibleToolError
+              ? error
+              : makeToolError(
+                  `Storage source read failed: ${unknownToMessage(error)}`,
+                  'execution',
+                  storageGetSourceToolName
+                )
+        )
+      )
+  })
+
+const storageTools = (
+  handlers: StorageKnowledgeSearchToolHandlers
+): ToolModule<AgentToolContext>['tools'] => {
   const requiredTools = [searchTool(handlers.search)]
   const sourceTools = [
     ...(handlers.listSources === undefined ? [] : [listSourcesTool(handlers.listSources)]),
@@ -447,7 +484,8 @@ const storageTools = (handlers: StorageKnowledgeSearchToolHandlers): ToolModule<
 export const makeStorageSearchToolModule = (
   searchOrHandlers: StorageSearchHandler | StorageKnowledgeSearchToolHandlers
 ): ToolModule<AgentToolContext> => {
-  const handlers = typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
+  const handlers =
+    typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
 
   return {
     id: 'storage-search',

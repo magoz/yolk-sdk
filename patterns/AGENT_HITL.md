@@ -4,16 +4,16 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 
 ## Ownership
 
-| Layer | Owns |
-| --- | --- |
-| `@yolk-sdk/agent/protocol` | `HitlRequest`, `HitlResponse`, approval/question events, `AgentAwaitingInput` |
-| `@yolk-sdk/agent/loop` | Pauses before gated tool execution; resumes from `hitlResponses` |
-| `@yolk-sdk/agent/runtime` | Transcript replay and append-log pending/resume events |
-| `@yolk-sdk/agent/client` | HTTP/WS response submission helpers |
-| `@yolk-sdk/agent/tools` | Domain-free `question` tool contract |
-| `@yolk-sdk/agent/react` | Headless waiting/tool/question render state |
-| `@yolk-sdk/agent/voice` | Voice approval gating (`handleVoiceToolCall`), controller pause/resume, `AwaitingInput` voice events |
-| App adapters | Storage, auth, concrete routes, hooks, buttons/forms |
+| Layer                      | Owns                                                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol` | `HitlRequest`, `HitlResponse`, approval/question events, `AgentAwaitingInput`                        |
+| `@yolk-sdk/agent/loop`     | Pauses before gated tool execution; resumes from `hitlResponses`                                     |
+| `@yolk-sdk/agent/runtime`  | Transcript replay and append-log pending/resume events                                               |
+| `@yolk-sdk/agent/client`   | HTTP/WS response submission helpers                                                                  |
+| `@yolk-sdk/agent/tools`    | Domain-free `question` tool contract                                                                 |
+| `@yolk-sdk/agent/react`    | Headless waiting/tool/question render state                                                          |
+| `@yolk-sdk/agent/voice`    | Voice approval gating (`handleVoiceToolCall`), controller pause/resume, `AwaitingInput` voice events |
+| App adapters               | Storage, auth, concrete routes, hooks, buttons/forms                                                 |
 
 ## Semantics
 
@@ -33,12 +33,12 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 
 ## Runtime adapters
 
-| Runtime | Resume contract |
-| --- | --- |
-| Stateless Next | Client sends full transcript plus `hitlResponses` to `/api/agent` |
-| Cloudflare DO | WebSocket accepts typed HITL response input; append log persists `RunAwaitingInput` and `HitlResponseAppended` |
-| Vercel Workflow | Tool step writes `AgentAwaitingInput`, waits on `createHook`, route resumes with `resumeHook` |
-| Voice session | Server tool endpoint returns `ApprovalRequired`; controller emits voice `AwaitingInput` and resumes by re-posting the call with the approval response; session death keeps the approval pending host-side |
+| Runtime         | Resume contract                                                                                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stateless Next  | Client sends full transcript plus `hitlResponses` to `/api/agent`                                                                                                                                         |
+| Cloudflare DO   | WebSocket accepts typed HITL response input; append log persists `RunAwaitingInput` and `HitlResponseAppended`                                                                                            |
+| Vercel Workflow | Tool step writes `AgentAwaitingInput`, waits on `createHook`, route resumes with `resumeHook`                                                                                                             |
+| Voice session   | Server tool endpoint returns `ApprovalRequired`; controller emits voice `AwaitingInput` and resumes by re-posting the call with the approval response; session death keeps the approval pending host-side |
 
 ## UI rules
 

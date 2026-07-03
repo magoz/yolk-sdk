@@ -10,31 +10,34 @@ import {
   type VercelAgentWorkflowToolBatchStepResult
 } from '../src/workflow.ts'
 
-const terminalModelResult = (input: VercelAgentWorkflowModelStepInput) => ({
-  done: true,
-  messages: [...(input.state.messages ?? [input.state.request]), `assistant-${input.state.turn}`],
-  createdMessages: [...input.state.createdMessages, `assistant-${input.state.turn}`],
-  toolCalls: [],
-  usage: { turns: input.state.turn },
-  turn: input.state.turn
-}) satisfies VercelAgentWorkflowModelStepResult
+const terminalModelResult = (input: VercelAgentWorkflowModelStepInput) =>
+  ({
+    done: true,
+    messages: [...(input.state.messages ?? [input.state.request]), `assistant-${input.state.turn}`],
+    createdMessages: [...input.state.createdMessages, `assistant-${input.state.turn}`],
+    toolCalls: [],
+    usage: { turns: input.state.turn },
+    turn: input.state.turn
+  }) satisfies VercelAgentWorkflowModelStepResult
 
-const toolModelResult = (input: VercelAgentWorkflowModelStepInput) => ({
-  done: false,
-  messages: [...(input.state.messages ?? [input.state.request]), `assistant-${input.state.turn}`],
-  createdMessages: [...input.state.createdMessages, `assistant-${input.state.turn}`],
-  toolCalls: [`tool-${input.state.turn}-a`, `tool-${input.state.turn}-b`],
-  usage: { turns: input.state.turn },
-  turn: input.state.turn
-}) satisfies VercelAgentWorkflowModelStepResult
+const toolModelResult = (input: VercelAgentWorkflowModelStepInput) =>
+  ({
+    done: false,
+    messages: [...(input.state.messages ?? [input.state.request]), `assistant-${input.state.turn}`],
+    createdMessages: [...input.state.createdMessages, `assistant-${input.state.turn}`],
+    toolCalls: [`tool-${input.state.turn}-a`, `tool-${input.state.turn}-b`],
+    usage: { turns: input.state.turn },
+    turn: input.state.turn
+  }) satisfies VercelAgentWorkflowModelStepResult
 
-const toolBatchResult = (input: VercelAgentWorkflowToolBatchStepInput) => ({
-  messages: input.calls.map(call => `result-${String(call)}`),
-  createdMessages: [
-    ...input.createdMessages,
-    ...input.calls.map(call => `result-${String(call)}`)
-  ]
-}) satisfies VercelAgentWorkflowToolBatchStepResult
+const toolBatchResult = (input: VercelAgentWorkflowToolBatchStepInput) =>
+  ({
+    messages: input.calls.map(call => `result-${String(call)}`),
+    createdMessages: [
+      ...input.createdMessages,
+      ...input.calls.map(call => `result-${String(call)}`)
+    ]
+  }) satisfies VercelAgentWorkflowToolBatchStepResult
 
 describe('runVercelAgentWorkflow', () => {
   it('closes stream after terminal model step', async () => {
@@ -55,7 +58,9 @@ describe('runVercelAgentWorkflow', () => {
     })
 
     expect(result._tag).toBe('Completed')
-    expect(states).toEqual([{ request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }])
+    expect(states).toEqual([
+      { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+    ])
     expect(closeCount).toBe(1)
   })
 

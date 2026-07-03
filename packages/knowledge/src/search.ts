@@ -46,12 +46,14 @@ export type KnowledgeSearcher = {
 const packedResultText = (result: KnowledgeSearchResult) =>
   result.context?.map(chunk => chunk.content).join('\n\n') ?? result.chunk.content
 
-export const packKnowledgeSearchContext = (query: string, results: ReadonlyArray<KnowledgeSearchResult>): KnowledgeSearchContext =>
-  ({
-    query,
-    results,
-    text: results.map(packedResultText).join('\n\n')
-  })
+export const packKnowledgeSearchContext = (
+  query: string,
+  results: ReadonlyArray<KnowledgeSearchResult>
+): KnowledgeSearchContext => ({
+  query,
+  results,
+  text: results.map(packedResultText).join('\n\n')
+})
 
 const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
   switch (scope._tag) {
@@ -116,36 +118,52 @@ const validateSearchInput = (input: KnowledgeSearchInput) => {
   const limit = input.limit ?? 10
   const contextChunks = input.contextChunks ?? 0
   const mode = input.mode ?? 'hybrid'
-  const vectorLimit = input.vectorLimit ?? (mode === 'hybrid' ? defaultHybridCandidateLimit(limit) : limit)
+  const vectorLimit =
+    input.vectorLimit ?? (mode === 'hybrid' ? defaultHybridCandidateLimit(limit) : limit)
   const textLimit = input.textLimit ?? defaultHybridCandidateLimit(limit)
 
   if (query.length === 0) {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Search query is empty', stage: 'embed' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Search query is empty', stage: 'embed' })
+    )
   }
 
   if (ids.length === 0) {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Search scope is empty', stage: 'store' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Search scope is empty', stage: 'store' })
+    )
   }
 
   if (!Number.isInteger(limit) || limit < 1) {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Search limit must be positive', stage: 'store' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Search limit must be positive', stage: 'store' })
+    )
   }
 
   if (!Number.isInteger(vectorLimit) || vectorLimit < 1) {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Vector search limit must be positive', stage: 'store' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Vector search limit must be positive', stage: 'store' })
+    )
   }
 
   if (!Number.isInteger(textLimit) || textLimit < 1) {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Text search limit must be positive', stage: 'store' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Text search limit must be positive', stage: 'store' })
+    )
   }
 
   if (mode !== 'vector' && mode !== 'hybrid') {
-    return Effect.fail(new KnowledgeSearchError({ message: 'Search mode is invalid', stage: 'store' }))
+    return Effect.fail(
+      new KnowledgeSearchError({ message: 'Search mode is invalid', stage: 'store' })
+    )
   }
 
   if (!Number.isInteger(contextChunks) || contextChunks < 0) {
     return Effect.fail(
-      new KnowledgeSearchError({ message: 'Context chunks must be zero or positive', stage: 'store' })
+      new KnowledgeSearchError({
+        message: 'Context chunks must be zero or positive',
+        stage: 'store'
+      })
     )
   }
 
@@ -171,7 +189,8 @@ const searchVectorChunks = (input: {
       .embedQuery(input.query)
       .pipe(
         Effect.mapError(
-          error => new KnowledgeSearchError({ message: error.message, stage: 'embed', cause: error })
+          error =>
+            new KnowledgeSearchError({ message: error.message, stage: 'embed', cause: error })
         )
       )
 
@@ -184,7 +203,8 @@ const searchVectorChunks = (input: {
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
+          error =>
+            new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
         )
       )
   })
@@ -200,7 +220,8 @@ const searchTextChunks = (input: {
       .searchChunksByText({ scope: input.scope, query: input.query, limit: input.limit })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
+          error =>
+            new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
         )
       )
   })
@@ -216,37 +237,38 @@ export const searchKnowledge = (input: KnowledgeSearchInput) =>
       'knowledge_search.scope_count': scopeIds(input.scope).length
     })
     const store = yield* SearchIndexStore
-    const results: ReadonlyArray<KnowledgeSearchResult> = valid.mode === 'vector'
-      ? yield* searchVectorChunks({
-        scope: input.scope,
-        query: valid.query,
-        limit: valid.vectorLimit,
-        minScore: input.minScore
-      })
-      : yield* Effect.gen(function* () {
-        const searches = yield* Effect.all(
-          {
-            vectorResults: searchVectorChunks({
-              scope: input.scope,
-              query: valid.query,
-              limit: valid.vectorLimit,
-              minScore: input.minScore
-            }),
-            textResults: searchTextChunks({
-              scope: input.scope,
-              query: valid.query,
-              limit: valid.textLimit
-            })
-          },
-          { concurrency: 'unbounded' }
-        )
+    const results: ReadonlyArray<KnowledgeSearchResult> =
+      valid.mode === 'vector'
+        ? yield* searchVectorChunks({
+            scope: input.scope,
+            query: valid.query,
+            limit: valid.vectorLimit,
+            minScore: input.minScore
+          })
+        : yield* Effect.gen(function* () {
+            const searches = yield* Effect.all(
+              {
+                vectorResults: searchVectorChunks({
+                  scope: input.scope,
+                  query: valid.query,
+                  limit: valid.vectorLimit,
+                  minScore: input.minScore
+                }),
+                textResults: searchTextChunks({
+                  scope: input.scope,
+                  query: valid.query,
+                  limit: valid.textLimit
+                })
+              },
+              { concurrency: 'unbounded' }
+            )
 
-        return fuseKnowledgeSearchResults({
-          vectorResults: searches.vectorResults,
-          textResults: searches.textResults,
-          limit: valid.limit
-        })
-      })
+            return fuseKnowledgeSearchResults({
+              vectorResults: searches.vectorResults,
+              textResults: searches.textResults,
+              limit: valid.limit
+            })
+          })
 
     if (valid.contextChunks === 0) {
       return results
@@ -263,7 +285,8 @@ export const searchKnowledge = (input: KnowledgeSearchInput) =>
         .pipe(
           Effect.map(context => ({ ...result, context })),
           Effect.mapError(
-            error => new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
+            error =>
+              new KnowledgeSearchError({ message: error.message, stage: 'store', cause: error })
           )
         )
     )

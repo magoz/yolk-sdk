@@ -217,7 +217,10 @@ const encodeEmailAddress = (address: string) => {
 }
 
 const encodeAddressList = (addresses: ReadonlyArray<string>) =>
-  addresses.flatMap(address => splitAddresses(address)).map(encodeEmailAddress).join(', ')
+  addresses
+    .flatMap(address => splitAddresses(address))
+    .map(encodeEmailAddress)
+    .join(', ')
 
 const base64UrlEncode = (value: string) => {
   const bytes = new TextEncoder().encode(value)
@@ -386,7 +389,10 @@ export const gmailSearchAction = defineAction({
   outputSchema: GmailSearchOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailReadonlyOAuthCredentialSlot)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'q', input.query)
@@ -422,7 +428,10 @@ export const gmailGetMessageAction = defineAction({
   outputSchema: GmailMessageOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailReadonlyOAuthCredentialSlot)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'format', input.format)
@@ -603,7 +612,10 @@ export const gmailDraftComposeAction = defineAction({
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailComposeOAuthCredentialSlot)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailComposeOAuthCredentialSlot
+      )
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
       if (fromValidation._tag === 'Failure') return fromValidation
 
@@ -638,7 +650,10 @@ export const gmailDraftUpdateAction = defineAction({
   outputSchema: GmailUnknownOutput,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailComposeOAuthCredentialSlot)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailComposeOAuthCredentialSlot
+      )
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
       if (fromValidation._tag === 'Failure') return fromValidation
 
@@ -756,7 +771,8 @@ export const gmailDraftReplyAction = defineAction({
         ...sendAsEmailsResult.value,
         ...(profile.emailAddress === undefined ? [] : [extractEmailAddress(profile.emailAddress)])
       ])
-      const fromAddress = requestedFrom ?? detectReplyFromAddress(original, sendAsEmailsResult.value)
+      const fromAddress =
+        requestedFrom ?? detectReplyFromAddress(original, sendAsEmailsResult.value)
       const recipients = splitAddresses(headerValue(original, 'From'))
         .concat(splitAddresses(headerValue(original, 'To')))
         .concat(splitAddresses(headerValue(original, 'Cc')))
@@ -826,7 +842,10 @@ export const gmailListSendAsAction = defineAction({
   outputSchema: GmailListSendAsOutput,
   execute: ({ integration }) =>
     Effect.gen(function* () {
-      const token = yield* resolveGoogleAccessToken(integration, GoogleGmailSettingsOAuthCredentialSlot)
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailSettingsOAuthCredentialSlot
+      )
       return yield* fetchSendAsOutput(token)
     })
 })

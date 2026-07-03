@@ -136,7 +136,8 @@ const normalizedRootSource = (source: string) =>
     .map(line => line.trim())
     .filter(line => line !== '' && !line.startsWith('//'))
 
-const sorted = (values: ReadonlyArray<string>) => [...values].sort((left, right) => left.localeCompare(right))
+const sorted = (values: ReadonlyArray<string>) =>
+  [...values].sort((left, right) => left.localeCompare(right))
 
 const sameMembers = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
   sorted(left).join('\n') === sorted(right).join('\n')

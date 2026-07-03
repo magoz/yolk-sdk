@@ -5,11 +5,11 @@ that exercise package-backed providers through app runtime wiring.
 
 ## Providers
 
-| Package subpath | Role |
-| ---- | ---- |
-| `@yolk-sdk/agent/providers/openai/codex-provider` | Active ChatGPT Codex OAuth provider (`gpt-5.5`) |
+| Package subpath                                       | Role                                               |
+| ----------------------------------------------------- | -------------------------------------------------- |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | Active ChatGPT Codex OAuth provider (`gpt-5.5`)    |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Active Claude OAuth provider (`claude-sonnet-4-6`) |
-| `@yolk-sdk/agent/providers/openai/provider` | Dormant API-key Chat Completions scaffold |
+| `@yolk-sdk/agent/providers/openai/provider`           | Dormant API-key Chat Completions scaffold          |
 
 ## Model policy
 

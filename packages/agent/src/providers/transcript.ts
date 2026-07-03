@@ -1,8 +1,5 @@
 import { Effect } from 'effect'
-import {
-  validateNoDanglingHostToolCalls,
-  type AgentMessage
-} from '@yolk-sdk/agent/protocol'
+import { validateNoDanglingHostToolCalls, type AgentMessage } from '@yolk-sdk/agent/protocol'
 import { LLMError } from '@yolk-sdk/agent/loop'
 
 export const validateProviderTranscript = (

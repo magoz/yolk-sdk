@@ -142,7 +142,8 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
 
           if (parsed === undefined) {
             return yield* new AnthropicClaudeOAuthError({
-              message: 'Invalid Anthropic Claude authorization code. Expected callback URL or code#state.'
+              message:
+                'Invalid Anthropic Claude authorization code. Expected callback URL or code#state.'
             })
           }
 
@@ -224,4 +225,5 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
 
 export const makeAnthropicClaudeOAuthLayer = (
   httpClientLayer: Layer.Layer<HttpClient.HttpClient>
-) => Layer.effect(AnthropicClaudeOAuth, AnthropicClaudeOAuth.make).pipe(Layer.provide(httpClientLayer))
+) =>
+  Layer.effect(AnthropicClaudeOAuth, AnthropicClaudeOAuth.make).pipe(Layer.provide(httpClientLayer))

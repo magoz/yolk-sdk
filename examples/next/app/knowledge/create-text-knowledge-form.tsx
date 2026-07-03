@@ -67,10 +67,17 @@ export function CreateTextKnowledgeForm() {
         Pin into agent context
       </label>
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={isPending || title.trim().length === 0 || content.trim().length === 0}>
+        <Button
+          type="submit"
+          disabled={isPending || title.trim().length === 0 || content.trim().length === 0}
+        >
           {isPending ? 'Saving…' : 'Save knowledge'}
         </Button>
-        {message ? <p className="text-sm text-muted-foreground" aria-live="polite">{message}</p> : null}
+        {message ? (
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {message}
+          </p>
+        ) : null}
       </div>
     </form>
   )

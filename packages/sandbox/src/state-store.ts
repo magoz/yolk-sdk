@@ -4,7 +4,9 @@ import type { SandboxStateStoreError } from './errors.ts'
 import type { SandboxState } from './model.ts'
 
 export type SandboxStateStoreApi = {
-  readonly load: (sandboxSessionId: string) => Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError>
+  readonly load: (
+    sandboxSessionId: string
+  ) => Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError>
   readonly save: (input: {
     readonly sandboxSessionId: string
     readonly state: SandboxState

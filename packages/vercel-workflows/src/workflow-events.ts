@@ -105,9 +105,7 @@ export const sequenceDurableAgentEvent = <Event extends object>(
   }
 }
 
-const encodeDurableAgentEventNdjson = <Event extends object>(
-  event: DurableAgentEvent<Event>
-) =>
+const encodeDurableAgentEventNdjson = <Event extends object>(event: DurableAgentEvent<Event>) =>
   textEncoder.encode(`${JSON.stringify(event)}\n`)
 
 export const writeDurableAgentEvent = async <Event extends object>(

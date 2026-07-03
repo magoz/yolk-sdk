@@ -1,6 +1,12 @@
 import { Clock, Config, Effect, Layer, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
-import { ToolError, type ContextTransformer, type LLMProvider, type LoopConfig, type ToolExecutor } from '@yolk-sdk/agent/loop'
+import {
+  ToolError,
+  type ContextTransformer,
+  type LLMProvider,
+  type LoopConfig,
+  type ToolExecutor
+} from '@yolk-sdk/agent/loop'
 import {
   makeNonRecursiveTaskToolModule,
   makeTaskToolResult,
@@ -78,7 +84,8 @@ type AgentTextRuntime = {
 const agentTextSubagents: ReadonlyArray<TaskSubagentDefinition> = [
   {
     name: 'general',
-    description: 'General-purpose agent for researching complex questions and executing multi-step tasks.'
+    description:
+      'General-purpose agent for researching complex questions and executing multi-step tasks.'
   },
   {
     name: 'explore',
@@ -168,7 +175,11 @@ const skillSummary = (skill: {
   enabled: skill.enabled
 })
 
-const findSkillForUpdate = (input: { readonly userId: string; readonly id?: string; readonly name?: string }) =>
+const findSkillForUpdate = (input: {
+  readonly userId: string
+  readonly id?: string
+  readonly name?: string
+}) =>
   Effect.gen(function* () {
     if (input.id === undefined && input.name === undefined) {
       return yield* Effect.fail(
@@ -242,11 +253,18 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
 
         return {
           message: `Created skill: ${skill.name}`,
-          data: { skill: skillSummary(skill), commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined }
+          data: {
+            skill: skillSummary(skill),
+            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+          }
         }
       }
       case 'Update': {
-        const existing = yield* findSkillForUpdate({ userId: action.userId, id: action.id, name: action.name })
+        const existing = yield* findSkillForUpdate({
+          userId: action.userId,
+          id: action.id,
+          name: action.name
+        })
         const skillName = action.name ?? existing.name
         yield* Effect.annotateCurrentSpan({
           'tool.manage_skills.action': 'update',
@@ -277,7 +295,10 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
 
         return {
           message: `Updated skill: ${skill.name}`,
-          data: { skill: skillSummary(skill), commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined }
+          data: {
+            skill: skillSummary(skill),
+            commandName: action.createCommand ? (action.commandName ?? skill.name) : undefined
+          }
         }
       }
     }
@@ -287,7 +308,11 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
     Effect.mapError(error =>
       error instanceof ToolError
         ? error
-        : new ToolError({ tool: 'manage_skills', message: unknownToMessage(error), cause: 'execution' })
+        : new ToolError({
+            tool: 'manage_skills',
+            message: unknownToMessage(error),
+            cause: 'execution'
+          })
     )
   )
 
@@ -310,9 +335,10 @@ export const makeAgentTextRuntime = (
     const storageToolModule = makeAppStorageKnowledgeSearchToolModule()
     const knowledgeToolModule = makeAppKnowledgeToolModule()
     const telegramConnectorConfig = yield* getTelegramConnectorConfig(userId)
-    const telegramToolModules = telegramConnectorConfig === undefined
-      ? []
-      : [makeAppTelegramToolModule(telegramConnectorConfig)]
+    const telegramToolModules =
+      telegramConnectorConfig === undefined
+        ? []
+        : [makeAppTelegramToolModule(telegramConnectorConfig)]
     const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
@@ -361,7 +387,12 @@ export const makeAgentTextRuntime = (
               }
             ).pipe(
               Stream.runCollect,
-              Effect.provide(makeAgentRuntimeLayerWithTools(providerLayer, makeToolExecutorLayer(subagentToolSet)))
+              Effect.provide(
+                makeAgentRuntimeLayerWithTools(
+                  providerLayer,
+                  makeToolExecutorLayer(subagentToolSet)
+                )
+              )
             )
             const output = subagentResultText(Array.from(eventsChunk))
             const endedAtMs = yield* Clock.currentTimeMillis

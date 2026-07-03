@@ -67,9 +67,7 @@ describe('agent compaction', () => {
   it('estimates text, media, and tool-call messages', () => {
     expect(estimateAgentMessageTokens(user('abcd'))).toBe(7)
     expect(
-      estimateAgentMessageTokens(
-        UserMessage.make({ content: [TextPart.make({ text: 'abcd' })] })
-      )
+      estimateAgentMessageTokens(UserMessage.make({ content: [TextPart.make({ text: 'abcd' })] }))
     ).toBe(7)
     expect(estimateAgentMessageTokens(toolCallingAssistant())).toBeGreaterThan(6)
   })

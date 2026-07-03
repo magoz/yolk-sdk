@@ -46,7 +46,9 @@ export const deleteAgentSkillAction = async (input: { readonly id: string }) => 
         })
       ),
       Effect.as({ _tag: 'Success' as const }),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not delete skill' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not delete skill' })
+      )
     )
   )
 }

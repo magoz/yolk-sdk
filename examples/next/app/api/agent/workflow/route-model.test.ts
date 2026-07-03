@@ -1,5 +1,9 @@
 import { describe, expect, it } from '@effect/vitest'
-import { workflowNdjsonHeaders, workflowStreamResponse, type WorkflowReadableRun } from './route-model'
+import {
+  workflowNdjsonHeaders,
+  workflowStreamResponse,
+  type WorkflowReadableRun
+} from './route-model'
 
 const encoder = new TextEncoder()
 

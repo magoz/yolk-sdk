@@ -4,7 +4,10 @@ import { useState, useTransition } from 'react'
 import { updateKnowledgeAvailabilityAction } from '@/lib/core/knowledge/update-knowledge-availability-action'
 import type { KnowledgeAvailability } from '@/lib/core/knowledge/availability'
 
-const availabilities: ReadonlyArray<{ readonly value: KnowledgeAvailability; readonly label: string }> = [
+const availabilities: ReadonlyArray<{
+  readonly value: KnowledgeAvailability
+  readonly label: string
+}> = [
   { value: 'pinned', label: 'Pinned' },
   { value: 'searchable', label: 'Searchable' },
   { value: 'archived', label: 'Archived' }
@@ -49,18 +52,24 @@ export function UpdateKnowledgeAvailabilityButton({
           }
           setSelectedAvailability(nextAvailability)
           startTransition(() => {
-            void updateKnowledgeAvailabilityAction({ id, availability: nextAvailability }).then(result => {
-              if (result._tag === 'Error') {
-                setMessage(result.message)
-                setSelectedAvailability(availability)
-              } else {
-                setMessage(undefined)
+            void updateKnowledgeAvailabilityAction({ id, availability: nextAvailability }).then(
+              result => {
+                if (result._tag === 'Error') {
+                  setMessage(result.message)
+                  setSelectedAvailability(availability)
+                } else {
+                  setMessage(undefined)
+                }
               }
-            })
+            )
           })
         }}
       >
-        {availabilities.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+        {availabilities.map(item => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
       </select>
       {message ? <span className="text-xs text-destructive">{message}</span> : null}
     </div>

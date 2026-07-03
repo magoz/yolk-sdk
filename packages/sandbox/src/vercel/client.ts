@@ -1,5 +1,11 @@
 import { Context, Layer } from 'effect'
-import { APIError, Sandbox as VercelSdkSandbox, type Command, type CommandFinished, type NetworkPolicy } from '@vercel/sandbox'
+import {
+  APIError,
+  Sandbox as VercelSdkSandbox,
+  type Command,
+  type CommandFinished,
+  type NetworkPolicy
+} from '@vercel/sandbox'
 import type { SandboxInitialSource, SandboxResources, SandboxSnapshotRetention } from '../model.ts'
 
 export type VercelSandboxRuntime = 'node22' | 'node24' | 'node26' | 'python3.13'
@@ -71,9 +77,10 @@ export type VercelSandboxClientApi = {
   readonly create: (input: VercelSandboxCreateInput) => Promise<VercelSandboxHandle>
 }
 
-export class VercelSandboxClient extends Context.Service<VercelSandboxClient, VercelSandboxClientApi>()(
-  '@yolk-sdk/sandbox/vercel/VercelSandboxClient'
-) {}
+export class VercelSandboxClient extends Context.Service<
+  VercelSandboxClient,
+  VercelSandboxClientApi
+>()('@yolk-sdk/sandbox/vercel/VercelSandboxClient') {}
 
 export const isVercelMissingSandboxError = (error: unknown) =>
   error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
@@ -98,18 +105,22 @@ const toDetachedCommand = (command: Command): VercelDetachedCommand => ({
 const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
   name: sandbox.name,
   writeFiles: files =>
-    sandbox.writeFiles(files.map(file => ({
-      path: file.path,
-      content: file.content,
-      ...(file.mode === undefined ? {} : { mode: file.mode })
-    }))),
+    sandbox.writeFiles(
+      files.map(file => ({
+        path: file.path,
+        content: file.content,
+        ...(file.mode === undefined ? {} : { mode: file.mode })
+      }))
+    ),
   runDetachedCommand: input =>
-    sandbox.runCommand({
-      cmd: input.cmd,
-      args: input.args === undefined ? [] : [...input.args],
-      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-      detached: true
-    }).then(toDetachedCommand),
+    sandbox
+      .runCommand({
+        cmd: input.cmd,
+        args: input.args === undefined ? [] : [...input.args],
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        detached: true
+      })
+      .then(toDetachedCommand),
   getCommand: id => sandbox.getCommand(id).then(toDetachedCommand),
   extendTimeout: durationMs => sandbox.extendTimeout(durationMs).then(() => undefined),
   delete: () => sandbox.delete().then(() => undefined),
@@ -211,13 +222,15 @@ export const VercelSandboxClientLive = Layer.succeed(
   VercelSandboxClient,
   VercelSandboxClient.of({
     get: input =>
-      VercelSdkSandbox.get({ name: input.name }).then(toHandle).catch(error => {
-        if (isVercelMissingSandboxError(error)) {
-          return null
-        }
+      VercelSdkSandbox.get({ name: input.name })
+        .then(toHandle)
+        .catch(error => {
+          if (isVercelMissingSandboxError(error)) {
+            return null
+          }
 
-        throw error
-      }),
+          throw error
+        }),
     create: input => createSandbox(input).then(toHandle)
   })
 )
