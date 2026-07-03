@@ -17,6 +17,12 @@ export type HoldToSpeakStatus = 'idle' | 'recording' | 'transcribing'
 type UseHoldToSpeakInput = {
   readonly onTranscript: (text: string) => void
   readonly onError: (message: string) => void
+  /**
+   * Fires when the MediaRecorder actually starts capturing — after the
+   * getUserMedia permission/setup delay, not at pointer down. Speech before
+   * this moment is lost; hosts use it for a "mic is hot" cue.
+   */
+  readonly onRecordingStarted?: () => void
 }
 
 type SpeechAudio = {
@@ -163,7 +169,11 @@ type PendingStart = {
  * The transcript is handed to the caller, which submits it through the normal
  * text agent runtime, so hold-to-speak turns get the full toolset and HITL.
  */
-export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) => {
+export const useHoldToSpeak = ({
+  onTranscript,
+  onError,
+  onRecordingStarted
+}: UseHoldToSpeakInput) => {
   const [status, setStatus] = useState<HoldToSpeakStatus>('idle')
   const [isSpeaking, setIsSpeaking] = useState(false)
   const activeRecordingRef = useRef<ActiveRecording | null>(null)
@@ -174,11 +184,11 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
   const speechRunIdRef = useRef(0)
   const speechPumpRunIdRef = useRef<number | null>(null)
   const cancelPlaybackRef = useRef<(() => void) | null>(null)
-  const callbacksRef = useRef({ onTranscript, onError })
+  const callbacksRef = useRef({ onTranscript, onError, onRecordingStarted })
 
   useEffect(() => {
-    callbacksRef.current = { onTranscript, onError }
-  }, [onTranscript, onError])
+    callbacksRef.current = { onTranscript, onError, onRecordingStarted }
+  }, [onTranscript, onError, onRecordingStarted])
 
   const revokeObjectUrl = useCallback(() => {
     if (objectUrlRef.current !== null) {
@@ -410,6 +420,7 @@ export const useHoldToSpeak = ({ onTranscript, onError }: UseHoldToSpeakInput) =
         })
         activeRecordingRef.current = recording
         recorder.start()
+        callbacksRef.current.onRecordingStarted?.()
       })
       .catch((error: unknown) => {
         pendingStartRef.current = null

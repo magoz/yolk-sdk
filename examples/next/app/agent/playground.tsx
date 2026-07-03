@@ -59,7 +59,7 @@ import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
 import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
-import { playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
+import { playRecordingStartEarcon, playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
@@ -577,7 +577,10 @@ export function AgentPlayground({
     onError: message => {
       toast.error(truncate(message))
       recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
-    }
+    },
+    // Speech before the recorder starts (permission/setup delay) is lost;
+    // blip when the mic is actually hot.
+    onRecordingStarted: playRecordingStartEarcon
   })
   const enqueueTtsSpeech = holdToSpeak.enqueueSpeech
   const resetTtsSpeech = holdToSpeak.resetSpeech
@@ -729,6 +732,14 @@ export function AgentPlayground({
 
     toggleVoice()
   }, [isVoiceMode, resetTtsSpeech, toggleVoice])
+
+  const startHoldRecording = holdToSpeak.startRecording
+  const handleHoldStart = useCallback(() => {
+    // Pointer down is the user gesture; prime so the recording blip can play
+    // when the recorder actually starts after the permission/setup delay.
+    primeVoiceEarcon()
+    startHoldRecording()
+  }, [startHoldRecording])
 
   useEffect(() => {
     appendTranscriptRef.current = text => {
@@ -1275,7 +1286,7 @@ export function AgentPlayground({
             onSubmit={handleSubmit}
             onStop={handleStop}
             onToggleVoice={handleToggleVoice}
-            onHoldStart={holdToSpeak.startRecording}
+            onHoldStart={handleHoldStart}
             onHoldEnd={holdToSpeak.stopRecording}
             onToggleTts={handleToggleTts}
           />

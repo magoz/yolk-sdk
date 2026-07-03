@@ -56,8 +56,7 @@ const playTone = (
   oscillator.stop(endTime)
 }
 
-/** Two-note rising chime: "realtime is live, the mic is capturing now". */
-export const playVoiceReadyEarcon = () => {
+const withAudioContext = (play: (context: AudioContext) => void) => {
   const context = getAudioContext()
 
   if (context === null) {
@@ -68,6 +67,24 @@ export const playVoiceReadyEarcon = () => {
     void context.resume().catch(() => undefined)
   }
 
-  playTone(context, 660, 0, 0.11)
-  playTone(context, 880, 0.09, 0.14)
+  play(context)
+}
+
+/** Two-note rising chime: "realtime is live, the mic is capturing now". */
+export const playVoiceReadyEarcon = () => {
+  withAudioContext(context => {
+    playTone(context, 660, 0, 0.11)
+    playTone(context, 880, 0.09, 0.14)
+  })
+}
+
+/**
+ * Single short blip: "hold-to-speak recorder started". Distinct from the
+ * realtime two-note chime; getUserMedia permission/setup delays mean speech
+ * before this blip is not captured.
+ */
+export const playRecordingStartEarcon = () => {
+  withAudioContext(context => {
+    playTone(context, 880, 0, 0.09)
+  })
 }
