@@ -95,10 +95,11 @@ describe('knowledge tool', () => {
       readonly limit: number
     }> = []
     const toolModule = makeKnowledgeToolModule({
-      list: input => Effect.sync(() => {
-        calls.push(input)
-        return [documentSummary]
-      }),
+      list: input =>
+        Effect.sync(() => {
+          calls.push(input)
+          return [documentSummary]
+        }),
       search: () => Effect.succeed([])
     })
 
@@ -221,10 +222,11 @@ describe('knowledge tool', () => {
     }> = []
     const toolModule = makeKnowledgeToolModule({
       search: () => Effect.succeed([]),
-      getContext: input => Effect.sync(() => {
-        calls.push(input)
-        return contextWindow
-      })
+      getContext: input =>
+        Effect.sync(() => {
+          calls.push(input)
+          return contextWindow
+        })
     })
 
     return Effect.gen(function* () {
@@ -236,12 +238,25 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { documentId: ' object_1 ', chunkId: ' chunk_1 ', before: 50, after: 4, maxChars: 90_000 }
+          params: {
+            documentId: ' object_1 ',
+            chunkId: ' chunk_1 ',
+            before: 50,
+            after: 4,
+            maxChars: 90_000
+          }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', documentId: 'object_1', chunkId: 'chunk_1', before: 20, after: 4, maxChars: 60_000 }
+        {
+          userId: 'user_1',
+          documentId: 'object_1',
+          chunkId: 'chunk_1',
+          before: 20,
+          after: 4,
+          maxChars: 60_000
+        }
       ])
       expect(result.content).toContain('Knowledge context: Project memory')
       expect(result.content).toContain('Has after: yes')
@@ -259,10 +274,11 @@ describe('knowledge tool', () => {
     }> = []
     const toolModule = makeKnowledgeToolModule({
       search: () => Effect.succeed([]),
-      getContext: input => Effect.sync(() => {
-        calls.push(input)
-        return contextWindow
-      })
+      getContext: input =>
+        Effect.sync(() => {
+          calls.push(input)
+          return contextWindow
+        })
     })
 
     return Effect.gen(function* () {
@@ -274,12 +290,27 @@ describe('knowledge tool', () => {
         ToolCall.make({
           id: 'call_1',
           name: 'get_knowledge_context',
-          params: { documentId: 'object_1', chunkId: null, position: null, before: null, after: null, maxChars: null }
+          params: {
+            documentId: 'object_1',
+            chunkId: null,
+            position: null,
+            before: null,
+            after: null,
+            maxChars: null
+          }
         })
       )
 
       expect(calls).toEqual([
-        { userId: 'user_1', documentId: 'object_1', chunkId: undefined, position: undefined, before: 3, after: 6, maxChars: 20_000 }
+        {
+          userId: 'user_1',
+          documentId: 'object_1',
+          chunkId: undefined,
+          position: undefined,
+          before: 3,
+          after: 6,
+          maxChars: 20_000
+        }
       ])
     })
   })
@@ -287,11 +318,14 @@ describe('knowledge tool', () => {
   it.effect('returns model-visible errors for missing knowledge context', () => {
     const toolModule = makeKnowledgeToolModule({
       search: () => Effect.succeed([]),
-      getContext: () => Effect.fail(modelVisibleToolError({
-        tool: 'get_knowledge_context',
-        message: 'Knowledge document not found',
-        reason: 'not_found'
-      }))
+      getContext: () =>
+        Effect.fail(
+          modelVisibleToolError({
+            tool: 'get_knowledge_context',
+            message: 'Knowledge document not found',
+            reason: 'not_found'
+          })
+        )
     })
 
     return Effect.gen(function* () {

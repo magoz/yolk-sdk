@@ -119,9 +119,9 @@ const parsedEffect = Schema.decodeUnknownEffect(ExternalData)(data)
 
 ### Valid Reasons for Disabling Rules
 
-| Rule                                            | Valid Reason                                      |
-| ----------------------------------------------- | ------------------------------------------------- |
-| `@typescript-eslint/no-unused-vars`             | Destructuring to omit properties (use `_` prefix) |
+| Rule                                | Valid Reason                                      |
+| ----------------------------------- | ------------------------------------------------- |
+| `@typescript-eslint/no-unused-vars` | Destructuring to omit properties (use `_` prefix) |
 
 ### Invalid Reasons (Never Do This)
 

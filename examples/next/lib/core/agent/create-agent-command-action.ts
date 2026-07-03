@@ -46,7 +46,9 @@ export const createAgentCommandAction = async (input: AgentCommandInput) => {
         })
       ),
       Effect.as({ _tag: 'Success' as const }),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not create command' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not create command' })
+      )
     )
   )
 }

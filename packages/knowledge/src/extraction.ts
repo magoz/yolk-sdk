@@ -16,6 +16,7 @@ export type KnowledgeExtractorApi = {
   ) => Effect.Effect<ExtractedKnowledgeDocument, KnowledgeExtractionError>
 }
 
-export class KnowledgeExtractor extends Context.Service<KnowledgeExtractor, KnowledgeExtractorApi>()(
-  '@yolk-sdk/knowledge/KnowledgeExtractor'
-) {}
+export class KnowledgeExtractor extends Context.Service<
+  KnowledgeExtractor,
+  KnowledgeExtractorApi
+>()('@yolk-sdk/knowledge/KnowledgeExtractor') {}

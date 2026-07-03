@@ -1,6 +1,10 @@
 # First-class Yolk voice
 
-Execution status: PLANNING. Initial decisions resolved; no implementation started.
+Execution status: IMPLEMENTED. All phases (1-9) landed: provider-neutral voice protocol, OpenAI Realtime codecs + client codec, browser WebRTC transport, client controller with approval HITL pause/resume, server tool handler with policy gating, transcript projection + durable event ids, `useYolkVoice` React hook, Next example migration, Effect WebSocket transport, OpenAI TTS/STT adapters, docs, and release gates (build, publint, smoke, exports, boundaries, tsc, lint, tests, docs).
+
+Remaining follow-ups are tracked as future questions: durable pending-approval persistence through the example app's session log (package contracts shipped; example has no voice session store yet), voice usage events, second provider, telephony, voice `question`.
+
+Follow-up shipped: the Next example now offers two voice input modes — `realtime` (existing fluid conversation) and `hold` (hold-to-speak: MediaRecorder -> `/api/agent/voice/transcribe` STT -> normal text runtime with full toolset/HITL -> `/api/agent/voice/speak` TTS reply). OpenAI transcription uploads now carry MIME-derived filenames so container detection works for webm/mp4 recordings.
 
 Scope: Yolk-native voice stack using Effect patterns. No AI SDK runtime dependency.
 
@@ -367,61 +371,61 @@ Verification mechanism for MVP: server-side session state keyed by authenticated
 
 ### Protocol/core
 
-- [ ] VOICE-10 Add voice command/event/config schemas.
-- [ ] VOICE-11 Add voice error schemas.
-- [ ] VOICE-12 Add voice controller service contracts.
-- [ ] VOICE-13 Add transcript projector contract.
+- [x] VOICE-10 Add voice command/event/config schemas.
+- [x] VOICE-11 Add voice error schemas.
+- [x] VOICE-12 Add voice controller service contracts.
+- [x] VOICE-13 Add transcript projector contract.
 
 ### OpenAI realtime
 
-- [ ] VOICE-20 Move OpenAI session config builder to provider subpath.
-- [ ] VOICE-21 Add OpenAI realtime event decoder.
-- [ ] VOICE-22 Add OpenAI realtime command encoder.
-- [ ] VOICE-23 Add codec tests for transcript/tool/error/interruption events.
+- [x] VOICE-20 Move OpenAI session config builder to provider subpath.
+- [x] VOICE-21 Add OpenAI realtime event decoder.
+- [x] VOICE-22 Add OpenAI realtime command encoder.
+- [x] VOICE-23 Add codec tests for transcript/tool/error/interruption events.
 
 ### WebRTC
 
-- [ ] VOICE-30 Add browser WebRTC transport.
-- [ ] VOICE-31 Add fake WebRTC seam.
-- [ ] VOICE-32 Add lifecycle cleanup tests.
-- [ ] VOICE-33 Add example route integration for SDP/token flow.
+- [x] VOICE-30 Add browser WebRTC transport.
+- [x] VOICE-31 Add fake WebRTC seam.
+- [x] VOICE-32 Add lifecycle cleanup tests.
+- [x] VOICE-33 Add example route integration for SDP/token flow.
 
 ### Tools/HITL
 
-- [ ] VOICE-40 Bind voice tool calls to sessions.
-- [ ] VOICE-41 Enforce voice tool policy server-side.
-- [ ] VOICE-42 Add manual approval flow with persisted pending state.
-- [ ] VOICE-43 Document voice `question` deferral.
-- [ ] VOICE-44 Add duplicate/idempotent tool-call handling.
-- [ ] VOICE-45 Add approve-after-session-death resume path.
-- [ ] VOICE-46 Define server tool endpoint contract replacing generic `/api/agent/realtime/tool`.
+- [x] VOICE-40 Bind voice tool calls to sessions (`VoiceSessionToolCallRequest` wired through example route/tool context).
+- [x] VOICE-41 Enforce voice tool policy server-side (`decideVoiceToolCall`/`handleVoiceToolCall`; approval-gated tools never execute).
+- [x] VOICE-42 Add manual approval flow (controller pause/resume + server approval application; durable pending persistence lands with Phase 5 log).
+- [x] VOICE-43 Document voice `question` deferral.
+- [x] VOICE-44 Add duplicate/idempotent tool-call handling (client controller de-dupe; durable server de-dupe lands with Phase 5 log).
+- [x] VOICE-45 Add approve-after-session-death resume path (controller keeps approval pending on session end; `voiceSeedTextsFromMessages` + stored HITL responses resume on reconnect; example-app durable store wiring is a future follow-up).
+- [x] VOICE-46 Define server tool endpoint contract (`VoiceSessionToolCallRequest` / `VoiceToolCallOutcome`).
 
 ### Durability
 
-- [ ] VOICE-50 Project transcripts to `AgentMessage`.
-- [ ] VOICE-51 Project tool calls/results without dangling calls.
-- [ ] VOICE-52 Append normalized voice events through `SessionEventStore` with `eventId`.
-- [ ] VOICE-53 Add reconnect replay path with client de-dupe.
+- [x] VOICE-50 Project transcripts to `AgentMessage`.
+- [x] VOICE-51 Project tool calls/results without dangling calls (unsettled calls dropped; pending HITL lives in session log).
+- [x] VOICE-52 Add `StoredVoiceEvent` + sequencer for durable `eventId` appends (host wires `SessionEventStore` in example/Phase 6).
+- [x] VOICE-53 Add reconnect seed helper (`voiceSeedTextsFromMessages`) + `dedupeStoredVoiceEvents` client de-dupe.
 
 ### React/example
 
-- [ ] VOICE-60 Add headless React voice hook.
-- [ ] VOICE-61 Migrate Next example voice UI.
-- [ ] VOICE-62 Add UI/HITL projection tests.
+- [x] VOICE-60 Add headless React voice hook (`useYolkVoice` under `@yolk-sdk/agent/voice/react`).
+- [x] VOICE-61 Migrate Next example voice UI (adapter over package hook; app WebRTC/tool HTTP glue deleted).
+- [x] VOICE-62 Add UI/HITL projection tests (hook lifecycle, drafts, approvals, errors, seeding).
 
 ### WebSocket/STT/TTS
 
-- [ ] VOICE-70 Add Effect WebSocket voice transport.
-- [ ] VOICE-71 Add OpenAI speech adapter.
-- [ ] VOICE-72 Add OpenAI transcription adapter.
+- [x] VOICE-70 Add Effect WebSocket voice transport (`makeWebSocketVoiceTransport` over Effect Socket).
+- [x] VOICE-71 Add OpenAI speech adapter (`makeOpenAiSpeechSynthesizerLayer`).
+- [x] VOICE-72 Add OpenAI transcription adapter (`makeOpenAiTranscriberLayer`).
 
 ### Docs/checks
 
-- [ ] VOICE-80 Update package README/export docs.
-- [ ] VOICE-81 Update docs site package reference.
-- [ ] VOICE-82 Add voice quickstart.
-- [ ] VOICE-83 Add voice HITL guide.
-- [ ] VOICE-84 Run package gates.
+- [x] VOICE-80 Update package README/export docs.
+- [x] VOICE-81 Update docs site package reference (`reference/packages`, `api-reference/agent`).
+- [x] VOICE-82 Add voice docs page (`docs/agent/voice`) with hook/server/speech usage.
+- [x] VOICE-83 Add voice HITL guidance (approvals section in voice docs page).
+- [x] VOICE-84 Run package gates (build, publint, smoke, exports, boundaries, tsc, lint, tests, docs).
 
 ## Open questions
 

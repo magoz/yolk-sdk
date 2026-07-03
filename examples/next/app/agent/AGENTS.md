@@ -80,9 +80,18 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 
 ## Voice lifecycle
 
-- Guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
-- Completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
+- Composer exposes three voice controls side by side: hold-to-speak mic (STT into the input field), realtime toggle (fluid speech-to-speech), and a TTS speaker toggle (speak assistant replies aloud). No settings visit required.
+- Realtime: guard stale async WebRTC starts/stops; close peer/data/media resources on cancel/failure.
+- Voice earcons (`voice-earcon.ts`): speech before capture starts is lost, so generated Web Audio cues mark the real capture start — two-note chime on the realtime live rising edge, single blip when the hold-to-speak recorder starts (`onRecordingStarted`, after the getUserMedia delay). The context is primed in the toggle/pointer-down gesture.
+- Realtime: completed transcripts append as protocol user messages; interim audio drafts remain transient UI state.
+- Realtime assistant finals are emitted as `AssistantMessage` events (replace the streamed bubble deterministically) followed by `AgentEnd` for status; never rely on the `AgentEnd` fallback append alone — its ordering guard breaks under realtime races (late whisper user finals, duplicate final event families, back-to-back responses) and duplicates messages.
 - Voice tool calls route through `/api/agent/realtime/tool`; do not execute tools in the browser hook.
+- Hold-to-speak (`use-hold-to-speak.ts`): MediaRecorder while held, `/api/agent/voice/transcribe` on release, and the transcript is appended into the composer input for review/edit before the user sends. It never auto-submits. Sub-300ms holds are discarded.
+- `speech-chunker.ts` owns pure sentence chunking/flush rules; keep tests there when changing streamed TTS boundaries.
+- `use-hold-to-speak.ts` owns STT recording plus the sequential TTS playback queue/prefetch/reset lifecycle; `playground.tsx` decides when chunks are enqueued (`ttsEnabled && !isVoiceMode`).
+- TTS toggle: while enabled, assistant `LLMTextDelta` output is sentence-chunked and queued through `/api/agent/voice/speak`; `AgentEnd` flushes the final partial chunk. Disabling stops playback. Speaker/hold controls are disabled while realtime is active, and realtime is disabled while holding/transcribing.
+- TTS and realtime are mutually exclusive: starting realtime force-disables the TTS toggle, and the event handler additionally ignores TTS chunking while voice mode is active (realtime pipes projected `LLMTextDelta`/`AgentEnd` through the same `onEvent` path and narrates natively — two narrations otherwise).
+- Hold-to-speak sends go through the normal text runtime, so they get the full toolset and HITL.
 
 ## References
 

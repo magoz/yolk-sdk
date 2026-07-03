@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { OAuthAccessToken, isTokenFresh, shouldRefreshToken, tokenRemainingTtlMs } from '../../src/oauth/index.ts'
+import {
+  OAuthAccessToken,
+  isTokenFresh,
+  shouldRefreshToken,
+  tokenRemainingTtlMs
+} from '../../src/oauth/index.ts'
 
 describe('OAuth token TTL helpers', () => {
   it('checks freshness against caller minimum TTL', () => {

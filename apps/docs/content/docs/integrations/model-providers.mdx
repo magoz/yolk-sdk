@@ -9,12 +9,12 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 
 ## Available providers
 
-| Provider | Factory | Auth | Notes |
-| --- | --- | --- | --- |
-| OpenAI-compatible chat | `makeOpenAiProviderLayer` | API key | Chat Completions-style endpoint; `OpenAiProviderLayer` can read `OPENAI_API_KEY` through Effect Config. |
-| OpenAI Codex | `makeOpenAiCodexProviderLayer` | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers. |
-| Anthropic Claude Code | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers. |
-| Faux provider | `FauxProvider.layer(...)` | none | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`. |
+| Provider               | Factory                            | Auth               | Notes                                                                                                   |
+| ---------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| OpenAI-compatible chat | `makeOpenAiProviderLayer`          | API key            | Chat Completions-style endpoint; `OpenAiProviderLayer` can read `OPENAI_API_KEY` through Effect Config. |
+| OpenAI Codex           | `makeOpenAiCodexProviderLayer`     | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers.                                |
+| Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                        |
+| Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                   |
 
 ## OpenAI-compatible chat
 

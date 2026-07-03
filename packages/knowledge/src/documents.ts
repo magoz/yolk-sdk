@@ -48,7 +48,9 @@ export const CreateKnowledgeDocumentInputSchema = Schema.Struct({
   summary: Schema.optional(Schema.String),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
-export type CreateKnowledgeDocumentInput = Schema.Schema.Type<typeof CreateKnowledgeDocumentInputSchema>
+export type CreateKnowledgeDocumentInput = Schema.Schema.Type<
+  typeof CreateKnowledgeDocumentInputSchema
+>
 
 export const UpdateKnowledgeDocumentInputSchema = Schema.Struct({
   scope: KnowledgeScopeSchema,
@@ -65,7 +67,9 @@ export const UpdateKnowledgeDocumentInputSchema = Schema.Struct({
   reviewedAt: Schema.optional(Schema.DateTimeUtc),
   metadata: Schema.optional(KnowledgeMetadataSchema)
 })
-export type UpdateKnowledgeDocumentInput = Schema.Schema.Type<typeof UpdateKnowledgeDocumentInputSchema>
+export type UpdateKnowledgeDocumentInput = Schema.Schema.Type<
+  typeof UpdateKnowledgeDocumentInputSchema
+>
 
 export const KnowledgeFileSchema = Schema.Struct({
   id: NonEmptyTrimmedString,
@@ -92,7 +96,10 @@ export type KnowledgeChunk = Schema.Schema.Type<typeof KnowledgeChunkSchema>
 
 export const KnowledgeSearchScopeSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('KnowledgeScope'), id: NonEmptyTrimmedString }),
-  Schema.Struct({ _tag: Schema.Literal('KnowledgeScopes'), ids: Schema.Array(NonEmptyTrimmedString) })
+  Schema.Struct({
+    _tag: Schema.Literal('KnowledgeScopes'),
+    ids: Schema.Array(NonEmptyTrimmedString)
+  })
 ])
 export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>
 

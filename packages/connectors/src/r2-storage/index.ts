@@ -32,7 +32,9 @@ export class R2PresignOutput extends Schema.Class<R2PresignOutput>('R2PresignOut
 }) {}
 
 export type R2PresignerApi = {
-  readonly presignPutObject: (input: R2PresignInput) => Effect.Effect<R2PresignOutput, ConnectorError>
+  readonly presignPutObject: (
+    input: R2PresignInput
+  ) => Effect.Effect<R2PresignOutput, ConnectorError>
 }
 
 export class R2Presigner extends Context.Service<R2Presigner, R2PresignerApi>()(

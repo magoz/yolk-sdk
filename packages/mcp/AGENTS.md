@@ -4,12 +4,12 @@
 
 ## Subpaths
 
-| Subpath | Source | Role |
-| --- | --- | --- |
-| `@yolk-sdk/mcp/client` | `src/client` | MCP client/config/tool adapters |
-| `@yolk-sdk/mcp/client/node` | `src/client/node.ts` | Node convenience wrappers |
-| `@yolk-sdk/mcp/protocol` | `src/client/protocol.ts` | JSON-RPC/MCP protocol helpers |
-| `@yolk-sdk/mcp/server` | `src/server` | Tool-only MCP server primitives |
+| Subpath                     | Source                   | Role                            |
+| --------------------------- | ------------------------ | ------------------------------- |
+| `@yolk-sdk/mcp/client`      | `src/client`             | MCP client/config/tool adapters |
+| `@yolk-sdk/mcp/client/node` | `src/client/node.ts`     | Node convenience wrappers       |
+| `@yolk-sdk/mcp/protocol`    | `src/client/protocol.ts` | JSON-RPC/MCP protocol helpers   |
+| `@yolk-sdk/mcp/server`      | `src/server`             | Tool-only MCP server primitives |
 
 ## Boundaries
 

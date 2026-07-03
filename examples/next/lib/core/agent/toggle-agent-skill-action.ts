@@ -50,7 +50,9 @@ export const toggleAgentSkillAction = async (input: {
         })
       ),
       Effect.as({ _tag: 'Success' as const }),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update skill' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not update skill' })
+      )
     )
   )
 }

@@ -93,13 +93,13 @@ Workflow/runtime changes require:
 
 ## 6. Validation matrix
 
-| Change | Commands |
-| --- | --- |
-| Docs only | `pnpm docs:check`, `pnpm build:docs`, `pnpm tsc`, `pnpm lint` |
-| Package API docs | add `pnpm packages:check` |
-| Package behavior docs | add package tests or `pnpm test:run` when broad |
-| Docs app code/config | include `pnpm build:docs` |
-| Cloudflare docs/runtime | add `pnpm cloudflare:check` |
+| Change                  | Commands                                                      |
+| ----------------------- | ------------------------------------------------------------- |
+| Docs only               | `pnpm docs:check`, `pnpm build:docs`, `pnpm tsc`, `pnpm lint` |
+| Package API docs        | add `pnpm packages:check`                                     |
+| Package behavior docs   | add package tests or `pnpm test:run` when broad               |
+| Docs app code/config    | include `pnpm build:docs`                                     |
+| Cloudflare docs/runtime | add `pnpm cloudflare:check`                                   |
 
 ## 7. Final audit before response
 

@@ -120,7 +120,8 @@ describe('OpenAI Codex provider', () => {
         ],
         parallel_tool_calls: true
       })
-    }))
+    })
+  )
 
   it.effect('rejects dangling host tool calls before Codex request lowering', () =>
     Effect.gen(function* () {
@@ -300,10 +301,7 @@ describe('OpenAI Codex provider', () => {
         ['event: error', 'data: {"type":"error","message":"backend overloaded"}', ''].join('\n')
       )
 
-      const error = yield* streamOpenAiCodexResponse(response).pipe(
-        Stream.runCollect,
-        Effect.flip
-      )
+      const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
 
       expect(error).toMatchObject({
         _tag: 'LLMError',

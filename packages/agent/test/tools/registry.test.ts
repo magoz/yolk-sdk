@@ -126,7 +126,11 @@ describe('resolveTools', () => {
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: params.text }))
       })
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
-      const result = yield* toolSet.execute({ id: 'call_1', name: 'schema_echo', params: { text: 'hi' } })
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: 'schema_echo',
+        params: { text: 'hi' }
+      })
 
       expect(result.content).toBe('hi')
       expect(toolSet.tools[0]?.parameters).toMatchObject({
@@ -219,12 +223,14 @@ describe('resolveTools', () => {
         parameters: EmptyToolParams,
         access: 'read',
         execute: () =>
-          Effect.fail(modelVisibleToolError({
-            tool: 'visible_error',
-            message: 'Try another input.',
-            reason: 'invalid_input',
-            details: { code: 'bad_input' }
-          }))
+          Effect.fail(
+            modelVisibleToolError({
+              tool: 'visible_error',
+              message: 'Try another input.',
+              reason: 'invalid_input',
+              details: { code: 'bad_input' }
+            })
+          )
       })
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
       const result = yield* toolSet.execute({

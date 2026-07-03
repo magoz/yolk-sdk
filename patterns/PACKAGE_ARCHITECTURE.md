@@ -19,11 +19,15 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/agent/providers/openai/codex`
   - `@yolk-sdk/agent/providers/openai/codex-provider`
   - `@yolk-sdk/agent/providers/openai/provider`
+  - `@yolk-sdk/agent/providers/openai/realtime`
+  - `@yolk-sdk/agent/providers/openai/speech`
   - `@yolk-sdk/agent/providers/anthropic`
   - `@yolk-sdk/agent/providers/anthropic/claude`
   - `@yolk-sdk/agent/providers/anthropic/claude-provider`
   - `@yolk-sdk/agent/skillset`
   - `@yolk-sdk/agent/voice`
+  - `@yolk-sdk/agent/voice/browser`
+  - `@yolk-sdk/agent/voice/react`
 - `@yolk-sdk/mcp` is a sibling MCP package, not part of agent core.
 - MCP APIs use explicit subpaths:
   - `@yolk-sdk/mcp/client`
@@ -61,8 +65,10 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol}
-@yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}
+@yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}; openai/realtime + openai/speech may also use @yolk-sdk/agent/voice contracts
 @yolk-sdk/agent/voice -> @yolk-sdk/agent/{loop,protocol}
+@yolk-sdk/agent/voice/browser -> voice core + browser WebRTC globals (lazy, behind a runtime seam)
+@yolk-sdk/agent/voice/react -> voice core + voice/browser + React peer
 @yolk-sdk/agent core -> no @yolk-sdk/knowledge, @yolk-sdk/mcp, app, Next, provider SDKs
 ```
 
@@ -91,7 +97,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents example app, Cloudflare, and `examples/next/e2e` code from importing retired internal package names.
 - Boundary script prevents retired package directories from reappearing.
 - Boundary script prevents root `@yolk-sdk/agent` and `@yolk-sdk/mcp` imports in example app, Cloudflare, and `examples/next/e2e` code; use explicit subpaths.
-- Boundary script prevents agent core subpaths from importing knowledge, MCP, retired package names, `@yolk-sdk/agent/react`, Next, React, or Node builtins. `@yolk-sdk/agent/react` is the only React-using subpath.
+- Boundary script prevents agent core subpaths from importing knowledge, MCP, retired package names, `@yolk-sdk/agent/react`, Next, React, or Node builtins. `@yolk-sdk/agent/react` and `@yolk-sdk/agent/voice/react` are the only React-using subpaths.
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.

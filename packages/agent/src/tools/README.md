@@ -33,12 +33,14 @@ converts these into `ToolResult.isError = true` with structured content:
 import { Effect } from 'effect'
 import { modelVisibleToolError } from '@yolk-sdk/agent/tools'
 
-return Effect.fail(modelVisibleToolError({
-  tool: 'search_docs',
-  reason: 'not_found',
-  message: 'Document not found',
-  details: { documentId: 'doc_123' }
-}))
+return Effect.fail(
+  modelVisibleToolError({
+    tool: 'search_docs',
+    reason: 'not_found',
+    message: 'Document not found',
+    details: { documentId: 'doc_123' }
+  })
+)
 ```
 
 Thrown `ToolError`s become model-visible failed tool results plus `ToolExecutionError` events,

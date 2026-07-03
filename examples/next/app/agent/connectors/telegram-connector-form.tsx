@@ -61,8 +61,8 @@ export function TelegramConnectorForm({
         <div className="space-y-1">
           <h2 className="text-lg font-medium">Telegram</h2>
           <p className="text-sm leading-6 text-muted-foreground">
-            Configure a bot token and chat id. The agent gets a `telegram_send_message`
-            tool after connect, including voice and subagent runs.
+            Configure a bot token and chat id. The agent gets a `telegram_send_message` tool after
+            connect, including voice and subagent runs.
           </p>
         </div>
         <Badge variant={connected ? 'secondary' : 'outline'}>
@@ -99,12 +99,7 @@ export function TelegramConnectorForm({
             {connected ? 'Update' : 'Connect'}
           </Button>
           {connected ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleDisconnect}
-              disabled={isPending}
-            >
+            <Button type="button" variant="outline" onClick={handleDisconnect} disabled={isPending}>
               Disconnect
             </Button>
           ) : null}

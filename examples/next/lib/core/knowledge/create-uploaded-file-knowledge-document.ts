@@ -40,13 +40,21 @@ export const createUploadedFileKnowledgeDocument = (input: {
         content: extracted.content,
         status: 'processing',
         availability: input.pinned ? 'pinned' : 'searchable',
-        summary: extracted.content.length <= 500 ? extracted.content : `${extracted.content.slice(0, 500)}…`,
+        summary:
+          extracted.content.length <= 500
+            ? extracted.content
+            : `${extracted.content.slice(0, 500)}…`,
         metadata: { filename: input.filename, mediaType: input.mediaType, ...extracted.metadata }
       })
       .returning()
 
     if (document === undefined) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge document', entity: 'userKnowledgeDocument' }))
+      return yield* Effect.fail(
+        new PersistenceError({
+          message: 'Could not create knowledge document',
+          entity: 'userKnowledgeDocument'
+        })
+      )
     }
 
     return yield* Effect.gen(function* () {
@@ -63,7 +71,12 @@ export const createUploadedFileKnowledgeDocument = (input: {
         .returning()
 
       if (file === undefined) {
-        return yield* Effect.fail(new PersistenceError({ message: 'Could not create knowledge file', entity: 'userKnowledgeFile' }))
+        return yield* Effect.fail(
+          new PersistenceError({
+            message: 'Could not create knowledge file',
+            entity: 'userKnowledgeFile'
+          })
+        )
       }
 
       return yield* indexKnowledgeDocument({
@@ -77,7 +90,10 @@ export const createUploadedFileKnowledgeDocument = (input: {
         Effect.all(
           [
             fileStore.deleteFile({ storageKey: input.storageKey }).pipe(Effect.ignore),
-            db.delete(schema.userKnowledgeDocument).where(eq(schema.userKnowledgeDocument.id, document.id)).pipe(Effect.ignore)
+            db
+              .delete(schema.userKnowledgeDocument)
+              .where(eq(schema.userKnowledgeDocument.id, document.id))
+              .pipe(Effect.ignore)
           ],
           { concurrency: 'unbounded' }
         ).pipe(Effect.andThen(Effect.fail(error)))

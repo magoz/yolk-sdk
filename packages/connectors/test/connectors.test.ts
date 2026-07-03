@@ -578,11 +578,10 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('normalizes Notion search pagination', () =>
     Effect.gen(function* () {
-      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
-        jsonHttpResponse(
-          '{"results":[{"id":"page_1"}],"has_more":true,"next_cursor":"cursor_1"}'
-        )
-      ])
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse('{"results":[{"id":"page_1"}],"has_more":true,"next_cursor":"cursor_1"}')]
+      )
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
@@ -650,9 +649,10 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('normalizes Notion terminal pagination', () =>
     Effect.gen(function* () {
-      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
-        jsonHttpResponse('{"results":[],"has_more":false,"next_cursor":null}')
-      ])
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse('{"results":[],"has_more":false,"next_cursor":null}')]
+      )
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
@@ -785,12 +785,8 @@ describe('@yolk-sdk/connectors', () => {
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
-        jsonHttpResponse(
-          '{"results":[{"id":"project_1","name":"Inbox"}],"next_cursor":null}'
-        ),
-        jsonHttpResponse(
-          '{"results":[{"id":"label_1","name":"Urgent"}],"next_cursor":"cursor_2"}'
-        )
+        jsonHttpResponse('{"results":[{"id":"project_1","name":"Inbox"}],"next_cursor":null}'),
+        jsonHttpResponse('{"results":[{"id":"label_1","name":"Urgent"}],"next_cursor":"cursor_2"}')
       ])
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
@@ -868,9 +864,10 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('maps provider status and body details into failures', () =>
     Effect.gen(function* () {
-      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
-        jsonStatusHttpResponse(429, '{"error":"Rate limit exceeded"}')
-      ])
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonStatusHttpResponse(429, '{"error":"Rate limit exceeded"}')]
+      )
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
@@ -961,9 +958,10 @@ describe('@yolk-sdk/connectors', () => {
 
   it.effect('returns queued LinkedIn email lookups', () =>
     Effect.gen(function* () {
-      const ConnectorHttpClientTest = makeConnectorHttpClientTest([], [
-        jsonHttpResponse('{"email_queue_count":2}')
-      ])
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse('{"email_queue_count":2}')]
+      )
       const CredentialResolverTest = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({
@@ -979,7 +977,10 @@ describe('@yolk-sdk/connectors', () => {
       })
 
       const result = yield* linkedInEmailAction
-        .execute({ integration: linkedInIntegration, input: { linkedinUrl: 'https://linkedin.com/in/a' } })
+        .execute({
+          integration: linkedInIntegration,
+          input: { linkedinUrl: 'https://linkedin.com/in/a' }
+        })
         .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
 
       expect(result).toMatchObject({
@@ -1020,7 +1021,10 @@ describe('@yolk-sdk/connectors', () => {
       })
 
       const result = yield* r2StorageUploadUrlAction
-        .execute({ integration: r2Integration, input: { filename: '/file.png', contentType: 'image/png' } })
+        .execute({
+          integration: r2Integration,
+          input: { filename: '/file.png', contentType: 'image/png' }
+        })
         .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, R2PresignerTest)))
 
       if (result._tag !== 'Success' || typeof result.value !== 'object' || result.value === null) {
@@ -1126,9 +1130,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(result).toMatchObject({
         _tag: 'Success',
         value: {
-          sendAs: [
-            { sendAsEmail: 'elina@speldosa.app', displayName: 'Elina', isDefault: true }
-          ]
+          sendAs: [{ sendAsEmail: 'elina@speldosa.app', displayName: 'Elina', isDefault: true }]
         }
       })
       expect(requests.at(0)).toMatchObject({

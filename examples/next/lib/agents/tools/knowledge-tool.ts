@@ -61,7 +61,9 @@ const KnowledgeSearchParams = Schema.Struct({
     Schema.annotate({ description: 'Optional vector similarity threshold from 0 to 1.' })
   ),
   contextChunks: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.' })
+    Schema.annotate({
+      description: 'Adjacent chunks to include around each match. Defaults to 1; capped at 5.'
+    })
   )
 })
 
@@ -70,19 +72,31 @@ const KnowledgeContextParams = Schema.Struct({
     Schema.annotate({ description: 'Knowledge document ID from search_knowledge citations.' })
   ),
   chunkId: Schema.optional(Schema.NullOr(Schema.String)).pipe(
-    Schema.annotate({ description: 'Optional chunk ID from search_knowledge. Use this to expand a specific citation.' })
+    Schema.annotate({
+      description:
+        'Optional chunk ID from search_knowledge. Use this to expand a specific citation.'
+    })
   ),
   position: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Optional chunk position to anchor traversal when chunkId is unavailable. Do not pass with chunkId.' })
+    Schema.annotate({
+      description:
+        'Optional chunk position to anchor traversal when chunkId is unavailable. Do not pass with chunkId.'
+    })
   ),
   before: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Chunks before the anchor to include. Defaults to 3; capped at 20.' })
+    Schema.annotate({
+      description: 'Chunks before the anchor to include. Defaults to 3; capped at 20.'
+    })
   ),
   after: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Chunks after the anchor to include. Defaults to 6; capped at 20.' })
+    Schema.annotate({
+      description: 'Chunks after the anchor to include. Defaults to 6; capped at 20.'
+    })
   ),
   maxChars: Schema.optional(Schema.NullOr(Schema.Number)).pipe(
-    Schema.annotate({ description: 'Maximum text characters to return. Defaults to 20000; capped at 60000.' })
+    Schema.annotate({
+      description: 'Maximum text characters to return. Defaults to 20000; capped at 60000.'
+    })
   )
 })
 
@@ -124,7 +138,8 @@ export type KnowledgeToolHandlers = {
 const isKnowledgeToolEnabled = (context: AgentToolContext) =>
   Effect.succeed(context.surface === 'text' || context.surface === 'voice')
 
-const unknownToMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
 const makeToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({ tool: knowledgeSearchToolName, message, cause })
@@ -197,23 +212,51 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
     if (queries.length === 0) {
-      return yield* Effect.fail(makeModelVisibleError(knowledgeSearchToolName, 'queries must not be empty'))
+      return yield* Effect.fail(
+        makeModelVisibleError(knowledgeSearchToolName, 'queries must not be empty')
+      )
     }
     if (queries.length > maxQueries) {
       return yield* Effect.fail(
-        makeModelVisibleError(knowledgeSearchToolName, `queries must include at most ${maxQueries} items`)
+        makeModelVisibleError(
+          knowledgeSearchToolName,
+          `queries must include at most ${maxQueries} items`
+        )
       )
     }
-    const limit = yield* normalizeInteger({ value: params.limit, defaultValue: defaultLimit, maxValue: maxLimit, minimum: 1, name: 'limit' })
-    const contextChunks = yield* normalizeInteger({ value: params.contextChunks, defaultValue: defaultContextChunks, maxValue: maxContextChunks, minimum: 0, name: 'contextChunks' })
+    const limit = yield* normalizeInteger({
+      value: params.limit,
+      defaultValue: defaultLimit,
+      maxValue: maxLimit,
+      minimum: 1,
+      name: 'limit'
+    })
+    const contextChunks = yield* normalizeInteger({
+      value: params.contextChunks,
+      defaultValue: defaultContextChunks,
+      maxValue: maxContextChunks,
+      minimum: 0,
+      name: 'contextChunks'
+    })
     const minScore = yield* normalizeMinScore(params.minScore)
     return { queries, limit, contextChunks, minScore }
   })
 
 const normalizeListParams = (params: KnowledgeListParams) =>
   Effect.gen(function* () {
-    const limit = yield* normalizeNamedInteger({ value: params.limit, defaultValue: defaultListLimit, maxValue: maxListLimit, minimum: 1, name: 'limit', tool: knowledgeListToolName })
-    return { query: optionalText(params.query), availability: params.availability ?? undefined, limit }
+    const limit = yield* normalizeNamedInteger({
+      value: params.limit,
+      defaultValue: defaultListLimit,
+      maxValue: maxListLimit,
+      minimum: 1,
+      name: 'limit',
+      tool: knowledgeListToolName
+    })
+    return {
+      query: optionalText(params.query),
+      availability: params.availability ?? undefined,
+      limit
+    }
   })
 
 const normalizeContextParams = (params: KnowledgeContextParams) =>
@@ -237,13 +280,35 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
       )
     }
 
-    const before = yield* normalizeNamedInteger({ value: params.before, defaultValue: defaultBefore, maxValue: maxTraversalChunks, minimum: 0, name: 'before', tool: knowledgeContextToolName })
-    const after = yield* normalizeNamedInteger({ value: params.after, defaultValue: defaultAfter, maxValue: maxTraversalChunks, minimum: 0, name: 'after', tool: knowledgeContextToolName })
-    const maxChars = yield* normalizeNamedInteger({ value: params.maxChars, defaultValue: defaultMaxChars, maxValue: maxMaxChars, minimum: 1, name: 'maxChars', tool: knowledgeContextToolName })
+    const before = yield* normalizeNamedInteger({
+      value: params.before,
+      defaultValue: defaultBefore,
+      maxValue: maxTraversalChunks,
+      minimum: 0,
+      name: 'before',
+      tool: knowledgeContextToolName
+    })
+    const after = yield* normalizeNamedInteger({
+      value: params.after,
+      defaultValue: defaultAfter,
+      maxValue: maxTraversalChunks,
+      minimum: 0,
+      name: 'after',
+      tool: knowledgeContextToolName
+    })
+    const maxChars = yield* normalizeNamedInteger({
+      value: params.maxChars,
+      defaultValue: defaultMaxChars,
+      maxValue: maxMaxChars,
+      minimum: 1,
+      name: 'maxChars',
+      tool: knowledgeContextToolName
+    })
     return { documentId, chunkId, position, before, after, maxChars }
   })
 
-const resultText = (result: KnowledgeSearchResult) => result.context.map(chunk => chunk.content).join('\n\n')
+const resultText = (result: KnowledgeSearchResult) =>
+  result.context.map(chunk => chunk.content).join('\n\n')
 
 const formatResults = (query: string, results: ReadonlyArray<KnowledgeSearchResult>) => {
   if (results.length === 0) {
@@ -262,10 +327,14 @@ const formatResults = (query: string, results: ReadonlyArray<KnowledgeSearchResu
         `Availability: ${result.document.availability}`,
         `Chunk: ${result.chunk.id}`,
         `Score: ${result.score.toFixed(3)}`,
-        result.vectorScore === undefined ? undefined : `Vector score: ${result.vectorScore.toFixed(3)}`,
+        result.vectorScore === undefined
+          ? undefined
+          : `Vector score: ${result.vectorScore.toFixed(3)}`,
         result.textScore === undefined ? undefined : `Text score: ${result.textScore.toFixed(3)}`,
         resultText(result)
-      ].filter(line => line !== undefined).join('\n')
+      ]
+        .filter(line => line !== undefined)
+        .join('\n')
     )
   ].join('\n\n')
 }
@@ -312,12 +381,16 @@ const formatDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSumma
         document.files.length === 0
           ? undefined
           : `File IDs: ${document.files.map(file => file.id).join(', ')}`
-      ].filter(line => line !== undefined).join('\n')
+      ]
+        .filter(line => line !== undefined)
+        .join('\n')
     )
   ].join('\n\n')
 }
 
-const structuredDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSummary>) => ({ documents })
+const structuredDocumentSummaries = (documents: ReadonlyArray<KnowledgeDocumentSummary>) => ({
+  documents
+})
 
 const formatContextWindow = (window: KnowledgeContextWindow) =>
   [
@@ -355,51 +428,63 @@ const structuredContextWindow = (window: KnowledgeContextWindow) => ({
   }))
 })
 
-const searchTool = (search: KnowledgeSearchHandler): ToolModule<AgentToolContext>['tools'][number] =>
+const searchTool = (
+  search: KnowledgeSearchHandler
+): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
-      name: knowledgeSearchToolName,
-      description: 'Search durable user knowledge. Use this for source-backed facts, uploaded knowledge, decisions, notes, and non-pinned knowledge not already in context.',
-      parameters: KnowledgeSearchParams,
-      access: 'read',
-      isEnabled: isKnowledgeToolEnabled,
-      invalidParamsMessage: error => `Invalid knowledge search arguments: ${unknownToMessage(error)}`,
-      execute: ({ call, context, params }) =>
-        Effect.gen(function* () {
-          const normalized = yield* normalizeParams(params)
-          const items = yield* Effect.forEach(
-            normalized.queries,
-            query => search({
+    name: knowledgeSearchToolName,
+    description:
+      'Search durable user knowledge. Use this for source-backed facts, uploaded knowledge, decisions, notes, and non-pinned knowledge not already in context.',
+    parameters: KnowledgeSearchParams,
+    access: 'read',
+    isEnabled: isKnowledgeToolEnabled,
+    invalidParamsMessage: error => `Invalid knowledge search arguments: ${unknownToMessage(error)}`,
+    execute: ({ call, context, params }) =>
+      Effect.gen(function* () {
+        const normalized = yield* normalizeParams(params)
+        const items = yield* Effect.forEach(
+          normalized.queries,
+          query =>
+            search({
               userId: context.userId,
               query,
               limit: normalized.limit,
               minScore: normalized.minScore,
               contextChunks: normalized.contextChunks
             }).pipe(Effect.map(results => ({ query, results }))),
-            { concurrency: 'unbounded' }
-          )
-
-          return ToolResult.make({
-            toolCallId: call.id,
-            content: ['Knowledge search results', '', ...items.map(item => formatResults(item.query, item.results))].join('\n\n'),
-            structuredContent: { queries: items.map(item => structuredResult(item.query, item.results)) }
-          })
-        }).pipe(
-          Effect.mapError(error =>
-            error instanceof ToolError || error instanceof ModelVisibleToolError
-              ? error
-              : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution')
-          )
+          { concurrency: 'unbounded' }
         )
-    })
+
+        return ToolResult.make({
+          toolCallId: call.id,
+          content: [
+            'Knowledge search results',
+            '',
+            ...items.map(item => formatResults(item.query, item.results))
+          ].join('\n\n'),
+          structuredContent: {
+            queries: items.map(item => structuredResult(item.query, item.results))
+          }
+        })
+      }).pipe(
+        Effect.mapError(error =>
+          error instanceof ToolError || error instanceof ModelVisibleToolError
+            ? error
+            : makeToolError(`Knowledge search failed: ${unknownToMessage(error)}`, 'execution')
+        )
+      )
+  })
 
 const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
     name: knowledgeListToolName,
-    description: 'List durable user knowledge documents and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge document IDs are unclear.',
+    description:
+      'List durable user knowledge documents and metadata. Use before searching when available uploaded files, notes, decisions, or knowledge document IDs are unclear.',
     parameters: KnowledgeListParams,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error => `Invalid knowledge listing arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid knowledge listing arguments: ${unknownToMessage(error)}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeListParams(params)
@@ -414,19 +499,27 @@ const listTool = (list: KnowledgeListHandler): ToolModule<AgentToolContext>['too
         Effect.mapError(error =>
           error instanceof ToolError || error instanceof ModelVisibleToolError
             ? error
-            : makeNamedToolError(knowledgeListToolName, `Knowledge listing failed: ${unknownToMessage(error)}`, 'execution')
+            : makeNamedToolError(
+                knowledgeListToolName,
+                `Knowledge listing failed: ${unknownToMessage(error)}`,
+                'execution'
+              )
         )
       )
   })
 
-const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolContext>['tools'][number] =>
+const contextTool = (
+  getContext: KnowledgeContextHandler
+): ToolModule<AgentToolContext>['tools'][number] =>
   makeTool({
     name: knowledgeContextToolName,
-    description: 'Read surrounding chunks from a specific durable knowledge document. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
+    description:
+      'Read surrounding chunks from a specific durable knowledge document. Use after search_knowledge when the user asks to expand, continue, inspect nearby pages, or see more context from a citation.',
     parameters: KnowledgeContextParams,
     access: 'read',
     isEnabled: isKnowledgeToolEnabled,
-    invalidParamsMessage: error => `Invalid knowledge context arguments: ${unknownToMessage(error)}`,
+    invalidParamsMessage: error =>
+      `Invalid knowledge context arguments: ${unknownToMessage(error)}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeContextParams(params)
@@ -441,7 +534,11 @@ const contextTool = (getContext: KnowledgeContextHandler): ToolModule<AgentToolC
         Effect.mapError(error =>
           error instanceof ToolError || error instanceof ModelVisibleToolError
             ? error
-            : makeNamedToolError(knowledgeContextToolName, `Knowledge context read failed: ${unknownToMessage(error)}`, 'execution')
+            : makeNamedToolError(
+                knowledgeContextToolName,
+                `Knowledge context read failed: ${unknownToMessage(error)}`,
+                'execution'
+              )
         )
       )
   })
@@ -455,6 +552,7 @@ const knowledgeTools = (handlers: KnowledgeToolHandlers): ToolModule<AgentToolCo
 export const makeKnowledgeToolModule = (
   searchOrHandlers: KnowledgeSearchHandler | KnowledgeToolHandlers
 ): ToolModule<AgentToolContext> => {
-  const handlers = typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
+  const handlers =
+    typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
   return { id: 'knowledge', tools: knowledgeTools(handlers) }
 }

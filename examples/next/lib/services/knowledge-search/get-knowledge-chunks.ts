@@ -22,15 +22,30 @@ export const getKnowledgeChunks = (input: {
         storageRecord: schema.storageObject
       })
       .from(schema.knowledgeChunk)
-      .innerJoin(schema.knowledgeDocument, eq(schema.knowledgeDocument.id, schema.knowledgeChunk.documentId))
-      .innerJoin(schema.storageObject, eq(schema.storageObject.id, schema.knowledgeDocument.storageObjectId))
+      .innerJoin(
+        schema.knowledgeDocument,
+        eq(schema.knowledgeDocument.id, schema.knowledgeChunk.documentId)
+      )
+      .innerJoin(
+        schema.storageObject,
+        eq(schema.storageObject.id, schema.knowledgeDocument.storageObjectId)
+      )
       .where(
-        and(inArray(schema.knowledgeChunk.id, [...input.chunkIds]), eq(schema.storageObject.userId, input.userId))
+        and(
+          inArray(schema.knowledgeChunk.id, [...input.chunkIds]),
+          eq(schema.storageObject.userId, input.userId)
+        )
       )
       .orderBy(asc(schema.knowledgeChunk.documentId), asc(schema.knowledgeChunk.position))
 
     return rows satisfies ReadonlyArray<AppKnowledgeChunkRecord>
   }).pipe(
     Effect.withSpan('knowledge_search.chunks.get'),
-    Effect.mapError(error => new AppSearchIndexStoreError({ message: 'Could not get knowledge search chunks', cause: error }))
+    Effect.mapError(
+      error =>
+        new AppSearchIndexStoreError({
+          message: 'Could not get knowledge search chunks',
+          cause: error
+        })
+    )
   )

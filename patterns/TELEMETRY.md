@@ -223,11 +223,11 @@ Span names use `domain.entity.action` format. Server actions prefix with `action
 
 Custom attributes per span:
 
-| Span              | Attributes                              |
-| ----------------- | --------------------------------------- |
-| `action.entity.*` | `entity.id`, `user.id`, `user.email`    |
-| `Auth.*`          | (none — session data is the result)     |
-| `Integration.*`   | low-cardinality integration metadata    |
+| Span              | Attributes                           |
+| ----------------- | ------------------------------------ |
+| `action.entity.*` | `entity.id`, `user.id`, `user.email` |
+| `Auth.*`          | (none — session data is the result)  |
+| `Integration.*`   | low-cardinality integration metadata |
 
 ## Exporters
 

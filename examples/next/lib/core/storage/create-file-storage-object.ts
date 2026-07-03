@@ -33,7 +33,10 @@ export const createFileStorageObject = (input: {
 
     if (object === undefined) {
       return yield* Effect.fail(
-        new PersistenceError({ message: 'Could not create storage object', entity: 'storageObject' })
+        new PersistenceError({
+          message: 'Could not create storage object',
+          entity: 'storageObject'
+        })
       )
     }
 
@@ -50,7 +53,11 @@ export const createFileStorageObject = (input: {
         },
         content: extracted.content,
         mediaType: object.mediaType ?? undefined,
-        metadata: { storageObjectId: object.id, title: object.filename ?? undefined, ...extracted.metadata }
+        metadata: {
+          storageObjectId: object.id,
+          title: object.filename ?? undefined,
+          ...extracted.metadata
+        }
       }
     })
 

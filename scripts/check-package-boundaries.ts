@@ -47,35 +47,19 @@ const agentCoreForbiddenImports = [
 const rules: ReadonlyArray<BoundaryRule> = [
   {
     packageDir: 'examples/next/app',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'examples/next/lib',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'cloudflare/agent/src',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'examples/next/e2e',
-    forbiddenImports: [
-      ...retiredImports,
-      '@yolk-sdk/agent$',
-      '@yolk-sdk/mcp$'
-    ]
+    forbiddenImports: [...retiredImports, '@yolk-sdk/agent$', '@yolk-sdk/mcp$']
   },
   {
     packageDir: 'packages/agent/src/protocol',
@@ -115,7 +99,12 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   {
     packageDir: 'packages/agent/src/voice',
-    forbiddenImports: agentCoreForbiddenImports
+    forbiddenImports: agentCoreForbiddenImports,
+    excludedDirs: ['packages/agent/src/voice/react.ts']
+  },
+  {
+    packageDir: 'packages/agent/src/voice/react.ts',
+    forbiddenImports: [...retiredImports, '@yolk-sdk/knowledge', '@yolk-sdk/mcp', 'next', 'node:']
   },
   {
     packageDir: 'packages/agent/src/react',
@@ -123,7 +112,14 @@ const rules: ReadonlyArray<BoundaryRule> = [
   },
   {
     packageDir: 'packages/knowledge/src',
-    forbiddenImports: [...retiredImports, '@yolk-sdk/agent/react', '@yolk-sdk/mcp', 'next', 'react', 'node:']
+    forbiddenImports: [
+      ...retiredImports,
+      '@yolk-sdk/agent/react',
+      '@yolk-sdk/mcp',
+      'next',
+      'react',
+      'node:'
+    ]
   },
   {
     packageDir: 'packages/sandbox/src',
@@ -159,10 +155,17 @@ const walk = (dir: string): ReadonlyArray<string> => {
 
 const packageExists = (packageDir: string) => {
   try {
-    return statSync(join(workspaceRoot, packageDir)).isDirectory()
+    const stats = statSync(join(workspaceRoot, packageDir))
+    return stats.isDirectory() || (stats.isFile() && isTypescriptFile(packageDir))
   } catch {
     return false
   }
+}
+
+const rulePathFiles = (packageDir: string): ReadonlyArray<string> => {
+  const absolutePath = join(workspaceRoot, packageDir)
+
+  return statSync(absolutePath).isFile() ? [absolutePath] : walk(absolutePath)
 }
 
 const isExcludedFile = (file: string, excludedDirs: ReadonlyArray<string> = []) =>
@@ -196,17 +199,21 @@ const violations = rules.flatMap(rule => {
     return []
   }
 
-  return walk(join(workspaceRoot, rule.packageDir)).filter(file => !isExcludedFile(file, rule.excludedDirs)).flatMap(file => {
-    const source = readFileSync(file, 'utf8')
-    return importsFrom(source).flatMap(specifier =>
-      rule.forbiddenImports
-        .filter(forbidden => violates(specifier, forbidden))
-        .map(forbidden => ({ file, specifier, forbidden }))
-    )
-  })
+  return rulePathFiles(rule.packageDir)
+    .filter(file => !isExcludedFile(file, rule.excludedDirs))
+    .flatMap(file => {
+      const source = readFileSync(file, 'utf8')
+      return importsFrom(source).flatMap(specifier =>
+        rule.forbiddenImports
+          .filter(forbidden => violates(specifier, forbidden))
+          .map(forbidden => ({ file, specifier, forbidden }))
+      )
+    })
 })
 
-const retiredDirViolations = retiredPackages.filter(retiredPackage => packageExists(retiredPackage.dir))
+const retiredDirViolations = retiredPackages.filter(retiredPackage =>
+  packageExists(retiredPackage.dir)
+)
 
 if (retiredDirViolations.length > 0) {
   console.error('Retired package directories found:')

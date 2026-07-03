@@ -38,9 +38,14 @@ const makePdf = (text: string) => {
   }
 
   const startXref = body.length
-  const rows = ['0000000000 65535 f ', ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)]
+  const rows = [
+    '0000000000 65535 f ',
+    ...offsets.map(offset => `${offset.toString().padStart(10, '0')} 00000 n `)
+  ]
 
-  return encode(`${body}xref\n0 6\n${rows.join('\n')}\ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n${startXref}\n%%EOF`)
+  return encode(
+    `${body}xref\n0 6\n${rows.join('\n')}\ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n${startXref}\n%%EOF`
+  )
 }
 
 const extract = (input: {
@@ -64,7 +69,8 @@ describe('FileExtractor', () => {
 
       expect(extracted.content).toBe('Alpha\n\nBeta gamma…')
       expect(extracted.metadata).toEqual({ format: 'text', title: 'notes.txt' })
-    }))
+    })
+  )
 
   it.effect('extracts xlsx sheets as csv sections', () =>
     Effect.gen(function* () {
@@ -86,7 +92,8 @@ describe('FileExtractor', () => {
       expect(extracted.content).toContain('Name,Count')
       expect(extracted.content).toContain('Alpha,2')
       expect(extracted.metadata.sheetNames).toEqual(['Inventory'])
-    }))
+    })
+  )
 
   it.effect('extracts pdf text and page count', () =>
     Effect.gen(function* () {
@@ -99,7 +106,8 @@ describe('FileExtractor', () => {
       expect(extracted.content).toBe('Hello PDF')
       expect(extracted.metadata.format).toBe('pdf')
       expect(extracted.metadata.pageCount).toBe(1)
-    }))
+    })
+  )
 
   it.effect('extracts docx text', () =>
     Effect.gen(function* () {
@@ -111,7 +119,8 @@ describe('FileExtractor', () => {
 
       expect(extracted.content).toBe('Hello DOCX')
       expect(extracted.metadata).toEqual({ format: 'docx', title: 'brief.docx' })
-    }))
+    })
+  )
 
   it.effect('extracts pptx slide and notes text', () =>
     Effect.gen(function* () {
@@ -129,7 +138,8 @@ describe('FileExtractor', () => {
 
       expect(extracted.content).toBe('First & one\n\nSecond\n\nSpeaker note')
       expect(extracted.metadata.format).toBe('pptx')
-    }))
+    })
+  )
 
   it.effect('rejects unsupported files', () =>
     Effect.gen(function* () {
@@ -140,5 +150,6 @@ describe('FileExtractor', () => {
       }).pipe(Effect.flip)
 
       expect(error._tag).toBe('UnsupportedFileFormatError')
-    }))
+    })
+  )
 })

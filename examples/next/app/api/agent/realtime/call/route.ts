@@ -36,6 +36,8 @@ class RealtimeCallRouteError extends Data.TaggedError('RealtimeCallRouteError')<
 class OpenAiRealtimeCallError extends Data.TaggedError('OpenAiRealtimeCallError')<{
   readonly message: string
   readonly cause?: unknown
+  /** Upstream OpenAI HTTP status when the failure came from a response. */
+  readonly upstreamStatus?: number
 }> {}
 
 const openAiRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls'
@@ -136,7 +138,8 @@ const requestOpenAiRealtimeAnswer = (input: {
     if (response.status < 200 || response.status >= 300) {
       return yield* Effect.fail(
         new OpenAiRealtimeCallError({
-          message: `OpenAI Realtime returned ${response.status}: ${body}`
+          message: `OpenAI Realtime returned ${response.status}: ${body}`,
+          upstreamStatus: response.status
         })
       )
     }
@@ -165,9 +168,10 @@ const handler = Effect.gen(function* () {
   const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
-  const telegramToolModules = telegramConnectorConfig === undefined
-    ? []
-    : [makeAppTelegramToolModule(telegramConnectorConfig)]
+  const telegramToolModules =
+    telegramConnectorConfig === undefined
+      ? []
+      : [makeAppTelegramToolModule(telegramConnectorConfig)]
   const toolSet = yield* resolveAgentToolSet({
     modules: [
       ...nodeVoiceToolModules,
@@ -213,11 +217,22 @@ const handler = Effect.gen(function* () {
     HttpServerResponse.json({ error: error.message }, { status: 400 })
   ),
   Effect.catchTag('OpenAiRealtimeCallError', error =>
-    reportError(error, { operation: 'agent.realtime.call', status: 502 }).pipe(
-      Effect.andThen(
-        HttpServerResponse.json({ error: 'OpenAI Realtime call failed' }, { status: 502 })
-      )
-    )
+    // 429 covers rate limits and exhausted credits (`insufficient_quota`);
+    // surface it distinctly so quota exhaustion doesn't read as an outage.
+    error.upstreamStatus === 429
+      ? reportError(error, { operation: 'agent.realtime.call', status: 429 }).pipe(
+          Effect.andThen(
+            HttpServerResponse.json(
+              { error: 'OpenAI quota or rate limit exceeded' },
+              { status: 429 }
+            )
+          )
+        )
+      : reportError(error, { operation: 'agent.realtime.call', status: 502 }).pipe(
+          Effect.andThen(
+            HttpServerResponse.json({ error: 'OpenAI Realtime call failed' }, { status: 502 })
+          )
+        )
   ),
   Effect.catch(error =>
     reportError(new RealtimeCallRouteError({ message: 'Realtime call failed', cause: error }), {

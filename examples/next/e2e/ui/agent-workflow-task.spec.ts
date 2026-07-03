@@ -8,7 +8,6 @@ import * as schema from '@/lib/services/db/schema'
 import { test, expect } from '../fixtures'
 import { TestDbLayer } from '../utils/test-db'
 
-
 const slowCall = {
   id: 'call_slow_task',
   name: 'task',

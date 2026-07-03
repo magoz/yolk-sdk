@@ -30,16 +30,17 @@ const commandResult = (input: {
   readonly timedOut?: boolean
   readonly workspaceReset?: boolean
   readonly previewUrls?: ReadonlyArray<SandboxPreviewUrl>
-}) => SandboxCommandResult.make({
-  exitCode: input.exitCode ?? 0,
-  stdout: input.stdout ?? '',
-  stderr: input.stderr ?? '',
-  durationMs: 10,
-  timedOut: input.timedOut ?? false,
-  workspaceReset: input.workspaceReset ?? false,
-  previewUrls: input.previewUrls ?? [],
-  state
-})
+}) =>
+  SandboxCommandResult.make({
+    exitCode: input.exitCode ?? 0,
+    stdout: input.stdout ?? '',
+    stderr: input.stderr ?? '',
+    durationMs: 10,
+    timedOut: input.timedOut ?? false,
+    workspaceReset: input.workspaceReset ?? false,
+    previewUrls: input.previewUrls ?? [],
+    state
+  })
 
 describe('sandbox agent tool', () => {
   it.effect('registers destructive sandbox tool', () =>
@@ -52,7 +53,9 @@ describe('sandbox agent tool', () => {
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([sandboxToolName])
-      expect(toolSet.metadata).toEqual([{ moduleId: 'sandbox', name: sandboxToolName, access: 'destructive' }])
+      expect(toolSet.metadata).toEqual([
+        { moduleId: 'sandbox', name: sandboxToolName, access: 'destructive' }
+      ])
       expect(toolSet.tools[0]?.description).toContain('real sandbox workspace')
     })
   )
@@ -61,9 +64,11 @@ describe('sandbox agent tool', () => {
     Effect.gen(function* () {
       const api: SandboxApi = {
         run: input =>
-          Effect.succeed(commandResult({
-            stdout: `${input.command}:${input.cwd}:${input.stdin ?? 'none'}:${input.timeoutMs}:${input.background ?? false}`
-          })),
+          Effect.succeed(
+            commandResult({
+              stdout: `${input.command}:${input.cwd}:${input.stdin ?? 'none'}:${input.timeoutMs}:${input.background ?? false}`
+            })
+          ),
         currentState: Effect.succeed(Option.some(state)),
         delete: Effect.void
       }
@@ -91,9 +96,7 @@ describe('sandbox agent tool', () => {
       callId: 'call_1',
       result: commandResult({
         stdout: 'ok',
-        previewUrls: [
-          SandboxPreviewUrl.make({ port: 3000, url: 'https://3000.example.test' })
-        ]
+        previewUrls: [SandboxPreviewUrl.make({ port: 3000, url: 'https://3000.example.test' })]
       })
     })
 
@@ -119,10 +122,12 @@ describe('sandbox agent tool', () => {
     Effect.gen(function* () {
       const api: SandboxApi = {
         run: () =>
-          Effect.fail(new SandboxExpiredError({
-            message: 'Sandbox expired',
-            expiredAtMs: 1
-          })),
+          Effect.fail(
+            new SandboxExpiredError({
+              message: 'Sandbox expired',
+              expiredAtMs: 1
+            })
+          ),
         currentState: Effect.succeed(Option.none()),
         delete: Effect.void
       }

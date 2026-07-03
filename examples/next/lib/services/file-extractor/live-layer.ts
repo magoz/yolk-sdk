@@ -6,7 +6,15 @@ import { FileExtractionError, UnsupportedFileFormatError } from './errors'
 import { extractPptxText } from './pptx-text'
 import { sanitizeExtractedText } from './sanitize'
 
-export type ExtractedFileFormat = 'csv' | 'docx' | 'json' | 'markdown' | 'pdf' | 'pptx' | 'text' | 'xlsx'
+export type ExtractedFileFormat =
+  | 'csv'
+  | 'docx'
+  | 'json'
+  | 'markdown'
+  | 'pdf'
+  | 'pptx'
+  | 'text'
+  | 'xlsx'
 
 export type ExtractedFile = {
   readonly content: string
@@ -87,7 +95,10 @@ const makeExtractedFile = (content: string, metadata: ExtractedFile['metadata'])
   const sanitized = sanitizeExtractedText(content)
   if (sanitized.length === 0) {
     return Effect.fail(
-      new FileExtractionError({ message: 'Extracted file content is empty', format: metadata.format })
+      new FileExtractionError({
+        message: 'Extracted file content is empty',
+        format: metadata.format
+      })
     )
   }
 
@@ -104,11 +115,13 @@ const extractPdf = (input: FileInput, format: ExtractedFileFormat) =>
     })
     const extracted = yield* Effect.tryPromise({
       try: () => extractText(document, { mergePages: true }),
-      catch: cause => new FileExtractionError({ message: 'Could not extract PDF text', format, cause })
+      catch: cause =>
+        new FileExtractionError({ message: 'Could not extract PDF text', format, cause })
     })
     const meta = yield* Effect.tryPromise({
       try: () => getMeta(document),
-      catch: cause => new FileExtractionError({ message: 'Could not read PDF metadata', format, cause })
+      catch: cause =>
+        new FileExtractionError({ message: 'Could not read PDF metadata', format, cause })
     }).pipe(Effect.option)
     yield* Effect.promise(() => document.destroy())
 
@@ -123,7 +136,8 @@ const extractDocx = (input: FileInput, format: ExtractedFileFormat) =>
   Effect.gen(function* () {
     const result = yield* Effect.tryPromise({
       try: () => mammoth.extractRawText({ buffer: Buffer.from(toArrayBuffer(input.bytes)) }),
-      catch: cause => new FileExtractionError({ message: 'Could not extract DOCX text', format, cause })
+      catch: cause =>
+        new FileExtractionError({ message: 'Could not extract DOCX text', format, cause })
     })
 
     return yield* makeExtractedFile(result.value, { format, title: input.filename })
@@ -154,7 +168,8 @@ const extractPptx = (input: FileInput, format: ExtractedFileFormat) =>
   Effect.gen(function* () {
     const text = yield* Effect.try({
       try: () => extractPptxText(input.bytes),
-      catch: cause => new FileExtractionError({ message: 'Could not extract PPTX text', format, cause })
+      catch: cause =>
+        new FileExtractionError({ message: 'Could not extract PPTX text', format, cause })
     })
 
     return yield* makeExtractedFile(text, { format, title: input.filename })
@@ -189,7 +204,10 @@ export class FileExtractor extends Context.Service<FileExtractor>()('@app/FileEx
           case 'json':
           case 'markdown':
           case 'text':
-            return yield* makeExtractedFile(decodeText(input.bytes), { format, title: input.filename })
+            return yield* makeExtractedFile(decodeText(input.bytes), {
+              format,
+              title: input.filename
+            })
         }
       }).pipe(Effect.withSpan('FileExtractor.extract'))
   })

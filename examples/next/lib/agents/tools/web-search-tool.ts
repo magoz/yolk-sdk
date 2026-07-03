@@ -36,7 +36,8 @@ const WebSearchParams = Schema.Struct({
   ),
   contextMaxCharacters: Schema.optional(Schema.Number).pipe(
     Schema.annotate({
-      description: 'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
+      description:
+        'Maximum LLM-ready context characters when supported. Defaults to 10000; capped at 50000.'
     })
   )
 })
@@ -141,7 +142,10 @@ const modelVisibleReasonFromToolError = (error: ToolError): ModelVisibleToolErro
 const decodeWebSearchParams = (params: unknown) =>
   Schema.decodeUnknownEffect(WebSearchParams)(params).pipe(
     Effect.mapError(error =>
-      makeModelVisibleError(`Invalid web search arguments: ${unknownToMessage(error)}`, 'validation')
+      makeModelVisibleError(
+        `Invalid web search arguments: ${unknownToMessage(error)}`,
+        'validation'
+      )
     )
   )
 
@@ -154,7 +158,9 @@ const normalizePositiveInteger = (input: {
   const value = input.value ?? input.defaultValue
 
   if (!Number.isInteger(value) || value <= 0) {
-    return Effect.fail(makeModelVisibleError(`${input.name} must be a positive integer`, 'validation'))
+    return Effect.fail(
+      makeModelVisibleError(`${input.name} must be a positive integer`, 'validation')
+    )
   }
 
   return Effect.succeed(Math.min(value, input.maxValue))
@@ -401,10 +407,9 @@ export const searchWeb = (
     const override = config.providerOverride
     const provider = selectWebSearchProvider(normalized.query, override)
     const result = yield* runSearchWithFallback(deps, provider, normalized, override, config).pipe(
-      Effect.mapError(error => makeModelVisibleError(
-        error.message,
-        modelVisibleReasonFromToolError(error)
-      ))
+      Effect.mapError(error =>
+        makeModelVisibleError(error.message, modelVisibleReasonFromToolError(error))
+      )
     )
 
     return formatToolOutput({

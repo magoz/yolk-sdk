@@ -242,12 +242,12 @@ const formatAnnotationValue = (value: Schema.Json) => JSON.stringify(value) ?? '
 
 export const messageContextText = (message: MessageEnvelope) => {
   const metadataLines = [
-    ...(
-      message.author?.displayName === undefined
-        ? []
-        : [`- author: ${message.author.displayName}`]
-    ),
-    ...(message.createdAtMs === undefined ? [] : [`- sent_at: ${formatCreatedAtMs(message.createdAtMs)}`])
+    ...(message.author?.displayName === undefined
+      ? []
+      : [`- author: ${message.author.displayName}`]),
+    ...(message.createdAtMs === undefined
+      ? []
+      : [`- sent_at: ${formatCreatedAtMs(message.createdAtMs)}`])
   ]
   const annotationLines = Object.entries(message.annotations ?? {}).map(
     ([key, value]) => `- ${key}: ${formatAnnotationValue(value)}`
@@ -268,5 +268,7 @@ export const prependMessageContextToContent = (content: Content, context: string
 
   const prefix = `${context}\n\nMessage:`
 
-  return typeof content === 'string' ? `${prefix}\n${content}` : [TextPart.make({ text: prefix }), ...content]
+  return typeof content === 'string'
+    ? `${prefix}\n${content}`
+    : [TextPart.make({ text: prefix }), ...content]
 }

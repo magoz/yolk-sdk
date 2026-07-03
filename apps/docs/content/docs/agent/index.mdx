@@ -22,16 +22,16 @@ import { makeTool } from '@yolk-sdk/agent/tools'
 
 ## Most common jobs
 
-| Job | API |
-| --- | --- |
-| Make a user message | `UserMessage.make({ content })` |
-| Run a model/tool loop | `run(...)` |
-| Run behind an HTTP/session boundary | `runRuntime(...)` |
-| Define schema-backed tools | `makeTool(...)` |
-| Stream from browser/client | `streamAgentEventsUntilTerminal(...)` |
-| Render headless React chat | `useAgentChat(...)` |
-| Build provider layers | provider subpaths |
-| Test without provider accounts | `FauxProvider`, `TestToolExecutor` |
+| Job                                 | API                                   |
+| ----------------------------------- | ------------------------------------- |
+| Make a user message                 | `UserMessage.make({ content })`       |
+| Run a model/tool loop               | `run(...)`                            |
+| Run behind an HTTP/session boundary | `runRuntime(...)`                     |
+| Define schema-backed tools          | `makeTool(...)`                       |
+| Stream from browser/client          | `streamAgentEventsUntilTerminal(...)` |
+| Render headless React chat          | `useAgentChat(...)`                   |
+| Build provider layers               | provider subpaths                     |
+| Test without provider accounts      | `FauxProvider`, `TestToolExecutor`    |
 
 ## Local test loop
 
@@ -48,12 +48,14 @@ const TestLayer = Layer.mergeAll(
   ContextTransformer.identity
 )
 
-const events = await Effect.runPromise(run({
-  messages: [UserMessage.make({ content: 'Hello' })],
-  systemPrompt: 'Be helpful.',
-  tools: [],
-  model: 'test-model'
-}).pipe(Stream.runCollect, Effect.provide(TestLayer)))
+const events = await Effect.runPromise(
+  run({
+    messages: [UserMessage.make({ content: 'Hello' })],
+    systemPrompt: 'Be helpful.',
+    tools: [],
+    model: 'test-model'
+  }).pipe(Stream.runCollect, Effect.provide(TestLayer))
+)
 ```
 
 Next: [add tools](./tools-hitl), [serve it with `runRuntime`](./loop-runtime), or [render it in React](./client-react).

@@ -27,7 +27,13 @@ export const updateKnowledgeAvailability = (input: {
       .returning()
 
     if (document === undefined) {
-      return yield* Effect.fail(new NotFoundError({ message: 'Knowledge document not found', entity: 'userKnowledgeDocument', id: input.id }))
+      return yield* Effect.fail(
+        new NotFoundError({
+          message: 'Knowledge document not found',
+          entity: 'userKnowledgeDocument',
+          id: input.id
+        })
+      )
     }
 
     return document

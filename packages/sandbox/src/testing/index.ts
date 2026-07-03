@@ -20,9 +20,9 @@ export const makeFakeSandboxLayer = (options: FakeSandboxOptions) =>
       Effect.map(stateRef =>
         Sandbox.of({
           run: input =>
-            options.run(input).pipe(
-              Effect.tap(result => Ref.set(stateRef, Option.some(result.state)))
-            ),
+            options
+              .run(input)
+              .pipe(Effect.tap(result => Ref.set(stateRef, Option.some(result.state)))),
           currentState: Ref.get(stateRef),
           delete: Ref.set(stateRef, Option.none())
         })
@@ -51,7 +51,10 @@ export const makeInMemorySandboxStateStoreLayer = (
             Effect.map(current => Option.fromNullishOr(current.get(sandboxSessionId)))
           ),
         save: input =>
-          Ref.update(states, current => new Map([...current, [input.sandboxSessionId, input.state]])),
+          Ref.update(
+            states,
+            current => new Map([...current, [input.sandboxSessionId, input.state]])
+          ),
         clear: sandboxSessionId =>
           Ref.update(states, current => {
             const next = new Map(current)

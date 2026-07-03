@@ -11,7 +11,6 @@ import { ensureTestEnv } from './utils/ensure-test-env'
 import { TestDbLayer } from './utils/test-db'
 import { TEST_USER_ID } from './test-ids'
 
-
 /**
  * Global setup runs once before all Playwright tests.
  *

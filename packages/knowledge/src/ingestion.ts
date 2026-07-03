@@ -51,7 +51,8 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
+          error =>
+            new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
         )
       )
 
@@ -59,7 +60,8 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       .extract(input.source)
       .pipe(
         Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'extract', cause: error })
+          error =>
+            new KnowledgeIngestionError({ message: error.message, stage: 'extract', cause: error })
         )
       )
 
@@ -73,17 +75,25 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'chunk', cause: error })
+          error =>
+            new KnowledgeIngestionError({ message: error.message, stage: 'chunk', cause: error })
         )
       )
 
     const indexed = yield* Effect.all(
       {
-        embeddings: embedder.embedTexts(chunks.map(chunk => chunk.content)).pipe(
-          Effect.mapError(
-            error => new KnowledgeIngestionError({ message: error.message, stage: 'embed', cause: error })
-          )
-        ),
+        embeddings: embedder
+          .embedTexts(chunks.map(chunk => chunk.content))
+          .pipe(
+            Effect.mapError(
+              error =>
+                new KnowledgeIngestionError({
+                  message: error.message,
+                  stage: 'embed',
+                  cause: error
+                })
+            )
+          ),
         summary: summarizer
           .summarize({
             content: extracted.content,
@@ -93,7 +103,11 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
           .pipe(
             Effect.mapError(
               error =>
-                new KnowledgeIngestionError({ message: error.message, stage: 'summarize', cause: error })
+                new KnowledgeIngestionError({
+                  message: error.message,
+                  stage: 'summarize',
+                  cause: error
+                })
             )
           )
       },
@@ -102,7 +116,10 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
 
     if (indexed.embeddings.length !== chunks.length) {
       return yield* Effect.fail(
-        new KnowledgeIngestionError({ message: 'Embedding count did not match chunk count', stage: 'embed' })
+        new KnowledgeIngestionError({
+          message: 'Embedding count did not match chunk count',
+          stage: 'embed'
+        })
       )
     }
 
@@ -118,7 +135,8 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
+          error =>
+            new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
         )
       )
 
@@ -135,16 +153,21 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       })
       .pipe(
         Effect.mapError(
-          error => new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
+          error =>
+            new KnowledgeIngestionError({ message: error.message, stage: 'store', cause: error })
         )
       )
   }).pipe(
     Effect.withSpan('knowledge_search.ingestDocument'),
-    Effect.catch(error => markErrorBestEffort(input, error).pipe(Effect.flatMap(() => Effect.fail(error))))
+    Effect.catch(error =>
+      markErrorBestEffort(input, error).pipe(Effect.flatMap(() => Effect.fail(error)))
+    )
   )
 
 export type KnowledgeIngestionPipeline = {
-  readonly ingest: (input: IngestKnowledgeDocumentInput) => ReturnType<typeof ingestKnowledgeDocument>
+  readonly ingest: (
+    input: IngestKnowledgeDocumentInput
+  ) => ReturnType<typeof ingestKnowledgeDocument>
 }
 
 export const makeIngestionPipeline = (): KnowledgeIngestionPipeline => ({

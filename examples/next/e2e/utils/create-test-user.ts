@@ -5,7 +5,6 @@ import * as schema from '@/lib/services/db/schema'
 import type { InsertUser } from '@/lib/services/db/schema'
 import { ensureTestEnv } from './ensure-test-env'
 
-
 export const createTestUser = (input?: Partial<InsertUser>) =>
   Effect.gen(function* () {
     yield* ensureTestEnv('Create Test User')

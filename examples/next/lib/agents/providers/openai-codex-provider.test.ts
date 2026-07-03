@@ -6,10 +6,19 @@ import {
   type HttpClientRequest
 } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
-import { ImagePart, TextPart, ToolDef, UserMessage, inlineBase64Source } from '@yolk-sdk/agent/protocol'
+import {
+  ImagePart,
+  TextPart,
+  ToolDef,
+  UserMessage,
+  inlineBase64Source
+} from '@yolk-sdk/agent/protocol'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
 import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
-import { openAiCodexProviderId, openAiCodexResponsesUrl } from '@yolk-sdk/agent/providers/openai/codex'
+import {
+  openAiCodexProviderId,
+  openAiCodexResponsesUrl
+} from '@yolk-sdk/agent/providers/openai/codex'
 import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/codex-provider'
 
 type CapturedRequest = {
@@ -536,9 +545,11 @@ describe('OpenAiCodexProviderLayer', () => {
       const requests: Array<CapturedRequest> = []
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
-          ['event: response.output_text.delta', 'data: {"type":"response.output_text.delta"', ''].join(
-            '\n'
-          ),
+          [
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta"',
+            ''
+          ].join('\n'),
           requests
         )
       )

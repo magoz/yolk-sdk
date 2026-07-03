@@ -127,9 +127,7 @@ const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
       )
     )
 
-const latestAwaitingRequests = (
-  log: RuntimeSessionEventLog
-): ReadonlyArray<HitlRequest> =>
+const latestAwaitingRequests = (log: RuntimeSessionEventLog): ReadonlyArray<HitlRequest> =>
   log.events.reduceRight<ReadonlyArray<HitlRequest> | undefined>((found, stored) => {
     if (found !== undefined) return found
     switch (stored.event._tag) {
@@ -167,7 +165,9 @@ const validateHitlResponse = (
   request: AppendHitlResponseRuntimeRequest,
   log: RuntimeSessionEventLog
 ) => {
-  if (latestAwaitingRequests(log).some(item => hitlResponseMatchesRequest(request.response, item))) {
+  if (
+    latestAwaitingRequests(log).some(item => hitlResponseMatchesRequest(request.response, item))
+  ) {
     return Effect.void
   }
 

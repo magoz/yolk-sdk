@@ -6,7 +6,9 @@ import { workflowErrorEvent } from './workflow-error'
 
 describe('workflowErrorEvent', () => {
   it('maps route validation errors', () => {
-    expect(workflowErrorEvent(new AgentDocumentLimitError({ message: 'Attach up to 4 PDFs.' }))).toMatchObject({
+    expect(
+      workflowErrorEvent(new AgentDocumentLimitError({ message: 'Attach up to 4 PDFs.' }))
+    ).toMatchObject({
       _tag: 'AgentError',
       code: 'validation_error',
       message: 'Attach up to 4 PDFs.',
@@ -16,7 +18,9 @@ describe('workflowErrorEvent', () => {
 
   it('maps loop errors with typed codes', () => {
     expect(
-      workflowErrorEvent(new ToolError({ tool: 'search', message: 'Tool timed out', cause: 'timeout' }))
+      workflowErrorEvent(
+        new ToolError({ tool: 'search', message: 'Tool timed out', cause: 'timeout' })
+      )
     ).toMatchObject({
       _tag: 'AgentError',
       code: 'tool_timeout',
@@ -35,7 +39,9 @@ describe('workflowErrorEvent', () => {
   })
 
   it('maps response encoding errors', () => {
-    expect(workflowErrorEvent(new AgentResponseEncodingError({ message: 'bad event' }))).toMatchObject({
+    expect(
+      workflowErrorEvent(new AgentResponseEncodingError({ message: 'bad event' }))
+    ).toMatchObject({
       _tag: 'AgentError',
       code: 'invalid_response',
       message: 'bad event',

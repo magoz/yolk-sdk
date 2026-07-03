@@ -81,7 +81,9 @@ export function AgentActivityPanel({
           {toolResultCount > 0 ? (
             <Badge variant="secondary">{countLabel(toolResultCount, 'tool result')}</Badge>
           ) : null}
-          {workflowRunId !== null ? <Badge variant="outline">workflow {workflowRunId}</Badge> : null}
+          {workflowRunId !== null ? (
+            <Badge variant="outline">workflow {workflowRunId}</Badge>
+          ) : null}
         </div>
 
         {workflowRunId !== null ? (

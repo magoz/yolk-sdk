@@ -39,17 +39,27 @@ export const completeFileKnowledgeUploadAction = async (input: {
       const allowedPrefix = `uploads/knowledge/${session.user.id}/`
 
       if (!input.storageKey.startsWith(allowedPrefix)) {
-        return yield* Effect.fail(new ValidationError({ field: 'storageKey', message: 'Invalid upload' }))
+        return yield* Effect.fail(
+          new ValidationError({ field: 'storageKey', message: 'Invalid upload' })
+        )
       }
 
-      if (!Number.isSafeInteger(input.byteSize) || input.byteSize <= 0 || input.byteSize > maxFileBytes) {
-        return yield* Effect.fail(new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' }))
+      if (
+        !Number.isSafeInteger(input.byteSize) ||
+        input.byteSize <= 0 ||
+        input.byteSize > maxFileBytes
+      ) {
+        return yield* Effect.fail(
+          new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' })
+        )
       }
 
       const bytes = yield* fileStore.getFile({ storageKey: input.storageKey })
 
       if (bytes.byteLength !== input.byteSize) {
-        return yield* Effect.fail(new ValidationError({ field: 'file', message: 'Uploaded file size mismatch' }))
+        return yield* Effect.fail(
+          new ValidationError({ field: 'file', message: 'Uploaded file size mismatch' })
+        )
       }
 
       yield* Effect.annotateCurrentSpan({
@@ -76,14 +86,30 @@ export const completeFileKnowledgeUploadAction = async (input: {
       Effect.tap(() => Effect.sync(() => revalidatePath('/knowledge'))),
       Effect.as({ _tag: 'Success' as const }),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
-      Effect.catchTag('ValidationError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('UnsupportedFileFormatError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('FileExtractionError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeFileError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeChunkingError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeEmbeddingError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.tapError(error => reportError(error, { operation: 'action.knowledge.completeFileUpload' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not save uploaded file' }))
+      Effect.catchTag('ValidationError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('UnsupportedFileFormatError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('FileExtractionError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('KnowledgeFileError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('KnowledgeChunkingError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('KnowledgeEmbeddingError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.tapError(error =>
+        reportError(error, { operation: 'action.knowledge.completeFileUpload' })
+      ),
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not save uploaded file' })
+      )
     )
   )
 }

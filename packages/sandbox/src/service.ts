@@ -10,10 +10,14 @@ import type { SandboxCommandInput, SandboxCommandResult, SandboxState } from './
 
 export type SandboxApi = {
   readonly run: (input: SandboxCommandInput) => Effect.Effect<SandboxCommandResult, SandboxError>
-  readonly currentState: Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError | SandboxStateError>
-  readonly delete: Effect.Effect<void, SandboxProviderError | SandboxStateStoreError | SandboxStateError>
+  readonly currentState: Effect.Effect<
+    Option.Option<SandboxState>,
+    SandboxStateStoreError | SandboxStateError
+  >
+  readonly delete: Effect.Effect<
+    void,
+    SandboxProviderError | SandboxStateStoreError | SandboxStateError
+  >
 }
 
-export class Sandbox extends Context.Service<Sandbox, SandboxApi>()(
-  '@yolk-sdk/sandbox/Sandbox'
-) {}
+export class Sandbox extends Context.Service<Sandbox, SandboxApi>()('@yolk-sdk/sandbox/Sandbox') {}

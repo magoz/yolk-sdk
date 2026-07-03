@@ -25,24 +25,24 @@ Do not tidy source code unless docs require tiny path/config updates.
 
 ## Arguments
 
-| Arg | Meaning |
-| --- | --- |
-| `--check` | Report only. Do not edit. |
-| `--docs` | Docs only. Default. |
-| `--create-new` | Read existing first, then rebuild docs. Ask before using. |
-| `--max-depth=N` | Limit AGENTS scan depth. Default: 6. |
+| Arg             | Meaning                                                   |
+| --------------- | --------------------------------------------------------- |
+| `--check`       | Report only. Do not edit.                                 |
+| `--docs`        | Docs only. Default.                                       |
+| `--create-new`  | Read existing first, then rebuild docs. Ask before using. |
+| `--max-depth=N` | Limit AGENTS scan depth. Default: 6.                      |
 
 ## Repo Knowledge Model
 
-| Area | Doc owner | Rules |
-| --- | --- | --- |
-| Root `AGENTS.md` | Monorepo contract | SDK-first strategy, commands, boundaries only |
-| `patterns/*` | Repo-wide reusable patterns | Packages, shared Effect/TS/testing/telemetry only |
-| `examples/next/*` | Next app docs | App Router, server actions, API routes, auth, nuqs, UX |
-| `packages/*` | Public SDK docs | Domain-free package contracts and exports |
-| `examples/next/lib/*` | App-owned backend docs | Services, domain actions, app agent wiring |
-| `cloudflare/*` | Worker app docs | Durable Object/Worker/runtime specifics |
-| `.repos/*` | Reference only | Never index, edit, lint, or workspace |
+| Area                  | Doc owner                   | Rules                                                  |
+| --------------------- | --------------------------- | ------------------------------------------------------ |
+| Root `AGENTS.md`      | Monorepo contract           | SDK-first strategy, commands, boundaries only          |
+| `patterns/*`          | Repo-wide reusable patterns | Packages, shared Effect/TS/testing/telemetry only      |
+| `examples/next/*`     | Next app docs               | App Router, server actions, API routes, auth, nuqs, UX |
+| `packages/*`          | Public SDK docs             | Domain-free package contracts and exports              |
+| `examples/next/lib/*` | App-owned backend docs      | Services, domain actions, app agent wiring             |
+| `cloudflare/*`        | Worker app docs             | Durable Object/Worker/runtime specifics                |
+| `.repos/*`            | Reference only              | Never index, edit, lint, or workspace                  |
 
 ## Workflow
 
@@ -105,9 +105,9 @@ Move or rewrite content by boundary:
 
 Before deleting large sections, create a preservation map:
 
-| Removed topic | Destination | Verified? |
-| --- | --- | --- |
-| Tool registry rules | `patterns/PACKAGE_ARCHITECTURE.md` | yes/no |
+| Removed topic       | Destination                        | Verified? |
+| ------------------- | ---------------------------------- | --------- |
+| Tool registry rules | `patterns/PACKAGE_ARCHITECTURE.md` | yes/no    |
 
 If no destination exists, move/summarize the project-specific rule before deleting it.
 

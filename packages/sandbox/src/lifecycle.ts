@@ -63,7 +63,9 @@ export const validateSandboxCommand = (command: string) => {
   return Effect.succeed(command)
 }
 
-export const normalizeWorkspaceCwd = (cwd?: string | null): Effect.Effect<string, SandboxInputError> => {
+export const normalizeWorkspaceCwd = (
+  cwd?: string | null
+): Effect.Effect<string, SandboxInputError> => {
   if (cwd === undefined || cwd === null || cwd.trim().length === 0) {
     return Effect.succeed('.')
   }

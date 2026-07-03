@@ -7,13 +7,13 @@ Effect-based setup/teardown.
 
 Test what users see and do, not implementation details.
 
-| Priority | Locator | Use |
-| --- | --- | --- |
-| 1 | `getByRole` | Buttons, links, headings, rows, menuitems; pass `{ name }` |
-| 2 | `getByLabel` | Inputs, textareas, comboboxes, switches |
-| 3 | `getByPlaceholder` | Only when adding a label is not practical |
-| 4 | `getByText` | Non-interactive elements only |
-| 5 | `getByTestId` | Last resort |
+| Priority | Locator            | Use                                                        |
+| -------- | ------------------ | ---------------------------------------------------------- |
+| 1        | `getByRole`        | Buttons, links, headings, rows, menuitems; pass `{ name }` |
+| 2        | `getByLabel`       | Inputs, textareas, comboboxes, switches                    |
+| 3        | `getByPlaceholder` | Only when adding a label is not practical                  |
+| 4        | `getByText`        | Non-interactive elements only                              |
+| 5        | `getByTestId`      | Last resort                                                |
 
 Never use CSS selectors for user flows. When two controls share a locator, fix the app with a
 unique accessible name instead of using positional selectors.

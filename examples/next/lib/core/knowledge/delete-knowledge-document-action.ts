@@ -31,7 +31,9 @@ export const deleteKnowledgeDocumentAction = async (id: string) => {
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
       Effect.tapError(error => reportError(error, { operation: 'action.knowledge.delete' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not delete knowledge document' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not delete knowledge document' })
+      )
     )
   )
 }

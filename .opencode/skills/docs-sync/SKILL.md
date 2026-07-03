@@ -11,18 +11,18 @@ This is a deep docs-drift workflow. It verifies code reality first, maps changed
 
 ## In This Skill
 
-| File | Purpose |
-| --- | --- |
+| File                                                 | Purpose                     |
+| ---------------------------------------------------- | --------------------------- |
 | [references/checklist.md](./references/checklist.md) | Full audit/update checklist |
-| [references/doc-map.md](./references/doc-map.md) | Changed-code → docs mapping |
+| [references/doc-map.md](./references/doc-map.md)     | Changed-code → docs mapping |
 
 ## Modes
 
-| User intent | Behavior |
-| --- | --- |
-| “audit docs”, “what’s stale?” | Read-only audit; return gaps and file-level plan. |
-| “sync docs”, “update docs”, “fix docs” | Audit, edit docs, validate. |
-| ambiguous | Ask whether to audit only or edit. |
+| User intent                            | Behavior                                          |
+| -------------------------------------- | ------------------------------------------------- |
+| “audit docs”, “what’s stale?”          | Read-only audit; return gaps and file-level plan. |
+| “sync docs”, “update docs”, “fix docs” | Audit, edit docs, validate.                       |
+| ambiguous                              | Ask whether to audit only or edit.                |
 
 ## Quick Start
 
@@ -93,13 +93,13 @@ pnpm test:run            # broad behavioral docs or test-backed examples
 
 ## Reading Order
 
-| Task | Files |
-| --- | --- |
-| Quick docs drift audit | SKILL.md → checklist.md |
-| Package API change | SKILL.md → doc-map.md → checklist.md → package-docs skill if README affected |
-| Provider/connector change | SKILL.md → doc-map.md → relevant package source/tests |
-| Workflow/runtime change | SKILL.md → doc-map.md → tests/source → docs pages |
-| Docs philosophy/process update | SKILL.md → apps/docs/AGENTS.md |
+| Task                           | Files                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| Quick docs drift audit         | SKILL.md → checklist.md                                                      |
+| Package API change             | SKILL.md → doc-map.md → checklist.md → package-docs skill if README affected |
+| Provider/connector change      | SKILL.md → doc-map.md → relevant package source/tests                        |
+| Workflow/runtime change        | SKILL.md → doc-map.md → tests/source → docs pages                            |
+| Docs philosophy/process update | SKILL.md → apps/docs/AGENTS.md                                               |
 
 ## Output Format
 

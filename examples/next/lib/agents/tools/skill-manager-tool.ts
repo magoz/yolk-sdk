@@ -8,9 +8,11 @@ import type { AgentToolContext } from './tool-context.ts'
 const skillManagerToolName = 'manage_skills'
 
 const SkillManagerParams = Schema.Struct({
-  action: Schema.Union([Schema.Literal('list'), Schema.Literal('create'), Schema.Literal('update')]).pipe(
-    Schema.annotate({ description: 'Action to perform.' })
-  ),
+  action: Schema.Union([
+    Schema.Literal('list'),
+    Schema.Literal('create'),
+    Schema.Literal('update')
+  ]).pipe(Schema.annotate({ description: 'Action to perform.' })),
   id: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Existing skill id for update.' })
   ),
@@ -27,7 +29,10 @@ const SkillManagerParams = Schema.Struct({
     Schema.annotate({ description: 'Whether the skill is enabled after update.' })
   ),
   createCommand: Schema.optional(Schema.NullOr(Schema.Boolean)).pipe(
-    Schema.annotate({ description: 'Whether to create or update a matching slash command. Defaults true for create/update.' })
+    Schema.annotate({
+      description:
+        'Whether to create or update a matching slash command. Defaults true for create/update.'
+    })
   ),
   commandName: Schema.optional(Schema.NullOr(Schema.String)).pipe(
     Schema.annotate({ description: 'Optional slash command name. Defaults to the skill name.' })
@@ -146,7 +151,8 @@ export const makeSkillManagerToolModule = (
       parameters: SkillManagerParams,
       access: 'write',
       isEnabled: context => Effect.succeed(context.surface === 'text' && context.subagent !== true),
-      invalidParamsMessage: error => `Invalid skill manager arguments: ${error instanceof Error ? error.message : String(error)}`,
+      invalidParamsMessage: error =>
+        `Invalid skill manager arguments: ${error instanceof Error ? error.message : String(error)}`,
       execute: ({ call, context, params }) =>
         Effect.gen(function* () {
           const action = yield* paramsToAction(params, context.userId)

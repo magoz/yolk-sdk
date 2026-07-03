@@ -14,27 +14,28 @@ import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { runAgentWorkflow } from './host-run-agent-workflow'
 
-export const startProgram = (request: Request) => Effect.gen(function* () {
-  const workflows = yield* VercelWorkflows
-  const body = yield* Effect.promise(() => request.json())
-  const input = yield* Effect.promise(() => decodeStartRequest(body))
-  yield* Effect.promise(() => assertCanStartRun(input))
+export const startProgram = (request: Request) =>
+  Effect.gen(function* () {
+    const workflows = yield* VercelWorkflows
+    const body = yield* Effect.promise(() => request.json())
+    const input = yield* Effect.promise(() => decodeStartRequest(body))
+    yield* Effect.promise(() => assertCanStartRun(input))
 
-  const run = yield* workflows.start(runAgentWorkflow, [
-    {
-      request: input.request,
-      context: input.context
-    }
-  ])
-  const readable = yield* run.getReadable<Uint8Array>()
+    const run = yield* workflows.start(runAgentWorkflow, [
+      {
+        request: input.request,
+        context: input.context
+      }
+    ])
+    const readable = yield* run.getReadable<Uint8Array>()
 
-  return new Response(readable, {
-    headers: {
-      'content-type': 'application/x-ndjson',
-      'x-workflow-run-id': run.runId
-    }
+    return new Response(readable, {
+      headers: {
+        'content-type': 'application/x-ndjson',
+        'x-workflow-run-id': run.runId
+      }
+    })
   })
-})
 ```
 
 `decodeStartRequest` and `assertCanStartRun` are host functions. Do not trust client-provided tools, provider config, or workflow context.
@@ -45,16 +46,17 @@ export const startProgram = (request: Request) => Effect.gen(function* () {
 import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 
-export const tailProgram = (request: Request, runId: string) => Effect.gen(function* () {
-  const workflows = yield* VercelWorkflows
-  yield* Effect.promise(() => assertCanReadRun(runId))
-  const startIndex = startIndexFromRequest(request)
-  const readable = yield* workflows.getReadable<Uint8Array>(runId, { startIndex })
+export const tailProgram = (request: Request, runId: string) =>
+  Effect.gen(function* () {
+    const workflows = yield* VercelWorkflows
+    yield* Effect.promise(() => assertCanReadRun(runId))
+    const startIndex = startIndexFromRequest(request)
+    const readable = yield* workflows.getReadable<Uint8Array>(runId, { startIndex })
 
-  return new Response(readable, {
-    headers: { 'content-type': 'application/x-ndjson' }
+    return new Response(readable, {
+      headers: { 'content-type': 'application/x-ndjson' }
+    })
   })
-})
 ```
 
 Clients can use `streamAgentRunEventsUntilTerminal` with this route.
@@ -65,26 +67,27 @@ Clients can use `streamAgentRunEventsUntilTerminal` with this route.
 import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 
-export const resumeProgram = (request: Request) => Effect.gen(function* () {
-  const workflows = yield* VercelWorkflows
-  const body = yield* Effect.promise(() => request.json())
-  const input = yield* Effect.promise(() => decodeHitlResumeRequest(body))
-  yield* Effect.promise(() => assertCanResumeRun(input.runId, input.hitlResponses))
+export const resumeProgram = (request: Request) =>
+  Effect.gen(function* () {
+    const workflows = yield* VercelWorkflows
+    const body = yield* Effect.promise(() => request.json())
+    const input = yield* Effect.promise(() => decodeHitlResumeRequest(body))
+    yield* Effect.promise(() => assertCanResumeRun(input.runId, input.hitlResponses))
 
-  const hitlResponse = yield* Effect.promise(() => decodeSingleHitlResponse(input.hitlResponses))
-  const streamTailIndex = yield* workflows.tailIndex(input.runId)
-  yield* workflows.resumeHook(input.hookToken, hitlResponse)
-  const readable = yield* workflows.getReadable<Uint8Array>(input.runId, {
-    startIndex: streamTailIndex + 1
-  })
+    const hitlResponse = yield* Effect.promise(() => decodeSingleHitlResponse(input.hitlResponses))
+    const streamTailIndex = yield* workflows.tailIndex(input.runId)
+    yield* workflows.resumeHook(input.hookToken, hitlResponse)
+    const readable = yield* workflows.getReadable<Uint8Array>(input.runId, {
+      startIndex: streamTailIndex + 1
+    })
 
-  return new Response(readable, {
-    headers: {
-      'content-type': 'application/x-ndjson',
-      'x-workflow-stream-tail-index': String(streamTailIndex)
-    }
+    return new Response(readable, {
+      headers: {
+        'content-type': 'application/x-ndjson',
+        'x-workflow-stream-tail-index': String(streamTailIndex)
+      }
+    })
   })
-})
 ```
 
 The helper-compatible request body is `{ hitlResponses }`. The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
@@ -97,13 +100,14 @@ If your resume route returns `202` with no body, do not use `streamAgentRunHitlR
 import { Effect } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 
-export const cancelProgram = (runId: string) => Effect.gen(function* () {
-  const workflows = yield* VercelWorkflows
-  yield* Effect.promise(() => assertCanCancelRun(runId))
-  yield* workflows.cancel(runId)
+export const cancelProgram = (runId: string) =>
+  Effect.gen(function* () {
+    const workflows = yield* VercelWorkflows
+    yield* Effect.promise(() => assertCanCancelRun(runId))
+    yield* workflows.cancel(runId)
 
-  return new Response(null, { status: 204 })
-})
+    return new Response(null, { status: 204 })
+  })
 ```
 
 Cancellation is host/Vercel-owned. The package does not define a cancellation protocol event.
@@ -112,12 +116,12 @@ Cancellation is host/Vercel-owned. The package does not define a cancellation pr
 
 Import these from `@yolk-sdk/agent/client`.
 
-| Client API | Route shape |
-| --- | --- |
-| `streamAgentEventsUntilTerminal` | starts run and follows continuation headers |
-| `streamAgentRunEventsUntilTerminal` | reads an existing run tail |
+| Client API                                      | Route shape                                   |
+| ----------------------------------------------- | --------------------------------------------- |
+| `streamAgentEventsUntilTerminal`                | starts run and follows continuation headers   |
+| `streamAgentRunEventsUntilTerminal`             | reads an existing run tail                    |
 | `streamAgentRunHitlResponseEventsUntilTerminal` | resumes HITL and follows returned/tail chunks |
-| `cancelAgentRun` | calls your cancel route |
+| `cancelAgentRun`                                | calls your cancel route                       |
 
 ## Headers
 
@@ -130,9 +134,9 @@ Use the SDK header helpers from `@yolk-sdk/agent/client` on the client:
 
 Header meanings:
 
-| Header | Meaning |
-| --- | --- |
-| `x-workflow-run-id` | Vercel Workflow run id returned by your start route |
+| Header                         | Meaning                                                               |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `x-workflow-run-id`            | Vercel Workflow run id returned by your start route                   |
 | `x-workflow-stream-tail-index` | Vercel stream chunk index immediately before the response body starts |
 
 The stream tail index is for Vercel continuation chunks. It is distinct from durable agent `eventSequence`, which is part of replay-safe event ids.

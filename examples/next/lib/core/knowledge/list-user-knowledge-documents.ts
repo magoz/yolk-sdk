@@ -31,7 +31,9 @@ export type KnowledgeDocumentSummary = {
 const normalizeLimit = (value: number | undefined) => {
   const limit = value ?? defaultLimit
   if (!Number.isInteger(limit) || limit < 1) {
-    return Effect.fail(new ValidationError({ field: 'limit', message: 'limit must be a positive integer' }))
+    return Effect.fail(
+      new ValidationError({ field: 'limit', message: 'limit must be a positive integer' })
+    )
   }
   return Effect.succeed(Math.min(limit, maxLimit))
 }
@@ -55,7 +57,9 @@ export const listUserKnowledgeDocuments = (input: {
           input.availability === undefined
             ? undefined
             : eq(schema.userKnowledgeDocument.availability, input.availability),
-          query === undefined || query.length === 0 ? undefined : ilike(schema.userKnowledgeDocument.title, `%${query}%`)
+          query === undefined || query.length === 0
+            ? undefined
+            : ilike(schema.userKnowledgeDocument.title, `%${query}%`)
         )
       )
       .orderBy(desc(schema.userKnowledgeDocument.updatedAt))

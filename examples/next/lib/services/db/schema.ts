@@ -218,7 +218,10 @@ export const agentConnector = pgTable(
     ),
     check('agentConnector_connectorId_nonempty_check', sql`length(${table.connectorId}) > 0`),
     check('agentConnector_chatId_nonempty_check', sql`length(${table.chatId}) > 0`),
-    check('agentConnector_credentialSecret_nonempty_check', sql`length(${table.credentialSecret}) > 0`)
+    check(
+      'agentConnector_credentialSecret_nonempty_check',
+      sql`length(${table.credentialSecret}) > 0`
+    )
   ]
 )
 export type AgentConnector = typeof agentConnector.$inferSelect
@@ -279,7 +282,9 @@ export const knowledgeCollection = pgTable(
     label: text('label'),
     embeddingModel: text('embeddingModel').notNull().default('text-embedding-3-small'),
     embeddingDimensions: integer('embeddingDimensions').notNull().default(1536),
-    chunkingStrategy: knowledgeChunkingStrategy('chunkingStrategy').notNull().default('sentence-token'),
+    chunkingStrategy: knowledgeChunkingStrategy('chunkingStrategy')
+      .notNull()
+      .default('sentence-token'),
     chunkMaxTokens: integer('chunkMaxTokens').notNull().default(512),
     metadata: jsonb('metadata')
       .$type<Record<string, unknown>>()
@@ -342,7 +347,10 @@ export const knowledgeDocument = pgTable(
       table.createdAt.asc().nullsLast()
     ),
     unique('knowledgeDocument_id_collectionId_key').on(table.id, table.collectionId),
-    unique('knowledgeDocument_collectionId_storageObjectId_key').on(table.collectionId, table.storageObjectId),
+    unique('knowledgeDocument_collectionId_storageObjectId_key').on(
+      table.collectionId,
+      table.storageObjectId
+    ),
     check('knowledgeDocument_tokenCount_check', sql`${table.tokenCount} >= 0`),
     check('knowledgeDocument_chunkCount_check', sql`${table.chunkCount} >= 0`)
   ]
@@ -468,9 +476,15 @@ export const userKnowledgeFile = pgTable(
   },
   table => [
     index('userKnowledgeFile_documentId_idx').using('btree', table.documentId.asc().nullsLast()),
-    uniqueIndex('userKnowledgeFile_storageKey_key').using('btree', table.storageKey.asc().nullsLast()),
+    uniqueIndex('userKnowledgeFile_storageKey_key').using(
+      'btree',
+      table.storageKey.asc().nullsLast()
+    ),
     check('userKnowledgeFile_storageKey_nonempty_check', sql`length(${table.storageKey}) > 0`),
-    check('userKnowledgeFile_byteSize_check', sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
+    check(
+      'userKnowledgeFile_byteSize_check',
+      sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`
+    )
   ]
 )
 export type UserKnowledgeFile = typeof userKnowledgeFile.$inferSelect
@@ -497,7 +511,10 @@ export const userKnowledgeChunk = pgTable(
     createdAt: timestamp('createdAt').notNull().defaultNow()
   },
   table => [
-    index('userKnowledgeChunk_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
+    index('userKnowledgeChunk_embedding_idx').using(
+      'hnsw',
+      table.embedding.op('vector_cosine_ops')
+    ),
     index('userKnowledgeChunk_content_fts_idx').using(
       'gin',
       sql`to_tsvector('english', ${table.content})`

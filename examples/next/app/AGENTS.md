@@ -4,15 +4,15 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Structure
 
-| Area          | Role                                     |
-| ------------- | ---------------------------------------- |
-| `page.tsx`    | Public home page                         |
-| `(auth)/`     | Login, OTP, logout, auth error UI        |
-| `agent/`      | Text+image/PDF + voice agent playground UI |
-| `storage/`    | Storage source ingestion/list UI         |
-| `knowledge/`  | Agent-native knowledge document management |
-| `api/`        | HTTP boundaries; see `examples/next/app/api/AGENTS.md` |
-| `globals.css` | Tailwind 4 globals/theme                 |
+| Area          | Role                                                            |
+| ------------- | --------------------------------------------------------------- |
+| `page.tsx`    | Public home page                                                |
+| `(auth)/`     | Login, OTP, logout, auth error UI                               |
+| `agent/`      | Text+image/PDF + hold-to-speak/realtime/TTS agent playground UI |
+| `storage/`    | Storage source ingestion/list UI                                |
+| `knowledge/`  | Agent-native knowledge document management                      |
+| `api/`        | HTTP boundaries; see `examples/next/app/api/AGENTS.md`          |
+| `globals.css` | Tailwind 4 globals/theme                                        |
 
 ## Page Rules
 
@@ -38,8 +38,8 @@ Next.js App Router UI and route composition. Keep app-specific wiring here; move
 
 ## Agent UI
 
-- `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF+mic UI.
-- Voice is available inside each runtime page; no separate voice route.
+- `/agent` chooses runtime; `/agent/next`, `/agent/cloudflare`, and `/agent/workflow` share text+image/PDF plus hold-to-speak STT, realtime, and TTS speaker controls.
+- Voice is available inside each runtime page; no separate voice page route, but API routes live under `/api/agent/realtime/*` and `/api/agent/voice/*`.
 - See `examples/next/app/agent/AGENTS.md` before touching chat state/rendering.
 - Console/status/debug chrome stays out of core conversation layout.
 

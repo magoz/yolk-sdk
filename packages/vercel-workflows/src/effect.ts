@@ -143,10 +143,7 @@ const VercelWorkflowsSdkLive = Layer.succeed(VercelWorkflowsSdk, {
   resumeHook: (token: string, payload: unknown) => workflowResumeHook<unknown>(token, payload)
 })
 
-export class VercelWorkflows extends Context.Service<
-  VercelWorkflows,
-  VercelWorkflowsClient
->()(
+export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWorkflowsClient>()(
   '@yolk-sdk/vercel-workflows/VercelWorkflows',
   {
     make: Effect.gen(function* () {
@@ -172,10 +169,7 @@ export class VercelWorkflows extends Context.Service<
           Effect.tryPromise({
             try: () => sdk.start(workflow, args),
             catch: cause => workflowsError('start', cause)
-          }).pipe(
-            Effect.map(makeWorkflowRun),
-            Effect.withSpan('VercelWorkflows.start')
-          ),
+          }).pipe(Effect.map(makeWorkflowRun), Effect.withSpan('VercelWorkflows.start')),
 
         getRun,
 
@@ -204,10 +198,7 @@ export class VercelWorkflows extends Context.Service<
             })
           ),
 
-        resumeHook: (
-          token: string,
-          payload: unknown
-        ): Effect.Effect<void, VercelWorkflowsError> =>
+        resumeHook: (token: string, payload: unknown): Effect.Effect<void, VercelWorkflowsError> =>
           Effect.tryPromise({
             try: () => sdk.resumeHook(token, payload).then(() => undefined),
             catch: cause => workflowsError('resumeHook', cause)

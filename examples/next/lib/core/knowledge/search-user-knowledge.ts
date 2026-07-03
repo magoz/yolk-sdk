@@ -28,7 +28,12 @@ const normalizePositiveInteger = (input: {
 }) => {
   const value = input.value ?? input.defaultValue
   if (!Number.isInteger(value) || value < 1) {
-    return Effect.fail(new ValidationError({ field: input.field, message: `${input.field} must be a positive integer` }))
+    return Effect.fail(
+      new ValidationError({
+        field: input.field,
+        message: `${input.field} must be a positive integer`
+      })
+    )
   }
   return Effect.succeed(Math.min(value, input.maxValue))
 }
@@ -36,13 +41,20 @@ const normalizePositiveInteger = (input: {
 const normalizeContextChunks = (value: number | undefined) => {
   const normalized = value ?? 1
   if (!Number.isInteger(normalized) || normalized < 0) {
-    return Effect.fail(new ValidationError({ field: 'contextChunks', message: 'contextChunks must be an integer >= 0' }))
+    return Effect.fail(
+      new ValidationError({
+        field: 'contextChunks',
+        message: 'contextChunks must be an integer >= 0'
+      })
+    )
   }
   return Effect.succeed(Math.min(normalized, maxContextChunks))
 }
 
 const dedupeMatches = (matches: ReadonlyArray<Match>) =>
-  matches.filter((match, index, all) => all.findIndex(item => item.chunk.id === match.chunk.id) === index)
+  matches.filter(
+    (match, index, all) => all.findIndex(item => item.chunk.id === match.chunk.id) === index
+  )
 
 const sortMatches = (matches: ReadonlyArray<Match>, limit: number) =>
   [...matches].sort((left, right) => right.score - left.score).slice(0, limit)
@@ -57,7 +69,9 @@ export const searchUserKnowledge = (input: {
   Effect.gen(function* () {
     const query = input.query.trim()
     if (query.length === 0) {
-      return yield* Effect.fail(new ValidationError({ field: 'query', message: 'Knowledge query is empty' }))
+      return yield* Effect.fail(
+        new ValidationError({ field: 'query', message: 'Knowledge query is empty' })
+      )
     }
 
     const limit = yield* normalizePositiveInteger({
@@ -72,7 +86,8 @@ export const searchUserKnowledge = (input: {
     const embedding = yield* embedder.embedQuery(query)
     const distance = cosineDistance(schema.userKnowledgeChunk.embedding, Array.from(embedding))
     const vectorScore = sql<number>`1 - (${distance})`
-    const minScoreCondition = input.minScore === undefined ? undefined : lte(distance, 1 - input.minScore)
+    const minScoreCondition =
+      input.minScore === undefined ? undefined : lte(distance, 1 - input.minScore)
 
     const vectorMatches = yield* db
       .select({
@@ -81,7 +96,10 @@ export const searchUserKnowledge = (input: {
         score: vectorScore
       })
       .from(schema.userKnowledgeChunk)
-      .innerJoin(schema.userKnowledgeDocument, eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId))
+      .innerJoin(
+        schema.userKnowledgeDocument,
+        eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId)
+      )
       .where(
         and(
           eq(schema.userKnowledgeDocument.userId, input.userId),
@@ -103,7 +121,10 @@ export const searchUserKnowledge = (input: {
         score: textScore
       })
       .from(schema.userKnowledgeChunk)
-      .innerJoin(schema.userKnowledgeDocument, eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId))
+      .innerJoin(
+        schema.userKnowledgeDocument,
+        eq(schema.userKnowledgeDocument.id, schema.userKnowledgeChunk.documentId)
+      )
       .where(
         and(
           eq(schema.userKnowledgeDocument.userId, input.userId),
@@ -130,7 +151,10 @@ export const searchUserKnowledge = (input: {
         .where(
           and(
             eq(schema.userKnowledgeChunk.documentId, match.chunk.documentId),
-            gte(schema.userKnowledgeChunk.position, Math.max(0, match.chunk.position - contextChunks)),
+            gte(
+              schema.userKnowledgeChunk.position,
+              Math.max(0, match.chunk.position - contextChunks)
+            ),
             lte(schema.userKnowledgeChunk.position, match.chunk.position + contextChunks)
           )
         )

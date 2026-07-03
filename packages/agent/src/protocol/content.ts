@@ -172,7 +172,8 @@ export const appendTextToContent = (content: Content, text: string): Content => 
   })
 }
 
-export const inlineBase64AttachmentSource = (data: string) => InlineBase64AttachmentSource.make({ data })
+export const inlineBase64AttachmentSource = (data: string) =>
+  InlineBase64AttachmentSource.make({ data })
 
 export const urlAttachmentSource = (url: string) => UrlAttachmentSource.make({ url })
 
@@ -212,7 +213,8 @@ export const attachmentSourceUrl = (source: AttachmentSource, mimeType: string) 
   }
 }
 
-const normalizeMimeType = (mimeType: string) => mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+const normalizeMimeType = (mimeType: string) =>
+  mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
 
 const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
   '.csv': 'text/csv',
@@ -237,7 +239,9 @@ const textDocumentMimeTypeByExtension: Readonly<Record<string, string>> = {
 }
 
 const isUnknownDocumentMimeType = (mimeType: string) =>
-  mimeType.length === 0 || mimeType === 'application/octet-stream' || mimeType === 'binary/octet-stream'
+  mimeType.length === 0 ||
+  mimeType === 'application/octet-stream' ||
+  mimeType === 'binary/octet-stream'
 
 export const isTextDocumentMimeType = (mimeType: string) => {
   const normalized = normalizeMimeType(mimeType)
@@ -303,10 +307,11 @@ export const documentPartFromText = (input: {
   readonly title?: string
 }) => {
   const normalized = normalizeMimeType(input.mimeType)
-  const mimeType = inferTextDocumentMimeType({
-    filename: input.filename,
-    mimeType: input.mimeType
-  }) ?? (isUnknownDocumentMimeType(normalized) ? 'text/plain' : undefined)
+  const mimeType =
+    inferTextDocumentMimeType({
+      filename: input.filename,
+      mimeType: input.mimeType
+    }) ?? (isUnknownDocumentMimeType(normalized) ? 'text/plain' : undefined)
 
   if (mimeType === undefined) return undefined
 

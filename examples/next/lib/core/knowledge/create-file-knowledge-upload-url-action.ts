@@ -7,14 +7,21 @@ import { AppLayer } from '@/lib/layers'
 import { ValidationError } from '@/lib/core/errors'
 import { NextEffect } from '@/lib/next-effect'
 import { getSession } from '@/lib/services/auth/get-session'
-import { R2KnowledgeUploadStore, R2KnowledgeUploadStoreLayer } from '@/lib/services/knowledge/live-layer'
+import {
+  R2KnowledgeUploadStore,
+  R2KnowledgeUploadStoreLayer
+} from '@/lib/services/knowledge/live-layer'
 import { reportError } from '@/lib/services/telemetry/report-error'
 
 const maxFileBytes = 2_000_000
 
-const CreateFileKnowledgeUploadUrlActionLayer = Layer.mergeAll(AppLayer, R2KnowledgeUploadStoreLayer)
+const CreateFileKnowledgeUploadUrlActionLayer = Layer.mergeAll(
+  AppLayer,
+  R2KnowledgeUploadStoreLayer
+)
 
-const safeFilename = (filename: string) => filename.trim().replaceAll('/', '_').replaceAll('\\', '_')
+const safeFilename = (filename: string) =>
+  filename.trim().replaceAll('/', '_').replaceAll('\\', '_')
 
 export const createFileKnowledgeUploadUrlAction = async (input: {
   readonly filename: string
@@ -30,11 +37,19 @@ export const createFileKnowledgeUploadUrlAction = async (input: {
       const filename = safeFilename(input.filename)
 
       if (filename.length === 0) {
-        return yield* Effect.fail(new ValidationError({ field: 'filename', message: 'Choose a file' }))
+        return yield* Effect.fail(
+          new ValidationError({ field: 'filename', message: 'Choose a file' })
+        )
       }
 
-      if (!Number.isSafeInteger(input.byteSize) || input.byteSize <= 0 || input.byteSize > maxFileBytes) {
-        return yield* Effect.fail(new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' }))
+      if (
+        !Number.isSafeInteger(input.byteSize) ||
+        input.byteSize <= 0 ||
+        input.byteSize > maxFileBytes
+      ) {
+        return yield* Effect.fail(
+          new ValidationError({ field: 'file', message: 'File must be 2MB or smaller' })
+        )
       }
 
       const storageKey = `uploads/knowledge/${session.user.id}/${createId()}/${filename}`
@@ -57,10 +72,18 @@ export const createFileKnowledgeUploadUrlAction = async (input: {
       Effect.provide(CreateFileKnowledgeUploadUrlActionLayer),
       Effect.scoped,
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
-      Effect.catchTag('ValidationError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.catchTag('KnowledgeFileError', error => Effect.succeed({ _tag: 'Error' as const, message: error.message })),
-      Effect.tapError(error => reportError(error, { operation: 'action.knowledge.createFileUploadUrl' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not create upload URL' }))
+      Effect.catchTag('ValidationError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.catchTag('KnowledgeFileError', error =>
+        Effect.succeed({ _tag: 'Error' as const, message: error.message })
+      ),
+      Effect.tapError(error =>
+        reportError(error, { operation: 'action.knowledge.createFileUploadUrl' })
+      ),
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not create upload URL' })
+      )
     )
   )
 }

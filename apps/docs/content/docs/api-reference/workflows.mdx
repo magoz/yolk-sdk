@@ -7,97 +7,97 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 
 ## Loop exports
 
-| Export | Purpose |
-| --- | --- |
-| `runVercelAgentWorkflow` | orchestrate model/tool/HITL/close callbacks |
-| `defaultMaxWorkflowTurns` | default max turns, currently `500` |
-| `noWorkflowStepRetry` | default retry policy, `{ maxAttempts: 1 }` |
-| `retryWorkflowStep` | retry helper for Workflow callback promises |
-| `settleWorkflowStep` | convert a promise into `Success` / `Failure` result |
+| Export                    | Purpose                                             |
+| ------------------------- | --------------------------------------------------- |
+| `runVercelAgentWorkflow`  | orchestrate model/tool/HITL/close callbacks         |
+| `defaultMaxWorkflowTurns` | default max turns, currently `500`                  |
+| `noWorkflowStepRetry`     | default retry policy, `{ maxAttempts: 1 }`          |
+| `retryWorkflowStep`       | retry helper for Workflow callback promises         |
+| `settleWorkflowStep`      | convert a promise into `Success` / `Failure` result |
 
 ## Durable event exports
 
-| Export | Purpose |
-| --- | --- |
-| `makeDurableAgentEventSequencerState` | initialize event sequence state |
-| `durableAgentEventId` | build `${streamId}:${turn}:${eventSequence}` |
-| `sequenceDurableAgentEvent` | add deterministic `eventId` without writing |
-| `writeDurableAgentEvent` | write sequenced NDJSON to a writer |
-| `commitThenWriteTerminalEvent` | commit durable state before writing terminal event |
+| Export                                | Purpose                                            |
+| ------------------------------------- | -------------------------------------------------- |
+| `makeDurableAgentEventSequencerState` | initialize event sequence state                    |
+| `durableAgentEventId`                 | build `${streamId}:${turn}:${eventSequence}`       |
+| `sequenceDurableAgentEvent`           | add deterministic `eventId` without writing        |
+| `writeDurableAgentEvent`              | write sequenced NDJSON to a writer                 |
+| `commitThenWriteTerminalEvent`        | commit durable state before writing terminal event |
 
 ## Effect API exports
 
 Import from `@yolk-sdk/vercel-workflows/effect`.
 
-| Export | Purpose |
-| --- | --- |
-| `VercelWorkflows` | Effect service for start/read/replay/resume/cancel operations |
-| `VercelWorkflowsClient` | service shape for injected fakes/custom layers |
-| `VercelWorkflowsError` | tagged error for public Workflow SDK failures |
-| `VercelWorkflowsSdk` | injectable low-level SDK dependency for tests/custom hosts |
-| `VercelWorkflowFunction` | Workflow function type accepted by `start` |
-| `VercelWorkflowRun` | Effect-native run handle returned by `start`/`getRun` |
-| `VercelWorkflowReadableOptions` | readable stream options, including `startIndex` |
-| `VercelWorkflowReadableStream` | native Workflow readable stream type |
+| Export                          | Purpose                                                       |
+| ------------------------------- | ------------------------------------------------------------- |
+| `VercelWorkflows`               | Effect service for start/read/replay/resume/cancel operations |
+| `VercelWorkflowsClient`         | service shape for injected fakes/custom layers                |
+| `VercelWorkflowsError`          | tagged error for public Workflow SDK failures                 |
+| `VercelWorkflowsSdk`            | injectable low-level SDK dependency for tests/custom hosts    |
+| `VercelWorkflowFunction`        | Workflow function type accepted by `start`                    |
+| `VercelWorkflowRun`             | Effect-native run handle returned by `start`/`getRun`         |
+| `VercelWorkflowReadableOptions` | readable stream options, including `startIndex`               |
+| `VercelWorkflowReadableStream`  | native Workflow readable stream type                          |
 
 `VercelWorkflows` methods:
 
-| Method | Purpose |
-| --- | --- |
-| `start(workflow, args)` | start a Workflow and return an Effect-native run handle |
-| `getRun(runId)` | create an Effect-native handle for an existing run |
-| `getReadable(runId, options?)` | read/replay a run stream |
-| `tailIndex(runId)` | read current stream tail index |
-| `resumeHook(token, payload)` | resume a pending Workflow hook |
-| `cancel(runId)` | cancel a run |
+| Method                         | Purpose                                                 |
+| ------------------------------ | ------------------------------------------------------- |
+| `start(workflow, args)`        | start a Workflow and return an Effect-native run handle |
+| `getRun(runId)`                | create an Effect-native handle for an existing run      |
+| `getReadable(runId, options?)` | read/replay a run stream                                |
+| `tailIndex(runId)`             | read current stream tail index                          |
+| `resumeHook(token, payload)`   | resume a pending Workflow hook                          |
+| `cancel(runId)`                | cancel a run                                            |
 
 The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP, queue, hook, or stream internals.
 
 ## Callback types
 
-| Type | Meaning |
-| --- | --- |
-| `VercelAgentWorkflowInput` | `{ request, context }` passed to workflow |
-| `SerializableWorkflowState` | persisted loop state between steps |
-| `VercelAgentWorkflowLoopConfig` | full config for `runVercelAgentWorkflow` |
-| `VercelAgentWorkflowModelStepInput` | model callback input |
-| `VercelAgentWorkflowModelStepResult` | model callback result |
-| `VercelAgentWorkflowToolBatchStepInput` | tool callback input |
-| `VercelAgentWorkflowToolBatchStepResult` | tool callback result |
-| `VercelAgentWorkflowAwaitingInput` | HITL hook payload |
-| `VercelAgentWorkflowRunResult` | terminal run result union |
-| `VercelAgentWorkflowStepRetryPolicy` | `{ maxAttempts }` |
-| `WorkflowStepResult` | `Success` / `Failure` wrapper from `settleWorkflowStep` |
+| Type                                     | Meaning                                                 |
+| ---------------------------------------- | ------------------------------------------------------- |
+| `VercelAgentWorkflowInput`               | `{ request, context }` passed to workflow               |
+| `SerializableWorkflowState`              | persisted loop state between steps                      |
+| `VercelAgentWorkflowLoopConfig`          | full config for `runVercelAgentWorkflow`                |
+| `VercelAgentWorkflowModelStepInput`      | model callback input                                    |
+| `VercelAgentWorkflowModelStepResult`     | model callback result                                   |
+| `VercelAgentWorkflowToolBatchStepInput`  | tool callback input                                     |
+| `VercelAgentWorkflowToolBatchStepResult` | tool callback result                                    |
+| `VercelAgentWorkflowAwaitingInput`       | HITL hook payload                                       |
+| `VercelAgentWorkflowRunResult`           | terminal run result union                               |
+| `VercelAgentWorkflowStepRetryPolicy`     | `{ maxAttempts }`                                       |
+| `WorkflowStepResult`                     | `Success` / `Failure` wrapper from `settleWorkflowStep` |
 
 ## Durable event types
 
-| Type | Meaning |
-| --- | --- |
-| `DurableAgentEvent` | JSON event with deterministic `eventId` |
-| `DurableAgentEventIdInput` | input for `durableAgentEventId` |
-| `DurableAgentEventSequencerState` | current durable event sequence state |
-| `SequenceDurableAgentEventInput` | input for `sequenceDurableAgentEvent` |
-| `SequencedDurableAgentEvent` | event plus current/next sequence values |
-| `WriteDurableAgentEventInput` | sequenced event input plus stream writer |
+| Type                              | Meaning                                  |
+| --------------------------------- | ---------------------------------------- |
+| `DurableAgentEvent`               | JSON event with deterministic `eventId`  |
+| `DurableAgentEventIdInput`        | input for `durableAgentEventId`          |
+| `DurableAgentEventSequencerState` | current durable event sequence state     |
+| `SequenceDurableAgentEventInput`  | input for `sequenceDurableAgentEvent`    |
+| `SequencedDurableAgentEvent`      | event plus current/next sequence values  |
+| `WriteDurableAgentEventInput`     | sequenced event input plus stream writer |
 
 ## Run result tags
 
-| Tag | Meaning |
-| --- | --- |
-| `Completed` | closed normally |
-| `ModelStepFailed` | model callback failed after retries |
-| `ToolBatchStepFailed` | tool callback failed after retries |
-| `AwaitInputFailed` | HITL hook failed or missing handler |
-| `CloseStreamFailed` | close callback failed |
-| `MaxTurnsExceeded` | exceeded `maxTurns` |
+| Tag                   | Meaning                             |
+| --------------------- | ----------------------------------- |
+| `Completed`           | closed normally                     |
+| `ModelStepFailed`     | model callback failed after retries |
+| `ToolBatchStepFailed` | tool callback failed after retries  |
+| `AwaitInputFailed`    | HITL hook failed or missing handler |
+| `CloseStreamFailed`   | close callback failed               |
+| `MaxTurnsExceeded`    | exceeded `maxTurns`                 |
 
 ## Terminal helper results
 
-| Tag | Meaning |
-| --- | --- |
-| `Committed` | commit, terminal write, and close path completed; close may report `CloseFailed` separately |
-| `CommitFailed` | commit failed and commit-error terminal write succeeded |
-| `TerminalWriteFailed` | commit succeeded but terminal write failed |
-| `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed |
+| Tag                      | Meaning                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `Committed`              | commit, terminal write, and close path completed; close may report `CloseFailed` separately |
+| `CommitFailed`           | commit failed and commit-error terminal write succeeded                                     |
+| `TerminalWriteFailed`    | commit succeeded but terminal write failed                                                  |
+| `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed                                        |
 
 `TerminalEventCloseResult` reports close status as `Closed` or `CloseFailed`.

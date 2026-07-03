@@ -121,14 +121,22 @@ describe('agent playground', () => {
   it('builds PDF submit content', () => {
     expect(contentFromInput(' summarize ', [documentAttachment])).toEqual([
       TextPart.make({ text: 'summarize' }),
-      DocumentPart.make({ source: inlineBase64Source('cGRm'), mimeType: 'application/pdf', filename: 'brief.pdf' })
+      DocumentPart.make({
+        source: inlineBase64Source('cGRm'),
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      })
     ])
   })
 
   it('keeps attachment order in submit content', () => {
     expect(contentFromInput(' compare ', [documentAttachment, imageAttachment])).toEqual([
       TextPart.make({ text: 'compare' }),
-      DocumentPart.make({ source: inlineBase64Source('cGRm'), mimeType: 'application/pdf', filename: 'brief.pdf' }),
+      DocumentPart.make({
+        source: inlineBase64Source('cGRm'),
+        mimeType: 'application/pdf',
+        filename: 'brief.pdf'
+      }),
       ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' })
     ])
   })
@@ -199,10 +207,18 @@ describe('agent playground', () => {
   })
 
   it('models workflow resume busy state', () => {
-    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: false })).toBe(false)
-    expect(isAgentTextBusy({ isRunning: true, isWaiting: false, isWorkflowResuming: false })).toBe(true)
-    expect(isAgentTextBusy({ isRunning: false, isWaiting: true, isWorkflowResuming: false })).toBe(true)
-    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: true })).toBe(true)
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: false })).toBe(
+      false
+    )
+    expect(isAgentTextBusy({ isRunning: true, isWaiting: false, isWorkflowResuming: false })).toBe(
+      true
+    )
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: true, isWorkflowResuming: false })).toBe(
+      true
+    )
+    expect(isAgentTextBusy({ isRunning: false, isWaiting: false, isWorkflowResuming: true })).toBe(
+      true
+    )
     expect(isWorkflowResumeDisabled({ status: 'done', isTextBusy: false })).toBe(true)
     expect(isWorkflowResumeDisabled({ status: 'error', isTextBusy: false })).toBe(false)
     expect(isWorkflowResumeDisabled({ status: 'idle', isTextBusy: true })).toBe(true)

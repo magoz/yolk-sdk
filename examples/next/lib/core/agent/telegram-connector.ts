@@ -84,7 +84,9 @@ export const getTelegramConnectorStatus = (userId: string) =>
       : { _tag: 'Connected' as const, chatId: config.chatId }
   }).pipe(Effect.withSpan('agent.telegramConnector.status'))
 
-export const saveTelegramConnectorConfig = (input: TelegramConnectorConfig & { readonly userId: string }) =>
+export const saveTelegramConnectorConfig = (
+  input: TelegramConnectorConfig & { readonly userId: string }
+) =>
   Effect.gen(function* () {
     const db = yield* Db
     const config = yield* validateTelegramConnectorConfig(input)

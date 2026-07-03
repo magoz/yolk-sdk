@@ -31,7 +31,12 @@ export const indexKnowledgeDocument = (input: {
     const embeddings = yield* embedder.embedTexts(chunks.map(chunk => chunk.content))
 
     if (embeddings.length !== chunks.length) {
-      return yield* Effect.fail(new PersistenceError({ message: 'Embedding count did not match chunk count', entity: 'userKnowledgeChunk' }))
+      return yield* Effect.fail(
+        new PersistenceError({
+          message: 'Embedding count did not match chunk count',
+          entity: 'userKnowledgeChunk'
+        })
+      )
     }
 
     return yield* db.transaction(tx =>
@@ -64,7 +69,12 @@ export const indexKnowledgeDocument = (input: {
           .pipe(
             Effect.flatMap(([document]) =>
               document === undefined
-                ? Effect.fail(new PersistenceError({ message: 'Could not mark knowledge document ready', entity: 'userKnowledgeDocument' }))
+                ? Effect.fail(
+                    new PersistenceError({
+                      message: 'Could not mark knowledge document ready',
+                      entity: 'userKnowledgeDocument'
+                    })
+                  )
                 : Effect.succeed(document)
             )
           )
@@ -77,7 +87,11 @@ export const indexKnowledgeDocument = (input: {
         const db = yield* Db
         yield* db
           .update(schema.userKnowledgeDocument)
-          .set({ status: 'error', errorMessage: error instanceof Error ? error.message : String(error), updatedAt: sql`CURRENT_TIMESTAMP` })
+          .set({
+            status: 'error',
+            errorMessage: error instanceof Error ? error.message : String(error),
+            updatedAt: sql`CURRENT_TIMESTAMP`
+          })
           .where(eq(schema.userKnowledgeDocument.id, input.documentId))
         return yield* Effect.fail(error)
       })

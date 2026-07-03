@@ -115,10 +115,7 @@ const expectedStopReason = (events: ReadonlyArray<LLMEvent>) =>
 
 const eventsWithDone = (input: typeof validProviderCase.Type) => {
   const events = fragmentsToEvents(input.fragments)
-  return [
-    ...events,
-    LLMDone.make({ stopReason: expectedStopReason(events) })
-  ]
+  return [...events, LLMDone.make({ stopReason: expectedStopReason(events) })]
 }
 
 const invalidEvents = (input: typeof invalidProviderCase.Type) => {
@@ -135,10 +132,7 @@ const invalidEvents = (input: typeof invalidProviderCase.Type) => {
         LLMDone.make({ stopReason: validReason })
       ]
     case 'wrongReason':
-      return [
-        ...events,
-        LLMDone.make({ stopReason: validReason === 'stop' ? 'tool_use' : 'stop' })
-      ]
+      return [...events, LLMDone.make({ stopReason: validReason === 'stop' ? 'tool_use' : 'stop' })]
   }
 }
 
@@ -234,18 +228,18 @@ const collectModelTurnEventsWithLayer = () =>
       model: 'faux',
       turn: 1
     }).pipe(
-      Stream.runForEach(event => Effect.sync(() => {
-        collected.push(event)
-      }))
+      Stream.runForEach(event =>
+        Effect.sync(() => {
+          collected.push(event)
+        })
+      )
     )
 
     return collected
   })
 
-const collectModelTurnEvents = (
-  events: ReadonlyArray<LLMEvent>,
-  requests: Array<LLMRequest>
-) => collectModelTurnEventsWithLayer().pipe(Effect.provide(makeLayer(events, requests)))
+const collectModelTurnEvents = (events: ReadonlyArray<LLMEvent>, requests: Array<LLMRequest>) =>
+  collectModelTurnEventsWithLayer().pipe(Effect.provide(makeLayer(events, requests)))
 
 const countTag = (events: ReadonlyArray<AgentEvent>, tag: AgentEvent['_tag']) =>
   events.filter(event => event._tag === tag).length
@@ -298,7 +292,9 @@ describe('provider stream property tests', () => {
       const requests: Array<LLMRequest> = []
 
       return Effect.gen(function* () {
-        const result = yield* collectModelTurnEvents(invalidEvents(input), requests).pipe(Effect.result)
+        const result = yield* collectModelTurnEvents(invalidEvents(input), requests).pipe(
+          Effect.result
+        )
 
         expect(requests).toHaveLength(1)
         expect(result).toMatchObject({

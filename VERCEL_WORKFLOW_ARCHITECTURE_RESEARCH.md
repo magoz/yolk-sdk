@@ -46,7 +46,7 @@ Cloudflare Project Think is not affected by the Codex OAuth issue because it doe
 The blog example uses Workers AI:
 
 ```ts
-createWorkersAI({ binding: env.AI })("@cf/moonshotai/kimi-k2.5")
+createWorkersAI({ binding: env.AI })('@cf/moonshotai/kimi-k2.5')
 ```
 
 Workers AI does not support Codex / ChatGPT subscription OAuth. A Think agent using Codex OAuth directly from Workers could hit the same WAF problem.
@@ -65,17 +65,17 @@ Workflow runs are unlimited duration. Individual step executions still run on Ve
 
 Current limits from Vercel docs:
 
-| Limit | Value |
-| --- | --- |
-| Workflow run duration | No limit |
-| Workflow steps per run | 10,000 |
-| Workflow events per run | 25,000 |
-| Step max runtime | Vercel Function max |
-| Function max runtime, Hobby | 300s |
-| Function max runtime, Pro/Ent | 800s |
-| Workflow replay max duration | 240s |
-| Workflow payload size | 50MB |
-| Total entity storage per run | 2GB |
+| Limit                         | Value               |
+| ----------------------------- | ------------------- |
+| Workflow run duration         | No limit            |
+| Workflow steps per run        | 10,000              |
+| Workflow events per run       | 25,000              |
+| Step max runtime              | Vercel Function max |
+| Function max runtime, Hobby   | 300s                |
+| Function max runtime, Pro/Ent | 800s                |
+| Workflow replay max duration  | 240s                |
+| Workflow payload size         | 50MB                |
+| Total entity storage per run  | 2GB                 |
 
 Implication:
 
@@ -111,7 +111,7 @@ Chat route starts a Workflow and returns a durable stream:
 const run = await start(runAgentWorkflow, [{ ...input, maxSteps: 500 }])
 return createUIMessageStreamResponse({
   stream: run.getReadable(),
-  headers: { "x-workflow-run-id": run.runId },
+  headers: { 'x-workflow-run-id': run.runId }
 })
 ```
 
@@ -144,7 +144,7 @@ The Open Agents `ToolLoopAgent` is configured with one model/tool step per outer
 
 ```ts
 new ToolLoopAgent({
-  stopWhen: stepCountIs(1),
+  stopWhen: stepCountIs(1)
 })
 ```
 
@@ -165,69 +165,69 @@ Vercel Workflow cost is small relative to sandbox cost.
 
 Workflow:
 
-| Resource | Rate |
-| --- | --- |
-| Workflow steps | $2.50 / 100k = $0.000025 / step |
-| Workflow storage | $0.00069 / GB-hour |
-| Queue operations | $0.60–$0.96 / 1M operations |
+| Resource         | Rate                            |
+| ---------------- | ------------------------------- |
+| Workflow steps   | $2.50 / 100k = $0.000025 / step |
+| Workflow storage | $0.00069 / GB-hour              |
+| Queue operations | $0.60–$0.96 / 1M operations     |
 
 Vercel Functions in `iad1`:
 
-| Resource | Rate |
-| --- | --- |
-| Active CPU | $0.128 / CPU-hour |
+| Resource           | Rate              |
+| ------------------ | ----------------- |
+| Active CPU         | $0.128 / CPU-hour |
 | Provisioned memory | $0.0106 / GB-hour |
 
 CPU billing pauses during I/O. Provisioned memory billing does not.
 
 Vercel Sandbox:
 
-| Resource | Rate / limit |
-| --- | --- |
-| Active CPU | $0.128 / vCPU-hour |
-| Provisioned memory | $0.0212 / GB-hour |
-| Sandbox creation | $0.60 / 1M |
-| Data transfer | $0.15 / GB |
-| Pro max runtime | 5h |
-| Pro concurrent sandboxes | 2,000 |
+| Resource                 | Rate / limit       |
+| ------------------------ | ------------------ |
+| Active CPU               | $0.128 / vCPU-hour |
+| Provisioned memory       | $0.0212 / GB-hour  |
+| Sandbox creation         | $0.60 / 1M         |
+| Data transfer            | $0.15 / GB         |
+| Pro max runtime          | 5h                 |
+| Pro concurrent sandboxes | 2,000              |
 
 ### Chat-only estimates
 
 Assumptions: 2GB function, `iad1`, 7d retention, no sandbox, excluding model/provider cost.
 
 | Run type | Wall time | Agent steps | Stored stream | Est/run |
-| --- | ---: | ---: | ---: | ---: |
-| Light | 5m | 10 | 1MB | ~$0.003 |
-| Normal | 15m | 50 | 5MB | ~$0.009 |
-| Heavy | 45m | 150 | 20MB | ~$0.029 |
+| -------- | --------: | ----------: | ------------: | ------: |
+| Light    |        5m |          10 |           1MB | ~$0.003 |
+| Normal   |       15m |          50 |           5MB | ~$0.009 |
+| Heavy    |       45m |         150 |          20MB | ~$0.029 |
 
 Monthly rough order:
 
-| Runs/mo | Light | Normal | Heavy |
-| ---: | ---: | ---: | ---: |
-| 1k | ~$3 | ~$9 | ~$29 |
-| 10k | ~$30 | ~$90 | ~$290 |
-| 100k | ~$300 | ~$900 | ~$2.9k |
+| Runs/mo | Light | Normal |  Heavy |
+| ------: | ----: | -----: | -----: |
+|      1k |   ~$3 |    ~$9 |   ~$29 |
+|     10k |  ~$30 |   ~$90 |  ~$290 |
+|    100k | ~$300 |  ~$900 | ~$2.9k |
 
 ### Coding-agent estimates with Sandbox
 
 Open Agents standard sandbox default is 4 vCPU / 8GB.
 
-| Sandbox session | Duration | CPU load | Sandbox cost | + workflow | Est/run |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Quick | 5m | 20% | ~$0.023 | ~$0.005 | ~$0.03 |
-| Typical | 30m | 20% | ~$0.136 | ~$0.018 | ~$0.15 |
-| CPU-heavy | 30m | 100% | ~$0.341 | ~$0.018 | ~$0.36 |
-| Long | 2h, 8vCPU/16GB | 50% | ~$1.70 | ~$0.06 | ~$1.76 |
-| Long maxed | 2h, 8vCPU/16GB | 100% | ~$2.73 | ~$0.06 | ~$2.79 |
+| Sandbox session |       Duration | CPU load | Sandbox cost | + workflow | Est/run |
+| --------------- | -------------: | -------: | -----------: | ---------: | ------: |
+| Quick           |             5m |      20% |      ~$0.023 |    ~$0.005 |  ~$0.03 |
+| Typical         |            30m |      20% |      ~$0.136 |    ~$0.018 |  ~$0.15 |
+| CPU-heavy       |            30m |     100% |      ~$0.341 |    ~$0.018 |  ~$0.36 |
+| Long            | 2h, 8vCPU/16GB |      50% |       ~$1.70 |     ~$0.06 |  ~$1.76 |
+| Long maxed      | 2h, 8vCPU/16GB |     100% |       ~$2.73 |     ~$0.06 |  ~$2.79 |
 
 Monthly rough order:
 
 | Sessions/mo | Typical 30m | CPU-heavy 30m |
-| ---: | ---: | ---: |
-| 1k | ~$150 | ~$360 |
-| 10k | ~$1.5k | ~$3.6k |
-| 100k | ~$15k | ~$36k |
+| ----------: | ----------: | ------------: |
+|          1k |       ~$150 |         ~$360 |
+|         10k |      ~$1.5k |        ~$3.6k |
+|        100k |       ~$15k |         ~$36k |
 
 ### Cloudflare Durable Object cost comparison
 
@@ -288,12 +288,12 @@ Vercel Workflow runtime
 
 Recommended default split:
 
-| Mode | Runtime |
-| --- | --- |
-| Codex subscription OAuth | Vercel Workflow |
+| Mode                                                     | Runtime                          |
+| -------------------------------------------------------- | -------------------------------- |
+| Codex subscription OAuth                                 | Vercel Workflow                  |
 | Claude/OpenAI API-key or Gateway, no Worker egress issue | Either Workflow or Cloudflare DO |
-| Worker-native provider experiments | Cloudflare DO |
-| Sandbox-backed coding agent | Vercel Workflow + Vercel Sandbox |
+| Worker-native provider experiments                       | Cloudflare DO                    |
+| Sandbox-backed coding agent                              | Vercel Workflow + Vercel Sandbox |
 
 ## Product state vs execution state
 

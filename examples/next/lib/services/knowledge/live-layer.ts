@@ -21,7 +21,13 @@ type R2KnowledgeFileStoreConfigShape = {
   readonly region: string
 }
 
-type KnowledgeFileKind = 'original' | 'extracted_text' | 'thumbnail' | 'transcript' | 'caption' | 'structured'
+type KnowledgeFileKind =
+  | 'original'
+  | 'extracted_text'
+  | 'thumbnail'
+  | 'transcript'
+  | 'caption'
+  | 'structured'
 
 export type CreateR2PresignedUploadInput = {
   readonly storageKey: string
@@ -42,7 +48,9 @@ class R2KnowledgeFileStoreConfig extends Context.Service<
 export class R2KnowledgeUploadStore extends Context.Service<
   R2KnowledgeUploadStore,
   {
-    readonly createUploadUrl: (input: CreateR2PresignedUploadInput) => Effect.Effect<R2PresignedUpload, KnowledgeFileError>
+    readonly createUploadUrl: (
+      input: CreateR2PresignedUploadInput
+    ) => Effect.Effect<R2PresignedUpload, KnowledgeFileError>
   }
 >()('@app/R2KnowledgeUploadStore') {}
 
@@ -60,10 +68,12 @@ const R2KnowledgeFileStoreConfigLayer = Layer.effect(
 
     return { endpoint, bucketName, accessKeyId, secretAccessKey, region }
   }).pipe(
-    Effect.mapError(() =>
-      new KnowledgeFileError({
-        message: 'R2 file store config missing: R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY'
-      })
+    Effect.mapError(
+      () =>
+        new KnowledgeFileError({
+          message:
+            'R2 file store config missing: R2_ENDPOINT, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY'
+        })
     )
   )
 )
@@ -88,7 +98,8 @@ const scopeUserId = (scope: KnowledgeScope) => scope.id
 
 const toDateTime = (date: Date) => DateTime.fromDateUnsafe(date)
 
-const unknownToMessage = (error: unknown) => error instanceof Error ? error.message : String(error)
+const unknownToMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
 
 const propertyValue = (input: unknown, key: string) => {
   if (typeof input !== 'object' || input === null) {
@@ -109,12 +120,9 @@ const numberProperty = (input: unknown, key: string) => {
 }
 
 const externalErrorMessage = (error: unknown) => {
-  const name = error instanceof Error && error.name.length > 0
-    ? error.name
-    : stringProperty(error, 'name')
-  const message = error instanceof Error
-    ? error.message
-    : stringProperty(error, 'message')
+  const name =
+    error instanceof Error && error.name.length > 0 ? error.name : stringProperty(error, 'name')
+  const message = error instanceof Error ? error.message : stringProperty(error, 'message')
   const metadata = propertyValue(error, '$metadata')
   const status = numberProperty(metadata, 'httpStatusCode')
   const details = [name, status === undefined ? undefined : `HTTP ${status}`, message]
@@ -126,7 +134,10 @@ const externalErrorMessage = (error: unknown) => {
 
 const fileIntegrationError = (message: string, cause: unknown) => {
   const details = externalErrorMessage(cause)
-  return new KnowledgeFileError({ message: details === undefined ? message : `${message}: ${details}`, cause })
+  return new KnowledgeFileError({
+    message: details === undefined ? message : `${message}: ${details}`,
+    cause
+  })
 }
 
 const storeError = (message: string, cause?: unknown) => new KnowledgeStoreError({ message, cause })
@@ -169,7 +180,8 @@ const rowToDocument = (input: {
   availability: input.document.availability,
   summary: input.document.summary ?? undefined,
   errorMessage: input.document.errorMessage ?? undefined,
-  reviewedAt: input.document.reviewedAt === null ? undefined : toDateTime(input.document.reviewedAt),
+  reviewedAt:
+    input.document.reviewedAt === null ? undefined : toDateTime(input.document.reviewedAt),
   metadata: input.document.metadata,
   createdAt: toDateTime(input.document.createdAt),
   updatedAt: toDateTime(input.document.updatedAt)
@@ -199,9 +211,10 @@ const updateSet = (input: {
   availability: input.update.availability ?? input.existing.availability,
   summary: input.update.summary ?? input.existing.summary,
   errorMessage: input.update.errorMessage ?? input.existing.errorMessage,
-  reviewedAt: input.update.reviewedAt === undefined
-    ? input.existing.reviewedAt
-    : DateTime.toDateUtc(input.update.reviewedAt),
+  reviewedAt:
+    input.update.reviewedAt === undefined
+      ? input.existing.reviewedAt
+      : DateTime.toDateUtc(input.update.reviewedAt),
   metadata: input.update.metadata ?? input.existing.metadata,
   updatedAt: sql`CURRENT_TIMESTAMP`
 })
@@ -253,7 +266,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           }
 
           return rowToDocument({ document: created })
-        }).pipe(Effect.withSpan('KnowledgeStore.createDocument'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.createDocument'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       updateDocument: input =>
         Effect.gen(function* () {
@@ -274,7 +290,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           }
 
           return rowToDocument({ document: updated })
-        }).pipe(Effect.withSpan('KnowledgeStore.updateDocument'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.updateDocument'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       getDocument: input =>
         getScopedDocument(input).pipe(
@@ -300,7 +319,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
           }
 
           return rowToDocument({ document: row })
-        }).pipe(Effect.withSpan('KnowledgeStore.getDocumentBySlug'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.getDocumentBySlug'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       listDocuments: input =>
         Effect.gen(function* () {
@@ -319,7 +341,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .limit(input.limit)
 
           return { documents: rows.map(document => rowToDocument({ document })) }
-        }).pipe(Effect.withSpan('KnowledgeStore.listDocuments'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.listDocuments'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       listPinned: input =>
         Effect.gen(function* () {
@@ -336,7 +361,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .limit(input.limit)
 
           return { documents: rows.map(document => rowToDocument({ document })) }
-        }).pipe(Effect.withSpan('KnowledgeStore.listPinned'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.listPinned'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       deleteDocument: input =>
         Effect.gen(function* () {
@@ -348,7 +376,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
                 eq(dbSchema.userKnowledgeDocument.userId, scopeUserId(input.scope))
               )
             )
-        }).pipe(Effect.withSpan('KnowledgeStore.deleteDocument'), Effect.catch(error => Effect.fail(mapStoreError(error)))),
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.deleteDocument'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        ),
 
       listFiles: input =>
         Effect.gen(function* () {
@@ -359,7 +390,10 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
             .where(eq(dbSchema.userKnowledgeFile.documentId, input.id))
 
           return rows.map(rowToFile)
-        }).pipe(Effect.withSpan('KnowledgeStore.listFiles'), Effect.catch(error => Effect.fail(mapStoreError(error))))
+        }).pipe(
+          Effect.withSpan('KnowledgeStore.listFiles'),
+          Effect.catch(error => Effect.fail(mapStoreError(error)))
+        )
     }
   })
 )
@@ -372,20 +406,27 @@ export const R2KnowledgeFileBlobStoreLayer = Layer.effect(
 
     return {
       putFile: input =>
-        client.putObject({
-          Bucket: config.bucketName,
-          Key: input.storageKey,
-          Body: input.bytes,
-          ContentType: input.mediaType
-        }).pipe(
-          Effect.asVoid,
-          Effect.withSpan('KnowledgeFileBlobStore.putFile'),
-          Effect.catch(error => Effect.fail(fileIntegrationError('Could not upload knowledge file', error)))
-        ),
+        client
+          .putObject({
+            Bucket: config.bucketName,
+            Key: input.storageKey,
+            Body: input.bytes,
+            ContentType: input.mediaType
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.withSpan('KnowledgeFileBlobStore.putFile'),
+            Effect.catch(error =>
+              Effect.fail(fileIntegrationError('Could not upload knowledge file', error))
+            )
+          ),
 
       getFile: input =>
         Effect.gen(function* () {
-          const response = yield* client.getObject({ Bucket: config.bucketName, Key: input.storageKey })
+          const response = yield* client.getObject({
+            Bucket: config.bucketName,
+            Key: input.storageKey
+          })
           const body = response.Body
           if (body === undefined) {
             return yield* Effect.fail(fileError('R2 object body missing'))
@@ -397,14 +438,18 @@ export const R2KnowledgeFileBlobStoreLayer = Layer.effect(
           })
         }).pipe(
           Effect.withSpan('KnowledgeFileBlobStore.getFile'),
-          Effect.catch(error => Effect.fail(fileIntegrationError('Could not download knowledge file', error)))
+          Effect.catch(error =>
+            Effect.fail(fileIntegrationError('Could not download knowledge file', error))
+          )
         ),
 
       deleteFile: input =>
         client.deleteObject({ Bucket: config.bucketName, Key: input.storageKey }).pipe(
           Effect.asVoid,
           Effect.withSpan('KnowledgeFileBlobStore.deleteFile'),
-          Effect.catch(error => Effect.fail(fileIntegrationError('Could not delete knowledge file', error)))
+          Effect.catch(error =>
+            Effect.fail(fileIntegrationError('Could not delete knowledge file', error))
+          )
         )
     }
   })
@@ -418,18 +463,22 @@ export const R2KnowledgeUploadStoreLayer = Layer.effect(
 
     return {
       createUploadUrl: input =>
-        client.putObject(
-          {
-            Bucket: config.bucketName,
-            Key: input.storageKey,
-            ContentType: input.mediaType
-          },
-          { presigned: true, expiresIn: input.expiresIn ?? 900 }
-        ).pipe(
-          Effect.map(uploadUrl => ({ uploadUrl, storageKey: input.storageKey })),
-          Effect.withSpan('R2KnowledgeUploadStore.createUploadUrl'),
-          Effect.catch(error => Effect.fail(fileIntegrationError('Could not create knowledge upload URL', error)))
-        )
+        client
+          .putObject(
+            {
+              Bucket: config.bucketName,
+              Key: input.storageKey,
+              ContentType: input.mediaType
+            },
+            { presigned: true, expiresIn: input.expiresIn ?? 900 }
+          )
+          .pipe(
+            Effect.map(uploadUrl => ({ uploadUrl, storageKey: input.storageKey })),
+            Effect.withSpan('R2KnowledgeUploadStore.createUploadUrl'),
+            Effect.catch(error =>
+              Effect.fail(fileIntegrationError('Could not create knowledge upload URL', error))
+            )
+          )
     }
   })
 ).pipe(Layer.provide(R2S3ClientLayer), Layer.provide(R2KnowledgeFileStoreConfigLayer))

@@ -38,7 +38,9 @@ const OpenAiChatCompletionResponseSchema = Schema.Struct({
   )
 })
 
-export type SummarizeKnowledgeDocumentInput = Schema.Schema.Type<typeof SummarizeKnowledgeDocumentInputSchema>
+export type SummarizeKnowledgeDocumentInput = Schema.Schema.Type<
+  typeof SummarizeKnowledgeDocumentInputSchema
+>
 export type KnowledgeDocumentSummary = Schema.Schema.Type<typeof KnowledgeDocumentSummarySchema>
 
 type SummarizerConfig = {
@@ -58,7 +60,9 @@ const KnowledgeDocumentSummarizerConfigLayer = Layer.effect(
   KnowledgeDocumentSummarizerConfig,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-    const model = optionString(yield* Config.option(Config.string('KNOWLEDGE_SEARCH_SUMMARIZATION_MODEL')))
+    const model = optionString(
+      yield* Config.option(Config.string('KNOWLEDGE_SEARCH_SUMMARIZATION_MODEL'))
+    )
 
     return { apiKey, model: model ?? DEFAULT_MODEL }
   }).pipe(
@@ -127,7 +131,10 @@ const toRequestError = (error: HttpClientError.HttpClientError) =>
 const readErrorBody = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(
     Effect.mapError(
-      error => new AppKnowledgeSummarizerError({ message: `Could not read OpenAI error body: ${error.message}` })
+      error =>
+        new AppKnowledgeSummarizerError({
+          message: `Could not read OpenAI error body: ${error.message}`
+        })
     )
   )
 
@@ -145,12 +152,18 @@ const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
 const parseOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
   response.json.pipe(
     Effect.mapError(
-      error => new AppKnowledgeSummarizerError({ message: `Could not parse OpenAI summarization JSON: ${error.message}` })
+      error =>
+        new AppKnowledgeSummarizerError({
+          message: `Could not parse OpenAI summarization JSON: ${error.message}`
+        })
     ),
     Effect.flatMap(value =>
       Schema.decodeUnknownEffect(OpenAiChatCompletionResponseSchema)(value).pipe(
         Effect.mapError(
-          error => new AppKnowledgeSummarizerError({ message: `Invalid OpenAI summarization response: ${error.message}` })
+          error =>
+            new AppKnowledgeSummarizerError({
+              message: `Invalid OpenAI summarization response: ${error.message}`
+            })
         )
       )
     )
@@ -159,7 +172,10 @@ const parseOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
 const decodeSummary = (content: string) =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(KnowledgeDocumentSummarySchema))(content).pipe(
     Effect.mapError(
-      error => new AppKnowledgeSummarizerError({ message: `Invalid generated document summary: ${error.message}` })
+      error =>
+        new AppKnowledgeSummarizerError({
+          message: `Invalid generated document summary: ${error.message}`
+        })
     ),
     Effect.map(summary => ({
       title: summary.title.trim(),
@@ -167,7 +183,9 @@ const decodeSummary = (content: string) =>
     })),
     Effect.flatMap(summary =>
       summary.title.length === 0 || summary.summary.length === 0
-        ? Effect.fail(new AppKnowledgeSummarizerError({ message: 'Generated document summary was empty' }))
+        ? Effect.fail(
+            new AppKnowledgeSummarizerError({ message: 'Generated document summary was empty' })
+          )
         : Effect.succeed(summary)
     )
   )
@@ -191,7 +209,10 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
           }),
           HttpClientRequest.bodyJson(requestBody(input, config.model)),
           Effect.mapError(
-            error => new AppKnowledgeSummarizerError({ message: `Could not encode summarization request: ${error.message}` })
+            error =>
+              new AppKnowledgeSummarizerError({
+                message: `Could not encode summarization request: ${error.message}`
+              })
           )
         )
         const response = yield* client.execute(request).pipe(Effect.mapError(toRequestError))
@@ -203,7 +224,9 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
         const parsed = yield* parseOpenAiResponse(response)
         const content = firstChoiceContent(parsed)
         if (content === null || content === undefined) {
-          return yield* Effect.fail(new AppKnowledgeSummarizerError({ message: 'OpenAI summarization returned no content' }))
+          return yield* Effect.fail(
+            new AppKnowledgeSummarizerError({ message: 'OpenAI summarization returned no content' })
+          )
         }
 
         yield* Effect.annotateCurrentSpan({
@@ -215,11 +238,15 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
       }).pipe(
         Effect.withSpan('knowledge_search.document.summarize'),
         Effect.retry({ while: isTransientError, schedule: retryPolicy }),
-        Effect.mapError(error =>
-          new KnowledgeSummarizationError({
-            message: error instanceof AppKnowledgeSummarizerError ? error.message : unknownToMessage(error),
-            cause: error
-          })
+        Effect.mapError(
+          error =>
+            new KnowledgeSummarizationError({
+              message:
+                error instanceof AppKnowledgeSummarizerError
+                  ? error.message
+                  : unknownToMessage(error),
+              cause: error
+            })
         )
       )
 

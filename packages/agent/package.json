@@ -83,6 +83,14 @@
       "types": "./src/providers/openai/provider.ts",
       "default": "./src/providers/openai/provider.ts"
     },
+    "./providers/openai/realtime": {
+      "types": "./src/providers/openai/realtime/index.ts",
+      "default": "./src/providers/openai/realtime/index.ts"
+    },
+    "./providers/openai/speech": {
+      "types": "./src/providers/openai/speech.ts",
+      "default": "./src/providers/openai/speech.ts"
+    },
     "./providers/anthropic": {
       "types": "./src/providers/anthropic/index.ts",
       "default": "./src/providers/anthropic/index.ts"
@@ -102,6 +110,14 @@
     "./voice": {
       "types": "./src/voice/index.ts",
       "default": "./src/voice/index.ts"
+    },
+    "./voice/browser": {
+      "types": "./src/voice/browser/index.ts",
+      "default": "./src/voice/browser/index.ts"
+    },
+    "./voice/react": {
+      "types": "./src/voice/react.ts",
+      "default": "./src/voice/react.ts"
     }
   },
   "files": [
@@ -186,6 +202,16 @@
         "import": "./dist/providers/openai/provider.mjs",
         "default": "./dist/providers/openai/provider.mjs"
       },
+      "./providers/openai/realtime": {
+        "types": "./dist/providers/openai/realtime/index.d.mts",
+        "import": "./dist/providers/openai/realtime/index.mjs",
+        "default": "./dist/providers/openai/realtime/index.mjs"
+      },
+      "./providers/openai/speech": {
+        "types": "./dist/providers/openai/speech.d.mts",
+        "import": "./dist/providers/openai/speech.mjs",
+        "default": "./dist/providers/openai/speech.mjs"
+      },
       "./providers/anthropic": {
         "types": "./dist/providers/anthropic/index.d.mts",
         "import": "./dist/providers/anthropic/index.mjs",
@@ -210,6 +236,16 @@
         "types": "./dist/voice/index.d.mts",
         "import": "./dist/voice/index.mjs",
         "default": "./dist/voice/index.mjs"
+      },
+      "./voice/browser": {
+        "types": "./dist/voice/browser/index.d.mts",
+        "import": "./dist/voice/browser/index.mjs",
+        "default": "./dist/voice/browser/index.mjs"
+      },
+      "./voice/react": {
+        "types": "./dist/voice/react.d.mts",
+        "import": "./dist/voice/react.mjs",
+        "default": "./dist/voice/react.mjs"
       }
     }
   },

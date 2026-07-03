@@ -13,7 +13,12 @@ describe('knowledgeFileStorageKey', () => {
       knowledgeFileStorageKey({ documentId: 'obj_1', fileId: 'file_2', kind: 'extracted_text' })
     ).toBe('knowledge/obj_1/derived/text/file_2.txt')
     expect(
-      knowledgeFileStorageKey({ documentId: 'obj_1', fileId: 'file_3', kind: 'thumbnail', extension: '.webp' })
+      knowledgeFileStorageKey({
+        documentId: 'obj_1',
+        fileId: 'file_3',
+        kind: 'thumbnail',
+        extension: '.webp'
+      })
     ).toBe('knowledge/obj_1/derived/thumb/file_3.webp')
   })
 })

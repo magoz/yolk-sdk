@@ -28,15 +28,15 @@ Do not rewrite broad areas. Patch the smallest safe slice.
 
 ## Arguments
 
-| Arg | Meaning |
-| --- | --- |
-| `--check` | Audit only. Do not edit. |
-| `--area=packages` | Focus `packages/*`. |
-| `--area=next` | Focus `examples/next/*`. |
-| `--area=cloudflare` | Focus `cloudflare/*`. |
-| `--area=agents` | Focus app agent wiring/tools/HITL. |
-| `--area=test` | Focus unit/e2e tests. |
-| `--all` | Broad audit and fixes. |
+| Arg                 | Meaning                            |
+| ------------------- | ---------------------------------- |
+| `--check`           | Audit only. Do not edit.           |
+| `--area=packages`   | Focus `packages/*`.                |
+| `--area=next`       | Focus `examples/next/*`.           |
+| `--area=cloudflare` | Focus `cloudflare/*`.              |
+| `--area=agents`     | Focus app agent wiring/tools/HITL. |
+| `--area=test`       | Focus unit/e2e tests.              |
+| `--all`             | Broad audit and fixes.             |
 
 ## Workflow
 

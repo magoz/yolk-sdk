@@ -31,11 +31,15 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                           |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                      |
 | `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                          |
+| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                 |
+| `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters                |
 | `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                       |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                 |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                     |
 | `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs               |
-| `@yolk-sdk/agent/voice`                               | Provider-neutral voice tool-call bridge                         |
+| `@yolk-sdk/agent/voice`                               | Provider-neutral voice protocol and tool-call bridge            |
+| `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                  |
+| `@yolk-sdk/agent/voice/react`                         | Headless browser voice React hook                               |
 
 ## Imports
 
@@ -299,6 +303,31 @@ for await (const event of streamAgentEventsUntilTerminal({
 
 The SDK client does not own durable route auth, run ownership, Workflow hook-token routing, or HITL
 request matching. Hosts expose the run endpoints and validate access/response identity server-side.
+
+## Voice
+
+Voice is a first-class modality: browser WebRTC transport, client controller, server tool
+handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
+
+- `useYolkVoice` (`@yolk-sdk/agent/voice/react`) owns browser session lifecycle, user drafts,
+  and pending approvals; provider codecs come from `@yolk-sdk/agent/providers/openai/realtime`.
+- Tools execute server-side only: the controller forwards provider tool calls as
+  `VoiceSessionToolCallRequest` to your endpoint; `handleVoiceToolCall` applies
+  `ToolDef.approval` policy and never runs approval-gated tools without a matching approved
+  response.
+- Approval-gated calls pause with `AwaitingInput`; approvals/denials resume through
+  `submitHitlResponse`. Voice `question` is deferred in v1.
+- `projectVoiceEvent` turns voice events into protocol messages with no dangling host tool
+  calls. Assistant drafts are keyed per provider output item (falling back to response id), so
+  back-to-back responses, multi-item responses, and duplicate final transcript event families
+  never concatenate, wipe, or duplicate messages. `sequenceVoiceEvent`/`dedupeStoredVoiceEvents`
+  give replay-safe durable event ids; `voiceSeedTextsFromMessages` seeds new provider sessions
+  after reconnect.
+- `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
+  `@yolk-sdk/agent/providers/openai/speech` provides `VoiceSpeechSynthesizer` /
+  `VoiceTranscriber` layers. `VoiceSpeechRequest.instructions` steers delivery style only, and
+  provider 429s (rate limit or exhausted credits) surface as `VoiceSpeechError` code
+  `rate_limited` so hosts can distinguish quota from outage.
 
 ## Task subagents
 

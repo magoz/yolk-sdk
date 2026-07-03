@@ -222,9 +222,7 @@ const latestApprovalRequest = (log: RuntimeSessionEventLog) => {
   return undefined
 }
 
-const responseForApprovalRequest = (
-  request: ToolApprovalRequest
-): ToolApprovalResponseType =>
+const responseForApprovalRequest = (request: ToolApprovalRequest): ToolApprovalResponseType =>
   ToolApprovalResponse.make({
     requestId: request.requestId,
     toolCallId: request.toolCallId,
@@ -240,10 +238,7 @@ const staleApprovalResponse = (): ToolApprovalResponseType =>
     source: 'user'
   })
 
-const expectedRevision = (
-  kind: typeof wsCommand.Type['kind'],
-  revision: number
-) => {
+const expectedRevision = (kind: (typeof wsCommand.Type)['kind'], revision: number) => {
   switch (kind) {
     case 'userCurrent':
     case 'hitlCurrent':
@@ -419,11 +414,7 @@ describe('Cloudflare session event storage', () => {
           expectedRevision: before.revision + 1
         },
         wsRuntimeConfig
-      ).pipe(
-        Stream.runCollect,
-        Effect.provide(makeWsLayer(storage, requests)),
-        Effect.result
-      )
+      ).pipe(Stream.runCollect, Effect.provide(makeWsLayer(storage, requests)), Effect.result)
       const after = yield* loadRuntimeEventLogOrEmpty(sessionId, storage)
 
       expect(result).toMatchObject({
@@ -451,11 +442,12 @@ describe('Cloudflare session event storage', () => {
             yield* interruptLatestIncompleteRun(sessionId, storage)
             expectedLog = interruptModelLog(sessionId, expectedLog)
           } else {
-            const expectedRevision = command.kind === 'appendNone'
-              ? undefined
-              : command.kind === 'appendCurrent'
-                ? expectedLog.revision
-                : expectedLog.revision + 1
+            const expectedRevision =
+              command.kind === 'appendNone'
+                ? undefined
+                : command.kind === 'appendCurrent'
+                  ? expectedLog.revision
+                  : expectedLog.revision + 1
             const event = runtimeEventForCommand(command.event, index)
             const result = yield* Effect.gen(function* () {
               const store = yield* SessionEventStore

@@ -14,12 +14,12 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/mcp/client` | Remote/local MCP config, tool listing/calling, protocol adapters |
-| `@yolk-sdk/mcp/client/node` | Node-only local stdio convenience helpers |
-| `@yolk-sdk/mcp/protocol` | JSON-RPC/MCP wire helpers |
-| `@yolk-sdk/mcp/server` | Tool-only MCP server primitives |
+| Subpath                     | Purpose                                                          |
+| --------------------------- | ---------------------------------------------------------------- |
+| `@yolk-sdk/mcp/client`      | Remote/local MCP config, tool listing/calling, protocol adapters |
+| `@yolk-sdk/mcp/client/node` | Node-only local stdio convenience helpers                        |
+| `@yolk-sdk/mcp/protocol`    | JSON-RPC/MCP wire helpers                                        |
+| `@yolk-sdk/mcp/server`      | Tool-only MCP server primitives                                  |
 
 ## Imports
 

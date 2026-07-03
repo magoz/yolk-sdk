@@ -27,7 +27,9 @@ const documentBody = (document: KnowledgeDocument) =>
     .join('\n')
 
 export const buildKnowledgeContext = (input: BuildKnowledgeContextInput) => {
-  const sections = Arr.map(input.documents, documentBody).filter(section => section.trim().length > 0)
+  const sections = Arr.map(input.documents, documentBody).filter(
+    section => section.trim().length > 0
+  )
   const header = '# Pinned knowledge\nUse this durable knowledge as high-priority context.'
   const body = sections.join('\n\n')
   const context = body.length === 0 ? '' : `${header}\n\n${body}`

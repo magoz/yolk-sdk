@@ -4,14 +4,14 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 ## Package map
 
-| Package | Role | Local docs |
-| --- | --- | --- |
-| `@yolk-sdk/agent` | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md` |
-| `@yolk-sdk/mcp` | MCP client/server/protocol adapters | `packages/mcp/AGENTS.md` |
-| `@yolk-sdk/knowledge` | Knowledge document/file/context/search contracts and lookup/manage tool helpers | `packages/knowledge/AGENTS.md` |
-| `@yolk-sdk/connectors` | Effect-native connector, integration, credential, and action primitives | `packages/connectors/AGENTS.md` |
-| `@yolk-sdk/sandbox` | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes | `packages/sandbox/AGENTS.md` |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers | `packages/vercel-workflows/AGENTS.md` |
+| Package                      | Role                                                                                                   | Local docs                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| `@yolk-sdk/agent`            | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md`            |
+| `@yolk-sdk/mcp`              | MCP client/server/protocol adapters                                                                    | `packages/mcp/AGENTS.md`              |
+| `@yolk-sdk/knowledge`        | Knowledge document/file/context/search contracts and lookup/manage tool helpers                        | `packages/knowledge/AGENTS.md`        |
+| `@yolk-sdk/connectors`       | Effect-native connector, integration, credential, and action primitives                                | `packages/connectors/AGENTS.md`       |
+| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                 | `packages/sandbox/AGENTS.md`          |
+| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers                                          | `packages/vercel-workflows/AGENTS.md` |
 
 ## Dependency direction
 
@@ -22,7 +22,7 @@ mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
 agent/react -> agent/client + agent/protocol + optional React peer
 agent/compaction -> agent/protocol + agent/loop
-agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect
+agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect; agent/providers/openai/realtime + speech may also use agent/voice
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
 sandbox root -> Effect only; sandbox/agent -> agent tools/protocol/loop; sandbox/vercel -> @vercel/sandbox only
 vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy

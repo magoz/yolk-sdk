@@ -12,17 +12,17 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/connectors` | Core connector/action/integration/credential primitives |
-| `@yolk-sdk/connectors/agent` | Adapter from connector actions to `@yolk-sdk/agent/tools` modules |
-| `@yolk-sdk/connectors/figma` | Figma remote MCP auth action and OAuth constants |
-| `@yolk-sdk/connectors/google` | Gmail/Calendar actions and Google OAuth slot constants |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions |
-| `@yolk-sdk/connectors/notion` | Notion page/block/database/data-source/comment/user actions and API token slot constants |
-| `@yolk-sdk/connectors/r2-storage` | Cloudflare R2 upload URL action with host-provided presigner |
-| `@yolk-sdk/connectors/telegram` | Telegram bot send/validate actions |
-| `@yolk-sdk/connectors/todoist` | Todoist project/task/label actions and API token slot constants |
+| Subpath                                | Purpose                                                                                  |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                  |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                        |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                         |
+| `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                   |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                 |
+| `@yolk-sdk/connectors/notion`          | Notion page/block/database/data-source/comment/user actions and API token slot constants |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                             |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                       |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                          |
 
 ## Imports
 
@@ -127,10 +127,7 @@ const program = Todoist.invoke({
 
 ```ts
 import { Effect } from 'effect'
-import {
-  makeCredentialBinding,
-  makeIntegration
-} from '@yolk-sdk/connectors'
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
 import { GoogleConnector, GoogleOAuthCredentialSlot } from '@yolk-sdk/connectors/google'
 
 const integration = makeIntegration({
@@ -160,15 +157,15 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 
 ## Provider actions
 
-| Subpath | Actions |
-| --- | --- |
-| `@yolk-sdk/connectors/figma` | `figma.mcp_auth` |
-| `@yolk-sdk/connectors/google` | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
-| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email` |
-| `@yolk-sdk/connectors/notion` | Notion search, page, block, database, data source, user, and comment actions |
-| `@yolk-sdk/connectors/r2-storage` | `r2_storage.upload_url` |
-| `@yolk-sdk/connectors/telegram` | `telegram.send_message`, `telegram.validate` |
-| `@yolk-sdk/connectors/todoist` | Todoist project, task, and label actions |
+| Subpath                                | Actions                                                                                                     |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
+| `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
+| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |
+| `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                |
+| `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                                     |
+| `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                |
+| `@yolk-sdk/connectors/todoist`         | Todoist project, task, and label actions                                                                    |
 
 R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled. `r2_storage.upload_url` includes `publicUrl` only when integration config provides `publicUrl`.
 
@@ -181,7 +178,7 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 const toolModule = makeConnectorToolModule(GoogleConnector, {
   integration,
   layer: HostConnectorLayer,
-  access: action => action.includes('create') ? 'write' : 'read'
+  access: action => (action.includes('create') ? 'write' : 'read')
 })
 ```
 

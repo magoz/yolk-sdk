@@ -27,12 +27,7 @@ export type ConnectorAction<Env = never, Error = never> = {
   ) => Effect.Effect<ActionResult<unknown>, Error | ConnectorError, Env>
 }
 
-export type DefineActionOptions<
-  InputSchema extends ActionInputSchema,
-  Output,
-  Env,
-  Error
-> = {
+export type DefineActionOptions<InputSchema extends ActionInputSchema, Output, Env, Error> = {
   readonly id: string
   readonly description?: string
   readonly inputSchema: InputSchema

@@ -19,9 +19,9 @@ Canary release prep:
 7. commit/push release prep after approval
 8. run GitHub Actions → `Publish packages` from `main`
 9. verify npm and tag:
-    - `npm view @yolk-sdk/agent version`
-    - `npm view @yolk-sdk/agent dist-tags`
-    - `git tag --list 'v*' --sort=-v:refname | head -n 1`
+   - `npm view @yolk-sdk/agent version`
+   - `npm view @yolk-sdk/agent dist-tags`
+   - `git tag --list 'v*' --sort=-v:refname | head -n 1`
 
 Canary versions stay lockstep across every public `@yolk-sdk/*` package.
 

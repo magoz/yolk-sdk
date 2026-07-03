@@ -5,7 +5,6 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { ensureTestEnv } from './ensure-test-env'
 
-
 /**
  * Sign a cookie value the same way better-call does internally.
  * Uses HMAC-SHA256 with standard base64 encoding (NOT base64url).

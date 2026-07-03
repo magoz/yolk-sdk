@@ -442,7 +442,9 @@ const sendOpenAiRequest = (
     const body = yield* toOpenAiRequestBody(request, config)
     const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI request')
 
-    const httpRequest = HttpClientRequest.post(config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions').pipe(
+    const httpRequest = HttpClientRequest.post(
+      config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions'
+    ).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
         authorization: `Bearer ${Redacted.value(config.apiKey)}`,

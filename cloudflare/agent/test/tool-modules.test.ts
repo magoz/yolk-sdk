@@ -2,7 +2,10 @@ import { Effect, Layer } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
-import { resolveAgentToolSet, makeTextToolModules } from '../../../examples/next/lib/agents/tools/registry'
+import {
+  resolveAgentToolSet,
+  makeTextToolModules
+} from '../../../examples/next/lib/agents/tools/registry'
 import { makeCloudflareTextToolModules } from '../src/tool-modules.ts'
 import { generatedSkillsetManifest } from '../src/generated/skillset.ts'
 
@@ -101,7 +104,9 @@ describe('Cloudflare tool modules', () => {
 
   it.effect('matches app text toolset with remote MCP', () =>
     Effect.gen(function* () {
-      const nextTools = yield* resolvedToolNames(makeTextToolModules(mcpServers, fakeRemoteMcpLayer))
+      const nextTools = yield* resolvedToolNames(
+        makeTextToolModules(mcpServers, fakeRemoteMcpLayer)
+      )
       const cloudflareTools = yield* resolvedToolNames(
         makeCloudflareTextToolModules(mcpServers, fakeRemoteMcpLayer)
       )

@@ -64,16 +64,22 @@ export const LinkedInSearchResult = Schema.Struct({
   author: Schema.optional(Schema.String)
 })
 
-export class LinkedInSearchOutput extends Schema.Class<LinkedInSearchOutput>('LinkedInSearchOutput')({
+export class LinkedInSearchOutput extends Schema.Class<LinkedInSearchOutput>(
+  'LinkedInSearchOutput'
+)({
   results: Schema.Array(LinkedInSearchResult),
   totalResults: Schema.optional(Schema.Number)
 }) {}
 
-export class LinkedInProfileInput extends Schema.Class<LinkedInProfileInput>('LinkedInProfileInput')({
+export class LinkedInProfileInput extends Schema.Class<LinkedInProfileInput>(
+  'LinkedInProfileInput'
+)({
   linkedinUrl: Schema.String
 }) {}
 
-export class LinkedInProfileOutput extends Schema.Class<LinkedInProfileOutput>('LinkedInProfileOutput')({
+export class LinkedInProfileOutput extends Schema.Class<LinkedInProfileOutput>(
+  'LinkedInProfileOutput'
+)({
   profile: Schema.Unknown
 }) {}
 
@@ -141,7 +147,10 @@ export const linkedInSearchAction = defineAction({
       }
 
       const decoded = yield* decodeJsonResponse(
-        Schema.Struct({ results: Schema.Array(LinkedInSearchResult), totalResults: Schema.optional(Schema.Number) }),
+        Schema.Struct({
+          results: Schema.Array(LinkedInSearchResult),
+          totalResults: Schema.optional(Schema.Number)
+        }),
         response
       )
       return ActionResult.success(LinkedInSearchOutput.make(decoded))
@@ -230,7 +239,11 @@ export const linkedInEmailAction = defineAction({
     })
 })
 
-export const linkedInSearchActions = [linkedInSearchAction, linkedInProfileAction, linkedInEmailAction]
+export const linkedInSearchActions = [
+  linkedInSearchAction,
+  linkedInProfileAction,
+  linkedInEmailAction
+]
 
 export const LinkedInSearchConnector = defineConnector({
   id: linkedInSearchConnectorId,

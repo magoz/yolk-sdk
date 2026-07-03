@@ -30,7 +30,9 @@ const SandboxToolParams = Schema.Struct({
   cwd: Schema.optional(
     Schema.NullOr(
       Schema.String.pipe(
-        Schema.annotate({ description: 'Workspace-relative working directory. Absolute paths are rejected.' })
+        Schema.annotate({
+          description: 'Workspace-relative working directory. Absolute paths are rejected.'
+        })
       )
     )
   ),
@@ -51,7 +53,9 @@ const SandboxToolParams = Schema.Struct({
   background: Schema.optional(
     Schema.NullOr(
       Schema.Boolean.pipe(
-        Schema.annotate({ description: 'Start command in background and return after a quick probe.' })
+        Schema.annotate({
+          description: 'Start command in background and return after a quick probe.'
+        })
       )
     )
   )
@@ -98,7 +102,7 @@ type OutputSlice = {
   readonly truncated: boolean
 }
 
-const nullToUndefined = <A>(value: A | null | undefined) => value === null ? undefined : value
+const nullToUndefined = <A>(value: A | null | undefined) => (value === null ? undefined : value)
 
 const toolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
@@ -127,7 +131,9 @@ const modelVisibleSandboxError = (
   }
 }
 
-const sandboxInfraToolError = (error: Exclude<SandboxError, SandboxInputError | SandboxExpiredError>) => {
+const sandboxInfraToolError = (
+  error: Exclude<SandboxError, SandboxInputError | SandboxExpiredError>
+) => {
   switch (error._tag) {
     case 'SandboxConfigError':
       return toolError(error.message, 'invalid_input')
@@ -210,7 +216,9 @@ const formatSandboxToolContent = (result: SandboxCommandResult, output: OutputSl
     '<stderr>',
     output.stderr,
     '</stderr>'
-  ].filter(line => line !== undefined).join('\n')
+  ]
+    .filter(line => line !== undefined)
+    .join('\n')
 
 const plainSandboxPreviewUrl = (
   previewUrl: SandboxCommandResult['previewUrls'][number]
@@ -256,7 +264,8 @@ export const makeSandboxToolResult = (input: {
   return ToolResult.make({
     toolCallId: input.callId,
     content: formatSandboxToolContent(input.result, output),
-    isError: input.result.timedOut || (input.result.exitCode !== null && input.result.exitCode !== 0),
+    isError:
+      input.result.timedOut || (input.result.exitCode !== null && input.result.exitCode !== 0),
     structuredContent: structuredContent(input.result, output.truncated)
   })
 }
@@ -273,12 +282,15 @@ const sandboxToolDescription = <Context>(options: SandboxToolModuleOptions<Conte
   return [
     'Run one non-interactive bash command inside a real sandbox workspace.',
     options.workspaceDescription ?? 'The working directory is the sandbox workspace root.',
-    options.lifecycleDescription ?? 'The sandbox is disposable and may reset after idle or max lifetime expiry.',
+    options.lifecycleDescription ??
+      'The sandbox is disposable and may reset after idle or max lifetime expiry.',
     `Foreground timeout defaults to 120s and is capped at ${Math.floor(maxSandboxCommandTimeoutMs / 1_000)}s.`,
     'Use workspace-relative cwd only; absolute paths and workspace escapes are rejected.',
     'Use stdin for large patches, scripts, or data.',
     'Set background=true for long-running servers; the tool returns after a quick probe.',
-    ports.length === 0 ? 'Preview URLs are returned when configured by the host.' : `Preview ports: ${ports.join(', ')}.`,
+    ports.length === 0
+      ? 'Preview URLs are returned when configured by the host.'
+      : `Preview ports: ${ports.join(', ')}.`,
     `Available capabilities:\n${capabilities.map(capability => `- ${capability}`).join('\n')}`
   ].join('\n\n')
 }
@@ -295,11 +307,14 @@ export const makeSandboxToolModuleFromApi = <Context>(
       parameters: SandboxToolParams,
       access: 'destructive',
       isEnabled: options.isEnabled,
-      invalidParamsMessage: error => `Invalid sandbox arguments: ${error instanceof Error ? error.message : String(error)}`,
+      invalidParamsMessage: error =>
+        `Invalid sandbox arguments: ${error instanceof Error ? error.message : String(error)}`,
       execute: ({ call, params }) =>
         Effect.gen(function* () {
           if (call.name !== sandboxToolName) {
-            return yield* Effect.fail(toolError(`Tool is not configured: ${call.name}`, 'not_found'))
+            return yield* Effect.fail(
+              toolError(`Tool is not configured: ${call.name}`, 'not_found')
+            )
           }
 
           const normalized = yield* normalizeToolParams(params)

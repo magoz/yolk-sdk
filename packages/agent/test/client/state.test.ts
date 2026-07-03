@@ -33,7 +33,12 @@ import {
   UserMessage,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
-import { markAgentAborted, markAgentError, reduceAgentEvents, submitAgentUserMessage } from '../../src/client'
+import {
+  markAgentAborted,
+  markAgentError,
+  reduceAgentEvents,
+  submitAgentUserMessage
+} from '../../src/client'
 
 describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
@@ -181,7 +186,12 @@ describe('reduceAgentEvents', () => {
     const message = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
     const state = reduceAgentEvents([
       AgentStart.make({}),
-      AgentAwaitingInput.make({ requests: [request], messages: [message], turns: 1, usage: zeroAgentUsage })
+      AgentAwaitingInput.make({
+        requests: [request],
+        messages: [message],
+        turns: 1,
+        usage: zeroAgentUsage
+      })
     ])
 
     expect(state.status).toBe('waiting')
@@ -196,10 +206,7 @@ describe('reduceAgentEvents', () => {
       retryable: true,
       provider
     })
-    const state = reduceAgentEvents([
-      AgentStart.make({}),
-      error
-    ])
+    const state = reduceAgentEvents([AgentStart.make({}), error])
 
     expect(state).toMatchObject({
       status: 'error',

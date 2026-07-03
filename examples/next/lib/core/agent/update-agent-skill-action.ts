@@ -28,7 +28,8 @@ export const updateAgentSkillAction = async (
         'agent_skill.id': input.id,
         'agent_skill.name': input.name,
         'agent_skill.create_command': input.createCommand === true,
-        'agent_command.name': commandName === undefined || commandName.length === 0 ? input.name : commandName
+        'agent_command.name':
+          commandName === undefined || commandName.length === 0 ? input.name : commandName
       })
 
       yield* updateAgentSkillWithCommand({
@@ -39,7 +40,10 @@ export const updateAgentSkillAction = async (
             ? {
                 _tag: 'CreateCommand',
                 command: {
-                  name: commandName === undefined || commandName.length === 0 ? input.name : commandName,
+                  name:
+                    commandName === undefined || commandName.length === 0
+                      ? input.name
+                      : commandName,
                   description: input.description,
                   template: `Use the ${input.name} skill.\n\n$ARGUMENTS`
                 }
@@ -70,7 +74,9 @@ export const updateAgentSkillAction = async (
         })
       ),
       Effect.as({ _tag: 'Success' as const }),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update skill' }))
+      Effect.catch(() =>
+        Effect.succeed({ _tag: 'Error' as const, message: 'Could not update skill' })
+      )
     )
   )
 }

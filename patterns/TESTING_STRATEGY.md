@@ -36,16 +36,16 @@ A seam is where a test enters the system: browser UI, HTTP route, server action,
 Effect service/layer, pure function, or simulation harness. Prefer the fewest stable seams that
 prove behavior.
 
-| Seam | Use for | Coupling risk |
-| --- | --- | --- |
-| Browser/UI | critical user/admin flows | lowest |
-| HTTP route/transport | API, protocol, stream, webhook contracts | low |
-| Server action | parse/auth/revalidate/client union behavior | medium |
-| Package public API | SDK contracts and provider compatibility | medium-low |
-| Effect service + layer | business behavior over services/DB | medium |
-| Pure function/model | dense domain rules/invariants | medium-low |
-| Simulation harness | state machines, retries, HITL/session workflows | medium |
-| Mocked module internals | external IO/framework seams only | highest |
+| Seam                    | Use for                                         | Coupling risk |
+| ----------------------- | ----------------------------------------------- | ------------- |
+| Browser/UI              | critical user/admin flows                       | lowest        |
+| HTTP route/transport    | API, protocol, stream, webhook contracts        | low           |
+| Server action           | parse/auth/revalidate/client union behavior     | medium        |
+| Package public API      | SDK contracts and provider compatibility        | medium-low    |
+| Effect service + layer  | business behavior over services/DB              | medium        |
+| Pure function/model     | dense domain rules/invariants                   | medium-low    |
+| Simulation harness      | state machines, retries, HITL/session workflows | medium        |
+| Mocked module internals | external IO/framework seams only                | highest       |
 
 Rules:
 
@@ -333,17 +333,17 @@ Treat one flaky test as suite trust = 0.
 
 ### General
 
-| Anti-Pattern                     | Why Bad                              | Do Instead                          |
-| -------------------------------- | ------------------------------------ | ----------------------------------- |
-| Testing private functions        | Couples tests to implementation      | Test public API                     |
-| Mocking everything               | Tests don't catch integration issues | Use real services when reasonable   |
-| Snapshot tests for UI            | Fragile, hard to maintain            | Test behavior, not markup           |
-| No error case tests              | Production errors surprise you       | Test all domain error paths         |
-| 100% coverage goal               | Wastes time on low-value tests       | Focus on high-risk code             |
+| Anti-Pattern                      | Why Bad                              | Do Instead                                    |
+| --------------------------------- | ------------------------------------ | --------------------------------------------- |
+| Testing private functions         | Couples tests to implementation      | Test public API                               |
+| Mocking everything                | Tests don't catch integration issues | Use real services when reasonable             |
+| Snapshot tests for UI             | Fragile, hard to maintain            | Test behavior, not markup                     |
+| No error case tests               | Production errors surprise you       | Test all domain error paths                   |
+| 100% coverage goal                | Wastes time on low-value tests       | Focus on high-risk code                       |
 | Undocumented separate `/test` dir | Hard to find relevant tests          | Colocate or document package-owned test areas |
-| Skipping integration tests       | Services might not compose           | Test critical integrations          |
-| Not using TestClock              | Tests are slow and flaky             | Use `it.effect` + TestClock         |
-| Forgetting to fork before adjust | Tests hang forever                   | Always fork before TestClock.adjust |
+| Skipping integration tests        | Services might not compose           | Test critical integrations                    |
+| Not using TestClock               | Tests are slow and flaky             | Use `it.effect` + TestClock                   |
+| Forgetting to fork before adjust  | Tests hang forever                   | Always fork before TestClock.adjust           |
 
 ## Examples
 

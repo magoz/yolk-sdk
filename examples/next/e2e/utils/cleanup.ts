@@ -6,7 +6,6 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 import { ensureTestEnv } from './ensure-test-env'
 
-
 /** Truncate every table in the Drizzle schema. */
 export const cleanupTestData = Effect.gen(function* () {
   yield* ensureTestEnv('Cleanup Test Data')

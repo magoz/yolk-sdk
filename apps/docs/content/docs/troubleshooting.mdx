@@ -36,13 +36,13 @@ Do not import package-internal `src/*` files from an app.
 
 Most runtime failures that mention a missing service mean an Effect layer was not provided.
 
-| Missing service | Provide |
-| --- | --- |
-| `LLMProvider` | model provider layer or `FauxProvider.layer(...)` |
-| `ToolExecutor` | `makeToolExecutorLayer(toolSet)` or host executor layer |
-| `LoopConfig` | `LoopConfig.defaultLayer` or custom loop config |
-| `ContextTransformer` | `ContextTransformer.identity` or compaction layer |
-| `HttpClient` | `FetchHttpClient.layer` or host HTTP layer |
+| Missing service      | Provide                                                 |
+| -------------------- | ------------------------------------------------------- |
+| `LLMProvider`        | model provider layer or `FauxProvider.layer(...)`       |
+| `ToolExecutor`       | `makeToolExecutorLayer(toolSet)` or host executor layer |
+| `LoopConfig`         | `LoopConfig.defaultLayer` or custom loop config         |
+| `ContextTransformer` | `ContextTransformer.identity` or compaction layer       |
+| `HttpClient`         | `FetchHttpClient.layer` or host HTTP layer              |
 
 Build one app-level layer and provide it at the route/runtime boundary.
 

@@ -13,7 +13,9 @@ const maxOutputCharacters = 20_000
 
 const JustBashParams = Schema.Struct({
   script: Schema.String.pipe(
-    Schema.annotate({ description: 'Bash script to run inside an isolated just-bash virtual filesystem.' })
+    Schema.annotate({
+      description: 'Bash script to run inside an isolated just-bash virtual filesystem.'
+    })
   ),
   cwd: Schema.optional(Schema.String).pipe(
     Schema.annotate({ description: 'Optional virtual working directory. Defaults to /home/user.' })
@@ -103,7 +105,8 @@ const runWithTimeout = (params: JustBashParams, timeoutMs: number) =>
         clearTimeout(timeoutId)
       }
     },
-    catch: error => makeToolError(`just-bash execution failed: ${unknownToMessage(error)}`, 'execution')
+    catch: error =>
+      makeToolError(`just-bash execution failed: ${unknownToMessage(error)}`, 'execution')
   })
 
 const formatResult = (input: {
@@ -121,15 +124,19 @@ const formatResult = (input: {
     '</stderr>'
   ].join('\n')
 
-const justBashToolResult = (call: ToolCall, result: {
-  readonly exitCode: number
-  readonly stdout: string
-  readonly stderr: string
-}) => ToolResult.make({
-  toolCallId: call.id,
-  content: formatResult(result),
-  isError: result.exitCode === 0 ? undefined : true
-})
+const justBashToolResult = (
+  call: ToolCall,
+  result: {
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+  }
+) =>
+  ToolResult.make({
+    toolCallId: call.id,
+    content: formatResult(result),
+    isError: result.exitCode === 0 ? undefined : true
+  })
 
 export const executeJustBashTool = (call: ToolCall) =>
   Effect.gen(function* () {

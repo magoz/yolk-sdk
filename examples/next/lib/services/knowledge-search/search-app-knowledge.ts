@@ -30,7 +30,10 @@ const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
   }
 }
 
-const ensureUserOwnsScope = (input: { readonly userId: string; readonly scope: KnowledgeSearchScope }) =>
+const ensureUserOwnsScope = (input: {
+  readonly userId: string
+  readonly scope: KnowledgeSearchScope
+}) =>
   Effect.gen(function* () {
     const ids = scopeIds(input.scope)
 
@@ -42,14 +45,22 @@ const ensureUserOwnsScope = (input: { readonly userId: string; readonly scope: K
     const rows = yield* db
       .select({ id: schema.knowledgeCollection.id })
       .from(schema.knowledgeCollection)
-      .where(and(inArray(schema.knowledgeCollection.id, [...ids]), eq(schema.knowledgeCollection.userId, input.userId)))
+      .where(
+        and(
+          inArray(schema.knowledgeCollection.id, [...ids]),
+          eq(schema.knowledgeCollection.userId, input.userId)
+        )
+      )
 
     const ownedIds = new Set(rows.map(row => row.id))
     const missingId = ids.find(id => !ownedIds.has(id))
 
     if (missingId !== undefined) {
       return yield* Effect.fail(
-        new AppKnowledgeCollectionNotFoundError({ message: 'knowledge collection not found', collectionId: missingId })
+        new AppKnowledgeCollectionNotFoundError({
+          message: 'knowledge collection not found',
+          collectionId: missingId
+        })
       )
     }
   })
@@ -59,7 +70,11 @@ const mapSearchError = (error: unknown) => {
     return error
   }
 
-  return new AppKnowledgeSearchError({ message: 'Could not search knowledge search', stage: 'store', cause: error })
+  return new AppKnowledgeSearchError({
+    message: 'Could not search knowledge search',
+    stage: 'store',
+    cause: error
+  })
 }
 
 export const searchAppKnowledge = (input: {
@@ -88,11 +103,9 @@ export const searchAppKnowledge = (input: {
       contextChunks: options.contextChunks ?? DEFAULT_CONTEXT_CHUNKS
     }).pipe(
       Effect.mapError(
-        error => new AppKnowledgeSearchError({ message: error.message, stage: error.stage, cause: error })
+        error =>
+          new AppKnowledgeSearchError({ message: error.message, stage: error.stage, cause: error })
       )
     )
-  }).pipe(
-    Effect.withSpan('knowledge_search.search'),
-    Effect.mapError(mapSearchError)
-  )
+  }).pipe(Effect.withSpan('knowledge_search.search'), Effect.mapError(mapSearchError))
 }

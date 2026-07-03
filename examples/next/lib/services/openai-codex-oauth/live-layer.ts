@@ -310,7 +310,10 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
         return toOAuthToken(tokens, currentAccountId, refreshTokenValue, nowMs)
       }).pipe(Effect.withSpan('OpenAiCodexOAuth.refreshToken'))
 
-    const needsRefresh = (token: OpenAiCodexOAuthToken, minTtlMs = OPENAI_CODEX_REFRESH_BUFFER_MS) =>
+    const needsRefresh = (
+      token: OpenAiCodexOAuthToken,
+      minTtlMs = OPENAI_CODEX_REFRESH_BUFFER_MS
+    ) =>
       Effect.gen(function* () {
         const nowMs = yield* Clock.currentTimeMillis
         return !token.access || token.expires < nowMs + minTtlMs

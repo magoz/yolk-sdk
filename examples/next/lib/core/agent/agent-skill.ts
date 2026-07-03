@@ -75,7 +75,10 @@ export const createAgentSkill = (input: AgentSkillInput & { readonly userId: str
   }).pipe(Effect.withSpan('agentSkill.create'))
 
 export const createAgentSkillWithCommand = (
-  input: AgentSkillInput & { readonly userId: string; readonly commandInput: AgentSkillCommandInput }
+  input: AgentSkillInput & {
+    readonly userId: string
+    readonly commandInput: AgentSkillCommandInput
+  }
 ) =>
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
@@ -115,7 +118,10 @@ export const createAgentSkillWithCommand = (
 
           if (command === undefined) {
             return yield* Effect.fail(
-              new PersistenceError({ message: 'Could not upsert agent command', entity: 'agentCommand' })
+              new PersistenceError({
+                message: 'Could not upsert agent command',
+                entity: 'agentCommand'
+              })
             )
           }
         }
@@ -145,7 +151,10 @@ export const updateAgentSkill = (input: AgentSkillUpdateInput & { readonly userI
   }).pipe(Effect.withSpan('agentSkill.update'))
 
 export const updateAgentSkillWithCommand = (
-  input: AgentSkillUpdateInput & { readonly userId: string; readonly commandInput: AgentSkillCommandInput }
+  input: AgentSkillUpdateInput & {
+    readonly userId: string
+    readonly commandInput: AgentSkillCommandInput
+  }
 ) =>
   Effect.gen(function* () {
     const values = yield* validateSkillInput(input)
@@ -160,12 +169,18 @@ export const updateAgentSkillWithCommand = (
         const [skill] = yield* tx
           .update(schema.agentSkill)
           .set({ ...values, enabled: input.enabled })
-          .where(and(eq(schema.agentSkill.id, input.id), eq(schema.agentSkill.userId, input.userId)))
+          .where(
+            and(eq(schema.agentSkill.id, input.id), eq(schema.agentSkill.userId, input.userId))
+          )
           .returning()
 
         if (skill === undefined) {
           return yield* Effect.fail(
-            new NotFoundError({ message: 'Agent skill not found', entity: 'agentSkill', id: input.id })
+            new NotFoundError({
+              message: 'Agent skill not found',
+              entity: 'agentSkill',
+              id: input.id
+            })
           )
         }
 
@@ -186,7 +201,10 @@ export const updateAgentSkillWithCommand = (
 
           if (command === undefined) {
             return yield* Effect.fail(
-              new PersistenceError({ message: 'Could not upsert agent command', entity: 'agentCommand' })
+              new PersistenceError({
+                message: 'Could not upsert agent command',
+                entity: 'agentCommand'
+              })
             )
           }
         }

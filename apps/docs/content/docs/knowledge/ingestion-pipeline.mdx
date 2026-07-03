@@ -15,12 +15,12 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
 
 `ingestKnowledgeDocument` requires these Effect services:
 
-| Service | Host provides |
-| --- | --- |
-| `SearchIndexStore` | scope/document/chunk persistence and search |
-| `KnowledgeExtractor` | source loading and text extraction |
-| `KnowledgeChunker` | text chunking; `DefaultKnowledgeChunkerLive` is available |
-| `KnowledgeEmbedder` | embedding provider |
+| Service               | Host provides                                                              |
+| --------------------- | -------------------------------------------------------------------------- |
+| `SearchIndexStore`    | scope/document/chunk persistence and search                                |
+| `KnowledgeExtractor`  | source loading and text extraction                                         |
+| `KnowledgeChunker`    | text chunking; `DefaultKnowledgeChunkerLive` is available                  |
+| `KnowledgeEmbedder`   | embedding provider                                                         |
 | `KnowledgeSummarizer` | title/summary provider; use `NoopKnowledgeSummarizerLive` for simple hosts |
 
 ## Ingest a document

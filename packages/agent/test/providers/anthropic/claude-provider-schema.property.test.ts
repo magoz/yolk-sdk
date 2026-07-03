@@ -7,10 +7,12 @@ import { toAnthropicClaudeRequestBody } from '../../../src/providers/anthropic/c
 
 const defaultPropertyRuns = 50
 const propertyRunsEnv = process.env.PROPERTY_RUNS
-const parsedPropertyRuns = propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
-const propertyRuns = Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
-  ? parsedPropertyRuns
-  : defaultPropertyRuns
+const parsedPropertyRuns =
+  propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+const propertyRuns =
+  Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
+    ? parsedPropertyRuns
+    : defaultPropertyRuns
 const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
@@ -111,7 +113,9 @@ const schemaParameters = (variant: typeof schemaVariant.Type) => {
   }
 }
 
-const schemaProbeTool = <ParamsSchema extends Schema.Schema<unknown> & { readonly DecodingServices: never }>(
+const schemaProbeTool = <
+  ParamsSchema extends Schema.Schema<unknown> & { readonly DecodingServices: never }
+>(
   parameters: ParamsSchema
 ) =>
   makeTool({

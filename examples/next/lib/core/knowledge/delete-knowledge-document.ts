@@ -10,7 +10,10 @@ export const deleteKnowledgeDocument = (input: { readonly userId: string; readon
     const files = yield* db
       .select({ storageKey: schema.userKnowledgeFile.storageKey })
       .from(schema.userKnowledgeFile)
-      .innerJoin(schema.userKnowledgeDocument, eq(schema.userKnowledgeDocument.id, schema.userKnowledgeFile.documentId))
+      .innerJoin(
+        schema.userKnowledgeDocument,
+        eq(schema.userKnowledgeDocument.id, schema.userKnowledgeFile.documentId)
+      )
       .where(
         and(
           eq(schema.userKnowledgeDocument.id, input.id),

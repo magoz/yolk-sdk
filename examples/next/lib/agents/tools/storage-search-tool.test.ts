@@ -245,11 +245,14 @@ describe('storage knowledge search tool', () => {
   it.effect('returns model-visible errors for missing storage source', () => {
     const toolModule = makeStorageSearchToolModule({
       search: () => Effect.succeed([]),
-      getSource: () => Effect.fail(modelVisibleToolError({
-        tool: 'get_storage_source',
-        message: 'Storage source not found',
-        reason: 'not_found'
-      }))
+      getSource: () =>
+        Effect.fail(
+          modelVisibleToolError({
+            tool: 'get_storage_source',
+            message: 'Storage source not found',
+            reason: 'not_found'
+          })
+        )
     })
 
     return Effect.gen(function* () {
@@ -258,7 +261,11 @@ describe('storage knowledge search tool', () => {
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
       const result = yield* toolSet.execute(
-        ToolCall.make({ id: 'call_1', name: 'get_storage_source', params: { id: 'missing_source' } })
+        ToolCall.make({
+          id: 'call_1',
+          name: 'get_storage_source',
+          params: { id: 'missing_source' }
+        })
       )
 
       expect(result).toMatchObject({

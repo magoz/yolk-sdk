@@ -23,7 +23,9 @@ export class ApiKeyCredential extends Schema.Class<ApiKeyCredential>('ApiKeyCred
   key: Schema.String
 }) {}
 
-export class BearerTokenCredential extends Schema.Class<BearerTokenCredential>('BearerTokenCredential')({
+export class BearerTokenCredential extends Schema.Class<BearerTokenCredential>(
+  'BearerTokenCredential'
+)({
   _tag: Schema.Literal('BearerTokenCredential'),
   token: Schema.String,
   expiresAt: Schema.optional(Schema.Number)
@@ -38,7 +40,11 @@ export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredent
   scopes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
-export const RuntimeCredential = Schema.Union([ApiKeyCredential, BearerTokenCredential, OAuthCredential])
+export const RuntimeCredential = Schema.Union([
+  ApiKeyCredential,
+  BearerTokenCredential,
+  OAuthCredential
+])
 export type RuntimeCredential = typeof RuntimeCredential.Type
 
 export type CredentialResolveRequest = {
@@ -53,9 +59,10 @@ export type CredentialResolverApi = {
   ) => Effect.Effect<RuntimeCredential, ConnectorError>
 }
 
-export class CredentialResolver extends Context.Service<CredentialResolver, CredentialResolverApi>()(
-  '@yolk-sdk/connectors/CredentialResolver'
-) {}
+export class CredentialResolver extends Context.Service<
+  CredentialResolver,
+  CredentialResolverApi
+>()('@yolk-sdk/connectors/CredentialResolver') {}
 
 export const makeCredentialBinding = (input: {
   readonly slotId: string

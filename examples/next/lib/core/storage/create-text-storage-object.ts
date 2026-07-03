@@ -15,7 +15,9 @@ export const createTextStorageObject = (input: {
     const trimmedContent = input.content.trim()
 
     if (trimmedContent.length === 0) {
-      return yield* Effect.fail(new ValidationError({ message: 'Storage text content is empty', field: 'content' }))
+      return yield* Effect.fail(
+        new ValidationError({ message: 'Storage text content is empty', field: 'content' })
+      )
     }
 
     const db = yield* Db
@@ -35,7 +37,10 @@ export const createTextStorageObject = (input: {
 
     if (object === undefined) {
       return yield* Effect.fail(
-        new PersistenceError({ message: 'Could not create storage object', entity: 'storageObject' })
+        new PersistenceError({
+          message: 'Could not create storage object',
+          entity: 'storageObject'
+        })
       )
     }
 

@@ -49,10 +49,7 @@ export async function POST(request: Request) {
     }
   )
 
-  const RuntimeLayer = Layer.mergeAll(
-    AppAgentLayerWithoutTools,
-    makeToolExecutorLayer(toolSet)
-  )
+  const RuntimeLayer = Layer.mergeAll(AppAgentLayerWithoutTools, makeToolExecutorLayer(toolSet))
 
   const body = new ReadableStream<Uint8Array>({
     start(controller) {

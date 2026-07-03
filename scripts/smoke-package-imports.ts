@@ -28,20 +28,48 @@ const packages: ReadonlyArray<PackageShape> = [
       './providers/openai/codex',
       './providers/openai/codex-provider',
       './providers/openai/provider',
+      './providers/openai/realtime',
+      './providers/openai/speech',
       './react',
       './runtime',
       './skillset',
       './tools',
-      './voice'
+      './voice',
+      './voice/browser',
+      './voice/react'
     ]
   },
   {
     name: '@yolk-sdk/connectors',
-    exports: ['.', './agent', './figma', './google', './linkedin-search', './notion', './r2-storage', './telegram', './todoist']
+    exports: [
+      '.',
+      './agent',
+      './figma',
+      './google',
+      './linkedin-search',
+      './notion',
+      './r2-storage',
+      './telegram',
+      './todoist'
+    ]
   },
   {
     name: '@yolk-sdk/knowledge',
-    exports: ['.', './agent', './chunking', './context', './documents', './embeddings', './errors', './extraction', './files', './ingestion', './search', './store', './summarization']
+    exports: [
+      '.',
+      './agent',
+      './chunking',
+      './context',
+      './documents',
+      './embeddings',
+      './errors',
+      './extraction',
+      './files',
+      './ingestion',
+      './search',
+      './store',
+      './summarization'
+    ]
   },
   { name: '@yolk-sdk/mcp', exports: ['.', './client', './client/node', './protocol', './server'] },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
@@ -67,16 +95,22 @@ const main = async () => {
 
   try {
     const tarballs = packages.map(packageShape => {
-      const output = execFileSync('pnpm', ['--filter', packageShape.name, 'pack', '--pack-destination', fixtureDir], {
-        cwd: workspaceRoot,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'inherit']
-      })
+      const output = execFileSync(
+        'pnpm',
+        ['--filter', packageShape.name, 'pack', '--pack-destination', fixtureDir],
+        {
+          cwd: workspaceRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'inherit']
+        }
+      )
 
       return extractTarballName(output)
     })
 
-    const tarballPaths = tarballs.map(tarball => (isAbsolute(tarball) ? tarball : join(fixtureDir, tarball)))
+    const tarballPaths = tarballs.map(tarball =>
+      isAbsolute(tarball) ? tarball : join(fixtureDir, tarball)
+    )
     const packageJson = {
       type: 'module',
       private: true,
@@ -97,12 +131,21 @@ const main = async () => {
     })
 
     for (const [index, packageShape] of packages.entries()) {
-      const scopedPackageDir = join(fixtureDir, 'node_modules', '@yolk-sdk', packageShape.name.replace('@yolk-sdk/', ''))
+      const scopedPackageDir = join(
+        fixtureDir,
+        'node_modules',
+        '@yolk-sdk',
+        packageShape.name.replace('@yolk-sdk/', '')
+      )
       mkdirSync(scopedPackageDir, { recursive: true })
-      execFileSync('tar', ['-xzf', tarballPaths[index], '--strip-components', '1', '-C', scopedPackageDir], {
-        cwd: fixtureDir,
-        stdio: 'inherit'
-      })
+      execFileSync(
+        'tar',
+        ['-xzf', tarballPaths[index], '--strip-components', '1', '-C', scopedPackageDir],
+        {
+          cwd: fixtureDir,
+          stdio: 'inherit'
+        }
+      )
     }
 
     const imports = packages.flatMap(packageShape =>
@@ -112,7 +155,15 @@ const main = async () => {
     )
 
     const smokeFile = join(fixtureDir, 'smoke.mjs')
-    writeFileSync(smokeFile, imports.map((specifier, index) => `await import(${JSON.stringify(specifier)}); console.log(${JSON.stringify(index)}, ${JSON.stringify(specifier)})`).join('\n'))
+    writeFileSync(
+      smokeFile,
+      imports
+        .map(
+          (specifier, index) =>
+            `await import(${JSON.stringify(specifier)}); console.log(${JSON.stringify(index)}, ${JSON.stringify(specifier)})`
+        )
+        .join('\n')
+    )
 
     await import(pathToFileURL(smokeFile).href)
   } finally {

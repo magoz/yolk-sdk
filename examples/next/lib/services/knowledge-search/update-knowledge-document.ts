@@ -27,7 +27,10 @@ const mapUpdateError = (error: unknown) => {
     return error
   }
 
-  return new AppSearchIndexStoreError({ message: 'Could not update knowledge search document', cause: error })
+  return new AppSearchIndexStoreError({
+    message: 'Could not update knowledge search document',
+    cause: error
+  })
 }
 
 const documentPatch = (fields: UpdateKnowledgeDocumentFields) => ({

@@ -152,12 +152,18 @@ const mcpContentBlockFromPart = (part: ContentPart) => {
       return { type: 'text', text: part.text }
     case 'Image':
       return Option.match(attachmentSourceBase64(part.source), {
-        onNone: () => ({ type: 'text', text: `Image attachment: ${attachmentSourcePreview(part.source)}` }),
+        onNone: () => ({
+          type: 'text',
+          text: `Image attachment: ${attachmentSourcePreview(part.source)}`
+        }),
         onSome: data => ({ type: 'image', data, mimeType: part.mimeType })
       })
     case 'Document':
       return Option.match(attachmentSourceBase64(part.source), {
-        onNone: () => ({ type: 'text', text: `Document attachment: ${attachmentSourcePreview(part.source)}` }),
+        onNone: () => ({
+          type: 'text',
+          text: `Document attachment: ${attachmentSourcePreview(part.source)}`
+        }),
         onSome: data => ({
           type: 'resource',
           resource: {
@@ -170,7 +176,10 @@ const mcpContentBlockFromPart = (part: ContentPart) => {
       })
     case 'Audio':
       return Option.match(attachmentSourceBase64(part.source), {
-        onNone: () => ({ type: 'text', text: `Audio attachment: ${attachmentSourcePreview(part.source)}` }),
+        onNone: () => ({
+          type: 'text',
+          text: `Audio attachment: ${attachmentSourcePreview(part.source)}`
+        }),
         onSome: data => ({ type: 'audio', data, mimeType: part.mimeType })
       })
   }

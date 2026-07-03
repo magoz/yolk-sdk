@@ -62,7 +62,9 @@ export class TelegramSendMessageOutput extends Schema.Class<TelegramSendMessageO
   chatId: Schema.String
 }) {}
 
-export class TelegramValidateOutput extends Schema.Class<TelegramValidateOutput>('TelegramValidateOutput')({
+export class TelegramValidateOutput extends Schema.Class<TelegramValidateOutput>(
+  'TelegramValidateOutput'
+)({
   ok: Schema.Boolean,
   chatId: Schema.String
 }) {}

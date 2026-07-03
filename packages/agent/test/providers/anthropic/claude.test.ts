@@ -51,7 +51,9 @@ describe('Anthropic Claude OAuth helpers', () => {
 
   it('parses callback URL input', () => {
     expect(
-      parseAnthropicClaudeAuthorizationCode('https://example.com/callback?code=code_2&state=state_2')
+      parseAnthropicClaudeAuthorizationCode(
+        'https://example.com/callback?code=code_2&state=state_2'
+      )
     ).toEqual({ code: 'code_2', state: 'state_2' })
   })
 })

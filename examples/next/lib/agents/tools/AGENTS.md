@@ -4,19 +4,19 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 ## Tool Matrix
 
-| Tool/module | Text | Voice | Cloudflare | Notes |
-| ----------- | ---- | ----- | ---------- | ----- |
-| `question` | yes | no | yes | package HITL question tool; loop pauses/resumes before executor |
-| `web_fetch` | yes | yes | yes | public URL fetch only |
-| `web_search` | yes | yes | yes | Exa/Parallel MCP endpoints |
-| `skill` | yes | no | bootstrap-injected; generated fallback | project skill command/runtime tool |
-| `manage_skills` | yes | no | no | authenticated user skill creation/list/update |
-| `just_bash` | yes | no | yes | just-bash virtual FS; network on; no host FS |
-| `list_knowledge_documents` / `search_knowledge` / `get_knowledge_context` | yes | yes | no | authenticated user knowledge discovery, search, and chunk-window traversal |
-| `search_storage` / `list_storage_sources` / `get_storage_source` | yes | yes | no | authenticated user storage search and source reads |
-| `telegram_send_message` | yes | yes | no | optional Telegram connector tool; requires user config; available to task subagents |
-| remote MCP | yes | no | via bootstrap | namespaced `<server>_<tool>` |
-| `task` | yes | no | no | top-level subagent delegation; no recursive task in v1 |
+| Tool/module                                                               | Text | Voice | Cloudflare                             | Notes                                                                               |
+| ------------------------------------------------------------------------- | ---- | ----- | -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `question`                                                                | yes  | no    | yes                                    | package HITL question tool; loop pauses/resumes before executor                     |
+| `web_fetch`                                                               | yes  | yes   | yes                                    | public URL fetch only                                                               |
+| `web_search`                                                              | yes  | yes   | yes                                    | Exa/Parallel MCP endpoints                                                          |
+| `skill`                                                                   | yes  | no    | bootstrap-injected; generated fallback | project skill command/runtime tool                                                  |
+| `manage_skills`                                                           | yes  | no    | no                                     | authenticated user skill creation/list/update                                       |
+| `just_bash`                                                               | yes  | no    | yes                                    | just-bash virtual FS; network on; no host FS                                        |
+| `list_knowledge_documents` / `search_knowledge` / `get_knowledge_context` | yes  | yes   | no                                     | authenticated user knowledge discovery, search, and chunk-window traversal          |
+| `search_storage` / `list_storage_sources` / `get_storage_source`          | yes  | yes   | no                                     | authenticated user storage search and source reads                                  |
+| `telegram_send_message`                                                   | yes  | yes   | no                                     | optional Telegram connector tool; requires user config; available to task subagents |
+| remote MCP                                                                | yes  | no    | via bootstrap                          | namespaced `<server>_<tool>`                                                        |
+| `task`                                                                    | yes  | no    | no                                     | top-level subagent delegation; no recursive task in v1                              |
 
 ## Rules
 

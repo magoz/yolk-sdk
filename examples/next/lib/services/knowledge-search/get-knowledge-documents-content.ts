@@ -11,7 +11,10 @@ type AccumulatedDocument = {
   readonly chunks: Array<string>
 }
 
-export const getKnowledgeDocumentsContent = (input: { readonly userId: string; readonly collectionId: string }) =>
+export const getKnowledgeDocumentsContent = (input: {
+  readonly userId: string
+  readonly collectionId: string
+}) =>
   Effect.gen(function* () {
     const db = yield* Db
     const rows = yield* db
@@ -21,10 +24,19 @@ export const getKnowledgeDocumentsContent = (input: { readonly userId: string; r
         chunkContent: schema.knowledgeChunk.content
       })
       .from(schema.knowledgeDocument)
-      .innerJoin(schema.storageObject, eq(schema.storageObject.id, schema.knowledgeDocument.storageObjectId))
-      .leftJoin(schema.knowledgeChunk, eq(schema.knowledgeChunk.documentId, schema.knowledgeDocument.id))
+      .innerJoin(
+        schema.storageObject,
+        eq(schema.storageObject.id, schema.knowledgeDocument.storageObjectId)
+      )
+      .leftJoin(
+        schema.knowledgeChunk,
+        eq(schema.knowledgeChunk.documentId, schema.knowledgeDocument.id)
+      )
       .where(
-        and(eq(schema.knowledgeDocument.collectionId, input.collectionId), eq(schema.storageObject.userId, input.userId))
+        and(
+          eq(schema.knowledgeDocument.collectionId, input.collectionId),
+          eq(schema.storageObject.userId, input.userId)
+        )
       )
       .orderBy(asc(schema.knowledgeDocument.createdAt), asc(schema.knowledgeChunk.position))
 
@@ -53,5 +65,11 @@ export const getKnowledgeDocumentsContent = (input: { readonly userId: string; r
     })) satisfies ReadonlyArray<AppKnowledgeDocumentWithContent>
   }).pipe(
     Effect.withSpan('knowledge_search.documents.getContent'),
-    Effect.mapError(error => new AppSearchIndexStoreError({ message: 'Could not get knowledge search document content', cause: error }))
+    Effect.mapError(
+      error =>
+        new AppSearchIndexStoreError({
+          message: 'Could not get knowledge search document content',
+          cause: error
+        })
+    )
   )

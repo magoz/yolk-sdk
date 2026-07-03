@@ -31,7 +31,9 @@ test.describe('knowledge UI', () => {
     }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
   })
 
-  test('creates, searches, updates availability, and deletes text knowledge', async ({ authedPage }) => {
+  test('creates, searches, updates availability, and deletes text knowledge', async ({
+    authedPage
+  }) => {
     await authedPage.goto('/knowledge', { waitUntil: 'domcontentloaded' })
     await expect(authedPage.getByRole('heading', { name: 'Knowledge', level: 1 })).toBeVisible({
       timeout: 15_000

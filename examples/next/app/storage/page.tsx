@@ -76,9 +76,7 @@ const nonEmptyString = (value: string | undefined | null): value is string =>
   value !== undefined && value !== null && value.length > 0
 
 const metadataLine = (item: StorageListItem) =>
-  [item.object.sourceType, formatBytes(item.object.byteSize)]
-    .filter(nonEmptyString)
-    .join(' · ')
+  [item.object.sourceType, formatBytes(item.object.byteSize)].filter(nonEmptyString).join(' · ')
 
 const previewText = (text: string | null) => {
   if (text === null) {
@@ -140,7 +138,9 @@ async function Content() {
                     <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_120px_120px_170px_auto] md:items-center">
                       <div className="min-w-0 space-y-1">
                         <p className="truncate font-medium">{displayTitle(item)}</p>
-                        <p className="truncate text-sm text-muted-foreground">{metadataLine(item)}</p>
+                        <p className="truncate text-sm text-muted-foreground">
+                          {metadataLine(item)}
+                        </p>
                         {item.document?.summary ? (
                           <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
                             {item.document.summary}
@@ -160,7 +160,9 @@ async function Content() {
                       </p>
                       <div className="text-sm text-muted-foreground">
                         <p>{formatDate(item.object.createdAt)}</p>
-                        {item.document?.processedAt ? <p>Processed {formatDate(item.document.processedAt)}</p> : null}
+                        {item.document?.processedAt ? (
+                          <p>Processed {formatDate(item.document.processedAt)}</p>
+                        ) : null}
                       </div>
                       <DeleteStorageSourceButton id={item.object.id} label={displayTitle(item)} />
                     </div>

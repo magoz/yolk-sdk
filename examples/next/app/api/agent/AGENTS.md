@@ -1,17 +1,19 @@
 # Agent API Routes
 
-Route-local contracts for text, Workflow, commands, and Realtime agent endpoints.
+Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice endpoints.
 
 ## Routes
 
-| Route                       | Role                                                        |
-| --------------------------- | ----------------------------------------------------------- |
-| `route.ts`                  | Stateless text NDJSON via Next runtime                      |
-| `workflow/route.ts`         | Start Vercel Workflow and stream NDJSON                     |
-| `workflow/[runId]/route.ts` | Resume/cancel Workflow runs and append HITL responses by id |
-| `commands/route.ts`         | Authenticated command list/render                           |
-| `realtime/call/route.ts`    | OpenAI Realtime SDP exchange                                |
-| `realtime/tool/route.ts`    | Voice tool execution bridge                                 |
+| Route                       | Role                                                          |
+| --------------------------- | ------------------------------------------------------------- |
+| `route.ts`                  | Stateless text NDJSON via Next runtime                        |
+| `workflow/route.ts`         | Start Vercel Workflow and stream NDJSON                       |
+| `workflow/[runId]/route.ts` | Resume/cancel Workflow runs and append HITL responses by id   |
+| `commands/route.ts`         | Authenticated command list/render                             |
+| `realtime/call/route.ts`    | OpenAI Realtime SDP exchange                                  |
+| `realtime/tool/route.ts`    | Voice tool execution bridge                                   |
+| `voice/transcribe/route.ts` | Hold-to-speak STT (`VoiceTranscriber` + OpenAI adapter)       |
+| `voice/speak/route.ts`      | Hold-to-speak TTS (`VoiceSpeechSynthesizer` + OpenAI adapter) |
 
 ## Text Runtime
 
@@ -33,11 +35,14 @@ Route-local contracts for text, Workflow, commands, and Realtime agent endpoints
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 
-## Commands + Realtime
+## Commands + Voice
 
 - Commands require auth and render command macros as prompt text; no model/provider calls here.
 - Realtime `/call` uses `OPENAI_API_KEY` and raw SDP.
-- Realtime `/tool` uses `@yolk-sdk/agent/voice`; current voice toolset is `web_fetch` + `web_search` + knowledge + storage + optional Telegram.
+- Realtime `/tool` uses `@yolk-sdk/agent/voice` (`handleVoiceToolCall` with `VoiceSessionToolCallRequest`/`VoiceToolCallOutcome`, including approval resume); current voice toolset is `web_fetch` + `web_search` + knowledge + storage + optional Telegram.
+- `voice/transcribe` accepts a raw `audio/*` body (15MB cap), uses OpenAI speech adapter defaults (`gpt-4o-mini-transcribe`, English), and returns `VoiceTranscriptionResult` JSON; console Realtime transcription selection does not affect hold-to-speak STT.
+- `voice/speak` accepts `{ text, voice? }` (4k char cap), defaults TTS voice to `marin` with app-owned delivery instructions, and returns audio bytes. Both one-shot voice routes require auth and `OPENAI_API_KEY`; provider failures map to 502 with safe bodies.
+- Realtime `/call` and both one-shot voice routes map upstream OpenAI 429 (rate limit or `insufficient_quota` credits) to a distinct 429 `OpenAI quota or rate limit exceeded` body; other upstream failures stay generic 502. Voice hooks parse `{ "error": ... }` bodies for display.
 
 ## Tests
 

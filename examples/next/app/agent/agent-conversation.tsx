@@ -163,20 +163,16 @@ const toolStateHasError = (state: ToolRunState) => {
 const optionLabel = (question: QuestionPrompt, optionId: string) =>
   question.options?.find(option => option.id === optionId)?.label ?? optionId
 
-const questionForAnswer = (
-  questions: ReadonlyArray<QuestionPrompt>,
-  answer: QuestionAnswer
-) => questions.find(question => question.id === answer.questionId)
+const questionForAnswer = (questions: ReadonlyArray<QuestionPrompt>, answer: QuestionAnswer) =>
+  questions.find(question => question.id === answer.questionId)
 
-const questionAnswerLine = (
-  answer: QuestionAnswer,
-  questions: ReadonlyArray<QuestionPrompt>
-) => {
+const questionAnswerLine = (answer: QuestionAnswer, questions: ReadonlyArray<QuestionPrompt>) => {
   const question = questionForAnswer(questions, answer)
   const prompt = question?.prompt ?? answer.questionId
-  const selected = answer.optionIds?.map(optionId =>
-    question === undefined ? optionId : optionLabel(question, optionId)
-  ) ?? []
+  const selected =
+    answer.optionIds?.map(optionId =>
+      question === undefined ? optionId : optionLabel(question, optionId)
+    ) ?? []
   const custom = answer.customAnswer?.trim()
   const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
 
@@ -225,7 +221,9 @@ const toolResultRole = (isError: boolean) => (isError ? 'error' : 'tool')
 const toolResultBadgeVariant = (isError: boolean) => (isError ? 'destructive' : 'outline')
 
 const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+  input !== null && typeof input === 'object'
+    ? Object.getOwnPropertyDescriptor(input, key)?.value
+    : undefined
 
 const stringField = (input: unknown, key: string) => {
   const value = objectField(input, key)
@@ -263,8 +261,10 @@ const taskMetadata = (call: ToolCall, state: ToolRunState) => {
   }
 
   const structured = resultStructuredContent(state)
-  const description = stringField(structured, 'description') ?? stringField(call.params, 'description')
-  const subagentType = stringField(structured, 'subagent_type') ?? stringField(call.params, 'subagent_type')
+  const description =
+    stringField(structured, 'description') ?? stringField(call.params, 'description')
+  const subagentType =
+    stringField(structured, 'subagent_type') ?? stringField(call.params, 'subagent_type')
 
   return {
     description,
@@ -282,8 +282,10 @@ const timestampLabel = (milliseconds: number) => new Date(milliseconds).toLocale
 
 const toolResultTitle = (name: string, isError: boolean) => (isError ? `${name} failed` : name)
 
-const approvalRequestId = (call: ToolCall, state: Extract<ToolRunState, { readonly _tag: 'ApprovalRequested' }>) =>
-  state.request?.requestId ?? `approval:${call.id}`
+const approvalRequestId = (
+  call: ToolCall,
+  state: Extract<ToolRunState, { readonly _tag: 'ApprovalRequested' }>
+) => state.request?.requestId ?? `approval:${call.id}`
 
 type QuestionDraft = {
   readonly questionId: string
@@ -291,7 +293,9 @@ type QuestionDraft = {
   readonly customAnswer: string
 }
 
-const initialQuestionDrafts = (questions: ReadonlyArray<QuestionPrompt>): ReadonlyArray<QuestionDraft> =>
+const initialQuestionDrafts = (
+  questions: ReadonlyArray<QuestionPrompt>
+): ReadonlyArray<QuestionDraft> =>
   questions.map(question => ({ questionId: question.id, optionIds: [], customAnswer: '' }))
 
 const draftForQuestion = (drafts: ReadonlyArray<QuestionDraft>, questionId: string) =>
@@ -367,15 +371,32 @@ function ApprovalControls({
   }, [call.id, onResponse, requestId])
 
   return (
-    <div className="border-t border-amber-500/15 px-3.5 py-3" role="group" aria-label={`Approve ${call.name}`}>
+    <div
+      className="border-t border-amber-500/15 px-3.5 py-3"
+      role="group"
+      aria-label={`Approve ${call.name}`}
+    >
       <div className="text-xs leading-5 text-muted-foreground">
         This tool needs approval before it runs.
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="min-h-11" disabled={disabled} onClick={handleApprove}>
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled}
+          onClick={handleApprove}
+        >
           Approve
         </Button>
-        <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={disabled} onClick={handleDeny}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled}
+          onClick={handleDeny}
+        >
           Deny
         </Button>
       </div>
@@ -402,11 +423,12 @@ function QuestionControls({
           return draft
         }
 
-        const optionIds = question.multiple === true
-          ? draft.optionIds.includes(optionId)
-            ? draft.optionIds.filter(id => id !== optionId)
-            : [...draft.optionIds, optionId]
-          : [optionId]
+        const optionIds =
+          question.multiple === true
+            ? draft.optionIds.includes(optionId)
+              ? draft.optionIds.filter(id => id !== optionId)
+              : [...draft.optionIds, optionId]
+            : [optionId]
 
         return { ...draft, optionIds }
       })
@@ -498,10 +520,23 @@ function QuestionControls({
         )
       })}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="min-h-11" disabled={disabled || !canSubmit} onClick={handleSubmit}>
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled || !canSubmit}
+          onClick={handleSubmit}
+        >
           Submit answer
         </Button>
-        <Button type="button" variant="outline" size="sm" className="min-h-11" disabled={disabled} onClick={handleCancel}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11"
+          disabled={disabled}
+          onClick={handleCancel}
+        >
           Cancel
         </Button>
       </div>
@@ -590,9 +625,18 @@ function ToolRunCard({
                   {task.subagentType === undefined ? null : <span>type {task.subagentType}</span>}
                   {task.subagentRunId === undefined ? null : <span>run {task.subagentRunId}</span>}
                   {task.model === undefined ? null : <span>model {task.model}</span>}
-                  {task.startedAtMs === undefined ? null : <span>start {timestampLabel(task.startedAtMs)}</span>}
-                  {task.endedAtMs === undefined ? null : <span>end {timestampLabel(task.endedAtMs)}</span>}
-                  {task.durationMs === undefined ? null : <span>duration {formatToolDuration({ _tag: 'Known', milliseconds: task.durationMs })}</span>}
+                  {task.startedAtMs === undefined ? null : (
+                    <span>start {timestampLabel(task.startedAtMs)}</span>
+                  )}
+                  {task.endedAtMs === undefined ? null : (
+                    <span>end {timestampLabel(task.endedAtMs)}</span>
+                  )}
+                  {task.durationMs === undefined ? null : (
+                    <span>
+                      duration{' '}
+                      {formatToolDuration({ _tag: 'Known', milliseconds: task.durationMs })}
+                    </span>
+                  )}
                 </div>
               )}
               <div className="mt-2 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">

@@ -9,9 +9,9 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
 
 ## In This Skill
 
-| File | Purpose |
-| --- | --- |
-| [references/readme-template.md](./references/readme-template.md) | Package README structure and examples |
+| File                                                             | Purpose                                         |
+| ---------------------------------------------------------------- | ----------------------------------------------- |
+| [references/readme-template.md](./references/readme-template.md) | Package README structure and examples           |
 | [references/audit-checklist.md](./references/audit-checklist.md) | Release-readiness and stale-doc audit checklist |
 
 ## Quick Start
@@ -23,11 +23,11 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
    - Read existing `packages/<name>/README.md` if present.
 
 2. Keep docs public-facing.
-    - README explains what npm users need.
-    - AGENTS explains what repo agents need.
-    - Root `packages/AGENTS.md` is an index and boundary summary only.
-    - Package-local `packages/<name>/AGENTS.md` owns detailed package rules.
-    - Patterns explain cross-package architecture/distribution policy.
+   - README explains what npm users need.
+   - AGENTS explains what repo agents need.
+   - Root `packages/AGENTS.md` is an index and boundary summary only.
+   - Package-local `packages/<name>/AGENTS.md` owns detailed package rules.
+   - Patterns explain cross-package architecture/distribution policy.
 
 3. For every README include:
    - one-line purpose
@@ -39,12 +39,12 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
    - package boundaries
 
 4. Update related knowledge when docs drift.
-    - Root `README.md` package list.
-    - `packages/AGENTS.md` package map only when package list/roles change.
-    - `packages/<name>/AGENTS.md` for package-specific boundaries/design rules.
-    - `patterns/PACKAGE_ARCHITECTURE.md` for cross-package shape/dependency rules.
-    - `patterns/PACKAGE_DISTRIBUTION.md` package/release policy.
-    - `scripts/AGENTS.md` if package docs/check scripts change.
+   - Root `README.md` package list.
+   - `packages/AGENTS.md` package map only when package list/roles change.
+   - `packages/<name>/AGENTS.md` for package-specific boundaries/design rules.
+   - `patterns/PACKAGE_ARCHITECTURE.md` for cross-package shape/dependency rules.
+   - `patterns/PACKAGE_DISTRIBUTION.md` package/release policy.
+   - `scripts/AGENTS.md` if package docs/check scripts change.
 
 5. Validate after edits.
 
@@ -79,8 +79,8 @@ pnpm lint
 
 ## Reading Order
 
-| Task | Files |
-| --- | --- |
-| Create README | SKILL.md → readme-template.md |
-| Audit all packages | SKILL.md → audit-checklist.md |
+| Task                   | Files                                                           |
+| ---------------------- | --------------------------------------------------------------- |
+| Create README          | SKILL.md → readme-template.md                                   |
+| Audit all packages     | SKILL.md → audit-checklist.md                                   |
 | Fix stale release docs | SKILL.md → audit-checklist.md → package-release skill if needed |

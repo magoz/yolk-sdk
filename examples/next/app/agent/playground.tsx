@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Array as Arr, Effect, Option } from 'effect'
 import {
   UserMessage,
@@ -53,9 +54,12 @@ import { AgentConsoleDialog } from './agent-console-dialog'
 import { AgentConversation } from './agent-conversation'
 import { AgentConversationHeader } from './agent-conversation-header'
 import { truncate } from './agent-format'
+import { appendSpeechTextDelta, emptySpeechChunkerState, flushSpeechText } from './speech-chunker'
 import { type AgentCommandSummary } from './slash-command-model'
 import type { AgentCompactionState } from './agent-usage-meter'
+import { useHoldToSpeak } from './use-hold-to-speak'
 import { useRealtimeVoice, type VoiceDebugEvent } from './use-realtime-voice'
+import { playRecordingStartEarcon, playVoiceReadyEarcon, primeVoiceEarcon } from './voice-earcon'
 import { isAgentTextBusy, isWorkflowResumeDisabled } from './workflow-ui-state'
 
 export type AgentRuntimeInfo =
@@ -475,20 +479,6 @@ export function AgentPlayground({
   const recordVoiceDebug = useCallback(
     (event: VoiceDebugEvent) => {
       switch (event._tag) {
-        case 'TransportReady':
-          recordActivity({
-            title: 'Voice transport ready',
-            detail: `peer=${event.peerConnectionState} · data=${event.dataChannelState}`,
-            tone: 'success'
-          })
-          return
-        case 'SessionOpened':
-          recordActivity({
-            title: 'Voice session opened',
-            detail: `${event.seededMessageCount} seeded messages`,
-            tone: 'neutral'
-          })
-          return
         case 'SessionConfigured':
           recordActivity({
             title: `Realtime ${event.eventType}`,
@@ -511,13 +501,6 @@ export function AgentPlayground({
           recordActivity({
             title: `Output transcript ${event.responseId ?? 'unknown response'}`,
             detail: truncate(event.transcript),
-            tone: 'neutral'
-          })
-          return
-        case 'ResponseDone':
-          recordActivity({
-            title: `Realtime response ${event.responseId ?? 'unknown'}`,
-            detail: `status=${event.status ?? 'unknown'}`,
             tone: 'neutral'
           })
           return
@@ -581,12 +564,104 @@ export function AgentPlayground({
   }, [recordActivity, runtime, workflowRunId])
   const agentTransport = cloudflareTransport ?? workflowTransport
 
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const ttsEnabledRef = useRef(false)
+  // Realtime narrates natively; TTS must never run alongside it or the
+  // assistant is narrated twice. Guarded per event because realtime pipes
+  // projected LLMTextDelta/AgentEnd through the same onEvent path.
+  const isVoiceModeRef = useRef(false)
+  const speechChunkerStateRef = useRef(emptySpeechChunkerState)
+  const appendTranscriptRef = useRef<(text: string) => void>(() => {})
+  const holdToSpeak = useHoldToSpeak({
+    onTranscript: text => appendTranscriptRef.current(text),
+    onError: message => {
+      toast.error(truncate(message))
+      recordActivity({ title: 'Hold to speak failed', detail: truncate(message), tone: 'error' })
+    },
+    // Speech before the recorder starts (permission/setup delay) is lost;
+    // blip when the mic is actually hot.
+    onRecordingStarted: playRecordingStartEarcon
+  })
+  const enqueueTtsSpeech = holdToSpeak.enqueueSpeech
+  const resetTtsSpeech = holdToSpeak.resetSpeech
+  const flushTtsSpeech = useCallback(() => {
+    const result = flushSpeechText(speechChunkerStateRef.current)
+    speechChunkerStateRef.current = result.state
+
+    if (result.chunks.length > 0) {
+      enqueueTtsSpeech(result.chunks)
+    }
+  }, [enqueueTtsSpeech])
+  const handleAgentEvent = useCallback(
+    (event: AgentEvent) => {
+      recordAgentEvent(event)
+
+      switch (event._tag) {
+        case 'AgentStart':
+          speechChunkerStateRef.current = emptySpeechChunkerState
+          resetTtsSpeech()
+          return
+        case 'AgentError':
+        case 'AgentRetry':
+          speechChunkerStateRef.current = emptySpeechChunkerState
+          resetTtsSpeech()
+          return
+        case 'AgentAwaitingInput':
+        case 'AgentEnd':
+          if (ttsEnabledRef.current && !isVoiceModeRef.current) {
+            flushTtsSpeech()
+          } else {
+            speechChunkerStateRef.current = emptySpeechChunkerState
+          }
+          return
+        case 'LLMTextDelta': {
+          if (!ttsEnabledRef.current || isVoiceModeRef.current) {
+            return
+          }
+
+          const result = appendSpeechTextDelta(speechChunkerStateRef.current, event.text)
+          speechChunkerStateRef.current = result.state
+
+          if (result.chunks.length > 0) {
+            enqueueTtsSpeech(result.chunks)
+          }
+
+          return
+        }
+        case 'AssistantMessage':
+        case 'CompactionEnd':
+        case 'CompactionStart':
+        case 'LLMReasoningDelta':
+        case 'LLMStreamEnd':
+        case 'LLMStreamStart':
+        case 'ProviderToolResult':
+        case 'QuestionAnswered':
+        case 'QuestionCancelled':
+        case 'QuestionRequested':
+        case 'ToolApprovalDenied':
+        case 'ToolApprovalGranted':
+        case 'ToolApprovalRequested':
+        case 'ToolExecutionCompleted':
+        case 'ToolExecutionError':
+        case 'ToolExecutionStarted':
+        case 'ToolInputDelta':
+        case 'ToolInputEnd':
+        case 'ToolInputStart':
+        case 'TurnEnd':
+        case 'TurnStart':
+        case 'UsageUpdate':
+          return
+      }
+    },
+    [enqueueTtsSpeech, flushTtsSpeech, recordAgentEvent, resetTtsSpeech]
+  )
+
   const agentChat = useAgentChat({
     sessionId,
     model: textModel,
     reasoningEffort,
     transport: agentTransport,
-    onEvent: recordAgentEvent,
+    onEvent: handleAgentEvent,
     onError: recordAgentError,
     onAbort: recordAgentAbort
   })
@@ -615,6 +690,7 @@ export function AgentPlayground({
     isLive: isVoiceLive,
     toggleSession: toggleVoice
   } = useRealtimeVoice({
+    sessionId,
     messages: agentChat.messages,
     transcriptionModel,
     onAgentEvent: applyEvent,
@@ -623,6 +699,76 @@ export function AgentPlayground({
     onDebug: recordVoiceDebug
   })
   const isVoiceMode = isVoiceConnecting || isVoiceLive
+
+  useEffect(() => {
+    isVoiceModeRef.current = isVoiceMode
+  }, [isVoiceMode])
+
+  // Speech during the connecting window is not captured; chime on the live
+  // rising edge so users know exactly when the mic is hot.
+  const wasVoiceLiveRef = useRef(false)
+  useEffect(() => {
+    if (isVoiceLive && !wasVoiceLiveRef.current) {
+      playVoiceReadyEarcon()
+    }
+
+    wasVoiceLiveRef.current = isVoiceLive
+  }, [isVoiceLive])
+
+  const handleToggleVoice = useCallback(() => {
+    if (!isVoiceMode) {
+      // Web Audio needs a user gesture; prime here so the ready chime can
+      // play when the session goes live later.
+      primeVoiceEarcon()
+
+      // Starting realtime: force TTS off so only one narration plays.
+      if (ttsEnabledRef.current) {
+        ttsEnabledRef.current = false
+        setTtsEnabled(false)
+        speechChunkerStateRef.current = emptySpeechChunkerState
+        resetTtsSpeech()
+      }
+    }
+
+    toggleVoice()
+  }, [isVoiceMode, resetTtsSpeech, toggleVoice])
+
+  const startHoldRecording = holdToSpeak.startRecording
+  const handleHoldStart = useCallback(() => {
+    // Pointer down is the user gesture; prime so the recording blip can play
+    // when the recorder actually starts after the permission/setup delay.
+    primeVoiceEarcon()
+    startHoldRecording()
+  }, [startHoldRecording])
+
+  useEffect(() => {
+    appendTranscriptRef.current = text => {
+      setInput(current => {
+        const trimmed = current.trimEnd()
+
+        return trimmed.length === 0 ? text : `${trimmed} ${text}`
+      })
+      recordActivity({
+        title: 'Hold to speak transcript',
+        detail: truncate(text),
+        tone: 'neutral'
+      })
+    }
+  }, [recordActivity])
+
+  const handleToggleTts = useCallback(() => {
+    setTtsEnabled(current => {
+      const next = !current
+      ttsEnabledRef.current = next
+
+      if (!next) {
+        speechChunkerStateRef.current = emptySpeechChunkerState
+        resetTtsSpeech()
+      }
+
+      return next
+    })
+  }, [resetTtsSpeech])
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const documentInputSupported = agentTextCapabilities.input.document
@@ -865,6 +1011,8 @@ export function AgentPlayground({
 
     workflowResumeAbortRef.current?.abort('Workflow stream stopped')
     workflowResumeAbortRef.current = null
+    speechChunkerStateRef.current = emptySpeechChunkerState
+    resetTtsSpeech()
     stop()
 
     if (runtime._tag !== 'Workflow' || runId === null) {
@@ -882,7 +1030,7 @@ export function AgentPlayground({
         const message = error instanceof Error ? error.message : 'Workflow cancel failed'
         recordActivity({ title: 'Workflow cancel failed', detail: message, tone: 'error' })
       })
-  }, [recordActivity, runtime, stop, workflowRunId])
+  }, [recordActivity, resetTtsSpeech, runtime, stop, workflowRunId])
 
   const handleEditUserMessage = useCallback(
     (messageId: string, content: string) => {
@@ -1054,6 +1202,7 @@ export function AgentPlayground({
   return (
     <main className="h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--color-muted),transparent_34rem),linear-gradient(135deg,var(--color-background),var(--color-muted))] p-2 sm:p-4 md:p-6">
       <audio ref={audioRef} autoPlay className="sr-only" />
+      <audio ref={holdToSpeak.attachAudioElement} className="sr-only" />
       <div className="mx-auto h-full max-w-5xl overflow-hidden rounded-[2rem] border border-foreground/10 bg-background/85 shadow-2xl shadow-foreground/10 backdrop-blur">
         <section className="flex h-full min-h-0 min-w-0 flex-col bg-card/80">
           <AgentConversationHeader
@@ -1114,6 +1263,10 @@ export function AgentPlayground({
             isVoiceMode={isVoiceMode}
             isVoiceConnecting={isVoiceConnecting}
             isVoiceLive={isVoiceLive}
+            isHoldRecording={holdToSpeak.isRecording}
+            isHoldTranscribing={holdToSpeak.isTranscribing}
+            ttsEnabled={ttsEnabled}
+            isTtsSpeaking={holdToSpeak.isSpeaking}
             imageInputSupported={imageInputSupported}
             documentInputSupported={documentInputSupported}
             textModel={textModel}
@@ -1132,7 +1285,10 @@ export function AgentPlayground({
             onSlashCommandSubmit={handleSlashCommandSubmit}
             onSubmit={handleSubmit}
             onStop={handleStop}
-            onToggleVoice={toggleVoice}
+            onToggleVoice={handleToggleVoice}
+            onHoldStart={handleHoldStart}
+            onHoldEnd={holdToSpeak.stopRecording}
+            onToggleTts={handleToggleTts}
           />
         </section>
       </div>

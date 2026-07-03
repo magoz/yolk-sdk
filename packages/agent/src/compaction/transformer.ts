@@ -10,9 +10,7 @@ import {
 } from './window.ts'
 import type { TranscriptTokenEstimator } from './estimator.ts'
 
-export type SummaryMessageFactory = (
-  messages: ReadonlyArray<AgentMessage>
-) => AgentMessage
+export type SummaryMessageFactory = (messages: ReadonlyArray<AgentMessage>) => AgentMessage
 
 export type WindowCompactionOptions = {
   readonly strategy: string

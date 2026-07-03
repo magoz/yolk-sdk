@@ -71,14 +71,12 @@ export const modelVisibleToolErrorStructuredContent = (
   ...(error.details === undefined ? {} : { details: error.details })
 })
 
-export const modelVisibleToolErrorResult = (
-  call: ToolCall,
-  error: ModelVisibleToolError
-) => makeErrorToolResult({
-  toolCallId: call.id,
-  content: error.message,
-  structuredContent: modelVisibleToolErrorStructuredContent(error)
-})
+export const modelVisibleToolErrorResult = (call: ToolCall, error: ModelVisibleToolError) =>
+  makeErrorToolResult({
+    toolCallId: call.id,
+    content: error.message,
+    structuredContent: modelVisibleToolErrorStructuredContent(error)
+  })
 
 export type ToolExecutionInput<Context> = {
   readonly call: ToolCall
@@ -165,7 +163,9 @@ const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
 const objectField = (input: unknown, key: string) =>
-  input !== null && typeof input === 'object' ? Object.getOwnPropertyDescriptor(input, key)?.value : undefined
+  input !== null && typeof input === 'object'
+    ? Object.getOwnPropertyDescriptor(input, key)?.value
+    : undefined
 
 const isObjectRecord = (input: unknown): input is Readonly<Record<string, unknown>> =>
   input !== null && typeof input === 'object' && !Array.isArray(input)
@@ -185,10 +185,12 @@ const hasJsonSchemaType = (input: unknown, type: string) => objectField(input, '
 const isEmptyStructJsonSchema = (schema: unknown) => {
   const anyOf = objectField(schema, 'anyOf')
 
-  return Array.isArray(anyOf) &&
+  return (
+    Array.isArray(anyOf) &&
     anyOf.length === 2 &&
     anyOf.some(item => hasJsonSchemaType(item, 'object')) &&
     anyOf.some(item => hasJsonSchemaType(item, 'array'))
+  )
 }
 
 const isEmptyRecordJsonSchema = (schema: unknown) =>
@@ -207,18 +209,21 @@ const emptyObjectJsonSchema = {
 const jsonSchemaFromSchema = (schema: Schema.Top) => {
   const document = Schema.toJsonSchemaDocument(schema)
   const definitionName = localDefinitionName(objectField(document.schema, '$ref'))
-  const localDefinition = definitionName === undefined
-    ? undefined
-    : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
+  const localDefinition =
+    definitionName === undefined
+      ? undefined
+      : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
   const rootSchema = isObjectRecord(localDefinition) ? localDefinition : document.schema
-  const remainingDefinitions = definitionName === undefined
-    ? document.definitions
-    : Object.fromEntries(
-        Object.entries(document.definitions).filter(([name]) => name !== definitionName)
-      )
-  const jsonSchema = isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
-    ? emptyObjectJsonSchema
-    : rootSchema
+  const remainingDefinitions =
+    definitionName === undefined
+      ? document.definitions
+      : Object.fromEntries(
+          Object.entries(document.definitions).filter(([name]) => name !== definitionName)
+        )
+  const jsonSchema =
+    isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
+      ? emptyObjectJsonSchema
+      : rootSchema
 
   return Object.keys(remainingDefinitions).length > 0
     ? { ...jsonSchema, $defs: remainingDefinitions }
@@ -241,7 +246,8 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
       Effect.matchEffect({
         onFailure: error => {
-          const message = options.invalidParamsMessage?.(error) ??
+          const message =
+            options.invalidParamsMessage?.(error) ??
             `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
 
           return Effect.succeed(
@@ -255,11 +261,14 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
             )
           )
         },
-        onSuccess: params => options.execute({ call, context, params }).pipe(
-          Effect.catchTag('ModelVisibleToolError', error =>
-            Effect.succeed(modelVisibleToolErrorResult(call, error))
-          )
-        )
+        onSuccess: params =>
+          options
+            .execute({ call, context, params })
+            .pipe(
+              Effect.catchTag('ModelVisibleToolError', error =>
+                Effect.succeed(modelVisibleToolErrorResult(call, error))
+              )
+            )
       })
     )
 })

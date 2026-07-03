@@ -61,8 +61,12 @@ export type KnowledgeStoreApi = {
   readonly listPinned: (
     input: ListPinnedKnowledgeInput
   ) => Effect.Effect<ListPinnedKnowledgeResult, KnowledgeStoreError>
-  readonly deleteDocument: (input: GetKnowledgeDocumentInput) => Effect.Effect<void, KnowledgeStoreError>
-  readonly listFiles: (input: GetKnowledgeDocumentInput) => Effect.Effect<ReadonlyArray<KnowledgeFile>, KnowledgeStoreError>
+  readonly deleteDocument: (
+    input: GetKnowledgeDocumentInput
+  ) => Effect.Effect<void, KnowledgeStoreError>
+  readonly listFiles: (
+    input: GetKnowledgeDocumentInput
+  ) => Effect.Effect<ReadonlyArray<KnowledgeFile>, KnowledgeStoreError>
 }
 
 export class KnowledgeStore extends Context.Service<KnowledgeStore, KnowledgeStoreApi>()(

@@ -58,27 +58,32 @@ const skillTool: ToolRegistration<AgentToolContext> = makeTool({
         context.skillset !== undefined &&
         context.skillset.skills.length > 0
     ),
-  invalidParamsMessage: error => `Invalid skill arguments: ${error instanceof Error ? error.message : String(error)}`,
+  invalidParamsMessage: error =>
+    `Invalid skill arguments: ${error instanceof Error ? error.message : String(error)}`,
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {
       const skillset = context.skillset
 
       if (skillset === undefined) {
-        return yield* Effect.fail(modelVisibleToolError({
-          tool: skillToolName,
-          message: 'Skills are not configured.',
-          reason: 'not_found'
-        }))
+        return yield* Effect.fail(
+          modelVisibleToolError({
+            tool: skillToolName,
+            message: 'Skills are not configured.',
+            reason: 'not_found'
+          })
+        )
       }
 
       const skill = findSkill(skillset.skills, params.name)
 
       if (skill === undefined) {
-        return yield* Effect.fail(modelVisibleToolError({
-          tool: skillToolName,
-          message: missingSkillContent(params.name, skillset.skills),
-          reason: 'not_found'
-        }))
+        return yield* Effect.fail(
+          modelVisibleToolError({
+            tool: skillToolName,
+            message: missingSkillContent(params.name, skillset.skills),
+            reason: 'not_found'
+          })
+        )
       }
 
       return ToolResult.make({

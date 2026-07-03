@@ -7,7 +7,7 @@ OpenAI Realtime/WebRTC server-side helpers and voice tool bridge glue.
 - Browser hook owns WebRTC peer/data/audio lifecycle in `examples/next/app/agent/use-realtime-voice.ts`.
 - `/api/agent/realtime/call` mints OpenAI Realtime SDP using `OPENAI_API_KEY`.
 - `/api/agent/realtime/tool` executes provider-normalized voice tool calls via `@yolk-sdk/agent/voice`.
-- Realtime/OpenAI specifics stay app-local; package `@yolk-sdk/agent/voice` remains provider-neutral.
+- App owns Realtime route auth, SDP exchange, session toolset, and UI labels; package `@yolk-sdk/agent/providers/openai/realtime` owns OpenAI session config/codecs/event mapping, and `@yolk-sdk/agent/voice` remains provider-neutral.
 
 ## Event policy
 
@@ -18,7 +18,7 @@ OpenAI Realtime/WebRTC server-side helpers and voice tool bridge glue.
 
 ## Model/config
 
-- Default model `gpt-realtime-2`; default transcription `gpt-realtime-whisper`.
+- Default model `gpt-realtime-2`; default voice `marin`; default reasoning `low`; default transcription `gpt-realtime-whisper`.
 - UI may select `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-mini-transcribe-2025-12-15`.
 - Prompted transcription models receive: `Transcribe English speech. Preserve exact words.`
 - OpenRouter is not supported for Realtime.

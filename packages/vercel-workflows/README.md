@@ -12,11 +12,11 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath | Purpose |
-| --- | --- |
-| `@yolk-sdk/vercel-workflows` | Workflow-safe agent loop orchestration APIs |
-| `@yolk-sdk/vercel-workflows/workflow` | Explicit equivalent subpath |
-| `@yolk-sdk/vercel-workflows/effect` | Effect-native wrapper around public `workflow/api` APIs |
+| Subpath                               | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `@yolk-sdk/vercel-workflows`          | Workflow-safe agent loop orchestration APIs             |
+| `@yolk-sdk/vercel-workflows/workflow` | Explicit equivalent subpath                             |
+| `@yolk-sdk/vercel-workflows/effect`   | Effect-native wrapper around public `workflow/api` APIs |
 
 ## Imports
 

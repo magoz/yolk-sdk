@@ -18,12 +18,12 @@ Use that skill as the upstream reference for property-testing discipline: tests 
 
 ## Terms
 
-| Term | Meaning | Question answered |
-| --- | --- | --- |
-| Simulation testing | Real code in a controlled fake world | Can this run deterministically without real external services? |
-| Property testing | Generated inputs or action sequences checked against invariants | Can generated cases falsify this law? |
-| Model testing | A small expected-state model run beside real code | Does implementation match the model after every step? |
-| Invariant | A condition that must always hold | What must never be false? |
+| Term               | Meaning                                                         | Question answered                                              |
+| ------------------ | --------------------------------------------------------------- | -------------------------------------------------------------- |
+| Simulation testing | Real code in a controlled fake world                            | Can this run deterministically without real external services? |
+| Property testing   | Generated inputs or action sequences checked against invariants | Can generated cases falsify this law?                          |
+| Model testing      | A small expected-state model run beside real code               | Does implementation match the model after every step?          |
+| Invariant          | A condition that must always hold                               | What must never be false?                                      |
 
 Simulation is the environment. Property testing is the exploration strategy. Model testing is one way to provide the oracle.
 
@@ -101,7 +101,7 @@ Add `fast-check` only when command/model testing needs direct generators or shri
 Effect v4 already supports schema-derived arbitraries:
 
 ```ts
-import { Schema } from "effect"
+import { Schema } from 'effect'
 
 const inputArbitrary = Schema.toArbitrary(ToolInputSchema)
 ```
@@ -475,11 +475,13 @@ Package-local property tests should share a tiny test-config helper instead of r
 ```ts
 const defaultPropertyRuns = 50
 const propertyRunsEnv = process.env.PROPERTY_RUNS
-const parsedPropertyRuns = propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+const parsedPropertyRuns =
+  propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
 
-export const propertyRuns = Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
-  ? parsedPropertyRuns
-  : defaultPropertyRuns
+export const propertyRuns =
+  Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
+    ? parsedPropertyRuns
+    : defaultPropertyRuns
 
 export const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
 ```
@@ -525,9 +527,9 @@ Conceptual shape:
 
 ```ts
 it.effect.prop(
-  "HITL invariants hold",
+  'HITL invariants hold',
   [CommandSequenceSchema],
-  (commands) =>
+  commands =>
     Effect.gen(function* () {
       const model = HitlModel.empty
       const harness = yield* HitlHarness.Service
@@ -538,7 +540,7 @@ it.effect.prop(
         yield* harness.assertInvariants(model)
       }
     }),
-  propertyOptions,
+  propertyOptions
 )
 ```
 

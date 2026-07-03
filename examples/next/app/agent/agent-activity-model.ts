@@ -1,4 +1,9 @@
-import type { AgentError, AgentEvent, AgentRetry, ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
+import type {
+  AgentError,
+  AgentEvent,
+  AgentRetry,
+  ProviderErrorInfo
+} from '@yolk-sdk/agent/protocol'
 import { contentPreview, countLabel, truncate, unknownPreview } from './agent-format'
 
 export type ActivityTone = 'neutral' | 'active' | 'success' | 'error' | 'tool'

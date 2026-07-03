@@ -91,14 +91,18 @@ export function CreateFileKnowledgeForm() {
               inputRef.current.value = ''
             }
           } else {
-            setMessage(`${failures.length} failed: ${failures[0]?.message ?? 'Could not save files'}`)
+            setMessage(
+              `${failures.length} failed: ${failures[0]?.message ?? 'Could not save files'}`
+            )
           }
         })
       }}
     >
       <div>
         <h2 className="font-medium">Add file knowledge</h2>
-        <p className="text-sm text-muted-foreground">Upload files, store originals, and extract text for agent context.</p>
+        <p className="text-sm text-muted-foreground">
+          Upload files, store originals, and extract text for agent context.
+        </p>
       </div>
       <div
         className={`rounded-xl border border-dashed p-6 text-center ${isDragging ? 'border-primary bg-primary/5' : 'border-border bg-muted/20'}`}
@@ -137,12 +141,17 @@ export function CreateFileKnowledgeForm() {
         <Label htmlFor="knowledge-file" className="cursor-pointer text-sm font-medium">
           Drop files or click to browse
         </Label>
-        <p className="mt-1 text-xs text-muted-foreground">TXT, MD, CSV, JSON, PDF, DOCX, XLSX, PPTX · 2MB each</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          TXT, MD, CSV, JSON, PDF, DOCX, XLSX, PPTX · 2MB each
+        </p>
       </div>
       {selectedFiles.length > 0 ? (
         <ul className="max-h-40 space-y-2 overflow-auto rounded-lg border p-2">
           {selectedFiles.map(file => (
-            <li key={fileKey(file)} className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm">
+            <li
+              key={fileKey(file)}
+              className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-sm"
+            >
               <div className="min-w-0">
                 <p className="truncate font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">{formatBytes(file.size)}</p>
@@ -151,7 +160,9 @@ export function CreateFileKnowledgeForm() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => setSelectedFiles(files => files.filter(item => fileKey(item) !== fileKey(file)))}
+                onClick={() =>
+                  setSelectedFiles(files => files.filter(item => fileKey(item) !== fileKey(file)))
+                }
               >
                 Remove
               </Button>
@@ -175,7 +186,11 @@ export function CreateFileKnowledgeForm() {
               ? 'Save 1 file'
               : `Save ${selectedFiles.length} files`}
         </Button>
-        {message ? <p className="text-sm text-muted-foreground" aria-live="polite">{message}</p> : null}
+        {message ? (
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {message}
+          </p>
+        ) : null}
       </div>
     </form>
   )

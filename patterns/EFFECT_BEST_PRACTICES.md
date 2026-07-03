@@ -147,12 +147,12 @@ validation, auth, provider failures, config failures, or user-correctable input.
 ```typescript
 // WRONG - empty returning() is an expected persistence failure shape
 if (row === undefined) {
-  return yield* Effect.die(new Error('Could not create row'))
+  return yield * Effect.die(new Error('Could not create row'))
 }
 
 // CORRECT - typed failure reaches boundary handlers and telemetry cleanly
 if (row === undefined) {
-  return yield* Effect.fail(new PersistenceError({ message: 'Could not create row' }))
+  return yield * Effect.fail(new PersistenceError({ message: 'Could not create row' }))
 }
 ```
 

@@ -19,9 +19,10 @@ export type KnowledgeSummarizerApi = {
   ) => Effect.Effect<KnowledgeDocumentSummary, KnowledgeSummarizationError>
 }
 
-export class KnowledgeSummarizer extends Context.Service<KnowledgeSummarizer, KnowledgeSummarizerApi>()(
-  '@yolk-sdk/knowledge/KnowledgeSummarizer'
-) {}
+export class KnowledgeSummarizer extends Context.Service<
+  KnowledgeSummarizer,
+  KnowledgeSummarizerApi
+>()('@yolk-sdk/knowledge/KnowledgeSummarizer') {}
 
 export const NoopKnowledgeSummarizerLive = Layer.succeed(KnowledgeSummarizer, {
   summarize: input => Effect.succeed({ title: input.sourceTitle })

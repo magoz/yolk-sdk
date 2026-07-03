@@ -35,8 +35,15 @@ export const updateKnowledgeAvailabilityAction = async (input: {
       Effect.catchTag('NotFoundError', error =>
         Effect.succeed({ _tag: 'Error' as const, message: error.message })
       ),
-      Effect.tapError(error => reportError(error, { operation: 'action.knowledge.updateAvailability' })),
-      Effect.catch(() => Effect.succeed({ _tag: 'Error' as const, message: 'Could not update knowledge availability' }))
+      Effect.tapError(error =>
+        reportError(error, { operation: 'action.knowledge.updateAvailability' })
+      ),
+      Effect.catch(() =>
+        Effect.succeed({
+          _tag: 'Error' as const,
+          message: 'Could not update knowledge availability'
+        })
+      )
     )
   )
 }

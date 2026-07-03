@@ -51,10 +51,10 @@ Pass `toolSet.tools` into `run`/`runRuntime`. Provide `ToolExecutorLayer` alongs
 
 Every tool declares one access level:
 
-| Access | Use for |
-| --- | --- |
-| `read` | search, fetch, inspect |
-| `write` | create/update external state |
+| Access        | Use for                                                 |
+| ------------- | ------------------------------------------------------- |
+| `read`        | search, fetch, inspect                                  |
+| `write`       | create/update external state                            |
 | `destructive` | delete, execute commands, send messages, mutate broadly |
 
 The SDK records access metadata. Your host enforces approval policy.

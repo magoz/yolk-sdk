@@ -31,21 +31,21 @@
 
 ## Subpaths
 
-| Subpath | Role |
-| --- | --- |
-| `@yolk-sdk/knowledge` | Root context/store/file/error helpers |
-| `@yolk-sdk/knowledge/documents` | Document, file, chunk, scope, status, availability schemas |
-| `@yolk-sdk/knowledge/files` | File blob-store contract |
-| `@yolk-sdk/knowledge/store` | Document store and search-index store contracts |
-| `@yolk-sdk/knowledge/context` | Pinned context assembly helpers |
-| `@yolk-sdk/knowledge/chunking` | Chunker contracts and defaults |
-| `@yolk-sdk/knowledge/embeddings` | Embedder contract and vector types |
-| `@yolk-sdk/knowledge/extraction` | Loaded source/extractor contract |
-| `@yolk-sdk/knowledge/ingestion` | Generic search chunk ingestion helper |
-| `@yolk-sdk/knowledge/search` | Search interface and context packing |
-| `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract |
-| `@yolk-sdk/knowledge/agent` | Lookup/manage tool factories |
-| `@yolk-sdk/knowledge/errors` | Shared knowledge error types |
+| Subpath                             | Role                                                       |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `@yolk-sdk/knowledge`               | Root context/store/file/error helpers                      |
+| `@yolk-sdk/knowledge/documents`     | Document, file, chunk, scope, status, availability schemas |
+| `@yolk-sdk/knowledge/files`         | File blob-store contract                                   |
+| `@yolk-sdk/knowledge/store`         | Document store and search-index store contracts            |
+| `@yolk-sdk/knowledge/context`       | Pinned context assembly helpers                            |
+| `@yolk-sdk/knowledge/chunking`      | Chunker contracts and defaults                             |
+| `@yolk-sdk/knowledge/embeddings`    | Embedder contract and vector types                         |
+| `@yolk-sdk/knowledge/extraction`    | Loaded source/extractor contract                           |
+| `@yolk-sdk/knowledge/ingestion`     | Generic search chunk ingestion helper                      |
+| `@yolk-sdk/knowledge/search`        | Search interface and context packing                       |
+| `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract                    |
+| `@yolk-sdk/knowledge/agent`         | Lookup/manage tool factories                               |
+| `@yolk-sdk/knowledge/errors`        | Shared knowledge error types                               |
 
 ## Rules
 

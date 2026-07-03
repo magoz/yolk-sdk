@@ -92,59 +92,59 @@ Executor exposes one shared integration runtime/catalog across agents. Agents di
 
 ## Resolved decisions
 
-| Area | Decision |
-| --- | --- |
-| Public shape | Add public `@yolk-sdk/sandbox`; reusable by Yolk apps including `../speldosa`. |
-| Root export | Root exports core service/models/errors, like `connectors`/`knowledge` core. |
-| Subpaths | `@yolk-sdk/sandbox/agent`, `/vercel`, `/testing`. No `/core` subpath. |
-| Effect style | Service-first: `Sandbox` and `SandboxStateStore` are `Context.Service`s. |
-| First provider | Vercel Sandbox only in v0. Other providers deferred. |
-| Runtime target | Node/Vercel first. Worker/Cloudflare can use a future broker. |
-| Vercel credentials | Let `@vercel/sandbox` use OIDC/env defaults. No Yolk credential abstraction v0. |
-| Agent surface | One tool: `sandbox`. |
-| Tool instructions | Self-contained generated tool description. No system-prompt helper v0. |
-| Tool params | `command`, `cwd?`, `stdin?`, `timeoutSeconds?`, `background?`. Optional params accept omission or `null`. No `purpose`. |
-| Command form | Shell string, multiline allowed, run through non-interactive bash. |
-| Working dir | `cwd` is workspace-relative only. Absolute cwd rejected. |
-| Stdin | Supported by wrapper files because Vercel SDK has no stdin parameter. Primary channel for large patches/scripts/data. |
-| Output | Split stdout/stderr; 50k model-visible char cap; truncation flag. |
-| Foreground timeout | Default 120s, max 600s. |
-| Background v0 | Start only; 2s quick probe; no logs/kill/list API yet. |
-| Concurrency v0 | Serialize commands per `Sandbox` service instance to avoid state races. |
-| Preview URLs | Included in tool description and command metadata. No preview tool. |
-| Tool surfaces | Package is surface-agnostic. Yolk enables Workflow/text first; voice later if desired. |
-| Dogfood route | Wire `/agent/workflow` first. |
-| `just_bash` | Remove from Workflow dogfood when sandbox lands; keep shared Cloudflare-compatible exposure until replacement exists. No migration/backcompat docs needed. |
-| Tool access | `destructive`. Trusted personal infra in v0. |
-| Session scope | One sandbox per host-provided `sandboxSessionId`, normally one per top-level conversation. Subagents reuse it. |
-| Vercel name | `sandbox-{hash(sandboxSessionId)}`; host must include user scope in `sandboxSessionId`. |
-| State | Provider-tagged typed JSON. Host DB stores JSON and decodes at the boundary. |
-| State store | Package defines `SandboxStateStore`; `Sandbox` service depends on it. |
-| State key | Store keyed by host `sandboxSessionId`, not raw user-facing session id. |
-| Lazy lifecycle | `Sandbox.run` lazily get-or-creates on first command. |
-| Persistence source | Host DB owns lifecycle timestamps; Vercel owns live status. |
-| Disposable default | `persistent: false`, idle TTL 30m, max lifetime 45m for package safety; hosts can override to 4h on Pro/Enterprise. |
-| Touch behavior | Each command extends/restores idle TTL by additive delta, capped by max lifetime. |
-| Idle expiry | If idle-expired or provider sandbox/session is gone before command, delete stale state/sandbox and create fresh. |
-| Max lifetime | Existing sandbox is never extended past max lifetime; before next command, delete/create fresh and mark `workspaceReset: true`. Current command may finish. |
-| Cleanup | Next internal cron route scans DB every 15m; package exposes single-session delete, no batch helper v0. |
-| Delete primitive | Use Vercel `sandbox.delete()` for disposable cleanup. |
-| Source model | Exactly one initial source ADT: empty, snapshot, git, or tarball. Snapshot and git/tarball are mutually exclusive. |
-| Bootstrap | No heavy bootstrap. Optional minimal bootstrap only. Full browser/tools require snapshot. |
-| Snapshot creation | App/script-owned (`pnpm sandbox:snapshot-base`), not package API v0. |
-| `apply_patch` | Base snapshot owns `apply_patch` on PATH. Package does not detect/install it. |
-| Snapshot tool detection | No hard detection of `apply_patch`/`agent-browser`; command failure is enough. |
-| Resources | Default 2 vCPU, host-overridable. |
-| Runtime | Vercel `node24` default. |
-| Ports | Default `[3000, 5173, 4321, 8000]`. |
-| Source checkout | Initial source ADT maps to Vercel `source`. Auth/branch policy app-owned. |
-| Env | Host-provided `env`; package owns no secrets. |
-| Network | Allow-all default; Vercel-specific network policy passthrough. |
-| Errors | Multiple tagged errors plus `SandboxError` union alias. |
-| Command failure | Nonzero exit and timeout are command result data, not Effect failure. |
-| Expired error mapping | `SandboxExpiredError` becomes model-visible tool error only when lifecycle expiry cannot be reset automatically. |
-| Infra error mapping | Config/state/provider errors become fatal `ToolError`. |
-| Tests | No live Vercel tests by default. Use fakes/seams; optional manual smoke later. |
+| Area                    | Decision                                                                                                                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public shape            | Add public `@yolk-sdk/sandbox`; reusable by Yolk apps including `../speldosa`.                                                                              |
+| Root export             | Root exports core service/models/errors, like `connectors`/`knowledge` core.                                                                                |
+| Subpaths                | `@yolk-sdk/sandbox/agent`, `/vercel`, `/testing`. No `/core` subpath.                                                                                       |
+| Effect style            | Service-first: `Sandbox` and `SandboxStateStore` are `Context.Service`s.                                                                                    |
+| First provider          | Vercel Sandbox only in v0. Other providers deferred.                                                                                                        |
+| Runtime target          | Node/Vercel first. Worker/Cloudflare can use a future broker.                                                                                               |
+| Vercel credentials      | Let `@vercel/sandbox` use OIDC/env defaults. No Yolk credential abstraction v0.                                                                             |
+| Agent surface           | One tool: `sandbox`.                                                                                                                                        |
+| Tool instructions       | Self-contained generated tool description. No system-prompt helper v0.                                                                                      |
+| Tool params             | `command`, `cwd?`, `stdin?`, `timeoutSeconds?`, `background?`. Optional params accept omission or `null`. No `purpose`.                                     |
+| Command form            | Shell string, multiline allowed, run through non-interactive bash.                                                                                          |
+| Working dir             | `cwd` is workspace-relative only. Absolute cwd rejected.                                                                                                    |
+| Stdin                   | Supported by wrapper files because Vercel SDK has no stdin parameter. Primary channel for large patches/scripts/data.                                       |
+| Output                  | Split stdout/stderr; 50k model-visible char cap; truncation flag.                                                                                           |
+| Foreground timeout      | Default 120s, max 600s.                                                                                                                                     |
+| Background v0           | Start only; 2s quick probe; no logs/kill/list API yet.                                                                                                      |
+| Concurrency v0          | Serialize commands per `Sandbox` service instance to avoid state races.                                                                                     |
+| Preview URLs            | Included in tool description and command metadata. No preview tool.                                                                                         |
+| Tool surfaces           | Package is surface-agnostic. Yolk enables Workflow/text first; voice later if desired.                                                                      |
+| Dogfood route           | Wire `/agent/workflow` first.                                                                                                                               |
+| `just_bash`             | Remove from Workflow dogfood when sandbox lands; keep shared Cloudflare-compatible exposure until replacement exists. No migration/backcompat docs needed.  |
+| Tool access             | `destructive`. Trusted personal infra in v0.                                                                                                                |
+| Session scope           | One sandbox per host-provided `sandboxSessionId`, normally one per top-level conversation. Subagents reuse it.                                              |
+| Vercel name             | `sandbox-{hash(sandboxSessionId)}`; host must include user scope in `sandboxSessionId`.                                                                     |
+| State                   | Provider-tagged typed JSON. Host DB stores JSON and decodes at the boundary.                                                                                |
+| State store             | Package defines `SandboxStateStore`; `Sandbox` service depends on it.                                                                                       |
+| State key               | Store keyed by host `sandboxSessionId`, not raw user-facing session id.                                                                                     |
+| Lazy lifecycle          | `Sandbox.run` lazily get-or-creates on first command.                                                                                                       |
+| Persistence source      | Host DB owns lifecycle timestamps; Vercel owns live status.                                                                                                 |
+| Disposable default      | `persistent: false`, idle TTL 30m, max lifetime 45m for package safety; hosts can override to 4h on Pro/Enterprise.                                         |
+| Touch behavior          | Each command extends/restores idle TTL by additive delta, capped by max lifetime.                                                                           |
+| Idle expiry             | If idle-expired or provider sandbox/session is gone before command, delete stale state/sandbox and create fresh.                                            |
+| Max lifetime            | Existing sandbox is never extended past max lifetime; before next command, delete/create fresh and mark `workspaceReset: true`. Current command may finish. |
+| Cleanup                 | Next internal cron route scans DB every 15m; package exposes single-session delete, no batch helper v0.                                                     |
+| Delete primitive        | Use Vercel `sandbox.delete()` for disposable cleanup.                                                                                                       |
+| Source model            | Exactly one initial source ADT: empty, snapshot, git, or tarball. Snapshot and git/tarball are mutually exclusive.                                          |
+| Bootstrap               | No heavy bootstrap. Optional minimal bootstrap only. Full browser/tools require snapshot.                                                                   |
+| Snapshot creation       | App/script-owned (`pnpm sandbox:snapshot-base`), not package API v0.                                                                                        |
+| `apply_patch`           | Base snapshot owns `apply_patch` on PATH. Package does not detect/install it.                                                                               |
+| Snapshot tool detection | No hard detection of `apply_patch`/`agent-browser`; command failure is enough.                                                                              |
+| Resources               | Default 2 vCPU, host-overridable.                                                                                                                           |
+| Runtime                 | Vercel `node24` default.                                                                                                                                    |
+| Ports                   | Default `[3000, 5173, 4321, 8000]`.                                                                                                                         |
+| Source checkout         | Initial source ADT maps to Vercel `source`. Auth/branch policy app-owned.                                                                                   |
+| Env                     | Host-provided `env`; package owns no secrets.                                                                                                               |
+| Network                 | Allow-all default; Vercel-specific network policy passthrough.                                                                                              |
+| Errors                  | Multiple tagged errors plus `SandboxError` union alias.                                                                                                     |
+| Command failure         | Nonzero exit and timeout are command result data, not Effect failure.                                                                                       |
+| Expired error mapping   | `SandboxExpiredError` becomes model-visible tool error only when lifecycle expiry cannot be reset automatically.                                            |
+| Infra error mapping     | Config/state/provider errors become fatal `ToolError`.                                                                                                      |
+| Tests                   | No live Vercel tests by default. Use fakes/seams; optional manual smoke later.                                                                              |
 
 ## Package shape
 
@@ -192,13 +192,17 @@ examples/next, speldosa -> @yolk-sdk/sandbox/* + app auth/storage/policy
 ```ts
 export type SandboxApi = {
   readonly run: (input: SandboxCommandInput) => Effect.Effect<SandboxCommandResult, SandboxError>
-  readonly currentState: Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError | SandboxStateError>
-  readonly delete: Effect.Effect<void, SandboxProviderError | SandboxStateStoreError | SandboxStateError>
+  readonly currentState: Effect.Effect<
+    Option.Option<SandboxState>,
+    SandboxStateStoreError | SandboxStateError
+  >
+  readonly delete: Effect.Effect<
+    void,
+    SandboxProviderError | SandboxStateStoreError | SandboxStateError
+  >
 }
 
-export class Sandbox extends Context.Service<Sandbox, SandboxApi>()(
-  '@yolk-sdk/sandbox/Sandbox'
-) {}
+export class Sandbox extends Context.Service<Sandbox, SandboxApi>()('@yolk-sdk/sandbox/Sandbox') {}
 ```
 
 `Sandbox.run` lazily creates/connects the provider sandbox, runs one command, updates lifecycle state, saves through `SandboxStateStore`, and returns command metadata. `currentState` returns `Option.none()` before first command.
@@ -207,8 +211,13 @@ export class Sandbox extends Context.Service<Sandbox, SandboxApi>()(
 
 ```ts
 export type SandboxStateStoreApi = {
-  readonly load: (sandboxSessionId: string) => Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError>
-  readonly save: (input: { readonly sandboxSessionId: string; readonly state: SandboxState }) => Effect.Effect<void, SandboxStateStoreError>
+  readonly load: (
+    sandboxSessionId: string
+  ) => Effect.Effect<Option.Option<SandboxState>, SandboxStateStoreError>
+  readonly save: (input: {
+    readonly sandboxSessionId: string
+    readonly state: SandboxState
+  }) => Effect.Effect<void, SandboxStateStoreError>
   readonly clear: (sandboxSessionId: string) => Effect.Effect<void, SandboxStateStoreError>
 }
 

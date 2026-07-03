@@ -12,7 +12,9 @@ import {
 
 describe('sandbox core', () => {
   it('builds deterministic Vercel names', () => {
-    expect(makeVercelSandboxName('user_1:session_1')).toBe(makeVercelSandboxName('user_1:session_1'))
+    expect(makeVercelSandboxName('user_1:session_1')).toBe(
+      makeVercelSandboxName('user_1:session_1')
+    )
     expect(makeVercelSandboxName('user_1:session_1')).toMatch(/^sandbox-[a-z0-9]+$/)
   })
 
@@ -50,13 +52,19 @@ describe('sandbox core', () => {
       maxExpiresAtMs: 200
     })
 
-    expect(sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 50 })._tag).toBe('UseExisting')
-    expect(sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 150 })).toMatchObject({
+    expect(
+      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 50 })._tag
+    ).toBe('UseExisting')
+    expect(
+      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 150 })
+    ).toMatchObject({
       _tag: 'Create',
       workspaceReset: true,
       reason: 'idle_expired'
     })
-    expect(sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 250 })).toMatchObject({
+    expect(
+      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 250 })
+    ).toMatchObject({
       _tag: 'Create',
       workspaceReset: true,
       reason: 'max_expired'
