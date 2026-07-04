@@ -1,3 +1,4 @@
+import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
 import {
@@ -19,6 +20,9 @@ import {
   voiceToolEventId,
   VoiceUserTranscriptFinal
 } from '../../src/voice/index.ts'
+
+const encodeState = Schema.encodeUnknownEffect(VoiceSessionLogState)
+const decodeState = Schema.decodeUnknownEffect(VoiceSessionLogState)
 
 const sequencedEvents = (
   streamId: string,
@@ -119,37 +123,40 @@ describe('foldStoredVoiceEvents', () => {
     ])
   })
 
-  it('round-trips state through its schema between batches', () => {
-    const [stored] = sequencedEvents('session-1', [
-      VoiceAssistantTranscriptDelta.make({ itemId: 'item-1', responseId: 'resp-1', delta: 'Par' })
-    ])
-    const folded = foldStoredVoiceEvents(emptyVoiceSessionLogState, [stored])
-    const encoded = Schema.encodeUnknownSync(VoiceSessionLogState)(folded.state)
-    const decoded = Schema.decodeUnknownSync(VoiceSessionLogState)(
-      JSON.parse(JSON.stringify(encoded))
-    )
-    const resumed = foldStoredVoiceEvents(decoded, [
-      StoredVoiceEvent.make({
-        eventId: 'session-1:1',
-        event: VoiceAssistantTranscriptFinal.make({
-          itemId: 'item-1',
-          responseId: 'resp-1',
-          text: null
+  it.effect('round-trips state through its schema between batches', () =>
+    Effect.gen(function* () {
+      const [stored] = sequencedEvents('session-1', [
+        VoiceAssistantTranscriptDelta.make({ itemId: 'item-1', responseId: 'resp-1', delta: 'Par' })
+      ])
+      const folded = foldStoredVoiceEvents(emptyVoiceSessionLogState, [stored])
+      const encoded = yield* encodeState(folded.state)
+      const decoded = yield* decodeState(JSON.parse(JSON.stringify(encoded)))
+      const resumed = foldStoredVoiceEvents(decoded, [
+        StoredVoiceEvent.make({
+          eventId: 'session-1:1',
+          event: VoiceAssistantTranscriptFinal.make({
+            itemId: 'item-1',
+            responseId: 'resp-1',
+            text: null
+          })
         })
-      })
-    ])
+      ])
 
-    expect(resumed.messages).toMatchObject([
-      { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'Par' }] }
-    ])
-  })
+      expect(resumed.messages).toMatchObject([
+        { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'Par' }] }
+      ])
+    })
+  )
 
-  it('rejects persisted state from another version', () => {
-    const encoded = Schema.encodeUnknownSync(VoiceSessionLogState)(emptyVoiceSessionLogState)
-    const stale = { ...encoded, version: 999 }
+  it.effect('rejects persisted state from another version', () =>
+    Effect.gen(function* () {
+      const encoded = yield* encodeState(emptyVoiceSessionLogState)
+      const stale = { ...encoded, version: 999 }
+      const failure = yield* Effect.flip(decodeState(stale))
 
-    expect(() => Schema.decodeUnknownSync(VoiceSessionLogState)(stale)).toThrow()
-  })
+      expect(failure._tag).toBe('SchemaError')
+    })
+  )
 })
 
 describe('tool event identity', () => {

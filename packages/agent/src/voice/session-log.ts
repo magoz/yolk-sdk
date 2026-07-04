@@ -2,11 +2,10 @@ import * as Schema from 'effect/Schema'
 import { ToolCall, ToolResultMessage, type AgentMessage } from '@yolk-sdk/agent/protocol'
 import { projectVoiceEvent, StoredVoiceEvent, type VoiceProjectionState } from './projection.ts'
 import {
-  VoiceToolCall,
   VoiceToolCallCompleted,
   VoiceToolCallFailed,
   VoiceToolCallsRequested,
-  type VoiceEvent,
+  type VoiceToolCall,
   type VoiceToolCallOutcome
 } from './protocol.ts'
 

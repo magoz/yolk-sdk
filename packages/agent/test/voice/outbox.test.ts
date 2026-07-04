@@ -1,9 +1,10 @@
 import { Duration, Effect, Exit, Ref, Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
+import type {
+  StoredVoiceEvent} from '../../src/voice/index.ts';
 import {
   makeVoiceEventOutbox,
-  StoredVoiceEvent,
   VoiceAssistantTranscriptDelta,
   VoiceSessionError,
   VoiceToolCall,
