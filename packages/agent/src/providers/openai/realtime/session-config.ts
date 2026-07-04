@@ -95,11 +95,116 @@ const makeOpenAiRealtimeInputTranscription = (
   }
 }
 
+type JsonSchemaRecord = Record<string, unknown>
+
+const isJsonSchemaRecord = (value: unknown): value is JsonSchemaRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+type ObjectVariant = {
+  readonly properties: JsonSchemaRecord
+  readonly required: ReadonlyArray<string>
+}
+
+const asObjectVariant = (value: unknown): ObjectVariant | undefined => {
+  if (!isJsonSchemaRecord(value) || value['type'] !== 'object') {
+    return undefined
+  }
+
+  const properties = value['properties']
+
+  if (!isJsonSchemaRecord(properties)) {
+    return undefined
+  }
+
+  const required = Array.isArray(value['required'])
+    ? value['required'].filter((key): key is string => typeof key === 'string')
+    : []
+
+  return { properties, required }
+}
+
+const stringEnumValues = (schema: unknown): ReadonlyArray<string> | undefined => {
+  if (!isJsonSchemaRecord(schema) || schema['type'] !== 'string') {
+    return undefined
+  }
+
+  const values = schema['enum']
+
+  if (!Array.isArray(values) || !values.every(value => typeof value === 'string')) {
+    return undefined
+  }
+
+  return values
+}
+
+// Same-named string enums union across variants so discriminator properties
+// (for example `operation`) keep every variant's value; otherwise the first
+// variant's schema wins.
+const mergeVariantProperty = (existing: unknown, incoming: unknown): unknown => {
+  const existingValues = stringEnumValues(existing)
+  const incomingValues = stringEnumValues(incoming)
+
+  if (existingValues === undefined || incomingValues === undefined) {
+    return existing
+  }
+
+  return { type: 'string', enum: [...new Set([...existingValues, ...incomingValues])] }
+}
+
+/**
+ * OpenAI Realtime hangs until a gateway timeout (504) on function tools whose
+ * `parameters` root is a union (`anyOf`) instead of an object schema. Lower a
+ * union of object variants into one object schema: variant properties merge
+ * (same-named string enums union), and `required` keeps only keys required by
+ * every variant. This widens what the model may produce; hosts still validate
+ * real arguments against the original tool schema at execution time.
+ */
+export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
+  if (!isJsonSchemaRecord(parameters)) {
+    return parameters
+  }
+
+  const anyOf = parameters['anyOf']
+
+  if (!Array.isArray(anyOf) || anyOf.length === 0) {
+    return parameters
+  }
+
+  const variants = anyOf.flatMap(value => {
+    const variant = asObjectVariant(value)
+
+    return variant === undefined ? [] : [variant]
+  })
+
+  if (variants.length !== anyOf.length) {
+    return parameters
+  }
+
+  const properties: JsonSchemaRecord = {}
+
+  for (const variant of variants) {
+    for (const [key, schema] of Object.entries(variant.properties)) {
+      properties[key] = key in properties ? mergeVariantProperty(properties[key], schema) : schema
+    }
+  }
+
+  const required = variants
+    .map(variant => variant.required)
+    .reduce((shared, keys) => shared.filter(key => keys.includes(key)))
+
+  return {
+    type: 'object',
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+    additionalProperties: false
+  }
+}
+
 export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool => ({
   type: 'function',
   name: tool.name,
   description: tool.description,
-  parameters: tool.parameters
+  parameters: openAiRealtimeToolParameters(tool.parameters)
 })
 
 export const makeOpenAiRealtimeSessionConfig = ({

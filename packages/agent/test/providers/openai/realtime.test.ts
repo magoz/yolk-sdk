@@ -6,6 +6,7 @@ import {
   makeOpenAiRealtimeFunctionCallOutputEvent,
   makeOpenAiRealtimeSessionConfig,
   openAiRealtimeSessionConfigFromVoice,
+  openAiRealtimeToolParameters,
   openAiRealtimeServerEventToVoiceEvents,
   openAiRealtimeTranscriptionPrompt
 } from '../../../src/providers/openai/realtime/index.ts'
@@ -291,6 +292,110 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
     expect(config.audio.input.transcription).toEqual({
       model: 'gpt-realtime-whisper',
       language: 'en'
+    })
+  })
+})
+
+describe('openAiRealtimeToolParameters', () => {
+  // OpenAI Realtime 504s on union-root tool parameters; see the helper's doc.
+  it('lowers a union of object variants into one object schema', () => {
+    const parameters = {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', enum: ['upsert'] },
+            slug: { type: 'string' },
+            content: { type: 'string' }
+          },
+          required: ['operation', 'slug', 'content'],
+          additionalProperties: false
+        },
+        {
+          type: 'object',
+          properties: {
+            operation: { type: 'string', enum: ['delete'] },
+            slug: { type: 'string' }
+          },
+          required: ['operation', 'slug'],
+          additionalProperties: false
+        }
+      ]
+    }
+
+    expect(openAiRealtimeToolParameters(parameters)).toEqual({
+      type: 'object',
+      properties: {
+        operation: { type: 'string', enum: ['upsert', 'delete'] },
+        slug: { type: 'string' },
+        content: { type: 'string' }
+      },
+      required: ['operation', 'slug'],
+      additionalProperties: false
+    })
+  })
+
+  it('keeps object-root parameters unchanged', () => {
+    const parameters = {
+      type: 'object',
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+      additionalProperties: false
+    }
+
+    expect(openAiRealtimeToolParameters(parameters)).toBe(parameters)
+  })
+
+  it('keeps unions with non-object variants unchanged', () => {
+    const parameters = {
+      anyOf: [
+        { type: 'object', properties: { a: { type: 'string' } } },
+        { type: 'string' }
+      ]
+    }
+
+    expect(openAiRealtimeToolParameters(parameters)).toBe(parameters)
+  })
+
+  it('omits required when no key is shared by every variant', () => {
+    const parameters = {
+      anyOf: [
+        { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] }
+      ]
+    }
+
+    expect(openAiRealtimeToolParameters(parameters)).toEqual({
+      type: 'object',
+      properties: { a: { type: 'string' }, b: { type: 'string' } },
+      additionalProperties: false
+    })
+  })
+
+  it('applies the lowering to session config tools', () => {
+    const unionTool = ToolDef.make({
+      name: 'knowledge_manage',
+      description: 'Manage knowledge',
+      parameters: {
+        anyOf: [
+          {
+            type: 'object',
+            properties: { operation: { type: 'string', enum: ['upsert'] } },
+            required: ['operation']
+          }
+        ]
+      }
+    })
+    const config = makeOpenAiRealtimeSessionConfig({
+      instructions: 'Be brief.',
+      tools: [unionTool]
+    })
+
+    expect(config.tools[0]?.parameters).toEqual({
+      type: 'object',
+      properties: { operation: { type: 'string', enum: ['upsert'] } },
+      required: ['operation'],
+      additionalProperties: false
     })
   })
 })

@@ -32,6 +32,7 @@ export {
   makeOpenAiRealtimeSessionConfig,
   openAiRealtimeModel,
   openAiRealtimeSessionConfigFromVoice,
+  openAiRealtimeToolParameters,
   openAiRealtimeTranscriptionPrompt,
   OpenAiRealtimeTranscriptionModelSchema,
   toOpenAiRealtimeTool,
