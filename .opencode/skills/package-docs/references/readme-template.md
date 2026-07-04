@@ -65,11 +65,15 @@ Document explicit subpaths:
 - `providers/openai/codex`
 - `providers/openai/codex-provider`
 - `providers/openai/provider`
+- `providers/openai/realtime`
+- `providers/openai/speech`
 - `providers/anthropic`
 - `providers/anthropic/claude`
 - `providers/anthropic/claude-provider`
 - `skillset`
 - `voice`
+- `voice/browser`
+- `voice/react`
 
 Mention host-owned providers, persistence, tools, context compaction, token storage, UI/styling, and policy.
 
@@ -79,7 +83,7 @@ Mention host-owned providers, persistence, tools, context compaction, token stor
 
 `skillset` docs should cover skill markdown, command markdown, render/parse APIs, manifests, and merge priority.
 
-`voice` docs should cover normalized voice tool request, JSON output envelope, and provider adapter responsibilities.
+`voice` docs should cover normalized voice tool request, JSON output envelope, and provider adapter responsibilities. `voice/browser` covers the browser WebRTC transport; `voice/react` covers the headless browser voice hook; `providers/openai/realtime` and `providers/openai/speech` cover OpenAI realtime codecs and TTS/STT adapters.
 
 ### MCP
 
