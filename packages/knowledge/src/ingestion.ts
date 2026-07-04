@@ -82,18 +82,16 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
 
     const indexed = yield* Effect.all(
       {
-        embeddings: embedder
-          .embedTexts(chunks.map(chunk => chunk.content))
-          .pipe(
-            Effect.mapError(
-              error =>
-                new KnowledgeIngestionError({
-                  message: error.message,
-                  stage: 'embed',
-                  cause: error
-                })
-            )
-          ),
+        embeddings: embedder.embedTexts(chunks.map(chunk => chunk.content)).pipe(
+          Effect.mapError(
+            error =>
+              new KnowledgeIngestionError({
+                message: error.message,
+                stage: 'embed',
+                cause: error
+              })
+          )
+        ),
         summary: summarizer
           .summarize({
             content: extracted.content,

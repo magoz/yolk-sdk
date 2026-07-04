@@ -348,10 +348,7 @@ describe('openAiRealtimeToolParameters', () => {
 
   it('keeps unions with non-object variants unchanged', () => {
     const parameters = {
-      anyOf: [
-        { type: 'object', properties: { a: { type: 'string' } } },
-        { type: 'string' }
-      ]
+      anyOf: [{ type: 'object', properties: { a: { type: 'string' } } }, { type: 'string' }]
     }
 
     expect(openAiRealtimeToolParameters(parameters)).toBe(parameters)

@@ -5,7 +5,7 @@ import type { McpRemoteServerConfig } from '@yolk-sdk/mcp/client'
 import {
   resolveAgentToolSet,
   makeTextToolModules
-} from '../../../examples/next/lib/agents/tools/registry'
+} from '../../../examples/next/lib/agents/tools/registry.ts'
 import { makeCloudflareTextToolModules } from '../src/tool-modules.ts'
 import { generatedSkillsetManifest } from '../src/generated/skillset.ts'
 

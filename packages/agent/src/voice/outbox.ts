@@ -1,9 +1,8 @@
 import { Duration, Effect, Queue, Ref, type Scope } from 'effect'
-import type {
-  StoredVoiceEvent} from './projection.ts';
 import {
   initialVoiceEventSequencerState,
   sequenceVoiceEvent,
+  type StoredVoiceEvent,
   type VoiceEventSequencerState
 } from './projection.ts'
 import type { VoiceEvent, VoiceSessionError } from './protocol.ts'
