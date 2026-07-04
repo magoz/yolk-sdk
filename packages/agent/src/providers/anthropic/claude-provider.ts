@@ -16,6 +16,7 @@ import {
   assistantHostToolCalls,
   isTextDocumentMimeType,
   messageContextText,
+  replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
   type AgentMessage,
   type Content,
@@ -1444,8 +1445,10 @@ const sendAnthropicClaudeRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
+    // Replayed transcripts can carry lone surrogates; harden the lowered
+    // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* encodeJsonString(
-      body,
+      replaceLoneSurrogatesDeep(body),
       'Could not serialize Anthropic Claude request'
     )
     const httpRequest = HttpClientRequest.post(

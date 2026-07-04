@@ -139,6 +139,36 @@ export const contentPartPreview = (part: ContentPart) => {
   }
 }
 
+const loneSurrogates = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
+/**
+ * Replace lone UTF-16 surrogates with U+FFFD. Models emit them in transcripts
+ * and tool arguments; they are valid JS strings but unencodable as UTF-8, so
+ * provider APIs and storage backends can reject payloads containing them.
+ */
+export const replaceLoneSurrogates = (text: string) => text.replace(loneSurrogates, '\uFFFD')
+
+/**
+ * Deep-apply `replaceLoneSurrogates` to every string (keys included) in a
+ * JSON-shaped value. Providers harden lowered request bodies with this before
+ * serialization so junk in replayed transcripts cannot poison model calls;
+ * hosts may also use it when persisting model-produced JSON.
+ */
+export const replaceLoneSurrogatesDeep = (value: unknown): unknown => {
+  if (typeof value === 'string') return replaceLoneSurrogates(value)
+  if (Array.isArray(value)) return value.map(replaceLoneSurrogatesDeep)
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        replaceLoneSurrogates(key),
+        replaceLoneSurrogatesDeep(entry)
+      ])
+    )
+  }
+
+  return value
+}
+
 export const contentText = (content: Content) =>
   typeof content === 'string' ? content : Arr.map(content, contentPartText).join('')
 

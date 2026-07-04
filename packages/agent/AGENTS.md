@@ -75,6 +75,10 @@
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
+- Model-produced text is untrusted input: `replaceLoneSurrogates(Deep)` in protocol hardens lone
+  UTF-16 surrogates (unencodable UTF-8); provider request lowering and the realtime client codec
+  apply it to outbound payloads. Storage-specific constraints (e.g. Postgres rejecting NUL) remain
+  host sanitization policy.
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.

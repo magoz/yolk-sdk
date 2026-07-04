@@ -18,6 +18,7 @@ import {
   assistantHostToolCalls,
   isTextDocumentMimeType,
   messageContextText,
+  replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
   type AgentMessage,
   type Content,
@@ -440,7 +441,12 @@ const sendOpenAiRequest = (
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toOpenAiRequestBody(request, config)
-    const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI request')
+    // Replayed transcripts can carry lone surrogates; harden the lowered
+    // body so one bad historical string cannot poison every model call.
+    const serializedBody = yield* encodeJsonString(
+      replaceLoneSurrogatesDeep(body),
+      'Could not serialize OpenAI request'
+    )
 
     const httpRequest = HttpClientRequest.post(
       config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions'

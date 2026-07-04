@@ -23,6 +23,8 @@ export {
   contentPartText,
   contentPreview,
   contentText,
+  replaceLoneSurrogates,
+  replaceLoneSurrogatesDeep,
   DocumentPart,
   documentPartFromText,
   ImagePart,

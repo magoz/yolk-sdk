@@ -17,6 +17,7 @@ import {
   assistantHostToolCalls,
   contentParts,
   messageContextText,
+  replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
   type AgentMessage,
   type AgentReasoningEffort,
@@ -1022,7 +1023,12 @@ const sendOpenAiCodexRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toOpenAiCodexRequestBody(request, config)
-    const serializedBody = yield* encodeJsonString(body, 'Could not serialize OpenAI Codex request')
+    // Replayed transcripts can carry lone surrogates; harden the lowered
+    // body so one bad historical string cannot poison every model call.
+    const serializedBody = yield* encodeJsonString(
+      replaceLoneSurrogatesDeep(body),
+      'Could not serialize OpenAI Codex request'
+    )
 
     const headers: Record<string, string> = {
       accept: 'application/json',

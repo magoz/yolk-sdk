@@ -24,6 +24,7 @@ import {
   resolveContentAttachmentSources,
   textDocumentMimeTypeFromFilename,
   textToBase64Utf8,
+  replaceLoneSurrogatesDeep,
   urlAttachmentSource
 } from '../../src/protocol'
 
@@ -247,4 +248,22 @@ describe('content helpers', () => {
       ])
     })
   )
+})
+
+describe('replaceLoneSurrogatesDeep', () => {
+  it('replaces lone surrogates in nested strings and keys', () => {
+    const value = {
+      messages: [{ content: 'broken \uD800 high', ['bad\uDC00key']: 'low \uDC00 tail' }]
+    }
+
+    expect(replaceLoneSurrogatesDeep(value)).toEqual({
+      messages: [{ content: 'broken \uFFFD high', ['bad\uFFFDkey']: 'low \uFFFD tail' }]
+    })
+  })
+
+  it('keeps valid surrogate pairs and non-strings intact', () => {
+    const value = { text: 'hello 👋🎉', count: 3, flag: true, none: null }
+
+    expect(replaceLoneSurrogatesDeep(value)).toEqual(value)
+  })
 })
