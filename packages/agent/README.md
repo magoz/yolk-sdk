@@ -322,7 +322,8 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   back-to-back responses, multi-item responses, and duplicate final transcript event families
   never concatenate, wipe, or duplicate messages. `sequenceVoiceEvent`/`dedupeStoredVoiceEvents`
   give replay-safe durable event ids; `voiceSeedTextsFromMessages` seeds new provider sessions
-  after reconnect.
+  after reconnect, optionally prefixing user seeds with author display names via
+  `{ includeAuthors: true }` for multi-user transcripts.
 - `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
   `@yolk-sdk/agent/providers/openai/speech` provides `VoiceSpeechSynthesizer` /
   `VoiceTranscriber` layers. `VoiceSpeechRequest.instructions` steers delivery style only, and
