@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.36
+
+### Patch Changes
+
+- afb30a0: `voiceSeedTextsFromMessages` gains `{ includeAuthors }`: prefixes user seeds with author display names so multi-user transcripts keep who-said-what when replayed into realtime voice sessions.
+
 ## 0.1.0-canary.35
 
 ### Patch Changes

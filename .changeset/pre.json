@@ -35,6 +35,7 @@
     "quiet-timers-jump",
     "safe-tool-errors",
     "sandbox-execution-plane",
+    "seed-authors",
     "sharp-provider-docs",
     "slow-tools-report",
     "smooth-sandboxes-reuse",

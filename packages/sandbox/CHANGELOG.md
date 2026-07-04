@@ -1,5 +1,12 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.36
+
+### Patch Changes
+
+- Updated dependencies [afb30a0]
+  - @yolk-sdk/agent@0.1.0-canary.36
+
 ## 0.1.0-canary.35
 
 ### Patch Changes
