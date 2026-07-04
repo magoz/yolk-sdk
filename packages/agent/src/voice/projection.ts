@@ -143,7 +143,12 @@ const flushSegment = (
 ): VoiceProjectionResult => {
   const draft = state.assistantDrafts.find(entry => entry.key === key)
   const remainingDrafts = state.assistantDrafts.filter(entry => entry.key !== key)
-  const text = transcript ?? draft?.text ?? ''
+  // Truncated/interrupted segments can arrive as finals with an empty
+  // transcript; never lose text the user already heard streaming.
+  const text =
+    transcript === null || transcript.trim().length === 0
+      ? (draft?.text ?? transcript ?? '')
+      : transcript
 
   return {
     state: {

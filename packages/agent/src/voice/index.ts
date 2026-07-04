@@ -74,6 +74,23 @@ export {
   type VoiceToolCallDecision
 } from './tool-server.ts'
 export {
+  emptyVoiceSessionLogState,
+  foldStoredVoiceEvents,
+  storedToolEventsFromOutcome,
+  storedVoiceToolEvents,
+  VOICE_SESSION_LOG_STATE_VERSION,
+  VoiceAssistantDraftState,
+  VoiceSessionLogState,
+  voiceToolEventId,
+  type VoiceSessionLogFoldResult,
+  type VoiceToolEventPhase
+} from './session-log.ts'
+export {
+  makeVoiceEventOutbox,
+  type VoiceEventOutboxApi,
+  type VoiceEventOutboxOptions
+} from './outbox.ts'
+export {
   dedupeStoredVoiceEvents,
   emptyVoiceProjectionState,
   initialVoiceEventSequencerState,

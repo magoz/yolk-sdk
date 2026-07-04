@@ -15,6 +15,7 @@ import {
 } from './browser/index.ts'
 import type { VoiceClientCodec } from './client-codec.ts'
 import { makeVoiceController, type VoiceControllerApi } from './controller.ts'
+import { makeVoiceEventOutbox, type VoiceEventOutboxOptions } from './outbox.ts'
 import {
   VoiceSessionError,
   type VoiceEvent,
@@ -41,6 +42,14 @@ export type UseYolkVoiceOptions = {
   readonly dataChannelLabel: string
   /** Conversation seeds replayed into each new provider session. */
   readonly seeds?: () => ReadonlyArray<VoiceSeedText>
+  /**
+   * Durable session-log outbox: every session event is buffered as a
+   * replay-safe `StoredVoiceEvent` and batch-flushed to the host endpoint
+   * (see `makeVoiceEventOutbox`). Use a keepalive-capable `flush` so the
+   * final batch survives page unload; the host folds batches with
+   * `foldStoredVoiceEvents`.
+   */
+  readonly eventLog?: VoiceEventOutboxOptions
   readonly onEvent?: (event: VoiceEvent) => void
   readonly onError?: (error: VoiceSessionError) => void
   readonly readyTimeoutMs?: number
@@ -213,7 +222,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       scopeRef.current = scope
 
       const opts = optionsRef.current
-      const session = yield* Scope.provide(
+      const { session, outbox } = yield* Scope.provide(
         Effect.gen(function* () {
           const transport = yield* makeWebRtcVoiceTransport({
             negotiate: opts.negotiate,
@@ -234,8 +243,10 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
             codec: opts.codec,
             executeToolCall: opts.executeToolCall
           })
+          const eventOutbox =
+            opts.eventLog === undefined ? null : yield* makeVoiceEventOutbox(opts.eventLog)
 
-          return controller
+          return { session: controller, outbox: eventOutbox }
         }),
         scope
       )
@@ -257,9 +268,13 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       }
 
       yield* Stream.runForEach(session.events, event =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           if (attemptIdRef.current !== attemptId) {
             return
+          }
+
+          if (outbox !== null) {
+            yield* outbox.offer(event)
           }
 
           optionsRef.current.onEvent?.(event)
