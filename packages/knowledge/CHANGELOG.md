@@ -1,5 +1,20 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.35
+
+### Patch Changes
+
+- Updated dependencies [e9d235d]
+- Updated dependencies [26b8b4d]
+  - @yolk-sdk/agent@0.1.0-canary.35
+
+## 0.1.0-canary.34
+
+### Patch Changes
+
+- Updated dependencies [01719c0]
+  - @yolk-sdk/agent@0.1.0-canary.34
+
 ## 0.1.0-canary.33
 
 ### Patch Changes
