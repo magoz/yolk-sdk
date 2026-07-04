@@ -281,6 +281,34 @@ export type VoiceSeedText = {
   readonly text: string
 }
 
+export type VoiceSeedTextOptions = {
+  /**
+   * Prefix user seeds with the message author's display name
+   * (`"Mike: ..."`). Text runtimes render per-message author envelopes into
+   * model-visible context; seeds drop envelopes, so multi-user transcripts
+   * lose who said what unless this is enabled. Assistant seeds are never
+   * prefixed — the assistant is the speaking agent itself.
+   */
+  readonly includeAuthors?: boolean
+}
+
+const userSeedText = (
+  message: Extract<AgentMessage, { readonly _tag: 'User' }>,
+  options: VoiceSeedTextOptions
+) => {
+  const text = contentPreview(message.content)
+
+  if (text.length === 0) {
+    return text
+  }
+
+  const displayName = message.author?.displayName?.trim()
+
+  return options.includeAuthors === true && displayName !== undefined && displayName.length > 0
+    ? `${displayName}: ${text}`
+    : text
+}
+
 /**
  * Map a replayed protocol transcript into text seeds for a new provider
  * session. Tool results are omitted; assistant messages seed their visible
@@ -288,12 +316,13 @@ export type VoiceSeedText = {
  * seeds through the controller before the first user turn.
  */
 export const voiceSeedTextsFromMessages = (
-  messages: ReadonlyArray<AgentMessage>
+  messages: ReadonlyArray<AgentMessage>,
+  options: VoiceSeedTextOptions = {}
 ): ReadonlyArray<VoiceSeedText> =>
   messages.flatMap((message): ReadonlyArray<VoiceSeedText> => {
     switch (message._tag) {
       case 'User': {
-        const text = contentPreview(message.content)
+        const text = userSeedText(message, options)
 
         return text.length === 0 ? [] : [{ role: 'user' as const, text }]
       }

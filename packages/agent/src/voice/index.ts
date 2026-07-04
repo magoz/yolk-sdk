@@ -103,5 +103,6 @@ export {
   type VoiceEventSequencerState,
   type VoiceProjectionResult,
   type VoiceProjectionState,
-  type VoiceSeedText
+  type VoiceSeedText,
+  type VoiceSeedTextOptions
 } from './projection.ts'

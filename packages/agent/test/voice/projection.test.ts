@@ -244,3 +244,32 @@ describe('voice durable event ids', () => {
     ])
   })
 })
+
+describe('voiceSeedTextsFromMessages authors', () => {
+  it('prefixes user seeds with author display names when enabled', () => {
+    const messages: ReadonlyArray<AgentMessage> = [
+      UserMessage.make({ content: 'Do X', author: { displayName: 'Mike' } }),
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'On it.' })],
+        author: { displayName: 'Agent' }
+      }),
+      UserMessage.make({ content: 'Actually do Y', author: { displayName: 'Elina' } }),
+      UserMessage.make({ content: 'No author here' })
+    ]
+
+    expect(voiceSeedTextsFromMessages(messages, { includeAuthors: true })).toEqual([
+      { role: 'user', text: 'Mike: Do X' },
+      { role: 'assistant', text: 'On it.' },
+      { role: 'user', text: 'Elina: Actually do Y' },
+      { role: 'user', text: 'No author here' }
+    ])
+  })
+
+  it('keeps seeds unprefixed by default', () => {
+    const messages: ReadonlyArray<AgentMessage> = [
+      UserMessage.make({ content: 'Do X', author: { displayName: 'Mike' } })
+    ]
+
+    expect(voiceSeedTextsFromMessages(messages)).toEqual([{ role: 'user', text: 'Do X' }])
+  })
+})

@@ -22,7 +22,11 @@ import {
   type VoiceToolCall,
   type VoiceToolCallOutcome
 } from './protocol.ts'
-import { voiceSeedTextsFromMessages, type VoiceSeedText } from './projection.ts'
+import {
+  voiceSeedTextsFromMessages,
+  type VoiceSeedText,
+  type VoiceSeedTextOptions
+} from './projection.ts'
 
 export type YolkVoiceStatus = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -410,4 +414,4 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 }
 
 export { voiceSeedTextsFromMessages }
-export type { VoiceSeedText }
+export type { VoiceSeedText, VoiceSeedTextOptions }
