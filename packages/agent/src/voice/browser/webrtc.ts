@@ -168,16 +168,29 @@ export const makeWebRtcVoiceTransport = (
     peerConnection.addTrack(audioTrack, mediaStream)
 
     const ready = yield* Deferred.make<void, VoiceSessionError>()
-    const failReadyUnsafe = (message: string) => {
-      Deferred.doneUnsafe(
-        ready,
-        Effect.fail(new VoiceSessionError({ code: 'transport_failed', message }))
+    const runBackground = <A, E>(effect: Effect.Effect<A, E>) => {
+      Effect.runFork(effect.pipe(Effect.asVoid))
+    }
+    const failReady = (message: string) => {
+      runBackground(
+        Deferred.fail(ready, new VoiceSessionError({ code: 'transport_failed', message }))
       )
     }
-    const checkReadyUnsafe = () => {
+    const checkReady = () => {
       if (peerConnection.connectionState === 'connected' && dataChannel.readyState === 'open') {
-        Deferred.doneUnsafe(ready, Effect.void)
+        runBackground(Deferred.succeed(ready, undefined))
       }
+    }
+    const emitAndEnd = (event: VoiceEvent) => {
+      runBackground(Queue.offer(queue, event).pipe(Effect.andThen(Queue.end(queue))))
+    }
+    const failWithEvent = (readyMessage: string, eventMessage: string) => {
+      failReady(readyMessage)
+      emitAndEnd(VoiceErrorEvent.make({ code: 'transport_failed', message: eventMessage }))
+    }
+    const closeWithEvent = (message: string) => {
+      failReady(message)
+      emitAndEnd(VoiceSessionClosed.make({ reason: 'data_channel_closed' }))
     }
     const handleTrack = (event: WebRtcTrackEventLike) => {
       const stream = event.streams[0]
@@ -191,41 +204,31 @@ export const makeWebRtcVoiceTransport = (
         peerConnection.connectionState === 'failed' ||
         peerConnection.connectionState === 'closed'
       ) {
-        failReadyUnsafe('WebRTC connection failed')
-        Queue.offerUnsafe(
-          queue,
-          VoiceErrorEvent.make({ code: 'transport_failed', message: 'Voice connection failed' })
-        )
-        Queue.endUnsafe(queue)
+        failWithEvent('WebRTC connection failed', 'Voice connection failed')
         return
       }
 
-      checkReadyUnsafe()
+      checkReady()
     }
     const handleChannelOpen = () => {
-      checkReadyUnsafe()
+      checkReady()
     }
     const handleChannelClose = () => {
-      failReadyUnsafe('Voice data channel closed before ready')
-      Queue.offerUnsafe(queue, VoiceSessionClosed.make({ reason: 'data_channel_closed' }))
-      Queue.endUnsafe(queue)
+      closeWithEvent('Voice data channel closed before ready')
     }
     const handleChannelError = () => {
-      failReadyUnsafe('Voice data channel failed')
-      Queue.offerUnsafe(
-        queue,
-        VoiceErrorEvent.make({ code: 'transport_failed', message: 'Voice data channel failed' })
-      )
-      Queue.endUnsafe(queue)
+      failWithEvent('Voice data channel failed', 'Voice data channel failed')
     }
     const handleChannelMessage = (event: WebRtcMessageEventLike) => {
       if (typeof event.data !== 'string') {
         return
       }
 
-      for (const voiceEvent of options.decodeMessage(event.data)) {
-        Queue.offerUnsafe(queue, voiceEvent)
-      }
+      runBackground(
+        Effect.forEach(options.decodeMessage(event.data), voiceEvent => Queue.offer(queue, voiceEvent), {
+          discard: true
+        })
+      )
     }
 
     yield* Effect.acquireRelease(

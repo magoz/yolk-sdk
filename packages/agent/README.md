@@ -282,21 +282,28 @@ continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` he
 fail with `AgentTransportError` if no terminal event is reached before the continuation limit.
 Empty non-terminal continuation chunks are polling gaps: the client waits briefly, retries from the
 same `startIndex`, and respects the request `signal` while waiting.
+Outbound `startIndex` values must be non-negative safe integers; invalid values fail before the
+HTTP request is sent.
 For HITL resume responses, `x-workflow-stream-tail-index` means the stream tail before the returned
 body. The returned body starts at `tail + 1`; the next continuation starts after all returned
 events. `continuationLimit: 0` disables follow-up chunks, so any non-terminal response fails
 immediately.
 
 ```ts
+import { Stream } from 'effect'
 import { streamAgentEventStreamUntilTerminal } from '@yolk-sdk/agent/client'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 
-for await (const event of streamAgentEventStreamUntilTerminal({
-  endpoint: '/api/agent/workflow',
-  sessionId: 'session_1',
-  messages: [UserMessage.make({ content: 'Hello' })],
-  runEndpoint: runId => `/api/agent/workflow/${encodeURIComponent(runId)}`
-})) {
+const events = Stream.toAsyncIterable(
+  streamAgentEventStreamUntilTerminal({
+    endpoint: '/api/agent/workflow',
+    sessionId: 'session_1',
+    messages: [UserMessage.make({ content: 'Hello' })],
+    runEndpoint: runId => `/api/agent/workflow/${encodeURIComponent(runId)}`
+  })
+)
+
+for await (const event of events) {
   // Apply AgentEvent to app state.
 }
 ```

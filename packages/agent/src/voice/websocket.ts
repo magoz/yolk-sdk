@@ -28,6 +28,20 @@ const socketErrorToVoiceError = (error: Socket.SocketError) =>
     message: `Voice WebSocket failed: ${error.message}`
   })
 
+const voiceSocketFailureMessage = (cause: Cause.Cause<Socket.SocketError | VoiceSessionError>) => {
+  const failure = cause.reasons.find(Cause.isFailReason)?.error
+
+  if (Socket.isSocketError(failure)) {
+    return socketErrorToVoiceError(failure).message
+  }
+
+  if (failure instanceof VoiceSessionError) {
+    return failure.message
+  }
+
+  return 'Voice WebSocket failed'
+}
+
 /**
  * Server/Node voice transport over an Effect WebSocket. Suits providers that
  * expose realtime sessions over WS instead of WebRTC, and non-browser voice
@@ -72,32 +86,24 @@ export const makeWebSocketVoiceTransport = (
 
     yield* socket.runString(handleMessage, { onOpen }).pipe(
       Effect.matchCauseEffect({
-        onFailure: cause => {
-          const failure = Cause.squash(cause)
-
-          return Effect.gen(function* () {
-            const message = Socket.isSocketError(failure)
-              ? socketErrorToVoiceError(failure).message
-              : 'Voice WebSocket failed'
-
-            Deferred.doneUnsafe(
+        onFailure: cause =>
+          Effect.gen(function* () {
+            const message = voiceSocketFailureMessage(cause)
+            yield* Deferred.fail(
               ready,
-              Effect.fail(new VoiceSessionError({ code: 'transport_failed', message }))
+              new VoiceSessionError({ code: 'transport_failed', message })
             )
             yield* Queue.offer(queue, VoiceErrorEvent.make({ code: 'transport_failed', message }))
             yield* Queue.end(queue)
-          })
-        },
+          }),
         onSuccess: () =>
           Effect.gen(function* () {
-            Deferred.doneUnsafe(
+            yield* Deferred.fail(
               ready,
-              Effect.fail(
-                new VoiceSessionError({
-                  code: 'transport_failed',
-                  message: 'Voice WebSocket closed before ready'
-                })
-              )
+              new VoiceSessionError({
+                code: 'transport_failed',
+                message: 'Voice WebSocket closed before ready'
+              })
             )
             yield* Queue.offer(queue, VoiceSessionClosed.make({ reason: 'socket_closed' }))
             yield* Queue.end(queue)

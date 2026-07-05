@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.38
+
+### Patch Changes
+
+- Harden agent transport and voice Effect boundaries.
+
 ## 0.1.0-canary.37
 
 ### Patch Changes

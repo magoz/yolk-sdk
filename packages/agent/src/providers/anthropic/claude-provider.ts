@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref, Stream } from 'effect'
+import { Effect, Layer, Option, Ref, Result, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -636,13 +636,13 @@ const jsonSchemaRequired = (schema: JsonObject) => {
   return Array.isArray(required) ? required.filter(item => typeof item === 'string') : []
 }
 
-const jsonValueKey = (value: unknown) => {
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return undefined
-  }
-}
+const jsonValueKey = (value: unknown) =>
+  Result.try(() => JSON.stringify(value)).pipe(
+    Result.match({
+      onFailure: () => undefined,
+      onSuccess: encoded => encoded
+    })
+  )
 
 const uniqueUnknownArray = (items: ReadonlyArray<unknown>): ReadonlyArray<unknown> => {
   const seen = new Set<string>()

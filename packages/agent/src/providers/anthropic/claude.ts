@@ -1,3 +1,4 @@
+import { Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk-sdk/agent/oauth'
 
@@ -99,21 +100,22 @@ export const parseAnthropicClaudeAuthorizationCode = (
     return undefined
   }
 
-  const parseFromUrl = () => {
-    try {
-      const url = new URL(trimmed)
-      const code = url.searchParams.get('code') ?? undefined
-      const state = url.searchParams.get('state') ?? undefined
+  const parseFromUrl = () =>
+    Result.try(() => new URL(trimmed)).pipe(
+      Result.match({
+        onFailure: () => undefined,
+        onSuccess: url => {
+          const code = url.searchParams.get('code') ?? undefined
+          const state = url.searchParams.get('state') ?? undefined
 
-      if (code === undefined || state === undefined) {
-        return undefined
-      }
+          if (code === undefined || state === undefined) {
+            return undefined
+          }
 
-      return { code, state }
-    } catch {
-      return undefined
-    }
-  }
+          return { code, state }
+        }
+      })
+    )
 
   const fromUrl = parseFromUrl()
 

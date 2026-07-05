@@ -6,6 +6,7 @@ import {
   Pull,
   Queue,
   Ref,
+  Result,
   Scope,
   Stream,
   type Layer
@@ -213,17 +214,23 @@ type ParsedEndpoint = {
 
 const absoluteUrlPattern = /^[A-Za-z][A-Za-z\d+.-]*:/
 
-const parseEndpoint = (endpoint: string): ParsedEndpoint | undefined => {
-  try {
-    return {
-      url: new URL(endpoint, relativeEndpointBase),
-      absolute: absoluteUrlPattern.test(endpoint),
-      leadingSlash: endpoint.startsWith('/')
-    }
-  } catch {
-    return undefined
-  }
-}
+const invalidAgentRunEndpointError = (endpoint: string) =>
+  new AgentTransportError({
+    message: 'Invalid agent run endpoint',
+    cause: endpoint
+  })
+
+const parseEndpoint = (endpoint: string): ParsedEndpoint | undefined =>
+  Result.try(() => ({
+    url: new URL(endpoint, relativeEndpointBase),
+    absolute: absoluteUrlPattern.test(endpoint),
+    leadingSlash: endpoint.startsWith('/')
+  })).pipe(
+    Result.match({
+      onFailure: () => undefined,
+      onSuccess: parsed => parsed
+    })
+  )
 
 const parseEndpointOrThrow = (endpoint: string) => {
   const parsed = parseEndpoint(endpoint)
@@ -232,10 +239,15 @@ const parseEndpointOrThrow = (endpoint: string) => {
     return parsed
   }
 
-  throw new AgentTransportError({
-    message: 'Invalid agent run endpoint',
-    cause: endpoint
-  })
+  throw invalidAgentRunEndpointError(endpoint)
+}
+
+const parseEndpointEffect = (endpoint: string) => {
+  const parsed = parseEndpoint(endpoint)
+
+  return parsed === undefined
+    ? Effect.fail(invalidAgentRunEndpointError(endpoint))
+    : Effect.succeed(parsed)
 }
 
 const serializeEndpoint = (endpoint: ParsedEndpoint) => {
@@ -326,6 +338,18 @@ const validateAgentRunStartIndexEffect = (startIndex: number | undefined) =>
   startIndex === undefined || (Number.isSafeInteger(startIndex) && startIndex >= 0)
     ? Effect.void
     : Effect.fail(invalidAgentRunStartIndexError(startIndex))
+
+const agentRunEndpointWithStartIndexEffect = (endpoint: string, startIndex: number | undefined) =>
+  Effect.gen(function* () {
+    if (startIndex === undefined) return endpoint
+
+    yield* validateAgentRunStartIndexEffect(startIndex)
+
+    const parsed = yield* parseEndpointEffect(endpoint)
+    parsed.url.searchParams.set('startIndex', String(startIndex))
+
+    return serializeEndpoint(parsed)
+  })
 
 const nextAgentRunStartIndex = (startIndex: number | undefined, count: number) =>
   (startIndex ?? 0) + count
@@ -541,14 +565,14 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
 
 const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
   Effect.gen(function* () {
-    validateAgentRunStartIndex(request.startIndex)
+    const endpoint = yield* agentRunEndpointWithStartIndexEffect(request.endpoint, request.startIndex)
 
     const client = yield* HttpClient.HttpClient
     const response = yield* client
       .execute(
-        HttpClientRequest.get(
-          agentRunEndpointWithStartIndex(request.endpoint, request.startIndex)
-        ).pipe(HttpClientRequest.setHeaders({ accept: 'application/x-ndjson' }))
+        HttpClientRequest.get(endpoint).pipe(
+          HttpClientRequest.setHeaders({ accept: 'application/x-ndjson' })
+        )
       )
       .pipe(Effect.mapError(toHttpClientTransportError('Agent run request failed')))
 
@@ -1169,8 +1193,7 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
           }
         })
         const failQueue = (error: AgentTransportError) =>
-          Queue.failCauseUnsafe(queue, Cause.fail(error))
-        const endQueue = () => Queue.endUnsafe(queue)
+          Effect.runFork(Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid))
         const handleMessage = (event: MessageEvent) => {
           if (typeof event.data !== 'string') {
             failQueue(toTransportError('Agent WebSocket returned binary data', event.data))
@@ -1197,12 +1220,15 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
                   return Effect.void
                 }
 
-                return Effect.sync(() => {
-                  Queue.offerUnsafe(queue, message)
+                return Effect.gen(function* () {
+                  yield* Queue.offer(queue, message)
+
                   if (isTerminalAgentEvent(message)) {
-                    settled = true
-                    endQueue()
-                    socket.close(1000, 'done')
+                    yield* Effect.sync(() => {
+                      settled = true
+                      socket.close(1000, 'done')
+                    })
+                    yield* Queue.end(queue).pipe(Effect.asVoid)
                   }
                 })
               }),
@@ -1243,5 +1269,5 @@ export const cancelAgentRun = (request: CancelAgentRunRequest) =>
 export const collectAgentEventsEffect = (request: StreamAgentEventsRequest) =>
   streamAgentEventStream(request).pipe(Stream.runCollect)
 
-export const collectAgentEvents = async (request: StreamAgentEventsRequest) =>
-  Array.from(await Effect.runPromise(collectAgentEventsEffect(request)))
+export const collectAgentEvents = (request: StreamAgentEventsRequest) =>
+  Effect.runPromise(collectAgentEventsEffect(request)).then(events => Array.from(events))

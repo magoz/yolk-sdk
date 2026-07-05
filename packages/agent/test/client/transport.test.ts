@@ -333,6 +333,25 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
   })
 
+  it('rejects negative durable run stream start indexes before request', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    await expect(
+      collectEventStream(
+        streamAgentRunEventStream({
+          endpoint: '/api/agent/run_1',
+          startIndex: -2,
+          httpClientLayer: makeHttpClientLayer(
+            new Response(encodeEvents([AgentStart.make({})])),
+            requests
+          )
+        })
+      )
+    ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
+
+    expect(requests).toEqual([])
+  })
+
   it('rejects negative durable run start indexes', async () => {
     const requests: Array<CapturedRequest> = []
 
