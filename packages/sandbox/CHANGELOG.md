@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.37
+
+### Patch Changes
+
+- Publish canary with agent client stream continuation fixes and package docs updates.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.37
+
 ## 0.1.0-canary.36
 
 ### Patch Changes

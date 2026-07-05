@@ -29,22 +29,17 @@ export {
   collectAgentEventsEffect,
   streamQuestionResponseEventStream,
   streamCloudflareAgentEventStream,
-  streamCloudflareAgentEvents,
-  streamAgentEvents,
-  streamAgentEventsUntilTerminal,
+  streamAgentEventStreamUntilTerminal,
   streamAgentEventStream,
-  streamAgentRunEvents,
-  streamAgentRunEventsUntilTerminal,
+  streamAgentRunEventStreamUntilTerminal,
   streamAgentRunEventStream,
-  streamAgentRunHitlResponseEvents,
-  streamAgentRunHitlResponseEventsUntilTerminal,
+  streamAgentRunHitlResponseEventStreamUntilTerminal,
   streamAgentRunHitlResponseEventStream,
-  streamToolApprovalResponseEventStream,
-  submitQuestionResponse,
-  submitToolApprovalResponse
+  streamToolApprovalResponseEventStream
 } from './transport.ts'
 export type {
   AgentRunContinuationOptions,
+  AgentRunIdleReconnectOptions,
   AgentHttpResponseInfo,
   CancelAgentRunRequest,
   SubmitQuestionResponseRequest,

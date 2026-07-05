@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.37
+
+### Patch Changes
+
+- Publish canary with agent client stream continuation fixes and package docs updates.
+
 ## 0.1.0-canary.36
 
 ## 0.1.0-canary.35

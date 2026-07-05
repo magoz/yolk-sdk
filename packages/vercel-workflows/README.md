@@ -148,7 +148,7 @@ live events -> host durable commit -> terminal event -> close
 
 This lets clients stop consuming at a protocol-terminal event and immediately revalidate or reconnect
 from durable state. Hosts that emit terminal events before persistence should not rely on
-`streamAgentEventsUntilTerminal()` as a durable-settled signal.
+`streamAgentEventStreamUntilTerminal()` as a durable-settled signal.
 
 Use `commitThenWriteTerminalEvent` when a step must commit host state before writing its terminal
 event:

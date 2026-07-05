@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Option, Stream } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
@@ -22,10 +22,10 @@ import {
 import {
   AgentTransportError,
   cancelAgentRun,
-  streamAgentEventsUntilTerminal,
-  streamAgentRunEventsUntilTerminal,
-  streamAgentRunHitlResponseEventsUntilTerminal,
-  streamCloudflareAgentEvents
+  streamAgentEventStreamUntilTerminal,
+  streamAgentRunEventStreamUntilTerminal,
+  streamAgentRunHitlResponseEventStreamUntilTerminal,
+  streamCloudflareAgentEventStream
 } from '@yolk-sdk/agent/client'
 import {
   agentTextCapabilities,
@@ -514,14 +514,16 @@ export function AgentPlayground({
     }
 
     return request =>
-      streamCloudflareAgentEvents({
-        webSocketUrl: runtime.webSocketUrl,
-        messages: request.messages,
-        hitlResponses: request.hitlResponses,
-        model: request.model,
-        reasoningEffort: request.reasoningEffort,
-        signal: request.signal
-      })
+      Stream.toAsyncIterable(
+        streamCloudflareAgentEventStream({
+          webSocketUrl: runtime.webSocketUrl,
+          messages: request.messages,
+          hitlResponses: request.hitlResponses,
+          model: request.model,
+          reasoningEffort: request.reasoningEffort,
+          signal: request.signal
+        })
+      )
   }, [runtime])
   const workflowTransport = useMemo<AgentChatTransport | undefined>(() => {
     if (runtime._tag !== 'Workflow') {
@@ -536,30 +538,34 @@ export function AgentPlayground({
           return missingWorkflowRunIdAgentEvents()
         }
 
-        return streamAgentRunHitlResponseEventsUntilTerminal({
-          endpoint: `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`,
-          hitlResponses: [hitlResponse],
-          signal: request.signal,
-          onResponse: response => {
-            const runId = response.headers['x-workflow-run-id']
+        return Stream.toAsyncIterable(
+          streamAgentRunHitlResponseEventStreamUntilTerminal({
+            endpoint: `/api/agent/workflow/${encodeURIComponent(workflowRunId)}`,
+            hitlResponses: [hitlResponse],
+            signal: request.signal,
+            onResponse: response => {
+              const runId = response.headers['x-workflow-run-id']
 
-            recordActivity({
-              title: 'Workflow HITL resume started',
-              detail: runId ?? workflowRunId,
-              tone: 'neutral'
-            })
-          }
-        })
+              recordActivity({
+                title: 'Workflow HITL resume started',
+                detail: runId ?? workflowRunId,
+                tone: 'neutral'
+              })
+            }
+          })
+        )
       }
 
-      return streamAgentEventsUntilTerminal({
-        ...request,
-        endpoint: '/api/agent/workflow',
-        onRunId: runId => {
-          setWorkflowRunId(runId)
-          recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
-        }
-      })
+      return Stream.toAsyncIterable(
+        streamAgentEventStreamUntilTerminal({
+          ...request,
+          endpoint: '/api/agent/workflow',
+          onRunId: runId => {
+            setWorkflowRunId(runId)
+            recordActivity({ title: 'Workflow run started', detail: runId, tone: 'neutral' })
+          }
+        })
+      )
     }
   }, [recordActivity, runtime, workflowRunId])
   const agentTransport = cloudflareTransport ?? workflowTransport
@@ -974,10 +980,14 @@ export function AgentPlayground({
 
     Effect.runPromise(
       Effect.promise(async () => {
-        for await (const event of streamAgentRunEventsUntilTerminal({
-          endpoint,
-          signal: abortController.signal
-        })) {
+        const events = Stream.toAsyncIterable(
+          streamAgentRunEventStreamUntilTerminal({
+            endpoint,
+            signal: abortController.signal
+          })
+        )
+
+        for await (const event of events) {
           applyEvent(event)
         }
       })

@@ -59,7 +59,7 @@ import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import {
   initialAgentClientState,
-  streamAgentEventsUntilTerminal,
+  streamAgentEventStreamUntilTerminal,
   toolRunsFromHitlRequests
 } from '@yolk-sdk/agent/client'
 import {
@@ -276,8 +276,8 @@ HTTP client helpers treat `AgentEnd`, `AgentError`, and `AgentAwaitingInput` as 
 end for consumers. Use `isTerminalAgentEvent` when projecting generic protocol streams. After a
 terminal event the response body drains to EOF; cancellation before a terminal event still aborts
 the active body reader.
-Durable Workflow clients can use `streamAgentEventsUntilTerminal`,
-`streamAgentRunEventsUntilTerminal`, and `streamAgentRunHitlResponseEventsUntilTerminal` to follow
+Durable Workflow clients can use `streamAgentEventStreamUntilTerminal`,
+`streamAgentRunEventStreamUntilTerminal`, and `streamAgentRunHitlResponseEventStreamUntilTerminal` to follow
 continuation chunks by `x-workflow-run-id` and `x-workflow-stream-tail-index` headers. These helpers
 fail with `AgentTransportError` if no terminal event is reached before the continuation limit.
 Empty non-terminal continuation chunks are polling gaps: the client waits briefly, retries from the
@@ -288,10 +288,10 @@ events. `continuationLimit: 0` disables follow-up chunks, so any non-terminal re
 immediately.
 
 ```ts
-import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
+import { streamAgentEventStreamUntilTerminal } from '@yolk-sdk/agent/client'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 
-for await (const event of streamAgentEventsUntilTerminal({
+for await (const event of streamAgentEventStreamUntilTerminal({
   endpoint: '/api/agent/workflow',
   sessionId: 'session_1',
   messages: [UserMessage.make({ content: 'Hello' })],

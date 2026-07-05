@@ -1,4 +1,15 @@
-import { Cause, Channel, Effect, Exit, Pull, Queue, Ref, Scope, Stream, type Layer } from 'effect'
+import {
+  Cause,
+  Channel,
+  Effect,
+  Exit,
+  Pull,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+  type Layer
+} from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -65,8 +76,14 @@ export type StreamAgentRunHitlResponseEventsRequest = {
 
 export type StreamAgentEventHandler = (event: AgentEventType, count: number) => void
 
+export type AgentRunIdleReconnectOptions = {
+  readonly idleTimeoutMs: number
+  readonly maxAttempts?: number
+}
+
 export type AgentRunContinuationOptions = {
   readonly continuationLimit?: number
+  readonly idleReconnect?: AgentRunIdleReconnectOptions
   readonly onEvent?: StreamAgentEventHandler
 }
 
@@ -111,6 +128,7 @@ export type StreamCloudflareAgentEventsRequest = {
 
 const defaultEndpoint = '/api/agent'
 const defaultRunContinuationLimit = 120
+const defaultIdleReconnectMaxAttempts = 12
 const relativeEndpointBase = 'http://yolk.local'
 
 const headerValue = (headers: Readonly<Record<string, string | undefined>>, name: string) => {
@@ -245,23 +263,49 @@ const appendEncodedPathSegment = (endpoint: string, segment: string) => {
 const defaultAgentRunEndpoint = (endpoint: string | undefined, runId: string) =>
   appendEncodedPathSegment(endpoint ?? defaultEndpoint, runId)
 
-const agentRunContinuationLimit = (limit: number | undefined) => {
-  if (limit === undefined) {
-    return defaultRunContinuationLimit
-  }
+const invalidAgentRunContinuationLimitError = (limit: number | undefined) =>
+  new AgentTransportError({
+    message: 'Invalid agent run continuation limit',
+    cause: limit
+  })
 
-  if (!Number.isSafeInteger(limit) || limit < 0) {
-    throw new AgentTransportError({
-      message: 'Invalid agent run continuation limit',
-      cause: limit
-    })
-  }
+const agentRunContinuationLimitEffect = (limit: number | undefined) => {
+  if (limit === undefined) return Effect.succeed(defaultRunContinuationLimit)
 
-  return limit
+  return Number.isSafeInteger(limit) && limit >= 0
+    ? Effect.succeed(limit)
+    : Effect.fail(invalidAgentRunContinuationLimitError(limit))
 }
 
-const validateAgentRunContinuationLimit = (limit: number | undefined) => {
-  agentRunContinuationLimit(limit)
+const invalidIdleReconnectMaxAttemptsError = (limit: number | undefined) =>
+  new AgentTransportError({
+    message: 'Invalid agent run idle reconnect max attempts',
+    cause: limit
+  })
+
+const idleReconnectMaxAttemptsEffect = (limit: number | undefined) => {
+  if (limit === undefined) return Effect.succeed(defaultIdleReconnectMaxAttempts)
+
+  return Number.isSafeInteger(limit) && limit >= 0
+    ? Effect.succeed(limit)
+    : Effect.fail(invalidIdleReconnectMaxAttemptsError(limit))
+}
+
+const validateAgentRunIdleReconnectEffect = (
+  options: AgentRunIdleReconnectOptions | undefined
+) => {
+  if (options === undefined) return Effect.void
+
+  if (!Number.isSafeInteger(options.idleTimeoutMs) || options.idleTimeoutMs <= 0) {
+    return Effect.fail(
+      new AgentTransportError({
+        message: 'Invalid agent run idle reconnect timeout',
+        cause: options.idleTimeoutMs
+      })
+    )
+  }
+
+  return idleReconnectMaxAttemptsEffect(options.maxAttempts).pipe(Effect.asVoid)
 }
 
 const validateAgentRunStartIndex = (startIndex: number | undefined) => {
@@ -269,11 +313,19 @@ const validateAgentRunStartIndex = (startIndex: number | undefined) => {
     return
   }
 
-  throw new AgentTransportError({
+  throw invalidAgentRunStartIndexError(startIndex)
+}
+
+const invalidAgentRunStartIndexError = (startIndex: number | undefined) =>
+  new AgentTransportError({
     message: 'Invalid agent run stream start index',
     cause: startIndex
   })
-}
+
+const validateAgentRunStartIndexEffect = (startIndex: number | undefined) =>
+  startIndex === undefined || (Number.isSafeInteger(startIndex) && startIndex >= 0)
+    ? Effect.void
+    : Effect.fail(invalidAgentRunStartIndexError(startIndex))
 
 const nextAgentRunStartIndex = (startIndex: number | undefined, count: number) =>
   (startIndex ?? 0) + count
@@ -710,7 +762,13 @@ export const streamQuestionResponseEventStream = (request: SubmitQuestionRespons
 type AgentEventChunkResult = {
   readonly count: number
   readonly terminal: boolean
+  readonly idle: boolean
 }
+
+type AgentEventPullResult =
+  | { readonly _tag: 'Events'; readonly events: Iterable<AgentEventType> }
+  | { readonly _tag: 'Done' }
+  | { readonly _tag: 'Idle' }
 
 type AgentRunContinuationInput = AgentRunContinuationOptions & {
   readonly endpoint: string | undefined
@@ -742,30 +800,23 @@ const noProgressAgentRunContinuationError = (endpoint: string, startIndex: numbe
 
 const noProgressAgentRunContinuationDelayMs = 250
 
-const waitForAgentRunContinuationProgress = (signal: AbortSignal | undefined) =>
-  new Promise<void>((resolve, reject) => {
-    if (signal === undefined) {
-      setTimeout(resolve, noProgressAgentRunContinuationDelayMs)
-      return
-    }
-
-    if (signal.aborted) {
-      reject(abortSignalError(signal))
-      return
-    }
-
-    const timeout = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }, noProgressAgentRunContinuationDelayMs)
-    const onAbort = () => {
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', onAbort)
-      reject(abortSignalError(signal))
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true })
+const idleReconnectLimitReachedError = (limit: number) =>
+  new AgentTransportError({
+    message: 'Agent run idle reconnect limit reached before a terminal event',
+    cause: { limit }
   })
+
+const missingIdleReconnectRunEndpointError = () =>
+  new AgentTransportError({
+    message: 'Agent run idle reconnect failed: missing x-workflow-run-id',
+    cause: 'missing_run_id'
+  })
+
+const waitForAgentRunContinuationProgress = (signal: AbortSignal | undefined) => {
+  const sleep = Effect.sleep(`${noProgressAgentRunContinuationDelayMs} millis`)
+
+  return signal === undefined ? sleep : sleep.pipe(Effect.raceFirst(abortSignalEffect(signal)))
+}
 
 const missingAgentRunTailIndexError = () =>
   new AgentTransportError({
@@ -773,174 +824,333 @@ const missingAgentRunTailIndexError = () =>
     cause: 'missing_tail_index'
   })
 
-const streamAgentEventChunk = async function* (input: {
-  readonly events: AsyncGenerator<AgentEventType, void, void>
-  readonly countOffset: number
-  readonly onEvent?: StreamAgentEventHandler
-}): AsyncGenerator<AgentEventType, AgentEventChunkResult, void> {
-  let count = 0
-  let terminal = false
-
-  for await (const event of input.events) {
-    count += 1
-    terminal = terminal || isTerminalAgentEvent(event)
-    input.onEvent?.(event, input.countOffset + count)
-    yield event
-  }
-
-  return { count, terminal }
-}
-
-const streamAgentRunContinuations = async function* (
-  input: AgentRunContinuationInput
-): AsyncGenerator<AgentEventType, void, void> {
-  let totalCount = input.countOffset
-  let terminal = input.terminal
-  let startIndex = input.startIndex
-  const limit = agentRunContinuationLimit(input.continuationLimit)
-
-  if (terminal) {
-    return
-  }
-
-  if (input.endpoint === undefined) {
-    throw missingAgentRunContinuationEndpointError()
-  }
-
-  for (let continuation = 0; continuation < limit; continuation += 1) {
-    const endpoint = input.endpoint
-
-    const chunk = yield* streamAgentEventChunk({
-      events: streamAgentRunEvents({
-        endpoint,
-        startIndex,
-        signal: input.signal,
-        httpClientLayer: input.httpClientLayer,
-        onResponse: input.onResponse
-      }),
-      countOffset: totalCount,
-      onEvent: input.onEvent
+const pullAgentEventChunk = <A extends Iterable<AgentEventType>>(
+  pull: Pull.Pull<A, AgentTransportError, void, never>,
+  idleReconnect: AgentRunIdleReconnectOptions | undefined
+) => {
+  const pullEvents: Effect.Effect<AgentEventPullResult, AgentTransportError, never> =
+    Pull.matchEffect(pull, {
+      onSuccess: events => Effect.succeed({ _tag: 'Events', events }),
+      onFailure: cause => Effect.failCause(cause),
+      onDone: () => Effect.succeed({ _tag: 'Done' })
     })
 
-    if (chunk.count === 0 && !chunk.terminal) {
-      if (continuation >= limit - 1) {
-        throw noProgressAgentRunContinuationError(endpoint, startIndex)
-      }
+  if (idleReconnect === undefined) return pullEvents
 
-      await waitForAgentRunContinuationProgress(input.signal)
-      continue
-    }
+  return pullEvents.pipe(
+    Effect.raceFirst(
+      Effect.sleep(`${idleReconnect.idleTimeoutMs} millis`).pipe(
+        Effect.map((): AgentEventPullResult => ({ _tag: 'Idle' }))
+      )
+    )
+  )
+}
 
-    terminal = chunk.terminal
-    startIndex = nextAgentRunStartIndex(startIndex, chunk.count)
-    totalCount += chunk.count
+const drainAgentEventStream = (input: {
+  readonly queue: Queue.Enqueue<AgentEventType>
+  readonly stream: Stream.Stream<AgentEventType, AgentTransportError, never>
+  readonly countOffset: number
+  readonly idleReconnect?: AgentRunIdleReconnectOptions
+  readonly onEvent?: StreamAgentEventHandler
+}): Effect.Effect<AgentEventChunkResult, AgentTransportError, Scope.Scope> =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    const pull = yield* Channel.toPullScoped(Stream.toChannel(input.stream), scope)
+    const run = (state: {
+      readonly count: number
+      readonly terminal: boolean
+    }): Effect.Effect<AgentEventChunkResult, AgentTransportError, never> =>
+      Effect.gen(function* () {
+        const pulled = yield* pullAgentEventChunk(pull, input.idleReconnect)
+
+        switch (pulled._tag) {
+          case 'Idle':
+            return { count: state.count, terminal: state.terminal, idle: true }
+          case 'Done':
+            return { count: state.count, terminal: state.terminal, idle: false }
+          case 'Events': {
+            let count = state.count
+            let terminal = state.terminal
+
+            for (const event of pulled.events) {
+              count += 1
+              terminal = terminal || isTerminalAgentEvent(event)
+              yield* Effect.sync(() => input.onEvent?.(event, input.countOffset + count))
+              yield* Queue.offer(input.queue, event)
+
+              if (terminal) return { count, terminal, idle: false }
+            }
+
+            return yield* run({ count, terminal })
+          }
+        }
+      })
+
+    return yield* run({ count: 0, terminal: false }).pipe(Effect.ensuring(closeScope(scope)))
+  })
+
+const streamAgentRunContinuationChunk = (input: {
+  readonly queue: Queue.Enqueue<AgentEventType>
+  readonly endpoint: string
+  readonly startIndex: number | undefined
+  readonly countOffset: number
+  readonly signal: AbortSignal | undefined
+  readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>
+  readonly onResponse?: (response: AgentHttpResponseInfo) => void
+  readonly onEvent?: StreamAgentEventHandler
+  readonly idleReconnect?: AgentRunIdleReconnectOptions
+}): Effect.Effect<AgentEventChunkResult, AgentTransportError, Scope.Scope> =>
+  drainAgentEventStream({
+    queue: input.queue,
+    stream: streamAgentRunEventStream({
+      endpoint: input.endpoint,
+      startIndex: input.startIndex,
+      signal: input.signal,
+      httpClientLayer: input.httpClientLayer,
+      onResponse: input.onResponse
+    }),
+    countOffset: input.countOffset,
+    idleReconnect: input.idleReconnect,
+    onEvent: input.onEvent
+  })
+
+const streamAgentRunContinuations = (
+  input: AgentRunContinuationInput,
+  queue: Queue.Enqueue<AgentEventType>
+): Effect.Effect<void, AgentTransportError, Scope.Scope> =>
+  Effect.gen(function* () {
+    let totalCount = input.countOffset
+    let terminal = input.terminal
+    let startIndex = input.startIndex
+    const limit = yield* agentRunContinuationLimitEffect(input.continuationLimit)
+    const idleReconnectLimit =
+      input.idleReconnect === undefined
+        ? undefined
+        : yield* idleReconnectMaxAttemptsEffect(input.idleReconnect.maxAttempts)
+    let idleReconnects = 0
 
     if (terminal) {
       return
     }
-  }
 
-  throw exhaustedAgentRunContinuationLimitError(limit)
-}
+    if (input.endpoint === undefined) {
+      return yield* Effect.fail(missingAgentRunContinuationEndpointError())
+    }
 
-export async function* streamAgentEventsUntilTerminal(
-  request: StreamAgentEventsUntilTerminalRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  validateAgentRunContinuationLimit(request.continuationLimit)
+    let continuation = 0
+    while (continuation < limit) {
+      const endpoint = input.endpoint
+      const chunkStartIndex = startIndex
 
-  let runEndpoint: string | undefined
-  let startIndex: number | undefined
+      const chunk = yield* streamAgentRunContinuationChunk({
+        queue,
+        endpoint,
+        startIndex: chunkStartIndex,
+        countOffset: totalCount,
+        signal: input.signal,
+        httpClientLayer: input.httpClientLayer,
+        onResponse: input.onResponse,
+        idleReconnect: input.idleReconnect,
+        onEvent: input.onEvent
+      })
 
-  const firstChunk = yield* streamAgentEventChunk({
-    events: streamAgentEvents({
-      ...request,
-      onResponse: response => {
-        startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
-        const runId = agentRunIdFromHeaders(response.headers)
-        if (runId !== undefined) {
-          runEndpoint =
-            request.runEndpoint?.(runId) ?? defaultAgentRunEndpoint(request.endpoint, runId)
-          request.onRunId?.(runId)
+      if (chunk.idle) {
+        if (idleReconnectLimit !== undefined && idleReconnects >= idleReconnectLimit) {
+          return yield* Effect.fail(idleReconnectLimitReachedError(idleReconnectLimit))
         }
 
-        request.onResponse?.(response)
+        startIndex = nextAgentRunStartIndex(chunkStartIndex, chunk.count)
+        totalCount += chunk.count
+        idleReconnects += 1
+        continue
       }
-    }),
-    countOffset: 0,
-    onEvent: request.onEvent
+
+      continuation += 1
+
+      if (chunk.count === 0 && !chunk.terminal) {
+        if (continuation >= limit) {
+          return yield* Effect.fail(noProgressAgentRunContinuationError(endpoint, startIndex))
+        }
+
+        yield* waitForAgentRunContinuationProgress(input.signal)
+        continue
+      }
+
+      terminal = chunk.terminal
+      startIndex = nextAgentRunStartIndex(chunkStartIndex, chunk.count)
+      totalCount += chunk.count
+
+      if (terminal) {
+        return
+      }
+    }
+
+    return yield* Effect.fail(exhaustedAgentRunContinuationLimitError(limit))
   })
 
-  yield* streamAgentRunContinuations({
-    endpoint: runEndpoint,
-    startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
-    countOffset: firstChunk.count,
-    terminal: firstChunk.terminal,
-    continuationLimit: request.continuationLimit,
-    signal: request.signal,
-    httpClientLayer: request.httpClientLayer,
-    onResponse: request.onResponse,
-    onEvent: request.onEvent
-  })
+export const streamAgentEventStreamUntilTerminal = (
+  request: StreamAgentEventsUntilTerminalRequest
+) => {
+  return Stream.callback<AgentEventType, AgentTransportError>(queue =>
+    Effect.gen(function* () {
+      yield* agentRunContinuationLimitEffect(request.continuationLimit).pipe(Effect.asVoid)
+      yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
+      let runEndpoint: string | undefined
+      let startIndex: number | undefined
+      const firstChunk = yield* drainAgentEventStream({
+        queue,
+        stream: streamAgentEventStream({
+          ...request,
+          onResponse: response => {
+            startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
+            const runId = agentRunIdFromHeaders(response.headers)
+            if (runId !== undefined) {
+              runEndpoint =
+                request.runEndpoint?.(runId) ?? defaultAgentRunEndpoint(request.endpoint, runId)
+              request.onRunId?.(runId)
+            }
+
+            request.onResponse?.(response)
+          }
+        }),
+        countOffset: 0,
+        idleReconnect: request.idleReconnect,
+        onEvent: request.onEvent
+      })
+
+      if (firstChunk.idle && runEndpoint === undefined) {
+        return yield* Effect.fail(missingIdleReconnectRunEndpointError())
+      }
+
+      yield* streamAgentRunContinuations(
+        {
+          endpoint: runEndpoint,
+          startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
+          countOffset: firstChunk.count,
+          terminal: firstChunk.terminal,
+          continuationLimit: request.continuationLimit,
+          idleReconnect: request.idleReconnect,
+          signal: request.signal,
+          httpClientLayer: request.httpClientLayer,
+          onResponse: request.onResponse,
+          onEvent: request.onEvent
+        },
+        queue
+      )
+      yield* Queue.end(queue).pipe(Effect.asVoid)
+    }).pipe(
+      Effect.catch((error: AgentTransportError) =>
+        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      )
+    )
+  )
 }
 
-export async function* streamAgentRunEventsUntilTerminal(
+export const streamAgentRunEventStreamUntilTerminal = (
   request: StreamAgentRunEventsUntilTerminalRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  validateAgentRunContinuationLimit(request.continuationLimit)
+) => {
+  return Stream.callback<AgentEventType, AgentTransportError>(queue =>
+    Effect.gen(function* () {
+      yield* agentRunContinuationLimitEffect(request.continuationLimit).pipe(Effect.asVoid)
+      yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
+      yield* validateAgentRunStartIndexEffect(request.startIndex)
+      const firstChunk = yield* streamAgentRunContinuationChunk({
+        queue,
+        endpoint: request.endpoint,
+        startIndex: request.startIndex,
+        countOffset: 0,
+        signal: request.signal,
+        httpClientLayer: request.httpClientLayer,
+        onResponse: request.onResponse,
+        idleReconnect: request.idleReconnect,
+        onEvent: request.onEvent
+      })
 
-  const firstChunk = yield* streamAgentEventChunk({
-    events: streamAgentRunEvents(request),
-    countOffset: 0,
-    onEvent: request.onEvent
-  })
-
-  yield* streamAgentRunContinuations({
-    endpoint: request.endpoint,
-    startIndex: nextAgentRunStartIndex(request.startIndex, firstChunk.count),
-    countOffset: firstChunk.count,
-    terminal: firstChunk.terminal,
-    continuationLimit: request.continuationLimit,
-    signal: request.signal,
-    httpClientLayer: request.httpClientLayer,
-    onResponse: request.onResponse,
-    onEvent: request.onEvent
-  })
+      yield* streamAgentRunContinuations(
+        {
+          endpoint: request.endpoint,
+          startIndex: nextAgentRunStartIndex(request.startIndex, firstChunk.count),
+          countOffset: firstChunk.count,
+          terminal: firstChunk.terminal,
+          continuationLimit: request.continuationLimit,
+          idleReconnect: request.idleReconnect,
+          signal: request.signal,
+          httpClientLayer: request.httpClientLayer,
+          onResponse: request.onResponse,
+          onEvent: request.onEvent
+        },
+        queue
+      )
+      yield* Queue.end(queue).pipe(Effect.asVoid)
+    }).pipe(
+      Effect.catch((error: AgentTransportError) =>
+        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      )
+    )
+  )
 }
 
-export async function* streamAgentRunHitlResponseEventsUntilTerminal(
-  request: StreamAgentRunHitlResponseEventsUntilTerminalRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  validateAgentRunContinuationLimit(request.continuationLimit)
-
-  let startIndex: number | undefined
-
-  const firstChunk = yield* streamAgentEventChunk({
-    events: streamAgentRunHitlResponseEvents({
-      ...request,
-      onResponse: response => {
-        startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
-        request.onResponse?.(response)
-      }
-    }),
+const streamAgentRunHitlResponseInitialChunk = (
+  request: StreamAgentRunHitlResponseEventsUntilTerminalRequest,
+  queue: Queue.Enqueue<AgentEventType>,
+  setStartIndex: (startIndex: number | undefined) => void
+): Effect.Effect<AgentEventChunkResult, AgentTransportError, Scope.Scope> =>
+  drainAgentEventStream({
+    queue,
+    stream: streamAgentRunHitlResponseEventStream({
+        ...request,
+        onResponse: response => {
+          setStartIndex(agentRunStreamStartIndexFromHeaders(response.headers))
+          request.onResponse?.(response)
+        }
+      }),
     countOffset: 0,
+    idleReconnect: request.idleReconnect,
     onEvent: request.onEvent
   })
 
-  if (!firstChunk.terminal && startIndex === undefined) {
-    throw missingAgentRunTailIndexError()
-  }
+export const streamAgentRunHitlResponseEventStreamUntilTerminal = (
+  request: StreamAgentRunHitlResponseEventsUntilTerminalRequest
+) => {
+  return Stream.callback<AgentEventType, AgentTransportError>(queue =>
+    Effect.gen(function* () {
+      yield* agentRunContinuationLimitEffect(request.continuationLimit).pipe(Effect.asVoid)
+      yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
+      let startIndex: number | undefined
+      const firstChunk = yield* streamAgentRunHitlResponseInitialChunk(
+        request,
+        queue,
+        nextStartIndex => {
+          startIndex = nextStartIndex
+        }
+      )
 
-  yield* streamAgentRunContinuations({
-    endpoint: request.endpoint,
-    startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
-    countOffset: firstChunk.count,
-    terminal: firstChunk.terminal,
-    continuationLimit: request.continuationLimit,
-    signal: request.signal,
-    httpClientLayer: request.httpClientLayer,
-    onResponse: request.onResponse,
-    onEvent: request.onEvent
-  })
+      if (!firstChunk.terminal && startIndex === undefined) {
+        return yield* Effect.fail(missingAgentRunTailIndexError())
+      }
+
+      yield* streamAgentRunContinuations(
+        {
+          endpoint: request.endpoint,
+          startIndex: nextAgentRunStartIndex(startIndex, firstChunk.count),
+          countOffset: firstChunk.count,
+          terminal: firstChunk.terminal,
+          continuationLimit: request.continuationLimit,
+          idleReconnect: request.idleReconnect,
+          signal: request.signal,
+          httpClientLayer: request.httpClientLayer,
+          onResponse: request.onResponse,
+          onEvent: request.onEvent
+        },
+        queue
+      )
+      yield* Queue.end(queue).pipe(Effect.asVoid)
+    }).pipe(
+      Effect.catch((error: AgentTransportError) =>
+        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      )
+    )
+  )
 }
 
 const isAgentEvent = (message: AgentWebSocketServerMessageType): message is AgentEventType =>
@@ -1026,58 +1236,6 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
     ),
     request.signal
   )
-
-export async function* streamCloudflareAgentEvents(
-  request: StreamCloudflareAgentEventsRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(streamCloudflareAgentEventStream(request))) {
-    yield event
-  }
-}
-
-export async function* streamAgentEvents(
-  request: StreamAgentEventsRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(streamAgentEventStream(request))) {
-    yield event
-  }
-}
-
-export async function* streamAgentRunEvents(
-  request: StreamAgentRunEventsRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(streamAgentRunEventStream(request))) {
-    yield event
-  }
-}
-
-export async function* streamAgentRunHitlResponseEvents(
-  request: StreamAgentRunHitlResponseEventsRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(
-    streamAgentRunHitlResponseEventStream(request)
-  )) {
-    yield event
-  }
-}
-
-export async function* submitToolApprovalResponse(
-  request: SubmitToolApprovalResponseRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(
-    streamToolApprovalResponseEventStream(request)
-  )) {
-    yield event
-  }
-}
-
-export async function* submitQuestionResponse(
-  request: SubmitQuestionResponseRequest
-): AsyncGenerator<AgentEventType, void, void> {
-  for await (const event of Stream.toAsyncIterable(streamQuestionResponseEventStream(request))) {
-    yield event
-  }
-}
 
 export const cancelAgentRun = (request: CancelAgentRunRequest) =>
   Effect.runPromise(cancelAgentRunEffect(request))

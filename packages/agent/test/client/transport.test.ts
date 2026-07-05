@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -27,13 +27,13 @@ import {
   appendAgentMessage,
   cancelAgentRun,
   collectAgentEvents,
-  streamAgentEventsUntilTerminal,
-  streamAgentRunHitlResponseEvents,
-  streamAgentRunHitlResponseEventsUntilTerminal,
-  streamAgentRunEventsUntilTerminal,
-  streamAgentRunEvents,
-  streamAgentEvents,
-  streamCloudflareAgentEvents
+  streamAgentEventStreamUntilTerminal,
+  streamAgentRunHitlResponseEventStreamUntilTerminal,
+  streamAgentRunEventStreamUntilTerminal,
+  streamAgentRunHitlResponseEventStream,
+  streamAgentRunEventStream,
+  streamAgentEventStream,
+  streamCloudflareAgentEventStream
 } from '../../src/client'
 
 type CapturedRequest = {
@@ -42,6 +42,19 @@ type CapturedRequest = {
 
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
   events.map(event => JSON.stringify(event)).join('\n')
+
+const hangingEventResponse = (
+  events: ReadonlyArray<unknown>,
+  init?: ResponseInit
+) =>
+  new Response(
+    new ReadableStream<Uint8Array>({
+      start: controller => {
+        controller.enqueue(new TextEncoder().encode(`${encodeEvents(events)}\n`))
+      }
+    }),
+    init
+  )
 
 const makeHttpClientLayerFromResponses = (
   responses: ReadonlyArray<Response>,
@@ -151,8 +164,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
     const responses: Array<Readonly<Record<string, string | undefined>>> = []
 
-    const events = await collectAsync(
-      streamAgentRunEvents({
+    const events = await collectEventStream(
+      streamAgentRunEventStream({
         endpoint: '/api/agent/workflow/run_1',
         onResponse: response => responses.push(response.headers),
         httpClientLayer: makeHttpClientLayer(
@@ -210,8 +223,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
     const runIds: Array<string> = []
     const seen: Array<string> = []
-    const events = await collectAsync(
-      streamAgentEventsUntilTerminal({
+    const events = await collectEventStream(
+      streamAgentEventStreamUntilTerminal({
         endpoint: '/api/agent',
         sessionId: 'session_1',
         messages,
@@ -243,8 +256,8 @@ describe('collectAgentEvents', () => {
 
   it('continues existing durable runs from the requested start index', async () => {
     const requests: Array<CapturedRequest> = []
-    const events = await collectAsync(
-      streamAgentRunEventsUntilTerminal({
+    const events = await collectEventStream(
+      streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
         startIndex: 4,
         httpClientLayer: makeHttpClientLayerFromResponses(
@@ -267,12 +280,65 @@ describe('collectAgentEvents', () => {
     expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
   })
 
+  it('reconnects idle existing durable runs from the emitted event count', async () => {
+    const requests: Array<CapturedRequest> = []
+
+    const events = await collectEventStream(
+      streamAgentRunEventStreamUntilTerminal({
+        endpoint: '/api/agent/run_1',
+        idleReconnect: { idleTimeoutMs: 25, maxAttempts: 1 },
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            hangingEventResponse([AgentStart.make({})]),
+            new Response(encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })]))
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent/run_1',
+      '/api/agent/run_1?startIndex=1'
+    ])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
+  it('reconnects idle newly started durable runs by run id', async () => {
+    const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+    const requests: Array<CapturedRequest> = []
+
+    const events = await collectEventStream(
+      streamAgentEventStreamUntilTerminal({
+        endpoint: '/api/agent',
+        sessionId: 'session_1',
+        messages,
+        idleReconnect: { idleTimeoutMs: 25, maxAttempts: 1 },
+        httpClientLayer: makeHttpClientLayerFromResponses(
+          [
+            hangingEventResponse([AgentStart.make({})], {
+              headers: { 'x-workflow-run-id': 'run_1' }
+            }),
+            new Response(encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })]))
+          ],
+          requests
+        )
+      })
+    )
+
+    expect(requests.map(item => item.request.url)).toEqual([
+      '/api/agent',
+      '/api/agent/run_1?startIndex=1'
+    ])
+    expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentEnd'])
+  })
+
   it('rejects negative durable run start indexes', async () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentRunEventsUntilTerminal({
+      collectEventStream(
+        streamAgentRunEventStreamUntilTerminal({
           endpoint: '/api/agent/run_1',
           startIndex: -2,
           httpClientLayer: makeHttpClientLayer(
@@ -294,8 +360,8 @@ describe('collectAgentEvents', () => {
       source: 'user'
     })
     const requests: Array<CapturedRequest> = []
-    const events = await collectAsync(
-      streamAgentRunHitlResponseEvents({
+    const events = await collectEventStream(
+      streamAgentRunHitlResponseEventStream({
         endpoint: '/api/agent/run_1',
         hitlResponses: [response],
         httpClientLayer: makeHttpClientLayer(
@@ -319,8 +385,8 @@ describe('collectAgentEvents', () => {
       source: 'user'
     })
     const requests: Array<CapturedRequest> = []
-    const events = await collectAsync(
-      streamAgentRunHitlResponseEventsUntilTerminal({
+    const events = await collectEventStream(
+      streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
         hitlResponses: [response],
         httpClientLayer: makeHttpClientLayerFromResponses(
@@ -354,8 +420,8 @@ describe('collectAgentEvents', () => {
       source: 'user'
     })
     const requests: Array<CapturedRequest> = []
-    const events = await collectAsync(
-      streamAgentRunHitlResponseEventsUntilTerminal({
+    const events = await collectEventStream(
+      streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
         hitlResponses: [response],
         continuationLimit: 2,
@@ -387,8 +453,8 @@ describe('collectAgentEvents', () => {
   it('aborts empty continuation waits before polling again', async () => {
     const controller = new AbortController()
     const requests: Array<CapturedRequest> = []
-    const eventsPromise = collectAsync(
-      streamAgentRunEventsUntilTerminal({
+    const eventsPromise = collectEventStream(
+      streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
         continuationLimit: 2,
         signal: controller.signal,
@@ -422,8 +488,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentEventsUntilTerminal({
+      collectEventStream(
+        streamAgentEventStreamUntilTerminal({
           endpoint: '/api/agent',
           sessionId: 'session_1',
           messages,
@@ -440,8 +506,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentRunEventsUntilTerminal({
+      collectEventStream(
+        streamAgentRunEventStreamUntilTerminal({
           endpoint: '/api/agent/run_1',
           continuationLimit: 1,
           httpClientLayer: makeHttpClientLayerFromResponses(
@@ -465,8 +531,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentRunEventsUntilTerminal({
+      collectEventStream(
+        streamAgentRunEventStreamUntilTerminal({
           endpoint: '/api/agent/run_1',
           continuationLimit: 1,
           httpClientLayer: makeHttpClientLayerFromResponses(
@@ -493,8 +559,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentRunHitlResponseEventsUntilTerminal({
+      collectEventStream(
+        streamAgentRunHitlResponseEventStreamUntilTerminal({
           endpoint: '/api/agent/run_1',
           hitlResponses: [response],
           httpClientLayer: makeHttpClientLayer(
@@ -510,8 +576,8 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAsync(
-        streamAgentRunEventsUntilTerminal({
+      collectEventStream(
+        streamAgentRunEventStreamUntilTerminal({
           endpoint: '/api/agent/run_1',
           continuationLimit: 1.5,
           httpClientLayer: makeHttpClientLayer(
@@ -550,16 +616,23 @@ describe('collectAgentEvents', () => {
         }
       })
     )
-    const events = streamAgentEvents({
-      sessionId: 'session_1',
-      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
-      httpClientLayer: makeHttpClientLayer(response, requests)
-    })
+    const events = Stream.toAsyncIterable(
+      streamAgentEventStream({
+        sessionId: 'session_1',
+        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+        httpClientLayer: makeHttpClientLayer(response, requests)
+      })
+    )[Symbol.asyncIterator]()
     const firstEvent = await events.next()
 
     expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
 
-    await events.return()
+    const returnEvents = events.return
+    if (returnEvents === undefined) {
+      throw new Error('Expected async iterator return')
+    }
+
+    await returnEvents.call(events)
 
     expect(cancelled).toBe(true)
   })
@@ -633,8 +706,8 @@ describe('collectAgentEvents', () => {
 
     try {
       const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
-      const eventsPromise = collectAsync(
-        streamCloudflareAgentEvents({
+      const eventsPromise = collectEventStream(
+        streamCloudflareAgentEventStream({
           webSocketUrl: 'wss://worker.example/connect/session_1',
           messages
         })
@@ -729,15 +802,8 @@ class FakeWebSocket {
   }
 }
 
-const collectAsync = async <A>(items: AsyncIterable<A>) => {
-  const collected: Array<A> = []
-
-  for await (const item of items) {
-    collected.push(item)
-  }
-
-  return collected
-}
+const collectEventStream = async <A, E>(stream: Stream.Stream<A, E, never>) =>
+  Array.from(await Effect.runPromise(stream.pipe(Stream.runCollect)))
 
 const wait = () => new Promise(resolve => setTimeout(resolve, 0))
 
