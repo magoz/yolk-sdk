@@ -31,6 +31,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
+      - name: Setup npm
+        run: npm install -g npm@11
+
       - name: Setup pnpm
         run: |
           corepack enable
