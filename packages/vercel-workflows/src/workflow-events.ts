@@ -15,6 +15,13 @@ export type DurableAgentEventIdInput = {
 
 export type SequenceDurableAgentEventInput<Event extends object = object> = {
   readonly state: DurableAgentEventSequencerState
+  /**
+   * Stable id namespace for one independent durable stream.
+   *
+   * Include the workflow/session/run id when multiple logical runs can be
+   * projected in the same client. Replay-safe clients de-dupe by `eventId`, so
+   * reusing a stream id across runs can drop legitimate follow-up events.
+   */
   readonly streamId: string
   readonly turn: number
   readonly event: Event

@@ -125,7 +125,7 @@ const state = makeDurableAgentEventSequencerState(eventSequence)
 const sequenced = await writeDurableAgentEvent({
   writer,
   event,
-  streamId: 'workflow',
+  streamId: `workflow:${runId}`,
   turn,
   state
 })
@@ -133,9 +133,12 @@ const sequenced = await writeDurableAgentEvent({
 eventSequence = sequenced.nextEventSequence
 ```
 
-The id format is `${streamId}:${turn}:${eventSequence}`. Keep `eventSequence` in Workflow state.
-Resume route reads should use `startIndex` when available. Host apps still own active-run locking,
-stale-run guards, and cancellation behavior.
+The id format is `${streamId}:${turn}:${eventSequence}`. Scope `streamId` to one logical durable
+run (for example `workflow:${runId}`), not just one route or feature. Replay-safe clients de-dupe by
+`eventId`; reusing a stream id across independent runs can make a follow-up run's live deltas look
+like old replayed events. Keep `eventSequence` in Workflow state and reset it when starting a fresh
+logical stream. Resume route reads should use `startIndex` when available. Host apps still own
+active-run locking, stale-run guards, and cancellation behavior.
 
 ## Terminal barriers
 
@@ -175,7 +178,8 @@ failures are returned separately and do not turn a successful durable commit int
 - Preserve tool result order and never advance the next model step with dangling host tool calls.
 - Decide cancellation/resume/conflict UX.
 - Own hook tokens and response validation for HITL resume.
-- Emit replay-safe event ids for durable streams and de-dupe by `eventId` client-side.
+- Emit replay-safe event ids for durable streams; scope stream ids per independent run and de-dupe
+  by `eventId` client-side.
 - Write durable terminal events only after host persistence has settled.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
 
