@@ -25,6 +25,7 @@ export {
   agentRunStreamStartIndexFromHeaders,
   agentRunStreamTailIndexFromHeaders,
   cancelAgentRun,
+  cancelAgentRunEffect,
   collectAgentEvents,
   collectAgentEventsEffect,
   streamQuestionResponseEventStream,

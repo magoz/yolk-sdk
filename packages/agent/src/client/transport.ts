@@ -618,7 +618,7 @@ const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRe
     )
   })
 
-const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
+export const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const response = yield* client

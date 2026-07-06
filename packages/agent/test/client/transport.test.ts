@@ -26,6 +26,7 @@ import {
   agentRunStreamTailIndexFromHeaders,
   appendAgentMessage,
   cancelAgentRun,
+  cancelAgentRunEffect,
   collectAgentEvents,
   streamAgentEventStreamUntilTerminal,
   streamAgentRunHitlResponseEventStreamUntilTerminal,
@@ -621,6 +622,19 @@ describe('collectAgentEvents', () => {
     expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
     expect(requests[0]?.request.method).toBe('DELETE')
   })
+
+  it.effect('exposes an Effect-native run cancel helper', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+
+      yield* cancelAgentRunEffect({
+        endpoint: '/api/agent/workflow/run_1',
+        httpClientLayer: makeHttpClientLayer(new Response(''), requests)
+      })
+
+      expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
+      expect(requests[0]?.request.method).toBe('DELETE')
+    }))
 
   it('cancels the response body when event consumption stops', async () => {
     let cancelled = false
