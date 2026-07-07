@@ -14,7 +14,7 @@ Next-only routes called by the Cloudflare Worker/DO. Never expose these contract
 ## Rules
 
 - Require `x-yolk-cloudflare-secret`; missing env and bad secret both fail closed.
-- Return access token/account/expiry only. Never send refresh tokens to Worker/DO.
+- Return `TokenBrokerResponse` (`provider`, `accessToken`, `expiresAt`, optional `accountId`) only. Never send refresh tokens to Worker/DO.
 - Keep provider ids aligned with `@yolk-sdk/agent/providers/openai`, `@yolk-sdk/agent/providers/anthropic`, and `@yolk-sdk/agent/oauth` broker contracts.
 - Codex proxy forwards the upstream body stream and preserves only safe response headers.
 - Header forwarding stays allowlist-only in `codex-responses/route-model.ts`; never forward cookies or bridge secrets.

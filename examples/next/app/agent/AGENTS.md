@@ -8,12 +8,12 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - `runtime-page.tsx` owns shared server bootstrap/session wiring for runtime pages.
 - `/agent/next` uses `/api/agent` NDJSON only.
 - `/agent/cloudflare` bootstraps direct Cloudflare WS only; missing env/bootstrap shows explicit error, no Next fallback; remote MCP config is loaded by Next and passed in bootstrap.
-- `/agent/workflow` uses `/api/agent/workflow`, starts a Vercel Workflow run, and reads the durable stream returned by `run.getReadable()`.
+- `/agent/workflow` uses `/api/agent/workflow`; the route starts via `VercelWorkflows.start(...)`, and the UI reads the returned durable NDJSON stream.
 - Workflow runtime records `x-workflow-run-id` in Activity, can replay the durable stream by run id, and stop requests cancel the Workflow run.
 - Workflow resume is for interrupted/aborted active runs only; keep resume disabled after `done` to avoid replaying completed stream chunks into duplicate UI messages.
 - Workflow resume counts as text-busy UI state: disable submit/actions/model controls and route Stop through the resume abort controller.
 - Workflow HITL approve/question controls submit through the active run id; do not start a new Workflow run when `hitlResponses` are present.
-- Workflow stop is optimistic in the UI: it aborts the browser stream and calls `run.cancel()`, but Vercel may not preempt an already-running model step immediately.
+- Workflow stop is optimistic in the UI: it aborts the browser stream and calls `cancelAgentRun({ endpoint })` (`DELETE /api/agent/workflow/:runId`), but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
 - `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
 - `@yolk-sdk/agent/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.

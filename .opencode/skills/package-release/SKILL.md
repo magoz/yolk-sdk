@@ -195,7 +195,7 @@ Yolk should mirror Effect + MCP SDK:
 
 ## Guardrails
 
-- Use `pnpm` only.
+- Use `pnpm` for repo/package scripts; use `npm` only for registry publish/view/trust flows documented in `patterns/PACKAGE_DISTRIBUTION.md`.
 - Keep `@yolk-sdk/*` lockstep until a deliberate versioning change.
 - Keep `dist/` generated and ignored.
 - Keep local source exports; `publishConfig.exports` points to `dist`.

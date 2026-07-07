@@ -10,7 +10,7 @@
 | `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                                  |
 | `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                        |
 | `@yolk-sdk/agent/runtime`                             | `src/runtime`                                | Generic runtime/session orchestration                                                                                    |
-| `@yolk-sdk/agent/client`                              | `src/client`                                 | Client transport/state helpers                                                                                           |
+| `@yolk-sdk/agent/client`                              | `src/client`                                 | Effect-native HTTP/NDJSON transport, durable run, attachment, and state helpers                                           |
 | `@yolk-sdk/agent/compaction`                          | `src/compaction`                             | Host-owned context compaction utilities                                                                                  |
 | `@yolk-sdk/agent/tools`                               | `src/tools`                                  | Generic tool module registry                                                                                             |
 | `@yolk-sdk/agent/react`                               | `src/react`                                  | Headless React chat hook/state helpers                                                                                   |
@@ -35,12 +35,12 @@
 - `src/react` and `src/voice/react.ts` are the only React-using areas; React is an optional peer.
 - Provider subpaths own vendor mechanics only; hosts still own token storage/refresh and app policy.
 - Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, or app packages from agent subpaths.
-- Protocol has no package dependencies except Effect.
-- Loop depends on protocol only.
-- Runtime depends on protocol + loop only.
-- Client depends on protocol only.
-- Compaction depends on protocol + loop only.
-- Tools depend on protocol + loop only.
+- Protocol depends on Effect only.
+- Loop depends on protocol + Effect only.
+- Runtime depends on protocol + loop + Effect only.
+- Client depends on protocol + Effect HTTP/Stream; browser WebSocket/attachment helpers touch `WebSocket`/`Blob`/`File`/`FileReader` lazily.
+- Compaction depends on protocol + loop + Effect only.
+- Tools depend on protocol + loop + Effect only.
 - OAuth and skillset depend on Effect only.
 - Voice depends on protocol + loop only.
 - `voice/browser` is the only DOM/WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes.
@@ -54,8 +54,8 @@
 - Voice session logs are host-persisted: `VoiceSessionLogState` is the versioned serializable fold state and `foldStoredVoiceEvents` is the pure, replay-safe batch fold; hosts run it inside their storage transaction and append the returned messages. Bump `VOICE_SESSION_LOG_STATE_VERSION` on breaking state-shape changes.
 - Tool lifecycle events use deterministic per-call ids (`voiceToolEventId`); `storedVoiceToolEvents` splits requested batches per call and `storedToolEventsFromOutcome` lets tool endpoints log server-witnessed activity that dedupes against client outbox replays.
 - `makeVoiceEventOutbox` (and the `useYolkVoice` `eventLog` option) is client transport mechanics only: at-least-once batching with boundary flushes and a scope-close drain; hosts own the flush endpoint, auth, and storage, and should flush with keepalive-capable transport.
-- React depends on client + protocol only.
-- Providers depend on protocol + loop + oauth only; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
+- React depends on client + protocol + Effect + optional React only.
+- Providers depend on protocol + loop + oauth + Effect; provider factories may use Effect HTTP; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk-sdk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, models, prompts, and tool policy.
@@ -76,10 +76,7 @@
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
-- Model-produced text is untrusted input: `replaceLoneSurrogates(Deep)` in protocol hardens lone
-  UTF-16 surrogates (unencodable UTF-8); provider request lowering and the realtime client codec
-  apply it to outbound payloads. Storage-specific constraints (e.g. Postgres rejecting NUL) remain
-  host sanitization policy.
+- Model-produced text is untrusted input: `replaceLoneSurrogates` / `replaceLoneSurrogatesDeep` in protocol harden lone UTF-16 surrogates (unencodable UTF-8); provider request lowering and the realtime client codec apply them to outbound payloads. Storage-specific constraints (e.g. Postgres rejecting NUL) remain host sanitization policy.
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.
@@ -97,6 +94,7 @@
 - Client HTTP transport treats `AgentEnd`/`AgentError`/`AgentAwaitingInput` as logical end, but only pre-terminal consumer cancellation should abort the body.
 - Use `isTerminalAgentEvent` as the canonical protocol helper for `AgentEnd`/`AgentError`/`AgentAwaitingInput` checks.
 - Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, poll empty non-terminal chunks without advancing `startIndex`, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
+- Client public helpers are Effect-native: stream helpers return `Stream`; `cancelAgentRun`, `collectAgentEvents`, `textFromBlob`, and `documentPartFromTextFile` return `Effect`; HTTP helpers accept `httpClientLayer`.
 
 ## Tests
 

@@ -8,7 +8,7 @@ Tests for Vercel Workflow orchestration contracts and package-owned directive fi
 | ---------------------------------------- | ----------------------------------------------------------- |
 | `workflow-loop.test.ts`                  | Pure contract tests with fake step callbacks                |
 | `workflow-events.test.ts`                | Durable event sequencing and terminal commit barrier tests  |
-| `effect.test.ts`                         | Fake `workflow/api` SDK unit tests for `./effect` wrapper   |
+| `effect.test.ts`                         | Fake `workflow/api` SDK unit tests for `./effect` client/layer |
 | `package-directives.integration.test.ts` | `@workflow/vitest` directive/start/stream/hook/cancel tests |
 | `fixtures/workflow-fixture.ts`           | Test-only workflow/step directive fixture; not published    |
 

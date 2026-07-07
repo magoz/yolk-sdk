@@ -23,7 +23,7 @@ Node CLI/dev boundaries. Scripts may use runtime APIs banned from app/service co
 - App DB setup scripts live under `examples/next/scripts`.
 - Generated writes must be deterministic and documented in the owning app docs.
 - Release smoke scripts may create temp dirs and pack/install package tarballs only under OS temp paths.
-- Package release scripts use explicit package/subpath allowlists; update them with every public package shape change.
+- Package export/smoke scripts use explicit package/subpath allowlists; update them with every public package shape change.
 
 ## Anti-Patterns
 

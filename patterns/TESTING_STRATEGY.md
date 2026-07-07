@@ -284,7 +284,7 @@ layer(testLayer)('post operations', it => {
 | Service | Unit Tests | Integration Tests | E2E Tests |
 | ------- | ---------- | ----------------- | --------- |
 | Auth    | Mock       | Mock              | Real      |
-| Db      | Mock       | Real (container)  | Real      |
+| Db      | Mock       | Real test DB/layer | Real test DB |
 | Email   | Mock       | Mock              | Mock      |
 
 **Rule:** Mock external services (email, integrations) in automated tests. Use real Db only in integration/E2E tests with test isolation.

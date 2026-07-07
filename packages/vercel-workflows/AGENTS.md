@@ -18,14 +18,13 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Host app supplies product route/auth/provider/tool wiring; package-owned `'use workflow'` / `'use step'` exports are allowed only with `@workflow/vitest` coverage.
 - Keep Effect runtime work out of workflow orchestration helpers; Effect may run inside host/package step callbacks.
 - Import Workflow orchestration APIs from `@yolk-sdk/vercel-workflows`; `./workflow` remains an explicit equivalent subpath.
-- Effect-native host route adapters live under `./effect` and wrap only public `workflow/api` calls.
+- Effect-native Workflow client/layer lives under `./effect`: `VercelWorkflows.layer` wraps public `workflow/api`; `VercelWorkflows.layerFromSdk` is the fake SDK seam.
 
 ## Design Rules
 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
-- Durable event helpers are generic over JSON-serializable objects; do not couple this package to `AgentEvent`.
-- Promise and Effect durable event helpers expose the same sequencing/barrier semantics; neither owns host storage policy.
+- Durable event helpers are pure/Effect-native: `sequenceDurableAgentEvent`, `writeDurableAgentEvent`, and `commitThenWriteTerminalEvent`; hosts own storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.
 - Terminal durable event helpers model commit-before-write ordering only; hosts own persistence and terminal error event shape.

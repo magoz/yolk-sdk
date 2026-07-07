@@ -51,7 +51,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - Area tests mirror source layout:
   - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
   - `packages/mcp/test/{client,server}`
-  - `packages/sandbox/test/{core,agent,vercel}`
+  - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/vercel-workflows/test`
 
 ## Dependency Direction
@@ -61,11 +61,12 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
 @yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
-@yolk-sdk/sandbox root -> Effect only; ./agent -> @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> @vercel/sandbox
-@yolk-sdk/vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
-@yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + React peer
+@yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
+@yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
+@yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + browser WebSocket/Blob/File APIs
+@yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol}
-@yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol}; openai/realtime + openai/speech may also use @yolk-sdk/agent/voice contracts
+@yolk-sdk/agent/providers/* -> @yolk-sdk/agent/oauth + @yolk-sdk/agent/{loop,protocol} + Effect; openai/realtime + openai/speech may also use @yolk-sdk/agent/voice contracts
 @yolk-sdk/agent/voice -> @yolk-sdk/agent/{loop,protocol}
 @yolk-sdk/agent/voice/browser -> voice core + browser WebRTC globals (lazy, behind a runtime seam)
 @yolk-sdk/agent/voice/react -> voice core + voice/browser + React peer

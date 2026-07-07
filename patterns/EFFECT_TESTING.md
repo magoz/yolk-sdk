@@ -4,11 +4,7 @@ This document covers testing patterns using `@effect/vitest` for Effect-based co
 
 ## Setup
 
-Install the testing dependencies:
-
-```bash
-pnpm add -D @effect/vitest vitest
-```
+Repo already pins `@effect/vitest` and `vitest`; package manifests use `catalog:` when needed.
 
 Import from `@effect/vitest` for Effect-aware testing:
 

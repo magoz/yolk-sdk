@@ -13,8 +13,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 ## Stream/event rules
 
 - Steps write protocol events to `getWritable<Uint8Array>()` as NDJSON.
-- App steps use `writeDurableAgentEvent`; normal ids are run-scoped:
-  `workflow:<runId>:<turn>:<sequence>`.
+- App steps use `writeDurableAgentEvent`; current normal ids are `workflow:<turn>:<sequence>`.
 - Error events use run-scoped stream ids: `workflow:<runId>:error:<turn>:<sequence>`.
 - Carry `eventSequence` through model/tool step results so retries/replay can de-dupe; reset it for
   fresh independent streams.

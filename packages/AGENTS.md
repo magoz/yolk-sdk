@@ -6,12 +6,12 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 | Package                      | Role                                                                                                   | Local docs                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| `@yolk-sdk/agent`            | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md`            |
+| `@yolk-sdk/agent`            | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md`            |
 | `@yolk-sdk/mcp`              | MCP client/server/protocol adapters                                                                    | `packages/mcp/AGENTS.md`              |
 | `@yolk-sdk/knowledge`        | Knowledge document/file/context/search contracts and lookup/manage tool helpers                        | `packages/knowledge/AGENTS.md`        |
 | `@yolk-sdk/connectors`       | Effect-native connector, integration, credential, and action primitives                                | `packages/connectors/AGENTS.md`       |
-| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                 | `packages/sandbox/AGENTS.md`          |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers                                          | `packages/vercel-workflows/AGENTS.md` |
+| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel client/layer adapter, and testing fakes                    | `packages/sandbox/AGENTS.md`          |
+| `@yolk-sdk/vercel-workflows` | Workflow loop contract, generic durable stream helpers, and Effect Workflow client/layer                | `packages/vercel-workflows/AGENTS.md` |
 
 ## Dependency direction
 
@@ -20,12 +20,13 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/*
 knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
 mcp -> agent/protocol only for tool/content adapters
 agent core -> no knowledge/mcp/app/Next/provider SDKs
+agent/client -> agent/protocol + Effect HTTP/Stream + browser WebSocket/Blob/File APIs; no React/Next/app/provider SDKs
 agent/react -> agent/client + agent/protocol + optional React peer
 agent/compaction -> agent/protocol + agent/loop
 agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect; agent/providers/openai/realtime + speech may also use agent/voice
 connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
-sandbox root -> Effect only; sandbox/agent -> agent tools/protocol/loop; sandbox/vercel -> @vercel/sandbox only
-vercel-workflows -> workflow runtime APIs + host-side Effect wrappers only; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
+sandbox root -> Effect only; sandbox/agent -> sandbox core + agent tools/protocol/loop; sandbox/vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
+vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
 agent/voice -> agent/loop + agent/protocol
 ```
 
@@ -33,7 +34,7 @@ agent/voice -> agent/loop + agent/protocol
 
 - Package architecture: `patterns/PACKAGE_ARCHITECTURE.md`.
 - Package distribution/release: `patterns/PACKAGE_DISTRIBUTION.md`.
-- Keep roots tiny; feature APIs use explicit subpaths.
+- Keep roots intentional: `agent`/`mcp` empty; `knowledge`/`connectors`/`sandbox`/`vercel-workflows` core-only; feature APIs use explicit subpaths.
 - Use source exports for workspace dev; npm `publishConfig.exports` points to `dist`.
 - Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.

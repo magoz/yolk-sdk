@@ -25,13 +25,12 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 
 ## Workflow Runtime
 
-- `workflow/route.ts` calls Vercel `start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
-- `workflow/[runId]/route.ts` uses `getRun(runId)` for replay/cancellation and `resumeHook` for one-response HITL resume.
-- GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index` for
-  the stream tail before the returned body.
+- `workflow/route.ts` uses `VercelWorkflows.start(runAgentWorkflow, ...)`, returns `run.getReadable()` and `x-workflow-run-id`.
+- `workflow/[runId]/route.ts` uses `VercelWorkflows.getReadable`, `tailIndex`, `resumeHook`, and `cancel` for replay, HITL resume, and cancellation.
+- GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index` for the stream tail before the returned body.
 - HITL resume body is `{ hitlResponses: [response] }`; route/workflow own hook-token routing, not the SDK client.
 - Current hook token is run-scoped; route auth must authorize run ownership, and loop response matching validates `requestId`/`toolCallId`.
-- HITL resume captures `getTailIndex()` via `startIndex: -1` before `resumeHook`, then returns replay after that tail index.
+- HITL resume captures `VercelWorkflows.tailIndex(runId)` before `resumeHook`, then returns replay after that tail index.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
 

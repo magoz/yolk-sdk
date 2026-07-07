@@ -4,7 +4,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 
 ## CRITICAL RULES
 
-- Use `pnpm` only.
+- Use `pnpm` for repo/package scripts; use `npm` only for registry publish/view/trust flows documented in `patterns/PACKAGE_DISTRIBUTION.md`.
 - Run `pnpm tsc` before finishing.
 - Run `pnpm lint` before finishing.
 - Run `pnpm test:run` before committing broad changes.
@@ -12,7 +12,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Run `pnpm docs:check` when touching `apps/docs`.
 - Run `pnpm cloudflare:check` when touching `cloudflare/*`.
 - Follow local `AGENTS.md` before editing scoped app/package areas; root owns repo-wide boundaries only.
-- Never commit generated `.next`, `.turbo`, `.source`, `dist`, coverage, or env files.
+- Never commit ignored generated/dev artifacts (`.next`, `.turbo`, `.source`, package `dist`, `.alchemy`, `.workflow-*`, `playwright-report`, `test-results`, coverage, `*.tsbuildinfo`, `next-env.d.ts`) or env files; tracked generated fallbacks need owning docs.
 
 ## MONOREPO STRATEGY
 
@@ -55,7 +55,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 ## ENV BOUNDARIES
 
 - Effect app/service code uses `Config.*` inside `Effect.gen`; map config errors around the whole block.
-- Direct `process.env` only in sync framework/config boundaries: root configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures env handoff, test-runner config helpers, sync SDK callbacks like `TelemetryLayer`.
+- Direct `process.env` only in sync config/script/test boundaries: root/app configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, app DB scripts, and sync SDK callbacks like `TelemetryLayer`.
 - Never add direct `dotenv.config()` outside `examples/next/lib/dotenv.ts`.
 
 ## WHERE TO LOOK
@@ -82,7 +82,7 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 - Packages use `@yolk-sdk/*` names and explicit subpath exports.
 - Public packages release in lockstep via Changesets fixed group.
 - `@yolk-sdk/cloudflare-agent` stays private and ignored by Changesets.
-- Keep package roots tiny; source exports for workspace dev, `publishConfig.exports` to `dist`.
+- Keep package roots intentional: `agent`/`mcp` empty; `knowledge`/`connectors`/`sandbox`/`vercel-workflows` core-only; feature APIs use explicit subpaths; source exports for workspace dev, `publishConfig.exports` to `dist`.
 
 ## APP BOUNDARIES
 
@@ -95,7 +95,6 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Repo                           | Location                     | Use                                                 |
 | ------------------------------ | ---------------------------- | --------------------------------------------------- |
 | `effect-smol`                  | `.repos/effect`              | Effect v4 source/docs                               |
-| `eve`                          | `.repos/eve`                 | Vercel durable agent framework competitor/reference |
 | `ai-sdk`                       | `.repos/ai`                  | SDK/package/examples monorepo reference             |
 | `opencode`                     | `.repos/opencode`            | Codex/OpenAI agent protocol/provider reference      |
 | `opencode-simulation`          | `.repos/opencode-simulation` | opencode simulation/property testing reference      |
