@@ -121,14 +121,13 @@ Only retry streamed steps if every event has a deterministic `eventId` and clien
 Use `commitThenWriteTerminalEvent` when terminal events imply durable state is settled:
 
 ```ts
-const result = await commitThenWriteTerminalEvent({
+const result = yield* commitThenWriteTerminalEvent({
   terminal: agentEndEvent,
-  commit: () => persistRunState(),
+  commit: persistRunState,
   write: event => writeEvent(event),
-  writeCommitError: error => writeEvent(toAgentErrorEvent(error)),
-  close: () => closeStreamWriter()
+  writeCommitError: error => writeEvent(toAgentErrorEvent(error))
 })
 ```
 
 The helper never writes success terminal before `commit` succeeds.
-Use `commitThenWriteTerminalEventEffect` when the barrier callbacks are already Effect-native.
+The surrounding workflow loop or stream owner owns the final close.

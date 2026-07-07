@@ -146,4 +146,5 @@ Your host owns hook tokens, route auth, run ownership, and pending request match
 
 ### Terminal event missing
 
-Write live events first, commit durable host state, then write the terminal event and close the stream.
+Write live events first, commit durable host state, then write the terminal event. Let the workflow
+loop or stream owner close the stream once after terminal handling settles.

@@ -108,18 +108,14 @@ describe('durable workflow agent events', () => {
             operations.push('write-error')
 
             return { nextEventSequence: 2 }
-          }),
-        close: Effect.sync(() => {
-          operations.push('close')
-        })
+          })
       })
     )
 
-    expect(operations).toEqual(['commit', 'write:AgentEnd', 'close'])
+    expect(operations).toEqual(['commit', 'write:AgentEnd'])
     expect(result).toMatchObject({
       _tag: 'Committed',
-      writeResult: { nextEventSequence: 2 },
-      closeResult: { _tag: 'Closed' }
+      writeResult: { nextEventSequence: 2 }
     })
   })
 
@@ -146,23 +142,19 @@ describe('durable workflow agent events', () => {
             operations.push(error === commitError ? 'write-error:commit' : 'write-error:unknown')
 
             return { _tag: 'AgentError' }
-          }),
-        close: Effect.sync(() => {
-          operations.push('close')
-        })
+          })
       })
     )
 
-    expect(operations).toEqual(['commit', 'write-error:commit', 'close'])
+    expect(operations).toEqual(['commit', 'write-error:commit'])
     expect(result).toMatchObject({
       _tag: 'CommitFailed',
       commitError,
-      writeResult: { _tag: 'AgentError' },
-      closeResult: { _tag: 'Closed' }
+      writeResult: { _tag: 'AgentError' }
     })
   })
 
-  it('closes when terminal write fails', async () => {
+  it('reports terminal write failures', async () => {
     const operations: Array<string> = []
     const writeError = new Error('write failed')
     const result = await Effect.runPromise(
@@ -184,41 +176,18 @@ describe('durable workflow agent events', () => {
             operations.push('write-error')
 
             return { _tag: 'AgentError' }
-          }),
-        close: Effect.sync(() => {
-          operations.push('close')
-        })
+          })
       })
     )
 
-    expect(operations).toEqual(['commit', 'write', 'close'])
+    expect(operations).toEqual(['commit', 'write'])
     expect(result).toEqual({
       _tag: 'TerminalWriteFailed',
-      error: writeError,
-      closeResult: { _tag: 'Closed' }
+      error: writeError
     })
   })
 
-  it('reports close failure separately from commit success', async () => {
-    const closeError = new Error('close failed')
-    const result = await Effect.runPromise(
-      commitThenWriteTerminalEvent({
-        terminal: { _tag: 'AgentEnd' },
-        commit: Effect.void,
-        write: event => Effect.succeed(event),
-        writeCommitError: () => Effect.succeed({ _tag: 'AgentError' }),
-        close: Effect.fail(closeError)
-      })
-    )
-
-    expect(result).toEqual({
-      _tag: 'Committed',
-      writeResult: { _tag: 'AgentEnd' },
-      closeResult: { _tag: 'CloseFailed', error: closeError }
-    })
-  })
-
-  it('closes when commit error terminal write fails', async () => {
+  it('reports commit error terminal write failures', async () => {
     const operations: Array<string> = []
     const commitError = new Error('commit failed')
     const writeError = new Error('write commit error failed')
@@ -245,19 +214,15 @@ describe('durable workflow agent events', () => {
             })
 
             return yield* Effect.fail(writeError)
-          }),
-        close: Effect.sync(() => {
-          operations.push('close')
-        })
+          })
       })
     )
 
-    expect(operations).toEqual(['commit', 'write-error:commit', 'close'])
+    expect(operations).toEqual(['commit', 'write-error:commit'])
     expect(result).toEqual({
       _tag: 'CommitErrorWriteFailed',
       commitError,
-      error: writeError,
-      closeResult: { _tag: 'Closed' }
+      error: writeError
     })
   })
 })

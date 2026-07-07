@@ -32,12 +32,13 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 
 ## Durable stream rule
 
-Write live events first, commit durable host state, then write terminal event and close:
+Write live events first, commit durable host state, then write terminal event. Let the workflow loop
+or stream owner close once after terminal handling settles:
 
 ```txt
-live events -> host durable commit -> terminal event -> close
+live events -> host durable commit -> terminal event -> workflow-owned close
 ```
 
 Use `sequenceDurableAgentEvent` for deterministic event ids without IO,
-`writeDurableAgentEvent` / `writeDurableAgentEventEffect` for id + NDJSON write, and
-`commitThenWriteTerminalEvent` / `commitThenWriteTerminalEventEffect` for terminal barriers.
+`writeDurableAgentEvent` for id + NDJSON write, and `commitThenWriteTerminalEvent` for terminal
+barriers.

@@ -150,10 +150,11 @@ active-run locking, stale-run guards, and cancellation behavior.
 ## Terminal barriers
 
 For durable host streams, terminal events are commit barriers. Emit live/progress events first,
-commit canonical host state, then write the terminal event, then close the writer:
+commit canonical host state, then write the terminal event. The surrounding workflow loop owns the
+single final stream close:
 
 ```txt
-live events -> host durable commit -> terminal event -> close
+live events -> host durable commit -> terminal event -> workflow-owned close
 ```
 
 This lets clients stop consuming at a protocol-terminal event and immediately revalidate or reconnect
@@ -169,14 +170,13 @@ const result = yield* commitThenWriteTerminalEvent({
   commit: persistState,
   write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
   writeCommitError: error =>
-    writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state }),
-  close: Effect.tryPromise({ try: () => writer.close(), catch: error => error })
+    writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state })
 })
 ```
 
 The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes
-the host-provided terminal error event instead. Terminal write failures still attempt `close`; close
-failures are returned separately and do not turn a successful durable commit into a failed commit.
+the host-provided terminal error event instead. The helper does not close writers; close once in the
+surrounding workflow loop or stream owner after terminal handling settles.
 
 ## Host responsibilities
 

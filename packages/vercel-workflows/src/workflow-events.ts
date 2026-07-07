@@ -42,18 +42,13 @@ export type WriteDurableAgentEventInput<Event extends object = object> =
     readonly writer: WritableStreamDefaultWriter<Uint8Array>
   }
 
-export type TerminalEventCloseResult =
-  | { readonly _tag: 'Closed' }
-  | { readonly _tag: 'CloseFailed'; readonly error: unknown }
-
 export type CommitThenWriteTerminalEventInput<
   TerminalEvent extends object,
   TerminalWriteResult,
   CommitErrorWriteResult,
   CommitError,
   TerminalWriteError,
-  CommitErrorWriteError,
-  CloseError
+  CommitErrorWriteError
 > = {
   readonly commit: Effect.Effect<void, CommitError>
   readonly terminal: TerminalEvent
@@ -61,31 +56,26 @@ export type CommitThenWriteTerminalEventInput<
   readonly writeCommitError: (
     error: unknown
   ) => Effect.Effect<CommitErrorWriteResult, CommitErrorWriteError>
-  readonly close: Effect.Effect<void, CloseError>
 }
 
 export type CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> =
   | {
       readonly _tag: 'Committed'
       readonly writeResult: TerminalWriteResult
-      readonly closeResult: TerminalEventCloseResult
     }
   | {
       readonly _tag: 'CommitFailed'
       readonly commitError: unknown
       readonly writeResult: CommitErrorWriteResult
-      readonly closeResult: TerminalEventCloseResult
     }
   | {
       readonly _tag: 'TerminalWriteFailed'
       readonly error: unknown
-      readonly closeResult: TerminalEventCloseResult
     }
   | {
       readonly _tag: 'CommitErrorWriteFailed'
       readonly commitError: unknown
       readonly error: unknown
-      readonly closeResult: TerminalEventCloseResult
     }
 
 const textEncoder = new TextEncoder()
@@ -136,62 +126,37 @@ export const writeDurableAgentEvent = <Event extends object>(
     return sequenced
   })
 
-const closedTerminalEventWriterResult = (): TerminalEventCloseResult => ({ _tag: 'Closed' })
-
-const closeFailedTerminalEventWriterResult = (error: unknown): TerminalEventCloseResult => ({
-  _tag: 'CloseFailed',
-  error
-})
-
 const committedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  writeResult: TerminalWriteResult,
-  closeResult: TerminalEventCloseResult
+  writeResult: TerminalWriteResult
 ): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
   _tag: 'Committed',
-  writeResult,
-  closeResult
+  writeResult
 })
 
 const commitFailedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
   commitError: unknown,
-  writeResult: CommitErrorWriteResult,
-  closeResult: TerminalEventCloseResult
+  writeResult: CommitErrorWriteResult
 ): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
   _tag: 'CommitFailed',
   commitError,
-  writeResult,
-  closeResult
+  writeResult
 })
 
 const terminalWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
-  error: unknown,
-  closeResult: TerminalEventCloseResult
+  error: unknown
 ): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
   _tag: 'TerminalWriteFailed',
-  error,
-  closeResult
+  error
 })
 
 const commitErrorWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
   commitError: unknown,
-  error: unknown,
-  closeResult: TerminalEventCloseResult
+  error: unknown
 ): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
   _tag: 'CommitErrorWriteFailed',
   commitError,
-  error,
-  closeResult
+  error
 })
-
-const closeTerminalEventWriterEffect = <CloseError>(
-  close: Effect.Effect<void, CloseError>
-): Effect.Effect<TerminalEventCloseResult, never> =>
-  close.pipe(
-    Effect.match({
-      onFailure: closeFailedTerminalEventWriterResult,
-      onSuccess: () => closedTerminalEventWriterResult()
-    })
-  )
 
 export const commitThenWriteTerminalEvent = <
   TerminalEvent extends object,
@@ -199,8 +164,7 @@ export const commitThenWriteTerminalEvent = <
   CommitErrorWriteResult,
   CommitError,
   TerminalWriteError,
-  CommitErrorWriteError,
-  CloseError
+  CommitErrorWriteError
 >(
   input: CommitThenWriteTerminalEventInput<
     TerminalEvent,
@@ -208,8 +172,7 @@ export const commitThenWriteTerminalEvent = <
     CommitErrorWriteResult,
     CommitError,
     TerminalWriteError,
-    CommitErrorWriteError,
-    CloseError
+    CommitErrorWriteError
   >
 ): Effect.Effect<
   CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>,
@@ -219,50 +182,26 @@ export const commitThenWriteTerminalEvent = <
     Effect.matchEffect({
       onFailure: commitError =>
         input.writeCommitError(commitError).pipe(
-          Effect.matchEffect({
+          Effect.match({
             onFailure: error =>
-              closeTerminalEventWriterEffect(input.close).pipe(
-                Effect.map(closeResult =>
-                  commitErrorWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
-                    commitError,
-                    error,
-                    closeResult
-                  )
-                )
+              commitErrorWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
+                commitError,
+                error
               ),
             onSuccess: writeResult =>
-              closeTerminalEventWriterEffect(input.close).pipe(
-                Effect.map(closeResult =>
-                  commitFailedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
-                    commitError,
-                    writeResult,
-                    closeResult
-                  )
-                )
+              commitFailedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
+                commitError,
+                writeResult
               )
           })
         ),
       onSuccess: () =>
         input.write(input.terminal).pipe(
-          Effect.matchEffect({
+          Effect.match({
             onFailure: error =>
-              closeTerminalEventWriterEffect(input.close).pipe(
-                Effect.map(closeResult =>
-                  terminalWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
-                    error,
-                    closeResult
-                  )
-                )
-              ),
+              terminalWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(error),
             onSuccess: writeResult =>
-              closeTerminalEventWriterEffect(input.close).pipe(
-                Effect.map(closeResult =>
-                  committedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
-                    writeResult,
-                    closeResult
-                  )
-                )
-              )
+              committedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(writeResult)
           })
         )
     })

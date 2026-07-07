@@ -23,9 +23,7 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `durableAgentEventId`                 | build `${streamId}:${turn}:${eventSequence}`       |
 | `sequenceDurableAgentEvent`           | add deterministic `eventId` without writing        |
 | `writeDurableAgentEvent`              | write sequenced NDJSON to a writer                 |
-| `writeDurableAgentEventEffect`        | Effect-native sequenced NDJSON writer              |
 | `commitThenWriteTerminalEvent`        | commit durable state before writing terminal event |
-| `commitThenWriteTerminalEventEffect`  | Effect-native terminal commit/write barrier        |
 
 ## Effect API exports
 
@@ -81,7 +79,8 @@ The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel ba
 | `SequenceDurableAgentEventInput`           | input for `sequenceDurableAgentEvent`    |
 | `SequencedDurableAgentEvent`               | event plus current/next sequence values  |
 | `WriteDurableAgentEventInput`              | sequenced event input plus stream writer |
-| `CommitThenWriteTerminalEventEffectInput`  | Effect-native terminal barrier input     |
+| `CommitThenWriteTerminalEventInput`        | terminal barrier input                    |
+| `CommitThenWriteTerminalEventResult`       | terminal barrier result union             |
 
 ## Run result tags
 
@@ -98,9 +97,9 @@ The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel ba
 
 | Tag                      | Meaning                                                                                     |
 | ------------------------ | ------------------------------------------------------------------------------------------- |
-| `Committed`              | commit, terminal write, and close path completed; close may report `CloseFailed` separately |
+| `Committed`              | commit succeeded and terminal write succeeded                                           |
 | `CommitFailed`           | commit failed and commit-error terminal write succeeded                                     |
 | `TerminalWriteFailed`    | commit succeeded but terminal write failed                                                  |
 | `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed                                        |
 
-`TerminalEventCloseResult` reports close status as `Closed` or `CloseFailed`.
+The terminal helper does not close streams. Close once from the surrounding workflow loop or stream owner.

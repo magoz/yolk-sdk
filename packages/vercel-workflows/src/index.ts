@@ -28,7 +28,6 @@ export type {
   VercelAgentWorkflowStepRetryPolicy,
   VercelAgentWorkflowToolBatchStepInput,
   VercelAgentWorkflowToolBatchStepResult,
-  TerminalEventCloseResult,
   WorkflowStepResult,
   WriteDurableAgentEventInput
 } from './workflow.ts'

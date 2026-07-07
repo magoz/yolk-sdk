@@ -33,6 +33,5 @@ export type {
   CommitThenWriteTerminalEventResult,
   SequenceDurableAgentEventInput,
   SequencedDurableAgentEvent,
-  TerminalEventCloseResult,
   WriteDurableAgentEventInput
 } from './workflow-events.ts'
