@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.41
+
+### Patch Changes
+
+- 6303c57: Remove terminal-event helper stream closing so workflow loop owns final close.
+
 ## 0.1.0-canary.40
 
 ### Patch Changes
