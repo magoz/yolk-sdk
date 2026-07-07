@@ -1,4 +1,9 @@
-export { documentPartFromTextFile, textFromBlob } from './attachments.ts'
+export {
+  documentPartFromTextFile,
+  documentPartFromTextFileEffect,
+  textFromBlob,
+  textFromBlobEffect
+} from './attachments.ts'
 export {
   appendAgentMessage,
   applyAgentEvent,

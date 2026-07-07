@@ -21,8 +21,13 @@ KnowledgeDocument
   origin
   content
   summary?
+  errorMessage?
+  reviewedAt?
+  metadata?
   status: processing | ready | error
   availability: pinned | searchable | archived
+  createdAt
+  updatedAt
 ```
 
 - `pinned`: host may inject into startup context and search.

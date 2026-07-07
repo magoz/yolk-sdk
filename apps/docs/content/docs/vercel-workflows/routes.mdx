@@ -59,7 +59,7 @@ export const tailProgram = (request: Request, runId: string) =>
   })
 ```
 
-Clients can use `streamAgentRunEventsUntilTerminal` with this route.
+Clients can use `streamAgentRunEventStreamUntilTerminal` with this route.
 
 ## Resume HITL
 
@@ -92,7 +92,7 @@ export const resumeProgram = (request: Request) =>
 
 The helper-compatible request body is `{ hitlResponses }`. The resume side must verify the authenticated user owns the run and the response matches a pending HITL request.
 
-If your resume route returns `202` with no body, do not use `streamAgentRunHitlResponseEventsUntilTerminal`. POST the resume yourself, then call `streamAgentRunEventsUntilTerminal` on the tail route.
+If your resume route returns `202` with no body, do not use `streamAgentRunHitlResponseEventStreamUntilTerminal`. POST the resume yourself, then call `streamAgentRunEventStreamUntilTerminal` on the tail route.
 
 ## Cancel a run
 
@@ -118,9 +118,9 @@ Import these from `@yolk-sdk/agent/client`.
 
 | Client API                                      | Route shape                                   |
 | ----------------------------------------------- | --------------------------------------------- |
-| `streamAgentEventsUntilTerminal`                | starts run and follows continuation headers   |
-| `streamAgentRunEventsUntilTerminal`             | reads an existing run tail                    |
-| `streamAgentRunHitlResponseEventsUntilTerminal` | resumes HITL and follows returned/tail chunks |
+| `streamAgentEventStreamUntilTerminal`                | starts run and follows continuation headers   |
+| `streamAgentRunEventStreamUntilTerminal`             | reads an existing run tail                    |
+| `streamAgentRunHitlResponseEventStreamUntilTerminal` | resumes HITL and follows returned/tail chunks |
 | `cancelAgentRun`                                | calls your cancel route                       |
 
 ## Headers

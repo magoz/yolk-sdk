@@ -35,7 +35,14 @@ Current Changesets config:
 
 ```json
 {
-  "fixed": [["@yolk-sdk/agent", "@yolk-sdk/mcp", "..."]],
+  "fixed": [[
+    "@yolk-sdk/agent",
+    "@yolk-sdk/connectors",
+    "@yolk-sdk/knowledge",
+    "@yolk-sdk/mcp",
+    "@yolk-sdk/sandbox",
+    "@yolk-sdk/vercel-workflows"
+  ]],
   "updateInternalDependencies": "patch",
   "ignore": ["@yolk-sdk/cloudflare-agent"],
   "access": "public",

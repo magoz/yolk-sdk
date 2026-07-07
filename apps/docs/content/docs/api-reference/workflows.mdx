@@ -23,7 +23,9 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `durableAgentEventId`                 | build `${streamId}:${turn}:${eventSequence}`       |
 | `sequenceDurableAgentEvent`           | add deterministic `eventId` without writing        |
 | `writeDurableAgentEvent`              | write sequenced NDJSON to a writer                 |
+| `writeDurableAgentEventEffect`        | Effect-native sequenced NDJSON writer              |
 | `commitThenWriteTerminalEvent`        | commit durable state before writing terminal event |
+| `commitThenWriteTerminalEventEffect`  | Effect-native terminal commit/write barrier        |
 
 ## Effect API exports
 
@@ -71,14 +73,15 @@ The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel ba
 
 ## Durable event types
 
-| Type                              | Meaning                                  |
-| --------------------------------- | ---------------------------------------- |
-| `DurableAgentEvent`               | JSON event with deterministic `eventId`  |
-| `DurableAgentEventIdInput`        | input for `durableAgentEventId`          |
-| `DurableAgentEventSequencerState` | current durable event sequence state     |
-| `SequenceDurableAgentEventInput`  | input for `sequenceDurableAgentEvent`    |
-| `SequencedDurableAgentEvent`      | event plus current/next sequence values  |
-| `WriteDurableAgentEventInput`     | sequenced event input plus stream writer |
+| Type                                       | Meaning                                  |
+| ------------------------------------------ | ---------------------------------------- |
+| `DurableAgentEvent`                        | JSON event with deterministic `eventId`  |
+| `DurableAgentEventIdInput`                 | input for `durableAgentEventId`          |
+| `DurableAgentEventSequencerState`          | current durable event sequence state     |
+| `SequenceDurableAgentEventInput`           | input for `sequenceDurableAgentEvent`    |
+| `SequencedDurableAgentEvent`               | event plus current/next sequence values  |
+| `WriteDurableAgentEventInput`              | sequenced event input plus stream writer |
+| `CommitThenWriteTerminalEventEffectInput`  | Effect-native terminal barrier input     |
 
 ## Run result tags
 

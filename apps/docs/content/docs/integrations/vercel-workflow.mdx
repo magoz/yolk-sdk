@@ -38,4 +38,6 @@ Write live events first, commit durable host state, then write terminal event an
 live events -> host durable commit -> terminal event -> close
 ```
 
-Use `sequenceDurableAgentEvent` for deterministic event ids without IO, `writeDurableAgentEvent` for id + NDJSON write, and `commitThenWriteTerminalEvent` for terminal barriers.
+Use `sequenceDurableAgentEvent` for deterministic event ids without IO,
+`writeDurableAgentEvent` / `writeDurableAgentEventEffect` for id + NDJSON write, and
+`commitThenWriteTerminalEvent` / `commitThenWriteTerminalEventEffect` for terminal barriers.

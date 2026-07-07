@@ -131,3 +131,4 @@ const result = await commitThenWriteTerminalEvent({
 ```
 
 The helper never writes success terminal before `commit` succeeds.
+Use `commitThenWriteTerminalEventEffect` when the barrier callbacks are already Effect-native.

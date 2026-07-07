@@ -1,6 +1,12 @@
 import { describe, expect, it } from '@effect/vitest'
+import { Effect } from 'effect'
 import { DocumentPart, inlineBase64AttachmentSource } from '@yolk-sdk/agent/protocol'
-import { documentPartFromTextFile, textFromBlob } from '../../src/client'
+import {
+  documentPartFromTextFile,
+  documentPartFromTextFileEffect,
+  textFromBlob,
+  textFromBlobEffect
+} from '../../src/client'
 
 describe('client attachment helpers', () => {
   it('builds document parts from text files without browser mime type', async () => {
@@ -24,4 +30,21 @@ describe('client attachment helpers', () => {
     await expect(documentPartFromTextFile(file)).resolves.toBeUndefined()
     await expect(documentPartFromTextFile(disguisedFile)).resolves.toBeUndefined()
   })
+
+  it.effect('exposes Effect-native text attachment helpers', () =>
+    Effect.gen(function* () {
+      const file = new File(['hello'], 'notes.txt', { type: '' })
+
+      const text = yield* textFromBlobEffect(file)
+      const part = yield* documentPartFromTextFileEffect(file)
+
+      expect(text).toBe('hello')
+      expect(part).toEqual(
+        DocumentPart.make({
+          source: inlineBase64AttachmentSource('aGVsbG8='),
+          mimeType: 'text/plain',
+          filename: 'notes.txt'
+        })
+      )
+    }))
 })

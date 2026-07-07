@@ -2,7 +2,7 @@
 
 Reusable agent stack. Domain-free below the app layer.
 
-## Stack
+## Private app/example stack
 
 | Category  | Technology                               |
 | --------- | ---------------------------------------- |
@@ -56,9 +56,9 @@ cp examples/next/.env.example examples/next/.env.local
 pnpm dev
 ```
 
-## Agent smoke test
+## Example app smoke test
 
-Current agent surfaces:
+Current `examples/next` agent surfaces:
 
 - runtime chooser at `/agent`
 - text + image/PDF + mic voice mode in `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`

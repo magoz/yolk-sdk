@@ -58,6 +58,8 @@ import {
 import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import {
+  documentPartFromTextFile,
+  documentPartFromTextFileEffect,
   initialAgentClientState,
   streamAgentEventStreamUntilTerminal,
   toolRunsFromHitlRequests
@@ -187,9 +189,9 @@ const message = UserMessage.make({
 })
 ```
 
-For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helper
-`documentPartFromTextFile` to create UTF-8 inline `DocumentPart` values without trusting filename
-extensions over explicit non-text MIME types.
+For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helpers
+`documentPartFromTextFile` / `documentPartFromTextFileEffect` to create UTF-8 inline
+`DocumentPart` values without trusting filename extensions over explicit non-text MIME types.
 
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
 `textImageDocumentModelCapabilities` so the loop rejects unsupported inputs before provider calls.
@@ -264,7 +266,9 @@ HITL is protocol-level, not UI-level:
 
 - Add `approval: { mode: 'manual' }` to a `ToolDef` to pause before execution.
 - `run` / `runRuntime` emit `ToolApprovalRequested` then `AgentAwaitingInput`.
-- Resume by passing `hitlResponses` or using client helpers like `submitToolApprovalResponse`.
+- Resume by passing `hitlResponses`, using `useAgentChat` methods like
+  `submitToolApprovalResponse` / `submitQuestionResponse`, or using client stream helpers like
+  `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
 - Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
 - Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON.

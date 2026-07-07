@@ -95,20 +95,20 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 
 | Export                                                                                                                                 | Purpose                                        |
 | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `streamAgentEventsUntilTerminal`                                                                                                       | start/consume HTTP stream until terminal event |
-| `streamAgentRunEventsUntilTerminal`                                                                                                    | consume durable run tail                       |
-| `streamAgentRunHitlResponseEventsUntilTerminal`                                                                                        | resume HITL and consume stream                 |
-| `streamAgentEvents`, `streamAgentEventStream`                                                                                          | one-shot NDJSON stream variants                |
-| `streamAgentRunEvents`, `streamAgentRunEventStream`                                                                                    | durable tail stream variants                   |
-| `streamAgentRunHitlResponseEvents`, `streamAgentRunHitlResponseEventStream`                                                            | durable HITL stream variants                   |
-| `streamCloudflareAgentEvents`, `streamCloudflareAgentEventStream`                                                                      | Cloudflare WebSocket stream helpers            |
+| `streamAgentEventStreamUntilTerminal`                                                                                                  | start/consume HTTP stream until terminal event |
+| `streamAgentRunEventStreamUntilTerminal`                                                                                               | consume durable run tail                       |
+| `streamAgentRunHitlResponseEventStreamUntilTerminal`                                                                                   | resume HITL and consume stream                 |
+| `streamAgentEventStream`                                                                                                               | one-shot NDJSON stream helper                  |
+| `streamAgentRunEventStream`                                                                                                            | durable tail stream helper                     |
+| `streamAgentRunHitlResponseEventStream`                                                                                                | durable HITL stream helper                     |
+| `streamCloudflareAgentEventStream`                                                                                                     | Cloudflare WebSocket stream helper             |
 | `collectAgentEvents`                                                                                                                   | collect a stream into an array                 |
-| `submitToolApprovalResponse`, `submitQuestionResponse`                                                                                 | client resume helpers                          |
+| `streamToolApprovalResponseEventStream`, `streamQuestionResponseEventStream`                                                           | client resume stream helpers                   |
 | `cancelAgentRun`                                                                                                                       | call host cancel endpoint                      |
 | `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers                   |
 | `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents`                                                                      | client reducer helpers                         |
 | `toolRunsFromHitlRequests`                                                                                                             | paused UI hydration                            |
-| `documentPartFromTextFile`                                                                                                             | browser file helper                            |
+| `documentPartFromTextFile`, `documentPartFromTextFileEffect`, `textFromBlob`, `textFromBlobEffect`                                    | browser file/blob helpers                      |
 | `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
 
 ## React

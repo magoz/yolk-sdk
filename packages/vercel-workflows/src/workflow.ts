@@ -7,10 +7,12 @@ export {
 } from './workflow-loop.ts'
 export {
   commitThenWriteTerminalEvent,
+  commitThenWriteTerminalEventEffect,
   durableAgentEventId,
   makeDurableAgentEventSequencerState,
   sequenceDurableAgentEvent,
-  writeDurableAgentEvent
+  writeDurableAgentEvent,
+  writeDurableAgentEventEffect
 } from './workflow-events.ts'
 export type {
   SerializableWorkflowState,
@@ -29,6 +31,7 @@ export type {
   DurableAgentEvent,
   DurableAgentEventIdInput,
   DurableAgentEventSequencerState,
+  CommitThenWriteTerminalEventEffectInput,
   CommitThenWriteTerminalEventInput,
   CommitThenWriteTerminalEventResult,
   SequenceDurableAgentEventInput,

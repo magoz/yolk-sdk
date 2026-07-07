@@ -8,9 +8,9 @@ Use `@yolk-sdk/agent/client` for transport helpers and `@yolk-sdk/agent/react` f
 ## Stream events from an endpoint
 
 ```ts
-import { streamAgentEventsUntilTerminal } from '@yolk-sdk/agent/client'
+import { streamAgentEventStreamUntilTerminal } from '@yolk-sdk/agent/client'
 
-for await (const event of streamAgentEventsUntilTerminal({
+for await (const event of streamAgentEventStreamUntilTerminal({
   endpoint: '/api/agent',
   sessionId: 'browser-session',
   messages

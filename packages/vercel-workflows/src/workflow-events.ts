@@ -1,3 +1,5 @@
+import { Effect } from 'effect'
+
 export type DurableAgentEventSequencerState = {
   readonly eventSequence: number
 }
@@ -54,6 +56,24 @@ export type CommitThenWriteTerminalEventInput<
   readonly write: (event: TerminalEvent) => Promise<TerminalWriteResult>
   readonly writeCommitError: (error: unknown) => Promise<CommitErrorWriteResult>
   readonly close: () => Promise<void>
+}
+
+export type CommitThenWriteTerminalEventEffectInput<
+  TerminalEvent extends object,
+  TerminalWriteResult,
+  CommitErrorWriteResult,
+  CommitError,
+  TerminalWriteError,
+  CommitErrorWriteError,
+  CloseError
+> = {
+  readonly commit: Effect.Effect<void, CommitError>
+  readonly terminal: TerminalEvent
+  readonly write: (event: TerminalEvent) => Effect.Effect<TerminalWriteResult, TerminalWriteError>
+  readonly writeCommitError: (
+    error: unknown
+  ) => Effect.Effect<CommitErrorWriteResult, CommitErrorWriteError>
+  readonly close: Effect.Effect<void, CloseError>
 }
 
 export type CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> =
@@ -115,26 +135,155 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 const encodeDurableAgentEventNdjson = <Event extends object>(event: DurableAgentEvent<Event>) =>
   textEncoder.encode(`${JSON.stringify(event)}\n`)
 
+export const writeDurableAgentEventEffect = <Event extends object>(
+  input: WriteDurableAgentEventInput<Event>
+): Effect.Effect<SequencedDurableAgentEvent<Event>, unknown> =>
+  Effect.gen(function* () {
+    const sequenced = sequenceDurableAgentEvent(input)
+    yield* Effect.tryPromise({
+      try: () => input.writer.write(encodeDurableAgentEventNdjson(sequenced.event)),
+      catch: cause => cause
+    })
+
+    return sequenced
+  })
+
 export const writeDurableAgentEvent = async <Event extends object>(
   input: WriteDurableAgentEventInput<Event>
-): Promise<SequencedDurableAgentEvent<Event>> => {
-  const sequenced = sequenceDurableAgentEvent(input)
-  await input.writer.write(encodeDurableAgentEventNdjson(sequenced.event))
+): Promise<SequencedDurableAgentEvent<Event>> =>
+  Effect.runPromise(writeDurableAgentEventEffect(input))
 
-  return sequenced
-}
+const closedTerminalEventWriterResult = (): TerminalEventCloseResult => ({ _tag: 'Closed' })
 
-const closeTerminalEventWriter = async (
-  close: () => Promise<void>
-): Promise<TerminalEventCloseResult> => {
-  try {
-    await close()
+const closeFailedTerminalEventWriterResult = (error: unknown): TerminalEventCloseResult => ({
+  _tag: 'CloseFailed',
+  error
+})
 
-    return { _tag: 'Closed' }
-  } catch (error) {
-    return { _tag: 'CloseFailed', error }
-  }
-}
+const committedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
+  writeResult: TerminalWriteResult,
+  closeResult: TerminalEventCloseResult
+): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
+  _tag: 'Committed',
+  writeResult,
+  closeResult
+})
+
+const commitFailedTerminalResult = <TerminalWriteResult, CommitErrorWriteResult>(
+  commitError: unknown,
+  writeResult: CommitErrorWriteResult,
+  closeResult: TerminalEventCloseResult
+): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
+  _tag: 'CommitFailed',
+  commitError,
+  writeResult,
+  closeResult
+})
+
+const terminalWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
+  error: unknown,
+  closeResult: TerminalEventCloseResult
+): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
+  _tag: 'TerminalWriteFailed',
+  error,
+  closeResult
+})
+
+const commitErrorWriteFailedResult = <TerminalWriteResult, CommitErrorWriteResult>(
+  commitError: unknown,
+  error: unknown,
+  closeResult: TerminalEventCloseResult
+): CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult> => ({
+  _tag: 'CommitErrorWriteFailed',
+  commitError,
+  error,
+  closeResult
+})
+
+const closeTerminalEventWriterEffect = <CloseError>(
+  close: Effect.Effect<void, CloseError>
+): Effect.Effect<TerminalEventCloseResult, never> =>
+  close.pipe(
+    Effect.match({
+      onFailure: closeFailedTerminalEventWriterResult,
+      onSuccess: () => closedTerminalEventWriterResult()
+    })
+  )
+
+export const commitThenWriteTerminalEventEffect = <
+  TerminalEvent extends object,
+  TerminalWriteResult,
+  CommitErrorWriteResult,
+  CommitError,
+  TerminalWriteError,
+  CommitErrorWriteError,
+  CloseError
+>(
+  input: CommitThenWriteTerminalEventEffectInput<
+    TerminalEvent,
+    TerminalWriteResult,
+    CommitErrorWriteResult,
+    CommitError,
+    TerminalWriteError,
+    CommitErrorWriteError,
+    CloseError
+  >
+): Effect.Effect<
+  CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>,
+  never
+> =>
+  input.commit.pipe(
+    Effect.matchEffect({
+      onFailure: commitError =>
+        input.writeCommitError(commitError).pipe(
+          Effect.matchEffect({
+            onFailure: error =>
+              closeTerminalEventWriterEffect(input.close).pipe(
+                Effect.map(closeResult =>
+                  commitErrorWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
+                    commitError,
+                    error,
+                    closeResult
+                  )
+                )
+              ),
+            onSuccess: writeResult =>
+              closeTerminalEventWriterEffect(input.close).pipe(
+                Effect.map(closeResult =>
+                  commitFailedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
+                    commitError,
+                    writeResult,
+                    closeResult
+                  )
+                )
+              )
+          })
+        ),
+      onSuccess: () =>
+        input.write(input.terminal).pipe(
+          Effect.matchEffect({
+            onFailure: error =>
+              closeTerminalEventWriterEffect(input.close).pipe(
+                Effect.map(closeResult =>
+                  terminalWriteFailedResult<TerminalWriteResult, CommitErrorWriteResult>(
+                    error,
+                    closeResult
+                  )
+                )
+              ),
+            onSuccess: writeResult =>
+              closeTerminalEventWriterEffect(input.close).pipe(
+                Effect.map(closeResult =>
+                  committedTerminalResult<TerminalWriteResult, CommitErrorWriteResult>(
+                    writeResult,
+                    closeResult
+                  )
+                )
+              )
+          })
+        )
+    })
+  )
 
 export const commitThenWriteTerminalEvent = async <
   TerminalEvent extends object,
@@ -146,30 +295,27 @@ export const commitThenWriteTerminalEvent = async <
     TerminalWriteResult,
     CommitErrorWriteResult
   >
-): Promise<CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>> => {
-  try {
-    await input.commit()
-  } catch (commitError) {
-    try {
-      const writeResult = await input.writeCommitError(commitError)
-      const closeResult = await closeTerminalEventWriter(input.close)
-
-      return { _tag: 'CommitFailed', commitError, writeResult, closeResult }
-    } catch (error) {
-      const closeResult = await closeTerminalEventWriter(input.close)
-
-      return { _tag: 'CommitErrorWriteFailed', commitError, error, closeResult }
-    }
-  }
-
-  try {
-    const writeResult = await input.write(input.terminal)
-    const closeResult = await closeTerminalEventWriter(input.close)
-
-    return { _tag: 'Committed', writeResult, closeResult }
-  } catch (error) {
-    const closeResult = await closeTerminalEventWriter(input.close)
-
-    return { _tag: 'TerminalWriteFailed', error, closeResult }
-  }
-}
+): Promise<CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>> =>
+  Effect.runPromise(
+    commitThenWriteTerminalEventEffect({
+      terminal: input.terminal,
+      commit: Effect.tryPromise({
+        try: input.commit,
+        catch: cause => cause
+      }),
+      write: event =>
+        Effect.tryPromise({
+          try: () => input.write(event),
+          catch: cause => cause
+        }),
+      writeCommitError: error =>
+        Effect.tryPromise({
+          try: () => input.writeCommitError(error),
+          catch: cause => cause
+        }),
+      close: Effect.tryPromise({
+        try: input.close,
+        catch: cause => cause
+      })
+    })
+  )

@@ -287,7 +287,7 @@ describe('collectAgentEvents', () => {
     const events = await collectEventStream(
       streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
-        idleReconnect: { idleTimeoutMs: 25, maxAttempts: 1 },
+        idleReconnect: { idleTimeoutMs: 250, maxAttempts: 1 },
         httpClientLayer: makeHttpClientLayerFromResponses(
           [
             hangingEventResponse([AgentStart.make({})]),
@@ -314,7 +314,7 @@ describe('collectAgentEvents', () => {
         endpoint: '/api/agent',
         sessionId: 'session_1',
         messages,
-        idleReconnect: { idleTimeoutMs: 25, maxAttempts: 1 },
+        idleReconnect: { idleTimeoutMs: 250, maxAttempts: 1 },
         httpClientLayer: makeHttpClientLayerFromResponses(
           [
             hangingEventResponse([AgentStart.make({})], {

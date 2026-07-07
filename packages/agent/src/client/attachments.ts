@@ -43,7 +43,7 @@ const textFromFileReaderEffect = (blob: Blob) =>
     return Effect.sync(removeListeners)
   })
 
-const textFromBlobEffect = (blob: Blob) => {
+export const textFromBlobEffect = (blob: Blob) => {
   if (typeof blob.text === 'function') {
     return Effect.tryPromise({
       try: () => blob.text(),
@@ -56,7 +56,7 @@ const textFromBlobEffect = (blob: Blob) => {
 
 export const textFromBlob = (blob: Blob) => Effect.runPromise(textFromBlobEffect(blob))
 
-const documentPartFromTextFileEffect = (
+export const documentPartFromTextFileEffect = (
   file: File,
   options?: {
     readonly title?: string

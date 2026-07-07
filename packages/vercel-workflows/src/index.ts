@@ -1,5 +1,6 @@
 export {
   commitThenWriteTerminalEvent,
+  commitThenWriteTerminalEventEffect,
   durableAgentEventId,
   defaultMaxWorkflowTurns,
   makeDurableAgentEventSequencerState,
@@ -8,9 +9,11 @@ export {
   runVercelAgentWorkflow,
   sequenceDurableAgentEvent,
   settleWorkflowStep,
-  writeDurableAgentEvent
+  writeDurableAgentEvent,
+  writeDurableAgentEventEffect
 } from './workflow.ts'
 export type {
+  CommitThenWriteTerminalEventEffectInput,
   CommitThenWriteTerminalEventInput,
   CommitThenWriteTerminalEventResult,
   DurableAgentEvent,

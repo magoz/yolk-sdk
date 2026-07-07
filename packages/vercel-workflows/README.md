@@ -25,10 +25,12 @@ Import Workflow APIs from the package root:
 ```ts
 import {
   commitThenWriteTerminalEvent,
+  commitThenWriteTerminalEventEffect,
   makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
   runVercelAgentWorkflow,
-  writeDurableAgentEvent
+  writeDurableAgentEvent,
+  writeDurableAgentEventEffect
 } from '@yolk-sdk/vercel-workflows'
 ```
 
@@ -140,6 +142,8 @@ like old replayed events. Keep `eventSequence` in Workflow state and reset it wh
 logical stream. Resume route reads should use `startIndex` when available. Host apps still own
 active-run locking, stale-run guards, and cancellation behavior.
 
+Use `writeDurableAgentEventEffect` when the writer path is already Effect-native.
+
 ## Terminal barriers
 
 For durable host streams, terminal events are commit barriers. Emit live/progress events first,
@@ -170,6 +174,8 @@ const result = await commitThenWriteTerminalEvent({
 The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes
 the host-provided terminal error event instead. Terminal write failures still attempt `close`; close
 failures are returned separately and do not turn a successful durable commit into a failed commit.
+
+Use `commitThenWriteTerminalEventEffect` for the same barrier with Effect callbacks.
 
 ## Host responsibilities
 

@@ -25,6 +25,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Workflow inputs/state use `unknown` wire payloads after host encoding.
 - Awaiting-input state stays `unknown` payloads; host app owns HITL hook tokens and response validation.
 - Durable event helpers are generic over JSON-serializable objects; do not couple this package to `AgentEvent`.
+- Promise and Effect durable event helpers expose the same sequencing/barrier semantics; neither owns host storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.
 - Terminal durable event helpers model commit-before-write ordering only; hosts own persistence and terminal error event shape.
