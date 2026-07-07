@@ -16,7 +16,7 @@ Release PRs:
 - Include only generated release files: package versions, changelogs, lockfile, consumed changesets, `.changeset/pre.json`.
 - No feature code.
 - Merge/push to `main`, then publish manually or by approved agent `gh` trigger.
-- Do not run the action from a commit that only adds `.changeset/*.md`; it will republish existing versions and 403.
+- Do not run the action from a commit that only adds `.changeset/*.md`; it has no release-prep output to publish.
 
 After successful release prep:
 
@@ -44,17 +44,18 @@ pnpm test:run
 
 Then inspect, commit, push after explicit approval.
 
-Before any publish trigger, verify with the unpublished-version check from `SKILL.md`:
+Before any publish trigger, verify version/tag state with the check from `SKILL.md`:
 
-- public package versions changed from previously published canary/latest
+- normal publishes have unpublished public package versions
+- already-published package versions are explicit partial retry/tag repair only
+- `v<version>` does not exist
 - changelog entries generated
 - consumed changeset ids recorded in `.changeset/pre.json`
-- no package version to publish already exists on npm
 
 ## GitHub Actions publish steps
 
 1. Ensure release prep is committed and pushed to `main`.
-2. Confirm package versions are unpublished on npm.
+2. Confirm version/tag state with the `SKILL.md` checker.
 3. Get explicit user approval to publish.
 4. Trigger manually or by approved agent command.
 
@@ -86,9 +87,9 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
-verify unpublished package versions
+verify lockstep version and missing git tag
 pnpm -r --filter './packages/*' pack --pack-destination .release
-npm publish .release/*.tgz --tag <tag> --access public
+npm publish each unpublished tarball --tag <tag> --access public
 git tag -a v<version> && git push origin v<version>
 ```
 
@@ -96,10 +97,14 @@ Verify after action completes:
 
 ```bash
 npm view @yolk-sdk/agent dist-tags
-npm view @yolk-sdk/sandbox dist-tags
+npm view @yolk-sdk/mcp dist-tags
+npm view @yolk-sdk/knowledge dist-tags
 npm view @yolk-sdk/connectors dist-tags
+npm view @yolk-sdk/sandbox dist-tags
+npm view @yolk-sdk/vercel-workflows dist-tags
 git fetch --tags
-git tag --list 'v*' --sort=-v:refname | head -n 5
+git tag --list 'v<version>'
+git ls-remote --tags origin 'refs/tags/v<version>'
 ```
 
 Preconditions:
@@ -107,7 +112,8 @@ Preconditions:
 - release prep commit is on `main`
 - release prep includes package version bumps and changelog entries, not just changesets
 - explicit user approval was given before any `gh workflow run`
-- every public package version is unpublished
+- normal publishes have at least one unpublished public package version; all-published runs are missing-tag repair only
+- `v<version>` does not exist
 - publish target tag is `canary` unless stable approved
 - all public versions are lockstep
 - working tree state was clean before release prep
@@ -145,8 +151,8 @@ Current workflow policy:
 - Manual `workflow_dispatch` only.
 - Uses `contents: write` for git tags and `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
 - Installs/builds/tests with `pnpm`.
-- Fails before publish if package versions already exist on npm.
 - Fails before publish if `v<version>` already exists.
+- Skips package tarballs whose exact `name@version` already exists on npm, so partial retries and missing-tag repair reuse the same version.
 - Packs package artifacts with `pnpm pack`.
 - Publishes tarballs with npm CLI, because npm trusted publishing is the supported OIDC path.
 - Tags the published commit as `v<version>` after successful publish.

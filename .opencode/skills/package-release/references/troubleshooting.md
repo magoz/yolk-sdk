@@ -58,7 +58,7 @@ If uncertain, stop and ask before rerunning publish.
 
 ## Package accidentally still private
 
-Symptom: `changeset publish` skips package.
+Symptom: GitHub Action omits a public package from the publish set or npm refuses the tarball as private.
 
 Fix:
 
@@ -125,17 +125,18 @@ Fix:
 
 ## Action says no new packages
 
-Cause: package versions already exist on npm, or `pnpm changeset:version` produced no bump.
+Cause: package versions already exist on npm, or `pnpm changeset:version` produced no bump. If `v<version>` is missing, the same workflow can still repair the tag.
 
 Fix:
 
 - Check pending `.changeset/*.md` before versioning.
 - Check package versions vs npm dist-tags.
+- If this is missing-tag repair, rerun the same workflow and do not bump versions.
 - Add/repair changeset release notes, run version prep again, validate, commit, push, rerun action.
 
 ## npm 403 cannot publish over existing version
 
-Cause: GitHub Action tried to publish a package version that already exists on npm.
+Cause: GitHub Action tried to publish a package version that already exists on npm. Current workflow skips these tarballs; treat this as a guard regression or legacy run.
 
 Most common cause: pushed only a `.changeset/*.md`, then ran action without `pnpm changeset:version` output committed.
 
@@ -155,5 +156,4 @@ Fix:
 
 - Check `contents: write` in `.github/workflows/publish.yml`.
 - Check whether `v<version>` already exists.
-- If publish succeeded and tag is missing, create the tag on the published commit and push it.
-- Do not rerun publish just to create a tag.
+- If publish succeeded and tag is missing, rerun the same workflow; already-published tarballs are skipped and the tag is created.

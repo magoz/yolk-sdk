@@ -49,10 +49,8 @@ class FakeSdkRun<TResult> implements VercelWorkflowsSdkRun<TResult> {
     return new FakeWorkflowReadableStream<Chunk>(this.tailIndex)
   }
 
-  cancel() {
+  readonly cancel = async () => {
     this.recordCancel(this.runId)
-
-    return Promise.resolve()
   }
 }
 
@@ -81,11 +79,9 @@ class RecordingWorkflowSdk implements VercelWorkflowsSdkClient {
   }
 
   getRun<TResult>(runId: string) {
-    const returnValue = new Promise<TResult>(() => undefined)
-
-    return new FakeSdkRun(
+    return new FakeSdkRun<TResult>(
       runId,
-      returnValue,
+      new Promise<TResult>(() => {}),
       'running',
       3,
       read => this.reads.push(read),
@@ -93,10 +89,8 @@ class RecordingWorkflowSdk implements VercelWorkflowsSdkClient {
     )
   }
 
-  resumeHook(token: string, payload: unknown) {
+  async resumeHook(token: string, payload: unknown) {
     this.resumedHooks.push({ token, payload })
-
-    return Promise.resolve({ token })
   }
 }
 

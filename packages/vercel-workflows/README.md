@@ -25,12 +25,10 @@ Import Workflow APIs from the package root:
 ```ts
 import {
   commitThenWriteTerminalEvent,
-  commitThenWriteTerminalEventEffect,
   makeDurableAgentEventSequencerState,
   noWorkflowStepRetry,
   runVercelAgentWorkflow,
-  writeDurableAgentEvent,
-  writeDurableAgentEventEffect
+  writeDurableAgentEvent
 } from '@yolk-sdk/vercel-workflows'
 ```
 
@@ -73,23 +71,30 @@ Host apps keep concrete Workflow directives local and pass them into the package
 
 ```ts
 import { createHook } from 'workflow'
+import { Effect } from 'effect'
 import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows'
+
+const workflowStep = <A>(body: () => Promise<A>) =>
+  Effect.tryPromise({ try: body, catch: error => error })
 
 export async function runAgentWorkflow(input: { request: unknown; context: unknown }) {
   'use workflow'
 
-  return await runVercelAgentWorkflow({
-    input,
-    runModelStep,
-    runToolBatchStep,
-    closeStream,
-    writeError,
-    awaitInput: async awaitingInput => {
-      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+  return await Effect.runPromise(
+    runVercelAgentWorkflow({
+      input,
+      runModelStep: input => workflowStep(() => runModelStep(input)),
+      runToolBatchStep: input => workflowStep(() => runToolBatchStep(input)),
+      closeStream: workflowStep(closeStream),
+      writeError: error => workflowStep(() => writeError(error)),
+      awaitInput: awaitingInput =>
+        workflowStep(async () => {
+          using hook = createHook<unknown>({ token: awaitingInput.hookToken })
 
-      return await hook
-    }
-  })
+          return await hook
+        })
+    })
+  )
 }
 ```
 
@@ -124,7 +129,7 @@ Use `writeDurableAgentEvent` to assign deterministic ids and write NDJSON:
 
 ```ts
 const state = makeDurableAgentEventSequencerState(eventSequence)
-const sequenced = await writeDurableAgentEvent({
+const sequenced = yield* writeDurableAgentEvent({
   writer,
   event,
   streamId: `workflow:${runId}`,
@@ -141,8 +146,6 @@ run (for example `workflow:${runId}`), not just one route or feature. Replay-saf
 like old replayed events. Keep `eventSequence` in Workflow state and reset it when starting a fresh
 logical stream. Resume route reads should use `startIndex` when available. Host apps still own
 active-run locking, stale-run guards, and cancellation behavior.
-
-Use `writeDurableAgentEventEffect` when the writer path is already Effect-native.
 
 ## Terminal barriers
 
@@ -161,21 +164,19 @@ Use `commitThenWriteTerminalEvent` when a step must commit host state before wri
 event:
 
 ```ts
-const result = await commitThenWriteTerminalEvent({
+const result = yield* commitThenWriteTerminalEvent({
   terminal,
-  commit: () => persistState(),
+  commit: persistState,
   write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
   writeCommitError: error =>
     writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state }),
-  close: () => writer.close()
+  close: Effect.tryPromise({ try: () => writer.close(), catch: error => error })
 })
 ```
 
 The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes
 the host-provided terminal error event instead. Terminal write failures still attempt `close`; close
 failures are returned separately and do not turn a successful durable commit into a failed commit.
-
-Use `commitThenWriteTerminalEventEffect` for the same barrier with Effect callbacks.
 
 ## Host responsibilities
 

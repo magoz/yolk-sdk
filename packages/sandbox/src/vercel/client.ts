@@ -1,4 +1,4 @@
-import { Context, Layer } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 import {
   APIError,
   Sandbox as VercelSdkSandbox,
@@ -21,15 +21,15 @@ export type VercelCommandSignal = 'SIGTERM' | 'SIGKILL'
 export type VercelFinishedCommand = {
   readonly id: string
   readonly exitCode: number
-  readonly output: () => Promise<VercelCommandOutput>
+  readonly output: Effect.Effect<VercelCommandOutput, unknown>
 }
 
 export type VercelDetachedCommand = {
   readonly id: string
   readonly exitCode: number | null
-  readonly wait: () => Promise<VercelFinishedCommand>
-  readonly kill: (signal: VercelCommandSignal) => Promise<void>
-  readonly output: () => Promise<VercelCommandOutput>
+  readonly wait: Effect.Effect<VercelFinishedCommand, unknown>
+  readonly kill: (signal: VercelCommandSignal) => Effect.Effect<void, unknown>
+  readonly output: Effect.Effect<VercelCommandOutput, unknown>
 }
 
 export type VercelSandboxFile = {
@@ -64,17 +64,19 @@ export type VercelSandboxGetInput = {
 
 export type VercelSandboxHandle = {
   readonly name: string
-  readonly writeFiles: (files: ReadonlyArray<VercelSandboxFile>) => Promise<void>
-  readonly runDetachedCommand: (input: VercelRunCommandInput) => Promise<VercelDetachedCommand>
-  readonly getCommand: (id: string) => Promise<VercelDetachedCommand>
-  readonly extendTimeout: (durationMs: number) => Promise<void>
-  readonly delete: () => Promise<void>
+  readonly writeFiles: (files: ReadonlyArray<VercelSandboxFile>) => Effect.Effect<void, unknown>
+  readonly runDetachedCommand: (
+    input: VercelRunCommandInput
+  ) => Effect.Effect<VercelDetachedCommand, unknown>
+  readonly getCommand: (id: string) => Effect.Effect<VercelDetachedCommand, unknown>
+  readonly extendTimeout: (durationMs: number) => Effect.Effect<void, unknown>
+  readonly delete: Effect.Effect<void, unknown>
   readonly domain: (port: number) => string
 }
 
 export type VercelSandboxClientApi = {
-  readonly get: (input: VercelSandboxGetInput) => Promise<VercelSandboxHandle | null>
-  readonly create: (input: VercelSandboxCreateInput) => Promise<VercelSandboxHandle>
+  readonly get: (input: VercelSandboxGetInput) => Effect.Effect<VercelSandboxHandle | null, unknown>
+  readonly create: (input: VercelSandboxCreateInput) => Effect.Effect<VercelSandboxHandle, unknown>
 }
 
 export class VercelSandboxClient extends Context.Service<
@@ -85,45 +87,57 @@ export class VercelSandboxClient extends Context.Service<
 export const isVercelMissingSandboxError = (error: unknown) =>
   error instanceof APIError && (error.response.status === 404 || error.response.status === 410)
 
-const commandOutput = (command: Command | CommandFinished): Promise<VercelCommandOutput> =>
-  Promise.all([command.stdout(), command.stderr()]).then(([stdout, stderr]) => ({ stdout, stderr }))
+const tryVercelPromise = <A>(body: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: body,
+    catch: error => error
+  })
+
+const commandOutput = (command: Command | CommandFinished): Effect.Effect<VercelCommandOutput, unknown> =>
+  Effect.all({
+    stdout: tryVercelPromise(() => command.stdout()),
+    stderr: tryVercelPromise(() => command.stderr())
+  })
 
 const toFinishedCommand = (command: CommandFinished): VercelFinishedCommand => ({
   id: command.cmdId,
   exitCode: command.exitCode,
-  output: () => commandOutput(command)
+  output: commandOutput(command)
 })
 
 const toDetachedCommand = (command: Command): VercelDetachedCommand => ({
   id: command.cmdId,
   exitCode: command.exitCode,
-  wait: () => command.wait().then(toFinishedCommand),
-  kill: signal => command.kill(signal),
-  output: () => commandOutput(command)
+  wait: tryVercelPromise(() => command.wait()).pipe(Effect.map(toFinishedCommand)),
+  kill: signal => tryVercelPromise(() => command.kill(signal)),
+  output: commandOutput(command)
 })
 
 const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
   name: sandbox.name,
   writeFiles: files =>
-    sandbox.writeFiles(
-      files.map(file => ({
-        path: file.path,
-        content: file.content,
-        ...(file.mode === undefined ? {} : { mode: file.mode })
-      }))
+    tryVercelPromise(() =>
+      sandbox.writeFiles(
+        files.map(file => ({
+          path: file.path,
+          content: file.content,
+          ...(file.mode === undefined ? {} : { mode: file.mode })
+        }))
+      )
     ),
   runDetachedCommand: input =>
-    sandbox
-      .runCommand({
+    tryVercelPromise(() =>
+      sandbox.runCommand({
         cmd: input.cmd,
         args: input.args === undefined ? [] : [...input.args],
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         detached: true
       })
-      .then(toDetachedCommand),
-  getCommand: id => sandbox.getCommand(id).then(toDetachedCommand),
-  extendTimeout: durationMs => sandbox.extendTimeout(durationMs).then(() => undefined),
-  delete: () => sandbox.delete().then(() => undefined),
+    ).pipe(Effect.map(toDetachedCommand)),
+  getCommand: id => tryVercelPromise(() => sandbox.getCommand(id)).pipe(Effect.map(toDetachedCommand)),
+  extendTimeout: durationMs =>
+    tryVercelPromise(() => sandbox.extendTimeout(durationMs)).pipe(Effect.asVoid),
+  delete: tryVercelPromise(() => sandbox.delete()).pipe(Effect.asVoid),
   domain: port => sandbox.domain(port)
 })
 
@@ -222,15 +236,16 @@ export const VercelSandboxClientLive = Layer.succeed(
   VercelSandboxClient,
   VercelSandboxClient.of({
     get: input =>
-      VercelSdkSandbox.get({ name: input.name })
-        .then(toHandle)
-        .catch(error => {
+      tryVercelPromise(() => VercelSdkSandbox.get({ name: input.name })).pipe(
+        Effect.map(toHandle),
+        Effect.catch((error: unknown) => {
           if (isVercelMissingSandboxError(error)) {
-            return null
+            return Effect.succeed(null)
           }
 
-          throw error
-        }),
-    create: input => createSandbox(input).then(toHandle)
+          return Effect.fail(error)
+        })
+      ),
+    create: input => tryVercelPromise(() => createSandbox(input)).pipe(Effect.map(toHandle))
   })
 )

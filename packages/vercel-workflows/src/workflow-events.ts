@@ -49,18 +49,6 @@ export type TerminalEventCloseResult =
 export type CommitThenWriteTerminalEventInput<
   TerminalEvent extends object,
   TerminalWriteResult,
-  CommitErrorWriteResult
-> = {
-  readonly commit: () => Promise<void>
-  readonly terminal: TerminalEvent
-  readonly write: (event: TerminalEvent) => Promise<TerminalWriteResult>
-  readonly writeCommitError: (error: unknown) => Promise<CommitErrorWriteResult>
-  readonly close: () => Promise<void>
-}
-
-export type CommitThenWriteTerminalEventEffectInput<
-  TerminalEvent extends object,
-  TerminalWriteResult,
   CommitErrorWriteResult,
   CommitError,
   TerminalWriteError,
@@ -135,7 +123,7 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 const encodeDurableAgentEventNdjson = <Event extends object>(event: DurableAgentEvent<Event>) =>
   textEncoder.encode(`${JSON.stringify(event)}\n`)
 
-export const writeDurableAgentEventEffect = <Event extends object>(
+export const writeDurableAgentEvent = <Event extends object>(
   input: WriteDurableAgentEventInput<Event>
 ): Effect.Effect<SequencedDurableAgentEvent<Event>, unknown> =>
   Effect.gen(function* () {
@@ -147,11 +135,6 @@ export const writeDurableAgentEventEffect = <Event extends object>(
 
     return sequenced
   })
-
-export const writeDurableAgentEvent = async <Event extends object>(
-  input: WriteDurableAgentEventInput<Event>
-): Promise<SequencedDurableAgentEvent<Event>> =>
-  Effect.runPromise(writeDurableAgentEventEffect(input))
 
 const closedTerminalEventWriterResult = (): TerminalEventCloseResult => ({ _tag: 'Closed' })
 
@@ -210,7 +193,7 @@ const closeTerminalEventWriterEffect = <CloseError>(
     })
   )
 
-export const commitThenWriteTerminalEventEffect = <
+export const commitThenWriteTerminalEvent = <
   TerminalEvent extends object,
   TerminalWriteResult,
   CommitErrorWriteResult,
@@ -219,7 +202,7 @@ export const commitThenWriteTerminalEventEffect = <
   CommitErrorWriteError,
   CloseError
 >(
-  input: CommitThenWriteTerminalEventEffectInput<
+  input: CommitThenWriteTerminalEventInput<
     TerminalEvent,
     TerminalWriteResult,
     CommitErrorWriteResult,
@@ -282,40 +265,5 @@ export const commitThenWriteTerminalEventEffect = <
               )
           })
         )
-    })
-  )
-
-export const commitThenWriteTerminalEvent = async <
-  TerminalEvent extends object,
-  TerminalWriteResult,
-  CommitErrorWriteResult
->(
-  input: CommitThenWriteTerminalEventInput<
-    TerminalEvent,
-    TerminalWriteResult,
-    CommitErrorWriteResult
-  >
-): Promise<CommitThenWriteTerminalEventResult<TerminalWriteResult, CommitErrorWriteResult>> =>
-  Effect.runPromise(
-    commitThenWriteTerminalEventEffect({
-      terminal: input.terminal,
-      commit: Effect.tryPromise({
-        try: input.commit,
-        catch: cause => cause
-      }),
-      write: event =>
-        Effect.tryPromise({
-          try: () => input.write(event),
-          catch: cause => cause
-        }),
-      writeCommitError: error =>
-        Effect.tryPromise({
-          try: () => input.writeCommitError(error),
-          catch: cause => cause
-        }),
-      close: Effect.tryPromise({
-        try: input.close,
-        catch: cause => cause
-      })
     })
   )

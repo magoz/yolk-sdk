@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.40
+
+### Patch Changes
+
+- Make public client, Workflow, and sandbox helpers Effect-native.
+
 ## 0.1.0-canary.39
 
 ### Patch Changes

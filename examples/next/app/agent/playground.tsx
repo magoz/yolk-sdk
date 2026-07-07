@@ -1032,11 +1032,11 @@ export function AgentPlayground({
     const endpoint = `/api/agent/workflow/${encodeURIComponent(runId)}`
     recordActivity({ title: 'Workflow cancel requested', detail: runId, tone: 'neutral' })
 
-    cancelAgentRun({ endpoint })
+    Effect.runPromise(cancelAgentRun({ endpoint }))
       .then(() => {
         recordActivity({ title: 'Workflow canceled', detail: runId, tone: 'success' })
       })
-      .catch(error => {
+      .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Workflow cancel failed'
         recordActivity({ title: 'Workflow cancel failed', detail: message, tone: 'error' })
       })

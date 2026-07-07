@@ -67,29 +67,44 @@ pnpm changeset:version
    - `pnpm-lock.yaml` when changed.
    - `.changeset/pre.json` and removed consumed changesets.
    - No feature code, env files, `dist`, `.next`, `.turbo`, coverage.
-   - Confirm package versions advanced beyond npm-published versions.
+   - Confirm normal releases have unpublished package versions; already-published versions are partial retry/tag repair only.
    - Confirm `v<version>` tag does not already exist.
 
 ```bash
 node - <<'NODE'
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
+const packages = []
 for (const d of fs.readdirSync('packages')) {
   const p = `packages/${d}/package.json`
   if (!fs.existsSync(p)) continue
   const pkg = JSON.parse(fs.readFileSync(p, 'utf8'))
   if (!pkg.name?.startsWith('@yolk-sdk/') || pkg.private) continue
-  let versions = '[]'
+  packages.push(pkg)
+}
+const versions = [...new Set(packages.map((pkg) => pkg.version))]
+if (versions.length !== 1) throw new Error(`Versions not lockstep: ${versions.join(', ')}`)
+const publishedPackages = []
+const unpublishedPackages = []
+for (const pkg of packages) {
+  let publishedVersionsJson = '[]'
   try {
-    versions = execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' })
+    publishedVersionsJson = execFileSync('npm', ['view', pkg.name, 'versions', '--json'], { encoding: 'utf8' })
   } catch (error) {
     if (!String(error).includes('E404')) throw error
   }
-  if (JSON.parse(versions).includes(pkg.version)) {
-    throw new Error(`${pkg.name}@${pkg.version} already published`)
+  if (JSON.parse(publishedVersionsJson).includes(pkg.version)) {
+    publishedPackages.push(`${pkg.name}@${pkg.version}`)
+  } else {
+    unpublishedPackages.push(`${pkg.name}@${pkg.version}`)
   }
-  console.log(`${pkg.name}@${pkg.version} ok`)
 }
+const tag = `v${versions[0]}`
+const refs = execFileSync('git', ['ls-remote', '--tags', 'origin', tag], { encoding: 'utf8' }).trim()
+if (refs.length > 0) throw new Error(`${tag} already exists`)
+console.log(`unpublished:\n${unpublishedPackages.map((pkg) => `- ${pkg}`).join('\n') || '- none'}`)
+console.log(`already published:\n${publishedPackages.map((pkg) => `- ${pkg}`).join('\n') || '- none'}`)
+if (unpublishedPackages.length === 0) console.log('all packages already published; proceed only for missing-tag repair')
 NODE
 ```
 
@@ -122,7 +137,7 @@ pnpm test:run
     - Never run local `pnpm release:canary` for normal releases.
     - Exception: first publish of a new npm package name may be a local packed-tarball publish after explicit approval; see `references/publishing.md`.
     - Before UI/`gh` trigger, confirm current `main` contains the version bump commit.
-    - After action completes, verify npm dist-tags and new `v<version>` git tag.
+    - After action completes, verify every public package dist-tag and new `v<version>` git tag.
 
 ## PR Workflow
 
@@ -146,7 +161,7 @@ pnpm changeset:version
 
 ## Common Commands
 
-Enter canary prerelease mode:
+Enter canary prerelease mode only when missing:
 
 ```bash
 pnpm changeset:canary:enter
@@ -176,7 +191,7 @@ Yolk should mirror Effect + MCP SDK:
 
 - Agent prepares and validates release files locally.
 - Human or explicitly approved agent triggers GitHub Actions publish from `main`.
-- GitHub Actions builds, validates, checks unpublished versions, packs, publishes tarballs, then tags `v<version>`.
+- GitHub Actions builds, validates version/tag state, packs, publishes missing tarballs, then tags `v<version>`.
 
 ## Guardrails
 

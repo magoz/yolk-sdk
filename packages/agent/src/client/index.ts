@@ -1,8 +1,6 @@
 export {
   documentPartFromTextFile,
-  documentPartFromTextFileEffect,
-  textFromBlob,
-  textFromBlobEffect
+  textFromBlob
 } from './attachments.ts'
 export {
   appendAgentMessage,
@@ -30,9 +28,7 @@ export {
   agentRunStreamStartIndexFromHeaders,
   agentRunStreamTailIndexFromHeaders,
   cancelAgentRun,
-  cancelAgentRunEffect,
   collectAgentEvents,
-  collectAgentEventsEffect,
   streamQuestionResponseEventStream,
   streamCloudflareAgentEventStream,
   streamAgentEventStreamUntilTerminal,

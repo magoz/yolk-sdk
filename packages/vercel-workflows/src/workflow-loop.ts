@@ -152,6 +152,7 @@ export async function retryWorkflowStep<A>(
   policy?: VercelAgentWorkflowStepRetryPolicy
 ): Promise<A> {
   const maxAttempts = maxRetryAttempts(policy)
+
   let attempt = 1
 
   for (;;) {

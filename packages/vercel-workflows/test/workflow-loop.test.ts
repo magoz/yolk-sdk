@@ -4,6 +4,7 @@ import {
   retryWorkflowStep,
   settleWorkflowStep,
   type SerializableWorkflowState,
+  type VercelAgentWorkflowLoopConfig,
   type VercelAgentWorkflowModelStepInput,
   type VercelAgentWorkflowModelStepResult,
   type VercelAgentWorkflowToolBatchStepInput,
@@ -39,22 +40,32 @@ const toolBatchResult = (input: VercelAgentWorkflowToolBatchStepInput) =>
     ]
   }) satisfies VercelAgentWorkflowToolBatchStepResult
 
+const step = <A>(body: () => A | Promise<A>) =>
+  Promise.resolve().then(body)
+
+const emptyStep = () => Promise.resolve()
+
+const failStep = (error: unknown) => Promise.reject(error)
+
+const runWorkflow = (config: VercelAgentWorkflowLoopConfig) =>
+  runVercelAgentWorkflow(config)
+
 describe('runVercelAgentWorkflow', () => {
   it('closes stream after terminal model step', async () => {
     const states: Array<SerializableWorkflowState> = []
     let closeCount = 0
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => {
+      runModelStep: input => step(() => {
         states.push(input.state)
         return terminalModelResult(input)
-      },
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => {
+      }),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: () => step(() => {
         closeCount += 1
-      },
-      writeError: async () => undefined
+      }),
+      writeError: emptyStep
     })
 
     expect(result._tag).toBe('Completed')
@@ -68,18 +79,18 @@ describe('runVercelAgentWorkflow', () => {
     const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => {
+      runModelStep: input => step(() => {
         modelStates.push(input.state)
         return input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input)
-      },
-      runToolBatchStep: async input => {
+      }),
+      runToolBatchStep: input => step(() => {
         toolInputs.push(input)
         return toolBatchResult(input)
-      },
-      closeStream: async () => undefined,
-      writeError: async () => undefined
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
     })
 
     expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
@@ -109,22 +120,22 @@ describe('runVercelAgentWorkflow', () => {
     const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => {
+      runModelStep: input => step(() => {
         modelStates.push(input.state)
 
         return input.state.turn === 1
           ? { ...toolModelResult(input), eventSequence: 3 }
           : terminalModelResult(input)
-      },
-      runToolBatchStep: async input => {
+      }),
+      runToolBatchStep: input => step(() => {
         toolInputs.push(input)
 
         return { ...toolBatchResult(input), eventSequence: 5 }
-      },
-      closeStream: async () => undefined,
-      writeError: async () => undefined
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
     })
 
     expect(result._tag).toBe('Completed')
@@ -144,24 +155,24 @@ describe('runVercelAgentWorkflow', () => {
       eventSequence: 7
     }
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input =>
-        input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input),
-      runToolBatchStep: async input => {
+      runModelStep: input =>
+        step(() => (input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input))),
+      runToolBatchStep: input => step(() => {
         toolInputs.push(input)
 
         return input.hitlResponses?.[0] === 'approved'
           ? { ...toolBatchResult(input), eventSequence: 9 }
           : { ...toolBatchResult(input), awaitingInput, eventSequence: 5 }
-      },
-      awaitInput: async input => {
+      }),
+      awaitInput: input => step(() => {
         awaitedInputs.push(input)
 
         return 'approved'
-      },
-      closeStream: async () => undefined,
-      writeError: async () => undefined
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
     })
 
     expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
@@ -180,14 +191,14 @@ describe('runVercelAgentWorkflow', () => {
       turns: 1
     }
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => toolModelResult(input),
-      runToolBatchStep: async input => ({ ...toolBatchResult(input), awaitingInput }),
-      closeStream: async () => undefined,
-      writeError: async value => {
+      runModelStep: input => step(() => toolModelResult(input)),
+      runToolBatchStep: input => step(() => ({ ...toolBatchResult(input), awaitingInput })),
+      closeStream: emptyStep,
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result).toMatchObject({ _tag: 'AwaitInputFailed', turn: 1, awaitingInput })
@@ -200,16 +211,16 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let closeCount = 0
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async () => Promise.reject(error),
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => {
+      runModelStep: () => failStep(error),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: () => step(() => {
         closeCount += 1
-      },
-      writeError: async value => {
+      }),
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result).toEqual({
@@ -226,10 +237,10 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let modelAttempts = 0
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       modelStepRetry: { maxAttempts: 2 },
-      runModelStep: async input => {
+      runModelStep: input => step(() => {
         modelAttempts += 1
 
         if (modelAttempts === 1) {
@@ -237,12 +248,12 @@ describe('runVercelAgentWorkflow', () => {
         }
 
         return terminalModelResult(input)
-      },
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => undefined,
-      writeError: async value => {
+      }),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result._tag).toBe('Completed')
@@ -255,17 +266,17 @@ describe('runVercelAgentWorkflow', () => {
     const errors: Array<unknown> = []
     let modelAttempts = 0
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async () => {
+      runModelStep: () => step(() => {
         modelAttempts += 1
         throw error
-      },
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => undefined,
-      writeError: async value => {
+      }),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result._tag).toBe('ModelStepFailed')
@@ -277,15 +288,17 @@ describe('runVercelAgentWorkflow', () => {
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
     let toolAttempts = 0
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       maxTurns: 2,
       toolBatchStepRetry: { maxAttempts: 2 },
-      runModelStep: async input =>
-        input.state.turn === 1
-          ? { ...toolModelResult(input), eventSequence: 3 }
-          : terminalModelResult(input),
-      runToolBatchStep: async input => {
+      runModelStep: input =>
+        step(() =>
+          input.state.turn === 1
+            ? { ...toolModelResult(input), eventSequence: 3 }
+            : terminalModelResult(input)
+        ),
+      runToolBatchStep: input => step(() => {
         toolAttempts += 1
         toolInputs.push(input)
 
@@ -294,9 +307,9 @@ describe('runVercelAgentWorkflow', () => {
         }
 
         return { ...toolBatchResult(input), eventSequence: 5 }
-      },
-      closeStream: async () => undefined,
-      writeError: async () => undefined
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
     })
 
     expect(result._tag).toBe('Completed')
@@ -306,12 +319,12 @@ describe('runVercelAgentWorkflow', () => {
   it('returns tool batch failures with the current workflow state', async () => {
     const error = new Error('tools failed')
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => toolModelResult(input),
-      runToolBatchStep: async () => Promise.reject(error),
-      closeStream: async () => undefined,
-      writeError: async () => undefined
+      runModelStep: input => step(() => toolModelResult(input)),
+      runToolBatchStep: () => failStep(error),
+      closeStream: emptyStep,
+      writeError: emptyStep
     })
 
     expect(result).toEqual({
@@ -326,14 +339,14 @@ describe('runVercelAgentWorkflow', () => {
     const error = new Error('close failed')
     const errors: Array<unknown> = []
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: async input => terminalModelResult(input),
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => Promise.reject(error),
-      writeError: async value => {
+      runModelStep: input => step(() => terminalModelResult(input)),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: () => failStep(error),
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result).toEqual({
@@ -348,15 +361,15 @@ describe('runVercelAgentWorkflow', () => {
   it('writes max-turn error when loop does not terminate', async () => {
     const errors: Array<unknown> = []
 
-    const result = await runVercelAgentWorkflow({
+    const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       maxTurns: 2,
-      runModelStep: async input => toolModelResult(input),
-      runToolBatchStep: async input => toolBatchResult(input),
-      closeStream: async () => undefined,
-      writeError: async value => {
+      runModelStep: input => step(() => toolModelResult(input)),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: value => step(() => {
         errors.push(value)
-      }
+      })
     })
 
     expect(result).toMatchObject({ _tag: 'MaxTurnsExceeded', maxTurns: 2 })
@@ -387,10 +400,10 @@ describe('retryWorkflowStep', () => {
 
     await expect(
       retryWorkflowStep(
-        async () => {
+        () => step(() => {
           attempts += 1
           throw new Error('failed')
-        },
+        }),
         { maxAttempts: 0 }
       )
     ).rejects.toThrow('failed')

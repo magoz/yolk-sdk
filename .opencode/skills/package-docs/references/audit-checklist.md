@@ -43,19 +43,23 @@ Check these after package shape changes:
 
 ## API drift checks
 
-Search for stale names after exports change:
+Search for stale names after exports change. `scripts/check-package-boundaries.ts` is the retired-package source of truth.
 
 ```txt
 makeCharacterChunker
 VectorStore
-agent-loop
-agent-runtime
-tool-registry
-@yolk-sdk/react
+@yolk-sdk/agent-loop
+@yolk-sdk/agent-runtime
+@yolk-sdk/anthropic
+@yolk-sdk/client
+@yolk-sdk/mcp-client
+@yolk-sdk/mcp-server
 @yolk-sdk/oauth
 @yolk-sdk/openai
-@yolk-sdk/anthropic
+@yolk-sdk/protocol
+@yolk-sdk/react
 @yolk-sdk/skillset
+@yolk-sdk/tool-registry
 @yolk-sdk/voice-runtime
 @yolk-sdk/vercel-workflows-runtime
 @yolk/

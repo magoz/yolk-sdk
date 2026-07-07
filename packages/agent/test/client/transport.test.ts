@@ -26,7 +26,6 @@ import {
   agentRunStreamTailIndexFromHeaders,
   appendAgentMessage,
   cancelAgentRun,
-  cancelAgentRunEffect,
   collectAgentEvents,
   streamAgentEventStreamUntilTerminal,
   streamAgentRunHitlResponseEventStreamUntilTerminal,
@@ -112,13 +111,15 @@ describe('collectAgentEvents', () => {
     const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
     const requests: Array<CapturedRequest> = []
 
-    const events = await collectAgentEvents({
-      endpoint: '/api/agent',
-      sessionId: 'session_1',
-      messages,
-      reasoningEffort: 'high',
-      httpClientLayer: makeHttpClientLayer(new Response(encodeEvents(responseEvents)), requests)
-    })
+    const events = await Effect.runPromise(
+      collectAgentEvents({
+        endpoint: '/api/agent',
+        sessionId: 'session_1',
+        messages,
+        reasoningEffort: 'high',
+        httpClientLayer: makeHttpClientLayer(new Response(encodeEvents(responseEvents)), requests)
+      })
+    )
 
     const headers = readCapturedHeaders(requests)
     expect(requests[0]?.request.url).toBe('/api/agent')
@@ -130,18 +131,20 @@ describe('collectAgentEvents', () => {
     expect(readCapturedBody(requests)).toBe(
       JSON.stringify({ sessionId: 'session_1', messages, reasoningEffort: 'high' })
     )
-    expect(events).toEqual(responseEvents)
+    expect(Array.from(events)).toEqual(responseEvents)
   })
 
   it('fails on malformed agent event lines', async () => {
     const requests: Array<CapturedRequest> = []
 
     await expect(
-      collectAgentEvents({
-        sessionId: 'session_1',
-        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
-        httpClientLayer: makeHttpClientLayer(new Response('{"_tag":"Nope"}\n'), requests)
-      })
+      Effect.runPromise(
+        collectAgentEvents({
+          sessionId: 'session_1',
+          messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+          httpClientLayer: makeHttpClientLayer(new Response('{"_tag":"Nope"}\n'), requests)
+        })
+      )
     ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
   })
 
@@ -151,13 +154,15 @@ describe('collectAgentEvents', () => {
     ]
     const requests: Array<CapturedRequest> = []
 
-    const events = await collectAgentEvents({
-      sessionId: 'session_1',
-      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
-      httpClientLayer: makeHttpClientLayer(new Response(encodeEvents(responseEvents)), requests)
-    })
+    const events = await Effect.runPromise(
+      collectAgentEvents({
+        sessionId: 'session_1',
+        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+        httpClientLayer: makeHttpClientLayer(new Response(encodeEvents(responseEvents)), requests)
+      })
+    )
 
-    expect(events).toEqual(responseEvents)
+    expect(Array.from(events)).toEqual(responseEvents)
   })
 
   it('reports response headers and streams existing runs', async () => {
@@ -614,27 +619,16 @@ describe('collectAgentEvents', () => {
   it('cancels existing runs with DELETE', async () => {
     const requests: Array<CapturedRequest> = []
 
-    await cancelAgentRun({
-      endpoint: '/api/agent/workflow/run_1',
-      httpClientLayer: makeHttpClientLayer(new Response(''), requests)
-    })
+    await Effect.runPromise(
+      cancelAgentRun({
+        endpoint: '/api/agent/workflow/run_1',
+        httpClientLayer: makeHttpClientLayer(new Response(''), requests)
+      })
+    )
 
     expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
     expect(requests[0]?.request.method).toBe('DELETE')
   })
-
-  it.effect('exposes an Effect-native run cancel helper', () =>
-    Effect.gen(function* () {
-      const requests: Array<CapturedRequest> = []
-
-      yield* cancelAgentRunEffect({
-        endpoint: '/api/agent/workflow/run_1',
-        httpClientLayer: makeHttpClientLayer(new Response(''), requests)
-      })
-
-      expect(requests[0]?.request.url).toBe('/api/agent/workflow/run_1')
-      expect(requests[0]?.request.method).toBe('DELETE')
-    }))
 
   it('cancels the response body when event consumption stops', async () => {
     let cancelled = false
@@ -707,11 +701,13 @@ describe('collectAgentEvents', () => {
       closed = true
       controller.close()
     }
-    const eventsPromise = collectAgentEvents({
-      sessionId: 'session_1',
-      messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
-      httpClientLayer: makeHttpClientLayer(response, requests)
-    })
+    const eventsPromise = Effect.runPromise(
+      collectAgentEvents({
+        sessionId: 'session_1',
+        messages: appendAgentMessage([], UserMessage.make({ content: 'hello' })),
+        httpClientLayer: makeHttpClientLayer(response, requests)
+      })
+    )
 
     try {
       const events = await Promise.race([
@@ -721,7 +717,7 @@ describe('collectAgentEvents', () => {
         )
       ])
 
-      expect(events.map(event => event._tag)).toEqual(['AgentStart', 'AgentAwaitingInput'])
+      expect(Array.from(events).map(event => event._tag)).toEqual(['AgentStart', 'AgentAwaitingInput'])
       expect(cancelled).toBe(false)
       expect(closed).toBe(false)
     } finally {

@@ -64,15 +64,13 @@ const writeSequencedWorkflowEvent = (input: {
 }) =>
   Effect.gen(function* () {
     const sequence = yield* Ref.get(input.eventSequence)
-    const result = yield* Effect.promise(() =>
-      writeDurableAgentEvent({
-        writer: input.writer,
-        event: input.event,
-        streamId: workflowEventStreamId,
-        turn: input.turn,
-        state: makeDurableAgentEventSequencerState(sequence)
-      })
-    )
+    const result = yield* writeDurableAgentEvent({
+      writer: input.writer,
+      event: input.event,
+      streamId: workflowEventStreamId,
+      turn: input.turn,
+      state: makeDurableAgentEventSequencerState(sequence)
+    })
 
     yield* Ref.set(input.eventSequence, result.nextEventSequence)
   })
@@ -399,15 +397,13 @@ export async function writeAgentWorkflowError(error: unknown) {
   const workflowRunId = getWorkflowMetadata().workflowRunId
 
   await Effect.runPromise(
-    Effect.promise(() =>
-      writeDurableAgentEvent({
-        writer,
-        event: workflowErrorEvent(error),
-        streamId: workflowErrorEventStreamId(workflowRunId),
-        turn: 0,
-        state: makeDurableAgentEventSequencerState()
-      })
-    ).pipe(
+    writeDurableAgentEvent({
+      writer,
+      event: workflowErrorEvent(error),
+      streamId: workflowErrorEventStreamId(workflowRunId),
+      turn: 0,
+      state: makeDurableAgentEventSequencerState()
+    }).pipe(
       Effect.asVoid,
       Effect.tap(() => reportError(workflowStepError(error), { operation: 'agent.workflow.step' })),
       Effect.catch(() => Effect.void),

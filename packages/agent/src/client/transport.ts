@@ -618,7 +618,7 @@ const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRe
     )
   })
 
-export const cancelAgentRunEffect = (request: CancelAgentRunRequest) =>
+export const cancelAgentRun = (request: CancelAgentRunRequest) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const response = yield* client
@@ -1263,11 +1263,5 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
     request.signal
   )
 
-export const cancelAgentRun = (request: CancelAgentRunRequest) =>
-  Effect.runPromise(cancelAgentRunEffect(request))
-
-export const collectAgentEventsEffect = (request: StreamAgentEventsRequest) =>
-  streamAgentEventStream(request).pipe(Stream.runCollect)
-
 export const collectAgentEvents = (request: StreamAgentEventsRequest) =>
-  Effect.runPromise(collectAgentEventsEffect(request)).then(events => Array.from(events))
+  streamAgentEventStream(request).pipe(Stream.runCollect)

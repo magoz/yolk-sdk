@@ -164,6 +164,7 @@ Rationale: lockstep versions are simpler when every public `packages/*` package 
 Canary prep flow:
 
 ```bash
+# if not already in canary prerelease mode
 pnpm changeset:canary:enter
 pnpm changeset:version
 ```
@@ -196,7 +197,15 @@ pnpm release:canary
 Verify npm after publish:
 
 ```bash
-npm view @yolk-sdk/agent dist-tags --json
+for package in \
+  @yolk-sdk/agent \
+  @yolk-sdk/mcp \
+  @yolk-sdk/knowledge \
+  @yolk-sdk/connectors \
+  @yolk-sdk/sandbox \
+  @yolk-sdk/vercel-workflows; do
+  npm view "$package" dist-tags --json
+done
 git fetch --tags
 git tag --list "v<version>"
 git ls-remote --tags origin "refs/tags/v<version>"
@@ -206,11 +215,12 @@ For lockstep canaries, verify every public package has the new `canary` dist-tag
 
 Requirements:
 
-- npm logged in as `magoz`.
 - `@yolk-sdk` org exists and `magoz` is owner.
 - package names are available or already owned by `@yolk-sdk`.
 - all public package versions are lockstep.
 - no dirty/unclear release state.
+
+Local npm login as `magoz` is required only for approved local first-publish or emergency-publish exceptions.
 
 Use the `/package-release` command after restarting opencode for guided release workflow.
 
@@ -222,8 +232,8 @@ Requirements before dispatch:
 
 - changesets consumed by `pnpm changeset:version`
 - every public package has same version
-- package version is not already fully published on npm; partial retries skip already-published tarballs
 - `v<version>` tag does not exist
+- normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
@@ -282,7 +292,7 @@ Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-pu
    - Done: `tsdown` emits `dist` JS and declarations; npm exports use `publishConfig.exports`.
 4. Add release tooling.
    - Done: Changesets fixed group and package build/check/publint/smoke scripts.
-   - Enter canary mode with `pnpm changeset:canary:enter` before first versioning.
+   - Confirm canary prerelease mode exists; enter it before first canary versioning.
 5. Add docs.
    - Root package overview.
    - Per-package README.

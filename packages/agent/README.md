@@ -59,7 +59,6 @@ import { run } from '@yolk-sdk/agent/loop'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
 import {
   documentPartFromTextFile,
-  documentPartFromTextFileEffect,
   initialAgentClientState,
   streamAgentEventStreamUntilTerminal,
   toolRunsFromHitlRequests
@@ -189,8 +188,8 @@ const message = UserMessage.make({
 })
 ```
 
-For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helpers
-`documentPartFromTextFile` / `documentPartFromTextFileEffect` to create UTF-8 inline
+For text files, use `documentPartFromText`, `inferTextDocumentMimeType`, and the client helper
+`documentPartFromTextFile` to create UTF-8 inline
 `DocumentPart` values without trusting filename extensions over explicit non-text MIME types.
 
 Use model capabilities like `textOnlyModelCapabilities`, `textImageModelCapabilities`, or
@@ -356,7 +355,7 @@ Recommended setup:
 - use `makeSubagentRunId(call.id)` for protocol-aligned run ids
 - return `makeTaskToolResult(...)` so UI can show subagent id, type, status, model, and timing
 
-See `examples/next/lib/agents/workflow-runtime/text-response.ts` for host-owned execution wiring.
+Keep host-owned subagent execution wiring outside this package; pass only the package task contract across the boundary.
 
 ## Tool failures
 

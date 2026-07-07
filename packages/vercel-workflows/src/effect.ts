@@ -48,7 +48,7 @@ export type VercelWorkflowsSdkClient = {
     args: TArgs
   ) => Promise<VercelWorkflowsSdkRun<TResult>>
   readonly getRun: <TResult>(runId: string) => VercelWorkflowsSdkRun<TResult>
-  readonly resumeHook: (token: string, payload: unknown) => Promise<unknown>
+  readonly resumeHook: (token: string, payload: unknown) => Promise<void>
 }
 
 export type VercelWorkflowRun<TResult> = {
@@ -95,6 +95,16 @@ const workflowsError = (operation: VercelWorkflowsOperation, cause: unknown) =>
 
 const spanAttributes = (runId: string) => ({ 'workflow.run.id': runId })
 
+const trySdkPromise = <A>(body: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: body,
+    catch: error => error
+  })
+
+const mapSdkError = (operation: VercelWorkflowsOperation) =>
+  <A>(effect: Effect.Effect<A, unknown>) =>
+    effect.pipe(Effect.mapError(cause => workflowsError(operation, cause)))
+
 const makeWorkflowRun = <TResult>(
   run: VercelWorkflowsSdkRun<TResult>
 ): VercelWorkflowRun<TResult> => ({
@@ -108,26 +118,20 @@ const makeWorkflowRun = <TResult>(
         attributes: spanAttributes(run.runId)
       })
     ),
-  cancel: Effect.tryPromise({
-    try: () => run.cancel(),
-    catch: cause => workflowsError('cancel', cause)
-  }).pipe(
+  cancel: trySdkPromise(() => run.cancel()).pipe(
+    mapSdkError('cancel'),
     Effect.withSpan('VercelWorkflows.run.cancel', {
       attributes: spanAttributes(run.runId)
     })
   ),
-  status: Effect.tryPromise({
-    try: () => run.status,
-    catch: cause => workflowsError('status', cause)
-  }).pipe(
+  status: trySdkPromise(() => run.status).pipe(
+    mapSdkError('status'),
     Effect.withSpan('VercelWorkflows.run.status', {
       attributes: spanAttributes(run.runId)
     })
   ),
-  returnValue: Effect.tryPromise({
-    try: () => run.returnValue,
-    catch: cause => workflowsError('returnValue', cause)
-  }).pipe(
+  returnValue: trySdkPromise(() => run.returnValue).pipe(
+    mapSdkError('returnValue'),
     Effect.withSpan('VercelWorkflows.run.returnValue', {
       attributes: spanAttributes(run.runId)
     })
@@ -140,7 +144,9 @@ const VercelWorkflowsSdkLive = Layer.succeed(VercelWorkflowsSdk, {
     args: TArgs
   ) => workflowStart(workflow, args),
   getRun: <TResult>(runId: string) => workflowGetRun<TResult>(runId),
-  resumeHook: (token: string, payload: unknown) => workflowResumeHook<unknown>(token, payload)
+  resumeHook: async (token: string, payload: unknown) => {
+    await workflowResumeHook<unknown>(token, payload)
+  }
 })
 
 export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWorkflowsClient>()(
@@ -153,9 +159,11 @@ export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWork
         runId: string
       ): Effect.Effect<VercelWorkflowRun<TResult>, VercelWorkflowsError> =>
         Effect.try({
-          try: () => makeWorkflowRun(sdk.getRun<TResult>(runId)),
-          catch: cause => workflowsError('getRun', cause)
+          try: () => sdk.getRun<TResult>(runId),
+          catch: error => error
         }).pipe(
+          mapSdkError('getRun'),
+          Effect.map(makeWorkflowRun),
           Effect.withSpan('VercelWorkflows.getRun', {
             attributes: spanAttributes(runId)
           })
@@ -166,10 +174,11 @@ export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWork
           workflow: VercelWorkflowFunction<TArgs, TResult>,
           args: TArgs
         ): Effect.Effect<VercelWorkflowRun<TResult>, VercelWorkflowsError> =>
-          Effect.tryPromise({
-            try: () => sdk.start(workflow, args),
-            catch: cause => workflowsError('start', cause)
-          }).pipe(Effect.map(makeWorkflowRun), Effect.withSpan('VercelWorkflows.start')),
+          trySdkPromise(() => sdk.start(workflow, args)).pipe(
+            mapSdkError('start'),
+            Effect.map(makeWorkflowRun),
+            Effect.withSpan('VercelWorkflows.start')
+          ),
 
         getRun,
 
@@ -199,10 +208,10 @@ export class VercelWorkflows extends Context.Service<VercelWorkflows, VercelWork
           ),
 
         resumeHook: (token: string, payload: unknown): Effect.Effect<void, VercelWorkflowsError> =>
-          Effect.tryPromise({
-            try: () => sdk.resumeHook(token, payload).then(() => undefined),
-            catch: cause => workflowsError('resumeHook', cause)
-          }).pipe(Effect.withSpan('VercelWorkflows.resumeHook')),
+          trySdkPromise(() => sdk.resumeHook(token, payload)).pipe(
+            mapSdkError('resumeHook'),
+            Effect.withSpan('VercelWorkflows.resumeHook')
+          ),
 
         cancel: (runId: string): Effect.Effect<void, VercelWorkflowsError> =>
           getRun<unknown>(runId).pipe(

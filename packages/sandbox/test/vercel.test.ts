@@ -16,7 +16,7 @@ import {
 const finishedCommand = (id: string, exitCode: number): VercelFinishedCommand => ({
   id,
   exitCode,
-  output: () => Promise.resolve({ stdout: 'done', stderr: '' })
+  output: Effect.succeed({ stdout: 'done', stderr: '' })
 })
 
 const detachedCommand = (input: {
@@ -27,9 +27,9 @@ const detachedCommand = (input: {
 }): VercelDetachedCommand => ({
   id: input.id,
   exitCode: input.exitCode,
-  wait: () => Promise.resolve(finishedCommand(input.id, input.exitCode ?? 0)),
-  kill: () => Promise.resolve(),
-  output: () => Promise.resolve({ stdout: input.stdout ?? 'done', stderr: input.stderr ?? '' })
+  wait: Effect.succeed(finishedCommand(input.id, input.exitCode ?? 0)),
+  kill: () => Effect.void,
+  output: Effect.succeed({ stdout: input.stdout ?? 'done', stderr: input.stderr ?? '' })
 })
 
 const makeHandle = (input: {
@@ -42,21 +42,20 @@ const makeHandle = (input: {
   name: input.name,
   writeFiles: files => {
     input.files.push(...files)
-    return Promise.resolve()
+    return Effect.void
   },
   runDetachedCommand: command => {
     input.commands.push(command)
-    return Promise.resolve(
+    return Effect.succeed(
       detachedCommand({ id: 'cmd_1', exitCode: input.background === true ? null : 0 })
     )
   },
   getCommand: id =>
-    Promise.resolve(detachedCommand({ id, exitCode: input.background === true ? null : 0 })),
-  extendTimeout: () => Promise.resolve(),
-  delete: () => {
+    Effect.succeed(detachedCommand({ id, exitCode: input.background === true ? null : 0 })),
+  extendTimeout: () => Effect.void,
+  delete: Effect.sync(() => {
     input.deleted.push(input.name)
-    return Promise.resolve()
-  },
+  }),
   domain: port => `https://${port}.example.test`
 })
 
@@ -71,8 +70,8 @@ describe('vercel sandbox layer', () => {
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
-          get: () => Promise.resolve(null),
-          create: () => Promise.resolve(handle)
+          get: () => Effect.succeed(null),
+          create: () => Effect.succeed(handle)
         })
       )
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId: 'session_1' }).pipe(
@@ -104,10 +103,10 @@ describe('vercel sandbox layer', () => {
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
-          get: () => Promise.resolve(handle),
+          get: () => Effect.succeed(handle),
           create: () => {
             createCount = createCount + 1
-            return Promise.resolve(handle)
+            return Effect.succeed(handle)
           }
         })
       )
@@ -136,8 +135,8 @@ describe('vercel sandbox layer', () => {
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
-          get: input => Promise.resolve(makeHandle({ name: input.name, files, commands, deleted })),
-          create: () => Promise.resolve(handle)
+          get: input => Effect.succeed(makeHandle({ name: input.name, files, commands, deleted })),
+          create: () => Effect.succeed(handle)
         })
       )
       const expiredState = VercelSandboxState.make({
@@ -174,8 +173,8 @@ describe('vercel sandbox layer', () => {
       const clientLayer = Layer.succeed(
         VercelSandboxClient,
         VercelSandboxClient.of({
-          get: () => Promise.resolve(null),
-          create: () => Promise.resolve(handle)
+          get: () => Effect.succeed(null),
+          create: () => Effect.succeed(handle)
         })
       )
       const layer = makeVercelSandboxLayerWithClient({ sandboxSessionId }).pipe(

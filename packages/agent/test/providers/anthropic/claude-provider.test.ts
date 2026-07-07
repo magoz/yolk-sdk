@@ -112,6 +112,13 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   return new TextDecoder().decode(body.body)
 }
 
+const collectKeys = (value: unknown): ReadonlyArray<string> => {
+  if (Array.isArray(value)) return value.flatMap(collectKeys)
+  if (typeof value !== 'object' || value === null) return []
+
+  return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
+}
+
 const runMinimalProviderRequest = (
   input: {
     readonly extraHeaders?: Readonly<Record<string, string>>
@@ -373,6 +380,57 @@ describe('Anthropic Claude provider', () => {
         properties: { first: { type: 'string' }, second: { type: 'number' } },
         required: ['first', 'second'],
         $defs: {}
+      })
+    })
+  )
+
+  it.effect('normalizes nested Anthropic tool schema combinators', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'hello' })],
+        tools: [
+          ToolDef.make({
+            name: 'schema_probe',
+            description: 'Probe nested schemas.',
+            parameters: {
+              type: 'object',
+              properties: {
+                count: {
+                  anyOf: [
+                    { anyOf: [{ type: 'number' }, { type: 'string', enum: ['NaN'] }] },
+                    { type: 'null' }
+                  ]
+                },
+                title: {
+                  type: 'string',
+                  allOf: [{ minLength: 1 }, { maxLength: 80 }]
+                },
+                items: {
+                  type: 'array',
+                  prefixItems: [{ type: 'string' }],
+                  items: { type: 'string' }
+                }
+              },
+              required: ['title']
+            }
+          })
+        ]
+      })
+      const schema = body.tools?.[0]?.input_schema
+      const keys = collectKeys(schema)
+
+      expect(keys).not.toContain('anyOf')
+      expect(keys).not.toContain('oneOf')
+      expect(keys).not.toContain('allOf')
+      expect(keys).not.toContain('prefixItems')
+      expect(schema).toMatchObject({
+        properties: {
+          count: { type: 'number' },
+          title: { type: 'string', minLength: 1, maxLength: 80 },
+          items: { type: 'array', items: { type: 'string' } }
+        }
       })
     })
   )

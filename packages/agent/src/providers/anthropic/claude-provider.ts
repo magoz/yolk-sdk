@@ -618,6 +618,13 @@ const withoutTopLevelJsonSchemaCombinators = (schema: JsonObject): JsonObject =>
     Object.entries(schema).filter(([key]) => !isTopLevelJsonSchemaCombinatorKey(key))
   )
 
+const withoutJsonSchemaCombinatorsAndTupleHints = (schema: JsonObject): JsonObject =>
+  Object.fromEntries(
+    Object.entries(schema).filter(
+      ([key]) => !isTopLevelJsonSchemaCombinatorKey(key) && key !== 'prefixItems'
+    )
+  )
+
 const jsonSchemaProperties = (schema: JsonObject) => {
   const properties = jsonObjectField(schema, 'properties')
 
@@ -728,6 +735,109 @@ const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject 
   return Object.fromEntries(merged)
 }
 
+const normalizeJsonSchemaObjectFields = (schema: JsonObject): JsonObject =>
+  Object.fromEntries(
+    Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => [
+      key,
+      normalizeAnthropicToolSchema(value)
+    ])
+  )
+
+const jsonSchemaType = (schema: JsonObject) => {
+  const type = jsonObjectField(schema, 'type')
+
+  return typeof type === 'string' ? type : undefined
+}
+
+const isNullJsonSchema = (schema: JsonObject) => jsonSchemaType(schema) === 'null'
+
+const firstJsonObject = (items: ReadonlyArray<JsonObject>) => items[0]
+
+const mergeCompatibleVariants = (
+  variants: ReadonlyArray<JsonObject>
+): JsonObject | undefined => {
+  const first = firstJsonObject(variants)
+  if (first === undefined) return undefined
+
+  let merged: unknown = first
+
+  for (const variant of variants.slice(1)) {
+    merged = mergePropertySchemas(merged, variant)
+  }
+
+  if (!isJsonObject(merged)) return undefined
+
+  if (Array.isArray(jsonObjectField(merged, 'anyOf'))) return undefined
+
+
+  return merged
+}
+
+const samePrimitiveTypeVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefined => {
+  const first = firstJsonObject(variants)
+  const type = first === undefined ? undefined : jsonSchemaType(first)
+
+  if (type === undefined || type === 'object' || type === 'array' || type === 'null') {
+    return undefined
+  }
+
+  return variants.every(variant => jsonSchemaType(variant) === type) ? first : undefined
+}
+
+const objectVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefined => {
+  if (
+    variants.length === 0 ||
+    variants.some(variant => {
+      const type = jsonSchemaType(variant)
+
+      return type !== undefined && type !== 'object'
+    })
+  ) {
+    return undefined
+  }
+
+  return {
+    type: 'object',
+    properties: mergeJsonSchemaObjects(variants.map(jsonSchemaProperties)),
+    required: mergeJsonSchemaRequired('oneOf', variants),
+    $defs: mergeJsonSchemaObjects(variants.map(jsonSchemaDefinitions)),
+    additionalProperties: mergeAdditionalProperties(variants) ?? false
+  }
+}
+
+const normalizeJsonSchemaCombinator = (
+  schema: JsonObject,
+  combinator: TopLevelJsonSchemaCombinator
+): JsonObject => {
+  const base = normalizeJsonSchemaObjectFields(schema)
+  const variants = combinator.items
+    .map(normalizeAnthropicToolSchema)
+    .filter(isJsonObject)
+    .filter(variant => !isNullJsonSchema(variant))
+  const first = firstJsonObject(variants)
+
+  if (first === undefined) return base
+
+  if (combinator.key === 'allOf') {
+    return mergeJsonSchemaObjects([base, ...variants])
+  }
+
+  const merged =
+    mergeCompatibleVariants(variants) ?? samePrimitiveTypeVariant(variants) ?? objectVariant(variants)
+
+  return mergeJsonSchemaObjects([base, merged ?? first])
+}
+
+function normalizeAnthropicToolSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeAnthropicToolSchema)
+  if (!isJsonObject(value)) return value
+
+  const combinator = topLevelJsonSchemaCombinator(value)
+  if (combinator !== undefined) return normalizeJsonSchemaCombinator(value, combinator)
+
+  return normalizeJsonSchemaObjectFields(value)
+}
+
 const mergeJsonSchemaRequired = (
   combinatorKey: TopLevelJsonSchemaCombinatorKey,
   objects: ReadonlyArray<JsonObject>
@@ -801,14 +911,14 @@ const anthropicToolInputSchema = (schema: unknown): unknown => {
   const combinator = topLevelJsonSchemaCombinator(schema)
 
   if (combinator !== undefined) {
-    return flattenTopLevelCombinatorToolSchema(schema, combinator)
+    return normalizeAnthropicToolSchema(flattenTopLevelCombinatorToolSchema(schema, combinator))
   }
 
   if (jsonObjectField(schema, 'type') !== undefined) {
-    return schema
+    return normalizeAnthropicToolSchema(schema)
   }
 
-  return { ...schema, type: 'object' }
+  return normalizeAnthropicToolSchema({ ...schema, type: 'object' })
 }
 
 const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessage, LLMError> =>

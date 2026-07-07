@@ -42,7 +42,7 @@ pnpm add @yolk-sdk/agent@canary
 
 Dependency rule:
 
-See `packages/AGENTS.md` and `patterns/PACKAGE_DISTRIBUTION.md` for package boundaries, release policy, and public subpaths.
+See `packages/AGENTS.md` and `patterns/PACKAGE_ARCHITECTURE.md` for package boundaries/public subpaths, and `patterns/PACKAGE_DISTRIBUTION.md` for release policy.
 
 No users, teams, orgs, projects, billing, or product permissions below app.
 

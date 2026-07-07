@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.40
+
+### Patch Changes
+
+- Make public client, Workflow, and sandbox helpers Effect-native.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.40
+
 ## 0.1.0-canary.39
 
 ### Patch Changes
