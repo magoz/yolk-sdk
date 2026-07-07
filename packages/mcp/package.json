@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/mcp",
-  "version": "0.1.0-canary.38",
+  "version": "0.1.0-canary.39",
   "description": "MCP client, server, and protocol utilities for Yolk agent runtimes.",
   "license": "MIT",
   "type": "module",

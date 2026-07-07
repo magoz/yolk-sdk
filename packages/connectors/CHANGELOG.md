@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.39
+
+### Patch Changes
+
+- Expose Effect-native attachment and durable workflow helpers, and refresh package documentation for current public exports.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.39
+
 ## 0.1.0-canary.38
 
 ### Patch Changes
