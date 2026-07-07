@@ -15,32 +15,15 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 
 ## Dependency direction
 
-```txt
-examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/*
-knowledge -> agent/protocol + agent/tools + agent/loop only for agent adapter
-mcp -> agent/protocol only for tool/content adapters
-agent core -> no knowledge/mcp/app/Next/provider SDKs
-agent/client -> agent/protocol + Effect HTTP/Stream + browser WebSocket/Blob/File APIs; no React/Next/app/provider SDKs
-agent/react -> agent/client + agent/protocol + optional React peer
-agent/compaction -> agent/protocol + agent/loop
-agent/providers -> agent/oauth + agent/loop + agent/protocol + Effect; agent/providers/openai/realtime + speech may also use agent/voice
-connectors -> agent/protocol + agent/loop + agent/tools only through ./agent; no app/storage/auth/UI policy
-sandbox root -> Effect only; sandbox/agent -> sandbox core + agent tools/protocol/loop; sandbox/vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
-vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
-agent/voice -> agent/loop + agent/protocol
-```
+Canonical package dependency rules live in `patterns/PACKAGE_ARCHITECTURE.md#dependency-direction`.
+Package-local boundaries and exceptions live in each package `AGENTS.md`.
 
 ## Rules
 
-- Package architecture: `patterns/PACKAGE_ARCHITECTURE.md`.
+- Canonical package architecture/dependency rules: `patterns/PACKAGE_ARCHITECTURE.md`.
 - Package distribution/release: `patterns/PACKAGE_DISTRIBUTION.md`.
-- Keep roots intentional: `agent`/`mcp` empty; `knowledge`/`connectors`/`sandbox`/`vercel-workflows` core-only; feature APIs use explicit subpaths.
-- Use source exports for workspace dev; npm `publishConfig.exports` points to `dist`.
-- Package-internal relative imports use explicit `.ts` extensions.
 - Keep package APIs generic over host context; never model app users, teams, orgs, projects, billing, token storage, or product permissions.
-- Provider/OAuth subpaths may model vendor auth mechanics, wire contracts, and agent provider adapters, not host storage or policy.
-- Public package manifests include release metadata, `files`, `publishConfig`, and `tsdown` build scripts. Keep private workspaces private.
-- Retired standalone package dirs/imports are forbidden; use unified subpaths checked by `scripts/check-package-boundaries.ts`.
+- Package-specific boundaries/design rules live in each package `AGENTS.md`.
 - When public packages/subpaths change, update package `exports`, `publishConfig.exports`, `scripts/check-package-exports.ts`, and `scripts/smoke-package-imports.ts` together.
 
 ## Commands

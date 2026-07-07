@@ -11,7 +11,7 @@ Components installed from external registries, styled for the Next example app.
 Standard UI components (buttons, inputs, dialogs, etc.)
 
 ```bash
-pnpm dlx shadcn@latest add [component]
+pnpm --dir examples/next dlx shadcn@latest add [component]
 ```
 
 Browse components: https://ui.shadcn.com/docs/components
@@ -21,7 +21,7 @@ Browse components: https://ui.shadcn.com/docs/components
 Pre-built page sections (hero, pricing, features, etc.)
 
 ```bash
-pnpm dlx shadcn@latest add @shadcnblocks/[block-name]
+pnpm --dir examples/next dlx shadcn@latest add @shadcnblocks/[block-name]
 ```
 
 Requires `SHADCNBLOCKS_API_KEY` env var for pro blocks.
@@ -33,7 +33,7 @@ Browse blocks: https://shadcnblocks.com
 Animated, interactive components (text animations, backgrounds, effects)
 
 ```bash
-pnpm dlx shadcn@latest add "@react-bits/[ComponentName]-TS-TW"
+pnpm --dir examples/next dlx shadcn@latest add "@react-bits/[ComponentName]-TS-TW"
 ```
 
 Format: `@react-bits/[ComponentName]-TS-TW` (TypeScript + Tailwind)

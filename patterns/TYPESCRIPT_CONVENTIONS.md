@@ -12,24 +12,22 @@ This document describes TypeScript configuration and coding conventions for this
 ## File Naming
 
 - **All files use kebab-case** — `chat-items.ts`, `claude-provider.ts`, `live-layer.ts`
-- **Service definitions** — `live-layer.ts` in the service directory
-- **Error definitions** — `errors.ts` colocated with service or domain
+- **Error definitions** — `errors.ts` colocated with the owning service/domain/package area when shared
+- Owner docs define local service file shapes; Next services use `examples/next/lib/services/AGENTS.md`.
 
 ## Module Structure - Flat Modules, No Barrel Files
 
 **Avoid barrel files** (index.ts re-exports). Create flat, focused modules:
 
 ```
-examples/next/lib/services/
-├── auth/
-│   ├── live-layer.ts      # Service definition
-│   └── errors.ts          # Service errors
-├── db/
-│   ├── live-layer.ts
-│   └── schema.ts
-└── email/
-    ├── live-layer.ts
-    └── errors.ts
+feature/
+├── feature.ts
+├── errors.ts
+└── feature.test.ts
+
+service-name/
+├── service.ts
+└── model.ts
 ```
 
 **Each module should be self-contained:**
@@ -53,8 +51,8 @@ export class Auth extends Context.Service<Auth>()('@app/Auth', {
 ### Use the narrowest valid import path
 
 ```typescript
-// CORRECT - app code may use the configured alias
-import { SomeService } from '@/lib/services/some-service/live-layer'
+// CORRECT - direct owner module path, not a barrel
+import { SomeService } from './services/some-service/live-layer'
 
 // CORRECT - package-internal relative imports include .ts
 import { parseAuthCode } from './claude.ts'

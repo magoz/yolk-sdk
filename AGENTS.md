@@ -70,19 +70,17 @@ Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer(
 | Server actions/domain | `examples/next/lib/core/*`         | App-owned; see local docs                                   |
 | Services/adapters     | `examples/next/lib/services/*`     | App-owned; see local docs                                   |
 | App agent wiring      | `examples/next/lib/agents/*`       | Provider selection, tools, MCP, runtime layers              |
-| UI components         | `examples/next/components/ui`      | App-owned Base UI/shadcn; see local docs                    |
-| E2E                   | `examples/next/e2e`                | Playwright; fixed port, no portless                         |
-| Cloudflare app        | `cloudflare/agent`                 | Worker/DO; explicit `.ts` relative imports                  |
+| UI components         | `examples/next/components/ui`      | App-owned UI; see local docs                                |
+| E2E                   | `examples/next/e2e`                | Playwright; see local docs                                  |
+| Cloudflare app        | `cloudflare/agent`                 | Worker/DO runtime; see local docs                           |
 | Scripts               | `scripts`                          | Node/process/console/raw JSON exceptions documented locally |
 | Local lint rules      | `eslint-local-rules`               | ESLint custom rules                                         |
 
 ## PACKAGE BOUNDARIES
 
 - `packages/*` must not import from `apps/*`, `examples/*`, or `cloudflare/*`.
-- Packages use `@yolk-sdk/*` names and explicit subpath exports.
-- Public packages release in lockstep via Changesets fixed group.
-- `@yolk-sdk/cloudflare-agent` stays private and ignored by Changesets.
-- Keep package roots intentional: `agent`/`mcp` empty; `knowledge`/`connectors`/`sandbox`/`vercel-workflows` core-only; feature APIs use explicit subpaths; source exports for workspace dev, `publishConfig.exports` to `dist`.
+- Packages use `@yolk-sdk/*` names, explicit subpath exports, and lockstep public releases.
+- Detailed package shape/dependency/release rules live in `packages/AGENTS.md`, `patterns/PACKAGE_ARCHITECTURE.md`, and `patterns/PACKAGE_DISTRIBUTION.md`.
 
 ## APP BOUNDARIES
 

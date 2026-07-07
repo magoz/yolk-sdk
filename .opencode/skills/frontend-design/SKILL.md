@@ -16,6 +16,10 @@ Create distinctive, production-grade interfaces avoiding generic "AI slop" aesth
 - Adding animations and micro-interactions
 - Creating visual designs, posters, brand materials
 
+## Yolk UI override
+
+For `examples/next`, follow `examples/next/components/ui/AGENTS.md`: Base UI primitives, `components.json` style `base-vega`, and `tw-animate-css`. Do not introduce Radix defaults or `tailwindcss-animate` unless explicitly requested.
+
 ## Reference Documentation
 
 ### Tailwind CSS v4.1
@@ -28,7 +32,7 @@ Create distinctive, production-grade interfaces avoiding generic "AI slop" aesth
 
 Search: `@theme`, `@container`, `OKLCH`, `mask-`, `text-shadow`
 
-### shadcn/ui (CLI v3.6)
+### shadcn/ui (CLI v3.7)
 
 - `./references/shadcn/setup.md` - Installation, visual styles, component list
 - `./references/shadcn/core-components.md` - Button, Card, Dialog, Select, Tabs, Toast
@@ -47,7 +51,7 @@ Search: `Field`, `InputGroup`, `Spinner`, `ButtonGroup`, `next-themes`
 | Animation Type | Tool |
 |----------------|------|
 | Hover/transitions | Tailwind CSS (`transition-*`) |
-| shadcn states | `tailwindcss-animate` (built-in) |
+| shadcn states | `tw-animate-css` in Yolk |
 | Gestures/layout/exit | Motion (`motion/react`) |
 | Complex SVG morphing | anime.js v4 (niche only) |
 
@@ -78,7 +82,7 @@ Bold maximalism and refined minimalism both work. Key is intentionality.
 
 ## Best Practices
 
-1. **Accessibility First**: Radix primitives, focus states, semantic HTML
+1. **Accessibility First**: Base UI/shadcn primitives in Yolk, focus states, semantic HTML
 2. **Mobile-First**: Start mobile, layer responsive variants
 3. **Design Tokens**: Use `@theme` for spacing, colors, typography
 4. **Dark Mode**: Apply dark variants to all themed elements
@@ -90,9 +94,9 @@ Bold maximalism and refined minimalism both work. Key is intentionality.
 
 **Tailwind v4.1**: CSS-first config via `@theme`. Single `@import "tailwindcss"`. OKLCH colors. Container queries built-in.
 
-**shadcn/ui v3.6**: Copy-paste Radix components. Visual styles: Vega/Nova/Maia/Lyra/Mira. New: Field, InputGroup, Spinner, ButtonGroup.
+**shadcn/ui v3.7**: Copy-paste components; Yolk uses Base UI style `base-vega`. New: Field, InputGroup, Spinner, ButtonGroup.
 
-**Motion**: `import { motion, AnimatePresence } from 'motion/react'`. Declarative React animations. Use `tailwindcss-animate` for shadcn states.
+**Motion**: `import { motion, AnimatePresence } from 'motion/react'`. Declarative React animations. Use `tw-animate-css` for Yolk shadcn states.
 
 ## Typography
 

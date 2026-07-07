@@ -40,9 +40,9 @@ Do not rewrite broad areas. Patch the smallest safe slice.
 
 ## Workflow
 
-### 1. Plan + todos
+### 1. Plan
 
-Use TodoWrite for every non-trivial run:
+For every non-trivial run, keep a short inline plan:
 
 1. Audit relevant owner docs and patterns
 2. Find violations

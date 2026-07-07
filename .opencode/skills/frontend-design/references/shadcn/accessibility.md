@@ -1,8 +1,8 @@
 # shadcn/ui Accessibility
 
-ARIA patterns, keyboard navigation, screen reader support via Radix UI.
+ARIA patterns, keyboard navigation, screen reader support via Base UI/shadcn primitives.
 
-## Radix Foundation
+## Primitive foundation
 
 Built-in: keyboard navigation, screen reader announcements, focus management, ARIA automatic.
 

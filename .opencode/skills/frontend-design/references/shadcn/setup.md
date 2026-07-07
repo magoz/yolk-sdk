@@ -1,6 +1,6 @@
 # shadcn/ui Setup
 
-CLI v3.6.x (current: v3.6.3) - Copy-paste components, Radix UI + Tailwind v4.
+CLI v3.7.x (repo devDependency: 3.7.0) - Copy-paste components; Yolk uses Base UI + Tailwind v4.
 
 ## New Project
 
@@ -23,7 +23,7 @@ npx shadcn@latest add button card dialog
 npx shadcn@latest add --all
 ```
 
-Components install to `components/ui/`.
+Components install to the configured `ui` alias. In Yolk, run from `examples/next`; components install to `examples/next/components/ui/`.
 
 ## Visual Styles
 
@@ -37,8 +37,8 @@ Components install to `components/ui/`.
 
 ## Component Libraries
 
-- **Radix UI** (default): Full accessibility, React-only
-- **Base UI**: MUI unstyled components
+- **Base UI** (Yolk default): accessible unstyled primitives from `@base-ui/react`
+- **Radix UI**: React-only alternative; do not switch Yolk components to Radix unless requested
 
 Select during `npx shadcn create` or in `components.json`.
 

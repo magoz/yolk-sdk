@@ -46,9 +46,9 @@ Do not tidy source code unless docs require tiny path/config updates.
 
 ## Workflow
 
-### 1. Plan + todos
+### 1. Plan
 
-Use TodoWrite for non-trivial runs:
+For non-trivial runs, keep a short inline plan:
 
 1. Audit docs and stale refs
 2. Classify misplaced knowledge
