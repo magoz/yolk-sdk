@@ -7,6 +7,7 @@
     "react-chat-ui",
     "persist-session",
     "durable-session-store",
+    "durable-compaction",
     "hitl",
     "testing"
   ]

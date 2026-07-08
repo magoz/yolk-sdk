@@ -25,7 +25,7 @@
 | `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                          |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                              |
 | `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                                 |
-| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contract, tool-call bridge, transcript projection, one-shot STT/TTS contracts |
+| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts     |
 | `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                           |
 | `@yolk-sdk/agent/voice/react`                         | `src/voice/react.ts`                         | Headless browser voice React hook                                                                                        |
 
@@ -42,7 +42,7 @@
 - Compaction depends on protocol + loop + Effect only.
 - Tools depend on protocol + loop + Effect only.
 - OAuth and skillset depend on Effect only.
-- Voice depends on protocol + loop only.
+- Voice depends on protocol + loop + Effect; `makeWebSocketVoiceTransport` needs a host `Socket.WebSocketConstructor` layer.
 - `voice/browser` is the only DOM/WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes.
 - Voice tools execute server-side only: the client `makeVoiceController` forwards provider tool calls to a host endpoint (`VoiceSessionToolCallRequest` in, `VoiceToolCallOutcome` out); `handleVoiceToolCall` applies `ToolDef.approval` policy before the executor and never runs approval-gated tools without a matching approved response.
 - Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
@@ -72,7 +72,7 @@
 - `AgentReasoningEffort` is protocol-only request config; app/provider layers choose and pass through values.
 - `AgentMessage` envelope fields are optional and model-visible: `createdAtMs`, `author.displayName`, and JSON `annotations`; preserve them through protocol round-trips.
 - Provider lowering renders message envelopes via `messageContextText` + `prependMessageContextToContent`; annotations are context only, not instructions.
-- `Content = string | ContentPart[]`; parts include text, image, document, and audio. Media parts carry `InlineBase64`, `Url`, or host-owned `Ref` sources. Use protocol helpers (`inlineBase64AttachmentSource`, `urlAttachmentSource`, `refAttachmentSource`, `contentText`, `contentPreview`, `contentParts`, `isContentEmpty`, `appendTextToContent`, `resolveContentAttachmentSources`, `documentPartFromText`, `inferTextDocumentMimeType`, `attachmentSourceText`, `attachmentSourceUrl`) instead of app-local duplication.
+- `Content = string | ContentPart[]`; parts include text, image, document, and audio. Media parts carry `InlineBase64`, `Url`, or host-owned `Ref` sources. Use protocol helpers (non-exhaustive: source factories, text/preview/parts, emptiness/append, hydration, document inference, attachment accessors) instead of app-local duplication.
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
@@ -81,7 +81,7 @@
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.
 - Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
-- `@yolk-sdk/agent/compaction` provides pure planning/estimation/transformer helpers only; hosts own thresholds, summary wording, LLM summarization, overflow retry, and checkpoints.
+- `@yolk-sdk/agent/compaction` provides pure planning/estimation, checkpoint formatting, ordered rich transcript formatting, and per-stream one-shot context-overflow retry helpers; hosts own thresholds, summary wording, LLM summarization, durable storage, and active-run guards.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
 - Durable replay may use `LLMTextDelta.textSoFar` / `LLMReasoningDelta.reasoningSoFar`; chat projection prefers snapshots and de-dupes by `eventId`.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.

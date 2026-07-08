@@ -22,6 +22,7 @@ examples/next/lib/services/[service-name]/
 - Use `Layer.effect(this, this.make)`; compose deps with `Layer.provide(...)`.
 - Single static `layer` property; avoid `layer` + `Live` twins.
 - Return `as const` from service `make` for literal inference; `as Type` casts stay banned.
+- Root helper exceptions are allowed for shared utilities: `retry.ts` and telemetry report helpers.
 
 ## Config
 

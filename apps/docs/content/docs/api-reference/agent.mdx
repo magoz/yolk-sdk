@@ -131,12 +131,16 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 
 `@yolk-sdk/agent/compaction`
 
-| Export                                                                                                     | Purpose                           |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio`                                      | budget helpers                    |
-| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens` | token estimation helpers          |
-| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                     | window compaction helpers         |
-| `makeWindowCompactionTransformer`                                                                          | `ContextTransformer` layer helper |
+| Export                                                                                                     | Purpose                                  |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio`                                      | budget helpers                           |
+| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens` | token estimation helpers                 |
+| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                     | window compaction helpers                |
+| `makeWindowCompactionTransformer`                                                                          | `ContextTransformer` layer helper        |
+| `makeCompactionCheckpointText`, `makeCompactionCheckpointMessage`                                          | synthetic checkpoint helpers             |
+| `formatAgentMessageForCompaction`, `formatAgentMessagesForCompaction`                                      | rich transcript summary-source formatter |
+| `compactionSummarySourceMessages`, `dropLeadingCompactionCheckpointMessage`                                | repeated-summary helper                  |
+| `makeContextOverflowRetryProvider`                                                                         | one-shot provider overflow retry wrapper |
 
 ## OAuth
 

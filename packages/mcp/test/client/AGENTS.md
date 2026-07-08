@@ -19,6 +19,8 @@ Transport/protocol tests for remote HTTP and local stdio MCP clients.
 - Policy rejection.
 - Duplicate generated tool names.
 - Invalid params and tool failures.
+- SSE parsing and retry/error boundaries.
+- MCP `structuredContent`, `isError`, and supported content block fidelity.
 
 ## Anti-Patterns
 

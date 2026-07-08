@@ -82,4 +82,7 @@ Production apps implement `SessionEventStore`; tests can use the in-memory layer
 
 ## Add compaction
 
-`@yolk-sdk/agent/compaction` provides helpers for budgets, token estimation, preview summaries, and window transforms. Use those helpers to build your `ContextTransformer` layer.
+`@yolk-sdk/agent/compaction` provides helpers for budgets, token estimation, preview summaries,
+checkpoint messages, transcript formatting, overflow retry, and window transforms.
+
+For long-lived server-owned sessions, see [Implement durable compaction](/docs/guides/durable-compaction).

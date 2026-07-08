@@ -5,7 +5,7 @@ Effect-native sandbox execution plane primitives plus a Vercel Sandbox adapter f
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/sandbox@canary effect
+pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.

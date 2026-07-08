@@ -23,7 +23,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                    |
 | `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration               |
 | `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers   |
-| `@yolk-sdk/agent/compaction`                          | Pure host-owned context budget, planning, and transformer utils |
+| `@yolk-sdk/agent/compaction`                          | Host-owned compaction budgets, checkpoints, formatting, retry   |
 | `@yolk-sdk/agent/tools`                               | Tool module registry, `makeTool`, task/question tool contracts  |
 | `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model  |
 | `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts               |
@@ -134,8 +134,9 @@ persist or display.
 
 ## Context compaction
 
-`@yolk-sdk/agent/compaction` provides pure scaffolding only. It does not call a model, persist
-checkpoints, or retry overflow. Hosts own thresholds, summary policy, and durable storage.
+`@yolk-sdk/agent/compaction` provides pure scaffolding only. It does not call a model or persist
+checkpoints. Hosts own thresholds, summary policy, durable storage, and active-run guards. The
+package includes a one-shot context-overflow retry wrapper that calls your host compactor.
 
 ```ts
 import {
@@ -381,7 +382,7 @@ aborts, and implementation bugs outside typed tool execution.
 ## Boundaries
 
 - Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
-- `@yolk-sdk/agent/compaction` is pure helper scaffolding; hosts own thresholds, summaries, checkpoints, and overflow retry.
+- `@yolk-sdk/agent/compaction` is pure helper scaffolding; hosts own thresholds, summaries, checkpoints, and durable compactor policy.
 - `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - Loop stays stateless: transcript in, events out.

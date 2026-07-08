@@ -36,6 +36,7 @@
 - `cwd` is workspace-relative; absolute paths and `..` escape are rejected.
 - Stdin uses wrapper files because Vercel SDK commands have no stdin param.
 - Timeout is Yolk-owned: run detached, wait with Effect timeout, kill on expiry; do not rely on Vercel `timeoutMs` exit `137`.
+- Long-running commands use `background: true`: quick probe, return `backgroundId`, and expose configured preview URLs.
 - Agent-facing surface stays one destructive `sandbox` tool.
 - Agent tool `structuredContent` stays plain JSON; do not return Effect Schema class instances.
 - Live Vercel smoke is manual/opt-in only; default tests use fakes/seams.

@@ -1,0 +1,309 @@
+---
+title: Implement durable compaction
+description: Keep full session history while sending compacted context to models.
+---
+
+Durable compaction lets long-lived agents keep their complete raw transcript for UI, audit, and
+export while sending a smaller projected context to the model.
+
+Use this guide when your app stores agent conversations in a database, append log, Durable Object,
+or workflow-owned state.
+
+## What you will build
+
+You will build a host-owned compaction layer with this shape:
+
+```txt
+raw history      = append-only messages and compaction rows
+model context    = latest checkpoint message + messages after it
+runtime writes   = newly created messages only
+summary storage  = durable compaction payload, not a synthetic transcript message
+```
+
+Yolk provides protocol helpers, planning helpers, checkpoint formatting, transcript formatting, and
+one-shot context-overflow retry. Your app owns storage, summary generation, thresholds, auth, and
+active-run guards.
+
+## Prerequisites
+
+- A server-owned transcript or session log.
+- A model provider layer for normal model calls.
+- A transaction or compare-and-set guard for appending messages.
+- A place to store compaction payloads beside messages.
+
+## Install
+
+```bash
+pnpm add @yolk-sdk/agent effect
+```
+
+## Design the ledger
+
+Store raw protocol messages and compaction payloads as first-class rows. Do not overwrite older
+messages with the summary.
+
+This is a host-owned shape, not an SDK schema:
+
+```ts
+import type { AgentMessage } from '@yolk-sdk/agent/protocol'
+
+type HostConversationEntry =
+  | {
+      readonly kind: 'message'
+      readonly sessionId: string
+      readonly revision: number
+      readonly seq: number
+      readonly message: AgentMessage
+      readonly runId?: string
+    }
+  | {
+      readonly kind: 'compaction'
+      readonly sessionId: string
+      readonly revision: number
+      readonly seq: number
+      readonly compaction: HostCompactionPayload
+      readonly runId?: string
+    }
+
+type HostCompactionPayload =
+  | {
+      readonly _tag: 'Completed'
+      readonly reason: 'auto' | 'manual' | 'overflow'
+      readonly summary: string
+      readonly recent: string
+      readonly compactedThroughSeq: number
+      readonly createdAtMs: number
+      readonly tokensBefore?: number
+      readonly tokensAfter?: number
+    }
+  | {
+      readonly _tag: 'Failed'
+      readonly reason: 'auto' | 'manual' | 'overflow'
+      readonly message: string
+      readonly createdAtMs: number
+    }
+```
+
+Production stores usually also keep a small session state row with the active revision, next sequence
+number, usage, active run id, and HITL state.
+
+## Project messages for the model
+
+Before any completed compaction exists, send the full active transcript. After compaction, send one
+synthetic checkpoint message plus messages appended after the compaction row.
+
+This fragment shows the projection:
+
+```ts
+import {
+  makeCompactionCheckpointMessage
+} from '@yolk-sdk/agent/compaction'
+import type { AgentMessage } from '@yolk-sdk/agent/protocol'
+
+const projectMessagesForModel = (
+  rows: ReadonlyArray<HostConversationEntry>
+): ReadonlyArray<AgentMessage> => {
+  const latestCompaction = rows
+    .filter(row => row.kind === 'compaction' && row.compaction._tag === 'Completed')
+    .at(-1)
+  const messages = rows.filter(row => row.kind === 'message')
+
+  if (latestCompaction === undefined) {
+    return messages.map(row => row.message)
+  }
+
+  const checkpoint = makeCompactionCheckpointMessage({
+    summary: latestCompaction.compaction.summary,
+    recent: latestCompaction.compaction.recent,
+    createdAtMs: latestCompaction.compaction.createdAtMs
+  })
+  const laterMessages = messages
+    .filter(row => row.seq > latestCompaction.seq)
+    .map(row => row.message)
+
+  return [checkpoint, ...laterMessages]
+}
+```
+
+Do not persist the checkpoint returned by `makeCompactionCheckpointMessage` as a raw message. It is a
+model-input projection only.
+
+## Plan when to compact
+
+Use the same token estimate you use for model-context warnings. `planWindowCompaction` keeps a recent
+tail and avoids splitting tool results away from recent assistant tool calls.
+
+This fragment plans an automatic compaction:
+
+```ts
+import {
+  contextBudgetStatus,
+  estimateAgentMessagesTokens,
+  makeContextBudget,
+  planWindowCompaction
+} from '@yolk-sdk/agent/compaction'
+import type { AgentMessage } from '@yolk-sdk/agent/protocol'
+
+const budget = makeContextBudget({
+  contextWindowTokens: 200_000,
+  reservedOutputTokens: 8_000,
+  warningRatio: 0.75,
+  compactionRatio: 0.9
+})
+
+const planCompaction = (messages: ReadonlyArray<AgentMessage>) => {
+  const inputTokens = estimateAgentMessagesTokens(messages)
+
+  if (contextBudgetStatus(inputTokens, budget) !== 'compact') {
+    return { _tag: 'Skip' as const }
+  }
+
+  return planWindowCompaction(messages, {
+    thresholdTokens: budget.compactionInputTokens
+  })
+}
+```
+
+The planner does not call a model. It only chooses which messages to summarize and which messages to
+keep as recent context.
+
+## Generate and store a summary
+
+Generate the summary with your app's provider configuration, then persist it as a compaction row.
+
+Use `formatAgentMessagesForCompaction` to serialize messages into summary input. It includes user
+text, assistant text, assistant reasoning summaries, host tool calls, and truncated tool results.
+
+This fragment shows the summary boundary:
+
+```ts
+import {
+  compactionSummarySourceMessages,
+  estimateAgentMessagesTokens,
+  formatAgentMessagesForCompaction,
+  makeCompactionCheckpointMessage
+} from '@yolk-sdk/agent/compaction'
+
+const summarizeAndPersist = async (input: {
+  readonly plan: Extract<ReturnType<typeof planCompaction>, { readonly _tag: 'Compact' }>
+  readonly previousSummary?: string
+  readonly expectedSeq: number
+}) => {
+  const messagesForSummary = compactionSummarySourceMessages({
+    hasPreviousSummary: input.previousSummary !== undefined,
+    messages: input.plan.compactedMessages
+  })
+  const formattedHistory = formatAgentMessagesForCompaction(messagesForSummary)
+  const summary = await hostSummarizeCompaction({
+    previousSummary: input.previousSummary,
+    history: formattedHistory
+  })
+  const recent = formatAgentMessagesForCompaction(input.plan.recentMessages)
+  const createdAtMs = Date.now()
+  const payload = {
+    _tag: 'Completed' as const,
+    reason: 'auto' as const,
+    summary,
+    recent,
+    compactedThroughSeq: input.expectedSeq,
+    createdAtMs,
+    tokensBefore: input.plan.beforeTokens,
+    tokensAfter: estimateAgentMessagesTokens([
+      makeCompactionCheckpointMessage({ summary, recent, createdAtMs })
+    ])
+  }
+
+  if (payload.tokensAfter >= input.plan.beforeTokens) {
+    return { _tag: 'Skipped' as const }
+  }
+
+  await hostAppendCompaction({
+    expectedSeq: input.expectedSeq,
+    payload
+  })
+
+  return { _tag: 'Compacted' as const, payload }
+}
+```
+
+`hostSummarizeCompaction` and `hostAppendCompaction` are app-owned. Your storage append should verify
+the active run id and expected sequence so a stale run cannot compact or append to a newer transcript.
+
+## Retry provider context overflow once
+
+Providers can still reject a request when their exact token accounting differs from your estimate.
+Wrap the provider with `makeContextOverflowRetryProvider` to compact and retry once when the provider
+raises `LLMError` with `cause: 'context_overflow'`.
+
+This fragment wires the retry wrapper:
+
+```ts
+import { Effect, Ref } from 'effect'
+import { makeContextOverflowRetryProvider } from '@yolk-sdk/agent/compaction'
+
+const messagesRef = await Effect.runPromise(Ref.make(projectedMessages))
+const retryProvider = await Effect.runPromise(
+  makeContextOverflowRetryProvider({
+    provider: appProvider,
+    messagesRef,
+    compact: messages =>
+      maybeCompactAndProject({
+        reason: 'overflow',
+        messages
+      })
+  })
+)
+```
+
+The compactor returns either:
+
+```ts
+type ContextOverflowRetryCompactionResult =
+  | { readonly _tag: 'Compacted'; readonly messages: ReadonlyArray<AgentMessage> }
+  | { readonly _tag: 'Skipped'; readonly messages: ReadonlyArray<AgentMessage> }
+```
+
+If compaction succeeds, Yolk retries the provider call once with the compacted messages. If compaction
+is skipped or the retry also overflows, the original overflow fails normally.
+
+## Persist only new messages
+
+When a model or tool step finishes, append only messages created by that step:
+
+- user input rows from user actions
+- assistant message rows from model steps
+- tool-result rows from tool steps
+- partial created messages from failure paths
+
+Never persist `projectMessagesForModel(...)` back into the raw ledger. That projection may contain a
+synthetic checkpoint that is not part of the user-visible transcript.
+
+## Handle edits and deletes
+
+For destructive transcript mutations, create a new revision rather than rewriting old rows. The new
+revision can contain the edited transcript and no compaction rows. Old revisions remain available for
+audit or debugging.
+
+This rule keeps compaction simple: the active revision has one append cursor, and the latest completed
+compaction in that revision defines model context.
+
+## Production checklist
+
+- Keep raw messages append-only.
+- Store completed and failed compactions as ledger entries, not raw messages.
+- Project checkpoints only at model/provider boundaries.
+- Guard compaction writes with active run id and expected sequence.
+- Ignore failed compaction rows during projection.
+- Merge previous summaries by passing `previousSummary` and dropping the leading checkpoint from the
+  new summary input.
+- Compact before model calls and once on provider `context_overflow`.
+- Surface compaction markers in your UI, but keep ledger rows as source of truth.
+
+## Related APIs
+
+- `planWindowCompaction`
+- `makeCompactionCheckpointMessage`
+- `formatAgentMessagesForCompaction`
+- `compactionSummarySourceMessages`
+- `makeContextOverflowRetryProvider`
+- `estimateAgentMessagesTokens`

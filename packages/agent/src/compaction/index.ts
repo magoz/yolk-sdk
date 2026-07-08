@@ -1,6 +1,21 @@
 export { contextBudgetStatus, contextBudgetUsageRatio, makeContextBudget } from './budget.ts'
 export type { ContextBudget, ContextBudgetInput, ContextBudgetStatus } from './budget.ts'
 export {
+  compactionCheckpointCloseTag,
+  compactionCheckpointOpenTag,
+  compactionSummarySourceMessages,
+  defaultCompactionCheckpointHeader,
+  dropLeadingCompactionCheckpointMessage,
+  isCompactionCheckpointMessage,
+  isCompactionCheckpointText,
+  makeCompactionCheckpointMessage,
+  makeCompactionCheckpointText
+} from './checkpoint.ts'
+export type {
+  CompactionCheckpointInput,
+  CompactionSummarySourceMessageOptions
+} from './checkpoint.ts'
+export {
   defaultCharactersPerToken,
   defaultMediaPartTokens,
   defaultMessageOverheadTokens,
@@ -15,14 +30,25 @@ export type {
   TranscriptTokenEstimator
 } from './estimator.ts'
 export {
+  compactionContentText,
+  defaultCompactionToolOutputMaxCharacters,
   defaultPreviewSummaryHeader,
   defaultSummaryPreviewMaxCharacters,
+  formatAgentMessageForCompaction,
+  formatAgentMessagesForCompaction,
   makePreviewSummaryContent,
   makePreviewSummaryMessage,
   previewAgentMessage,
+  truncateCompactionToolOutput,
   truncateSummaryPreview
 } from './summary.ts'
-export type { PreviewSummaryMessageOptions } from './summary.ts'
+export type { CompactionMessageFormatOptions, PreviewSummaryMessageOptions } from './summary.ts'
+export { makeContextOverflowRetryProvider } from './retry.ts'
+export type {
+  ContextOverflowRetryCompactionResult,
+  ContextOverflowRetryCompactor,
+  ContextOverflowRetryProviderInput
+} from './retry.ts'
 export {
   applyCompactionPlan,
   defaultCompactionTailMessageCount,

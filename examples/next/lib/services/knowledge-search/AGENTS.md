@@ -5,7 +5,7 @@ App-owned concrete adapters for the domain-free knowledge search contracts.
 ## Role
 
 - `DrizzleSearchIndexStoreLayer`: implements `SearchIndexStore` over app Drizzle schema, pgvector, and Postgres full-text search.
-- `TextKnowledgeExtractorLayer`: string-only extractor for V1 `/storage` text sources; preserves metadata title.
+- `TextKnowledgeExtractorLayer`: string extractor for normalized storage ingestion content: manual text plus extracted files; preserves metadata title.
 - `OpenAiKnowledgeEmbedderLayer`: OpenAI embeddings via Effect `HttpClient` and `OPENAI_API_KEY`.
 - `OpenAiKnowledgeDocumentSummarizerLayer`: OpenAI chat completion title + summary generation via Effect `HttpClient` and `OPENAI_API_KEY`.
 - `AppKnowledgeSearchLayer`: composed layer for storage/knowledge search ingestion and search boundaries.
