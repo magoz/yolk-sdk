@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.42
+
+### Patch Changes
+
+- Add compaction checkpoint formatting and one-shot context-overflow retry helpers.
+
 ## 0.1.0-canary.41
 
 ### Patch Changes

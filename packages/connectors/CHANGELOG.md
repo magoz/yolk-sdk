@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.42
+
+### Patch Changes
+
+- Add compaction checkpoint formatting and one-shot context-overflow retry helpers.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.42
+
 ## 0.1.0-canary.41
 
 ### Patch Changes

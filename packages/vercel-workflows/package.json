@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/vercel-workflows",
-  "version": "0.1.0-canary.41",
+  "version": "0.1.0-canary.42",
   "description": "Vercel Workflow orchestration primitives for Yolk agent loops.",
   "license": "MIT",
   "type": "module",
