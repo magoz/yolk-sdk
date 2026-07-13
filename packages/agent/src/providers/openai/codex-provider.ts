@@ -72,11 +72,16 @@ type OpenAiCodexInputImagePart = {
   readonly image_url: string
 }
 
-type OpenAiCodexInputFilePart = {
-  readonly type: 'input_file'
-  readonly filename: string
-  readonly file_data: string
-}
+type OpenAiCodexInputFilePart =
+  | {
+      readonly type: 'input_file'
+      readonly filename: string
+      readonly file_data: string
+    }
+  | {
+      readonly type: 'input_file'
+      readonly file_url: string
+    }
 
 type OpenAiCodexOutputTextPart = {
   readonly type: 'output_text'
@@ -278,15 +283,22 @@ const userPartToCodexInputPart = (
           })
       })
     case 'Document':
-      return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
-        onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
-        onSome: url =>
-          Effect.succeed({
-            type: 'input_file',
-            filename: part.filename,
-            file_data: url
+      switch (part.source._tag) {
+        case 'InlineBase64':
+          return Option.match(attachmentSourceDataUrl(part.source, part.mimeType), {
+            onNone: () => Effect.fail(unsupportedContentError('Invalid document source')),
+            onSome: url =>
+              Effect.succeed({
+                type: 'input_file',
+                filename: part.filename,
+                file_data: url
+              })
           })
-      })
+        case 'Url':
+          return Effect.succeed({ type: 'input_file', file_url: part.source.url })
+        case 'Ref':
+          return Effect.fail(unsupportedContentError('Unresolved document source'))
+      }
     case 'Audio':
       return Effect.fail(unsupportedContentError('User audio'))
   }

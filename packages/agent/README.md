@@ -170,8 +170,8 @@ const ContextLayer = makeWindowCompactionTransformer({
 - `AudioPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
-`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat, OpenAI Codex,
-and Anthropic support image URLs; Anthropic also supports PDF URLs. Use inline base64 for simple apps,
+`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat supports image
+URLs; OpenAI Codex and Anthropic support image and PDF URLs. Use inline base64 for simple apps,
 durable URLs for app-owned uploads, or persist `Ref` values and call
 `resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
 upload, auth, retention, URL durability, and ref hydration policy.
