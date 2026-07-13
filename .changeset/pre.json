@@ -14,6 +14,7 @@
   },
   "changesets": [
     "brave-hitl-rules",
+    "bright-codex-files",
     "bright-knowledge-documents",
     "brisk-claude-streams",
     "curvy-claude-headers",
@@ -32,7 +33,6 @@
     "olive-usage-tokens",
     "polite-runs-poll",
     "proud-tools-lower",
-    "quiet-compaction-canary",
     "quiet-owls-approve",
     "quiet-timers-jump",
     "safe-tool-errors",

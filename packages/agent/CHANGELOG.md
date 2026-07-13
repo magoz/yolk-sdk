@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.43
+
+### Patch Changes
+
+- 5c53852: Pass URL-backed documents through as OpenAI Codex Responses input files.
+
 ## 0.1.0-canary.42
 
 ### Patch Changes
