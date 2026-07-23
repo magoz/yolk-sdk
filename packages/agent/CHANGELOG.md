@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.48
+
+### Patch Changes
+
+- 6cfc7fb: Require hosts to configure model-specific output limits for Anthropic and OpenAI providers.
+
 ## 0.1.0-canary.47
 
 ### Patch Changes
