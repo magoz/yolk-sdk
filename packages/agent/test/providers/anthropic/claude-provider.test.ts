@@ -267,6 +267,107 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('lowers rich tool results to nested Claude content blocks', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'inspect' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'screenshot', params: {} })
+              })
+            ]
+          }),
+          ToolResultMessage.make({
+            toolCallId: 'call-1',
+            content: [
+              TextPart.make({ text: 'Screenshot:' }),
+              ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+              DocumentPart.make({
+                source: urlAttachmentSource('https://example.com/brief.pdf'),
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf'
+              })
+            ],
+            isError: true
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[2]).toEqual({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call-1',
+            content: [
+              { type: 'text', text: 'Screenshot:' },
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: 'image/png', data: 'abc' }
+              },
+              {
+                type: 'document',
+                source: { type: 'url', url: 'https://example.com/brief.pdf' },
+                title: 'brief.pdf'
+              }
+            ],
+            is_error: true
+          }
+        ]
+      })
+    })
+  )
+
+  it.effect('lowers image-only URL tool results', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-sonnet-4-6',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'inspect' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'screenshot', params: {} })
+              })
+            ]
+          }),
+          ToolResultMessage.make({
+            toolCallId: 'call-1',
+            content: [
+              ImagePart.make({
+                source: urlAttachmentSource('https://example.com/screenshot.png'),
+                mimeType: 'image/png'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.messages[2]).toMatchObject({
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call-1',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'url', url: 'https://example.com/screenshot.png' }
+              }
+            ]
+          }
+        ]
+      })
+    })
+  )
+
   it.effect('rejects dangling host tool calls before Anthropic request lowering', () =>
     Effect.gen(function* () {
       const error = yield* toAnthropicClaudeRequestBody({

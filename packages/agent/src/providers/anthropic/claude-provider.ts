@@ -100,10 +100,15 @@ type AnthropicToolUseBlock = {
   readonly input: unknown
 }
 
+type AnthropicToolResultContentBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicDocumentBlock
+
 type AnthropicToolResultBlock = {
   readonly type: 'tool_result'
   readonly tool_use_id: string
-  readonly content: string
+  readonly content: string | ReadonlyArray<AnthropicToolResultContentBlock>
   readonly is_error?: boolean
 }
 
@@ -533,7 +538,9 @@ const textDocumentToAnthropicBlock = (part: Extract<ContentPart, { readonly _tag
     )
   )
 
-const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserBlock, LLMError> => {
+const contentPartToAnthropicBlock = (
+  part: ContentPart
+): Effect.Effect<AnthropicToolResultContentBlock, LLMError> => {
   switch (part._tag) {
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
@@ -550,12 +557,12 @@ const contentPartToUserBlock = (part: ContentPart): Effect.Effect<AnthropicUserB
   }
 }
 
-const contentToUserContent = (
+const contentToAnthropicContent = (
   content: Content
-): Effect.Effect<string | ReadonlyArray<AnthropicUserBlock>, LLMError> =>
+): Effect.Effect<string | ReadonlyArray<AnthropicToolResultContentBlock>, LLMError> =>
   typeof content === 'string'
     ? Effect.succeed(content)
-    : Effect.forEach(content, contentPartToUserBlock)
+    : Effect.forEach(content, contentPartToAnthropicBlock)
 
 const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
   switch (part._tag) {
@@ -927,7 +934,7 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
       case 'User':
         return {
           role: 'user',
-          content: yield* contentToUserContent(
+          content: yield* contentToAnthropicContent(
             prependMessageContextToContent(message.content, messageContextText(message))
           )
         }
@@ -948,9 +955,8 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
             {
               type: 'tool_result',
               tool_use_id: message.toolCallId,
-              content: yield* contentToText(
-                prependMessageContextToContent(message.content, messageContextText(message)),
-                'Tool result'
+              content: yield* contentToAnthropicContent(
+                prependMessageContextToContent(message.content, messageContextText(message))
               ),
               is_error: message.isError
             }

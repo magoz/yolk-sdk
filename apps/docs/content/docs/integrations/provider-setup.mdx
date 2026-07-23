@@ -90,6 +90,10 @@ Then provide `AppAgentLayer` to `run` or `runRuntime`.
 | OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files     |
 | Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents |
 
+Claude preserves supported image, PDF, and inline text-document parts inside tool results instead
+of flattening them to text. Resolve host-owned attachment refs before provider execution; Claude
+tool results do not support audio.
+
 Set model capabilities in your request config so unsupported inputs fail before provider execution.
 
 ## Host responsibilities

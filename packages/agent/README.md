@@ -176,6 +176,10 @@ durable URLs for app-owned uploads, or persist `Ref` values and call
 `resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
 upload, auth, retention, URL durability, and ref hydration policy.
 
+Anthropic Claude preserves supported rich `ToolResultMessage` parts as nested tool-result content:
+text, images, inline text documents, and URL/base64 PDFs. Audio and unresolved `Ref` sources still
+fail before the provider request.
+
 ```ts
 import { ImagePart, UserMessage, urlAttachmentSource } from '@yolk-sdk/agent/protocol'
 
