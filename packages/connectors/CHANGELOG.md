@@ -1,5 +1,14 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.46
+
+### Patch Changes
+
+- Classify Anthropic context overflow, support tokenizer-backed compaction estimates, and return
+  normalized Gmail threads without raw MIME or attachment bytes.
+- Updated dependencies
+  - @yolk-sdk/agent@0.1.0-canary.46
+
 ## 0.1.0-canary.45
 
 ### Patch Changes

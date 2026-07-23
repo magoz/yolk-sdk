@@ -1,5 +1,7 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.46
+
 ## 0.1.0-canary.45
 
 ## 0.1.0-canary.44
