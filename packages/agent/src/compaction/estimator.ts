@@ -8,6 +8,7 @@ import {
 
 export type TokenEstimateOptions = {
   readonly charactersPerToken?: number
+  readonly countTextTokens?: (text: string) => number
   readonly mediaPartTokens?: number
   readonly messageOverheadTokens?: number
 }
@@ -29,7 +30,12 @@ const messageOverheadTokens = (options: TokenEstimateOptions) =>
   Math.max(0, options.messageOverheadTokens ?? defaultMessageOverheadTokens)
 
 export const estimateTextTokens = (text: string, options: TokenEstimateOptions = {}) =>
-  Math.ceil(text.length / charactersPerToken(options))
+  Math.max(
+    0,
+    Math.ceil(
+      options.countTextTokens?.(text) ?? text.length / charactersPerToken(options)
+    )
+  )
 
 export const estimateContentTokens = (content: Content, options: TokenEstimateOptions = {}) => {
   if (typeof content === 'string') {

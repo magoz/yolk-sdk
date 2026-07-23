@@ -97,6 +97,11 @@ describe('agent compaction', () => {
       estimateAgentMessageTokens(UserMessage.make({ content: [TextPart.make({ text: 'abcd' })] }))
     ).toBe(7)
     expect(estimateAgentMessageTokens(toolCallingAssistant())).toBeGreaterThan(6)
+    expect(
+      estimateAgentMessageTokens(user('encoded'), {
+        countTextTokens: text => text.length * 2
+      })
+    ).toBe(20)
   })
 
   it('plans window compaction only above threshold', () => {
