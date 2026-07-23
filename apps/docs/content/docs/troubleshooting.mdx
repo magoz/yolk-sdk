@@ -60,6 +60,18 @@ Codex and Claude provider layers need a fresh `OAuthAccessToken`. Your host owns
 
 Set model capabilities to match the provider/model. The loop rejects unsupported image, document, or audio parts before provider execution.
 
+### Anthropic context is too long
+
+Anthropic prompt-too-long responses become non-retryable `context_overflow` failures. Generic loop
+retry does not retry them. Compact before provider execution, or use
+`makeContextOverflowRetryProvider` to run your host compactor and retry once.
+
+### Claude reaches `max_tokens`
+
+Claude output-limit stops fail as non-retryable `invalid_response` instead of normal completion. A
+stream may already have emitted partial text, but it will not emit normal `Done`. Increase
+`maxTokens`, request shorter output, or adjust host output policy before retrying.
+
 ## Tool errors
 
 ### Tool is not configured

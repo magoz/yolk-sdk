@@ -81,8 +81,11 @@
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.
-- Compaction is host-owned through `ContextTransformer`; durable checkpoints belong in runtime/app storage, not loop core.
+- Anthropic prompt-too-long signals normalize to non-retryable `context_overflow`; generic loop retry must not retry them. `makeContextOverflowRetryProvider` is the explicit exception and may compact and retry once per provider stream.
+- Anthropic `stop_reason: "max_tokens"` is a non-retryable `invalid_response` in JSON and SSE responses; never emit `LLMDone` or report normal completion for a truncated turn.
+- Compaction is host-owned through `ContextTransformer`. Persist the raw transcript and host-owned compaction payload, not the synthetic `UserMessage` returned by `makeCompactionCheckpointMessage`; use `compactionSummarySourceMessages` to exclude the previous leading checkpoint when summarizing again.
 - `@yolk-sdk/agent/compaction` provides pure planning/estimation, checkpoint formatting, ordered rich transcript formatting, and per-stream one-shot context-overflow retry helpers; hosts own thresholds, summary wording, LLM summarization, durable storage, and active-run guards.
+- Built-in token estimates are provider-neutral heuristics. Hosts needing model-accurate thresholds inject synchronous `countTextTokens` or a whole-transcript `estimateTokens`, reuse one estimator across warnings/planning/before-after checks, and keep tokenizer dependencies outside the package.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
 - Durable replay may use `LLMTextDelta.textSoFar` / `LLMReasoningDelta.reasoningSoFar`; chat projection prefers snapshots and de-dupes by `eventId`.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.

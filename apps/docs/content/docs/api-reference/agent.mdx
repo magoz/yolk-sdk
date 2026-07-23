@@ -131,16 +131,24 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 
 `@yolk-sdk/agent/compaction`
 
-| Export                                                                                                     | Purpose                                  |
-| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio`                                      | budget helpers                           |
-| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens` | token estimation helpers                 |
-| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                     | window compaction helpers                |
-| `makeWindowCompactionTransformer`                                                                          | `ContextTransformer` layer helper        |
-| `makeCompactionCheckpointText`, `makeCompactionCheckpointMessage`                                          | synthetic checkpoint helpers             |
-| `formatAgentMessageForCompaction`, `formatAgentMessagesForCompaction`                                      | rich transcript summary-source formatter |
-| `compactionSummarySourceMessages`, `dropLeadingCompactionCheckpointMessage`                                | repeated-summary helper                  |
-| `makeContextOverflowRetryProvider`                                                                         | one-shot provider overflow retry wrapper |
+| Export                                                                                                       | Purpose                                  |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `makeContextBudget`, `contextBudgetStatus`, `contextBudgetUsageRatio`                                        | budget helpers                           |
+| `estimateAgentMessageTokens`, `estimateAgentMessagesTokens`, `estimateContentTokens`, `estimateTextTokens`   | token estimation helpers                 |
+| `TokenEstimateOptions`, `MessageTokenEstimator`, `TranscriptTokenEstimator`                                  | host tokenizer and estimator contracts   |
+| `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                       | window compaction helpers                |
+| `makeWindowCompactionTransformer`                                                                            | `ContextTransformer` layer helper        |
+| `makeCompactionCheckpointText`, `makeCompactionCheckpointMessage`                                            | synthetic checkpoint helpers             |
+| `isCompactionCheckpointText`, `isCompactionCheckpointMessage`                                                | checkpoint guards                        |
+| `formatAgentMessageForCompaction`, `formatAgentMessagesForCompaction`                                        | rich transcript summary-source formatter |
+| `CompactionMessageFormatOptions`                                                                             | reasoning/tool formatting controls       |
+| `compactionSummarySourceMessages`, `dropLeadingCompactionCheckpointMessage`                                  | repeated-summary helper                  |
+| `makeContextOverflowRetryProvider`                                                                           | one-shot provider overflow retry wrapper |
+| `ContextOverflowRetryCompactionResult`, `ContextOverflowRetryCompactor`, `ContextOverflowRetryProviderInput` | retry wrapper contracts                  |
+
+`TokenEstimateOptions.countTextTokens` accepts a synchronous host tokenizer for text, reasoning,
+and tool identifiers. Media and message overhead remain configurable heuristics. Window planners and
+transformers also accept a whole-transcript `estimateTokens`; use one estimator consistently.
 
 ## OAuth
 

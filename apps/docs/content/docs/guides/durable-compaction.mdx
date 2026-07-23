@@ -151,21 +151,32 @@ const budget = makeContextBudget({
   compactionRatio: 0.9
 })
 
+declare const hostCountTextTokens: (text: string) => number
+
+const estimateTokens = (messages: ReadonlyArray<AgentMessage>) =>
+  estimateAgentMessagesTokens(messages, {
+    countTextTokens: hostCountTextTokens
+  })
+
 const planCompaction = (messages: ReadonlyArray<AgentMessage>) => {
-  const inputTokens = estimateAgentMessagesTokens(messages)
+  const inputTokens = estimateTokens(messages)
 
   if (contextBudgetStatus(inputTokens, budget) !== 'compact') {
     return { _tag: 'Skip' as const }
   }
 
   return planWindowCompaction(messages, {
-    thresholdTokens: budget.compactionInputTokens
+    thresholdTokens: budget.compactionInputTokens,
+    estimateTokens
   })
 }
 ```
 
 The planner does not call a model. It only chooses which messages to summarize and which messages to
-keep as recent context.
+keep as recent context. Without `countTextTokens`, Yolk uses a provider-neutral character heuristic
+plus fixed message and media overhead. Inject a synchronous host tokenizer when model-accurate
+thresholds matter, and reuse the same `estimateTokens` function for warnings, planning, transformers,
+and before/after checks.
 
 ## Generate and store a summary
 
@@ -179,7 +190,6 @@ This fragment shows the summary boundary:
 ```ts
 import {
   compactionSummarySourceMessages,
-  estimateAgentMessagesTokens,
   formatAgentMessagesForCompaction,
   makeCompactionCheckpointMessage
 } from '@yolk-sdk/agent/compaction'
@@ -208,9 +218,7 @@ const summarizeAndPersist = async (input: {
     compactedThroughSeq: input.expectedSeq,
     createdAtMs,
     tokensBefore: input.plan.beforeTokens,
-    tokensAfter: estimateAgentMessagesTokens([
-      makeCompactionCheckpointMessage({ summary, recent, createdAtMs })
-    ])
+    tokensAfter: estimateTokens([makeCompactionCheckpointMessage({ summary, recent, createdAtMs })])
   }
 
   if (payload.tokensAfter >= input.plan.beforeTokens) {

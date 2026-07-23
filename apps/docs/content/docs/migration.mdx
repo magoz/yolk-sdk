@@ -21,6 +21,39 @@ pnpm list '@yolk-sdk/*'
 
 Do not mix versions unless a release note explicitly says it is safe.
 
+## Recent canary migrations
+
+### `0.1.0-canary.47`: Claude output limits
+
+Anthropic Claude turns that stop at `max_tokens` now fail as non-retryable `invalid_response`
+instead of reporting normal completion. Stream consumers may observe partial text, but no normal
+`Done` follows. Increase `maxTokens`, request shorter output, or adjust host output policy.
+
+### `0.1.0-canary.46`: Anthropic context overflow
+
+Anthropic prompt-too-long responses now classify as non-retryable `context_overflow`. Generic loop
+retry does not retry them. Hosts with compaction can use `makeContextOverflowRetryProvider` to
+compact and retry once.
+
+### `0.1.0-canary.46`: normalized Gmail threads
+
+`gmail.get_thread` no longer accepts only `{ threadId }` or returns Gmail's raw thread wire payload.
+Use this fragment to pass an explicit format:
+
+```ts
+import { GmailGetThreadInput } from '@yolk-sdk/connectors/google'
+
+const input = new GmailGetThreadInput({
+  threadId: hostGmailThreadId,
+  format: 'full'
+})
+```
+
+Allowed formats are `full`, `metadata`, and `minimal`; use `full` when decoded bodies are required.
+Read normalized `messages[].body`, `bodyMimeType`, `headers`, and `attachments` instead of Gmail
+`payload`, MIME parts, or `body.data`. Thread output contains attachment metadata only; fetch bytes
+through `gmail.get_attachment` with `messageId` and `attachmentId`.
+
 ## Upgrade checklist
 
 1. Update all `@yolk-sdk/*` dependencies together.

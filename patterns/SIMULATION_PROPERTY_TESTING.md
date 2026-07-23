@@ -331,7 +331,9 @@ Useful invariants:
 - `Done.stopReason` is derived from host tool calls: `tool_use` when any host tool call exists, otherwise `stop`
 - missing, duplicate, or wrong-reason `Done` fails with `LLMError { cause: "invalid_response" }`
 - retryable pre-emission provider failures retry up to `maxRetries`
-- non-retryable failures, `context_overflow`, and post-emission failures never retry
+- loop-generic retry never retries non-retryable failures, `context_overflow`, or post-emission failures
+- `makeContextOverflowRetryProvider` is the overflow exception: it retries at most once after successful host compaction; skipped/failed compaction or a second overflow terminates
+- provider output-limit/truncation signals fail as non-retryable `invalid_response` and never synthesize `Done`
 
 ### Cloudflare storage parity rollout
 

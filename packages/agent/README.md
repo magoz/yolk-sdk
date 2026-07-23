@@ -121,6 +121,10 @@ policy and emits protocol-visible retry/error state:
 - Client and React state keep `error: string | null` for compatibility and add typed `errorInfo` /
   `retryInfo`.
 - `buildAgentChatItems` can project active retry state as an `AgentChatItem` with `_tag: 'Retry'`.
+- Anthropic prompt-too-long responses become non-retryable `context_overflow`; the host-owned
+  compaction wrapper may compact and retry once.
+- Anthropic `max_tokens` completion fails as non-retryable `invalid_response` instead of reporting
+  a truncated turn as complete.
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
@@ -134,9 +138,10 @@ persist or display.
 
 ## Context compaction
 
-`@yolk-sdk/agent/compaction` provides pure scaffolding only. It does not call a model or persist
-checkpoints. Hosts own thresholds, summary policy, durable storage, and active-run guards. The
-package includes a one-shot context-overflow retry wrapper that calls your host compactor.
+`@yolk-sdk/agent/compaction` provides pure budgeting, planning, estimation, checkpoint, and
+formatting utilities plus Effect-native context-transformer and provider-retry adapters. It does
+not summarize or persist checkpoints. Hosts own thresholds, summary policy, durable storage, and
+active-run guards. The one-shot context-overflow wrapper calls your host compactor.
 
 ```ts
 import {
@@ -159,6 +164,11 @@ const ContextLayer = makeWindowCompactionTransformer({
   makeSummaryMessage: messages => makePreviewSummaryMessage(messages)
 })
 ```
+
+The default estimator uses provider-neutral character and media heuristics. Pass
+`TokenEstimateOptions.countTextTokens` to the estimation helpers when the host has a synchronous
+tokenizer, or pass a whole-transcript `estimateTokens` to planners and transformers. Reuse the same
+estimator for warnings, planning, and before/after checks; tokenizer dependencies remain host-owned.
 
 ## Protocol content
 

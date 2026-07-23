@@ -37,7 +37,7 @@ Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots,
 | `gmail.get_message`    | fetch one message              |
 | `gmail.list`           | list messages                  |
 | `gmail.list_drafts`    | list drafts                    |
-| `gmail.get_thread`     | fetch a thread                 |
+| `gmail.get_thread`     | fetch normalized thread       |
 | `gmail.list_labels`    | list labels                    |
 | `gmail.modify_labels`  | add/remove labels              |
 | `gmail.trash`          | move a message to trash        |
@@ -49,6 +49,19 @@ Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots,
 | `gmail.get_attachment` | fetch an attachment            |
 | `gmail.list_send_as`   | list send-as aliases           |
 | `gmail.list_accounts`  | list accessible Gmail accounts |
+
+#### Fetch a normalized Gmail thread
+
+`gmail.get_thread` requires `{ threadId, format }`, where `format` is `full`, `metadata`, or
+`minimal`. Use `full` when decoded message bodies are required.
+
+The action returns `GmailThreadOutput`. Each `GmailThreadMessage` includes selected root headers,
+attachment metadata, and an optional decoded `body` with `bodyMimeType`. Plain text is preferred
+when available; otherwise HTML is used. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`,
+`From`, `In-Reply-To`, `Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
+
+Raw MIME payloads and attachment bytes are intentionally omitted. Use the parent message `id` as
+`messageId` plus the attachment's `attachmentId` with `gmail.get_attachment` to fetch content.
 
 ### Calendar actions
 

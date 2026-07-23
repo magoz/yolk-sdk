@@ -42,4 +42,5 @@
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
+- `gmail.get_thread` is a bounded normalized boundary: require an explicit format, decode text bodies with plain text preferred over HTML, retain selected headers and attachment metadata, and never expose raw MIME payloads or attachment bytes. Fetch attachment content through `gmail.get_attachment`.
 - Agent adapters require a host-provided Effect layer for connector dependencies; adapters must not construct HTTP or credential services themselves.

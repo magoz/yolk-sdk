@@ -63,6 +63,13 @@ const ClaudeLayer = makeAnthropicClaudeProviderLayer({
 
 OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/providers/anthropic/claude`.
 
+Anthropic prompt-too-long responses are non-retryable `context_overflow` failures. If your host owns
+durable compaction, wrap the provider with `makeContextOverflowRetryProvider` to compact and retry
+once. See [Implement durable compaction](../guides/durable-compaction).
+
+Claude responses that stop at `max_tokens` fail as non-retryable `invalid_response`; they do not emit
+normal completion. Increase `maxTokens`, request a shorter response, or adjust host output policy.
+
 ## Provide the layer
 
 Merge the provider with your loop/tool layers:

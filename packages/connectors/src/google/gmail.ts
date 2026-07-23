@@ -741,7 +741,7 @@ export const gmailListDraftsAction = defineAction({
 
 export const gmailGetThreadAction = defineAction({
   id: 'gmail.get_thread',
-  description: 'Get a Gmail thread by id.',
+  description: 'Get a normalized Gmail thread; use full format for decoded message bodies.',
   inputSchema: GmailGetThreadInput,
   outputSchema: GmailThreadOutput,
   execute: ({ integration, input }) =>
