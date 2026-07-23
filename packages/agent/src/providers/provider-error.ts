@@ -144,7 +144,11 @@ const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | unde
     signal.includes('context_length') ||
     signal.includes('context length') ||
     signal.includes('context_overflow') ||
-    signal.includes('context overflow')
+    signal.includes('context overflow') ||
+    signal.includes('prompt is too long') ||
+    signal.includes('input is too long') ||
+    signal.includes('too many tokens') ||
+    signal.includes('input_length_error')
   ) {
     return 'context_overflow'
   }

@@ -1037,6 +1037,37 @@ const stringField = (value: unknown, key: string) => {
   return typeof raw === 'string' ? raw : undefined
 }
 
+type AnthropicHttpErrorInfo = {
+  readonly message?: string
+  readonly providerCode?: string
+}
+
+const maxAnthropicHttpErrorMessageCharacters = 1_000
+
+const boundedAnthropicHttpErrorMessage = (message: string) =>
+  message.length <= maxAnthropicHttpErrorMessageCharacters
+    ? message
+    : `${message.slice(0, maxAnthropicHttpErrorMessageCharacters)}…`
+
+const decodeAnthropicHttpErrorInfo = (
+  raw: string
+): Effect.Effect<AnthropicHttpErrorInfo> =>
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
+    Effect.map(parsed => {
+      const error = field(parsed, 'error')
+      const message = stringField(error, 'message')
+      const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
+
+      return {
+        ...(message === undefined
+          ? {}
+          : { message: boundedAnthropicHttpErrorMessage(message) }),
+        ...(providerCode === undefined ? {} : { providerCode })
+      }
+    }),
+    Effect.catch(() => Effect.succeed({}))
+  )
+
 const providerSignalError = (input: {
   readonly message: string
   readonly providerCode?: string
@@ -1594,18 +1625,27 @@ const sendAnthropicClaudeRequest = (
             })
         )
       )
+      const errorInfo = yield* decodeAnthropicHttpErrorInfo(errorText)
 
       const provider = classifyProviderFailure({
         provider: anthropicClaudeProvider,
         status: response.status,
         headers: response.headers,
-        body: errorText
+        body: errorText,
+        ...(errorInfo.message === undefined ? {} : { message: errorInfo.message }),
+        ...(errorInfo.providerCode === undefined
+          ? {}
+          : { providerCode: errorInfo.providerCode })
       })
+      const message =
+        errorInfo.message === undefined
+          ? `Anthropic Claude returned ${response.status}`
+          : `Anthropic Claude returned ${response.status}: ${errorInfo.message}`
 
       return yield* Effect.fail(
         new LLMError({
           cause: providerFailureCause(provider.kind),
-          message: `Anthropic Claude returned ${response.status}`,
+          message,
           retryable: providerFailureRetryable(provider.kind),
           provider
         })

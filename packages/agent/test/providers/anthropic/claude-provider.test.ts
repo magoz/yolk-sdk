@@ -711,6 +711,37 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('maps Anthropic prompt-too-long HTTP errors to context overflow', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const response = new Response(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: 'prompt is too long: 233153 tokens > 200000 maximum'
+          }
+        }),
+        { status: 400 }
+      )
+      const error = yield* runMinimalProviderRequest({ response }, requests).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'context_overflow',
+        message:
+          'Anthropic Claude returned 400: prompt is too long: 233153 tokens > 200000 maximum',
+        retryable: false,
+        provider: {
+          provider: 'anthropic_claude',
+          kind: 'context_overflow',
+          status: 400,
+          providerCode: 'invalid_request_error'
+        }
+      })
+    })
+  )
+
   it.effect('streams Anthropic text deltas as they arrive', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
