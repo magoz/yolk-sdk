@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.44
+
+### Patch Changes
+
+- 607255e: Send image and document tool results to Anthropic Claude as native content blocks.
+
 ## 0.1.0-canary.43
 
 ### Patch Changes

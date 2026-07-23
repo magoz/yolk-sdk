@@ -1,5 +1,12 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.44
+
+### Patch Changes
+
+- Updated dependencies [607255e]
+  - @yolk-sdk/agent@0.1.0-canary.44
+
 ## 0.1.0-canary.43
 
 ### Patch Changes
