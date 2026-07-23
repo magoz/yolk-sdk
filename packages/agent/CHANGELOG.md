@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.45
+
+### Patch Changes
+
+- d8c0b7a: Send image and document tool results to OpenAI Codex as native function output content.
+
 ## 0.1.0-canary.44
 
 ### Patch Changes

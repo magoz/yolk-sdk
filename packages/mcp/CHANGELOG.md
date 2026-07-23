@@ -1,5 +1,12 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.45
+
+### Patch Changes
+
+- Updated dependencies [d8c0b7a]
+  - @yolk-sdk/agent@0.1.0-canary.45
+
 ## 0.1.0-canary.44
 
 ### Patch Changes
