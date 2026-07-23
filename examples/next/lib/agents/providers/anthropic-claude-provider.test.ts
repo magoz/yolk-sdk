@@ -28,7 +28,8 @@ const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) 
       provider: anthropicClaudeProviderId,
       accessToken: 'test-token',
       expiresAt: 9_999
-    })
+    }),
+    maxTokens: 123
   }).pipe(Layer.provide(httpClientLayer))
 
 const makeHttpClientLayer = (

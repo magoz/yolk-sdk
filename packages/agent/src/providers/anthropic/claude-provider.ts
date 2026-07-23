@@ -53,7 +53,7 @@ import { validateProviderTranscript } from '../transcript.ts'
 export type AnthropicClaudeProviderConfig = {
   readonly token: OAuthAccessToken
   readonly messagesUrl?: string
-  readonly maxTokens?: number
+  readonly maxTokens: number
   readonly extraHeaders?: Readonly<Record<string, string>>
 }
 
@@ -201,7 +201,6 @@ const unprefixClaudeToolName = (name: string) => {
 }
 
 const anthropicClaudeMessagesUrl = 'https://api.anthropic.com/v1/messages?beta=true'
-const anthropicClaudeMaxTokens = 8192
 const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   type: 'text',
   text: anthropicClaudeSystemIdentity
@@ -973,7 +972,7 @@ const toAnthropicTool = (tool: ToolDef): AnthropicTool => ({
 
 export const toAnthropicClaudeRequestBody = (
   request: LLMRequest,
-  config?: { readonly maxTokens?: number; readonly stream?: boolean }
+  config: { readonly maxTokens: number; readonly stream?: boolean }
 ): Effect.Effect<AnthropicRequestBody, LLMError> =>
   Effect.gen(function* () {
     yield* validateProviderTranscript(request.messages)
@@ -984,10 +983,10 @@ export const toAnthropicClaudeRequestBody = (
       model: request.model,
       system: [billingSystemBlock, anthropicClaudeIdentitySystemBlock],
       messages,
-      max_tokens: config?.maxTokens ?? anthropicClaudeMaxTokens
+      max_tokens: config.maxTokens
     }
     const body: AnthropicRequestBody =
-      config?.stream === true ? { ...baseBody, stream: true } : baseBody
+      config.stream === true ? { ...baseBody, stream: true } : baseBody
 
     if (request.tools.length === 0) {
       return body

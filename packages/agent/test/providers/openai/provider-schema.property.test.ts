@@ -150,7 +150,9 @@ describe('OpenAI provider schema properties', () => {
     [schemaVariantArbitrary],
     ([variant]) =>
       Effect.gen(function* () {
-        const body = yield* toOpenAiRequestBody(requestForTool(variant))
+        const body = yield* toOpenAiRequestBody(requestForTool(variant), {
+          maxCompletionTokens: 123
+        })
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
         const functionSchema = field(tool, 'function')
 
@@ -164,7 +166,9 @@ describe('OpenAI provider schema properties', () => {
     [schemaVariantArbitrary],
     ([variant]) =>
       Effect.gen(function* () {
-        const body = yield* toOpenAiCodexRequestBody(requestForTool(variant))
+        const body = yield* toOpenAiCodexRequestBody(requestForTool(variant), {
+          maxOutputTokens: 123
+        })
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
         assertProviderSafeParameters(field(tool, 'parameters'))

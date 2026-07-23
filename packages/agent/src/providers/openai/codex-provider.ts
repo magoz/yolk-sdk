@@ -51,6 +51,7 @@ export type OpenAiCodexReasoningSummary = 'auto' | 'concise' | 'detailed'
 
 export type OpenAiCodexProviderConfig = {
   readonly token: OAuthAccessToken
+  readonly maxOutputTokens: number
   readonly responsesUrl?: string
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly defaultReasoningEffort?: AgentReasoningEffort
@@ -119,6 +120,7 @@ type OpenAiCodexRequestBody = {
   readonly model: string
   readonly instructions: string
   readonly input: ReadonlyArray<OpenAiCodexInputItem>
+  readonly max_output_tokens: number
   readonly store: false
   readonly stream: true
   readonly reasoning: {
@@ -411,7 +413,8 @@ const toOpenAiCodexTool = (tool: ToolDef): OpenAiCodexTool => ({
 
 export const toOpenAiCodexRequestBody = (
   request: LLMRequest,
-  config?: {
+  config: {
+    readonly maxOutputTokens: number
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiCodexReasoningSummary
   }
@@ -424,11 +427,12 @@ export const toOpenAiCodexRequestBody = (
       model: request.model,
       instructions: request.systemPrompt,
       input,
+      max_output_tokens: config.maxOutputTokens,
       store: false,
       stream: true,
       reasoning: {
-        effort: request.reasoningEffort ?? config?.defaultReasoningEffort ?? 'low',
-        summary: config?.reasoningSummary ?? 'auto'
+        effort: request.reasoningEffort ?? config.defaultReasoningEffort ?? 'low',
+        summary: config.reasoningSummary ?? 'auto'
       }
     }
 

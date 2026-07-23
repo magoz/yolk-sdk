@@ -29,6 +29,7 @@ import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,
   agentTextModel,
+  agentTextModelMaxOutputTokens,
   agentTextModelProvider,
   agentTextReasoningEffort,
   isAgentTextModel,
@@ -144,7 +145,8 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
             provider: anthropicClaudeProviderId,
             accessToken: token.access,
             expiresAt: token.expires
-          })
+          }),
+          maxTokens: agentTextModelMaxOutputTokens(model)
         }).pipe(Layer.provide(FetchHttpClient.layer))
       }
       case 'openai-codex': {
@@ -155,7 +157,8 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
             accessToken: token.access,
             expiresAt: token.expires,
             accountId: token.accountId
-          })
+          }),
+          maxOutputTokens: agentTextModelMaxOutputTokens(model)
         }).pipe(Layer.provide(FetchHttpClient.layer))
       }
     }

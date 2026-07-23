@@ -9,12 +9,15 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 
 ## Available providers
 
-| Provider               | Factory                            | Auth               | Notes                                                                                                   |
-| ---------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
-| OpenAI-compatible chat | `makeOpenAiProviderLayer`          | API key            | Chat Completions-style endpoint; `OpenAiProviderLayer` can read `OPENAI_API_KEY` through Effect Config. |
-| OpenAI Codex           | `makeOpenAiCodexProviderLayer`     | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers.                                |
-| Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                        |
-| Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                   |
+| Provider               | Factory                            | Auth               | Notes                                                                                                               |
+| ---------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| OpenAI-compatible chat | `makeOpenAiProviderLayer`          | API key            | Chat Completions-style endpoint; `OpenAiProviderLayer` can read its API key and output limit through Effect Config. |
+| OpenAI Codex           | `makeOpenAiCodexProviderLayer`     | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers.                                            |
+| Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                                    |
+| Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                               |
+
+Provider output-token limits are required. Resolve them from the host-owned model configuration;
+Yolk does not maintain a model-limit catalog or apply hidden fallbacks.
 
 ## OpenAI-compatible chat
 
@@ -25,7 +28,7 @@ import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provid
 
 const ProviderLayer = makeOpenAiProviderLayer({
   apiKey: Redacted.make(hostOpenAiApiKey),
-  maxCompletionTokens: 4_096
+  maxCompletionTokens: hostModelConfig.maxOutputTokens
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
@@ -40,6 +43,7 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 
 const ProviderLayer = makeOpenAiCodexProviderLayer({
   token: hostOAuthAccessToken,
+  maxOutputTokens: hostModelConfig.maxOutputTokens,
   defaultReasoningEffort: 'medium',
   reasoningSummary: 'auto'
 }).pipe(Layer.provide(FetchHttpClient.layer))
@@ -62,7 +66,7 @@ import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anth
 
 const ProviderLayer = makeAnthropicClaudeProviderLayer({
   token: hostOAuthAccessToken,
-  maxTokens: 8_192
+  maxTokens: hostModelConfig.maxOutputTokens
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 

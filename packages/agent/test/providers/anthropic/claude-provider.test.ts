@@ -24,8 +24,17 @@ import { LLMProvider } from '@yolk-sdk/agent/loop'
 import {
   makeAnthropicClaudeProviderLayer,
   streamAnthropicClaudeResponse,
-  toAnthropicClaudeRequestBody
+  toAnthropicClaudeRequestBody as lowerAnthropicClaudeRequestBody
 } from '../../../src/providers/anthropic/claude-provider.ts'
+
+const anthropicTestMaxTokens = 123
+
+const toAnthropicClaudeRequestBody = (
+  request: Parameters<typeof lowerAnthropicClaudeRequestBody>[0],
+  config: Parameters<typeof lowerAnthropicClaudeRequestBody>[1] = {
+    maxTokens: anthropicTestMaxTokens
+  }
+) => lowerAnthropicClaudeRequestBody(request, config)
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
@@ -134,6 +143,7 @@ const runMinimalProviderRequest = (
         accessToken: 'token',
         expiresAt: Date.now() + 60_000
       }),
+      maxTokens: anthropicTestMaxTokens,
       ...(input.extraHeaders === undefined ? {} : { extraHeaders: input.extraHeaders })
     }).pipe(
       Layer.provide(
@@ -162,7 +172,8 @@ const collectProviderEvents = (response: Response, requests: Array<CapturedReque
         provider: 'anthropic-claude',
         accessToken: 'token',
         expiresAt: Date.now() + 60_000
-      })
+      }),
+      maxTokens: anthropicTestMaxTokens
     }).pipe(Layer.provide(makeHttpClientLayer(response, requests)))
 
     return yield* Effect.gen(function* () {
@@ -753,7 +764,8 @@ describe('Anthropic Claude provider', () => {
           provider: 'anthropic-claude',
           accessToken: 'token',
           expiresAt: Date.now() + 60_000
-        })
+        }),
+        maxTokens: anthropicTestMaxTokens
       }).pipe(Layer.provide(makeHttpClientLayer(response, requests)))
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider

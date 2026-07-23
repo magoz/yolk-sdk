@@ -117,17 +117,21 @@ describe('Codex WS headers', () => {
 describe('Codex WS request body', () => {
   it('keeps stream true for response.create', async () => {
     const body = await Effect.runPromise(
-      toWsRequestBody({
-        model: 'gpt-5.4',
-        systemPrompt: 'You are a smoke test assistant.',
-        messages: [UserMessage.make({ content: 'Reply with exactly: pong' })],
-        tools: [],
-        reasoningEffort: 'low'
-      })
+      toWsRequestBody(
+        {
+          model: 'gpt-5.4',
+          systemPrompt: 'You are a smoke test assistant.',
+          messages: [UserMessage.make({ content: 'Reply with exactly: pong' })],
+          tools: [],
+          reasoningEffort: 'low'
+        },
+        123
+      )
     )
 
     expect(body.type).toBe('response.create')
     expect(body.stream).toBe(true)
+    expect(body.max_output_tokens).toBe(123)
     expect(body.instructions).toBe('You are a smoke test assistant.')
     expect(body.input).toEqual([{ role: 'user', content: 'Reply with exactly: pong' }])
     expect(body.reasoning.effort).toBe('low')
@@ -139,6 +143,7 @@ describe('Codex WS proxy fallback', () => {
     const requests: Array<CapturedRequest> = []
     const layer = makeCodexWsProviderLayer({
       token,
+      maxOutputTokens: 123,
       sessionId: 'session_1',
       fallback: {
         endpoint: 'https://app.example.test/api/internal/cloudflare/codex-responses',

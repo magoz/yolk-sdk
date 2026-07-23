@@ -39,6 +39,7 @@ const codexInstallationId = 'yolk-cloudflare-agent'
 
 export type CodexWsConfig = {
   readonly token: TokenBrokerResponse
+  readonly maxOutputTokens: number
   readonly sessionId?: string
   readonly fallback?: CodexResponsesProxyConfig
 }
@@ -243,12 +244,14 @@ const encodeJson = (value: unknown) =>
 // Request
 // ---------------------------------------------------------------------------
 
-export const toWsRequestBody = (request: LLMRequest) =>
-  toOpenAiCodexRequestBody(request).pipe(
+export const toWsRequestBody = (request: LLMRequest, maxOutputTokens: number) =>
+  toOpenAiCodexRequestBody(request, { maxOutputTokens }).pipe(
     Effect.map(body => ({ type: 'response.create' as const, ...body }))
   )
 
-export const codexWsHeaders = (config: CodexWsConfig): Record<string, string> => {
+export const codexWsHeaders = (
+  config: Pick<CodexWsConfig, 'token' | 'sessionId'>
+): Record<string, string> => {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${config.token.accessToken}`,
     'OpenAI-Beta': codexWsBetaHeader,
@@ -602,7 +605,7 @@ const sendCodexProxyRequest = (
   client: HttpClient.HttpClient
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiCodexRequestBody(request)
+    const body = yield* toOpenAiCodexRequestBody(request, config)
     const serializedBody = yield* encodeJson(body)
     const response = yield* client
       .execute(
@@ -664,7 +667,7 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
     stream: (request: LLMRequest) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const body = yield* toWsRequestBody(request)
+          const body = yield* toWsRequestBody(request, config.maxOutputTokens)
           const bodyJson = yield* encodeJson(body)
           const socket = yield* makeCodexSocket(config).pipe(Effect.mapError(socketErrorToLlmError))
           const write = yield* socket.writer

@@ -148,12 +148,15 @@ describe('Anthropic Claude provider schema properties', () => {
     [schemaVariantArbitrary],
     ([variant]) =>
       Effect.gen(function* () {
-        const body = yield* toAnthropicClaudeRequestBody({
-          model: 'claude-sonnet-4-6',
-          systemPrompt: 'Use tools safely.',
-          messages: [UserMessage.make({ content: 'hello' })],
-          tools: [providerSafeTool(variant).def]
-        })
+        const body = yield* toAnthropicClaudeRequestBody(
+          {
+            model: 'claude-sonnet-4-6',
+            systemPrompt: 'Use tools safely.',
+            messages: [UserMessage.make({ content: 'hello' })],
+            tools: [providerSafeTool(variant).def]
+          },
+          { maxTokens: 123 }
+        )
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
         assertProviderSafeParameters(field(tool, 'input_schema'))

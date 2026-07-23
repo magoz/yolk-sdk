@@ -5,6 +5,9 @@ description: Wire OpenAI-compatible, OpenAI Codex, or Anthropic Claude provider 
 
 Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
 
+Provider output-token limits are required and should come from the host's model configuration. Yolk
+does not infer model limits or apply hidden fallbacks.
+
 ## Install
 
 ```bash
@@ -22,7 +25,7 @@ import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provid
 
 const OpenAiLayer = makeOpenAiProviderLayer({
   apiKey: Redacted.make(hostOpenAiApiKey),
-  maxCompletionTokens: 4096
+  maxCompletionTokens: hostModelConfig.maxOutputTokens
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
@@ -39,6 +42,7 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 
 const CodexLayer = makeOpenAiCodexProviderLayer({
   token: hostOAuthAccessToken,
+  maxOutputTokens: hostModelConfig.maxOutputTokens,
   defaultReasoningEffort: 'low',
   reasoningSummary: 'auto'
 }).pipe(Layer.provide(FetchHttpClient.layer))
@@ -57,7 +61,7 @@ import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anth
 
 const ClaudeLayer = makeAnthropicClaudeProviderLayer({
   token: hostOAuthAccessToken,
-  maxTokens: 8192
+  maxTokens: hostModelConfig.maxOutputTokens
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 

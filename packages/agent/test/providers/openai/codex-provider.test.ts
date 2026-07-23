@@ -17,8 +17,19 @@ import {
 } from '@yolk-sdk/agent/protocol'
 import {
   streamOpenAiCodexResponse,
-  toOpenAiCodexRequestBody
+  toOpenAiCodexRequestBody as lowerOpenAiCodexRequestBody
 } from '../../../src/providers/openai/codex-provider.ts'
+
+const openAiCodexTestMaxOutputTokens = 123
+
+const toOpenAiCodexRequestBody = (
+  request: Parameters<typeof lowerOpenAiCodexRequestBody>[0],
+  config?: Omit<Parameters<typeof lowerOpenAiCodexRequestBody>[1], 'maxOutputTokens'>
+) =>
+  lowerOpenAiCodexRequestBody(request, {
+    maxOutputTokens: openAiCodexTestMaxOutputTokens,
+    ...config
+  })
 
 const responseFromText = (text: string) => {
   const request = HttpClientRequest.get('https://example.com')
@@ -108,6 +119,7 @@ describe('OpenAI Codex provider', () => {
           },
           { type: 'function_call_output', call_id: 'call-1', output: 'result' }
         ],
+        max_output_tokens: openAiCodexTestMaxOutputTokens,
         store: false,
         stream: true,
         reasoning: { effort: 'medium', summary: 'detailed' },

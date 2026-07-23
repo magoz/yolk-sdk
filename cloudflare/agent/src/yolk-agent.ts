@@ -45,6 +45,7 @@ import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anth
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
 import {
   agentTextModel,
+  agentTextModelMaxOutputTokens,
   agentTextModelProvider,
   isAgentTextModel,
   type AgentTextModel
@@ -398,7 +399,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                   ? getAnthropicToken().pipe(
                       Effect.map(token =>
                         makeAnthropicClaudeProviderLayer({
-                          token: anthropicTokenToProviderToken(token)
+                          token: anthropicTokenToProviderToken(token),
+                          maxTokens: agentTextModelMaxOutputTokens(model)
                         }).pipe(Layer.provide(FetchHttpClient.layer))
                       )
                     )
@@ -406,6 +408,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                       Effect.map(token =>
                         makeCodexWsProviderLayer({
                           token,
+                          maxOutputTokens: agentTextModelMaxOutputTokens(model),
                           sessionId,
                           fallback:
                             bootstrap.codexResponsesEndpoint === undefined

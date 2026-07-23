@@ -15,17 +15,23 @@ import {
 import { LLMProvider } from '@yolk-sdk/agent/loop'
 import {
   makeOpenAiProviderLayer,
-  toOpenAiRequestBody
+  toOpenAiRequestBody as lowerOpenAiRequestBody
 } from '../../../src/providers/openai/provider.ts'
+
+const openAiTestMaxOutputTokens = 123
+
+const toOpenAiRequestBody = (request: Parameters<typeof lowerOpenAiRequestBody>[0]) =>
+  lowerOpenAiRequestBody(request, { maxCompletionTokens: openAiTestMaxOutputTokens })
 
 type CapturedRequest = {
   readonly request: HttpClientRequest.HttpClientRequest
 }
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
-  makeOpenAiProviderLayer({ apiKey: Redacted.make('test-key') }).pipe(
-    Layer.provide(httpClientLayer)
-  )
+  makeOpenAiProviderLayer({
+    apiKey: Redacted.make('test-key'),
+    maxCompletionTokens: openAiTestMaxOutputTokens
+  }).pipe(Layer.provide(httpClientLayer))
 
 const makeHttpClientLayer = (
   response: Response,

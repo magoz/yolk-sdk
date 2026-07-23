@@ -50,7 +50,9 @@ Build one app-level layer and provide it at the route/runtime boundary.
 
 ### Missing OpenAI API key
 
-`OpenAiProviderLayer` reads `OPENAI_API_KEY` through Effect Config. If you do not want env config, use `makeOpenAiProviderLayer({ apiKey })` and provide an HTTP layer.
+`OpenAiProviderLayer` reads `OPENAI_API_KEY` and `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+If you do not want env config, use `makeOpenAiProviderLayer({ apiKey, maxCompletionTokens })` and
+provide an HTTP layer.
 
 ### OAuth provider returns unauthorized
 

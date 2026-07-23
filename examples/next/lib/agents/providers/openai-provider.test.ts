@@ -10,9 +10,10 @@ type CapturedRequest = {
 }
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
-  makeOpenAiProviderLayer({ apiKey: Redacted.make('test-key') }).pipe(
-    Layer.provide(httpClientLayer)
-  )
+  makeOpenAiProviderLayer({
+    apiKey: Redacted.make('test-key'),
+    maxCompletionTokens: 123
+  }).pipe(Layer.provide(httpClientLayer))
 
 const makeHttpClientLayer = (
   responseBody: unknown,
@@ -76,7 +77,7 @@ describe('OpenAiProviderLayer', () => {
           { role: 'system', content: 'Be brief.' },
           { role: 'user', content: 'hello' }
         ],
-        max_completion_tokens: 4096
+        max_completion_tokens: 123
       })
       expect(Array.from(eventsChunk).map(event => event._tag)).toEqual(['TextDelta', 'Done'])
     })

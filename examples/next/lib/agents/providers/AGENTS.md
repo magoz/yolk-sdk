@@ -31,7 +31,8 @@ that exercise package-backed providers through app runtime wiring.
 ## Codex quirks
 
 - Endpoint: `https://chatgpt.com/backend-api/codex/responses` unless trusted proxy override is supplied.
-- Request uses `store: false`, `stream: true`, `originator: opencode`, and no `max_output_tokens`.
+- Request uses `store: false`, `stream: true`, `originator: opencode`, and the host model config's
+  `max_output_tokens`.
 - Forward `ChatGPT-Account-Id` when token has account id.
 - Treat SSE as valid even when content-type is `text/plain`; parse by body shape.
 - Function calls may arrive before completion as `response.output_item.done`; emit tool use immediately.

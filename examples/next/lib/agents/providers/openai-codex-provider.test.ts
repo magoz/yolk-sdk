@@ -33,7 +33,7 @@ const token = new OAuthAccessToken({
 })
 
 const makeProviderLayer = (httpClientLayer: Layer.Layer<HttpClient.HttpClient>) =>
-  makeOpenAiCodexProviderLayer({ token }).pipe(Layer.provide(httpClientLayer))
+  makeOpenAiCodexProviderLayer({ token, maxOutputTokens: 123 }).pipe(Layer.provide(httpClientLayer))
 
 const makeHttpClientLayer = (
   responseBody: unknown,
@@ -186,6 +186,7 @@ describe('OpenAiCodexProviderLayer', () => {
         model: 'gpt-5.4',
         instructions: 'Be brief.',
         input: [{ role: 'user', content: 'hello' }],
+        max_output_tokens: 123,
         store: false,
         stream: true,
         reasoning: { effort: 'low', summary: 'auto' }

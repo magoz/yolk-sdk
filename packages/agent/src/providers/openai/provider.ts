@@ -45,7 +45,7 @@ import { validateProviderTranscript } from '../transcript.ts'
 
 export type OpenAiProviderConfig = {
   readonly chatCompletionsUrl?: string
-  readonly maxCompletionTokens?: number
+  readonly maxCompletionTokens: number
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly apiKey: Redacted.Redacted<string>
 }
@@ -158,13 +158,14 @@ const OpenAiConfigLayer = Layer.effect(
   OpenAiConfig,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
-    return { apiKey }
+    const maxCompletionTokens = yield* Config.int('OPENAI_MAX_COMPLETION_TOKENS')
+    return { apiKey, maxCompletionTokens }
   }).pipe(
     Effect.mapError(
       () =>
         new LLMError({
           cause: 'provider_error',
-          message: 'OPENAI_API_KEY not found',
+          message: 'OpenAI provider environment configuration missing',
           retryable: false
         })
     )
@@ -339,7 +340,7 @@ const toOpenAiTool = (tool: ToolDef): OpenAiTool => ({
 
 export const toOpenAiRequestBody = (
   request: LLMRequest,
-  config?: { readonly maxCompletionTokens?: number }
+  config: { readonly maxCompletionTokens: number }
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
     yield* validateProviderTranscript(request.messages)
@@ -350,7 +351,7 @@ export const toOpenAiRequestBody = (
     const body = {
       model: request.model,
       messages,
-      max_completion_tokens: config?.maxCompletionTokens ?? 4096
+      max_completion_tokens: config.maxCompletionTokens
     }
 
     if (request.tools.length === 0) {
