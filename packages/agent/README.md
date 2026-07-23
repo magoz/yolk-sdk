@@ -171,14 +171,15 @@ const ContextLayer = makeWindowCompactionTransformer({
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
 `refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat supports image
-URLs; OpenAI Codex and Anthropic support image and PDF URLs. Use inline base64 for simple apps,
-durable URLs for app-owned uploads, or persist `Ref` values and call
+URLs; OpenAI Codex supports image and document URLs; Anthropic supports image and PDF URLs. Use
+inline base64 for simple apps, durable URLs for app-owned uploads, or persist `Ref` values and call
 `resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
 upload, auth, retention, URL durability, and ref hydration policy.
 
-Anthropic Claude preserves supported rich `ToolResultMessage` parts as nested tool-result content:
-text, images, inline text documents, and URL/base64 PDFs. Audio and unresolved `Ref` sources still
-fail before the provider request.
+OpenAI Codex preserves text, image, and document `ToolResultMessage` parts as native function output
+content. Anthropic Claude preserves text, images, inline text documents, and URL/base64 PDFs as
+nested tool-result content. Audio and unresolved `Ref` sources still fail before the provider
+request.
 
 ```ts
 import { ImagePart, UserMessage, urlAttachmentSource } from '@yolk-sdk/agent/protocol'

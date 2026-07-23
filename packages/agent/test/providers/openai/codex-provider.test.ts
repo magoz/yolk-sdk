@@ -2,6 +2,7 @@ import { Effect, Stream } from 'effect'
 import { HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AudioPart,
   AssistantAgentMessage,
   DocumentPart,
   HostToolCallPart,
@@ -120,6 +121,123 @@ describe('OpenAI Codex provider', () => {
         ],
         parallel_tool_calls: true
       })
+    })
+  )
+
+  it.effect('lowers rich tool results to Codex function output content', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'inspect' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'screenshot', params: {} })
+              })
+            ]
+          }),
+          ToolResultMessage.make({
+            toolCallId: 'call-1',
+            content: [
+              TextPart.make({ text: 'Screenshot:' }),
+              ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+              DocumentPart.make({
+                source: urlAttachmentSource('https://example.com/brief.pdf'),
+                mimeType: 'application/pdf',
+                filename: 'brief.pdf'
+              })
+            ],
+            isError: true
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input[2]).toEqual({
+        type: 'function_call_output',
+        call_id: 'call-1',
+        output: [
+          { type: 'input_text', text: 'Tool execution failed.' },
+          { type: 'input_text', text: 'Screenshot:' },
+          { type: 'input_image', image_url: 'data:image/png;base64,abc' },
+          { type: 'input_file', file_url: 'https://example.com/brief.pdf' }
+        ]
+      })
+    })
+  )
+
+  it.effect('lowers image-only URL tool results', () =>
+    Effect.gen(function* () {
+      const body = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'inspect' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'screenshot', params: {} })
+              })
+            ]
+          }),
+          ToolResultMessage.make({
+            toolCallId: 'call-1',
+            content: [
+              ImagePart.make({
+                source: urlAttachmentSource('https://example.com/screenshot.png'),
+                mimeType: 'image/png'
+              })
+            ]
+          })
+        ],
+        tools: []
+      })
+
+      expect(body.input[2]).toEqual({
+        type: 'function_call_output',
+        call_id: 'call-1',
+        output: [
+          {
+            type: 'input_image',
+            image_url: 'https://example.com/screenshot.png'
+          }
+        ]
+      })
+    })
+  )
+
+  it.effect('reports unsupported audio tool results without misidentifying their owner', () =>
+    Effect.gen(function* () {
+      const error = yield* toOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: '',
+        messages: [
+          UserMessage.make({ content: 'listen' }),
+          AssistantAgentMessage.make({
+            parts: [
+              HostToolCallPart.make({
+                call: ToolCall.make({ id: 'call-1', name: 'recording', params: {} })
+              })
+            ]
+          }),
+          ToolResultMessage.make({
+            toolCallId: 'call-1',
+            content: [
+              AudioPart.make({
+                source: inlineBase64Source('abc'),
+                mimeType: 'audio/wav'
+              })
+            ]
+          })
+        ],
+        tools: []
+      }).pipe(Effect.flip)
+
+      expect(error.message).toBe(
+        'Audio content is not supported by the OpenAI Codex OAuth provider yet'
+      )
     })
   )
 

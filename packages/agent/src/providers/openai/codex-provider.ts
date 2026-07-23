@@ -83,16 +83,12 @@ type OpenAiCodexInputFilePart =
       readonly file_url: string
     }
 
-type OpenAiCodexOutputTextPart = {
-  readonly type: 'output_text'
-  readonly text: string
-}
-
 type OpenAiCodexInputContentPart =
   | OpenAiCodexInputTextPart
   | OpenAiCodexInputImagePart
   | OpenAiCodexInputFilePart
-  | OpenAiCodexOutputTextPart
+
+type OpenAiCodexFunctionOutput = string | ReadonlyArray<OpenAiCodexInputContentPart>
 
 type OpenAiCodexFunctionCallInput = {
   readonly type: 'function_call'
@@ -104,7 +100,7 @@ type OpenAiCodexFunctionCallInput = {
 type OpenAiCodexFunctionOutputInput = {
   readonly type: 'function_call_output'
   readonly call_id: string
-  readonly output: string
+  readonly output: OpenAiCodexFunctionOutput
 }
 
 type OpenAiCodexInputItem =
@@ -264,7 +260,7 @@ const contentToText = (content: Content, owner: string): Effect.Effect<string, L
         Effect.map(textParts => textParts.join('\n'))
       )
 
-const userPartToCodexInputPart = (
+const contentPartToCodexInputPart = (
   part: ContentPart
 ): Effect.Effect<
   OpenAiCodexInputTextPart | OpenAiCodexInputImagePart | OpenAiCodexInputFilePart,
@@ -300,7 +296,7 @@ const userPartToCodexInputPart = (
           return Effect.fail(unsupportedContentError('Unresolved document source'))
       }
     case 'Audio':
-      return Effect.fail(unsupportedContentError('User audio'))
+      return Effect.fail(unsupportedContentError('Audio'))
   }
 }
 
@@ -318,8 +314,32 @@ const contentToUserInput = (
     return Effect.succeed(onlyPart.text)
   }
 
-  return Effect.forEach(parts, userPartToCodexInputPart)
+  return Effect.forEach(parts, contentPartToCodexInputPart)
 }
+
+const contentToCodexFunctionOutput = (
+  content: Content
+): Effect.Effect<OpenAiCodexFunctionOutput, LLMError> =>
+  typeof content === 'string'
+    ? Effect.succeed(content)
+    : Effect.forEach(content, contentPartToCodexInputPart)
+
+const codexToolResultOutput = (
+  content: Content,
+  isError: boolean | undefined
+): Effect.Effect<OpenAiCodexFunctionOutput, LLMError> =>
+  contentToCodexFunctionOutput(content).pipe(
+    Effect.map(output => {
+      if (isError !== true) return output
+
+      const errorPart: OpenAiCodexInputTextPart = {
+        type: 'input_text',
+        text: 'Tool execution failed.'
+      }
+
+      return typeof output === 'string' ? `${errorPart.text}\n\n${output}` : [errorPart, ...output]
+    })
+  )
 
 const serializeToolArguments = (params: unknown) =>
   encodeJsonString(params, 'Could not serialize OpenAI Codex tool arguments')
@@ -373,9 +393,9 @@ const messageToCodexInput = (
           {
             type: 'function_call_output',
             call_id: message.toolCallId,
-            output: yield* contentToText(
+            output: yield* codexToolResultOutput(
               prependMessageContextToContent(message.content, messageContextText(message)),
-              'Tool result'
+              message.isError
             )
           }
         ]
