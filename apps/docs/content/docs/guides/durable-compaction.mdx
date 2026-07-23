@@ -90,7 +90,8 @@ number, usage, active run id, and HITL state.
 ## Project messages for the model
 
 Before any completed compaction exists, send the full active transcript. After compaction, send one
-synthetic checkpoint message plus messages appended after the compaction row.
+synthetic checkpoint message plus messages appended after the compaction row. The projection below
+expects rows already filtered to one session's active revision and sorted by ascending `seq`.
 
 This fragment shows the projection:
 
@@ -174,16 +175,19 @@ const planCompaction = (messages: ReadonlyArray<AgentMessage>) => {
 
 The planner does not call a model. It only chooses which messages to summarize and which messages to
 keep as recent context. Without `countTextTokens`, Yolk uses a provider-neutral character heuristic
-plus fixed message and media overhead. Inject a synchronous host tokenizer when model-accurate
-thresholds matter, and reuse the same `estimateTokens` function for warnings, planning, transformers,
-and before/after checks.
+plus fixed message and media overhead. A synchronous host tokenizer improves selected message text,
+reasoning, and host tool-call estimates only. Exact provider-request accounting must also include the
+system prompt, tool definitions, vendor framing, and a safety margin. Reuse the same
+`estimateTokens` function for warnings, planning, transformers, and before/after checks.
 
 ## Generate and store a summary
 
 Generate the summary with your app's provider configuration, then persist it as a compaction row.
 
 Use `formatAgentMessagesForCompaction` to serialize messages into summary input. It includes user
-text, assistant text, assistant reasoning summaries, host tool calls, and truncated tool results.
+text, assistant text/reasoning, host and provider tool calls/results, and truncated tool parameters
+and results. This format is intentionally lossy: it omits message envelope metadata, structured tool
+result content, and error flags. Supply a host formatter when those fields matter to the summary.
 
 This fragment shows the summary boundary:
 
@@ -196,16 +200,20 @@ import {
 
 const summarizeAndPersist = async (input: {
   readonly plan: Extract<ReturnType<typeof planCompaction>, { readonly _tag: 'Compact' }>
-  readonly previousSummary?: string
+  readonly previousCompaction?: {
+    readonly summary: string
+    readonly recent: string
+  }
   readonly expectedSeq: number
 }) => {
   const messagesForSummary = compactionSummarySourceMessages({
-    hasPreviousSummary: input.previousSummary !== undefined,
+    hasPreviousSummary: input.previousCompaction !== undefined,
     messages: input.plan.compactedMessages
   })
   const formattedHistory = formatAgentMessagesForCompaction(messagesForSummary)
   const summary = await hostSummarizeCompaction({
-    previousSummary: input.previousSummary,
+    previousSummary: input.previousCompaction?.summary,
+    previousRecent: input.previousCompaction?.recent,
     history: formattedHistory
   })
   const recent = formatAgentMessagesForCompaction(input.plan.recentMessages)
@@ -236,6 +244,8 @@ const summarizeAndPersist = async (input: {
 
 `hostSummarizeCompaction` and `hostAppendCompaction` are app-owned. Your storage append should verify
 the active run id and expected sequence so a stale run cannot compact or append to a newer transcript.
+When a previous compaction exists, the summarizer must fold both its `summary` and `recent` text into
+the new summary before the leading synthetic checkpoint is dropped.
 
 ## Retry provider context overflow once
 
@@ -272,7 +282,14 @@ type ContextOverflowRetryCompactionResult =
 ```
 
 If compaction succeeds, Yolk retries the provider call once with the compacted messages. If compaction
-is skipped or the retry also overflows, the original overflow fails normally.
+is skipped or the compactor fails, the original overflow fails normally. A retry-provider failure,
+including a second overflow, propagates from the retry stream.
+The retry budget resets for each `provider.stream(...)` call and only intercepts tagged `LLMError`
+values with `cause: 'context_overflow'`. `messagesRef` is an optional host side channel; the wrapper
+updates it after successful compaction but does not persist or replace runtime transcript state.
+
+Use this wrapper only when the provider reports context overflow before emitting deltas. It does not
+retract already-emitted text/usage or emit compaction lifecycle events before starting the retry.
 
 ## Persist only new messages
 
@@ -295,6 +312,17 @@ audit or debugging.
 This rule keeps compaction simple: the active revision has one append cursor, and the latest completed
 compaction in that revision defines model context.
 
+## Verify the integration
+
+1. Set a low test threshold and append enough messages to trigger compaction.
+2. Confirm the raw transcript remains unchanged and a completed compaction payload is appended.
+3. Confirm the next provider request starts with one synthetic checkpoint plus later messages.
+4. Script one pre-emission `context_overflow` and confirm the host compactor runs once.
+5. Script a second overflow and confirm it terminates without another retry.
+
+The expected result is a complete durable transcript, bounded provider input, and at most one
+overflow compaction retry per provider stream.
+
 ## Production checklist
 
 - Keep raw messages append-only.
@@ -302,12 +330,14 @@ compaction in that revision defines model context.
 - Project checkpoints only at model/provider boundaries.
 - Guard compaction writes with active run id and expected sequence.
 - Ignore failed compaction rows during projection.
-- Merge previous summaries by passing `previousSummary` and dropping the leading checkpoint from the
-  new summary input.
+- Merge previous compactions by passing both `previousSummary` and `previousRecent`, then drop the
+  leading checkpoint from the new summary input.
 - Compact before model calls and once on provider `context_overflow`.
 - Surface compaction markers in your UI, but keep ledger rows as source of truth.
 
 ## Related APIs
+
+See [Agent APIs](../api-reference/agent#compaction) for the public compaction surface.
 
 - `planWindowCompaction`
 - `makeCompactionCheckpointMessage`

@@ -10,7 +10,9 @@ Alchemy state is local under `.alchemy/state` for now.
 - Incoming WebSocket text becomes a `UserMessage`.
 - `@yolk-sdk/agent/runtime` runs in input mode.
 - DO storage persists the protocol transcript.
-- A faux LLM provider replies deterministically for infra/runtime validation.
+- Smoke and unbootstrapped sessions use a faux provider for deterministic infra/runtime validation.
+- Bootstrapped sessions select Anthropic Claude or OpenAI Codex from app-provided model/token broker configuration.
+- Both provider paths use the selected host model's required output-token limit; the Worker does not infer limits.
 
 ## Commands
 

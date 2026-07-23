@@ -47,7 +47,7 @@ type IndexedToolResultMessage = {
   readonly message: AgentMessage
 }
 
-const workflowEventStreamId = 'workflow'
+const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`
 const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
 
 // App-owned token strategy, not an SDK transport contract. The client only posts
@@ -59,6 +59,7 @@ export const agentWorkflowHitlHookToken = (input: { readonly runId: string }) =>
 const writeSequencedWorkflowEvent = (input: {
   readonly writer: WritableStreamDefaultWriter<Uint8Array>
   readonly event: AgentEvent
+  readonly workflowRunId: string
   readonly turn: number
   readonly eventSequence: Ref.Ref<number>
 }) =>
@@ -67,7 +68,7 @@ const writeSequencedWorkflowEvent = (input: {
     const result = yield* writeDurableAgentEvent({
       writer: input.writer,
       event: input.event,
-      streamId: workflowEventStreamId,
+      streamId: workflowEventStreamId(input.workflowRunId),
       turn: input.turn,
       state: makeDurableAgentEventSequencerState(sequence)
     })
@@ -114,6 +115,7 @@ const decodeStepRequest = (state: SerializableWorkflowState) =>
 
 const collectModelEvent = (input: {
   readonly event: AgentEvent
+  readonly workflowRunId: string
   readonly writer: WritableStreamDefaultWriter<Uint8Array>
   readonly assistantMessage: Ref.Ref<AgentMessage | undefined>
   readonly toolCalls: Ref.Ref<ReadonlyArray<ToolCall>>
@@ -125,6 +127,7 @@ const collectModelEvent = (input: {
   writeSequencedWorkflowEvent({
     writer: input.writer,
     event: input.event,
+    workflowRunId: input.workflowRunId,
     turn: input.turn,
     eventSequence: input.eventSequence
   }).pipe(
@@ -196,6 +199,7 @@ export async function runAgentWorkflowModelStep(input: {
 
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
+  const workflowRunId = getWorkflowMetadata().workflowRunId
 
   return await Effect.runPromise(
     Effect.gen(function* () {
@@ -224,6 +228,7 @@ export async function runAgentWorkflowModelStep(input: {
         Stream.runForEach(event =>
           collectModelEvent({
             event,
+            workflowRunId,
             writer,
             assistantMessage,
             toolCalls,
@@ -257,6 +262,7 @@ export async function runAgentWorkflowModelStep(input: {
             turns: input.state.turn,
             usage: currentUsage
           }),
+          workflowRunId,
           turn: input.state.turn,
           eventSequence
         })
@@ -320,6 +326,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
           writeSequencedWorkflowEvent({
             writer,
             event,
+            workflowRunId,
             turn: input.turn ?? 0,
             eventSequence
           }).pipe(

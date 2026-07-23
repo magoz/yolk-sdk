@@ -957,12 +957,16 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
-  it.effect('normalizes Gmail threads without MIME body data', () =>
+  it.effect('normalizes Gmail threads without MIME or attachment content', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
       const quotedPrintableData = encodeBase64Url('Hej=20Elina=0AAndra=20raden')
       const htmlData = encodeBase64Url('<p>HTML fallback</p>')
       const attachmentData = encodeBase64Url('SECRET_ATTACHMENT_BYTES')
+      const textAttachmentData = encodeBase64Url('SECRET_TEXT_ATTACHMENT')
+      const inlineAttachmentData = encodeBase64Url('SECRET_INLINE_ATTACHMENT')
+      const dispositionAttachmentData = encodeBase64Url('SECRET_DISPOSITION_ATTACHMENT')
+      const nestedAttachmentData = encodeBase64Url('SECRET_NESTED_ATTACHMENT')
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
         jsonHttpResponse(
           JSON.stringify({
@@ -1000,6 +1004,40 @@ describe('@yolk-sdk/connectors', () => {
                         attachmentId: 'attachment_1',
                         data: attachmentData
                       }
+                    },
+                    {
+                      partId: '2',
+                      mimeType: 'text/plain',
+                      filename: 'notes.txt',
+                      body: {
+                        size: 22,
+                        attachmentId: 'attachment_2',
+                        data: textAttachmentData
+                      }
+                    },
+                    {
+                      partId: '3',
+                      mimeType: 'application/octet-stream',
+                      filename: 'inline.bin',
+                      body: { size: 24, data: inlineAttachmentData }
+                    },
+                    {
+                      partId: '4',
+                      mimeType: 'text/plain',
+                      headers: [{ name: 'Content-Disposition', value: 'attachment' }],
+                      body: { size: 29, data: dispositionAttachmentData }
+                    },
+                    {
+                      partId: '5',
+                      mimeType: 'message/rfc822',
+                      body: { size: 128 },
+                      parts: [
+                        {
+                          partId: '5.1',
+                          mimeType: 'text/plain',
+                          body: { size: 24, data: nestedAttachmentData }
+                        }
+                      ]
                     }
                   ]
                 }
@@ -1020,6 +1058,15 @@ describe('@yolk-sdk/connectors', () => {
                 payload: {
                   mimeType: 'text/plain',
                   body: { size: 3, data: '%%%' }
+                }
+              },
+              {
+                id: 'message_4',
+                threadId: 'thread_1',
+                snippet: 'Malformed padding remains readable through snippet',
+                payload: {
+                  mimeType: 'text/plain',
+                  body: { size: 2, data: 'A=' }
                 }
               }
             ]
@@ -1059,6 +1106,29 @@ describe('@yolk-sdk/connectors', () => {
                   mimeType: 'application/pdf',
                   size: 1024,
                   attachmentId: 'attachment_1'
+                },
+                {
+                  partId: '2',
+                  filename: 'notes.txt',
+                  mimeType: 'text/plain',
+                  size: 22,
+                  attachmentId: 'attachment_2'
+                },
+                {
+                  partId: '3',
+                  filename: 'inline.bin',
+                  mimeType: 'application/octet-stream',
+                  size: 24
+                },
+                {
+                  partId: '4',
+                  mimeType: 'text/plain',
+                  size: 29
+                },
+                {
+                  partId: '5',
+                  mimeType: 'message/rfc822',
+                  size: 128
                 }
               ]
             },
@@ -1072,6 +1142,11 @@ describe('@yolk-sdk/connectors', () => {
               id: 'message_3',
               snippet: 'Malformed body remains readable through snippet',
               attachments: []
+            },
+            {
+              id: 'message_4',
+              snippet: 'Malformed padding remains readable through snippet',
+              attachments: []
             }
           ]
         }
@@ -1080,6 +1155,14 @@ describe('@yolk-sdk/connectors', () => {
       expect(serialized).not.toContain(quotedPrintableData)
       expect(serialized).not.toContain(htmlData)
       expect(serialized).not.toContain(attachmentData)
+      expect(serialized).not.toContain(textAttachmentData)
+      expect(serialized).not.toContain(inlineAttachmentData)
+      expect(serialized).not.toContain(dispositionAttachmentData)
+      expect(serialized).not.toContain(nestedAttachmentData)
+      expect(serialized).not.toContain('SECRET_TEXT_ATTACHMENT')
+      expect(serialized).not.toContain('SECRET_INLINE_ATTACHMENT')
+      expect(serialized).not.toContain('SECRET_DISPOSITION_ATTACHMENT')
+      expect(serialized).not.toContain('SECRET_NESTED_ATTACHMENT')
       expect(serialized).not.toContain('X-Provider-Internal')
     })
   )

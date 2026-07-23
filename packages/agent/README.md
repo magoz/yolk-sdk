@@ -107,6 +107,21 @@ const program = run({
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
 
+## Provider configuration
+
+Provider output limits are required and host-owned. Yolk does not infer model limits or apply hidden
+fallbacks.
+
+| Provider factory                       | Required output-limit field |
+| -------------------------------------- | --------------------------- |
+| `makeOpenAiProviderLayer`              | `maxCompletionTokens`    |
+| `makeOpenAiCodexProviderLayer`         | `maxOutputTokens`        |
+| `makeAnthropicClaudeProviderLayer`     | `maxTokens`              |
+
+The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
+`toAnthropicClaudeRequestBody` helpers require the same limit configuration. `OpenAiProviderLayer`
+reads both `OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+
 ## Provider failures and retries
 
 Provider adapters classify safe failure metadata at the boundary. The loop owns bounded retry
@@ -166,9 +181,11 @@ const ContextLayer = makeWindowCompactionTransformer({
 ```
 
 The default estimator uses provider-neutral character and media heuristics. Pass
-`TokenEstimateOptions.countTextTokens` to the estimation helpers when the host has a synchronous
-tokenizer, or pass a whole-transcript `estimateTokens` to planners and transformers. Reuse the same
-estimator for warnings, planning, and before/after checks; tokenizer dependencies remain host-owned.
+`TokenEstimateOptions.countTextTokens` to improve estimates for selected message text, reasoning,
+and host tool-call identifiers, or pass a whole-transcript `estimateTokens` to planners and
+transformers. Exact provider-request accounting must also include system prompts, tool definitions,
+vendor framing, and a safety margin. Reuse one estimator for warnings, planning, and before/after
+checks; tokenizer dependencies remain host-owned.
 
 ## Protocol content
 
@@ -388,6 +405,7 @@ aborts, and implementation bugs outside typed tool execution.
 ## Host responsibilities
 
 - Choose models/providers and provide an LLM provider layer, using SDK provider subpaths or host adapters.
+- Configure model-specific provider output-token limits.
 - Persist sessions, transcripts, and append logs.
 - Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.
@@ -397,7 +415,7 @@ aborts, and implementation bugs outside typed tool execution.
 ## Boundaries
 
 - Core loop/protocol/runtime/tools have no React, Next.js, provider SDKs, auth, storage drivers, or app concepts.
-- `@yolk-sdk/agent/compaction` is pure helper scaffolding; hosts own thresholds, summaries, checkpoints, and durable compactor policy.
+- `@yolk-sdk/agent/compaction` combines pure planning/formatting helpers with Effect-native transformer and retry adapters; hosts own thresholds, summaries, compaction payloads, and durable compactor policy.
 - `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
 - Loop stays stateless: transcript in, events out.

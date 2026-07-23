@@ -47,6 +47,15 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 Google's normalized thread contracts are `GmailGetThreadInput`, `GmailThreadAttachment`,
 `GmailThreadMessage`, and `GmailThreadOutput`.
 
+- `GmailGetThreadInput`: required `threadId` and `format: 'full' | 'metadata' | 'minimal'`.
+- `GmailThreadOutput`: required `id` and `messages`; optional `historyId`.
+- `GmailThreadMessage`: required `id`, `headers`, and `attachments`; optional `threadId`, `labelIds`,
+  `snippet`, `internalDate`, `body`, and `bodyMimeType`.
+- `GmailThreadAttachment`: optional `partId`, `filename`, `mimeType`, `size`, and `attachmentId`.
+
+Non-success provider responses return `ActionResult.failure` with code `gmail_get_thread_failed`.
+Invalid JSON or response shape fails with `ConnectorError { cause: 'validation_failed' }`.
+
 See [Connectors catalog](../integrations/connectors) for action ids.
 
 ## Sandbox

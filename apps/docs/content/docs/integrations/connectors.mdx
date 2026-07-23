@@ -56,12 +56,15 @@ Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots,
 `minimal`. Use `full` when decoded message bodies are required.
 
 The action returns `GmailThreadOutput`. Each `GmailThreadMessage` includes selected root headers,
-attachment metadata, and an optional decoded `body` with `bodyMimeType`. Plain text is preferred
-when available; otherwise HTML is used. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`,
-`From`, `In-Reply-To`, `Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
+attachment metadata, and an optional decoded message `body` with `bodyMimeType`. Plain text is
+preferred when available; otherwise HTML is used. Text and nested-message attachments do not enter
+the message body. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`, `From`, `In-Reply-To`,
+`Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
 
-Raw MIME payloads and attachment bytes are intentionally omitted. Use the parent message `id` as
-`messageId` plus the attachment's `attachmentId` with `gmail.get_attachment` to fetch content.
+Raw MIME and attachment content are intentionally omitted. `attachmentId` is optional because Gmail
+may return inline attachment data instead. When present, use the parent message `id` as `messageId`
+plus `attachmentId` with `gmail.get_attachment`; omitted inline data is not retrievable through that
+action.
 
 ### Calendar actions
 

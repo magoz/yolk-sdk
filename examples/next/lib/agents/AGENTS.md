@@ -29,7 +29,8 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 
 ## Models + Providers
 
-- Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, and reasoning defaults from there.
+- Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, `agentTextModelMaxOutputTokens`, and reasoning defaults from there.
+- Model-specific output limits are host policy: GPT-5.5 uses `128_000`; Claude Sonnet 4.6 uses `64_000`. Next, Workflow, and Cloudflare provider construction must pass the selected model's configured limit.
 - Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
 - Next/Workflow providers receive text+image/PDF capabilities; Cloudflare direct WS currently shares UI flags but does not pass package capability validation.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.

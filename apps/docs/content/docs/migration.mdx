@@ -23,6 +23,22 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### `0.1.0-canary.48`: required provider output limits
+
+Provider constructors no longer infer output-token limits or apply hidden fallbacks. Supply the
+required field for the selected adapter:
+
+| Provider config                    | Required output-limit field | Previous behavior                    |
+| ---------------------------------- | --------------------------- | ------------------------------------ |
+| `OpenAiProviderConfig`             | `maxCompletionTokens`  | defaulted to `4096`                  |
+| `OpenAiCodexProviderConfig`        | `maxOutputTokens`      | omitted `max_output_tokens`          |
+| `AnthropicClaudeProviderConfig`    | `maxTokens`            | defaulted to `8192`                  |
+
+The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
+`toAnthropicClaudeRequestBody` lowerers also require their limit configuration. The env-backed
+`OpenAiProviderLayer` now requires integer `OPENAI_MAX_COMPLETION_TOKENS` alongside
+`OPENAI_API_KEY`. Keep these values in host-owned model configuration.
+
 ### `0.1.0-canary.47`: Claude output limits
 
 Anthropic Claude turns that stop at `max_tokens` now fail as non-retryable `invalid_response`
@@ -43,7 +59,7 @@ Use this fragment to pass an explicit format:
 ```ts
 import { GmailGetThreadInput } from '@yolk-sdk/connectors/google'
 
-const input = new GmailGetThreadInput({
+const input = GmailGetThreadInput.make({
   threadId: hostGmailThreadId,
   format: 'full'
 })
@@ -51,8 +67,10 @@ const input = new GmailGetThreadInput({
 
 Allowed formats are `full`, `metadata`, and `minimal`; use `full` when decoded bodies are required.
 Read normalized `messages[].body`, `bodyMimeType`, `headers`, and `attachments` instead of Gmail
-`payload`, MIME parts, or `body.data`. Thread output contains attachment metadata only; fetch bytes
-through `gmail.get_attachment` with `messageId` and `attachmentId`.
+`payload`, MIME parts, or `body.data`. Thread output contains attachment metadata only. When
+`attachmentId` exists, fetch content through `gmail.get_attachment` with the parent message `id` as
+`messageId`. Gmail inline attachments may omit `attachmentId`; their content is intentionally absent
+from normalized thread output and cannot be fetched through that action.
 
 ## Upgrade checklist
 
@@ -72,7 +90,7 @@ through `gmail.get_attachment` with `messageId` and `attachmentId`.
 | Protocol     | event names, message fields, terminal state, tool/HITL payloads    |
 | Loop/runtime | required Effect services, runtime request shapes, stream semantics |
 | Client/React | projection state, transport headers, resume helpers                |
-| Providers    | auth config, model capabilities, usage/error metadata              |
+| Providers    | auth config, model capabilities, output limits, usage/error metadata |
 | Tools        | registration metadata, access levels, approval semantics           |
 | MCP          | remote/local config, result adaptation, HTTPS policy               |
 | Knowledge    | store contracts, search request shape, agent tool options          |

@@ -17,6 +17,7 @@ Import by subpath:
 import { run } from '@yolk-sdk/agent/loop'
 import { UserMessage } from '@yolk-sdk/agent/protocol'
 import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { planWindowCompaction } from '@yolk-sdk/agent/compaction'
 import { makeTool } from '@yolk-sdk/agent/tools'
 ```
 
@@ -31,6 +32,7 @@ import { makeTool } from '@yolk-sdk/agent/tools'
 | Stream from browser/client          | `streamAgentEventStreamUntilTerminal(...)` |
 | Render headless React chat          | `useAgentChat(...)`                   |
 | Build provider layers               | provider subpaths                     |
+| Plan bounded model context           | `planWindowCompaction(...)`            |
 | Test without provider accounts      | `FauxProvider`, `TestToolExecutor`    |
 
 ## Local test loop

@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -248,7 +248,10 @@ const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
 
   const unpadded = normalized.replaceAll(/=+$/g, '')
   const padded = `${unpadded}${'='.repeat((4 - (unpadded.length % 4)) % 4)}`
-  const binary = atob(padded)
+  const decoded = Result.try(() => atob(padded))
+  if (Result.isFailure(decoded)) return undefined
+
+  const binary = decoded.success
   const bytes = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index)
@@ -312,8 +315,14 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
   const size = unknownNumberField(body, 'size')
   const attachmentId = unknownStringField(body, 'attachmentId')
   const hasFilename = filename !== undefined && filename.trim() !== ''
+  const contentDisposition = gmailPartHeader(part, 'content-disposition')?.trim().toLowerCase()
+  const isAttachment =
+    hasFilename ||
+    attachmentId !== undefined ||
+    contentDisposition?.startsWith('attachment') === true ||
+    mimeType === 'message/rfc822'
 
-  if (hasFilename || attachmentId !== undefined) {
+  if (isAttachment) {
     collected.attachments.push(
       new GmailThreadAttachment({
         ...(partId === undefined ? {} : { partId }),
@@ -323,6 +332,7 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
         ...(attachmentId === undefined ? {} : { attachmentId })
       })
     )
+    return
   }
 
   if (mimeType === 'text/plain' || mimeType === 'text/html') {
@@ -741,7 +751,8 @@ export const gmailListDraftsAction = defineAction({
 
 export const gmailGetThreadAction = defineAction({
   id: 'gmail.get_thread',
-  description: 'Get a normalized Gmail thread; use full format for decoded message bodies.',
+  description:
+    'Get normalized Gmail thread messages; full adds decoded bodies. Attachments are metadata-only; fetch entries with attachmentId via gmail.get_attachment.',
   inputSchema: GmailGetThreadInput,
   outputSchema: GmailThreadOutput,
   execute: ({ integration, input }) =>

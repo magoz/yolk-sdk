@@ -15,6 +15,7 @@ that exercise package-backed providers through app runtime wiring.
 
 - Text model/reasoning/capabilities live in `examples/next/lib/agents/text-agent-config.ts`.
 - Active text providers: Codex OAuth (`gpt-5.5`) and Anthropic Claude OAuth (`claude-sonnet-4-6`).
+- Output limits are required host policy from `agentTextModelMaxOutputTokens`: GPT-5.5 uses `128_000`; Claude Sonnet 4.6 uses `64_000`. Pass them to both active providers; dormant OpenAI chat construction requires `maxCompletionTokens` too.
 - Provider choice is app boundary policy; package providers implement `LLMProvider` only.
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex requests set `reasoning.summary = 'auto'`; summaries are optional provider output.
@@ -46,6 +47,7 @@ that exercise package-backed providers through app runtime wiring.
 - Requires per-user token from `examples/next/lib/core/agent/anthropic-claude-auth.ts`.
 - Requests use Bearer auth with Claude Code OAuth compatibility headers from `@yolk-sdk/agent/providers/anthropic`.
 - Requests set `stream: true` and parse SSE/JSON by body shape; content-type may be misleading behind gateways.
+- Requests use the selected host model config's `max_tokens`.
 - Request shape must mimic Claude Code OAuth fingerprinting:
   - `system[]` contains only Claude Code billing header + `You are Claude Code, Anthropic's official CLI for Claude.`
   - app/system instructions are prepended to the first user message

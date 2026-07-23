@@ -30,4 +30,12 @@ describe('runAgentWorkflow', () => {
     expect(workflowFunctionSource).toContain('runToolBatchStep: runAgentWorkflowToolBatchStep')
     expect(workflowFunctionSource).toContain('awaitInput:')
   })
+
+  it('scopes durable event ids to the workflow run', () => {
+    expect(source).toContain(
+      'const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`'
+    )
+    expect(source).toContain('streamId: workflowEventStreamId(input.workflowRunId)')
+    expect(source).not.toContain("const workflowEventStreamId = 'workflow'")
+  })
 })

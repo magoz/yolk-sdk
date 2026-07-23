@@ -24,6 +24,7 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 | `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities` | model input capability helpers |
 | `ProviderErrorInfo`, `ProviderFailureKind`                                                                                | safe provider error metadata   |
 | `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                           | usage accounting helpers       |
+| `CompactionStart`, `CompactionEnd`                                                                                         | compaction lifecycle events    |
 | `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers   |
 
 ## Loop
@@ -108,7 +109,7 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 | `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers                   |
 | `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents`                                                                      | client reducer helpers                         |
 | `toolRunsFromHitlRequests`                                                                                                             | paused UI hydration                            |
-| `documentPartFromTextFile`, `documentPartFromTextFileEffect`, `textFromBlob`, `textFromBlobEffect`                                    | browser file/blob helpers                      |
+| `documentPartFromTextFile`, `textFromBlob`                                                                                           | browser file/blob helpers returning `Effect`   |
 | `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
 
 ## React
@@ -139,16 +140,20 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 | `planWindowCompaction`, `applyCompactionPlan`, `compactWindowMessages`                                       | window compaction helpers                |
 | `makeWindowCompactionTransformer`                                                                            | `ContextTransformer` layer helper        |
 | `makeCompactionCheckpointText`, `makeCompactionCheckpointMessage`                                            | synthetic checkpoint helpers             |
-| `isCompactionCheckpointText`, `isCompactionCheckpointMessage`                                                | checkpoint guards                        |
+| `isCompactionCheckpointText`, `isCompactionCheckpointMessage`                                                | host-controlled marker predicates        |
 | `formatAgentMessageForCompaction`, `formatAgentMessagesForCompaction`                                        | rich transcript summary-source formatter |
 | `CompactionMessageFormatOptions`                                                                             | reasoning/tool formatting controls       |
 | `compactionSummarySourceMessages`, `dropLeadingCompactionCheckpointMessage`                                  | repeated-summary helper                  |
 | `makeContextOverflowRetryProvider`                                                                           | one-shot provider overflow retry wrapper |
 | `ContextOverflowRetryCompactionResult`, `ContextOverflowRetryCompactor`, `ContextOverflowRetryProviderInput` | retry wrapper contracts                  |
 
-`TokenEstimateOptions.countTextTokens` accepts a synchronous host tokenizer for text, reasoning,
-and tool identifiers. Media and message overhead remain configurable heuristics. Window planners and
-transformers also accept a whole-transcript `estimateTokens`; use one estimator consistently.
+`TokenEstimateOptions.countTextTokens` accepts a synchronous host tokenizer for message text,
+reasoning, and host tool-call ids/names. Media, message overhead, non-message request input, and
+vendor framing remain outside that callback. Window planners and transformers also accept a
+whole-transcript `estimateTokens`; use one estimator consistently and keep a safety margin.
+
+Checkpoint predicates detect the package's open/close marker strings; they are not structural
+parsers. Use them only on host-produced projected context, not arbitrary user-authored messages.
 
 ## OAuth
 
@@ -205,12 +210,23 @@ transformers also accept a whole-transcript `estimateTokens`; use one estimator 
 
 | Subpath                                               | Main exports                                                                     |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`                                 |
+| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody` |
 | `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                             |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`                                                   |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody` |
 | `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                       |
 | `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
 | `@yolk-sdk/agent/providers/openai/speech`             | `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`                 |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers         |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`                                               |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                      |
+
+Provider output limits are required and host-owned:
+
+- `OpenAiProviderConfig.maxCompletionTokens` becomes vendor `max_completion_tokens`.
+- `OpenAiCodexProviderConfig.maxOutputTokens` becomes vendor `max_output_tokens`.
+- `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
+- `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
+  `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+
+The three public request lowerers require a second configuration argument containing the matching
+limit. Yolk does not infer limits from model ids.

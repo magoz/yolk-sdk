@@ -71,30 +71,23 @@ Host apps keep concrete Workflow directives local and pass them into the package
 
 ```ts
 import { createHook } from 'workflow'
-import { Effect } from 'effect'
 import { runVercelAgentWorkflow } from '@yolk-sdk/vercel-workflows'
-
-const workflowStep = <A>(body: () => Promise<A>) =>
-  Effect.tryPromise({ try: body, catch: error => error })
 
 export async function runAgentWorkflow(input: { request: unknown; context: unknown }) {
   'use workflow'
 
-  return await Effect.runPromise(
-    runVercelAgentWorkflow({
-      input,
-      runModelStep: input => workflowStep(() => runModelStep(input)),
-      runToolBatchStep: input => workflowStep(() => runToolBatchStep(input)),
-      closeStream: workflowStep(closeStream),
-      writeError: error => workflowStep(() => writeError(error)),
-      awaitInput: awaitingInput =>
-        workflowStep(async () => {
-          using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+  return await runVercelAgentWorkflow({
+    input,
+    runModelStep,
+    runToolBatchStep,
+    closeStream,
+    writeError,
+    awaitInput: async awaitingInput => {
+      using hook = createHook<unknown>({ token: awaitingInput.hookToken })
 
-          return await hook
-        })
-    })
-  )
+      return await hook
+    }
+  })
 }
 ```
 

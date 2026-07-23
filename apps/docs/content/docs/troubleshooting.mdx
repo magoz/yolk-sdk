@@ -48,11 +48,11 @@ Build one app-level layer and provide it at the route/runtime boundary.
 
 ## Provider errors
 
-### Missing OpenAI API key
+### Missing OpenAI provider environment configuration
 
 `OpenAiProviderLayer` reads `OPENAI_API_KEY` and `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
-If you do not want env config, use `makeOpenAiProviderLayer({ apiKey, maxCompletionTokens })` and
-provide an HTTP layer.
+The output limit must parse as an integer. If you do not want env config, use
+`makeOpenAiProviderLayer({ apiKey, maxCompletionTokens })` and provide an HTTP layer.
 
 ### OAuth provider returns unauthorized
 

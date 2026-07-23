@@ -83,6 +83,8 @@ Text model defaults:
 default provider: OpenAI Codex OAuth
 default model: gpt-5.5
 available text models: gpt-5.5, claude-sonnet-4-6
+gpt-5.5 max output tokens: 128000
+claude-sonnet-4-6 max output tokens: 64000
 ```
 
 Optional prompt override:
