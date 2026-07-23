@@ -22,6 +22,7 @@ import { FigmaConnector } from '@yolk-sdk/connectors/figma'
 import {
   gmailDraftComposeAction,
   gmailDraftReplyAction,
+  gmailGetThreadAction,
   gmailListDraftsAction,
   gmailListSendAsAction,
   GoogleConnector,
@@ -953,6 +954,133 @@ describe('@yolk-sdk/connectors', () => {
       expect(gmailScopes).not.toContain(googleCalendarEventsScope)
       expect(calendarScopes).toContain(googleCalendarEventsScope)
       expect(calendarScopes).not.toContain(googleGmailReadonlyScope)
+    })
+  )
+
+  it.effect('normalizes Gmail threads without MIME body data', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const quotedPrintableData = encodeBase64Url('Hej=20Elina=0AAndra=20raden')
+      const htmlData = encodeBase64Url('<p>HTML fallback</p>')
+      const attachmentData = encodeBase64Url('SECRET_ATTACHMENT_BYTES')
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'thread_1',
+            historyId: 'history_1',
+            messages: [
+              {
+                id: 'message_1',
+                threadId: 'thread_1',
+                labelIds: ['INBOX'],
+                snippet: 'Hej Elina',
+                internalDate: '1780000000000',
+                payload: {
+                  mimeType: 'multipart/mixed',
+                  headers: [
+                    { name: 'From', value: 'Lead <lead@example.com>' },
+                    { name: 'Subject', value: 'Avtal' },
+                    { name: 'X-Provider-Internal', value: 'omit' }
+                  ],
+                  parts: [
+                    {
+                      partId: '0',
+                      mimeType: 'text/plain',
+                      headers: [
+                        { name: 'Content-Transfer-Encoding', value: 'quoted-printable' }
+                      ],
+                      body: { size: 31, data: quotedPrintableData }
+                    },
+                    {
+                      partId: '1',
+                      mimeType: 'application/pdf',
+                      filename: 'agreement.pdf',
+                      body: {
+                        size: 1024,
+                        attachmentId: 'attachment_1',
+                        data: attachmentData
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                id: 'message_2',
+                threadId: 'thread_1',
+                payload: {
+                  mimeType: 'text/html',
+                  headers: [{ name: 'Date', value: 'Thu, 23 Jul 2026 10:00:00 +0200' }],
+                  body: { size: 20, data: htmlData }
+                }
+              },
+              {
+                id: 'message_3',
+                threadId: 'thread_1',
+                snippet: 'Malformed body remains readable through snippet',
+                payload: {
+                  mimeType: 'text/plain',
+                  body: { size: 3, data: '%%%' }
+                }
+              }
+            ]
+          })
+        )
+      ])
+
+      const result = yield* gmailGetThreadAction
+        .execute({
+          integration: googleIntegration,
+          input: { threadId: 'thread_1', format: 'full' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads/thread_1?format=full'
+      })
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: {
+          id: 'thread_1',
+          historyId: 'history_1',
+          messages: [
+            {
+              id: 'message_1',
+              headers: [
+                { name: 'From', value: 'Lead <lead@example.com>' },
+                { name: 'Subject', value: 'Avtal' }
+              ],
+              body: 'Hej Elina\nAndra raden',
+              bodyMimeType: 'text/plain',
+              attachments: [
+                {
+                  partId: '1',
+                  filename: 'agreement.pdf',
+                  mimeType: 'application/pdf',
+                  size: 1024,
+                  attachmentId: 'attachment_1'
+                }
+              ]
+            },
+            {
+              id: 'message_2',
+              body: '<p>HTML fallback</p>',
+              bodyMimeType: 'text/html',
+              attachments: []
+            },
+            {
+              id: 'message_3',
+              snippet: 'Malformed body remains readable through snippet',
+              attachments: []
+            }
+          ]
+        }
+      })
+      const serialized = JSON.stringify(result)
+      expect(serialized).not.toContain(quotedPrintableData)
+      expect(serialized).not.toContain(htmlData)
+      expect(serialized).not.toContain(attachmentData)
+      expect(serialized).not.toContain('X-Provider-Internal')
     })
   )
 

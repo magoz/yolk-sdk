@@ -45,6 +45,13 @@ export class GmailGetMessageInput extends Schema.Class<GmailGetMessageInput>(
   format: Schema.optional(Schema.Literals(['minimal', 'full', 'raw', 'metadata']))
 }) {}
 
+export class GmailGetThreadInput extends Schema.Class<GmailGetThreadInput>(
+  'GmailGetThreadInput'
+)({
+  threadId: Schema.String,
+  format: Schema.Literals(['full', 'metadata', 'minimal'])
+}) {}
+
 export class GmailMessageIdInput extends Schema.Class<GmailMessageIdInput>('GmailMessageIdInput')({
   messageId: Schema.String
 }) {}
@@ -124,6 +131,49 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
   raw: Schema.optional(Schema.String)
 }) {}
 
+export class GmailThreadAttachment extends Schema.Class<GmailThreadAttachment>(
+  'GmailThreadAttachment'
+)({
+  partId: Schema.optional(Schema.String),
+  filename: Schema.optional(Schema.String),
+  mimeType: Schema.optional(Schema.String),
+  size: Schema.optional(Schema.Number),
+  attachmentId: Schema.optional(Schema.String)
+}) {}
+
+export class GmailThreadMessage extends Schema.Class<GmailThreadMessage>('GmailThreadMessage')({
+  id: Schema.String,
+  threadId: Schema.optional(Schema.String),
+  labelIds: Schema.optional(Schema.Array(Schema.String)),
+  snippet: Schema.optional(Schema.String),
+  internalDate: Schema.optional(Schema.String),
+  headers: Schema.Array(GmailMessagePayloadHeader),
+  body: Schema.optional(Schema.String),
+  bodyMimeType: Schema.optional(Schema.Literals(['text/plain', 'text/html'])),
+  attachments: Schema.Array(GmailThreadAttachment)
+}) {}
+
+export class GmailThreadOutput extends Schema.Class<GmailThreadOutput>('GmailThreadOutput')({
+  id: Schema.String,
+  historyId: Schema.optional(Schema.String),
+  messages: Schema.Array(GmailThreadMessage)
+}) {}
+
+const GmailThreadWireMessage = Schema.Struct({
+  id: Schema.String,
+  threadId: Schema.optional(Schema.String),
+  labelIds: Schema.optional(Schema.Array(Schema.String)),
+  snippet: Schema.optional(Schema.String),
+  internalDate: Schema.optional(Schema.String),
+  payload: Schema.optional(Schema.Unknown)
+})
+
+const GmailThreadWireOutput = Schema.Struct({
+  id: Schema.String,
+  historyId: Schema.optional(Schema.String),
+  messages: Schema.optional(Schema.Array(GmailThreadWireMessage))
+})
+
 export class GmailSendAs extends Schema.Class<GmailSendAs>('GmailSendAs')({
   sendAsEmail: Schema.optional(Schema.String),
   displayName: Schema.optional(Schema.String),
@@ -138,6 +188,184 @@ export class GmailListSendAsOutput extends Schema.Class<GmailListSendAsOutput>(
 }) {}
 
 export const GmailUnknownOutput = Schema.Unknown
+
+const isUnknownRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null
+
+const unknownField = (value: unknown, key: string) =>
+  isUnknownRecord(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined
+
+const unknownStringField = (value: unknown, key: string) => {
+  const field = unknownField(value, key)
+  return typeof field === 'string' ? field : undefined
+}
+
+const unknownNumberField = (value: unknown, key: string) => {
+  const field = unknownField(value, key)
+  return typeof field === 'number' ? field : undefined
+}
+
+const unknownArrayField = (value: unknown, key: string) => {
+  const field = unknownField(value, key)
+  return Array.isArray(field) ? field : []
+}
+
+const gmailThreadHeaderNames = new Set([
+  'bcc',
+  'cc',
+  'date',
+  'delivered-to',
+  'from',
+  'in-reply-to',
+  'message-id',
+  'references',
+  'reply-to',
+  'subject',
+  'to'
+])
+
+const gmailPartHeaders = (part: unknown) =>
+  unknownArrayField(part, 'headers').flatMap(header => {
+    const name = unknownStringField(header, 'name')
+    const value = unknownStringField(header, 'value')
+    return name === undefined || value === undefined ? [] : [{ name, value }]
+  })
+
+const selectedGmailPartHeaders = (part: unknown) =>
+  gmailPartHeaders(part).filter(header => gmailThreadHeaderNames.has(header.name.toLowerCase()))
+
+const gmailPartHeader = (part: unknown, name: string) =>
+  gmailPartHeaders(part).find(header => header.name.toLowerCase() === name.toLowerCase())?.value
+
+const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
+  const compact = value.replaceAll(/\s/g, '')
+  const normalized = urlEncoded
+    ? compact.replaceAll('-', '+').replaceAll('_', '/')
+    : compact
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1) {
+    return undefined
+  }
+
+  const unpadded = normalized.replaceAll(/=+$/g, '')
+  const padded = `${unpadded}${'='.repeat((4 - (unpadded.length % 4)) % 4)}`
+  const binary = atob(padded)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
+}
+
+const decodeQuotedPrintable = (value: string) => {
+  const withoutSoftBreaks = value.replaceAll(/=\r?\n/g, '')
+  const bytes: Array<number> = []
+  const encoder = new TextEncoder()
+
+  for (let index = 0; index < withoutSoftBreaks.length; index += 1) {
+    const character = withoutSoftBreaks[index]
+    const pair = withoutSoftBreaks.slice(index + 1, index + 3)
+    if (character === '=' && /^[A-Fa-f0-9]{2}$/.test(pair)) {
+      bytes.push(Number.parseInt(pair, 16))
+      index += 2
+      continue
+    }
+
+    if (character !== undefined) {
+      bytes.push(...encoder.encode(character))
+    }
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes))
+}
+
+const decodeGmailTextBody = (part: unknown) => {
+  const body = unknownField(part, 'body')
+  const data = unknownStringField(body, 'data')
+  if (data === undefined) return undefined
+
+  const bytes = decodeBase64Bytes(data, true)
+  if (bytes === undefined) return undefined
+
+  const value = new TextDecoder().decode(bytes)
+  const transferEncoding = gmailPartHeader(part, 'content-transfer-encoding')?.toLowerCase()
+  if (transferEncoding === 'quoted-printable') return decodeQuotedPrintable(value)
+  if (transferEncoding === 'base64') {
+    const transferredBytes = decodeBase64Bytes(value, false)
+    return transferredBytes === undefined ? undefined : new TextDecoder().decode(transferredBytes)
+  }
+  return value
+}
+
+type GmailCollectedParts = {
+  readonly plain: Array<string>
+  readonly html: Array<string>
+  readonly attachments: Array<GmailThreadAttachment>
+}
+
+const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void => {
+  if (!isUnknownRecord(part)) return
+
+  const partId = unknownStringField(part, 'partId')
+  const filename = unknownStringField(part, 'filename')
+  const mimeType = unknownStringField(part, 'mimeType')
+  const body = unknownField(part, 'body')
+  const size = unknownNumberField(body, 'size')
+  const attachmentId = unknownStringField(body, 'attachmentId')
+  const hasFilename = filename !== undefined && filename.trim() !== ''
+
+  if (hasFilename || attachmentId !== undefined) {
+    collected.attachments.push(
+      new GmailThreadAttachment({
+        ...(partId === undefined ? {} : { partId }),
+        ...(hasFilename ? { filename } : {}),
+        ...(mimeType === undefined ? {} : { mimeType }),
+        ...(size === undefined ? {} : { size }),
+        ...(attachmentId === undefined ? {} : { attachmentId })
+      })
+    )
+  }
+
+  if (mimeType === 'text/plain' || mimeType === 'text/html') {
+    const decoded = decodeGmailTextBody(part)
+    if (decoded !== undefined && decoded.trim() !== '') {
+      if (mimeType === 'text/plain') collected.plain.push(decoded)
+      else collected.html.push(decoded)
+    }
+  }
+
+  for (const child of unknownArrayField(part, 'parts')) {
+    collectGmailParts(child, collected)
+  }
+}
+
+const normalizeGmailThreadMessage = (
+  message: typeof GmailThreadWireMessage.Type
+): GmailThreadMessage => {
+  const collected: GmailCollectedParts = { plain: [], html: [], attachments: [] }
+  collectGmailParts(message.payload, collected)
+  const usesPlain = collected.plain.length > 0
+  const bodies = usesPlain ? collected.plain : collected.html
+  const body = bodies.length === 0 ? undefined : bodies.join('\n\n')
+
+  return new GmailThreadMessage({
+    id: message.id,
+    ...(message.threadId === undefined ? {} : { threadId: message.threadId }),
+    ...(message.labelIds === undefined ? {} : { labelIds: message.labelIds }),
+    ...(message.snippet === undefined ? {} : { snippet: message.snippet }),
+    ...(message.internalDate === undefined ? {} : { internalDate: message.internalDate }),
+    headers: selectedGmailPartHeaders(message.payload),
+    ...(body === undefined ? {} : { body }),
+    ...(body === undefined ? {} : { bodyMimeType: usesPlain ? 'text/plain' : 'text/html' }),
+    attachments: collected.attachments
+  })
+}
+
+const normalizeGmailThread = (thread: typeof GmailThreadWireOutput.Type) =>
+  new GmailThreadOutput({
+    id: thread.id,
+    ...(thread.historyId === undefined ? {} : { historyId: thread.historyId }),
+    messages: (thread.messages ?? []).map(normalizeGmailThreadMessage)
+  })
 
 const gmailProviderFailure = (code: string, message: string, status: number, body: string) =>
   providerFailureFromResponse({ code, message, status, body })
@@ -514,20 +742,37 @@ export const gmailListDraftsAction = defineAction({
 export const gmailGetThreadAction = defineAction({
   id: 'gmail.get_thread',
   description: 'Get a Gmail thread by id.',
-  inputSchema: Schema.Struct({ threadId: Schema.String }),
-  outputSchema: GmailUnknownOutput,
+  inputSchema: GmailGetThreadInput,
+  outputSchema: GmailThreadOutput,
   execute: ({ integration, input }) =>
-    runGmailJsonAction(
-      integration,
-      token =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
+      const http = yield* ConnectorHttpClient
+      const params = new URLSearchParams()
+      appendSearchParam(params, 'format', input.format)
+      const response = yield* http.request(
         gmailRequest({
           token,
           method: 'GET',
-          path: `/users/me/threads/${encodeURIComponent(input.threadId)}`
-        }),
-      'gmail_get_thread_failed',
-      'Gmail get thread failed'
-    )
+          path: `/users/me/threads/${encodeURIComponent(input.threadId)}?${params.toString()}`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_get_thread_failed',
+          'Gmail get thread failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailThreadWireOutput, response)
+      return ActionResult.success(normalizeGmailThread(output))
+    })
 })
 
 export const gmailListLabelsAction = defineAction({
