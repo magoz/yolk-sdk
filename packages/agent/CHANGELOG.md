@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.47
+
+### Patch Changes
+
+- b0576d3: Fail Claude turns truncated at `max_tokens` instead of reporting normal completion.
+
 ## 0.1.0-canary.46
 
 ### Patch Changes
