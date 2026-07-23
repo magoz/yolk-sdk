@@ -811,6 +811,28 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('fails non-streaming responses truncated at max_tokens', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      const response = new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: 'I will call the tool next.' }],
+          stop_reason: 'max_tokens',
+          usage: { input_tokens: 2, output_tokens: 8192 }
+        }),
+        { status: 200 }
+      )
+      const error = yield* collectProviderEvents(response, requests).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'Anthropic Claude stopped after reaching max_tokens',
+        retryable: false
+      })
+    })
+  )
+
   it.effect('maps Anthropic cache usage into total input usage', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
@@ -935,6 +957,31 @@ describe('Anthropic Claude provider', () => {
         }
       })
       expect(events[1]).toMatchObject({ usage: { input: { total: 0 }, output: { total: 6 } } })
+    })
+  )
+
+  it.effect('fails streams truncated at max_tokens instead of reporting completion', () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get('https://example.com')
+      const response = HttpClientResponse.fromWeb(
+        request,
+        responseFromChunks([
+          'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I will call the tool next."}}\n\n',
+          'data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":8192}}\n\n',
+          'data: {"type":"message_stop"}\n\n'
+        ])
+      )
+      const error = yield* streamAnthropicClaudeResponse(response).pipe(
+        Stream.runCollect,
+        Effect.flip
+      )
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'Anthropic Claude stopped after reaching max_tokens',
+        retryable: false
+      })
     })
   )
 

@@ -1231,6 +1231,10 @@ const toLlmEvents = (
   response: AnthropicMessageResponse
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
+    if (response.stop_reason === 'max_tokens') {
+      return yield* Effect.fail(anthropicMaxTokensError())
+    }
+
     const events = yield* Effect.forEach(response.content, block => {
       switch (block.type) {
         case 'text':
@@ -1283,6 +1287,7 @@ type AnthropicBodyFormat = 'undecided' | 'sse' | 'json'
 type AnthropicSseState = {
   readonly hasToolCall: boolean
   readonly hasDone: boolean
+  readonly stopReason?: string
   readonly usage: AnthropicUsageComponents
 }
 
@@ -1331,6 +1336,13 @@ const invalidToolUseStartError = () =>
   new LLMError({
     cause: 'invalid_response',
     message: 'Invalid Anthropic Claude tool_use stream block',
+    retryable: false
+  })
+
+const anthropicMaxTokensError = () =>
+  new LLMError({
+    cause: 'invalid_response',
+    message: 'Anthropic Claude stopped after reaching max_tokens',
     retryable: false
   })
 
@@ -1423,11 +1435,22 @@ const makeAnthropicStreamEmitter = () => {
 
     if (type === 'message_delta') {
       const step = usageStepFromUnknown(field(data, 'usage'), state.usage)
+      const delta = field(data, 'delta')
+      const stopReason = stringField(delta, 'stop_reason')
 
-      return Effect.succeed({ state: { ...state, usage: step.snapshot }, events: step.events })
+      return Effect.succeed({
+        state: {
+          ...state,
+          usage: step.snapshot,
+          ...(stopReason === undefined ? {} : { stopReason })
+        },
+        events: step.events
+      })
     }
 
     if (type === 'message_stop') {
+      if (state.stopReason === 'max_tokens') return Effect.fail(anthropicMaxTokensError())
+
       return Effect.succeed({
         state: { ...state, hasDone: true },
         events: [LLMDone.make({ stopReason: state.hasToolCall ? 'tool_use' : 'stop' })]
@@ -1544,6 +1567,10 @@ const finalizeBodyState = (
         sseState = tailStep.state
         events.push(...tailStep.events)
       }
+    }
+
+    if (sseState.stopReason === 'max_tokens') {
+      return yield* Effect.fail(anthropicMaxTokensError())
     }
 
     if (!sseState.hasDone) {
