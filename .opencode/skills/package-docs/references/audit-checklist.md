@@ -82,6 +82,7 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
 For pure wording-only docs:

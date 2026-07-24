@@ -22,6 +22,7 @@ export { makeVercelSandboxName } from './name.ts'
 export {
   DisposableSandboxLifecycle,
   EmptySandboxInitialSource,
+  GitSandboxBasicAuth,
   GitSandboxInitialSource,
   PersistentSandboxLifecycle,
   SandboxCommandInput,

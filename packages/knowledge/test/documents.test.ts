@@ -93,10 +93,15 @@ describe('knowledge searching', () => {
         _tag: 'KnowledgeScope',
         id: ' scope_1 '
       }).pipe(Effect.result)
+      const emptyScopes = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)({
+        _tag: 'KnowledgeScopes',
+        ids: []
+      }).pipe(Effect.result)
 
       expect(invalidDocument._tag).toBe('Failure')
       expect(invalidChunk._tag).toBe('Failure')
       expect(invalidScope._tag).toBe('Failure')
+      expect(emptyScopes._tag).toBe('Failure')
     })
   )
 
@@ -272,12 +277,12 @@ describe('knowledge searching', () => {
         })
       )
       const error = yield* searchKnowledge({
-        scope: { _tag: 'KnowledgeScopes', ids: [] },
-        query: 'alpha'
+        scope: { _tag: 'KnowledgeScope', id: 'scope_1' },
+        query: '   '
       }).pipe(Effect.flip, Effect.provide(layer))
 
       expect(error).toBeInstanceOf(KnowledgeSearchError)
-      expect(error.message).toBe('Search scope is empty')
+      expect(error.message).toBe('Search query is empty')
       expect(new SearchIndexStoreError({ message: 'store' })._tag).toBe('SearchIndexStoreError')
     })
   )
@@ -305,6 +310,43 @@ describe('knowledge searching', () => {
       })
 
       expect(result.content).toContain('result for docs')
+    })
+  })
+
+  it.effect('rejects invalid lookup count parameters before host handlers', () => {
+    let searchCount = 0
+    const tool = makeKnowledgeLookupTool<undefined>({
+      search: () => {
+        searchCount += 1
+        return Effect.succeed([])
+      },
+      get: () =>
+        Effect.fail(
+          new ToolError({ tool: 'knowledge_lookup', message: 'unused', cause: 'execution' })
+        )
+    })
+
+    return Effect.gen(function* () {
+      const invalidLimit = yield* tool.execute({
+        context: undefined,
+        call: ToolCall.make({
+          id: 'call_limit',
+          name: 'knowledge_lookup',
+          params: { operation: 'search', query: 'docs', limit: 0 }
+        })
+      })
+      const invalidContext = yield* tool.execute({
+        context: undefined,
+        call: ToolCall.make({
+          id: 'call_context',
+          name: 'knowledge_lookup',
+          params: { operation: 'search', query: 'docs', contextChunks: -1 }
+        })
+      })
+
+      expect(invalidLimit.isError).toBe(true)
+      expect(invalidContext.isError).toBe(true)
+      expect(searchCount).toBe(0)
     })
   })
 })

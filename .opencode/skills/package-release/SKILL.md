@@ -119,6 +119,7 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
 8. Do not proceed if validation fails.
@@ -134,7 +135,7 @@ pnpm test:run
 10. Publish by GitHub Actions only.
     - Manual UI default; approved agent can run `gh workflow run publish.yml --ref main -f tag=canary`.
     - Use `canary` unless stable was explicitly approved.
-    - Never run local `pnpm release:canary` for normal releases.
+    - Never publish locally for normal releases.
     - Exception: first publish of a new npm package name may be a local packed-tarball publish after explicit approval; see `references/publishing.md`.
     - Before UI/`gh` trigger, confirm current `main` contains the version bump commit.
     - After action completes, verify every public package dist-tag and new `v<version>` git tag.

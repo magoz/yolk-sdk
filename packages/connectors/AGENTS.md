@@ -14,7 +14,7 @@
 ## Public model
 
 | Export area       | Purpose                                                                                   |
-| ----------------- | ----------------------------------------------------------------------------------------- |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
 | `connector`       | connector definition and action dispatch                                                  |
 | `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                |
 | `integration`     | configured invokable connector instance data                                              |
@@ -42,5 +42,7 @@
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
+- Figma MCP `refreshToken`, `clientId`, and `clientSecret` come from the runtime
+  `OAuthCredential`; never read them from integration config.
 - `gmail.get_thread` is a bounded normalized boundary: require an explicit format, decode message text with plain text preferred over HTML, retain selected headers and attachment metadata, and never expose raw MIME or attachment content. Text/nested attachment parts must not enter the message body. Fetch external attachment content through `gmail.get_attachment` only when metadata includes `attachmentId`; inline attachment data is intentionally omitted.
 - Agent adapters require a host-provided Effect layer for connector dependencies; adapters must not construct HTTP or credential services themselves.

@@ -115,8 +115,15 @@ export type VercelAgentWorkflowLoopConfig = {
   readonly runToolBatchStep: (
     input: VercelAgentWorkflowToolBatchStepInput
   ) => Promise<VercelAgentWorkflowToolBatchStepResult>
+  /** Called only after a model step returns `done: true`. */
   readonly closeStream: () => Promise<void>
+  /**
+   * Best-effort final failure handler. It must write a safe final error and
+   * close the failure stream; rejection is suppressed in favor of the
+   * original structured run result.
+   */
   readonly writeError: (error: unknown) => Promise<void>
+  /** A successful await suspends/resumes without invoking either finalizer. */
   readonly awaitInput?: (input: VercelAgentWorkflowAwaitingInput) => Promise<unknown>
   readonly modelStepRetry?: VercelAgentWorkflowStepRetryPolicy
   readonly toolBatchStepRetry?: VercelAgentWorkflowStepRetryPolicy
@@ -144,8 +151,11 @@ const missingAwaitInputHandlerError = () =>
     'Vercel agent workflow awaiting input requested but no awaitInput handler is configured'
   )
 
-const maxRetryAttempts = (policy: VercelAgentWorkflowStepRetryPolicy | undefined) =>
-  Math.max(1, Math.floor(policy?.maxAttempts ?? noWorkflowStepRetry.maxAttempts))
+const maxRetryAttempts = (policy: VercelAgentWorkflowStepRetryPolicy | undefined) => {
+  const configured = policy?.maxAttempts ?? noWorkflowStepRetry.maxAttempts
+
+  return Number.isFinite(configured) ? Math.max(1, Math.floor(configured)) : 1
+}
 
 export async function retryWorkflowStep<A>(
   runStep: () => Promise<A>,

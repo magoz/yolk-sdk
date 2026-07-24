@@ -33,6 +33,7 @@ Remote MCP requires HTTPS by default. `http://localhost` is only for explicit de
 Use `@yolk-sdk/mcp/client/node` only from Node hosts:
 
 ```ts
+import { execPath } from 'node:process'
 import { Effect } from 'effect'
 import { listLocalMcpServerToolsNode } from '@yolk-sdk/mcp/client/node'
 
@@ -41,7 +42,7 @@ const tools = await Effect.runPromise(
     {
       name: 'local-files',
       type: 'local',
-      command: ['npx', '-y', '@example/mcp-server'],
+      command: [execPath, './mcp-server.mjs'],
       environment: {
         EXAMPLE_TOKEN: token
       }
@@ -56,7 +57,9 @@ const tools = await Effect.runPromise(
 )
 ```
 
-Local stdio uses explicit environment only. Do not pass the host process environment wholesale.
+Local stdio uses explicit environment only; host environment inheritance is disabled. Prefer an
+absolute executable such as `execPath`. If a bare executable or `/usr/bin/env` shebang is required,
+pass an explicitly allowlisted `PATH`; never pass the host process environment wholesale.
 
 ## Tool name mapping
 

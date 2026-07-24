@@ -1,7 +1,12 @@
 import { Duration, Effect, Fiber, Layer } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
-import { Sandbox, VercelSandboxState, makeVercelSandboxName } from '../src/index.ts'
+import {
+  PersistentSandboxLifecycle,
+  Sandbox,
+  VercelSandboxState,
+  makeVercelSandboxName
+} from '../src/index.ts'
 import { makeInMemorySandboxStateStoreLayer } from '../src/testing/index.ts'
 import {
   VercelSandboxClient,
@@ -159,6 +164,96 @@ describe('vercel sandbox layer', () => {
 
       expect(result.workspaceReset).toBe(true)
       expect(deleted).toEqual([name])
+    })
+  )
+
+  it.effect('reattaches expired persistent state without deleting the workspace', () =>
+    Effect.gen(function* () {
+      const files: Array<VercelSandboxFile> = []
+      const commands: Array<VercelRunCommandInput> = []
+      const deleted: Array<string> = []
+      const sandboxSessionId = 'session_persistent'
+      const name = makeVercelSandboxName(sandboxSessionId)
+      const handle = makeHandle({ name, files, commands, deleted })
+      let createCount = 0
+      const clientLayer = Layer.succeed(
+        VercelSandboxClient,
+        VercelSandboxClient.of({
+          get: () => Effect.succeed(handle),
+          create: () => {
+            createCount += 1
+            return Effect.succeed(handle)
+          }
+        })
+      )
+      const expiredState = VercelSandboxState.make({
+        name,
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        expiresAtMs: 0,
+        maxExpiresAtMs: Number.MAX_SAFE_INTEGER
+      })
+      const stateLayer = makeInMemorySandboxStateStoreLayer([
+        { sandboxSessionId, state: expiredState }
+      ])
+      const layer = makeVercelSandboxLayerWithClient({
+        sandboxSessionId,
+        lifecycle: PersistentSandboxLifecycle.make({ idleTtlMs: 30 * 60_000 })
+      }).pipe(Layer.provide(Layer.mergeAll(clientLayer, stateLayer)))
+      const result = yield* Effect.gen(function* () {
+        const sandbox = yield* Sandbox
+        return yield* sandbox.run({ command: 'pwd' })
+      }).pipe(Effect.provide(layer))
+
+      expect(result.workspaceReset).toBe(false)
+      expect(createCount).toBe(0)
+      expect(deleted).toEqual([])
+    })
+  )
+
+  it.effect('recreates persistent state when the provider sandbox is missing', () =>
+    Effect.gen(function* () {
+      const files: Array<VercelSandboxFile> = []
+      const commands: Array<VercelRunCommandInput> = []
+      const deleted: Array<string> = []
+      const sandboxSessionId = 'session_persistent_missing'
+      const name = makeVercelSandboxName(sandboxSessionId)
+      const handle = makeHandle({ name, files, commands, deleted })
+      let createCount = 0
+      const clientLayer = Layer.succeed(
+        VercelSandboxClient,
+        VercelSandboxClient.of({
+          get: () => Effect.succeed(null),
+          create: () => {
+            createCount += 1
+            return Effect.succeed(handle)
+          }
+        })
+      )
+      const stateLayer = makeInMemorySandboxStateStoreLayer([
+        {
+          sandboxSessionId,
+          state: VercelSandboxState.make({
+            name,
+            createdAtMs: 0,
+            lastUsedAtMs: 0,
+            expiresAtMs: 0,
+            maxExpiresAtMs: Number.MAX_SAFE_INTEGER
+          })
+        }
+      ])
+      const layer = makeVercelSandboxLayerWithClient({
+        sandboxSessionId,
+        lifecycle: PersistentSandboxLifecycle.make({ idleTtlMs: 30 * 60_000 })
+      }).pipe(Layer.provide(Layer.mergeAll(clientLayer, stateLayer)))
+      const result = yield* Effect.gen(function* () {
+        const sandbox = yield* Sandbox
+        return yield* sandbox.run({ command: 'pwd' })
+      }).pipe(Effect.provide(layer))
+
+      expect(result.workspaceReset).toBe(true)
+      expect(createCount).toBe(1)
+      expect(deleted).toEqual([])
     })
   )
 

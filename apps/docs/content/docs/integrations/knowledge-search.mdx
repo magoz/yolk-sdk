@@ -21,6 +21,8 @@ await Effect.runPromise(
 ```
 
 Your app provides extraction, chunking, embedding, summarization, and store layers.
+The pipeline updates `SearchIndexStore`, not `KnowledgeStore`, and is not a cross-operation
+transaction; your adapter owns atomic chunk replacement and rollback policy.
 
 ## Search
 
@@ -38,6 +40,9 @@ const results = await Effect.runPromise(
   }).pipe(Effect.provide(HostKnowledgeLayer))
 )
 ```
+
+Filter the store to host-approved `ready` documents with active availability. The search helper
+does not apply status or availability policy itself.
 
 ## Expose as tool
 

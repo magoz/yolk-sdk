@@ -15,6 +15,8 @@
 
 - Root/core imports Effect only; no provider SDKs, Node APIs, app code, React, Next, DB, or auth.
 - Only `src/vercel/*` may import `@vercel/sandbox`.
+- `@yolk-sdk/sandbox/vercel` is Node/server-only because `@vercel/sandbox` imports Node built-ins;
+  browser and Worker code use core contracts through a host execution endpoint.
 - `src/vercel/client.ts` is the only live `@vercel/sandbox` SDK boundary; `src/vercel/layer.ts` consumes `VercelSandboxClient` for fakeable Effect layers.
 - `src/agent.ts` may depend on `@yolk-sdk/agent/tools`, `@yolk-sdk/agent/protocol`, and `@yolk-sdk/agent/loop`; core must not.
 - Hosts own identity, auth, storage adapters, lifecycle cleanup scans, env/secrets, snapshots, git policy, approvals, and UI.
@@ -28,11 +30,14 @@
 - Vercel sandbox names are stable hashes from `sandboxSessionId`.
 - Disposable lifecycle is default: 30m idle TTL, 45m max lifetime.
 - Persistent lifecycle is modeled but dogfood should stay disposable until stable.
-- Initial source is an ADT: empty, snapshot, git, or tarball. Snapshot replaces separate base-snapshot fields.
+- Initial source is an ADT: empty, snapshot, git, or tarball. Git basic auth is an all-or-nothing
+  nested value. Snapshot replaces separate base-snapshot fields and determines runtime.
 - Hosts choose Vercel env, ports, resources, runtime, and network policy; package stores no secrets.
 - Vercel state store is a fast path: if empty, `get(name)` before `create(name)` and save reattached state.
 - Use `makeVercelSandboxLayerWithClient` for tests/custom SDK seams; use `makeVercelSandboxLayer` for live client wiring. Hosts still provide `SandboxStateStore`.
 - Stale or max-expired disposable state recreates before command and reports `workspaceReset: true`.
+- Persistent idle expiry reattaches the stable named sandbox; only a provider-missing sandbox
+  recreates and reports `workspaceReset: true`.
 - `cwd` is workspace-relative; absolute paths and `..` escape are rejected.
 - Stdin uses wrapper files because Vercel SDK commands have no stdin param.
 - Timeout is Yolk-owned: run detached, wait with Effect timeout, kill on expiry; do not rely on Vercel `timeoutMs` exit `137`.

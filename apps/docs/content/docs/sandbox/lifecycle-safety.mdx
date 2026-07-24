@@ -5,6 +5,10 @@ description: Configure Vercel Sandbox lifecycle, source, environment, ports, and
 
 The sandbox package exposes execution mechanics. Your app owns safety policy.
 
+`@yolk-sdk/sandbox/vercel` is Node/server-only because `@vercel/sandbox` imports Node built-ins.
+Browser and Worker code may use provider-free core types but must call a host execution endpoint
+instead of importing the Vercel adapter.
+
 ## Vercel layer
 
 ```ts
@@ -43,6 +47,8 @@ Replace the in-memory state store with durable app storage in production.
 | workspace root      | `/vercel/sandbox`              |
 
 Expired disposable state recreates before command execution and returns `workspaceReset: true`.
+Persistent state instead reattaches the stable named sandbox so Vercel can resume the latest
+persisted filesystem; it recreates only when the provider no longer has that sandbox.
 
 ## Source options
 
@@ -54,6 +60,8 @@ Expired disposable state recreates before command execution and returns `workspa
 | `TarballSandboxInitialSource`  | hydrate from an archive                |
 
 Choose source per trusted server policy, not from raw client input.
+Git credentials use optional `GitSandboxBasicAuth`, so username/password are always supplied
+together. `runtime` applies to empty, Git, and tarball creation; snapshots inherit their runtime.
 
 ## Agent tool
 

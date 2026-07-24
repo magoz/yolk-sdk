@@ -27,8 +27,10 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Durable event helpers are pure/Effect-native: `sequenceDurableAgentEvent`, `writeDurableAgentEvent`, and `commitThenWriteTerminalEvent`; hosts own storage policy.
 - Host-provided durable `streamId`s must be scoped to one independent run/session; clients de-dupe
   by `eventId`, so duplicate ids across runs drop legitimate live events.
-- Terminal durable event helpers model commit-before-write ordering only; they never close writers.
-  Hosts own persistence, terminal error event shape, and the single final stream close.
+- Terminal durable event helpers model commit-before-write ordering only; they never infer closure
+  from an event tag or close writers. `closeStream` owns successful `AgentEnd` closure;
+  `writeError` owns safe `AgentError` write plus failure closure; successful
+  `AgentAwaitingInput` releases its writer lock but leaves the Workflow stream open for resume.
 - Keep APIs Workflow-specific and free of app/provider/tool/storage policy.
 - Preserve tool result order by original model tool-call order.
 - Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.

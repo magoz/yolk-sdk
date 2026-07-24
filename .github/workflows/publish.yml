@@ -21,6 +21,9 @@ jobs:
     name: Publish packages
     runs-on: ubuntu-latest
     steps:
+      - name: Verify main branch
+        run: test "$GITHUB_REF" = "refs/heads/main"
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -52,6 +55,7 @@ jobs:
           pnpm tsc
           pnpm lint
           pnpm test:run
+          pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 
       - name: Verify release version
         id: release-version

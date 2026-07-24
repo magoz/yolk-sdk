@@ -98,7 +98,7 @@ export const KnowledgeSearchScopeSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('KnowledgeScope'), id: NonEmptyTrimmedString }),
   Schema.Struct({
     _tag: Schema.Literal('KnowledgeScopes'),
-    ids: Schema.Array(NonEmptyTrimmedString)
+    ids: Schema.NonEmptyArray(NonEmptyTrimmedString)
   })
 ])
 export type KnowledgeSearchScope = Schema.Schema.Type<typeof KnowledgeSearchScopeSchema>

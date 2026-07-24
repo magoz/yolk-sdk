@@ -9,7 +9,7 @@ import { makeInMemorySessionEventStoreLayer, SessionEventStore } from '@yolk-sdk
 import { ToolAccess } from '@yolk-sdk/agent/tools'
 
 describe('@yolk-sdk/agent subpaths', () => {
-  it('imports every public subpath', async () => {
+  it('imports core public subpaths', async () => {
     const [root, protocol, client, compaction, loop, testing, runtime, tools] = await Promise.all([
       import('@yolk-sdk/agent'),
       import('@yolk-sdk/agent/protocol'),

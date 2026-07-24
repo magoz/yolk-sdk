@@ -22,3 +22,7 @@ Domain-free MCP client and tool adapter.
 - No app auth or product permissions.
 - No agent loop/provider imports.
 - Core local APIs require platform services; Node wrappers provide them at host boundary.
+- Local children receive only configured `environment` values (`extendEnv: false`). Prefer an
+  absolute executable such as `process.execPath`; bare executables and `/usr/bin/env` shebangs need
+  an explicitly allowlisted `PATH`.
+- Local servers remain disabled unless `securityPolicy.allowLocalServers` is explicitly true.

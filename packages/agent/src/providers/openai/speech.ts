@@ -159,8 +159,9 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
 
 /**
  * OpenAI speech-to-text adapter for the provider-neutral `VoiceTranscriber`
- * service. Uses `verbose_json` so language/duration/segments survive when the
- * model provides them.
+ * service. Whisper models use `verbose_json`; GPT-4o transcribe models use
+ * plain `json`. Optional language/duration/segments survive only when the
+ * selected model returns them.
  */
 export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
   Layer.effect(

@@ -5,7 +5,7 @@
 ## Subpaths
 
 | Subpath                                               | Source                                       | Role                                                                                                                     |
-| ----------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                         |
 | `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                                  |
 | `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                        |
@@ -38,16 +38,18 @@
 - Protocol depends on Effect only.
 - Loop depends on protocol + Effect only.
 - Runtime depends on protocol + loop + Effect only.
-- Client depends on protocol + Effect HTTP/Stream; browser WebSocket/attachment helpers touch `WebSocket`/`Blob`/`File`/`FileReader` lazily.
+- Client depends on protocol + Effect HTTP/Stream. HTTP helpers are runtime-portable; attachment helpers require `Blob`/`File` and may use `FileReader`, while Cloudflare WebSocket transport constructs the global `WebSocket` when its stream runs. Browser globals are never read at import time.
 - Compaction depends on protocol + loop + Effect only.
 - Tools depend on protocol + loop + Effect only.
 - OAuth and skillset depend on Effect only.
 - Voice depends on protocol + loop + Effect; `makeWebSocketVoiceTransport` needs a host `Socket.WebSocketConstructor` layer.
-- `voice/browser` is the only DOM/WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes.
+- `voice/browser` is the only WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes. Client attachment/WebSocket helpers also use browser APIs as described above.
 - Voice tools execute server-side only: the client `makeVoiceController` forwards provider tool calls to a host endpoint (`VoiceSessionToolCallRequest` in, `VoiceToolCallOutcome` out); `handleVoiceToolCall` applies `ToolDef.approval` policy before the executor and never runs approval-gated tools without a matching approved response.
 - Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
 - If a voice session ends while awaiting approval, the approval stays pending host-side and the event stream completes; durable resume is host/session-log policy.
 - One-shot speech contracts live in voice: `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, and `speechResultToAudioPart`. `VoiceSpeechRequest.instructions` is delivery-style steering only (tone, pacing), not model-visible content instructions.
+- `providers/openai/speech` is host/server integration: it requires runtime `FormData`/`Blob`, an
+  Effect `HttpClient`, and a secret API key. Do not invoke it directly from browsers.
 - `projectVoiceEvent` keeps assistant drafts per segment key (`itemId`, falling back to `responseId`): a delta for a new segment flushes the previous draft, and finals for already-flushed keys project nothing. Providers emit transcript finals per output item, duplicate final event families, and back-to-back responses; response-level keying wipes later items of the same response, key-less/global drafts concatenate or duplicate.
 - `voiceSeedTextsFromMessages` seeds visible text only; pass `{ includeAuthors: true }` to prefix user seeds with author display names for multi-user transcripts (assistant seeds never carry names).
 - Segment finals with empty transcripts keep the streamed draft text (truncated/interrupted segments must never lose text the user already heard).

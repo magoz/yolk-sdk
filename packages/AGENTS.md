@@ -5,7 +5,7 @@ Public `@yolk-sdk/*` packages. Domain-free SDK surface; apps own product policy,
 ## Package map
 
 | Package                      | Role                                                                                                   | Local docs                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
 | `@yolk-sdk/agent`            | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice | `packages/agent/AGENTS.md`            |
 | `@yolk-sdk/mcp`              | MCP client/server/protocol adapters                                                                    | `packages/mcp/AGENTS.md`              |
 | `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers       | `packages/knowledge/AGENTS.md`        |
@@ -30,5 +30,6 @@ Package-local boundaries and exceptions live in each package `AGENTS.md`.
 
 - Check packages: `pnpm packages:check`
 - Build packages: `pnpm packages:build`
-- Release validation: see `patterns/PACKAGE_DISTRIBUTION.md`; full gates include build, publint, smoke, packages check, Cloudflare check, `tsc`, lint, and tests.
+- Release validation: see `patterns/PACKAGE_DISTRIBUTION.md`; full gates include build, publint, smoke, packages check, Cloudflare check, `tsc`, lint, tests, and Workflow directive tests.
 - Package tests run through root `pnpm test:run` unless a local doc says otherwise.
+- Workflow directive tests require `pnpm --filter @yolk-sdk/vercel-workflows test:workflow` explicitly.

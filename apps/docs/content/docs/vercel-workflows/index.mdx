@@ -76,16 +76,22 @@ ${streamId}:${turn}:${eventSequence}
 
 Clients should de-dupe by `eventId` during resume/reconnect.
 
-## Commit before terminal events
+## Commit before protocol terminal events
 
-Durable streams should settle canonical host state before terminal events:
+“Terminal” is a logical client boundary. Final callback ownership is:
 
 ```txt
-live events -> host durable commit -> terminal event -> workflow-owned close
+AgentEnd: durable completion commit -> AgentEnd -> closeStream
+AgentError: failure commit/mapping -> AgentError -> writeError-owned close
+AgentAwaitingInput: persist pending HITL -> emit pause -> release writer lock, do not close -> resume
 ```
 
 Use `commitThenWriteTerminalEvent` when a step must commit host state before writing the terminal
-event. The workflow loop or stream owner owns the final close.
+event. It cannot infer whether an event is Workflow-final and never closes the writer.
+
+The workflow loop calls `closeStream` only on successful completion. Failure paths call `writeError`
+best-effort; that callback must write the safe run-final error and close, including after a failed
+success close.
 
 ## Next pages
 

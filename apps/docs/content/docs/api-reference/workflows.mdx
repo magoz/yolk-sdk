@@ -35,10 +35,21 @@ Import from `@yolk-sdk/vercel-workflows/effect`.
 | `VercelWorkflowsClient`         | service shape for injected fakes/custom layers                |
 | `VercelWorkflowsError`          | tagged error for public Workflow SDK failures                 |
 | `VercelWorkflowsSdk`            | injectable low-level SDK dependency for tests/custom hosts    |
+| `VercelWorkflowsSdkClient`      | low-level SDK dependency shape                                |
+| `VercelWorkflowsSdkRun`         | low-level SDK run shape                                       |
 | `VercelWorkflowFunction`        | Workflow function type accepted by `start`                    |
 | `VercelWorkflowRun`             | Effect-native run handle returned by `start`/`getRun`         |
+| `VercelWorkflowRunStatus`       | native Workflow run status type                               |
 | `VercelWorkflowReadableOptions` | readable stream options, including `startIndex`               |
 | `VercelWorkflowReadableStream`  | native Workflow readable stream type                          |
+| `VercelWorkflowsOperation`      | operation names carried by `VercelWorkflowsError`             |
+
+Layers:
+
+| Layer                          | Purpose                                                               |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `VercelWorkflows.layer`        | live service backed by public `workflow/api`                          |
+| `VercelWorkflows.layerFromSdk` | service requiring injected `VercelWorkflowsSdk` for tests/custom SDKs |
 
 `VercelWorkflows` methods:
 
@@ -51,12 +62,30 @@ Import from `@yolk-sdk/vercel-workflows/effect`.
 | `resumeHook(token, payload)`   | resume a pending Workflow hook                          |
 | `cancel(runId)`                | cancel a run                                            |
 
+`VercelWorkflowRun` members:
+
+| Member                  | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `runId`                 | native Workflow run id                                        |
+| `getReadable(options?)` | Effect-wrapped readable stream for this run                   |
+| `cancel`                | Effect that cancels this run                                  |
+| `status`                | Effect that resolves the native run status                    |
+| `returnValue`           | Effect that resolves the typed Workflow function return value |
+
 The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP, queue, hook, or stream internals.
+
+Every Effect operation on `VercelWorkflows` and `VercelWorkflowRun` fails with
+`VercelWorkflowsError`, which carries `_tag`, `operation`, `message`, and the original `cause`.
+`operation` is one of `start`, `getRun`, `getReadable`, `tailIndex`, `resumeHook`, `cancel`,
+`status`, or `returnValue`. `runId` is plain data and cannot fail.
+
+`VercelWorkflowsClient` is the Effect service shape. `VercelWorkflowsSdkClient` and
+`VercelWorkflowsSdkRun` are the lower-level Promise SDK seam used by `VercelWorkflowsSdk`.
 
 ## Callback types
 
 | Type                                     | Meaning                                                 |
-| ---------------------------------------- | ------------------------------------------------------- |
+| ---------------------------------------- | --------------------------------------------------------------------------------- |
 | `VercelAgentWorkflowInput`               | `{ request, context }` passed to workflow               |
 | `SerializableWorkflowState`              | persisted loop state between steps                      |
 | `VercelAgentWorkflowLoopConfig`          | full config for `runVercelAgentWorkflow`                |
@@ -66,13 +95,13 @@ The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel ba
 | `VercelAgentWorkflowToolBatchStepResult` | tool callback result                                    |
 | `VercelAgentWorkflowAwaitingInput`       | HITL hook payload                                       |
 | `VercelAgentWorkflowRunResult`           | terminal run result union                               |
-| `VercelAgentWorkflowStepRetryPolicy`     | `{ maxAttempts }`                                       |
+| `VercelAgentWorkflowStepRetryPolicy`     | `{ maxAttempts }`; finite values floor/clamp to `1`, non-finite values become `1` |
 | `WorkflowStepResult`                     | `Success` / `Failure` wrapper from `settleWorkflowStep` |
 
 ## Durable event types
 
 | Type                                       | Meaning                                  |
-| ------------------------------------------ | ---------------------------------------- |
+| ------------------------------------ | ---------------------------------------- |
 | `DurableAgentEvent`                        | JSON event with deterministic `eventId`  |
 | `DurableAgentEventIdInput`                 | input for `durableAgentEventId`          |
 | `DurableAgentEventSequencerState`          | current durable event sequence state     |
@@ -96,10 +125,12 @@ The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel ba
 ## Terminal helper results
 
 | Tag                      | Meaning                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------- |
+| ------------------------ | ------------------------------------------------------- |
 | `Committed`              | commit succeeded and terminal write succeeded                                           |
 | `CommitFailed`           | commit failed and commit-error terminal write succeeded                                     |
 | `TerminalWriteFailed`    | commit succeeded but terminal write failed                                                  |
 | `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed                                        |
 
-The terminal helper does not close streams. Close once from the surrounding workflow loop or stream owner.
+The terminal helper does not close streams or infer finality from event tags. Successful
+`AgentEnd` closes through `closeStream`; failure `AgentError` closes through `writeError`. Release
+the writer lock without final-closing resumable `AgentAwaitingInput`.

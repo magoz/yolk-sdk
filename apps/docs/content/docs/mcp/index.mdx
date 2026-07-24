@@ -61,9 +61,8 @@ The result is a Yolk `ToolResult`, ready to feed back into the agent loop.
 
 Use `@yolk-sdk/mcp/client/node` only in Node hosts:
 
-```ts
-import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'
-```
+See [MCP auth, local servers, and server policy](./auth-local-server#local-stdio) for a runnable Node
+example, explicit environment rules, and the required `allowLocalServers` opt-in.
 
 Worker/browser code should stay on `@yolk-sdk/mcp/client`.
 

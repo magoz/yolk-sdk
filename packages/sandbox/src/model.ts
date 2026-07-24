@@ -4,6 +4,7 @@ const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty
 const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 const PositiveInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 const PositiveNumber = Schema.Number.pipe(Schema.check(Schema.isGreaterThan(0)))
+const SnapshotRetentionCount = PositiveInteger.pipe(Schema.check(Schema.isLessThanOrEqualTo(10)))
 
 export class SandboxCommandInput extends Schema.Class<SandboxCommandInput>('SandboxCommandInput')({
   command: Schema.String,
@@ -54,7 +55,7 @@ export class DisposableSandboxLifecycle extends Schema.TaggedClass<DisposableSan
 export class SandboxSnapshotRetention extends Schema.Class<SandboxSnapshotRetention>(
   'SandboxSnapshotRetention'
 )({
-  count: PositiveInteger,
+  count: SnapshotRetentionCount,
   expirationMs: Schema.optional(NonNegativeInteger),
   deleteEvicted: Schema.optional(Schema.Boolean)
 }) {}
@@ -86,10 +87,14 @@ export class SnapshotSandboxInitialSource extends Schema.TaggedClass<SnapshotSan
   }
 ) {}
 
+export class GitSandboxBasicAuth extends Schema.Class<GitSandboxBasicAuth>('GitSandboxBasicAuth')({
+  username: NonEmptyTrimmedString,
+  password: NonEmptyTrimmedString
+}) {}
+
 export class GitSandboxInitialSource extends Schema.TaggedClass<GitSandboxInitialSource>()('Git', {
   url: NonEmptyTrimmedString,
-  username: Schema.optional(NonEmptyTrimmedString),
-  password: Schema.optional(NonEmptyTrimmedString),
+  auth: Schema.optional(GitSandboxBasicAuth),
   depth: Schema.optional(PositiveInteger),
   revision: Schema.optional(NonEmptyTrimmedString)
 }) {}

@@ -71,3 +71,8 @@ Cover:
 - Default retries are disabled.
 - Retried streamed steps have de-dupe-ready event ids.
 - Terminal write happens only after durable commit succeeds.
+- `AgentEnd` closes exactly once through `closeStream`.
+- Failure paths use `writeError`, not `closeStream`; a `writeError` rejection preserves the original
+  structured failure result.
+- `AgentAwaitingInput` does not close before resume; resumed execution can append and eventually
+  close.

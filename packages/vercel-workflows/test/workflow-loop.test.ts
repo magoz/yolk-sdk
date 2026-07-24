@@ -146,6 +146,7 @@ describe('runVercelAgentWorkflow', () => {
   it('waits for HITL input and reruns tool batch with responses', async () => {
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
     const awaitedInputs: Array<unknown> = []
+    let closeCount = 0
     const awaitingInput = {
       hookToken: 'hook-1',
       requests: ['request-approval'],
@@ -168,10 +169,13 @@ describe('runVercelAgentWorkflow', () => {
       }),
       awaitInput: input => step(() => {
         awaitedInputs.push(input)
+        expect(closeCount).toBe(0)
 
         return 'approved'
       }),
-      closeStream: emptyStep,
+      closeStream: () => step(() => {
+        closeCount += 1
+      }),
       writeError: emptyStep
     })
 
@@ -179,6 +183,7 @@ describe('runVercelAgentWorkflow', () => {
     expect(awaitedInputs).toEqual([awaitingInput])
     expect(toolInputs.map(input => input.hitlResponses)).toEqual([[], ['approved']])
     expect(toolInputs.map(input => input.eventSequence)).toEqual([0, 7])
+    expect(closeCount).toBe(1)
   })
 
   it('fails when awaiting input without handler', async () => {
@@ -206,7 +211,7 @@ describe('runVercelAgentWorkflow', () => {
     expect(String(errors[0])).toContain('no awaitInput handler')
   })
 
-  it('writes model step errors and stops', async () => {
+  it('delegates model step failures without calling the success close', async () => {
     const error = new Error('model failed')
     const errors: Array<unknown> = []
     let closeCount = 0
@@ -231,6 +236,20 @@ describe('runVercelAgentWorkflow', () => {
     })
     expect(errors).toEqual([error])
     expect(closeCount).toBe(0)
+  })
+
+  it('preserves the original failure when writeError also fails', async () => {
+    const error = new Error('model failed')
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: () => failStep(error),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: () => failStep(new Error('error writer failed'))
+    })
+
+    expect(result).toMatchObject({ _tag: 'ModelStepFailed', error })
   })
 
   it('retries model steps when policy allows', async () => {
@@ -395,7 +414,11 @@ describe('settleWorkflowStep', () => {
 })
 
 describe('retryWorkflowStep', () => {
-  it('normalizes invalid retry attempts to one attempt', async () => {
+  it.each([
+    [0.9, 1],
+    [1.9, 1],
+    [2.9, 2]
+  ])('floors finite retry attempts (%s) to %s', async (maxAttempts, expectedAttempts) => {
     let attempts = 0
 
     await expect(
@@ -404,10 +427,29 @@ describe('retryWorkflowStep', () => {
           attempts += 1
           throw new Error('failed')
         }),
-        { maxAttempts: 0 }
+        { maxAttempts }
       )
     ).rejects.toThrow('failed')
 
-    expect(attempts).toBe(1)
+    expect(attempts).toBe(expectedAttempts)
   })
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'normalizes invalid retry attempts (%s) to one attempt',
+    async maxAttempts => {
+      let attempts = 0
+
+      await expect(
+        retryWorkflowStep(
+          () => step(() => {
+            attempts += 1
+            throw new Error('failed')
+          }),
+          { maxAttempts }
+        )
+      ).rejects.toThrow('failed')
+
+      expect(attempts).toBe(1)
+    }
+  )
 })

@@ -38,6 +38,11 @@ awaitInput: async awaitingInput => {
 
 When the hook resolves, Yolk appends the decoded response to accumulated `hitlResponses` and reruns the same tool batch.
 
+`AgentAwaitingInput` ends the current client consumption window but not the Workflow run. Persist
+pending state and emit it as a commit barrier; release the writer lock without final-closing the
+Workflow stream before the hook resumes. `AwaitInputFailed` is final and invokes `writeError`, which
+must write the safe error and close.
+
 ## Resume from a route
 
 ```ts

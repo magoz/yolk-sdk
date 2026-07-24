@@ -18,7 +18,11 @@ import {
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
-import { FigmaConnector } from '@yolk-sdk/connectors/figma'
+import {
+  figmaMcpAuthAction,
+  FigmaConnector,
+  FigmaOAuthCredentialSlot
+} from '@yolk-sdk/connectors/figma'
 import {
   gmailDraftComposeAction,
   gmailDraftReplyAction,
@@ -425,6 +429,57 @@ describe('@yolk-sdk/connectors', () => {
       'todoist.list_labels'
     ])
   })
+
+  it.effect('resolves Figma MCP secrets through the runtime credential', () =>
+    Effect.gen(function* () {
+      const figmaIntegration = makeIntegration({
+        connectorId: 'figma',
+        credentialBindings: [
+          makeCredentialBinding({
+            slotId: FigmaOAuthCredentialSlot.id,
+            credentialRef: 'figma-oauth'
+          })
+        ]
+      })
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'figma',
+                accessToken: 'figma_access',
+                refreshToken: 'figma_refresh',
+                clientId: 'figma_client',
+                clientSecret: 'figma_secret',
+                expiresAt: 1_800_000_000_000
+              })
+            )
+        })
+      )
+
+      const result = yield* figmaMcpAuthAction
+        .execute({ integration: figmaIntegration, input: {} })
+        .pipe(Effect.provide(CredentialResolverTest))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: {
+          provider: 'figma',
+          tokens: {
+            accessToken: 'figma_access',
+            refreshToken: 'figma_refresh',
+            expiresAt: 1_800_000_000_000
+          },
+          clientInfo: {
+            clientId: 'figma_client',
+            clientSecret: 'figma_secret'
+          }
+        }
+      })
+    })
+  )
 
   it.effect('invokes a typed connector action', () =>
     Effect.gen(function* () {
@@ -990,9 +1045,7 @@ describe('@yolk-sdk/connectors', () => {
                     {
                       partId: '0',
                       mimeType: 'text/plain',
-                      headers: [
-                        { name: 'Content-Transfer-Encoding', value: 'quoted-printable' }
-                      ],
+                      headers: [{ name: 'Content-Transfer-Encoding', value: 'quoted-printable' }],
                       body: { size: 31, data: quotedPrintableData }
                     },
                     {

@@ -186,6 +186,9 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 
 `HostConnectorLayer` should provide `CredentialResolver`, `ConnectorHttpClient`, and any other connector dependencies.
 
+Figma MCP auth reads `accessToken` plus optional `refreshToken`, `clientId`, and `clientSecret`
+from the runtime `OAuthCredential`. Keep these values in the host credential store.
+
 ## Host responsibilities
 
 - Store, encrypt, refresh, revoke, and audit credentials.

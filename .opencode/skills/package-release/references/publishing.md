@@ -40,6 +40,7 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
 Then inspect, commit, push after explicit approval.
@@ -87,6 +88,7 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 verify lockstep version and missing git tag
 pnpm -r --filter './packages/*' pack --pack-destination .release
 npm publish each unpublished tarball --tag <tag> --access public
@@ -157,7 +159,9 @@ Current workflow policy:
 - Publishes tarballs with npm CLI, because npm trusted publishing is the supported OIDC path.
 - Tags the published commit as `v<version>` after successful publish.
 
-Do not run local publish in normal flow. Local `pnpm release:canary` is emergency-only and requires explicit user approval.
+Do not run local publish in normal flow. Emergency local publish requires explicit user approval,
+packed tarballs, npm CLI, and `--provenance=false` while repository source is private. Follow
+`patterns/PACKAGE_DISTRIBUTION.md`; do not use `pnpm publish` for registry operations.
 
 ## Exceptions/failures
 

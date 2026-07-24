@@ -1,7 +1,6 @@
 import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
-import { optionalStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
@@ -31,13 +30,14 @@ const resolveFigmaAccessToken = (integration: ConnectorIntegration) =>
         return {
           accessToken: credential.accessToken,
           expiresAt: credential.expiresAt,
-          refreshToken: optionalStringConfig(integration, 'refreshToken')
+          refreshToken: credential.refreshToken,
+          clientId: credential.clientId,
+          clientSecret: credential.clientSecret
         }
       case 'BearerTokenCredential':
         return {
           accessToken: credential.token,
-          expiresAt: credential.expiresAt,
-          refreshToken: optionalStringConfig(integration, 'refreshToken')
+          expiresAt: credential.expiresAt
         }
       case 'ApiKeyCredential':
         return yield* Effect.fail(
@@ -105,8 +105,8 @@ export const figmaMcpAuthAction = defineAction({
           accessToken: token.accessToken,
           refreshToken: token.refreshToken,
           expiresAt: token.expiresAt,
-          clientId: optionalStringConfig(integration, 'clientId'),
-          clientSecret: optionalStringConfig(integration, 'clientSecret')
+          clientId: token.clientId,
+          clientSecret: token.clientSecret
         })
       )
     })

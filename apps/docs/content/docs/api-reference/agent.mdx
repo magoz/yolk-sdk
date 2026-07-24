@@ -182,7 +182,7 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 `@yolk-sdk/agent/voice`
 
 | Export                                                                                             | Purpose                                                             |
-| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError`                            | provider-neutral voice protocol                                     |
 | `makeVoiceController`                                                                              | client controller: tool forwarding, approval pause/resume, batching |
 | `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput`    | server-side tool policy/execution                                   |
@@ -191,7 +191,7 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages`                     | transcript projection and reconnect seeds                           |
 | `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId`            | replay-safe durable voice events                                    |
 | `makeWebSocketVoiceTransport`                                                                      | Effect Socket voice transport for Node/server runtimes              |
-| `VoiceSpeechSynthesizer`, `VoiceTranscriber`, `VoiceSpeechRequest`, `speechResultToAudioPart`      | one-shot TTS/STT contracts                                          |
+| `VoiceSpeechSynthesizer`, `VoiceSpeechRequest`, `VoiceSpeechResult`, `VoiceTranscriber`, `VoiceTranscriptionRequest`, `VoiceTranscriptionResult`, `VoiceTranscriptionSegment`, `VoiceSpeechError`, `VoiceSpeechErrorCode`, `speechResultToAudioPart` | one-shot TTS/STT contracts, results, and safe failures              |
 | `VoiceTransport`                                                                                   | transport service contract                                          |
 
 `@yolk-sdk/agent/voice/browser`
@@ -209,13 +209,13 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 ## Providers
 
 | Subpath                                               | Main exports                                                                     |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody` |
 | `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                             |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody` |
 | `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                       |
 | `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
-| `@yolk-sdk/agent/providers/openai/speech`             | `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`                 |
+| `@yolk-sdk/agent/providers/openai/speech`             | `OpenAiSpeechConfig`, `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`              |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers         |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                      |

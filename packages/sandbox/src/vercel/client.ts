@@ -93,7 +93,9 @@ const tryVercelPromise = <A>(body: () => Promise<A>) =>
     catch: error => error
   })
 
-const commandOutput = (command: Command | CommandFinished): Effect.Effect<VercelCommandOutput, unknown> =>
+const commandOutput = (
+  command: Command | CommandFinished
+): Effect.Effect<VercelCommandOutput, unknown> =>
   Effect.all({
     stdout: tryVercelPromise(() => command.stdout()),
     stderr: tryVercelPromise(() => command.stderr())
@@ -134,7 +136,8 @@ const toHandle = (sandbox: VercelSdkSandbox): VercelSandboxHandle => ({
         detached: true
       })
     ).pipe(Effect.map(toDetachedCommand)),
-  getCommand: id => tryVercelPromise(() => sandbox.getCommand(id)).pipe(Effect.map(toDetachedCommand)),
+  getCommand: id =>
+    tryVercelPromise(() => sandbox.getCommand(id)).pipe(Effect.map(toDetachedCommand)),
   extendTimeout: durationMs =>
     tryVercelPromise(() => sandbox.extendTimeout(durationMs)).pipe(Effect.asVoid),
   delete: tryVercelPromise(() => sandbox.delete()).pipe(Effect.asVoid),
@@ -180,16 +183,16 @@ const commonCreateOptions = (input: VercelSandboxCreateInput) => ({
 const gitSource = (
   source: Extract<SandboxInitialSource, { readonly _tag: 'Git' }>
 ): AnonymousGitSource | BasicAuthGitSource => {
-  if ((source.username === undefined) !== (source.password === undefined)) {
-    throw new Error('Vercel git source requires both username and password when using basic auth')
+  if ('username' in source || 'password' in source) {
+    throw new Error('Vercel git source credentials must use the auth field')
   }
 
-  if (source.username !== undefined && source.password !== undefined) {
+  if (source.auth !== undefined) {
     return {
       type: 'git',
       url: source.url,
-      username: source.username,
-      password: source.password,
+      username: source.auth.username,
+      password: source.auth.password,
       ...(source.depth === undefined ? {} : { depth: source.depth }),
       ...(source.revision === undefined ? {} : { revision: source.revision })
     }

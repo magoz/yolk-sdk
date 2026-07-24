@@ -165,6 +165,7 @@ export const sandboxStateDecision = (input: {
   readonly state: Option.Option<SandboxState>
   readonly name: string
   readonly nowMs: number
+  readonly lifecycle: SandboxLifecycle
 }): SandboxStateDecision => {
   if (Option.isNone(input.state)) {
     return { _tag: 'Create', workspaceReset: false }
@@ -174,6 +175,10 @@ export const sandboxStateDecision = (input: {
 
   if (state.name !== input.name) {
     return { _tag: 'Create', workspaceReset: true, reason: 'name_mismatch' }
+  }
+
+  if (input.lifecycle._tag === 'Persistent') {
+    return { _tag: 'UseExisting', state }
   }
 
   if (input.nowMs >= state.maxExpiresAtMs) {

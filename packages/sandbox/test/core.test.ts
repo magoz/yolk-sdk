@@ -1,10 +1,14 @@
 import { Effect, Option } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
   defaultSandboxLifecycle,
+  GitSandboxBasicAuth,
   makeVercelSandboxName,
   normalizeWorkspaceCwd,
+  PersistentSandboxLifecycle,
   sandboxCommandTimeoutMs,
+  SandboxSnapshotRetention,
   sandboxStateDecision,
   touchSandboxState,
   VercelSandboxState
@@ -43,6 +47,23 @@ describe('sandbox core', () => {
     expect(sandboxCommandTimeoutMs(1_500)).toBe(1_500)
   })
 
+  it.effect('validates Git auth and snapshot retention boundaries', () =>
+    Effect.gen(function* () {
+      const auth = yield* Schema.decodeUnknownEffect(GitSandboxBasicAuth)({
+        username: 'git-user',
+        password: 'git-password'
+      })
+      const retention = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({ count: 10 })
+      const tooMany = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({
+        count: 11
+      }).pipe(Effect.result)
+
+      expect(auth.username).toBe('git-user')
+      expect(retention.count).toBe(10)
+      expect(tooMany._tag).toBe('Failure')
+    })
+  )
+
   it('detects idle and max expiry', () => {
     const state = VercelSandboxState.make({
       name: 'sandbox-a',
@@ -53,22 +74,57 @@ describe('sandbox core', () => {
     })
 
     expect(
-      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 50 })._tag
+      sandboxStateDecision({
+        state: Option.some(state),
+        name: 'sandbox-a',
+        nowMs: 50,
+        lifecycle: defaultSandboxLifecycle
+      })._tag
     ).toBe('UseExisting')
     expect(
-      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 150 })
+      sandboxStateDecision({
+        state: Option.some(state),
+        name: 'sandbox-a',
+        nowMs: 150,
+        lifecycle: defaultSandboxLifecycle
+      })
     ).toMatchObject({
       _tag: 'Create',
       workspaceReset: true,
       reason: 'idle_expired'
     })
     expect(
-      sandboxStateDecision({ state: Option.some(state), name: 'sandbox-a', nowMs: 250 })
+      sandboxStateDecision({
+        state: Option.some(state),
+        name: 'sandbox-a',
+        nowMs: 250,
+        lifecycle: defaultSandboxLifecycle
+      })
     ).toMatchObject({
       _tag: 'Create',
       workspaceReset: true,
       reason: 'max_expired'
     })
+  })
+
+  it('reattaches expired persistent state', () => {
+    const state = VercelSandboxState.make({
+      name: 'sandbox-a',
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 100,
+      maxExpiresAtMs: Number.MAX_SAFE_INTEGER
+    })
+    const lifecycle = PersistentSandboxLifecycle.make({ idleTtlMs: 100 })
+
+    expect(
+      sandboxStateDecision({
+        state: Option.some(state),
+        name: 'sandbox-a',
+        nowMs: 150,
+        lifecycle
+      })
+    ).toMatchObject({ _tag: 'UseExisting', state })
   })
 
   it('touches disposable state without exceeding max lifetime', () => {

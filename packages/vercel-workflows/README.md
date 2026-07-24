@@ -60,7 +60,7 @@ queues, hooks, or stream storage.
 - tool batch result: return one ordered tool-result message per host call, including failed `isError` results
 - awaiting-input state: carry pending HITL hook data, wait through `awaitInput`, then rerun the
   same tool batch with accumulated responses
-- close step: flush/close output stream
+- close step: flush/close output stream after a successful final model step
 - terminal status: completed, step failure, await-input failure, close failure, or max turns exceeded
 
 Continuation state stays plain serializable data for Workflow persistence.
@@ -111,6 +111,8 @@ tokens that the resume side can reconstruct or store.
 
 Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are opt-in because
 streamed retries can duplicate chunks unless host/client de-dupe is ready.
+Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
+one. Retries have no built-in backoff.
 
 ## Durable stream events
 
@@ -122,7 +124,9 @@ Use `writeDurableAgentEvent` to assign deterministic ids and write NDJSON:
 
 ```ts
 const state = makeDurableAgentEventSequencerState(eventSequence)
-const sequenced = yield* writeDurableAgentEvent({
+const sequenced =
+  yield *
+  writeDurableAgentEvent({
   writer,
   event,
   streamId: `workflow:${runId}`,
@@ -142,12 +146,23 @@ active-run locking, stale-run guards, and cancellation behavior.
 
 ## Terminal barriers
 
-For durable host streams, terminal events are commit barriers. Emit live/progress events first,
-commit canonical host state, then write the terminal event. The surrounding workflow loop owns the
-single final stream close:
+For durable host streams, protocol terminal events are commit barriers. Emit live/progress events
+first, commit canonical host state, then write the event.
+
+“Terminal” in `isTerminalAgentEvent` means a logical client-consumption boundary, not necessarily a
+final Workflow state. Final callback ownership is:
 
 ```txt
-live events -> host durable commit -> terminal event -> workflow-owned close
+AgentEnd: durable completion commit -> AgentEnd -> closeStream
+AgentError: failure commit/mapping -> AgentError -> writeError-owned close
+```
+
+`AgentAwaitingInput` is terminal for the current client consumption window but resumable for the
+Workflow run. Persist pending HITL state and write it without finalizing the durable stream solely
+because `isTerminalAgentEvent` returns true:
+
+```txt
+persist pending HITL -> AgentAwaitingInput -> release writer lock (do not close) -> await hook -> continue
 ```
 
 This lets clients stop consuming at a protocol-terminal event and immediately revalidate or reconnect
@@ -158,7 +173,9 @@ Use `commitThenWriteTerminalEvent` when a step must commit host state before wri
 event:
 
 ```ts
-const result = yield* commitThenWriteTerminalEvent({
+const result =
+  yield *
+  commitThenWriteTerminalEvent({
   terminal,
   commit: persistState,
   write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
@@ -168,8 +185,14 @@ const result = yield* commitThenWriteTerminalEvent({
 ```
 
 The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes
-the host-provided terminal error event instead. The helper does not close writers; close once in the
-surrounding workflow loop or stream owner after terminal handling settles.
+the host-provided terminal error event instead. It can protect either a final event or an
+`AgentAwaitingInput` persistence barrier; it never decides closure from `_tag` and never closes
+writers.
+
+`runVercelAgentWorkflow` calls `closeStream` only after `runModelStep` returns `done: true`. On model,
+tool, await-input, or max-turn failure it calls `writeError` best-effort and returns without calling
+`closeStream`; `writeError` must write a safe run-final error and attempt to close that failure path.
+Never close on resumable `AgentAwaitingInput`.
 
 ## Host responsibilities
 
@@ -181,6 +204,8 @@ surrounding workflow loop or stream owner after terminal handling settles.
 - Emit replay-safe event ids for durable streams; scope stream ids per independent run and de-dupe
   by `eventId` client-side.
 - Write durable terminal events only after host persistence has settled.
+- Implement `closeStream` for successful final closure and `writeError` for safe final error write
+  plus failure closure. Release, but do not close, the writer after `AgentAwaitingInput`.
 - Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
 
 ## Boundaries

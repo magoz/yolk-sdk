@@ -25,6 +25,23 @@ KnowledgeDocument
   updatedAt
 ```
 
+`KnowledgeSource` separately models `File`, `Url`, or `Text` ingestion origins.
+`IndexedKnowledgeDocument` carries that source plus indexing status and optional
+title/summary/error/hash/count metadata. It is distinct from the content-oriented
+`KnowledgeDocument` above.
+
+Status and availability are independent:
+
+- `processing`: indexing, not ready for prompt/search
+- `ready`: usable when availability allows
+- `error`: retained with an ingestion/indexing failure
+- `pinned`: host may inject into startup context and search
+- `searchable`: host may expose through search
+- `archived`: retained but normally excluded
+
+The helpers do not enforce this policy automatically. Pass only selected documents to
+`buildKnowledgeContext`, and filter status/availability in your `SearchIndexStore` adapter.
+
 Install:
 
 ```bash
@@ -46,7 +63,9 @@ Add the resulting text to your system prompt. Your app chooses which documents a
 
 ## Ingest a document into search
 
-`ingestKnowledgeDocument` extracts, chunks, embeds, summarizes, replaces chunks, and updates document status.
+`ingestKnowledgeDocument` updates an `IndexedKnowledgeDocument`: it upserts `processing`, extracts,
+chunks, embeds and summarizes, replaces chunks, then marks the index record `ready`. It does not
+update `KnowledgeStore` automatically.
 
 ```ts
 import { ingestKnowledgeDocument } from '@yolk-sdk/knowledge/ingestion'
@@ -65,6 +84,10 @@ Provide these layers from your app:
 - `KnowledgeChunker`
 - `KnowledgeEmbedder`
 - `KnowledgeSummarizer`
+
+The pipeline is not a cross-operation transaction. Your `SearchIndexStore` owns atomic chunk
+replacement, rollback policy, and ready/error filtering. Failures retain their stage on
+`KnowledgeIngestionError` and trigger a best-effort `markDocumentError` call with the message.
 
 ## Search documents
 

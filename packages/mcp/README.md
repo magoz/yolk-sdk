@@ -50,10 +50,35 @@ Effect.runPromise(tools)
 ## Local stdio client
 
 ```ts
+import { execPath } from 'node:process'
+import { Effect } from 'effect'
 import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'
+
+const tools = await Effect.runPromise(
+  listMcpToolsNode(
+    [
+      {
+        name: 'local-tools',
+        type: 'local',
+        command: [execPath, './mcp-server.mjs'],
+        environment: { LOG_LEVEL: 'error' }
+      }
+    ],
+    {
+      securityPolicy: {
+        allowLocalServers: true,
+        allowDevHttpLocalhost: false
+      }
+    }
+  )
+)
 ```
 
 `@yolk-sdk/mcp/client/node` may use Node process APIs. Keep Worker/browser imports on `@yolk-sdk/mcp/client`.
+Local servers are denied by default; opt in with `securityPolicy.allowLocalServers: true` only in a
+trusted Node host. The child receives only the explicit `environment` map, not the host environment.
+Prefer an absolute executable such as `execPath`; a bare executable or `/usr/bin/env` shebang needs
+an explicitly allowlisted `PATH` in `environment`.
 
 ## Server
 

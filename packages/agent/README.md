@@ -17,7 +17,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 ## Subpaths
 
 | Subpath                                               | Purpose                                                         |
-| ----------------------------------------------------- | --------------------------------------------------------------- |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
 | `@yolk-sdk/agent/protocol`                            | Wire messages, events, content, usage, tool schemas             |
 | `@yolk-sdk/agent/loop`                                | Stateless LLM/tool loop                                         |
 | `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                    |
@@ -113,7 +113,7 @@ Provider output limits are required and host-owned. Yolk does not infer model li
 fallbacks.
 
 | Provider factory                       | Required output-limit field |
-| -------------------------------------- | --------------------------- |
+| ---------------------------------- | --------------------------- |
 | `makeOpenAiProviderLayer`              | `maxCompletionTokens`    |
 | `makeOpenAiCodexProviderLayer`         | `maxOutputTokens`        |
 | `makeAnthropicClaudeProviderLayer`     | `maxTokens`              |
@@ -368,8 +368,9 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   after reconnect, optionally prefixing user seeds with author display names via
   `{ includeAuthors: true }` for multi-user transcripts.
 - `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
-  `@yolk-sdk/agent/providers/openai/speech` provides `VoiceSpeechSynthesizer` /
-  `VoiceTranscriber` layers. `VoiceSpeechRequest.instructions` steers delivery style only, and
+  `@yolk-sdk/agent/providers/openai/speech` provides `makeOpenAiSpeechSynthesizerLayer` and
+  `makeOpenAiTranscriberLayer` for the provider-neutral voice services.
+  `VoiceSpeechRequest.instructions` steers delivery style only, and
   provider 429s (rate limit or exhausted credits) surface as `VoiceSpeechError` code
   `rate_limited` so hosts can distinguish quota from outage.
 
@@ -418,8 +419,14 @@ aborts, and implementation bugs outside typed tool execution.
 - `@yolk-sdk/agent/compaction` combines pure planning/formatting helpers with Effect-native transformer and retry adapters; hosts own thresholds, summaries, compaction payloads, and durable compactor policy.
 - `@yolk-sdk/agent/react` is headless and uses React as an optional peer.
 - Provider subpaths own vendor wire/auth mechanics only; hosts own token storage, refresh, routing, and policy.
+- `@yolk-sdk/agent/providers/openai/speech` is server integration requiring runtime
+  `FormData`/`Blob`, a host `HttpClient` layer, and a secret API key; do not invoke it from browser
+  code.
 - Loop stays stateless: transcript in, events out.
 - Runtime owns generic session orchestration only; host apps own persistence adapters and policy.
+- Client HTTP helpers are runtime-portable with a host `HttpClient` layer. Attachment helpers need
+  `Blob`/`File` and may use `FileReader`; the Cloudflare WebSocket transport needs the global
+  `WebSocket` constructor when its stream runs. None read browser globals at import time.
 - Tools model generic metadata/execution; host apps own concrete tool catalogs.
 - `task` is the standard subagent delegation tool. Packages define the schema; host apps execute subagents and omit `task` from subagent toolsets in v1.
 

@@ -36,6 +36,29 @@ KnowledgeDocument
 
 Optional files and chunks are modeled as `KnowledgeFile` and `KnowledgeChunk`.
 
+`KnowledgeSource` is a separate ingestion ADT:
+
+- `File`: host-owned `ref` plus optional name/media type
+- `Url`: host-owned URL string
+- `Text`: optional label; bytes/text arrive through `LoadedKnowledgeSource.content`
+
+`IndexedKnowledgeDocument` is the search-index record. It carries `source`, indexing `status`, and
+optional title/summary/error/hash/count metadata. It is distinct from the content-oriented
+`KnowledgeDocument` managed through `KnowledgeStore`.
+
+Status and availability are independent:
+
+- `processing`: saved/indexing, not ready for prompt or search
+- `ready`: usable when availability allows
+- `error`: retained with an ingestion/indexing failure
+- `pinned`: host may include in startup context and search
+- `searchable`: host may expose through search
+- `archived`: retained but normally omitted from prompt and search
+
+These are contracts, not automatic policy. `buildKnowledgeContext` formats exactly the documents
+you pass; `searchKnowledge` delegates candidate filtering to `SearchIndexStore`. Hosts must select
+ready/pinned documents and exclude processing, error, or archived records as appropriate.
+
 ## Subpaths
 
 | Subpath                             | Purpose                                                        |
@@ -48,7 +71,7 @@ Optional files and chunks are modeled as `KnowledgeFile` and `KnowledgeChunk`.
 | `@yolk-sdk/knowledge/chunking`      | Text chunker contracts and defaults                            |
 | `@yolk-sdk/knowledge/embeddings`    | Embedder contract and vector types                             |
 | `@yolk-sdk/knowledge/extraction`    | Source/extractor contract                                      |
-| `@yolk-sdk/knowledge/ingestion`     | Search chunk ingestion helper                                  |
+| `@yolk-sdk/knowledge/ingestion`     | Extract/chunk/embed/summarize/index pipeline                   |
 | `@yolk-sdk/knowledge/search`        | Vector/hybrid chunk search helpers                             |
 | `@yolk-sdk/knowledge/summarization` | Optional title/summary service contract                        |
 | `@yolk-sdk/knowledge/agent`         | `knowledge_lookup` and `knowledge_manage` tool factories       |
@@ -75,6 +98,20 @@ const context = buildKnowledgeContext({
 ```
 
 Add the resulting text to your system prompt. Your app chooses which documents are pinned.
+
+## Ingestion semantics
+
+`ingestKnowledgeDocument` upserts a `processing` index record, extracts, chunks, embeds and
+summarizes concurrently, checks embedding cardinality, calls `replaceDocumentChunks`, then marks
+the index record `ready`.
+
+Failures are returned as `KnowledgeIngestionError` with a `store`, `extract`, `chunk`, `embed`, or
+`summarize` stage. The pipeline then best-effort calls `markDocumentError` with the error message;
+failure to mark the error is suppressed so the original failure survives.
+
+The pipeline is not a transaction and does not update `KnowledgeStore`. The host
+`SearchIndexStore` adapter owns atomic chunk replacement, rollback/transaction behavior, ready/error
+filtering, and any coordination with the content document store.
 
 ## Host responsibilities
 

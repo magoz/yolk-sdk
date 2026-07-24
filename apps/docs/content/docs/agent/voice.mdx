@@ -101,23 +101,36 @@ Project voice events into protocol messages with `projectVoiceEvent`; final user
 ## One-shot speech and transcription
 
 ```ts
-import { VoiceSpeechRequest, VoiceSpeechSynthesizer, VoiceTranscriber } from '@yolk-sdk/agent/voice'
 import {
-  makeOpenAiSpeechSynthesizerLayer,
-  makeOpenAiTranscriberLayer
-} from '@yolk-sdk/agent/providers/openai/speech'
+  speechResultToAudioPart,
+  VoiceSpeechRequest,
+  VoiceSpeechSynthesizer,
+  VoiceTranscriber
+} from '@yolk-sdk/agent/voice'
+import { Effect } from 'effect'
 
-const speech =
-  yield * (yield * VoiceSpeechSynthesizer).synthesize(VoiceSpeechRequest.make({ text: 'Hello!' }))
-const transcript =
-  yield *
-  (yield * VoiceTranscriber).transcribe({
+const program = Effect.gen(function* () {
+  const synthesizer = yield* VoiceSpeechSynthesizer
+  const transcriber = yield* VoiceTranscriber
+  const speech = yield* synthesizer.synthesize(VoiceSpeechRequest.make({ text: 'Hello!' }))
+  const transcript = yield* transcriber.transcribe({
     audio: speech.audio,
     mimeType: speech.mimeType
   })
+
+  return {
+    transcript,
+    audioPart: speechResultToAudioPart(speech, { filename: 'hello.mp3' })
+  }
+})
 ```
 
-Provide the layers with your `HttpClient` layer and API key config; `speechResultToAudioPart` converts synthesized audio into a protocol `AudioPart`. `VoiceSpeechRequest.instructions` (or `defaultInstructions` in the OpenAI layer config) steers delivery style — tone, pacing, emotion — per synthesis request; OpenAI's `tts-1`/`tts-1-hd` reject instructions, so leave it unset for those models.
+This is a server-side fragment. Provide `makeOpenAiSpeechSynthesizerLayer` and
+`makeOpenAiTranscriberLayer` from `@yolk-sdk/agent/providers/openai/speech`, each with an Effect
+`HttpClient` layer and host-owned `OpenAiSpeechConfig`. Never expose the OpenAI API key to browser
+code. `VoiceSpeechRequest.instructions` (or `defaultInstructions` in the OpenAI layer config)
+steers delivery style — tone, pacing, emotion — per synthesis request; OpenAI's
+`tts-1`/`tts-1-hd` reject instructions, so leave it unset for those models.
 
 ### Hold-to-speak pattern
 

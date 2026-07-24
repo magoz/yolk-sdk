@@ -36,6 +36,9 @@ export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredent
   provider: Schema.String,
   accessToken: Schema.String,
   expiresAt: Schema.Number,
+  refreshToken: Schema.optional(Schema.String),
+  clientId: Schema.optional(Schema.String),
+  clientSecret: Schema.optional(Schema.String),
   accountId: Schema.optional(Schema.String),
   scopes: Schema.optional(Schema.Array(Schema.String))
 }) {}

@@ -5,12 +5,16 @@ import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { makeTool, type ToolRegistration } from '@yolk-sdk/agent/tools'
 import {
   KnowledgeAvailabilitySchema,
+  NonNegativeInteger,
   NonEmptyTrimmedString,
+  PositiveInteger,
   type KnowledgeAvailability,
   type KnowledgeDocument
 } from './documents.ts'
 
 const OptionalNonEmptyTrimmedString = Schema.optional(Schema.NullOr(NonEmptyTrimmedString))
+const OptionalPositiveInteger = Schema.optional(Schema.NullOr(PositiveInteger))
+const OptionalNonNegativeInteger = Schema.optional(Schema.NullOr(NonNegativeInteger))
 const OptionalNumber = Schema.optional(Schema.NullOr(Schema.Number))
 
 const KnowledgeTargetParamsSchema = Schema.Struct({
@@ -22,9 +26,9 @@ const KnowledgeLookupParams = Schema.Union([
   Schema.Struct({
     operation: Schema.Literal('search'),
     query: NonEmptyTrimmedString,
-    limit: OptionalNumber,
+    limit: OptionalPositiveInteger,
     minScore: OptionalNumber,
-    contextChunks: OptionalNumber
+    contextChunks: OptionalNonNegativeInteger
   }),
   Schema.Struct({
     operation: Schema.Literal('get'),

@@ -16,9 +16,9 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
 `ingestKnowledgeDocument` requires these Effect services:
 
 | Service               | Host provides                                                              |
-| --------------------- | -------------------------------------------------------------------------- |
+| --------------------- | --------------------------------------------------------------------------- |
 | `SearchIndexStore`    | scope/document/chunk persistence and search                                |
-| `KnowledgeExtractor`  | source loading and text extraction                                         |
+| `KnowledgeExtractor`  | extraction/normalization from caller-loaded `LoadedKnowledgeSource.content` |
 | `KnowledgeChunker`    | text chunking; `DefaultKnowledgeChunkerLive` is available                  |
 | `KnowledgeEmbedder`   | embedding provider                                                         |
 | `KnowledgeSummarizer` | title/summary provider; use `NoopKnowledgeSummarizerLive` for simple hosts |
@@ -50,17 +50,27 @@ await Effect.runPromise(
 ```
 
 `loadedSource` is host-owned source metadata/content from `@yolk-sdk/knowledge/extraction`.
+The package does not fetch `Url` sources or resolve `File.ref`; load bytes/text before ingestion.
+`KnowledgeFileBlobStore` is not consumed automatically by `ingestKnowledgeDocument`.
 
 ## What ingestion does
 
-1. Marks the document `processing`.
+1. Upserts an `IndexedKnowledgeDocument` with `processing` status.
 2. Extracts source text and metadata.
 3. Chunks text using `maxTokens` or the default chunk size.
 4. Embeds chunks and summarizes concurrently.
-5. Replaces document chunks atomically.
-6. Marks the document `ready` with title, summary, token count, and chunk count.
+5. Verifies one embedding exists per chunk, then calls `replaceDocumentChunks`.
+6. Marks the index document `ready` with title, summary, token count, and chunk count.
 
-On failure, it best-effort marks the document `error` with a stage: `store`, `extract`, `chunk`, `embed`, or `summarize`.
+On failure, the returned `KnowledgeIngestionError` carries a `store`, `extract`, `chunk`, `embed`,
+or `summarize` stage. The pipeline best-effort calls `markDocumentError` with the error message; if
+that call also fails, it preserves the original failure.
+
+The calls are not one package-owned transaction. `SearchIndexStore.replaceDocumentChunks` names
+the replacement operation, but the host adapter owns its atomicity and rollback behavior. For
+example, a later `markDocumentReady` failure may leave replaced chunks beside an `error` status
+unless the adapter coordinates those writes. Ingestion does not update the separate
+`KnowledgeStore` document automatically.
 
 ## Search after ingestion
 
@@ -96,5 +106,7 @@ Resolve this tool with `@yolk-sdk/agent/tools` and pass it to the loop.
 - Check permissions before choosing `scope`.
 - Keep scope ids tenant-safe and host-owned.
 - Store embedding model/dimensions in host-owned config.
+- Filter search to host-approved `ready` records and active availability; the search helper does
+  not enforce document status or availability.
 - Re-ingest on content hash changes.
 - Treat archived knowledge as retained but normally excluded from active search.

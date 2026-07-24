@@ -37,7 +37,6 @@
     "changeset:canary:enter": "changeset pre enter canary",
     "changeset:canary:exit": "changeset pre exit",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
-    "release:canary": "pnpm packages:build && pnpm -r --filter './packages/*' publish --tag canary --access public --no-git-checks",
     "codex-ws:smoke": "tsx scripts/codex-ws-smoke.ts",
     "skillset:build": "tsx scripts/build-skillset.ts",
     "clone-repos": "node --experimental-strip-types scripts/clone-repos.ts",

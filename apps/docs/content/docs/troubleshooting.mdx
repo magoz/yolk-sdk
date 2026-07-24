@@ -98,7 +98,9 @@ For NDJSON routes, use `content-type: application/x-ndjson` and avoid middleware
 
 ### Client never completes
 
-Streams are logically complete only after `AgentEnd`, `AgentError`, or `AgentAwaitingInput`. Use `isTerminalAgentEvent` when writing custom consumers.
+Streams reach a logical client boundary after `AgentEnd`, `AgentError`, or `AgentAwaitingInput`. Use
+`isTerminalAgentEvent` when writing custom consumers, but do not treat resumable
+`AgentAwaitingInput` as a final Workflow close.
 
 ## MCP errors
 
@@ -160,5 +162,7 @@ Your host owns hook tokens, route auth, run ownership, and pending request match
 
 ### Terminal event missing
 
-Write live events first, commit durable host state, then write the terminal event. Let the workflow
-loop or stream owner close the stream once after terminal handling settles.
+For `AgentEnd`, commit durable state, write the event, then let `closeStream` close. For
+`AgentError`, `writeError` must write the safe event and close. Do not final-close after resumable
+`AgentAwaitingInput`; release the writer lock and continue the same Workflow run after the hook
+resolves.

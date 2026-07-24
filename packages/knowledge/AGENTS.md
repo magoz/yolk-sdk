@@ -23,16 +23,23 @@
 - `searchable`: host may expose through search tools.
 - `archived`: retained but normally omitted from prompt/search.
 
+Availability is host policy. `buildKnowledgeContext` does not filter its input, and
+`searchKnowledge` delegates status/availability filtering to `SearchIndexStore`.
+
 ## Status semantics
 
 - `processing`: saved but not ready for prompt/search.
 - `ready`: active if availability allows it.
 - `error`: saved with an indexing/extraction failure.
 
+`KnowledgeDocument` and `IndexedKnowledgeDocument` are separate contracts. Ingestion updates only
+the search-index document through `SearchIndexStore`; hosts coordinate it with `KnowledgeStore`.
+`replaceDocumentChunks` atomicity/transactions belong to the host adapter.
+
 ## Subpaths
 
 | Subpath                             | Role                                                       |
-| ----------------------------------- | ---------------------------------------------------------- |
+| ----------------------------------- | ------------------------------------------------------------------------- |
 | `@yolk-sdk/knowledge`               | Root context/store/file/error helpers                      |
 | `@yolk-sdk/knowledge/documents`     | Document, source, file, chunk, search-scope, status, availability schemas |
 | `@yolk-sdk/knowledge/files`         | File blob-store contract                                   |
@@ -50,7 +57,9 @@
 ## Rules
 
 - Use Effect Schema at public boundaries.
-- Reject empty ids/slugs/titles/purpose/origin/content and invalid numeric counts.
+- Schema-modeled ids/slugs/titles/purpose/origin/content are non-empty. Use the exported positive
+  and non-negative integer schemas where counts are schema-modeled; runtime search/chunking helpers
+  validate their own numeric options, while hosts parse typed store inputs at their boundary.
 - Keep root exports explicit; do not use broad `export *` barrels.
 - Keep package APIs generic; host apps own all policy and IO.
 - Do not reintroduce previous graph-model concepts into core knowledge without explicit product need.

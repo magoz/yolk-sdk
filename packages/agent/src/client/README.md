@@ -28,4 +28,9 @@ Framework-agnostic client transport and state helpers for Yolk agents.
 - No React.
 - No UI components.
 - No auth chrome, provider defaults, or app routes.
+- HTTP helpers are runtime-portable when the host provides an Effect `HttpClient` layer.
+- `documentPartFromTextFile`/`textFromBlob` require `File`/`Blob`; the fallback reader requires
+  `FileReader`.
+- Cloudflare WebSocket transport requires the global `WebSocket` constructor when its stream runs.
+- Browser globals are not read at module import time.
 - Pre-terminal cancellation aborts active response body readers; terminal draining does not.

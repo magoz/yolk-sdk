@@ -311,7 +311,10 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
             nowMs: input.nowMs,
             lifecycle
           })
-          const deltaMs = sandboxTimeoutExtendDeltaMs({ before: input.state, after: touched })
+          const deltaMs =
+            lifecycle._tag === 'Persistent' && input.nowMs >= input.state.expiresAtMs
+              ? 0
+              : sandboxTimeoutExtendDeltaMs({ before: input.state, after: touched })
 
           if (deltaMs > 0) {
             yield* tryProvider('extendTimeout', input.handle.extendTimeout(deltaMs))
@@ -329,7 +332,7 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
       const ensureSandbox = (nowMs: number): Effect.Effect<ActiveSandbox, SandboxError> =>
         Effect.gen(function* () {
           const loaded = yield* store.load(config.sandboxSessionId)
-          const decision = sandboxStateDecision({ state: loaded, name, nowMs })
+          const decision = sandboxStateDecision({ state: loaded, name, nowMs, lifecycle })
 
           if (decision._tag === 'Create') {
             if (Option.isNone(loaded)) {

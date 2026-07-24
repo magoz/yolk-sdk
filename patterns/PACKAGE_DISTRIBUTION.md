@@ -35,14 +35,16 @@ Current Changesets config:
 
 ```json
 {
-  "fixed": [[
+  "fixed": [
+    [
     "@yolk-sdk/agent",
     "@yolk-sdk/connectors",
     "@yolk-sdk/knowledge",
     "@yolk-sdk/mcp",
     "@yolk-sdk/sandbox",
     "@yolk-sdk/vercel-workflows"
-  ]],
+    ]
+  ],
   "updateInternalDependencies": "patch",
   "ignore": ["@yolk-sdk/cloudflare-agent"],
   "access": "public",
@@ -182,17 +184,30 @@ pnpm cloudflare:check
 pnpm tsc
 pnpm lint
 pnpm test:run
+pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
 Public `packages/*` manifests are publishable. Keep private workspaces such as `examples/next` and `cloudflare/agent` private/ignored.
 
 Verify `git status` is clean/understood. Normal publish path is GitHub Actions after merged version-prep commit, not local publish. The Action validates versions/tags, publishes with npm CLI, then creates `v<version>`.
 
-Local publish is emergency-only and requires explicit approval:
+Local publish is emergency-only. Require explicit approval, a clean checkout of the merged release
+commit on `main`, and a recorded reason, commit SHA, package/version set, and approver:
 
 ```bash
-pnpm release:canary
+release_dir="$(mktemp -d)"
+pnpm packages:build
+pnpm -r --filter './packages/*' pack --pack-destination "$release_dir"
+for tarball in "$release_dir"/*.tgz; do
+  npm publish "$tarball" --tag canary --access public --provenance=false
+done
 ```
+
+Use npm for the registry operation. Emergency local publishes are intentionally unprovenanced; a
+local run cannot produce the GitHub Actions attestation. Package manifests remain
+provenance-ready for the normal Action once repository source becomes public. After publishing,
+rerun `.github/workflows/publish.yml` as an all-published/missing-tag repair so it validates the
+release commit and creates `v<version>`.
 
 Verify npm after publish:
 
@@ -227,6 +242,7 @@ Use the `/package-release` command after restarting opencode for guided release 
 ## GitHub Actions Publish
 
 `.github/workflows/publish.yml` runs manually from `main`.
+The workflow fails immediately when dispatched against any other ref.
 
 Requirements before dispatch:
 
@@ -234,7 +250,7 @@ Requirements before dispatch:
 - every public package has same version
 - `v<version>` tag does not exist
 - normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
-- validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`
+- validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
 
 The Action publishes canaries with npm tag `canary` and stable versions with `latest`, then creates annotated git tag `v<version>`. It skips already-published tarballs so partial failures can be retried. Provenance is disabled while the repo is private; re-enable it when source is public.
 
@@ -306,6 +322,7 @@ Rerun `.github/workflows/publish.yml` from `main`. The workflow skips already-pu
    - `pnpm tsc`
    - `pnpm lint`
    - `pnpm test:run`
+   - `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
    - clean fixture install from packed tarballs
 7. Publish canary via GitHub Actions.
    - Public `packages/*` are publishable; private apps stay private.

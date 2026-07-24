@@ -32,13 +32,15 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 
 ## Durable stream rule
 
-Write live events first, commit durable host state, then write terminal event. Let the workflow loop
-or stream owner close once after terminal handling settles:
+Use distinct finalization paths:
 
 ```txt
-live events -> host durable commit -> terminal event -> workflow-owned close
+AgentEnd: durable completion commit -> AgentEnd -> closeStream
+AgentError: failure commit/mapping -> AgentError -> writeError-owned close
+AgentAwaitingInput: persist pending HITL -> emit pause -> release writer lock, do not close -> resume
 ```
 
 Use `sequenceDurableAgentEvent` for deterministic event ids without IO,
 `writeDurableAgentEvent` for id + NDJSON write, and `commitThenWriteTerminalEvent` for terminal
-barriers.
+barriers. The helper never decides closure from an event tag. The loop closes only successful runs;
+`writeError` must write the safe final error and close failure paths.
