@@ -1,5 +1,12 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.49
+
+### Patch Changes
+
+- 9b50918: Reject empty multi-scope searches and invalid lookup limit/context counts at schema boundaries.
+  - @yolk-sdk/agent@0.1.0-canary.49
+
 ## 0.1.0-canary.48
 
 ### Patch Changes

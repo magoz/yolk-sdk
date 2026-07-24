@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.49
+
+### Patch Changes
+
+- 9b50918: Resolve Figma refresh tokens and OAuth client secrets through host runtime credentials instead of integration config.
+- b1f81eb: Keep Gmail attachment content out of normalized thread bodies and tolerate malformed body encoding.
+  - @yolk-sdk/agent@0.1.0-canary.49
+
 ## 0.1.0-canary.48
 
 ### Patch Changes

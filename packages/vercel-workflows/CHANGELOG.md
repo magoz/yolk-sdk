@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.49
+
+### Patch Changes
+
+- 9b50918: Normalize non-finite Workflow retry attempt counts to one attempt instead of retrying forever.
+
 ## 0.1.0-canary.48
 
 ## 0.1.0-canary.47

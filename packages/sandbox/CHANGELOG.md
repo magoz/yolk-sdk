@@ -1,5 +1,15 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.49
+
+### Minor Changes
+
+- 9b50918: Resume expired persistent sandboxes by stable name, model Git basic auth as an all-or-nothing value, and constrain snapshot retention counts to Vercel's supported range.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.49
+
 ## 0.1.0-canary.48
 
 ### Patch Changes
