@@ -24,6 +24,7 @@
 | `http`            | host-provided HTTP request/response port; not a connector                                 |
 | `result`          | value-level success/failure results for expected upstream failures                        |
 | `error`           | typed package/runtime failures                                                            |
+| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version          |
 | `figma`           | Figma remote MCP auth data action and OAuth constants                                     |
 | `google`          | Gmail/Calendar actions plus Google OAuth slot constants                                   |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                 |
@@ -42,6 +43,7 @@
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
+- Afloat MCP auth actions are server-side connection helpers; never expose returned API keys through model-callable connector modules.
 - Figma MCP `refreshToken`, `clientId`, and `clientSecret` come from the runtime
   `OAuthCredential`; never read them from integration config.
 - `gmail.get_thread` is a bounded normalized boundary: require an explicit format, decode message text with plain text preferred over HTML, retain selected headers and attachment metadata, and never expose raw MIME or attachment content. Text/nested attachment parts must not enter the message body. Fetch external attachment content through `gmail.get_attachment` only when metadata includes `attachmentId`; inline attachment data is intentionally omitted.

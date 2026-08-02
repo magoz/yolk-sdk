@@ -37,7 +37,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
   - `@yolk-sdk/mcp/server`
   - `@yolk-sdk/mcp/server/node`
 - `@yolk-sdk/knowledge` owns knowledge document/file/context/search contracts. Public subpaths: `./documents`, `./files`, `./store`, `./context`, `./chunking`, `./embeddings`, `./extraction`, `./ingestion`, `./search`, `./summarization`, `./errors`, and `./agent`.
-- `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./figma`, `./google`, `./linkedin-search`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
+- `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./figma`, `./google`, `./linkedin-search`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, and hosts own concrete Workflow directives.
 - OpenAI/Codex and Anthropic/Claude provider mechanics live under `@yolk-sdk/agent/providers/*`.

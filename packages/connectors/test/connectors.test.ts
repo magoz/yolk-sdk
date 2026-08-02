@@ -5,6 +5,7 @@ import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
   ApiKeyCredential,
+  BearerTokenCredential,
   type ConnectorAction,
   OAuthCredential,
   ConnectorError,
@@ -18,6 +19,11 @@ import {
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+import {
+  afloatMcpAuthAction,
+  AfloatApiKeyCredentialSlot,
+  AfloatConnector
+} from '@yolk-sdk/connectors/afloat'
 import {
   figmaMcpAuthAction,
   FigmaConnector,
@@ -327,10 +333,11 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
 
 describe('@yolk-sdk/connectors', () => {
   it('imports public subpaths', async () => {
-    const [root, agent, figma, google, linkedIn, notion, r2, telegram, todoist] = await Promise.all(
-      [
+    const [root, agent, afloat, figma, google, linkedIn, notion, r2, telegram, todoist] =
+      await Promise.all([
         import('@yolk-sdk/connectors'),
         import('@yolk-sdk/connectors/agent'),
+        import('@yolk-sdk/connectors/afloat'),
         import('@yolk-sdk/connectors/figma'),
         import('@yolk-sdk/connectors/google'),
         import('@yolk-sdk/connectors/linkedin-search'),
@@ -338,11 +345,11 @@ describe('@yolk-sdk/connectors', () => {
         import('@yolk-sdk/connectors/r2-storage'),
         import('@yolk-sdk/connectors/telegram'),
         import('@yolk-sdk/connectors/todoist')
-      ]
-    )
+      ])
 
     expect(root.defineConnector).toBeDefined()
     expect(agent.makeConnectorToolModule).toBeDefined()
+    expect(afloat.AfloatConnector).toBeDefined()
     expect(figma.FigmaConnector).toBeDefined()
     expect(google.GoogleConnector).toBeDefined()
     expect(linkedIn.LinkedInSearchConnector).toBeDefined()
@@ -378,6 +385,7 @@ describe('@yolk-sdk/connectors', () => {
       'calendar.delete_event',
       'calendar.list_accounts'
     ])
+    expect(AfloatConnector.actions.map(action => action.id)).toEqual(['afloat.mcp_auth'])
     expect(FigmaConnector.actions.map(action => action.id)).toEqual(['figma.mcp_auth'])
     expect(LinkedInSearchConnector.actions.map(action => action.id)).toEqual([
       'linkedin_search.search',
@@ -429,6 +437,102 @@ describe('@yolk-sdk/connectors', () => {
       'todoist.list_labels'
     ])
   })
+
+  it.effect('resolves Afloat MCP secrets through the runtime credential', () =>
+    Effect.gen(function* () {
+      const afloatIntegration = makeIntegration({
+        connectorId: 'afloat',
+        credentialBindings: [
+          makeCredentialBinding({
+            slotId: AfloatApiKeyCredentialSlot.id,
+            credentialRef: 'afloat-api-key'
+          })
+        ]
+      })
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              ApiKeyCredential.make({
+                _tag: 'ApiKeyCredential',
+                key: 'afloat_test_key'
+              })
+            )
+        })
+      )
+
+      const result = yield* afloatMcpAuthAction
+        .execute({ integration: afloatIntegration, input: {} })
+        .pipe(Effect.provide(CredentialResolverTest))
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: {
+          provider: 'afloat',
+          serverUrl: 'https://app.useafloat.com/mcp',
+          protocolVersion: '2026-07-28',
+          apiKey: 'afloat_test_key'
+        }
+      })
+    })
+  )
+
+  it.effect('rejects invalid Afloat runtime credentials', () =>
+    Effect.gen(function* () {
+      const afloatIntegration = makeIntegration({
+        connectorId: 'afloat',
+        credentialBindings: [
+          makeCredentialBinding({
+            slotId: AfloatApiKeyCredentialSlot.id,
+            credentialRef: 'afloat-api-key'
+          })
+        ]
+      })
+      const malformedKeyResolver = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              ApiKeyCredential.make({
+                _tag: 'ApiKeyCredential',
+                key: 'invalid_key'
+              })
+            )
+        })
+      )
+      const bearerResolver = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              BearerTokenCredential.make({
+                _tag: 'BearerTokenCredential',
+                token: 'afloat_bearer'
+              })
+            )
+        })
+      )
+
+      const [malformedKey, wrongKind] = yield* Effect.all([
+        afloatMcpAuthAction
+          .execute({ integration: afloatIntegration, input: {} })
+          .pipe(Effect.provide(malformedKeyResolver), Effect.result),
+        afloatMcpAuthAction
+          .execute({ integration: afloatIntegration, input: {} })
+          .pipe(Effect.provide(bearerResolver), Effect.result)
+      ])
+
+      expect(malformedKey).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
+      })
+      expect(wrongKind).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
+      })
+    })
+  )
 
   it.effect('resolves Figma MCP secrets through the runtime credential', () =>
     Effect.gen(function* () {

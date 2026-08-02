@@ -44,6 +44,7 @@ const packages: ReadonlyArray<PackageShape> = [
     exports: [
       '.',
       './agent',
+      './afloat',
       './figma',
       './google',
       './linkedin-search',

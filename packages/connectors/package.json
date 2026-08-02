@@ -34,6 +34,10 @@
       "types": "./src/agent.ts",
       "default": "./src/agent.ts"
     },
+    "./afloat": {
+      "types": "./src/afloat/index.ts",
+      "default": "./src/afloat/index.ts"
+    },
     "./figma": {
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
@@ -84,6 +88,11 @@
         "types": "./dist/agent.d.mts",
         "import": "./dist/agent.mjs",
         "default": "./dist/agent.mjs"
+      },
+      "./afloat": {
+        "types": "./dist/afloat/index.d.mts",
+        "import": "./dist/afloat/index.mjs",
+        "default": "./dist/afloat/index.mjs"
       },
       "./figma": {
         "types": "./dist/figma/index.d.mts",

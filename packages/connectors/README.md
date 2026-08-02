@@ -16,6 +16,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | -------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                  |
 | `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                        |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version              |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                         |
 | `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                   |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                 |
@@ -161,6 +162,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 
 | Subpath                                | Actions                                                                                                     |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                           |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
 | `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |
@@ -185,6 +187,10 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 ```
 
 `HostConnectorLayer` should provide `CredentialResolver`, `ConnectorHttpClient`, and any other connector dependencies.
+
+Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
+canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;
+never expose the auth action through a model-callable connector module.
 
 Figma MCP auth reads `accessToken` plus optional `refreshToken`, `clientId`, and `clientSecret`
 from the runtime `OAuthCredential`. Keep these values in the host credential store.

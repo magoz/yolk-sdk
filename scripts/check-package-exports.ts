@@ -86,6 +86,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './package.json',
       '.',
       './agent',
+      './afloat',
       './figma',
       './google',
       './linkedin-search',
