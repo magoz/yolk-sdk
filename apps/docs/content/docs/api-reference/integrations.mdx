@@ -5,12 +5,14 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 
 ## MCP
 
-| Subpath                     | Main exports                                                                                                                                                                                        |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/mcp/client`      | `listMcpTools`, `listMcpServerTools`, `listRemoteMcpServerTools`, `listLocalMcpServerTools`, `callMcpServerTool`, `callRemoteMcpServerTool`, `callLocalMcpServerTool`, config and protocol adapters |
-| `@yolk-sdk/mcp/client/node` | `listMcpToolsNode`, `listMcpServerToolsNode`, `listLocalMcpServerToolsNode`, `callMcpServerToolNode`, `callLocalMcpServerToolNode`                                                                  |
-| `@yolk-sdk/mcp/protocol`    | JSON-RPC/MCP schemas and helpers                                                                                                                                                                    |
-| `@yolk-sdk/mcp/server`      | `makeMcpToolServer`, `runStdioMcpServer`                                                                                                                                                            |
+| Subpath                     | Main exports                                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/mcp/client`      | Official `Client`, Streamable HTTP, full-core client types/helpers, plus Effect/Yolk tool list/call adapters                                     |
+| `@yolk-sdk/mcp/client/node` | Official `StdioClientTransport` plus NodeServices wrappers for Yolk local tool helpers                                                           |
+| `@yolk-sdk/mcp/core`        | Official MCP v2 Zod wire schemas                                                                                                                 |
+| `@yolk-sdk/mcp/protocol`    | Yolk JSON-RPC/MCP adapter schemas and helpers                                                                                                    |
+| `@yolk-sdk/mcp/server`      | Official `McpServer`, `createMcpHandler`, resources, prompts, completions, MRTR, subscriptions, plus `makeMcpToolServer` and `runStdioMcpServer` |
+| `@yolk-sdk/mcp/server/node` | Official `serveStdio` and `StdioServerTransport`                                                                                                 |
 
 ## Knowledge
 

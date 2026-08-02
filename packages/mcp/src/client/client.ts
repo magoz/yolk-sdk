@@ -1,5 +1,14 @@
 import { Duration, Effect, Option, Stream } from 'effect'
-import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
+import * as Schema from 'effect/Schema'
+import {
+  Client as SdkClient,
+  ProtocolError,
+  SdkError,
+  SdkErrorCode,
+  StreamableHTTPClientTransport,
+  type ClientOptions as SdkClientOptions
+} from '@modelcontextprotocol/client'
+import { HttpClient } from 'effect/unstable/http'
 import { ChildProcess } from 'effect/unstable/process'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
 import type { ToolResult } from '@yolk-sdk/agent/protocol'
@@ -27,6 +36,7 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse
 } from './protocol.ts'
+import { makeEffectFetch } from './effect-fetch.ts'
 
 const defaultRequestTimeoutMs = 30_000
 
@@ -34,6 +44,8 @@ export type McpClientOptions = {
   readonly clientInfo?: McpClientInfo
   readonly securityPolicy?: McpSecurityPolicy
   readonly timeoutMs?: number
+  readonly sdk?: SdkClientOptions
+  readonly configureClient?: (client: SdkClient) => void
 }
 
 export type McpResolvedTool = {
@@ -93,26 +105,6 @@ const validateLocal = (config: McpLocalServerConfig, policy: McpSecurityPolicy) 
     }
   })
 
-const parseSseJsonRpcResponse = (server: string, body: string) =>
-  Effect.gen(function* () {
-    const candidates = [
-      body,
-      ...body
-        .split('\n')
-        .filter(line => line.startsWith('data: '))
-        .map(line => line.substring('data: '.length))
-    ]
-    const parsed = yield* Effect.forEach(candidates, candidate =>
-      decodeJsonRpcResponseFromJson(server, candidate).pipe(Effect.option)
-    ).pipe(Effect.map(Option.firstSomeOf))
-
-    if (Option.isSome(parsed)) {
-      return parsed.value
-    }
-
-    return yield* fail(server, 'MCP response did not contain a JSON-RPC message', 'protocol')
-  })
-
 const unwrapResponse = (server: string, response: JsonRpcResponse) =>
   'error' in response
     ? Effect.fail(jsonRpcErrorToMcpError(server, response.error))
@@ -133,95 +125,84 @@ const findDuplicateToolName = (tools: ReadonlyArray<McpResolvedTool>) => {
   return Option.fromNullishOr(names.find((name, index) => names.indexOf(name) !== index))
 }
 
-const requestRemote = (
+const sdkFailureCause = (error: unknown): McpError['cause'] => {
+  if (error instanceof ProtocolError) {
+    return 'protocol'
+  }
+
+  if (error instanceof SdkError) {
+    if (error.code === SdkErrorCode.RequestTimeout) {
+      return 'timeout'
+    }
+
+    const message = error.message.toLowerCase()
+    return message.includes('content type') || message.includes('json') || message.includes('parse')
+      ? 'protocol'
+      : 'transport'
+  }
+
+  return 'transport'
+}
+
+const mapSdkError = (server: string, operation: string) => (error: unknown) =>
+  error instanceof McpError
+    ? error
+    : new McpError({
+        server,
+        message: `${operation}: ${unknownToMessage(error)}`,
+        cause: sdkFailureCause(error)
+      })
+
+const withRemoteSdkClient = <A>(
   config: McpRemoteServerConfig,
-  request: JsonRpcRequest,
-  options?: McpClientOptions
-) =>
+  options: McpClientOptions | undefined,
+  run: (client: SdkClient) => Promise<A>
+): Effect.Effect<A, McpError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const policy = securityPolicy(options)
-    const url = yield* validateRemoteUrl(config, policy)
+    const url = yield* validateRemoteUrl(config, securityPolicy(options))
     const http = yield* HttpClient.HttpClient
-    const body = yield* encodeJsonRpcMessage(config.name, request)
-    const encoded = HttpClientRequest.post(url).pipe(
-      HttpClientRequest.accept('application/json, text/event-stream'),
-      HttpClientRequest.setHeaders(config.headers ?? {}),
-      HttpClientRequest.bodyText(body, 'application/json')
-    )
-    const response = yield* HttpClient.filterStatusOk(http)
-      .execute(encoded)
-      .pipe(
-        Effect.mapError(
-          error =>
-            new McpError({
-              server: config.name,
-              message: `MCP request failed: ${unknownToMessage(error)}`,
-              cause: 'transport'
-            })
-        ),
-        Effect.timeoutOrElse({
-          duration: Duration.millis(timeoutMs(options)),
-          orElse: () => fail(config.name, 'MCP request timed out', 'timeout')
+    const sdkClient = yield* Effect.try({
+      try: () => {
+        const client = new SdkClient(clientInfo(options), {
+          ...options?.sdk,
+          versionNegotiation: options?.sdk?.versionNegotiation ?? { mode: 'auto' }
         })
-      )
-    const text = yield* response.text.pipe(
-      Effect.mapError(
-        error =>
-          new McpError({
-            server: config.name,
-            message: `Could not read MCP response: ${unknownToMessage(error)}`,
-            cause: 'transport'
-          })
-      )
-    )
-    const decoded = yield* parseSseJsonRpcResponse(config.name, text)
+        options?.configureClient?.(client)
+        return client
+      },
+      catch: mapSdkError(config.name, 'Could not configure MCP client')
+    })
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      fetch: makeEffectFetch(http),
+      requestInit: { headers: new Headers(config.headers) }
+    })
 
-    return yield* unwrapResponse(config.name, decoded)
-  })
-
-const notifyRemote = (
-  config: McpRemoteServerConfig,
-  notification: JsonRpcNotification,
-  options?: McpClientOptions
-) =>
-  Effect.gen(function* () {
-    const policy = securityPolicy(options)
-    const url = yield* validateRemoteUrl(config, policy)
-    const http = yield* HttpClient.HttpClient
-    const body = yield* encodeJsonRpcMessage(config.name, notification)
-    const encoded = HttpClientRequest.post(url).pipe(
-      HttpClientRequest.accept('application/json, text/event-stream'),
-      HttpClientRequest.setHeaders(config.headers ?? {}),
-      HttpClientRequest.bodyText(body, 'application/json')
-    )
-    yield* HttpClient.filterStatusOk(http)
-      .execute(encoded)
-      .pipe(
-        Effect.mapError(
-          error =>
-            new McpError({
-              server: config.name,
-              message: `MCP notification failed: ${unknownToMessage(error)}`,
-              cause: 'transport'
+    return yield* Effect.acquireUseRelease(
+      Effect.tryPromise({
+        try: () =>
+          sdkClient
+            .connect(transport, {
+              timeout: timeoutMs(options),
+              maxTotalTimeout: timeoutMs(options)
             })
-        ),
-        Effect.timeoutOrElse({
-          duration: Duration.millis(timeoutMs(options)),
-          orElse: () => fail(config.name, 'MCP notification timed out', 'timeout')
-        })
-      )
+            .then(() => sdkClient),
+        catch: mapSdkError(config.name, 'Could not connect to MCP server')
+      }),
+      () =>
+        Effect.tryPromise({
+          try: () => run(sdkClient),
+          catch: mapSdkError(config.name, 'MCP request failed')
+        }),
+      () => Effect.promise(() => sdkClient.close()).pipe(Effect.catch(() => Effect.void))
+    )
   })
 
-const requestRemoteSession = (
-  config: McpRemoteServerConfig,
-  request: JsonRpcRequest,
-  options?: McpClientOptions
-) =>
-  Effect.gen(function* () {
-    yield* requestRemote(config, initializeRequest(options), options)
-    yield* notifyRemote(config, makeInitializedNotification(), options)
-    return yield* requestRemote(config, request, options)
-  })
+const sdkRequestOptions = (options?: McpClientOptions) => ({
+  timeout: timeoutMs(options),
+  maxTotalTimeout: timeoutMs(options)
+})
+
+const decodeToolArguments = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema.Unknown))
 
 type EncodedLocalMessage = {
   readonly message: JsonRpcRequest | JsonRpcNotification
@@ -373,7 +354,9 @@ export const listRemoteMcpServerTools = (
       return []
     }
 
-    const result = yield* requestRemoteSession(config, listToolsRequest(), options)
+    const result = yield* withRemoteSdkClient(config, options, client =>
+      client.listTools(undefined, sdkRequestOptions(options))
+    )
     return yield* resolveMcpTools(config, result)
   })
 
@@ -436,11 +419,23 @@ export const callRemoteMcpServerTool = (
   input: Omit<CallMcpServerToolInput, 'config'> & { readonly config: McpRemoteServerConfig }
 ): Effect.Effect<ToolResult, McpError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const result = yield* requestRemoteSession(
-      input.config,
-      callToolRequest({ toolName: input.mcpToolName, params: input.params }),
-      input.options
+    const args = yield* decodeToolArguments(input.params).pipe(
+      Effect.mapError(
+        error =>
+          new McpError({
+            server: input.config.name,
+            message: `Invalid tools/call arguments: ${unknownToMessage(error)}`,
+            cause: 'validation'
+          })
+      )
     )
+    const result = yield* withRemoteSdkClient(input.config, input.options, async client => {
+      await client.listTools(undefined, sdkRequestOptions(input.options))
+      return client.callTool(
+        { name: input.mcpToolName, arguments: args },
+        sdkRequestOptions(input.options)
+      )
+    })
     return yield* resolveMcpToolResult(input, result)
   })
 

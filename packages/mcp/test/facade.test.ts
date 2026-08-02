@@ -1,23 +1,30 @@
 import { describe, expect, it } from '@effect/vitest'
-import { defaultMcpClientInfo } from '@yolk-sdk/mcp/client'
+import { Client, defaultMcpClientInfo } from '@yolk-sdk/mcp/client'
+import { DiscoverRequestSchema } from '@yolk-sdk/mcp/core'
 import { latestMcpProtocolVersion, makeJsonRpcRequest } from '@yolk-sdk/mcp/protocol'
-import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
+import { McpServer, makeMcpToolServer } from '@yolk-sdk/mcp/server'
 
 describe('@yolk-sdk/mcp subpaths', () => {
   it('imports every public subpath', async () => {
-    const [root, client, nodeClient, protocol, server] = await Promise.all([
+    const [root, client, nodeClient, core, protocol, server, nodeServer] = await Promise.all([
       import('@yolk-sdk/mcp'),
       import('@yolk-sdk/mcp/client'),
       import('@yolk-sdk/mcp/client/node'),
+      import('@yolk-sdk/mcp/core'),
       import('@yolk-sdk/mcp/protocol'),
-      import('@yolk-sdk/mcp/server')
+      import('@yolk-sdk/mcp/server'),
+      import('@yolk-sdk/mcp/server/node')
     ])
 
     expect(root).toBeDefined()
     expect(client.defaultMcpClientInfo).toBeDefined()
+    expect(nodeClient.StdioClientTransport).toBeDefined()
     expect(nodeClient.listMcpToolsNode).toBeDefined()
+    expect(core.DiscoverRequestSchema).toBeDefined()
     expect(protocol.makeJsonRpcRequest).toBeDefined()
+    expect(server.McpServer).toBeDefined()
     expect(server.makeMcpToolServer).toBeDefined()
+    expect(nodeServer.serveStdio).toBeDefined()
   })
 
   it('exports client, protocol, and server subpaths', () => {
@@ -25,7 +32,10 @@ describe('@yolk-sdk/mcp subpaths', () => {
     const server = makeMcpToolServer({ name: 'test', version: '0.0.0', tools: [] })
 
     expect(defaultMcpClientInfo.name).toBe('yolk')
-    expect(latestMcpProtocolVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(DiscoverRequestSchema).toBeDefined()
+    expect(latestMcpProtocolVersion).toBe('2026-07-28')
+    expect(Client).toBeDefined()
+    expect(McpServer).toBeDefined()
     expect(request.method).toBe('tools/list')
     expect(server).toBeDefined()
   })

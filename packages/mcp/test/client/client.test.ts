@@ -49,6 +49,7 @@ type ResponseMode =
   | 'duplicate-tools'
   | 'tool-error'
   | 'rich-result'
+  | 'legacy'
 
 const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
   Layer.succeed(
@@ -80,23 +81,23 @@ const makeFakeLocalMcpLayer = (lines: ReadonlyArray<string>) =>
     )
   )
 
-const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
+const requestMessage = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
   if (body._tag !== 'Uint8Array') {
-    return 'notifications/initialized'
+    return { id: null, method: 'notifications/initialized' }
   }
 
-  const text = new TextDecoder().decode(body.body)
-  if (text.includes('"method":"initialize"')) {
-    return 'initialize'
+  const value: unknown = JSON.parse(new TextDecoder().decode(body.body))
+  if (typeof value !== 'object' || value === null) {
+    return { id: null, method: 'unknown' }
   }
-  if (text.includes('"method":"tools/list"')) {
-    return 'tools/list'
+
+  const method = Reflect.get(value, 'method')
+  const id = Reflect.get(value, 'id')
+  return {
+    id: typeof id === 'string' || typeof id === 'number' ? id : null,
+    method: typeof method === 'string' ? method : 'unknown'
   }
-  if (text.includes('"method":"tools/call"')) {
-    return 'tools/call'
-  }
-  return 'notifications/initialized'
 }
 
 const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.HttpClient> => {
@@ -108,14 +109,45 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
           yield* Effect.sleep(Duration.millis(100))
         }
 
-        const method = requestMethod(request)
+        const message = requestMessage(request)
+        const method = message.method
+
+        if (
+          method !== 'initialize' &&
+          method !== 'notifications/initialized' &&
+          request.headers['mcp-protocol-version'] === '2026-07-28'
+        ) {
+          expect(request.headers['accept']).toBe('application/json, text/event-stream')
+          expect(request.headers['mcp-method']).toBe(method)
+          expect(request.headers['mcp-protocol-version']).toBe('2026-07-28')
+        }
+
+        if (mode === 'legacy' && method === 'server/discover') {
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: message.id,
+                error: { code: -32_601, message: 'Method not found' }
+              }),
+              { status: 400, headers: { 'content-type': 'application/json' } }
+            )
+          )
+        }
 
         if (mode === 'status-error') {
           return HttpClientResponse.fromWeb(request, new Response('nope', { status: 500 }))
         }
 
         if (mode === 'invalid-json') {
-          return HttpClientResponse.fromWeb(request, new Response('not json', { status: 200 }))
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response('not json', {
+              status: 200,
+              headers: { 'content-type': 'application/json' }
+            })
+          )
         }
 
         if (mode === 'json-rpc-error') {
@@ -124,67 +156,89 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
             new Response(
               JSON.stringify({
                 jsonrpc: '2.0',
-                id: method === 'initialize' ? 1 : method === 'tools/list' ? 2 : 3,
+                id: message.id,
                 error: { code: -32_000, message: 'fixture failure' }
               }),
-              { status: 200 }
+              { status: 200, headers: { 'content-type': 'application/json' } }
             )
           )
         }
 
         const result =
-          method === 'initialize'
+          method === 'server/discover'
             ? {
-                protocolVersion: '2024-11-05',
-                capabilities: {},
-                serverInfo: { name: 'remote', version: '0' }
-              }
-            : method === 'tools/list'
-              ? {
-                  tools:
-                    mode === 'duplicate-tools'
-                      ? [
-                          {
-                            name: 'search.one',
-                            description: 'Search one',
-                            inputSchema: { type: 'object' }
-                          },
-                          {
-                            name: 'search/one',
-                            description: 'Search duplicate',
-                            inputSchema: { type: 'object' }
-                          }
-                        ]
-                      : [
-                          {
-                            name: 'search',
-                            description: 'Search',
-                            inputSchema: { type: 'object' }
-                          }
-                        ]
+                resultType: 'complete',
+                supportedVersions: ['2026-07-28'],
+                capabilities: { tools: {} },
+                ttlMs: 60_000,
+                cacheScope: 'public',
+                _meta: {
+                  'io.modelcontextprotocol/serverInfo': { name: 'remote', version: '0' }
                 }
-              : mode === 'tool-error'
-                ? { content: [{ type: 'text', text: 'bad params' }], isError: true }
-                : mode === 'rich-result'
+              }
+            : method === 'initialize'
+              ? {
+                  protocolVersion: '2024-11-05',
+                  capabilities: { tools: {} },
+                  serverInfo: { name: 'remote', version: '0' }
+                }
+              : method === 'tools/list'
+                ? {
+                    resultType: 'complete',
+                    ttlMs: 60_000,
+                    cacheScope: 'public',
+                    tools:
+                      mode === 'duplicate-tools'
+                        ? [
+                            {
+                              name: 'search.one',
+                              description: 'Search one',
+                              inputSchema: { type: 'object' }
+                            },
+                            {
+                              name: 'search/one',
+                              description: 'Search duplicate',
+                              inputSchema: { type: 'object' }
+                            }
+                          ]
+                        : [
+                            {
+                              name: 'search',
+                              description: 'Search',
+                              inputSchema: { type: 'object' }
+                            }
+                          ]
+                  }
+                : mode === 'tool-error'
                   ? {
-                      content: [
-                        { type: 'text', text: 'remote result' },
-                        { type: 'image', data: 'abc', mimeType: 'image/png' },
-                        { type: 'audio', data: 'def', mimeType: 'audio/opus' },
-                        {
-                          type: 'resource',
-                          resource: { uri: 'file:///tmp/out.txt', text: 'resource text' }
-                        },
-                        {
-                          type: 'resource_link',
-                          uri: 'file:///tmp/linked.txt',
-                          name: 'linked.txt'
-                        }
-                      ],
-                      structuredContent: { answer: 42 },
+                      resultType: 'complete',
+                      content: [{ type: 'text', text: 'bad params' }],
                       isError: true
                     }
-                  : { content: [{ type: 'text', text: 'remote result' }] }
+                  : mode === 'rich-result'
+                    ? {
+                        resultType: 'complete',
+                        content: [
+                          { type: 'text', text: 'remote result' },
+                          { type: 'image', data: 'abc', mimeType: 'image/png' },
+                          { type: 'audio', data: 'def', mimeType: 'audio/opus' },
+                          {
+                            type: 'resource',
+                            resource: { uri: 'file:///tmp/out.txt', text: 'resource text' }
+                          },
+                          {
+                            type: 'resource_link',
+                            uri: 'file:///tmp/linked.txt',
+                            name: 'linked.txt'
+                          }
+                        ],
+                        structuredContent: { answer: 42 },
+                        isError: true
+                      }
+                    : {
+                        resultType: 'complete',
+                        content: [{ type: 'text', text: 'remote result' }]
+                      }
 
         if (method === 'notifications/initialized') {
           return HttpClientResponse.fromWeb(request, new Response(undefined, { status: 204 }))
@@ -192,7 +246,7 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
 
         const payload = JSON.stringify({
           jsonrpc: '2.0',
-          id: method === 'initialize' ? 1 : method === 'tools/list' ? 2 : 3,
+          id: message.id,
           result
         })
 
@@ -243,6 +297,17 @@ describe('MCP client', () => {
       }).pipe(Effect.provide(makeFakeRemoteMcpLayer('json')))
 
       expect(result.content).toBe('remote result')
+    })
+  )
+
+  it.effect('falls back to initialize-based remote servers', () =>
+    Effect.gen(function* () {
+      const tools = yield* listRemoteMcpServerTools(
+        { name: 'remote', type: 'remote', url: 'https://example.com/mcp' },
+        { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
+      ).pipe(Effect.provide(makeFakeRemoteMcpLayer('legacy')))
+
+      expect(tools.map(tool => tool.def.name)).toEqual(['remote_search'])
     })
   )
 

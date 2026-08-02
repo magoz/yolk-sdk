@@ -1,8 +1,8 @@
 # @yolk-sdk/mcp
 
-Domain-free Model Context Protocol client/server/protocol adapters.
+MCP `2026-07-28` client, server, protocol, and Yolk tool adapters with legacy MCP compatibility.
 
-Root export is intentionally tiny. Import client, protocol, and server APIs from explicit subpaths.
+The root export is intentionally tiny. Import APIs from explicit subpaths.
 
 ## Install
 
@@ -14,97 +14,88 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath                     | Purpose                                                          |
-| --------------------------- | ---------------------------------------------------------------- |
-| `@yolk-sdk/mcp/client`      | Remote/local MCP config, tool listing/calling, protocol adapters |
-| `@yolk-sdk/mcp/client/node` | Node-only local stdio convenience helpers                        |
-| `@yolk-sdk/mcp/protocol`    | JSON-RPC/MCP wire helpers                                        |
-| `@yolk-sdk/mcp/server`      | Tool-only MCP server primitives                                  |
+| Subpath                     | Purpose                                                                |
+| --------------------------- | ---------------------------------------------------------------------- |
+| `@yolk-sdk/mcp/client`      | Official full-core client plus Effect/Yolk list and call helpers       |
+| `@yolk-sdk/mcp/client/node` | Official stdio client transport plus NodeServices convenience wrappers |
+| `@yolk-sdk/mcp/core`        | Official MCP v2 wire schemas                                           |
+| `@yolk-sdk/mcp/protocol`    | Yolk JSON-RPC/MCP adapter helpers                                      |
+| `@yolk-sdk/mcp/server`      | Official full-core server plus Yolk tool-only server primitives        |
+| `@yolk-sdk/mcp/server/node` | Official dual-era stdio server entrypoint                              |
 
-## Imports
+## Use the full MCP v2 client
+
+The official client surface supports tools, resources, prompts, completions, MRTR, response caching, subscriptions, OAuth helpers, and legacy negotiation.
 
 ```ts
-import { listMcpTools } from '@yolk-sdk/mcp/client'
-import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'
-import { makeJsonRpcRequest } from '@yolk-sdk/mcp/protocol'
-import { makeMcpToolServer } from '@yolk-sdk/mcp/server'
+import { Client, StreamableHTTPClientTransport } from '@yolk-sdk/mcp/client'
+
+const client = new Client(
+  { name: 'my-app', version: '1.0.0' },
+  { versionNegotiation: { mode: 'auto' } }
+)
+
+await client.connect(new StreamableHTTPClientTransport(new URL('https://example.com/mcp')))
+
+const { tools } = await client.listTools()
 ```
 
-## Remote client
+`mode: 'auto'` prefers stateless MCP `2026-07-28` and falls back to an initialize-based server. Pin `{ pin: '2026-07-28' }` for modern-only behavior. The upstream `Client` default remains legacy for compatibility.
+
+## Use Effect/Yolk tool adapters
+
+The high-level remote helpers use the official v2 client over an Effect `HttpClient` bridge. They negotiate modern MCP automatically, aggregate paginated tool lists, honor v2 routing headers and cache hints, and fall back to legacy servers.
 
 ```ts
 import { Effect } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import { listRemoteMcpServerTools } from '@yolk-sdk/mcp/client'
 
-const tools = listRemoteMcpServerTools({
-  name: 'docs',
-  type: 'remote',
-  url: 'https://example.com/mcp'
-}).pipe(Effect.provide(FetchHttpClient.layer))
-
-// Host chooses HttpClient layer and auth policy.
-Effect.runPromise(tools)
-```
-
-## Local stdio client
-
-```ts
-import { execPath } from 'node:process'
-import { Effect } from 'effect'
-import { listMcpToolsNode } from '@yolk-sdk/mcp/client/node'
-
 const tools = await Effect.runPromise(
-  listMcpToolsNode(
-    [
-      {
-        name: 'local-tools',
-        type: 'local',
-        command: [execPath, './mcp-server.mjs'],
-        environment: { LOG_LEVEL: 'error' }
-      }
-    ],
-    {
-      securityPolicy: {
-        allowLocalServers: true,
-        allowDevHttpLocalhost: false
-      }
-    }
-  )
+  listRemoteMcpServerTools({
+    name: 'docs',
+    type: 'remote',
+    url: 'https://example.com/mcp'
+  }).pipe(Effect.provide(FetchHttpClient.layer))
 )
 ```
 
-`@yolk-sdk/mcp/client/node` may use Node process APIs. Keep Worker/browser imports on `@yolk-sdk/mcp/client`.
-Local servers are denied by default; opt in with `securityPolicy.allowLocalServers: true` only in a
-trusted Node host. The child receives only the explicit `environment` map, not the host environment.
-Prefer an absolute executable such as `execPath`; a bare executable or `/usr/bin/env` shebang needs
-an explicitly allowlisted `PATH` in `environment`.
+Use `McpClientOptions.sdk` for official client options such as capabilities, MRTR, and shared response caching. Use `configureClient` to register elicitation or sampling handlers before connection. Use a persistent official `Client` directly for long-lived subscriptions and progress streams.
 
-## Server
+## Build a full MCP server
+
+Use the official server surface for tools, resources, prompts, completions, MRTR, and subscriptions:
+
+```ts
+import { McpServer, createMcpHandler } from '@yolk-sdk/mcp/server'
+
+const handler = createMcpHandler(() => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' })
+  // Register tools, resources, and prompts here.
+  return server
+})
+
+export default { fetch: handler.fetch }
+```
+
+`createMcpHandler` serves stateless `2026-07-28` and legacy initialize-based HTTP clients from one endpoint. Validate `Origin` and `Host` before calling `handler.fetch`.
+
+For dual-era Node stdio, import `serveStdio` from `@yolk-sdk/mcp/server/node`.
+
+## Adapt Yolk tools into MCP
 
 ```ts
 import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 ```
 
-The server is tool-only. Hosts own HTTP routes, auth, deployment, and tool policy.
-Protocol document parts are exposed as MCP resource blocks with encoded `file:///...` URIs.
-`runStdioMcpServer` is for CLI hosts that provide an Effect `Stdio` layer.
+`makeMcpToolServer` exposes approved Yolk tools. Its HTTP handler accepts both stateless v2 and legacy requests, validates browser origins against the endpoint hostname by default, and preserves MCP content and structured results. `runStdioMcpServer` remains the Effect-native minimal stdio adapter; use `serveStdio` for the full modern stdio surface.
 
 ## Host responsibilities
 
-- Own persisted MCP server config, auth, and product tool policy.
-- Provide HTTP runtime layers and credentials for remote MCP.
-- Keep Node stdio usage behind Node-only hosts.
+- Own persisted server config, credentials, authorization policy, and enabled capabilities.
+- Partition private MCP caches by authorization context.
+- Validate HTTP `Origin` and `Host` at deployment boundaries.
+- Keep Node stdio usage behind trusted Node hosts.
+- Treat tool annotations, server identity, icons, and request state as untrusted input.
 
-## Boundaries
-
-- App auth, persisted config, policy, and product tools stay outside this package.
-- Node convenience wrappers stay behind `@yolk-sdk/mcp/client/node`.
-- MCP may adapt to `@yolk-sdk/agent/protocol` tool types; agent loop/providers stay MCP-agnostic.
-- Remote MCP requires `https:` by default; localhost HTTP is explicit dev policy.
-
-## Tree-shaking
-
-- ESM package with `sideEffects: false`.
-- Explicit subpath exports only.
-- No wildcard exports or root feature barrel.
+Remote MCP requires HTTPS by default; localhost HTTP is an explicit development policy.

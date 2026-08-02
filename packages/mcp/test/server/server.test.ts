@@ -87,6 +87,35 @@ const handleHttpJson = (value: unknown) =>
     return yield* decodeJson(body)
   })
 
+const modernMeta = {
+  'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+  'io.modelcontextprotocol/clientCapabilities': {},
+  'io.modelcontextprotocol/clientInfo': { name: 'test-client', version: '1.0.0' }
+}
+
+const modernHttpRequest = (input: {
+  readonly method: string
+  readonly id?: string | number
+  readonly params?: Readonly<Record<string, unknown>>
+  readonly headers?: Readonly<Record<string, string>>
+}) =>
+  new Request('https://example.com/mcp', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      'mcp-method': input.method,
+      'mcp-protocol-version': '2026-07-28',
+      ...(input.headers ?? {})
+    },
+    body: requestLine({
+      jsonrpc: '2.0',
+      id: input.id ?? 1,
+      method: input.method,
+      params: { ...(input.params ?? {}), _meta: modernMeta }
+    })
+  })
+
 describe('MCP tool server', () => {
   it.effect('handles initialize', () =>
     Effect.gen(function* () {
@@ -253,6 +282,56 @@ describe('MCP tool server', () => {
         id: 8,
         result: { tools: [{ name: 'echo' }] }
       })
+    })
+  )
+
+  it.effect('serves stateless 2026-07-28 HTTP requests', () =>
+    Effect.gen(function* () {
+      const response = yield* server.handleHttpRequest(
+        modernHttpRequest({ method: 'tools/list', id: 10 })
+      )
+      const json = yield* Effect.promise(() => response.text()).pipe(Effect.flatMap(decodeJson))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('mcp-session-id')).toBeNull()
+      expect(json).toMatchObject({
+        jsonrpc: '2.0',
+        id: 10,
+        result: {
+          resultType: 'complete',
+          tools: [{ name: 'echo' }],
+          ttlMs: 0,
+          cacheScope: 'private'
+        }
+      })
+    })
+  )
+
+  it.effect('rejects mismatched modern HTTP routing headers', () =>
+    Effect.gen(function* () {
+      const response = yield* server.handleHttpRequest(
+        modernHttpRequest({
+          method: 'tools/call',
+          params: { name: 'echo', arguments: {} },
+          headers: { 'mcp-name': 'different' }
+        })
+      )
+      const json = yield* Effect.promise(() => response.text()).pipe(Effect.flatMap(decodeJson))
+
+      expect(response.status).toBe(400)
+      expect(json).toMatchObject({ error: { code: -32_020 } })
+    })
+  )
+
+  it.effect('rejects invalid browser origins', () =>
+    Effect.gen(function* () {
+      const response = yield* server.handleHttpRequest(
+        new Request('https://example.com/mcp', {
+          headers: { origin: 'https://attacker.example' }
+        })
+      )
+
+      expect(response.status).toBe(403)
     })
   )
 

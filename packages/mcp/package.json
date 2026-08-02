@@ -34,6 +34,10 @@
       "types": "./src/client/index.ts",
       "default": "./src/client/index.ts"
     },
+    "./core": {
+      "types": "./src/core.ts",
+      "default": "./src/core.ts"
+    },
     "./client/node": {
       "types": "./src/client/node.ts",
       "default": "./src/client/node.ts"
@@ -45,6 +49,10 @@
     "./server": {
       "types": "./src/server/index.ts",
       "default": "./src/server/index.ts"
+    },
+    "./server/node": {
+      "types": "./src/server/node.ts",
+      "default": "./src/server/node.ts"
     }
   },
   "files": [
@@ -69,6 +77,11 @@
         "import": "./dist/client/index.mjs",
         "default": "./dist/client/index.mjs"
       },
+      "./core": {
+        "types": "./dist/core.d.mts",
+        "import": "./dist/core.mjs",
+        "default": "./dist/core.mjs"
+      },
       "./client/node": {
         "types": "./dist/client/node.d.mts",
         "import": "./dist/client/node.mjs",
@@ -83,6 +96,11 @@
         "types": "./dist/server/index.d.mts",
         "import": "./dist/server/index.mjs",
         "default": "./dist/server/index.mjs"
+      },
+      "./server/node": {
+        "types": "./dist/server/node.d.mts",
+        "import": "./dist/server/node.mjs",
+        "default": "./dist/server/node.mjs"
       }
     }
   },
@@ -94,6 +112,9 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@yolk-sdk/agent": "workspace:^",
     "effect": "catalog:"
   }

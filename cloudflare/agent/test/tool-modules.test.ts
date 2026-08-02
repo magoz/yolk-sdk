@@ -27,65 +27,65 @@ const resolvedToolNames = (modulesEffect: ReturnType<typeof makeTextToolModules>
     return toolSet.tools.map(tool => tool.name)
   })
 
-const requestMethod = (request: HttpClientRequest.HttpClientRequest) => {
+const requestMessage = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
   if (body._tag !== 'Uint8Array') {
-    return 'notifications/initialized'
+    return { id: null, method: 'unknown' }
   }
 
-  const text = new TextDecoder().decode(body.body)
-  if (text.includes('"method":"initialize"')) {
-    return 'initialize'
+  const value: unknown = JSON.parse(new TextDecoder().decode(body.body))
+  if (typeof value !== 'object' || value === null) {
+    return { id: null, method: 'unknown' }
   }
-  if (text.includes('"method":"tools/list"')) {
-    return 'tools/list'
+
+  const id = Reflect.get(value, 'id')
+  const method = Reflect.get(value, 'method')
+  return {
+    id: typeof id === 'string' || typeof id === 'number' ? id : null,
+    method: typeof method === 'string' ? method : 'unknown'
   }
-  return 'notifications/initialized'
 }
 
 const fakeRemoteMcpLayer: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
   HttpClient.HttpClient,
-  HttpClient.make(request =>
-    Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        new Response(responseBodyFor(requestMethod(request)), {
-          status: responseStatusFor(requestMethod(request)),
-          headers: { 'content-type': 'application/json' }
-        })
-      )
-    )
-  )
-)
-
-const responseStatusFor = (method: string) => (method === 'notifications/initialized' ? 204 : 200)
-
-const responseBodyFor = (method: string) => {
-  if (method === 'notifications/initialized') {
-    return undefined
-  }
-
-  return JSON.stringify({
-    jsonrpc: '2.0',
-    id: method === 'initialize' ? 1 : 2,
-    result:
-      method === 'initialize'
+  HttpClient.make(request => {
+    const message = requestMessage(request)
+    const result =
+      message.method === 'server/discover'
         ? {
-            protocolVersion: '2024-11-05',
-            capabilities: {},
-            serverInfo: { name: 'remote', version: '0' }
+            resultType: 'complete',
+            supportedVersions: ['2026-07-28'],
+            capabilities: { tools: {} },
+            ttlMs: 60_000,
+            cacheScope: 'public',
+            _meta: {
+              'io.modelcontextprotocol/serverInfo': { name: 'remote', version: '0' }
+            }
           }
         : {
+            resultType: 'complete',
             tools: [
               {
                 name: 'search',
                 description: 'Search docs',
                 inputSchema: { type: 'object' }
               }
-            ]
+            ],
+            ttlMs: 60_000,
+            cacheScope: 'public'
           }
+
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        })
+      )
+    )
   })
-}
+)
 
 const mcpServers: ReadonlyArray<McpRemoteServerConfig> = [
   { name: 'docs', type: 'remote', url: 'https://example.com/mcp' }

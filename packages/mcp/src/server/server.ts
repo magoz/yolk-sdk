@@ -1,15 +1,24 @@
 import { Array as Arr, Effect, Option } from 'effect'
+import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
+  McpServer as SdkMcpServer,
+  createMcpHandler,
+  fromJsonSchema,
+  originValidationResponse,
+  type CallToolResult as SdkCallToolResult,
+  type ContentBlock as SdkContentBlock
+} from '@modelcontextprotocol/server'
+import {
   ToolCall,
+  ToolResult,
   attachmentSourceBase64,
   attachmentSourcePreview,
   contentParts,
   type ContentPart,
-  type ToolDef,
-  type ToolResult
+  type ToolDef
 } from '@yolk-sdk/agent/protocol'
-import { latestMcpProtocolVersion } from '@yolk-sdk/mcp/client'
+import { legacyMcpProtocolVersion } from '@yolk-sdk/mcp/client'
 import { McpServerError } from './errors.ts'
 
 type JsonRpcRequest = {
@@ -146,7 +155,7 @@ const protocolErrorResponse = (id: string | number | null, error: McpServerError
 
 const documentResourceUri = (filename: string) => `file:///${encodeURIComponent(filename)}`
 
-const mcpContentBlockFromPart = (part: ContentPart) => {
+const mcpContentBlockFromPart = (part: ContentPart): SdkContentBlock => {
   switch (part._tag) {
     case 'Text':
       return { type: 'text', text: part.text }
@@ -185,7 +194,7 @@ const mcpContentBlockFromPart = (part: ContentPart) => {
   }
 }
 
-const mcpResultFromToolResult = (result: ToolResult) => {
+const mcpResultFromToolResult = (result: ToolResult): SdkCallToolResult => {
   const content = Arr.map(contentParts(result.content), mcpContentBlockFromPart)
   const base = result.isError === undefined ? { content } : { content, isError: result.isError }
 
@@ -194,13 +203,14 @@ const mcpResultFromToolResult = (result: ToolResult) => {
     : { ...base, structuredContent: result.structuredContent }
 }
 
-const mcpErrorResult = (message: string) => ({
+const mcpErrorResult = (message: string): SdkCallToolResult => ({
   content: [{ type: 'text', text: message }],
   isError: true
 })
 
-const mcpResultFromExecutionResult = (result: ToolResult | ReturnType<typeof mcpErrorResult>) =>
-  'toolCallId' in result ? mcpResultFromToolResult(result) : result
+const mcpResultFromExecutionResult = (
+  result: ToolResult | ReturnType<typeof mcpErrorResult>
+): SdkCallToolResult => (result instanceof ToolResult ? mcpResultFromToolResult(result) : result)
 
 const toolListItem = (tool: ToolDef) => ({
   name: tool.name,
@@ -246,15 +256,65 @@ export const makeMcpToolServer = <R>(input: {
   readonly name: string
   readonly version: string
   readonly tools: ReadonlyArray<McpServerTool<R>>
+  readonly allowedOriginHostnames?: ReadonlyArray<string>
 }): McpToolServer<R> => {
   const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
+  const toolInputSchemas = input.tools.map(tool => ({
+    tool,
+    schema: Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))(
+      tool.def.parameters
+    ).pipe(Option.getOrElse(() => ({ type: 'object', additionalProperties: true })))
+  }))
+
+  const makeSdkServer = (context: Context.Context<R>) => {
+    const server = new SdkMcpServer(
+      { name: input.name, version: input.version },
+      {
+        cacheHints: {
+          'server/discover': { ttlMs: 0, cacheScope: 'private' },
+          'tools/list': { ttlMs: 0, cacheScope: 'private' }
+        }
+      }
+    )
+
+    for (const { schema, tool } of toolInputSchemas) {
+      server.registerTool(
+        tool.def.name,
+        {
+          description: tool.def.description,
+          inputSchema: fromJsonSchema(schema)
+        },
+        async (args, sdkContext) => {
+          const result = await Effect.runPromiseWith(context)(
+            tool
+              .execute(
+                ToolCall.make({
+                  id: String(sdkContext.mcpReq.id),
+                  name: tool.def.name,
+                  params: args
+                })
+              )
+              .pipe(
+                Effect.catch(error =>
+                  Effect.succeed(mcpErrorResult(`MCP tool failed: ${error.message}`))
+                )
+              )
+          )
+
+          return mcpResultFromExecutionResult(result)
+        }
+      )
+    }
+
+    return server
+  }
 
   const handleRequest = (request: JsonRpcRequest) =>
     Effect.gen(function* () {
       switch (request.method) {
         case 'initialize':
           return successResponse(request.id, {
-            protocolVersion: latestMcpProtocolVersion,
+            protocolVersion: legacyMcpProtocolVersion,
             capabilities: { tools: {} },
             serverInfo: { name: input.name, version: input.version }
           })
@@ -342,21 +402,46 @@ export const makeMcpToolServer = <R>(input: {
 
   const handleHttpRequest = (request: Request) =>
     Effect.gen(function* () {
-      if (request.method !== 'POST') {
-        const body = yield* methodNotAllowedBody()
-        return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
+      const targetHostname = new URL(request.url).hostname
+      const rejected = originValidationResponse(
+        request,
+        Array.from(input.allowedOriginHostnames ?? [targetHostname])
+      )
+      if (rejected !== undefined) {
+        return rejected
       }
 
-      const body = yield* Effect.promise(() => request.text()).pipe(
-        Effect.mapError(error => unknownToMessage(error)),
-        Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
-      )
+      if (!request.headers.has('mcp-protocol-version')) {
+        if (request.method !== 'POST') {
+          const body = yield* methodNotAllowedBody()
+          return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
+        }
 
-      const responseBody = yield* handleJson(body).pipe(
-        Effect.catch(error => badRequestBody(unknownToMessage(error)))
-      )
+        const body = yield* Effect.promise(() => request.text()).pipe(
+          Effect.mapError(error => unknownToMessage(error)),
+          Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
+        )
+        const responseBody = yield* handleJson(body).pipe(
+          Effect.catch(error => badRequestBody(unknownToMessage(error)))
+        )
+        return jsonResponse(responseBody)
+      }
 
-      return jsonResponse(responseBody)
+      const context = yield* Effect.context<R>()
+      const handler = createMcpHandler(() => makeSdkServer(context))
+
+      return yield* Effect.acquireUseRelease(
+        Effect.succeed(handler),
+        current =>
+          Effect.tryPromise(() => current.fetch(request)).pipe(
+            Effect.catch(error =>
+              badRequestBody(unknownToMessage(error)).pipe(
+                Effect.map(body => jsonResponse(body, { status: 400 }))
+              )
+            )
+          ),
+        current => Effect.promise(() => current.close()).pipe(Effect.catch(() => Effect.void))
+      )
     })
 
   return { handleLine, handleJson, handleHttpRequest }

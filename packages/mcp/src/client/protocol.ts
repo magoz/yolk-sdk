@@ -11,7 +11,8 @@ import {
 import type { Content, ContentPart } from '@yolk-sdk/agent/protocol'
 import { McpError } from './errors.ts'
 
-export const latestMcpProtocolVersion = '2024-11-05'
+export const latestMcpProtocolVersion = '2026-07-28'
+export const legacyMcpProtocolVersion = '2024-11-05'
 
 export const JsonRpcErrorObject = Schema.Struct({
   code: Schema.Number,
@@ -120,7 +121,7 @@ export const makeInitializeParams = (input: {
   readonly name: string
   readonly version: string
 }) => ({
-  protocolVersion: latestMcpProtocolVersion,
+  protocolVersion: legacyMcpProtocolVersion,
   capabilities: {},
   clientInfo: {
     name: input.name,

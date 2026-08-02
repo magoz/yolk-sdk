@@ -4,24 +4,28 @@
 
 ## Subpaths
 
-| Subpath                     | Source                   | Role                                                    |
-| --------------------------- | ------------------------ | ------------------------------------------------------- |
-| `@yolk-sdk/mcp/client`      | `src/client`             | Remote/local MCP client/config/tool adapters            |
-| `@yolk-sdk/mcp/client/node` | `src/client/node.ts`     | NodeServices wrappers for local MCP                     |
-| `@yolk-sdk/mcp/protocol`    | `src/client/protocol.ts` | JSON-RPC/MCP protocol helpers                           |
-| `@yolk-sdk/mcp/server`      | `src/server`             | Tool-only MCP server primitives, HTTP handler, stdio runner |
+| Subpath                     | Source                   | Role                                                       |
+| --------------------------- | ------------------------ | ---------------------------------------------------------- |
+| `@yolk-sdk/mcp/client`      | `src/client`             | Official full-core client plus Effect/Yolk tool adapters   |
+| `@yolk-sdk/mcp/client/node` | `src/client/node.ts`     | Official stdio transport plus NodeServices wrappers        |
+| `@yolk-sdk/mcp/core`        | `src/core.ts`            | Official MCP v2 wire schemas                               |
+| `@yolk-sdk/mcp/protocol`    | `src/client/protocol.ts` | Yolk JSON-RPC/MCP adapter helpers                          |
+| `@yolk-sdk/mcp/server`      | `src/server`             | Official full-core server plus Yolk tool-server primitives |
+| `@yolk-sdk/mcp/server/node` | `src/server/node.ts`     | Official dual-era stdio server entrypoint                  |
 
 ## Boundaries
 
 - MCP is external protocol infrastructure, not agent-core.
-- App auth, persisted config, policy, and product tool catalogs stay outside this package.
+- App auth, persisted config, credential storage, policy, and product catalogs stay outside this package. Generic MCP OAuth protocol helpers may be re-exported from the official SDK.
 - Keep NodeServices convenience wrappers behind `@yolk-sdk/mcp/client/node`; local client core stays in `@yolk-sdk/mcp/client`.
 - Client/server may use `@yolk-sdk/agent/protocol` for generic tool/content adapters; agent loop/providers remain MCP-agnostic.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 
 ## Client/server rules
 
-- Remote MCP uses Effect `HttpClient`; tests inject fake clients, apps provide runtime layers.
+- Effect/Yolk remote tool helpers use the official MCP v2 client over an Effect `HttpClient` fetch bridge; tests inject fake clients and apps provide runtime layers.
+- Official `Client` defaults remain unchanged; callers must select `versionNegotiation: { mode: 'auto' }` or pin `2026-07-28` to use the modern protocol.
+- Full-core server HTTP uses `createMcpHandler`; modern stdio uses `serveStdio` from the Node subpath. Both preserve legacy serving unless explicitly rejected.
 - Remote MCP requires `https:` by default; `http://localhost` is dev-policy gated.
 - Local stdio client core uses Effect platform process/stream APIs, not raw `node:child_process`; Node wrappers only provide `NodeServices.layer`.
 - Local stdio receives explicit env only, uses `extendEnv: false`, ignores stderr, validates `initialize`, and matches responses by JSON-RPC id.

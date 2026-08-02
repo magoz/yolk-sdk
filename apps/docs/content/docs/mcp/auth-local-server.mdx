@@ -73,6 +73,18 @@ agent tool: docs_search
 
 When executing a model tool call, map `call.name` back to the resolved MCP tool and call by raw `mcpToolName`.
 
+## Full MCP v2 server policy
+
+The official `Client`, `McpServer`, `createMcpHandler`, MRTR, subscriptions, and protocol helpers are exported from `@yolk-sdk/mcp/client`, `@yolk-sdk/mcp/server`, and `@yolk-sdk/mcp/core`.
+
+For HTTP servers:
+
+- Validate `Origin` and `Host` before `createMcpHandler().fetch`.
+- Authenticate every stateless request; do not rely on connection or session identity.
+- Partition `cacheScope: 'private'` entries by authorization context.
+- Integrity-protect MRTR `requestState` when it affects authorization, resource access, or business logic.
+- Treat self-reported client/server identity and tool annotations as untrusted.
+
 ## Tool-only MCP server
 
 Expose app-approved Yolk tools over MCP:
@@ -87,7 +99,7 @@ const server = makeMcpToolServer({
 })
 ```
 
-The server supports `initialize`, `tools/list`, and `tools/call`. It does not own routes, auth, resources, prompts, OAuth, or deployment.
+The adapter serves stateless MCP `2026-07-28` and initialize-based legacy HTTP clients for `tools/list` and `tools/call`. It does not own routes, auth, resources, prompts, or deployment. Use the official `McpServer` exports for the full core protocol.
 
 ## Policy checklist
 

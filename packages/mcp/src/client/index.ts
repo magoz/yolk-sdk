@@ -1,3 +1,5 @@
+export * from '@modelcontextprotocol/client'
+
 export { defaultMcpClientInfo, defaultMcpSecurityPolicy } from './config.ts'
 export type {
   McpClientInfo,
@@ -34,6 +36,7 @@ export {
   JsonRpcSuccessResponse,
   jsonRpcErrorToMcpError,
   latestMcpProtocolVersion,
+  legacyMcpProtocolVersion,
   makeInitializedNotification,
   makeInitializeParams,
   makeJsonRpcRequest,

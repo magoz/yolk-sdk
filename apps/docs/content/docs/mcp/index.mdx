@@ -13,7 +13,30 @@ Install:
 pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect
 ```
 
-## List remote MCP tools
+## Connect with the full MCP v2 client
+
+Use the official client API for tools, resources, prompts, completions, MRTR, subscriptions, response caching, and OAuth protocol helpers:
+
+```ts
+import { Client, StreamableHTTPClientTransport } from '@yolk-sdk/mcp/client'
+
+const client = new Client(
+  { name: 'my-app', version: '1.0.0' },
+  { versionNegotiation: { mode: 'auto' } }
+)
+
+await client.connect(new StreamableHTTPClientTransport(new URL('https://example.com/mcp')))
+
+const tools = await client.listTools()
+const resources = await client.listResources()
+const prompts = await client.listPrompts()
+```
+
+`mode: 'auto'` prefers stateless MCP `2026-07-28` and falls back to initialize-based servers. Use `{ pin: '2026-07-28' }` for modern-only behavior. The upstream `Client` default remains legacy for compatibility.
+
+Import official wire schemas from `@yolk-sdk/mcp/core`. Import Node stdio transports from `@yolk-sdk/mcp/client/node` and `@yolk-sdk/mcp/server/node`.
+
+## List remote MCP tools for a Yolk agent
 
 ```ts
 import { Effect } from 'effect'
@@ -66,9 +89,27 @@ example, explicit environment rules, and the required `allowLocalServers` opt-in
 
 Worker/browser code should stay on `@yolk-sdk/mcp/client`.
 
-## Expose tools through MCP
+## Build a full MCP v2 server
 
-Use `@yolk-sdk/mcp/server` to build a tool-only MCP server. Your app supplies HTTP routes, stdio entrypoints, auth, deployment, and tool policy.
+Use `McpServer` and `createMcpHandler` for tools, resources, prompts, completions, MRTR, and subscriptions:
+
+```ts
+import { McpServer, createMcpHandler } from '@yolk-sdk/mcp/server'
+
+const handler = createMcpHandler(() => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' })
+  // Register tools, resources, and prompts here.
+  return server
+})
+
+export default { fetch: handler.fetch }
+```
+
+`createMcpHandler` serves stateless MCP `2026-07-28` and legacy initialize-based HTTP clients. Put deployment authentication plus `Origin` and `Host` validation in front of `handler.fetch`.
+
+## Expose Yolk tools through MCP
+
+Use `makeMcpToolServer` from `@yolk-sdk/mcp/server` to expose a tool-only Yolk adapter. Its HTTP entrypoint accepts both modern and legacy requests. Use the official `McpServer` surface when you need other core capabilities.
 
 ## Security defaults
 

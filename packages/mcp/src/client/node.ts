@@ -1,3 +1,5 @@
+export * from '@modelcontextprotocol/client/stdio'
+
 import { Effect } from 'effect'
 import { NodeServices } from '@effect/platform-node'
 import type { McpLocalServerConfig, McpServerConfig } from './config.ts'

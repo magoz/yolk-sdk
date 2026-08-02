@@ -32,8 +32,10 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 - MCP APIs use explicit subpaths:
   - `@yolk-sdk/mcp/client`
   - `@yolk-sdk/mcp/client/node`
+  - `@yolk-sdk/mcp/core`
   - `@yolk-sdk/mcp/protocol`
   - `@yolk-sdk/mcp/server`
+  - `@yolk-sdk/mcp/server/node`
 - `@yolk-sdk/knowledge` owns knowledge document/file/context/search contracts. Public subpaths: `./documents`, `./files`, `./store`, `./context`, `./chunking`, `./embeddings`, `./extraction`, `./ingestion`, `./search`, `./summarization`, `./errors`, and `./agent`.
 - `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./figma`, `./google`, `./linkedin-search`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
@@ -59,7 +61,7 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 ```txt
 examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpaths
 @yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
-@yolk-sdk/mcp -> @yolk-sdk/agent/protocol only for tool/content adapters
+@yolk-sdk/mcp -> official @modelcontextprotocol v2 packages + @yolk-sdk/agent/protocol only for tool/content adapters
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
@@ -80,7 +82,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Use explicit `exports`; avoid broad root barrels for feature APIs.
 - No top-level env reads, service construction, SDK clients, or network calls in packages.
 - Import types as types; ESLint enforces `@typescript-eslint/consistent-type-imports`.
-- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`).
+- Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`).
 - Prefer runtime-portable Effect APIs in package code.
 
 ## Workspace Setup

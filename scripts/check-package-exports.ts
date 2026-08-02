@@ -46,7 +46,16 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
   {
     packageDir: 'packages/mcp',
     packageName: '@yolk-sdk/mcp',
-    expectedExports: ['./package.json', '.', './client', './client/node', './protocol', './server'],
+    expectedExports: [
+      './package.json',
+      '.',
+      './client',
+      './client/node',
+      './core',
+      './protocol',
+      './server',
+      './server/node'
+    ],
     tinyRoot: true
   },
   {

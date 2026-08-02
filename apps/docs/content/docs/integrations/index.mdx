@@ -33,15 +33,17 @@ See [Connectors catalog](./connectors) and [Add connector tools](./connector-too
 
 ## Runtime/platform integrations
 
-| Integration        | What ships                                                                               | Import                                         |
-| ------------------ | ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| MCP remote servers | list/call remote MCP tools over HTTP                                                     | `@yolk-sdk/mcp/client`                         |
-| MCP local stdio    | Node-only stdio MCP client helpers                                                       | `@yolk-sdk/mcp/client/node`                    |
-| MCP tool server    | expose Yolk tools as a tool-only MCP server                                              | `@yolk-sdk/mcp/server`                         |
-| Knowledge search   | document schemas, pinned context, ingestion/search contracts, lookup/manage tool helpers | `@yolk-sdk/knowledge/*`                        |
-| Sandbox execution  | core sandbox service, one destructive agent tool                                         | `@yolk-sdk/sandbox`, `@yolk-sdk/sandbox/agent` |
-| Vercel Sandbox     | concrete sandbox provider layer                                                          | `@yolk-sdk/sandbox/vercel`                     |
-| Vercel Workflows   | durable workflow loop contract                                                           | `@yolk-sdk/vercel-workflows`                   |
+| Integration          | What ships                                                                                                                   | Import                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| MCP full-core client | MCP `2026-07-28` tools, resources, prompts, completions, MRTR, subscriptions, caching, OAuth helpers, and legacy negotiation | `@yolk-sdk/mcp/client`                         |
+| MCP local stdio      | Node-only full-core stdio transport plus Yolk convenience helpers                                                            | `@yolk-sdk/mcp/client/node`                    |
+| MCP full-core server | Dual-era HTTP, resources, prompts, completions, MRTR, and subscriptions                                                      | `@yolk-sdk/mcp/server`                         |
+| MCP stdio server     | Node-only dual-era `serveStdio`                                                                                              | `@yolk-sdk/mcp/server/node`                    |
+| MCP Yolk tool server | Expose Yolk tools through a minimal dual-era MCP server                                                                      | `@yolk-sdk/mcp/server`                         |
+| Knowledge search     | document schemas, pinned context, ingestion/search contracts, lookup/manage tool helpers                                     | `@yolk-sdk/knowledge/*`                        |
+| Sandbox execution    | core sandbox service, one destructive agent tool                                                                             | `@yolk-sdk/sandbox`, `@yolk-sdk/sandbox/agent` |
+| Vercel Sandbox       | concrete sandbox provider layer                                                                                              | `@yolk-sdk/sandbox/vercel`                     |
+| Vercel Workflows     | durable workflow loop contract                                                                                               | `@yolk-sdk/vercel-workflows`                   |
 
 ## Not included
 
