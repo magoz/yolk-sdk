@@ -470,7 +470,7 @@ describe('@yolk-sdk/connectors', () => {
         _tag: 'Success',
         value: {
           provider: 'afloat',
-          serverUrl: 'https://app.useafloat.com/mcp',
+          serverUrl: 'https://useafloat.com/mcp',
           protocolVersion: '2026-07-28',
           apiKey: 'afloat_test_key'
         }

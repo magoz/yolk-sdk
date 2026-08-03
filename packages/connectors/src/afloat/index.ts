@@ -9,7 +9,7 @@ import type { ConnectorIntegration } from '../integration.ts'
 
 export const afloatConnectorId = 'afloat'
 export const afloatApiKeySlotId = 'afloat.api_key'
-export const afloatMcpServerUrl = 'https://app.useafloat.com/mcp'
+export const afloatMcpServerUrl = 'https://useafloat.com/mcp'
 export const afloatMcpProtocolVersion = '2026-07-28'
 
 export const AfloatApiKeyCredentialSlot = CredentialSlot.make({
