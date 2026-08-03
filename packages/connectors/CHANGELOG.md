@@ -1,5 +1,12 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.51
+
+### Patch Changes
+
+- d0f1744: Use Afloat's deployed `https://useafloat.com/mcp` endpoint for remote MCP connections.
+  - @yolk-sdk/agent@0.1.0-canary.51
+
 ## 0.1.0-canary.50
 
 ### Minor Changes

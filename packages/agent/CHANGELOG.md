@@ -1,5 +1,7 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.51
+
 ## 0.1.0-canary.50
 
 ## 0.1.0-canary.49
