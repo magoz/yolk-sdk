@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.50
+
+### Minor Changes
+
+- 123dabf: Add an official Afloat remote MCP connector contract with the canonical endpoint, required MCP protocol version, API-key credential slot, and server-side auth-data action.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.50
+
 ## 0.1.0-canary.49
 
 ### Patch Changes

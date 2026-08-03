@@ -13,6 +13,7 @@
     "@yolk-docs/site": "0.0.0"
   },
   "changesets": [
+    "afloat-connector",
     "brave-hitl-rules",
     "bright-codex-files",
     "bright-knowledge-documents",
@@ -34,6 +35,7 @@
     "golden-yolks-unify",
     "harden-lone-surrogates",
     "honest-transports-reflect",
+    "modern-mcp-core",
     "neat-agent-streams",
     "next-canary-release",
     "olive-usage-tokens",
