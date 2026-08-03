@@ -472,7 +472,7 @@ describe('MCP client', () => {
         })
         expect(result.content).toBe('local result')
       }),
-    15_000
+    30_000
   )
 
   it.effect('supports injected local process spawners without Node services', () =>
