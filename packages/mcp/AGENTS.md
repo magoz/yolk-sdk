@@ -32,6 +32,7 @@
 - Decode wire JSON in two steps: JSON string → unknown (`Schema.UnknownFromJsonString`) → protocol schema.
 - Server `handleHttpRequest` maps JSON parse errors to `-32700`; invalid JSON-RPC/request params to `-32600`.
 - Server stdio runner uses Effect `Stdio`; hosts provide the platform layer.
+- Preserve discovered MCP `title`, input/output schemas, and annotations when adapting tools.
 - Preserve MCP `structuredContent`, `isError`, and supported content blocks when adapting tool results.
 - Server maps protocol documents to MCP resource blocks with encoded `file:///...` URIs.
 - Export normal tool results/content; agent loop/providers stay MCP-agnostic.
