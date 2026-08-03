@@ -32,6 +32,7 @@ import {
   makeJsonRpcRequest,
   mcpToolToToolDef,
   toolCallResultToToolResult,
+  type McpToolAnnotations,
   type JsonRpcNotification,
   type JsonRpcRequest,
   type JsonRpcResponse
@@ -51,6 +52,9 @@ export type McpClientOptions = {
 export type McpResolvedTool = {
   readonly serverName: string
   readonly mcpToolName: string
+  readonly title?: string
+  readonly outputSchema?: unknown
+  readonly annotations?: McpToolAnnotations
   readonly def: ReturnType<typeof mcpToolToToolDef>
 }
 
@@ -341,6 +345,9 @@ const resolveMcpTools = (config: McpServerConfig, result: unknown) =>
     return tools.tools.map(tool => ({
       serverName: config.name,
       mcpToolName: tool.name,
+      title: tool.title,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
       def: mcpToolToToolDef({ serverName: config.name, tool })
     }))
   })

@@ -56,10 +56,16 @@ export type JsonRpcNotification = typeof JsonRpcNotification.Type
 export const JsonRpcMessage = Schema.Union([JsonRpcRequest, JsonRpcNotification])
 export type JsonRpcMessage = typeof JsonRpcMessage.Type
 
+export const McpToolAnnotations = Schema.Record(Schema.String, Schema.Unknown)
+export type McpToolAnnotations = typeof McpToolAnnotations.Type
+
 export const McpTool = Schema.Struct({
   name: Schema.String,
+  title: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
-  inputSchema: Schema.optional(Schema.Unknown)
+  inputSchema: Schema.optional(Schema.Unknown),
+  outputSchema: Schema.optional(Schema.Unknown),
+  annotations: Schema.optional(McpToolAnnotations)
 })
 export type McpTool = typeof McpTool.Type
 

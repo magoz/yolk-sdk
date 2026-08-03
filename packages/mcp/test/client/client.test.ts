@@ -47,6 +47,7 @@ type ResponseMode =
   | 'status-error'
   | 'timeout'
   | 'duplicate-tools'
+  | 'metadata'
   | 'tool-error'
   | 'rich-result'
   | 'legacy'
@@ -205,7 +206,20 @@ const makeFakeRemoteMcpLayer = (mode: ResponseMode): Layer.Layer<HttpClient.Http
                             {
                               name: 'search',
                               description: 'Search',
-                              inputSchema: { type: 'object' }
+                              inputSchema: { type: 'object' },
+                              ...(mode === 'metadata'
+                                ? {
+                                    title: 'Search records',
+                                    outputSchema: {
+                                      type: 'object',
+                                      properties: { records: { type: 'array' } }
+                                    },
+                                    annotations: {
+                                      readOnlyHint: true,
+                                      destructiveHint: false
+                                    }
+                                  }
+                                : {})
                             }
                           ]
                   }
@@ -284,9 +298,20 @@ describe('MCP client', () => {
       const options = { securityPolicy: { allowLocalServers: false, allowDevHttpLocalhost: false } }
 
       const tools = yield* listRemoteMcpServerTools(config, options).pipe(
-        Effect.provide(makeFakeRemoteMcpLayer('json'))
+        Effect.provide(makeFakeRemoteMcpLayer('metadata'))
       )
-      expect(tools.map(tool => tool.def.name)).toEqual(['remote_search'])
+      expect(tools).toMatchObject([
+        {
+          mcpToolName: 'search',
+          title: 'Search records',
+          outputSchema: { type: 'object', properties: { records: { type: 'array' } } },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false
+          },
+          def: { name: 'remote_search' }
+        }
+      ])
 
       const result = yield* callRemoteMcpServerTool({
         config,
