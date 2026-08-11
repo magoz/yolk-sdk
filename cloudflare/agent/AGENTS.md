@@ -78,7 +78,7 @@ Do not build these here yet unless explicitly requested:
 - Keep agent/MCP packages provider-neutral; provider subpaths stay host-runtime agnostic.
 - Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
-- Bootstrapped Codex and Anthropic construction must use `agentTextModelMaxOutputTokens(model)`; direct/proxied `CodexWsConfig.maxOutputTokens` and Claude `maxTokens` are required, with no Worker-owned fallback.
+- Bootstrapped Codex and Anthropic construction must use `agentTextModelMaxOutputTokens(model)`; direct/proxied `CodexWsConfig.maxOutputTokens` and Claude `maxTokens` are required, with no Worker-owned fallback. Codex retains the required config but omits unsupported vendor `max_output_tokens`.
 - Centralize provider refresh in Next; DO caches `TokenBrokerResponse` (`provider`, `accessToken`, `expiresAt`, optional `accountId`) only and never stores refresh tokens.
 - Codex provider is proxy-first from DO: Browser ↔ Worker/DO stays WebSocket, DO ↔ Next uses the internal streaming HTTP Codex proxy. Direct Codex WebSocket code remains as dormant fallback for unproxied configs/experiments.
 - Token broker requests use provider ids from `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` and `@yolk-sdk/agent/oauth` broker contracts.

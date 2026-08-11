@@ -23,6 +23,13 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### `0.1.0-canary.52`: Codex omits the unsupported output limit
+
+ChatGPT subscription Codex requests no longer send `max_output_tokens` because the endpoint rejects
+that field. `OpenAiCodexProviderConfig.maxOutputTokens` remains required host configuration in this
+canary API, but the adapter does not serialize it. Existing host construction code does not need to
+change.
+
 ### `0.1.0-canary.48`: required provider output limits
 
 Provider constructors no longer infer output-token limits or apply hidden fallbacks. Supply the

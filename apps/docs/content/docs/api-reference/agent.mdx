@@ -223,7 +223,8 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 Provider output limits are required and host-owned:
 
 - `OpenAiProviderConfig.maxCompletionTokens` becomes vendor `max_completion_tokens`.
-- `OpenAiCodexProviderConfig.maxOutputTokens` becomes vendor `max_output_tokens`.
+- `OpenAiCodexProviderConfig.maxOutputTokens` remains required host configuration, but ChatGPT
+  subscription Codex requests omit unsupported vendor `max_output_tokens`.
 - `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
 - `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
   `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.

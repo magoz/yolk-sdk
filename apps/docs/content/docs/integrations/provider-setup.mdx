@@ -48,6 +48,9 @@ const CodexLayer = makeOpenAiCodexProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
+`maxOutputTokens` remains required host configuration, but the ChatGPT subscription endpoint rejects
+vendor `max_output_tokens`, so the adapter omits that field from requests.
+
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and `@yolk-sdk/agent/providers/openai/codex`.
 
 ## Anthropic Claude Code
