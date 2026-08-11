@@ -182,11 +182,11 @@ describe('OpenAiCodexProviderLayer', () => {
         'Bearer access-token'
       )
       expect(Option.getOrUndefined(Headers.get(headers, 'ChatGPT-Account-Id'))).toBe('acct_test')
+      expect(requestBody).not.toHaveProperty('max_output_tokens')
       expect(requestBody).toMatchObject({
         model: 'gpt-5.4',
         instructions: 'Be brief.',
         input: [{ role: 'user', content: 'hello' }],
-        max_output_tokens: 123,
         store: false,
         stream: true,
         reasoning: { effort: 'low', summary: 'auto' }

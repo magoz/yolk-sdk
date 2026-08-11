@@ -120,7 +120,6 @@ type OpenAiCodexRequestBody = {
   readonly model: string
   readonly instructions: string
   readonly input: ReadonlyArray<OpenAiCodexInputItem>
-  readonly max_output_tokens: number
   readonly store: false
   readonly stream: true
   readonly reasoning: {
@@ -427,7 +426,6 @@ export const toOpenAiCodexRequestBody = (
       model: request.model,
       instructions: request.systemPrompt,
       input,
-      max_output_tokens: config.maxOutputTokens,
       store: false,
       stream: true,
       reasoning: {

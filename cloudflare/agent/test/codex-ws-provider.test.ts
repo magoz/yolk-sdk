@@ -131,7 +131,7 @@ describe('Codex WS request body', () => {
 
     expect(body.type).toBe('response.create')
     expect(body.stream).toBe(true)
-    expect(body.max_output_tokens).toBe(123)
+    expect(body).not.toHaveProperty('max_output_tokens')
     expect(body.instructions).toBe('You are a smoke test assistant.')
     expect(body.input).toEqual([{ role: 'user', content: 'Reply with exactly: pong' }])
     expect(body.reasoning.effort).toBe('low')

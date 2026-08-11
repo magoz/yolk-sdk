@@ -12,7 +12,7 @@ Alchemy state is local under `.alchemy/state` for now.
 - DO storage persists the protocol transcript.
 - Smoke and unbootstrapped sessions use a faux provider for deterministic infra/runtime validation.
 - Bootstrapped sessions select Anthropic Claude or OpenAI Codex from app-provided model/token broker configuration.
-- Both provider paths use the selected host model's required output-token limit; the Worker does not infer limits.
+- Both provider constructors receive the selected host model's required output-token configuration; the Worker does not infer limits. Codex omits the unsupported vendor `max_output_tokens` field.
 
 ## Commands
 

@@ -95,6 +95,7 @@ describe('OpenAI Codex provider', () => {
         { defaultReasoningEffort: 'low', reasoningSummary: 'detailed' }
       )
 
+      expect(body).not.toHaveProperty('max_output_tokens')
       expect(body).toEqual({
         model: 'gpt-5.4',
         instructions: 'Be concise.',
@@ -119,7 +120,6 @@ describe('OpenAI Codex provider', () => {
           },
           { type: 'function_call_output', call_id: 'call-1', output: 'result' }
         ],
-        max_output_tokens: openAiCodexTestMaxOutputTokens,
         store: false,
         stream: true,
         reasoning: { effort: 'medium', summary: 'detailed' },

@@ -113,14 +113,16 @@ Provider output limits are required and host-owned. Yolk does not infer model li
 fallbacks.
 
 | Provider factory                       | Required output-limit field |
-| ---------------------------------- | --------------------------- |
-| `makeOpenAiProviderLayer`              | `maxCompletionTokens`    |
-| `makeOpenAiCodexProviderLayer`         | `maxOutputTokens`        |
-| `makeAnthropicClaudeProviderLayer`     | `maxTokens`              |
+| -------------------------------------- | --------------------------- |
+| `makeOpenAiProviderLayer`              | `maxCompletionTokens`       |
+| `makeOpenAiCodexProviderLayer`         | `maxOutputTokens`           |
+| `makeAnthropicClaudeProviderLayer`     | `maxTokens`                 |
 
 The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
-`toAnthropicClaudeRequestBody` helpers require the same limit configuration. `OpenAiProviderLayer`
-reads both `OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+`toAnthropicClaudeRequestBody` helpers require the same limit configuration. ChatGPT subscription
+Codex rejects vendor `max_output_tokens`, so the Codex adapter retains the required host config but
+omits that field from requests. `OpenAiProviderLayer` reads both `OPENAI_API_KEY` and integer
+`OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
 ## Provider failures and retries
 
