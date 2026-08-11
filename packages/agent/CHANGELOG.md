@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.52
+
+### Patch Changes
+
+- 15d0159: Omit the unsupported `max_output_tokens` field from ChatGPT subscription Codex requests while retaining required host `maxOutputTokens` configuration.
+
 ## 0.1.0-canary.51
 
 ## 0.1.0-canary.50

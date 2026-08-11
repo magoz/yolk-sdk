@@ -1,5 +1,12 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.52
+
+### Patch Changes
+
+- Updated dependencies [15d0159]
+  - @yolk-sdk/agent@0.1.0-canary.52
+
 ## 0.1.0-canary.51
 
 ### Patch Changes
