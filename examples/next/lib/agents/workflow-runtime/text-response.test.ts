@@ -3,17 +3,17 @@ import { describe, expect, it } from '@effect/vitest'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
 
-const taskToolStart = source.indexOf(
+const subagentToolStart = source.indexOf(
   'const subagentToolModule = makeNonRecursiveSubagentToolModule'
 )
-const taskExecuteSource = source.slice(
-  taskToolStart,
-  source.indexOf('const toolModules', taskToolStart)
+const subagentExecuteSource = source.slice(
+  subagentToolStart,
+  source.indexOf('const toolModules', subagentToolStart)
 )
 
 describe('makeAgentTextRuntime subagent tool wiring', () => {
   it('adds subagent tool to top-level text runtime', () => {
-    expect(taskToolStart).toBeGreaterThanOrEqual(0)
+    expect(subagentToolStart).toBeGreaterThanOrEqual(0)
     expect(source).toContain('const knowledgeToolModule = makeAppKnowledgeToolModule()')
     expect(source).toContain('const storageToolModule = makeAppStorageKnowledgeSearchToolModule()')
     expect(source).toContain(
@@ -29,18 +29,20 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
   })
 
   it('omits subagent tool from subagent toolsets', () => {
-    expect(taskExecuteSource).toContain('subagent: true')
-    expect(taskExecuteSource).toContain('modules: subagentToolModules')
-    expect(taskExecuteSource).not.toContain('modules: toolModules')
+    expect(subagentExecuteSource).toContain('subagent: true')
+    expect(subagentExecuteSource).toContain('modules: subagentToolModules')
+    expect(subagentExecuteSource).not.toContain('modules: toolModules')
+    expect(subagentExecuteSource).toContain(':subagent:${call.id}')
+    expect(subagentExecuteSource).not.toContain(':task:${call.id}')
   })
 
-  it('returns subagent failures as task results', () => {
-    expect(taskExecuteSource).toContain("Effect.catchTag('ToolError'")
-    expect(taskExecuteSource).toContain('Subagent failed:')
-    expect(taskExecuteSource).toContain('isError: true')
+  it('returns subagent failures as subagent results', () => {
+    expect(subagentExecuteSource).toContain("Effect.catchTag('ToolError'")
+    expect(subagentExecuteSource).toContain('Subagent failed:')
+    expect(subagentExecuteSource).toContain('isError: true')
   })
 
-  it('adds task timing metadata to structured results', () => {
+  it('adds subagent timing metadata to structured results', () => {
     expect(source).toContain('makeSubagentToolResult')
     expect(source).toContain('subagentToolRunId')
     expect(source).toContain('startedAtMs')

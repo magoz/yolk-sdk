@@ -368,14 +368,14 @@ export const makeAgentTextRuntime = (
               modules: subagentToolModules,
               context: {
                 ...context,
-                sessionId: `${context.sessionId ?? input.sessionId}:task:${call.id}`,
+                sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
                 subagent: true
               }
             }).pipe(Effect.mapError(toolRegistryErrorToToolError))
             const eventsChunk = yield* runRuntime(
               {
                 _tag: 'Transcript',
-                sessionId: `${input.sessionId}:task:${call.id}`,
+                sessionId: `${input.sessionId}:subagent:${call.id}`,
                 messages: [UserMessage.make({ content: params.prompt })]
               },
               {

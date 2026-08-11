@@ -155,7 +155,7 @@ describe('subagent tool', () => {
     })
   )
 
-  it.effect('executes a known subagent task with runtime selections', () =>
+  it.effect('executes a known subagent with runtime selections', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [

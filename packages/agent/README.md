@@ -24,7 +24,7 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration              |
 | `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
 | `@yolk-sdk/agent/compaction`                          | Host-owned compaction budgets, checkpoints, formatting, retry  |
-| `@yolk-sdk/agent/tools`                               | Tool module registry, `makeTool`, task/question tool contracts |
+| `@yolk-sdk/agent/tools`                               | Tool registry, `makeTool`, subagent/question contracts         |
 | `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model |
 | `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts              |
 | `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                          |

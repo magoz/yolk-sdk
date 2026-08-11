@@ -1421,7 +1421,7 @@ describe('run', () => {
   it.effect('emits subagent lifecycle events for subagent tool calls', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({
-        id: 'call_task',
+        id: 'call_subagent',
         name: 'subagent',
         params: { description: 'inspect bug', prompt: 'inspect', subagent_type: 'general' }
       })
@@ -1439,7 +1439,7 @@ describe('run', () => {
         'SubagentCompleted'
       ])
       expect(events[1]).toMatchObject({
-        parentToolCallId: 'call_task',
+        parentToolCallId: 'call_subagent',
         subagentRunId: makeSubagentRunId(call.id),
         subagentType: 'general',
         description: 'inspect bug',
@@ -1456,12 +1456,12 @@ describe('run', () => {
   it.effect('starts same-turn subagents before waiting for completions', () =>
     Effect.gen(function* () {
       const slow = ToolCall.make({
-        id: 'call_slow_task',
+        id: 'call_slow_subagent',
         name: 'subagent',
         params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
       })
       const fast = ToolCall.make({
-        id: 'call_fast_task',
+        id: 'call_fast_subagent',
         name: 'subagent',
         params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
       })
