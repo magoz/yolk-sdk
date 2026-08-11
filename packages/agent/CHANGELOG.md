@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.53
+
+### Minor Changes
+
+- a47adb1: Let hosts expose validated model and reasoning-effort choices on the task subagent tool, and include the selected reasoning effort in structured task results.
+
 ## 0.1.0-canary.52
 
 ### Patch Changes
