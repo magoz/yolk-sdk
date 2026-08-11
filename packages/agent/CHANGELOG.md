@@ -1,5 +1,15 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.54
+
+### Minor Changes
+
+- Forward supported protocol reasoning efforts to Anthropic Claude through `output_config.effort`.
+
+### Patch Changes
+
+- Preserve every sibling function call in streamed OpenAI Codex Responses while deduplicating final-response replays by call ID.
+
 ## 0.1.0-canary.53
 
 ### Minor Changes

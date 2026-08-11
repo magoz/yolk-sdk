@@ -14,6 +14,7 @@
   },
   "changesets": [
     "afloat-connector",
+    "anthropic-reasoning-effort",
     "brave-hitl-rules",
     "bright-codex-files",
     "bright-knowledge-documents",
@@ -33,6 +34,7 @@
     "flexible-task-runtimes",
     "fresh-tools-shout",
     "fresh-yolks-walk",
+    "fuzzy-codex-siblings",
     "fuzzy-documents-chat",
     "gentle-attachments",
     "golden-yolks-unify",
