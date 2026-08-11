@@ -389,7 +389,9 @@ Recommended setup:
 - omit `task` from subagent toolsets
 - include only tools that are safe for autonomous delegated work
 - use `makeSubagentRunId(call.id)` for protocol-aligned run ids
-- return `makeTaskToolResult(...)` so UI can show subagent id, type, status, model, and timing
+- optionally configure model and reasoning-effort choices so the parent can select child runtime settings
+- treat omitted `model` and `reasoning_effort` parameters as inheritance of host runtime settings
+- return `makeTaskToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, and timing
 
 Keep host-owned subagent execution wiring outside this package; pass only the package task contract across the boundary.
 

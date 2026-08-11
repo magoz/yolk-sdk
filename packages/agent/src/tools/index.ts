@@ -42,6 +42,9 @@ export type {
 export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 export type {
   TaskExecutionInput,
+  TaskModelDefinition,
+  TaskReasoningEffortDefinition,
+  TaskRuntimeSelectionOptions,
   TaskSubagentContext,
   TaskSubagentDefinition,
   TaskToolOptions,

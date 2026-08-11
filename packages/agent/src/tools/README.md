@@ -51,7 +51,11 @@ aborts, and implementation bugs outside typed tool execution.
 
 `task` is the standard tool for delegating focused work to a subagent. The SDK owns the
 tool schema, validation, event metadata shape, and result formatting. Host apps still own
-execution: model choice, provider layer, prompt, auth, concrete tools, storage, and policy.
+execution: available model/reasoning choices, provider layers, prompts, auth, concrete tools,
+storage, and policy. When choices are configured, the tool exposes optional `model` and
+`reasoning_effort` fields; omission lets the host inherit its current runtime settings. Model ids
+are opaque host values. Reasoning effort values are `minimal`, `low`, `medium`, `high`, and
+`xhigh`.
 
 Use `makeNonRecursiveTaskToolModule` for the top-level agent so nested subagents do not receive
 `task` again:
@@ -77,10 +81,20 @@ const taskToolModule = makeNonRecursiveTaskToolModule<ToolContext>({
     { name: 'general', description: 'Handle complex multi-step work.' },
     { name: 'explore', description: 'Explore code and docs.' }
   ],
+  models: [
+    { id: 'gpt-5.5', description: 'Strong general-purpose model.' },
+    { id: 'fast-model', description: 'Fast model for focused exploration.' }
+  ],
+  reasoningEfforts: [
+    { value: 'medium', description: 'Balanced default for normal exploration.' },
+    { value: 'high', description: 'Use for difficult reasoning.' }
+  ],
   execute: ({ call, context, params }) =>
     Effect.gen(function* () {
       const startedAtMs = yield* Clock.currentTimeMillis
       const subagentRunId = makeSubagentRunId(call.id)
+      const model = params.model ?? 'gpt-5.5'
+      const reasoningEffort = params.reasoning_effort ?? 'medium'
       const subagentToolSet = yield* resolveSubagentToolSet({
         ...context,
         subagent: true
@@ -89,7 +103,8 @@ const taskToolModule = makeNonRecursiveTaskToolModule<ToolContext>({
         messages: [UserMessage.make({ content: params.prompt })],
         systemPrompt: subagentSystemPrompt(params.subagent_type),
         tools: subagentToolSet.tools,
-        model: 'gpt-5.5'
+        model,
+        reasoningEffort
       }).pipe(Stream.runCollect, Effect.provide(makeToolExecutorLayer(subagentToolSet)))
       const endedAtMs = yield* Clock.currentTimeMillis
 
@@ -101,11 +116,16 @@ const taskToolModule = makeNonRecursiveTaskToolModule<ToolContext>({
         subagentRunId,
         startedAtMs,
         endedAtMs,
-        model: 'gpt-5.5'
+        model,
+        reasoningEffort
       })
     })
 })
 ```
+
+Host apps should advertise only runtime choices they can execute. If support depends on the
+selected model, validate the model/reasoning combination before constructing the child provider
+layer and return a model-visible error for unsupported combinations.
 
 Host apps should usually resolve a smaller subagent toolset:
 

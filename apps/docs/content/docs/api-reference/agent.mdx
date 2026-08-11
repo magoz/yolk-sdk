@@ -24,7 +24,7 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 | `AgentModelCapabilities`, `textOnlyModelCapabilities`, `textImageModelCapabilities`, `textImageDocumentModelCapabilities` | model input capability helpers |
 | `ProviderErrorInfo`, `ProviderFailureKind`                                                                                | safe provider error metadata   |
 | `AgentUsage`, `addAgentUsage`, `zeroAgentUsage`                                                                           | usage accounting helpers       |
-| `CompactionStart`, `CompactionEnd`                                                                                         | compaction lifecycle events    |
+| `CompactionStart`, `CompactionEnd`                                                                                        | compaction lifecycle events    |
 | `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers   |
 
 ## Loop
@@ -86,9 +86,108 @@ Runtime request tags:
 | `ToolAccess`                     | `read`, `write`, `destructive`                            |
 | `makeQuestionToolModule`         | built-in question HITL tool                               |
 | `makeNonRecursiveTaskToolModule` | subagent task tool without recursion                      |
+| `TaskRuntimeSelectionOptions`    | host-advertised subagent model and reasoning choices      |
+| `TaskModelDefinition`            | model id and model-visible selection guidance             |
+| `TaskReasoningEffortDefinition`  | reasoning effort and model-visible selection guidance     |
 | `modelVisibleToolError`          | recoverable error visible to model                        |
 
 Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolResult`, `taskToolName`, `makeQuestionToolDef`, `questionToolName`.
+
+Configure `models` and `reasoningEfforts` on a task tool module to expose validated optional
+`model` and `reasoning_effort` parameters to the parent agent. Omission means the host should
+inherit its current runtime setting. Hosts remain responsible for provider credentials, capability
+checks, and constructing the selected child runtime. Pass the effective effort to
+`makeTaskToolResult` as `reasoningEffort` to include `reasoning_effort` in structured result
+metadata.
+
+The public task types are:
+
+```ts
+// TypeScript fragments
+
+type TaskSubagentDefinition = {
+  readonly name: string
+  readonly description: string
+}
+
+type TaskModelDefinition = {
+  readonly id: string
+  readonly description: string
+}
+
+type TaskReasoningEffortDefinition = {
+  readonly value: AgentReasoningEffort
+  readonly description: string
+}
+
+type TaskRuntimeSelectionOptions = {
+  readonly models?: ReadonlyArray<TaskModelDefinition>
+  readonly reasoningEfforts?: ReadonlyArray<TaskReasoningEffortDefinition>
+}
+
+type TaskSubagentContext = {
+  readonly subagent?: boolean
+}
+
+type TaskToolParams = {
+  readonly description: string
+  readonly prompt: string
+  readonly subagent_type: string
+  readonly model?: string
+  readonly reasoning_effort?: AgentReasoningEffort
+}
+
+type TaskExecutionInput<Context> = {
+  readonly call: ToolCall
+  readonly context: Context
+  readonly params: TaskToolParams
+}
+
+type TaskToolOptions<Context> = TaskRuntimeSelectionOptions & {
+  readonly subagents: ReadonlyArray<TaskSubagentDefinition>
+  readonly isEnabled?: (
+    context: Context
+  ) => Effect.Effect<boolean, ToolRegistryError>
+  readonly execute: (
+    input: TaskExecutionInput<Context>
+  ) => Effect.Effect<ToolResult, ToolError>
+}
+
+type TaskToolResultInput = {
+  readonly callId: string
+  readonly output: string
+  readonly subagentType: string
+  readonly description: string
+  readonly subagentRunId: string
+  readonly startedAtMs: number
+  readonly endedAtMs: number
+  readonly model: string
+  readonly reasoningEffort?: AgentReasoningEffort
+  readonly isError?: boolean
+}
+```
+
+`AgentReasoningEffort` accepts `minimal`, `low`, `medium`, `high`, or `xhigh`. Model IDs are
+host-owned opaque strings and are not normalized by the task tool.
+
+Task helper signatures:
+
+| Helper | Signature and return |
+| ------ | -------------------- |
+| `makeTaskToolDef` | `(subagents: ReadonlyArray<TaskSubagentDefinition>, runtimeSelections?: TaskRuntimeSelectionOptions) => ToolDef` |
+| `makeTaskToolRegistration` | `<Context>(options: TaskToolOptions<Context>) => ToolRegistration<Context>` |
+| `makeTaskToolModule` | `<Context>(options: TaskToolOptions<Context>) => ToolModule<Context>` |
+| `makeNonRecursiveTaskToolModule` | `<Context extends TaskSubagentContext>(options: TaskToolOptions<Context>) => ToolModule<Context>` |
+| `makeTaskToolResult` | `(input: TaskToolResultInput) => ToolResult` |
+| `formatTaskResult` | `(output: string) => string` |
+| `subagentResultText` | `(events: ReadonlyArray<AgentEvent>) => string` |
+| `taskSubagentRunId` | `(parentToolCallId: string) => string` |
+| `taskToolName` | `"task"` |
+
+Selections outside the configured enums, empty required strings, and unknown subagent types return
+model-visible validation results before host execution. Their structured error reason is
+`validation`. The host `execute` callback may fail with `ToolError`. `makeTaskToolResult` includes
+`reasoning_effort` only when `reasoningEffort` is provided.
 
 ## Client
 
@@ -109,7 +208,7 @@ Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolRes
 | `agentRunIdFromHeaders`, `agentRunStreamTailIndexFromHeaders`, `agentRunStreamStartIndexFromHeaders`, `agentRunEndpointWithStartIndex` | durable route header helpers                   |
 | `initialAgentClientState`, `applyAgentEvent`, `reduceAgentEvents`                                                                      | client reducer helpers                         |
 | `toolRunsFromHitlRequests`                                                                                                             | paused UI hydration                            |
-| `documentPartFromTextFile`, `textFromBlob`                                                                                           | browser file/blob helpers returning `Effect`   |
+| `documentPartFromTextFile`, `textFromBlob`                                                                                             | browser file/blob helpers returning `Effect`   |
 | `AgentTransportError`                                                                                                                  | transport and decoding failure                 |
 
 ## React
@@ -181,18 +280,18 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 
 `@yolk-sdk/agent/voice`
 
-| Export                                                                                             | Purpose                                                             |
+| Export                                                                                                                                                                                                                                               | Purpose                                                             |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError`                            | provider-neutral voice protocol                                     |
-| `makeVoiceController`                                                                              | client controller: tool forwarding, approval pause/resume, batching |
-| `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput`    | server-side tool policy/execution                                   |
-| `VoiceSessionToolCallRequest`, `VoiceToolCallOutcome`                                              | server tool endpoint wire contracts                                 |
-| `executeVoiceToolCall`, `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError` | tool bridge over `ToolExecutor`                                     |
-| `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages`                     | transcript projection and reconnect seeds                           |
-| `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId`            | replay-safe durable voice events                                    |
-| `makeWebSocketVoiceTransport`                                                                      | Effect Socket voice transport for Node/server runtimes              |
+| `VoiceEvent`, `VoiceCommand`, `VoiceSessionConfig`, `VoiceSessionError`                                                                                                                                                                              | provider-neutral voice protocol                                     |
+| `makeVoiceController`                                                                                                                                                                                                                                | client controller: tool forwarding, approval pause/resume, batching |
+| `handleVoiceToolCall`, `decideVoiceToolCall`, `voiceApprovalRequestId`, `voiceToolDenialOutput`                                                                                                                                                      | server-side tool policy/execution                                   |
+| `VoiceSessionToolCallRequest`, `VoiceToolCallOutcome`                                                                                                                                                                                                | server tool endpoint wire contracts                                 |
+| `executeVoiceToolCall`, `VoiceToolCallRequest`, `VoiceToolExecutionResult`, `VoiceToolBridgeError`                                                                                                                                                   | tool bridge over `ToolExecutor`                                     |
+| `projectVoiceEvent`, `emptyVoiceProjectionState`, `voiceSeedTextsFromMessages`                                                                                                                                                                       | transcript projection and reconnect seeds                           |
+| `StoredVoiceEvent`, `sequenceVoiceEvent`, `dedupeStoredVoiceEvents`, `makeVoiceEventId`                                                                                                                                                              | replay-safe durable voice events                                    |
+| `makeWebSocketVoiceTransport`                                                                                                                                                                                                                        | Effect Socket voice transport for Node/server runtimes              |
 | `VoiceSpeechSynthesizer`, `VoiceSpeechRequest`, `VoiceSpeechResult`, `VoiceTranscriber`, `VoiceTranscriptionRequest`, `VoiceTranscriptionResult`, `VoiceTranscriptionSegment`, `VoiceSpeechError`, `VoiceSpeechErrorCode`, `speechResultToAudioPart` | one-shot TTS/STT contracts, results, and safe failures              |
-| `VoiceTransport`                                                                                   | transport service contract                                          |
+| `VoiceTransport`                                                                                                                                                                                                                                     | transport service contract                                          |
 
 `@yolk-sdk/agent/voice/browser`
 
@@ -208,17 +307,17 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 
 ## Providers
 
-| Subpath                                               | Main exports                                                                     |
+| Subpath                                               | Main exports                                                                                        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody` |
-| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                             |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody` |
-| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                       |
-| `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec |
+| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`     |
+| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                                                |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody`             |
+| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                                          |
+| `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec                    |
 | `@yolk-sdk/agent/providers/openai/speech`             | `OpenAiSpeechConfig`, `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`              |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers         |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers                            |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
-| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                      |
+| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                                         |
 
 Provider output limits are required and host-owned:
 

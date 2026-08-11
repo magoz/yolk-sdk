@@ -16,6 +16,7 @@ import {
   subagentResultText,
   taskSubagentRunId,
   taskToolName,
+  type TaskReasoningEffortDefinition,
   type TaskSubagentDefinition
 } from '../../src/tools'
 
@@ -27,6 +28,16 @@ type TestContext = {
 const subagents: ReadonlyArray<TaskSubagentDefinition> = [
   { name: 'explore', description: 'Explore code and docs.' },
   { name: 'general', description: 'Handle complex multi-step work.' }
+]
+
+const models = [
+  { id: 'fast-model', description: 'Fast model for focused exploration.' },
+  { id: 'deep-model', description: 'Strong model for difficult synthesis.' }
+]
+
+const reasoningEfforts: ReadonlyArray<TaskReasoningEffortDefinition> = [
+  { value: 'low', description: 'Use for straightforward work.' },
+  { value: 'high', description: 'Use for difficult reasoning.' }
 ]
 
 describe('task tool', () => {
@@ -52,19 +63,254 @@ describe('task tool', () => {
     })
   )
 
-  it.effect('executes a known subagent task', () =>
+  it.effect('exposes configured model and reasoning choices', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
           makeTaskToolModule<TestContext>({
             subagents,
+            models,
+            reasoningEfforts,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const tool = toolSet.tools[0]
+
+      expect(tool?.description).toContain('fast-model: Fast model for focused exploration.')
+      expect(tool?.description).toContain('low: Use for straightforward work.')
+      expect(tool?.parameters).toMatchObject({
+        type: 'object',
+        properties: {
+          model: {
+            anyOf: [{ enum: ['fast-model'] }, { enum: ['deep-model'] }]
+          },
+          reasoning_effort: {
+            anyOf: [{ enum: ['low'] }, { enum: ['high'] }]
+          }
+        }
+      })
+      expect(tool?.parameters).not.toMatchObject({ required: ['model', 'reasoning_effort'] })
+    })
+  )
+
+  it.effect('omits unconfigured model and reasoning choices', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const parameters = toolSet.tools[0]?.parameters
+
+      expect(parameters).not.toMatchObject({
+        properties: {
+          model: expect.anything()
+        }
+      })
+      expect(parameters).not.toMatchObject({
+        properties: {
+          reasoning_effort: expect.anything()
+        }
+      })
+    })
+  )
+
+  it.effect('supports model-only and reasoning-only configurations', () =>
+    Effect.gen(function* () {
+      const execute = ({ call }: { readonly call: { readonly id: string } }) =>
+        Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+      const modelOnly = yield* resolveTools(
+        [makeTaskToolModule<TestContext>({ subagents, models, execute })],
+        { sessionId: 'session_1' }
+      )
+      const reasoningOnly = yield* resolveTools(
+        [makeTaskToolModule<TestContext>({ subagents, reasoningEfforts, execute })],
+        { sessionId: 'session_1' }
+      )
+
+      expect(modelOnly.tools[0]?.parameters).toMatchObject({
+        type: 'object',
+        properties: { model: expect.anything() }
+      })
+      expect(modelOnly.tools[0]?.parameters).not.toMatchObject({
+        properties: { reasoning_effort: expect.anything() }
+      })
+      expect(reasoningOnly.tools[0]?.parameters).toMatchObject({
+        type: 'object',
+        properties: { reasoning_effort: expect.anything() }
+      })
+      expect(reasoningOnly.tools[0]?.parameters).not.toMatchObject({
+        properties: { model: expect.anything() }
+      })
+    })
+  )
+
+  it.effect('executes a known subagent task with runtime selections', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            models,
+            reasoningEfforts,
             execute: ({ call, context, params }) =>
               Effect.succeed(
                 ToolResult.make({
                   toolCallId: call.id,
                   content: formatTaskResult(
-                    `${context.sessionId}:${params.subagent_type}:${params.description}:${params.prompt}`
+                    [
+                      context.sessionId,
+                      params.subagent_type,
+                      params.description,
+                      params.prompt,
+                      params.model,
+                      params.reasoning_effort
+                    ].join(':')
                   )
+                })
+              )
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'explore',
+          model: 'fast-model',
+          reasoning_effort: 'low'
+        }
+      })
+
+      expect(result.content).toBe(
+        '<task_result>\nsession_1:explore:Find auth:Explore auth flow:fast-model:low\n</task_result>'
+      )
+    })
+  )
+
+  it.effect('preserves configured model IDs as opaque values', () =>
+    Effect.gen(function* () {
+      const opaqueModelId = '  host/model id  '
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            models: [{ id: opaqueModelId, description: 'Host-owned opaque model id.' }],
+            execute: ({ call, params }) =>
+              Effect.succeed(
+                ToolResult.make({ toolCallId: call.id, content: params.model ?? 'inherit' })
+              )
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'explore',
+          model: opaqueModelId
+        }
+      })
+
+      expect(result.content).toBe(opaqueModelId)
+    })
+  )
+
+  it.effect('rejects models outside the configured choices', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            models,
+            reasoningEfforts,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'explore',
+          model: 'unknown-model',
+          reasoning_effort: 'low'
+        }
+      })
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        isError: true,
+        structuredContent: { type: 'model_visible_tool_error', reason: 'validation' }
+      })
+    })
+  )
+
+  it.effect('rejects reasoning efforts outside the configured choices', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            models,
+            reasoningEfforts,
+            execute: ({ call }) =>
+              Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+          })
+        ],
+        { sessionId: 'session_1' }
+      )
+      const result = yield* toolSet.execute({
+        id: 'call_1',
+        name: taskToolName,
+        params: {
+          description: 'Find auth',
+          prompt: 'Explore auth flow',
+          subagent_type: 'explore',
+          model: 'fast-model',
+          reasoning_effort: 'medium'
+        }
+      })
+
+      expect(result).toMatchObject({
+        toolCallId: 'call_1',
+        isError: true,
+        structuredContent: { type: 'model_visible_tool_error', reason: 'validation' }
+      })
+    })
+  )
+
+  it.effect('inherits host runtime settings when selections are omitted', () =>
+    Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [
+          makeTaskToolModule<TestContext>({
+            subagents,
+            models,
+            reasoningEfforts,
+            execute: ({ call, params }) =>
+              Effect.succeed(
+                ToolResult.make({
+                  toolCallId: call.id,
+                  content: `${params.model ?? 'inherit'}:${params.reasoning_effort ?? 'inherit'}`
                 })
               )
           })
@@ -81,9 +327,7 @@ describe('task tool', () => {
         }
       })
 
-      expect(result.content).toBe(
-        '<task_result>\nsession_1:explore:Find auth:Explore auth flow\n</task_result>'
-      )
+      expect(result.content).toBe('inherit:inherit')
     })
   )
 
@@ -199,7 +443,8 @@ describe('task tool', () => {
       subagentRunId: taskSubagentRunId('call_1'),
       startedAtMs: 100,
       endedAtMs: 250,
-      model: 'test-model'
+      model: 'test-model',
+      reasoningEffort: 'high'
     })
 
     expect(result).toMatchObject({
@@ -211,7 +456,8 @@ describe('task tool', () => {
         description: 'Find docs',
         duration_ms: 150,
         status: 'completed',
-        model: 'test-model'
+        model: 'test-model',
+        reasoning_effort: 'high'
       }
     })
     expect(taskSubagentRunId('call_1')).toBe(makeSubagentRunId('call_1'))
