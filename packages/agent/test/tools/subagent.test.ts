@@ -8,16 +8,16 @@ import {
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
-  formatTaskResult,
-  makeNonRecursiveTaskToolModule,
-  makeTaskToolResult,
-  makeTaskToolModule,
+  formatSubagentResult,
+  makeNonRecursiveSubagentToolModule,
+  makeSubagentToolResult,
+  makeSubagentToolModule,
   resolveTools,
   subagentResultText,
-  taskSubagentRunId,
-  taskToolName,
-  type TaskReasoningEffortDefinition,
-  type TaskSubagentDefinition
+  subagentToolName,
+  subagentToolRunId,
+  type SubagentReasoningEffortDefinition,
+  type SubagentDefinition
 } from '../../src/tools'
 
 type TestContext = {
@@ -25,7 +25,7 @@ type TestContext = {
   readonly subagent?: boolean
 }
 
-const subagents: ReadonlyArray<TaskSubagentDefinition> = [
+const subagents: ReadonlyArray<SubagentDefinition> = [
   { name: 'explore', description: 'Explore code and docs.' },
   { name: 'general', description: 'Handle complex multi-step work.' }
 ]
@@ -35,17 +35,17 @@ const models = [
   { id: 'deep-model', description: 'Strong model for difficult synthesis.' }
 ]
 
-const reasoningEfforts: ReadonlyArray<TaskReasoningEffortDefinition> = [
+const reasoningEfforts: ReadonlyArray<SubagentReasoningEffortDefinition> = [
   { value: 'low', description: 'Use for straightforward work.' },
   { value: 'high', description: 'Use for difficult reasoning.' }
 ]
 
-describe('task tool', () => {
-  it.effect('resolves task tool with subagent metadata', () =>
+describe('subagent tool', () => {
+  it.effect('resolves subagent tool with subagent metadata', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             execute: ({ call }) =>
               Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
@@ -54,12 +54,14 @@ describe('task tool', () => {
         { sessionId: 'session_1' }
       )
 
-      expect(toolSet.tools.map(tool => tool.name)).toEqual([taskToolName])
+      expect(toolSet.tools.map(tool => tool.name)).toEqual([subagentToolName])
       expect(toolSet.tools[0]?.description).toContain('explore')
-      expect(toolSet.tools[0]?.description).toContain('call this task tool multiple times')
-      expect(toolSet.tools[0]?.description).toContain('runs same-turn task calls concurrently')
+      expect(toolSet.tools[0]?.description).toContain('call this subagent tool multiple times')
+      expect(toolSet.tools[0]?.description).toContain('runs same-turn subagent calls concurrently')
       expect(toolSet.tools[0]?.description).not.toContain('multi_tool_use')
-      expect(toolSet.metadata).toEqual([{ moduleId: 'task', name: taskToolName, access: 'read' }])
+      expect(toolSet.metadata).toEqual([
+        { moduleId: 'subagent', name: subagentToolName, access: 'read' }
+      ])
     })
   )
 
@@ -67,7 +69,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models,
             reasoningEfforts,
@@ -100,7 +102,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             execute: ({ call }) =>
               Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
@@ -128,11 +130,11 @@ describe('task tool', () => {
       const execute = ({ call }: { readonly call: { readonly id: string } }) =>
         Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
       const modelOnly = yield* resolveTools(
-        [makeTaskToolModule<TestContext>({ subagents, models, execute })],
+        [makeSubagentToolModule<TestContext>({ subagents, models, execute })],
         { sessionId: 'session_1' }
       )
       const reasoningOnly = yield* resolveTools(
-        [makeTaskToolModule<TestContext>({ subagents, reasoningEfforts, execute })],
+        [makeSubagentToolModule<TestContext>({ subagents, reasoningEfforts, execute })],
         { sessionId: 'session_1' }
       )
 
@@ -153,11 +155,11 @@ describe('task tool', () => {
     })
   )
 
-  it.effect('executes a known subagent task with runtime selections', () =>
+  it.effect('executes a known subagent with runtime selections', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models,
             reasoningEfforts,
@@ -165,7 +167,7 @@ describe('task tool', () => {
               Effect.succeed(
                 ToolResult.make({
                   toolCallId: call.id,
-                  content: formatTaskResult(
+                  content: formatSubagentResult(
                     [
                       context.sessionId,
                       params.subagent_type,
@@ -183,7 +185,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -194,7 +196,7 @@ describe('task tool', () => {
       })
 
       expect(result.content).toBe(
-        '<task_result>\nsession_1:explore:Find auth:Explore auth flow:fast-model:low\n</task_result>'
+        '<subagent_result>\nsession_1:explore:Find auth:Explore auth flow:fast-model:low\n</subagent_result>'
       )
     })
   )
@@ -204,7 +206,7 @@ describe('task tool', () => {
       const opaqueModelId = '  host/model id  '
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models: [{ id: opaqueModelId, description: 'Host-owned opaque model id.' }],
             execute: ({ call, params }) =>
@@ -217,7 +219,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -234,7 +236,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models,
             reasoningEfforts,
@@ -246,7 +248,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -268,7 +270,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models,
             reasoningEfforts,
@@ -280,7 +282,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -302,7 +304,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             models,
             reasoningEfforts,
@@ -319,7 +321,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -335,7 +337,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             execute: ({ call }) =>
               Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
@@ -345,7 +347,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: 'Explore auth flow',
@@ -365,7 +367,7 @@ describe('task tool', () => {
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeTaskToolModule<TestContext>({
+          makeSubagentToolModule<TestContext>({
             subagents,
             execute: ({ call }) =>
               Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
@@ -375,7 +377,7 @@ describe('task tool', () => {
       )
       const result = yield* toolSet.execute({
         id: 'call_1',
-        name: taskToolName,
+        name: subagentToolName,
         params: {
           description: 'Find auth',
           prompt: ' ',
@@ -391,11 +393,11 @@ describe('task tool', () => {
     })
   )
 
-  it.effect('can hide the task tool from subagents', () =>
+  it.effect('can hide the subagent tool from subagents', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools(
         [
-          makeNonRecursiveTaskToolModule<TestContext>({
+          makeNonRecursiveSubagentToolModule<TestContext>({
             subagents,
             execute: ({ call }) =>
               Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
@@ -410,37 +412,37 @@ describe('task tool', () => {
 
   it.effect('composes non-recursive gating with host gating', () =>
     Effect.gen(function* () {
-      const taskModule = makeNonRecursiveTaskToolModule<TestContext>({
+      const subagentModule = makeNonRecursiveSubagentToolModule<TestContext>({
         subagents,
         isEnabled: context => Effect.succeed(context.sessionId === 'enabled_session'),
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
       })
 
-      const disabledTopLevelTools = yield* resolveTools([taskModule], {
+      const disabledTopLevelTools = yield* resolveTools([subagentModule], {
         sessionId: 'disabled_session'
       })
-      const enabledTopLevelTools = yield* resolveTools([taskModule], {
+      const enabledTopLevelTools = yield* resolveTools([subagentModule], {
         sessionId: 'enabled_session'
       })
-      const enabledSubagentTools = yield* resolveTools([taskModule], {
+      const enabledSubagentTools = yield* resolveTools([subagentModule], {
         sessionId: 'enabled_session',
         subagent: true
       })
 
       expect(disabledTopLevelTools.tools).toEqual([])
-      expect(enabledTopLevelTools.tools.map(tool => tool.name)).toEqual([taskToolName])
+      expect(enabledTopLevelTools.tools.map(tool => tool.name)).toEqual([subagentToolName])
       expect(enabledSubagentTools.tools).toEqual([])
     })
   )
 
-  it('formats structured task tool results', () => {
-    const result = makeTaskToolResult({
+  it('formats structured subagent tool results', () => {
+    const result = makeSubagentToolResult({
       callId: 'call_1',
       output: 'Found docs.',
       subagentType: 'explore',
       description: 'Find docs',
-      subagentRunId: taskSubagentRunId('call_1'),
+      subagentRunId: subagentToolRunId('call_1'),
       startedAtMs: 100,
       endedAtMs: 250,
       model: 'test-model',
@@ -449,7 +451,7 @@ describe('task tool', () => {
 
     expect(result).toMatchObject({
       toolCallId: 'call_1',
-      content: '<task_result>\nFound docs.\n</task_result>',
+      content: '<subagent_result>\nFound docs.\n</subagent_result>',
       structuredContent: {
         subagent_run_id: 'subagent:call_1',
         subagent_type: 'explore',
@@ -460,7 +462,7 @@ describe('task tool', () => {
         reasoning_effort: 'high'
       }
     })
-    expect(taskSubagentRunId('call_1')).toBe(makeSubagentRunId('call_1'))
+    expect(subagentToolRunId('call_1')).toBe(makeSubagentRunId('call_1'))
   })
 
   it('extracts final subagent assistant text', () => {

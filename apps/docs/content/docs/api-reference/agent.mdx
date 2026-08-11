@@ -77,59 +77,59 @@ Runtime request tags:
 
 `@yolk-sdk/agent/tools`
 
-| Export                           | Purpose                                                   |
-| -------------------------------- | --------------------------------------------------------- |
-| `makeTool`                       | schema-backed tool registration                           |
-| `resolveTools`                   | filter/merge modules into model-visible defs and executor |
-| `makeToolExecutorLayer`          | provide resolved executor as `ToolExecutor`               |
-| `EmptyToolParams`                | no-arg tool schema                                        |
-| `ToolAccess`                     | `read`, `write`, `destructive`                            |
-| `makeQuestionToolModule`         | built-in question HITL tool                               |
-| `makeNonRecursiveTaskToolModule` | subagent task tool without recursion                      |
-| `TaskRuntimeSelectionOptions`    | host-advertised subagent model and reasoning choices      |
-| `TaskModelDefinition`            | model id and model-visible selection guidance             |
-| `TaskReasoningEffortDefinition`  | reasoning effort and model-visible selection guidance     |
-| `modelVisibleToolError`          | recoverable error visible to model                        |
+| Export                               | Purpose                                                   |
+| ------------------------------------ | --------------------------------------------------------- |
+| `makeTool`                           | schema-backed tool registration                           |
+| `resolveTools`                       | filter/merge modules into model-visible defs and executor |
+| `makeToolExecutorLayer`              | provide resolved executor as `ToolExecutor`               |
+| `EmptyToolParams`                    | no-arg tool schema                                        |
+| `ToolAccess`                         | `read`, `write`, `destructive`                            |
+| `makeQuestionToolModule`             | built-in question HITL tool                               |
+| `makeNonRecursiveSubagentToolModule` | subagent tool without recursive delegation                |
+| `SubagentRuntimeSelectionOptions`    | host-advertised subagent model and reasoning choices      |
+| `SubagentModelDefinition`            | model id and model-visible selection guidance             |
+| `SubagentReasoningEffortDefinition`  | reasoning effort and model-visible selection guidance     |
+| `modelVisibleToolError`              | recoverable error visible to model                        |
 
-Task/question helpers: `makeTaskToolModule`, `makeTaskToolDef`, `makeTaskToolResult`, `taskToolName`, `makeQuestionToolDef`, `questionToolName`.
+Subagent/question helpers: `makeSubagentToolModule`, `makeSubagentToolDef`, `makeSubagentToolResult`, `subagentToolName`, `makeQuestionToolDef`, `questionToolName`.
 
-Configure `models` and `reasoningEfforts` on a task tool module to expose validated optional
+Configure `models` and `reasoningEfforts` on a subagent tool module to expose validated optional
 `model` and `reasoning_effort` parameters to the parent agent. Omission means the host should
 inherit its current runtime setting. Hosts remain responsible for provider credentials, capability
 checks, and constructing the selected child runtime. Pass the effective effort to
-`makeTaskToolResult` as `reasoningEffort` to include `reasoning_effort` in structured result
+`makeSubagentToolResult` as `reasoningEffort` to include `reasoning_effort` in structured result
 metadata.
 
-The public task types are:
+The public subagent types are:
 
 ```ts
 // TypeScript fragments
 
-type TaskSubagentDefinition = {
+type SubagentDefinition = {
   readonly name: string
   readonly description: string
 }
 
-type TaskModelDefinition = {
+type SubagentModelDefinition = {
   readonly id: string
   readonly description: string
 }
 
-type TaskReasoningEffortDefinition = {
+type SubagentReasoningEffortDefinition = {
   readonly value: AgentReasoningEffort
   readonly description: string
 }
 
-type TaskRuntimeSelectionOptions = {
-  readonly models?: ReadonlyArray<TaskModelDefinition>
-  readonly reasoningEfforts?: ReadonlyArray<TaskReasoningEffortDefinition>
+type SubagentRuntimeSelectionOptions = {
+  readonly models?: ReadonlyArray<SubagentModelDefinition>
+  readonly reasoningEfforts?: ReadonlyArray<SubagentReasoningEffortDefinition>
 }
 
-type TaskSubagentContext = {
+type SubagentContext = {
   readonly subagent?: boolean
 }
 
-type TaskToolParams = {
+type SubagentToolParams = {
   readonly description: string
   readonly prompt: string
   readonly subagent_type: string
@@ -137,23 +137,19 @@ type TaskToolParams = {
   readonly reasoning_effort?: AgentReasoningEffort
 }
 
-type TaskExecutionInput<Context> = {
+type SubagentExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
-  readonly params: TaskToolParams
+  readonly params: SubagentToolParams
 }
 
-type TaskToolOptions<Context> = TaskRuntimeSelectionOptions & {
-  readonly subagents: ReadonlyArray<TaskSubagentDefinition>
-  readonly isEnabled?: (
-    context: Context
-  ) => Effect.Effect<boolean, ToolRegistryError>
-  readonly execute: (
-    input: TaskExecutionInput<Context>
-  ) => Effect.Effect<ToolResult, ToolError>
+type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
+  readonly subagents: ReadonlyArray<SubagentDefinition>
+  readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
+  readonly execute: (input: SubagentExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
 
-type TaskToolResultInput = {
+type SubagentToolResultInput = {
   readonly callId: string
   readonly output: string
   readonly subagentType: string
@@ -168,25 +164,25 @@ type TaskToolResultInput = {
 ```
 
 `AgentReasoningEffort` accepts `minimal`, `low`, `medium`, `high`, or `xhigh`. Model IDs are
-host-owned opaque strings and are not normalized by the task tool.
+host-owned opaque strings and are not normalized by the subagent tool.
 
-Task helper signatures:
+Subagent helper signatures:
 
-| Helper | Signature and return |
-| ------ | -------------------- |
-| `makeTaskToolDef` | `(subagents: ReadonlyArray<TaskSubagentDefinition>, runtimeSelections?: TaskRuntimeSelectionOptions) => ToolDef` |
-| `makeTaskToolRegistration` | `<Context>(options: TaskToolOptions<Context>) => ToolRegistration<Context>` |
-| `makeTaskToolModule` | `<Context>(options: TaskToolOptions<Context>) => ToolModule<Context>` |
-| `makeNonRecursiveTaskToolModule` | `<Context extends TaskSubagentContext>(options: TaskToolOptions<Context>) => ToolModule<Context>` |
-| `makeTaskToolResult` | `(input: TaskToolResultInput) => ToolResult` |
-| `formatTaskResult` | `(output: string) => string` |
-| `subagentResultText` | `(events: ReadonlyArray<AgentEvent>) => string` |
-| `taskSubagentRunId` | `(parentToolCallId: string) => string` |
-| `taskToolName` | `"task"` |
+| Helper                               | Signature and return                                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `makeSubagentToolDef`                | `(subagents: ReadonlyArray<SubagentDefinition>, runtimeSelections?: SubagentRuntimeSelectionOptions) => ToolDef` |
+| `makeSubagentToolRegistration`       | `<Context>(options: SubagentToolOptions<Context>) => ToolRegistration<Context>`                                  |
+| `makeSubagentToolModule`             | `<Context>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                                        |
+| `makeNonRecursiveSubagentToolModule` | `<Context extends SubagentContext>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                |
+| `makeSubagentToolResult`             | `(input: SubagentToolResultInput) => ToolResult`                                                                 |
+| `formatSubagentResult`               | `(output: string) => string`                                                                                     |
+| `subagentResultText`                 | `(events: ReadonlyArray<AgentEvent>) => string`                                                                  |
+| `subagentToolRunId`                  | `(parentToolCallId: string) => string`                                                                           |
+| `subagentToolName`                   | `"subagent"`                                                                                                     |
 
 Selections outside the configured enums, empty required strings, and unknown subagent types return
 model-visible validation results before host execution. Their structured error reason is
-`validation`. The host `execute` callback may fail with `ToolError`. `makeTaskToolResult` includes
+`validation`. The host `execute` callback may fail with `ToolError`. `makeSubagentToolResult` includes
 `reasoning_effort` only when `reasoningEffort` is provided.
 
 ## Client

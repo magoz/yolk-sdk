@@ -62,7 +62,7 @@ Current `examples/next` agent surfaces:
 
 - runtime chooser at `/agent`
 - text + image/PDF + mic voice mode in `/agent/next`, `/agent/cloudflare`, and `/agent/workflow`
-- text tools: web fetch/search, knowledge/storage search, skill, virtual bash, optional remote MCP, optional Telegram, HITL question, task subagents
+- text tools: web fetch/search, knowledge/storage search, skill, virtual bash, optional remote MCP, optional Telegram, HITL question, subagents
 - `/agent/next`: no durable persistence; browser sends full protocol transcript each turn
 - `/agent/cloudflare`: Worker/Durable Object WS runtime with append-log storage
 - `/agent/workflow`: Vercel Workflow durable run stream

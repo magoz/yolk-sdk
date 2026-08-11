@@ -19,16 +19,16 @@ export {
   questionToolName
 } from './question.ts'
 export {
-  formatTaskResult,
-  makeNonRecursiveTaskToolModule,
-  makeTaskToolResult,
-  makeTaskToolDef,
-  makeTaskToolModule,
-  makeTaskToolRegistration,
+  formatSubagentResult,
+  makeNonRecursiveSubagentToolModule,
+  makeSubagentToolResult,
+  makeSubagentToolDef,
+  makeSubagentToolModule,
+  makeSubagentToolRegistration,
   subagentResultText,
-  taskSubagentRunId,
-  taskToolName
-} from './task.ts'
+  subagentToolName,
+  subagentToolRunId
+} from './subagent.ts'
 export type {
   ResolvedToolSet,
   SchemaToolExecutionInput,
@@ -41,13 +41,13 @@ export type {
 } from './registry.ts'
 export type { QuestionExecutionInput, QuestionToolOptions } from './question.ts'
 export type {
-  TaskExecutionInput,
-  TaskModelDefinition,
-  TaskReasoningEffortDefinition,
-  TaskRuntimeSelectionOptions,
-  TaskSubagentContext,
-  TaskSubagentDefinition,
-  TaskToolOptions,
-  TaskToolParams,
-  TaskToolResultInput
-} from './task.ts'
+  SubagentExecutionInput,
+  SubagentModelDefinition,
+  SubagentReasoningEffortDefinition,
+  SubagentRuntimeSelectionOptions,
+  SubagentContext,
+  SubagentDefinition,
+  SubagentToolOptions,
+  SubagentToolParams,
+  SubagentToolResultInput
+} from './subagent.ts'

@@ -23,6 +23,26 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: rename task delegation to subagent
+
+The model-facing `task` delegation tool is now named `subagent` to distinguish isolated child-agent
+runs from durable application tasks. Update tool-name checks and replace the public tools helpers:
+
+| Previous                              | Replacement                                  |
+| ------------------------------------- | -------------------------------------------- |
+| `makeTaskToolModule`                  | `makeSubagentToolModule`                     |
+| `makeNonRecursiveTaskToolModule`      | `makeNonRecursiveSubagentToolModule`         |
+| `makeTaskToolDef`                     | `makeSubagentToolDef`                        |
+| `makeTaskToolRegistration`            | `makeSubagentToolRegistration`               |
+| `makeTaskToolResult`                  | `makeSubagentToolResult`                     |
+| `formatTaskResult`                    | `formatSubagentResult`                       |
+| `taskToolName`                        | `subagentToolName`                           |
+| `taskSubagentRunId`                   | `subagentToolRunId`                          |
+| `Task*` public types                  | corresponding `Subagent*` public types       |
+
+The old names are removed rather than aliased. Hosts must expose `subagent`, omit it from child
+agent toolsets, and update UI/tool-call matching from `task` to `subagent`.
+
 ### `0.1.0-canary.52`: Codex omits the unsupported output limit
 
 ChatGPT subscription Codex requests no longer send `max_output_tokens` because the endpoint rejects

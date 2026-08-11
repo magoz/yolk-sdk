@@ -9,20 +9,20 @@ import { test, expect } from '../fixtures'
 import { TestDbLayer } from '../utils/test-db'
 
 const slowCall = {
-  id: 'call_slow_task',
-  name: 'task',
+  id: 'call_slow_subagent',
+  name: 'subagent',
   params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
 }
 
 const fastCall = {
-  id: 'call_fast_task',
-  name: 'task',
+  id: 'call_fast_subagent',
+  name: 'subagent',
   params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
 }
 
 const result = (call: typeof slowCall, startedAtMs: number, endedAtMs: number) => ({
   toolCallId: call.id,
-  content: `<task_result>done ${call.id}</task_result>`,
+  content: `<subagent_result>done ${call.id}</subagent_result>`,
   structuredContent: {
     subagent_run_id: `subagent:${call.id}`,
     subagent_type: 'general',
@@ -75,7 +75,7 @@ const startWorkflowStreamServer = async () => {
     const startedAtMs = Date.now()
     response.writeHead(200, {
       'content-type': 'application/x-ndjson; charset=utf-8',
-      'x-workflow-run-id': 'e2e-task-parallel-run'
+      'x-workflow-run-id': 'e2e-subagent-parallel-run'
     })
     writeEvent(response, { _tag: 'AgentStart' })
     writeEvent(response, { _tag: 'TurnStart', turn: 1 })
@@ -155,7 +155,7 @@ const startWorkflowStreamServer = async () => {
   }
 }
 
-test('shows same-turn workflow task subagents running concurrently', async ({ page }) => {
+test('shows same-turn workflow subagents running concurrently', async ({ page }) => {
   const streamServer = await startWorkflowStreamServer()
 
   try {
@@ -172,21 +172,21 @@ test('shows same-turn workflow task subagents running concurrently', async ({ pa
     await page.getByRole('button', { name: 'Send' }).click()
 
     await expect(
-      page.getByRole('button', { name: 'tool Task: slow task', exact: true })
+      page.getByRole('button', { name: 'tool Subagent: slow task', exact: true })
     ).toBeVisible({ timeout: 15_000 })
     await expect(
-      page.getByRole('button', { name: 'tool Task: fast task', exact: true })
+      page.getByRole('button', { name: 'tool Subagent: fast task', exact: true })
     ).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Running 3 tools')).toBeVisible()
+    await expect(page.getByText('Running 2 tools')).toBeVisible()
 
     streamServer.releaseCompletions()
 
-    await expect(page.getByRole('button', { name: /Task: slow task.*\d+ms/ })).toBeVisible({
-      timeout: 15_000
-    })
-    await expect(page.getByRole('button', { name: /Task: fast task.*\d+ms/ })).toBeVisible({
-      timeout: 15_000
-    })
+    await expect(
+      page.getByRole('button', { name: /Subagent: slow task.*\d+ms/ })
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(
+      page.getByRole('button', { name: /Subagent: fast task.*\d+ms/ })
+    ).toBeVisible({ timeout: 15_000 })
   } finally {
     await streamServer.close()
   }

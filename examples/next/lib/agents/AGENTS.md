@@ -44,10 +44,10 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Shared text runtime construction lives in `workflow-runtime/text-response.ts` for both `/api/agent` and Workflow.
 - `context-budget.ts` and `context-transformer.ts` wrap `@yolk-sdk/agent/compaction`; app owns thresholds and summary policy.
 - Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
-- Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `task` for top-level subagent delegation.
-- Task subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; subagents run normal text tools but without `task`, so recursive subagents are disabled in v1.
-- Task results include structured subagent metadata for status, timing, model, and ids.
-- Parallel task execution requires multiple `task` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
+- Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `subagent` for top-level delegation.
+- Subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; children run normal text tools but without `subagent`, so recursive delegation is disabled in v1.
+- Subagent results include structured metadata for status, timing, model, and ids.
+- Parallel delegation requires multiple `subagent` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
 - Workflow text runtime exposes run id in Activity; replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response; stop calls `DELETE`.
 - Realtime voice seeds current protocol transcript via `conversation.item.create`; hold-to-speak routes use OpenAI speech adapters and the normal text runtime. TTS and realtime are mutually exclusive in the UI.
 

@@ -16,30 +16,30 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 
 ## Subpaths
 
-| Subpath                                               | Purpose                                                         |
+| Subpath                                               | Purpose                                                        |
 | ----------------------------------------------------- | -------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                            | Wire messages, events, content, usage, tool schemas             |
-| `@yolk-sdk/agent/loop`                                | Stateless LLM/tool loop                                         |
-| `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                    |
-| `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration               |
-| `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers   |
-| `@yolk-sdk/agent/compaction`                          | Host-owned compaction budgets, checkpoints, formatting, retry   |
-| `@yolk-sdk/agent/tools`                               | Tool module registry, `makeTool`, task/question tool contracts  |
-| `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model  |
-| `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts               |
-| `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                           |
-| `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                           |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                      |
-| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                          |
-| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                 |
-| `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters                |
-| `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                       |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                 |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                     |
-| `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs               |
-| `@yolk-sdk/agent/voice`                               | Voice protocol, controller, tool handler, projection, speech    |
-| `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                  |
-| `@yolk-sdk/agent/voice/react`                         | Headless browser voice React hook                               |
+| `@yolk-sdk/agent/protocol`                            | Wire messages, events, content, usage, tool schemas            |
+| `@yolk-sdk/agent/loop`                                | Stateless LLM/tool loop                                        |
+| `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                   |
+| `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration              |
+| `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
+| `@yolk-sdk/agent/compaction`                          | Host-owned compaction budgets, checkpoints, formatting, retry  |
+| `@yolk-sdk/agent/tools`                               | Tool registry, `makeTool`, subagent/question contracts         |
+| `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model |
+| `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts              |
+| `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                          |
+| `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                          |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                     |
+| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                         |
+| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                |
+| `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters               |
+| `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                      |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                    |
+| `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs              |
+| `@yolk-sdk/agent/voice`                               | Voice protocol, controller, tool handler, projection, speech   |
+| `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                 |
+| `@yolk-sdk/agent/voice/react`                         | Headless browser voice React hook                              |
 
 ## Imports
 
@@ -69,8 +69,8 @@ import {
   makeWindowCompactionTransformer
 } from '@yolk-sdk/agent/compaction'
 import {
-  makeNonRecursiveTaskToolModule,
-  makeTaskToolResult,
+  makeNonRecursiveSubagentToolModule,
+  makeSubagentToolResult,
   modelVisibleToolError,
   modelVisibleToolErrorStructuredContent,
   makeQuestionToolModule,
@@ -112,11 +112,11 @@ const program = run({
 Provider output limits are required and host-owned. Yolk does not infer model limits or apply hidden
 fallbacks.
 
-| Provider factory                       | Required output-limit field |
-| -------------------------------------- | --------------------------- |
-| `makeOpenAiProviderLayer`              | `maxCompletionTokens`       |
-| `makeOpenAiCodexProviderLayer`         | `maxOutputTokens`           |
-| `makeAnthropicClaudeProviderLayer`     | `maxTokens`                 |
+| Provider factory                   | Required output-limit field |
+| ---------------------------------- | --------------------------- |
+| `makeOpenAiProviderLayer`          | `maxCompletionTokens`       |
+| `makeOpenAiCodexProviderLayer`     | `maxOutputTokens`           |
+| `makeAnthropicClaudeProviderLayer` | `maxTokens`                 |
 
 The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
 `toAnthropicClaudeRequestBody` helpers require the same limit configuration. ChatGPT subscription
@@ -388,24 +388,24 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   provider 429s (rate limit or exhausted credits) surface as `VoiceSpeechError` code
   `rate_limited` so hosts can distinguish quota from outage.
 
-## Task subagents
+## Subagents
 
-`task` is the package-owned contract for subagent delegation. The SDK provides schema,
-validation, non-recursive module wiring, subagent result extraction, and structured task result
+`subagent` is the package-owned contract for child-agent delegation. The SDK provides schema,
+validation, non-recursive module wiring, subagent result extraction, and structured result
 metadata. Host apps provide the actual nested runtime.
 
 Recommended setup:
 
-- expose `makeNonRecursiveTaskToolModule` only to the top-level agent
+- expose `makeNonRecursiveSubagentToolModule` only to the top-level agent
 - resolve subagent tools with `subagent: true`
-- omit `task` from subagent toolsets
+- omit `subagent` from subagent toolsets
 - include only tools that are safe for autonomous delegated work
 - use `makeSubagentRunId(call.id)` for protocol-aligned run ids
 - optionally configure model and reasoning-effort choices so the parent can select child runtime settings
 - treat omitted `model` and `reasoning_effort` parameters as inheritance of host runtime settings
-- return `makeTaskToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, and timing
+- return `makeSubagentToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, and timing
 
-Keep host-owned subagent execution wiring outside this package; pass only the package task contract across the boundary.
+Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
 
 ## Tool failures
 
@@ -444,7 +444,7 @@ aborts, and implementation bugs outside typed tool execution.
   `Blob`/`File` and may use `FileReader`; the Cloudflare WebSocket transport needs the global
   `WebSocket` constructor when its stream runs. None read browser globals at import time.
 - Tools model generic metadata/execution; host apps own concrete tool catalogs.
-- `task` is the standard subagent delegation tool. Packages define the schema; host apps execute subagents and omit `task` from subagent toolsets in v1.
+- `subagent` is the standard delegation tool. Packages define the schema; host apps execute subagents and omit `subagent` from child toolsets in v1.
 
 ## Testing
 

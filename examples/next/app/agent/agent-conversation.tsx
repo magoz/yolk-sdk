@@ -255,8 +255,8 @@ const resultStructuredContent = (state: ToolRunState) => {
   }
 }
 
-const taskMetadata = (call: ToolCall, state: ToolRunState) => {
-  if (call.name !== 'task') {
+const subagentMetadata = (call: ToolCall, state: ToolRunState) => {
+  if (call.name !== 'subagent') {
     return undefined
   }
 
@@ -563,8 +563,9 @@ function ToolRunCard({
   const isRunning = state._tag === 'Running'
   const isError = toolStateHasError(state)
   const output = toolStateContent(state)
-  const task = taskMetadata(call, state)
-  const title = task?.description === undefined ? call.name : `Task: ${task.description}`
+  const subagent = subagentMetadata(call, state)
+  const title =
+    subagent?.description === undefined ? call.name : `Subagent: ${subagent.description}`
   const detailsId = `${id}-details`
   const handleToggle = useCallback(() => {
     setExpanded(current => !current)
@@ -620,21 +621,25 @@ function ToolRunCard({
                 <span className="font-medium text-foreground">{title}</span>
                 <span className="font-mono text-[11px] text-muted-foreground">{call.id}</span>
               </div>
-              {task === undefined ? null : (
+              {subagent === undefined ? null : (
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                  {task.subagentType === undefined ? null : <span>type {task.subagentType}</span>}
-                  {task.subagentRunId === undefined ? null : <span>run {task.subagentRunId}</span>}
-                  {task.model === undefined ? null : <span>model {task.model}</span>}
-                  {task.startedAtMs === undefined ? null : (
-                    <span>start {timestampLabel(task.startedAtMs)}</span>
+                  {subagent.subagentType === undefined ? null : (
+                    <span>type {subagent.subagentType}</span>
                   )}
-                  {task.endedAtMs === undefined ? null : (
-                    <span>end {timestampLabel(task.endedAtMs)}</span>
+                  {subagent.subagentRunId === undefined ? null : (
+                    <span>run {subagent.subagentRunId}</span>
                   )}
-                  {task.durationMs === undefined ? null : (
+                  {subagent.model === undefined ? null : <span>model {subagent.model}</span>}
+                  {subagent.startedAtMs === undefined ? null : (
+                    <span>start {timestampLabel(subagent.startedAtMs)}</span>
+                  )}
+                  {subagent.endedAtMs === undefined ? null : (
+                    <span>end {timestampLabel(subagent.endedAtMs)}</span>
+                  )}
+                  {subagent.durationMs === undefined ? null : (
                     <span>
                       duration{' '}
-                      {formatToolDuration({ _tag: 'Known', milliseconds: task.durationMs })}
+                      {formatToolDuration({ _tag: 'Known', milliseconds: subagent.durationMs })}
                     </span>
                   )}
                 </div>
