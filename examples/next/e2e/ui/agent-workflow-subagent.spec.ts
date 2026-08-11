@@ -10,19 +10,19 @@ import { TestDbLayer } from '../utils/test-db'
 
 const slowCall = {
   id: 'call_slow_task',
-  name: 'task',
+  name: 'subagent',
   params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
 }
 
 const fastCall = {
   id: 'call_fast_task',
-  name: 'task',
+  name: 'subagent',
   params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
 }
 
 const result = (call: typeof slowCall, startedAtMs: number, endedAtMs: number) => ({
   toolCallId: call.id,
-  content: `<task_result>done ${call.id}</task_result>`,
+  content: `<subagent_result>done ${call.id}</subagent_result>`,
   structuredContent: {
     subagent_run_id: `subagent:${call.id}`,
     subagent_type: 'general',
@@ -155,7 +155,7 @@ const startWorkflowStreamServer = async () => {
   }
 }
 
-test('shows same-turn workflow task subagents running concurrently', async ({ page }) => {
+test('shows same-turn workflow subagents running concurrently', async ({ page }) => {
   const streamServer = await startWorkflowStreamServer()
 
   try {

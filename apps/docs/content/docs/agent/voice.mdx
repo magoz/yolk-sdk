@@ -134,7 +134,7 @@ steers delivery style — tone, pacing, emotion — per synthesis request; OpenA
 
 ### Hold-to-speak pattern
 
-The one-shot services compose into a second voice mode alongside realtime: record while a button is held, transcribe on release into the chat input, send through your normal text agent runtime, and optionally speak assistant replies with TTS. This trades realtime's low latency for the full text stack — any model provider, the complete toolset, and `question`/`task` HITL. The Next example implements this (host integration, not SDK API): STT/TTS routes wrap the OpenAI layers, a hold-to-speak hook drives MediaRecorder capture and streamed sentence playback, and the composer offers hold-to-speak, realtime, and speak-replies controls side by side.
+The one-shot services compose into a second voice mode alongside realtime: record while a button is held, transcribe on release into the chat input, send through your normal text agent runtime, and optionally speak assistant replies with TTS. This trades realtime's low latency for the full text stack — any model provider, the complete toolset, and `question`/`subagent` HITL. The Next example implements this (host integration, not SDK API): STT/TTS routes wrap the OpenAI layers, a hold-to-speak hook drives MediaRecorder capture and streamed sentence playback, and the composer offers hold-to-speak, realtime, and speak-replies controls side by side.
 
 ## Host responsibilities
 

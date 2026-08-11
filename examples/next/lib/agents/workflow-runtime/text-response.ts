@@ -8,12 +8,12 @@ import {
   type ToolExecutor
 } from '@yolk-sdk/agent/loop'
 import {
-  makeNonRecursiveTaskToolModule,
-  makeTaskToolResult,
+  makeNonRecursiveSubagentToolModule,
+  makeSubagentToolResult,
   makeToolExecutorLayer,
   subagentResultText,
-  taskSubagentRunId,
-  type TaskSubagentDefinition,
+  subagentToolRunId,
+  type SubagentDefinition,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/agent/skillset'
@@ -82,7 +82,7 @@ type AgentTextRuntime = {
   readonly layer: AgentTextRuntimeLayer
 }
 
-const agentTextSubagents: ReadonlyArray<TaskSubagentDefinition> = [
+const agentTextSubagents: ReadonlyArray<SubagentDefinition> = [
   {
     name: 'general',
     description:
@@ -103,11 +103,11 @@ const subagentPrompt = (input: {
     input.baseSystemPrompt,
     `You are a ${input.subagentType} subagent launched by the main Yolk agent.`,
     'Work autonomously on the delegated task. Return only your final concise findings.',
-    'You cannot launch further task subagents in v1. Use your normal tools when useful.'
+    'You cannot launch further subagents in v1. Use your normal tools when useful.'
   ].join('\n\n')
 
 const toolError = (message: string, cause: ToolError['cause']) =>
-  new ToolError({ tool: 'task', message, cause })
+  new ToolError({ tool: 'subagent', message, cause })
 
 const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
   toolError(error.message, 'execution')
@@ -356,12 +356,12 @@ export const makeAgentTextRuntime = (
       appendAvailableSkills(baseConfig.systemPrompt, skillset),
       pinnedKnowledge
     )
-    const taskToolModule = makeNonRecursiveTaskToolModule<AgentToolContext>({
+    const subagentToolModule = makeNonRecursiveSubagentToolModule<AgentToolContext>({
       subagents: agentTextSubagents,
       execute: ({ call, context, params }) =>
         Effect.gen(function* () {
           const startedAtMs = yield* Clock.currentTimeMillis
-          const subagentRunId = taskSubagentRunId(call.id)
+          const subagentRunId = subagentToolRunId(call.id)
 
           return yield* Effect.gen(function* () {
             const subagentToolSet = yield* resolveAgentToolSet({
@@ -400,7 +400,7 @@ export const makeAgentTextRuntime = (
             const output = subagentResultText(Array.from(eventsChunk))
             const endedAtMs = yield* Clock.currentTimeMillis
 
-            return makeTaskToolResult({
+            return makeSubagentToolResult({
               callId: call.id,
               output,
               subagentType: params.subagent_type,
@@ -414,7 +414,7 @@ export const makeAgentTextRuntime = (
             Effect.catchTag('ToolError', error =>
               Clock.currentTimeMillis.pipe(
                 Effect.map(endedAtMs =>
-                  makeTaskToolResult({
+                  makeSubagentToolResult({
                     callId: call.id,
                     output: `Subagent failed: ${error.message}`,
                     subagentType: params.subagent_type,
@@ -431,7 +431,7 @@ export const makeAgentTextRuntime = (
             Effect.catch(error =>
               Clock.currentTimeMillis.pipe(
                 Effect.map(endedAtMs =>
-                  makeTaskToolResult({
+                  makeSubagentToolResult({
                     callId: call.id,
                     output: `Subagent failed: ${unknownToMessage(error)}`,
                     subagentType: params.subagent_type,
@@ -451,7 +451,7 @@ export const makeAgentTextRuntime = (
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...subagentToolModules,
       skillManagerToolModule,
-      taskToolModule
+      subagentToolModule
     ]
     const toolSet = yield* resolveAgentToolSet({
       modules: toolModules,

@@ -1418,16 +1418,16 @@ describe('run', () => {
     })
   )
 
-  it.effect('emits subagent lifecycle events for task tool calls', () =>
+  it.effect('emits subagent lifecycle events for subagent tool calls', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({
         id: 'call_task',
-        name: 'task',
+        name: 'subagent',
         params: { description: 'inspect bug', prompt: 'inspect', subagent_type: 'general' }
       })
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
-        Effect.provide(TestToolExecutor.layer({ task: 'done' })),
+        Effect.provide(TestToolExecutor.layer({ subagent: 'done' })),
         Effect.provide(LoopConfig.defaultLayer)
       )
 
@@ -1453,16 +1453,16 @@ describe('run', () => {
     })
   )
 
-  it.effect('starts same-turn task subagents before waiting for completions', () =>
+  it.effect('starts same-turn subagents before waiting for completions', () =>
     Effect.gen(function* () {
       const slow = ToolCall.make({
         id: 'call_slow_task',
-        name: 'task',
+        name: 'subagent',
         params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
       })
       const fast = ToolCall.make({
         id: 'call_fast_task',
-        name: 'task',
+        name: 'subagent',
         params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
       })
       const slowGate = yield* Deferred.make<void>()

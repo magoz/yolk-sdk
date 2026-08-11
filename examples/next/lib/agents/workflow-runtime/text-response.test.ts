@@ -3,14 +3,16 @@ import { describe, expect, it } from '@effect/vitest'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
 
-const taskToolStart = source.indexOf('const taskToolModule = makeNonRecursiveTaskToolModule')
+const taskToolStart = source.indexOf(
+  'const subagentToolModule = makeNonRecursiveSubagentToolModule'
+)
 const taskExecuteSource = source.slice(
   taskToolStart,
   source.indexOf('const toolModules', taskToolStart)
 )
 
-describe('makeAgentTextRuntime task tool wiring', () => {
-  it('adds task tool to top-level text runtime', () => {
+describe('makeAgentTextRuntime subagent tool wiring', () => {
+  it('adds subagent tool to top-level text runtime', () => {
     expect(taskToolStart).toBeGreaterThanOrEqual(0)
     expect(source).toContain('const knowledgeToolModule = makeAppKnowledgeToolModule()')
     expect(source).toContain('const storageToolModule = makeAppStorageKnowledgeSearchToolModule()')
@@ -21,12 +23,12 @@ describe('makeAgentTextRuntime task tool wiring', () => {
     expect(source).toContain('storageToolModule')
     expect(source).toContain('knowledgeToolModule')
     expect(source).toContain('...subagentToolModules,')
-    expect(source).toContain('taskToolModule')
+    expect(source).toContain('subagentToolModule')
     expect(source).toContain("name: 'general'")
     expect(source).toContain("name: 'explore'")
   })
 
-  it('omits task tool from subagent toolsets', () => {
+  it('omits subagent tool from subagent toolsets', () => {
     expect(taskExecuteSource).toContain('subagent: true')
     expect(taskExecuteSource).toContain('modules: subagentToolModules')
     expect(taskExecuteSource).not.toContain('modules: toolModules')
@@ -39,8 +41,8 @@ describe('makeAgentTextRuntime task tool wiring', () => {
   })
 
   it('adds task timing metadata to structured results', () => {
-    expect(source).toContain('makeTaskToolResult')
-    expect(source).toContain('taskSubagentRunId')
+    expect(source).toContain('makeSubagentToolResult')
+    expect(source).toContain('subagentToolRunId')
     expect(source).toContain('startedAtMs')
     expect(source).toContain('endedAtMs')
   })

@@ -8,8 +8,8 @@ Generic host tool registration and resolution.
 - Tool resolution from host modules and context.
 - Duplicate tool name validation.
 - Adapter from resolved tools to `@yolk-sdk/agent/loop` `ToolExecutor`.
-- Package-owned `task` and `question` tool contracts.
-- Helpers for task subagent result metadata and non-recursive task tool exposure.
+- Package-owned `subagent` and `question` tool contracts.
+- Helpers for subagent result metadata and non-recursive subagent tool exposure.
 - `ModelVisibleToolError` helpers for recoverable, model-visible tool failures.
 
 ## Use it when
@@ -47,9 +47,9 @@ Thrown `ToolError`s become model-visible failed tool results plus `ToolExecution
 so keep messages safe and non-secret. Reserve stream failure for provider/runtime defects,
 aborts, and implementation bugs outside typed tool execution.
 
-## Task subagents
+## Subagents
 
-`task` is the standard tool for delegating focused work to a subagent. The SDK owns the
+`subagent` is the standard tool for delegating focused work to a child agent. The SDK owns the
 tool schema, validation, event metadata shape, and result formatting. Host apps still own
 execution: available model/reasoning choices, provider layers, prompts, auth, concrete tools,
 storage, and policy. When choices are configured, the tool exposes optional `model` and
@@ -57,26 +57,26 @@ storage, and policy. When choices are configured, the tool exposes optional `mod
 are opaque host values. Reasoning effort values are `minimal`, `low`, `medium`, `high`, and
 `xhigh`.
 
-Use `makeNonRecursiveTaskToolModule` for the top-level agent so nested subagents do not receive
-`task` again:
+Use `makeNonRecursiveSubagentToolModule` for the top-level agent so nested subagents do not receive
+`subagent` again:
 
 ```ts
 import { Clock, Effect, Stream } from 'effect'
 import { run } from '@yolk-sdk/agent/loop'
 import { makeSubagentRunId, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
-  makeNonRecursiveTaskToolModule,
-  makeTaskToolResult,
+  makeNonRecursiveSubagentToolModule,
+  makeSubagentToolResult,
   makeToolExecutorLayer,
   subagentResultText,
-  type TaskSubagentContext
+  type SubagentContext
 } from '@yolk-sdk/agent/tools'
 
-type ToolContext = TaskSubagentContext & {
+type ToolContext = SubagentContext & {
   readonly sessionId: string
 }
 
-const taskToolModule = makeNonRecursiveTaskToolModule<ToolContext>({
+const subagentToolModule = makeNonRecursiveSubagentToolModule<ToolContext>({
   subagents: [
     { name: 'general', description: 'Handle complex multi-step work.' },
     { name: 'explore', description: 'Explore code and docs.' }
@@ -108,7 +108,7 @@ const taskToolModule = makeNonRecursiveTaskToolModule<ToolContext>({
       }).pipe(Stream.runCollect, Effect.provide(makeToolExecutorLayer(subagentToolSet)))
       const endedAtMs = yield* Clock.currentTimeMillis
 
-      return makeTaskToolResult({
+      return makeSubagentToolResult({
         callId: call.id,
         output: subagentResultText(Array.from(events)),
         subagentType: params.subagent_type,
@@ -130,10 +130,10 @@ layer and return a model-visible error for unsupported combinations.
 Host apps should usually resolve a smaller subagent toolset:
 
 - include read/search tools that help delegated work
-- exclude `task` to prevent recursion
+- exclude `subagent` to prevent recursion
 - exclude write/destructive tools unless explicitly safe for autonomous subagents
 - pass a fresh or derived session id so subagent work is traceable
 
 The loop emits normal tool lifecycle events plus `SubagentStarted` / `SubagentCompleted` around
-`task` calls. Same-turn sibling `task` calls run concurrently through the standard parallel tool
-batch behavior.
+`subagent` calls. Same-turn sibling `subagent` calls run concurrently through the standard parallel
+tool batch behavior.

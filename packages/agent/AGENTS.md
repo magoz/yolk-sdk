@@ -4,30 +4,30 @@
 
 ## Subpaths
 
-| Subpath                                               | Source                                       | Role                                                                                                                     |
+| Subpath                                               | Source                                       | Role                                                                                                                 |
 | ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                         |
-| `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                                  |
-| `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                        |
-| `@yolk-sdk/agent/runtime`                             | `src/runtime`                                | Generic runtime/session orchestration                                                                                    |
-| `@yolk-sdk/agent/client`                              | `src/client`                                 | Effect-native HTTP/NDJSON transport, durable run, attachment, and state helpers                                           |
-| `@yolk-sdk/agent/compaction`                          | `src/compaction`                             | Host-owned context compaction utilities                                                                                  |
-| `@yolk-sdk/agent/tools`                               | `src/tools`                                  | Generic tool module registry                                                                                             |
-| `@yolk-sdk/agent/react`                               | `src/react`                                  | Headless React chat hook/state helpers                                                                                   |
-| `@yolk-sdk/agent/oauth`                               | `src/oauth`                                  | Provider-neutral OAuth token contracts                                                                                   |
-| `@yolk-sdk/agent/providers/openai`                    | `src/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                                    |
-| `@yolk-sdk/agent/providers/openai/codex`              | `src/providers/openai/codex.ts`              | OpenAI Codex request and auth helpers                                                                                    |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                                                                                               |
-| `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory                                                                                   |
-| `@yolk-sdk/agent/providers/openai/realtime`           | `src/providers/openai/realtime`              | OpenAI Realtime session config + event codecs                                                                            |
-| `@yolk-sdk/agent/providers/openai/speech`             | `src/providers/openai/speech.ts`             | OpenAI TTS/STT service adapters                                                                                          |
-| `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                                                |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                          |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                              |
-| `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                                 |
-| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts     |
-| `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                           |
-| `@yolk-sdk/agent/voice/react`                         | `src/voice/react.ts`                         | Headless browser voice React hook                                                                                        |
+| `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                     |
+| `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                              |
+| `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                    |
+| `@yolk-sdk/agent/runtime`                             | `src/runtime`                                | Generic runtime/session orchestration                                                                                |
+| `@yolk-sdk/agent/client`                              | `src/client`                                 | Effect-native HTTP/NDJSON transport, durable run, attachment, and state helpers                                      |
+| `@yolk-sdk/agent/compaction`                          | `src/compaction`                             | Host-owned context compaction utilities                                                                              |
+| `@yolk-sdk/agent/tools`                               | `src/tools`                                  | Generic tool module registry                                                                                         |
+| `@yolk-sdk/agent/react`                               | `src/react`                                  | Headless React chat hook/state helpers                                                                               |
+| `@yolk-sdk/agent/oauth`                               | `src/oauth`                                  | Provider-neutral OAuth token contracts                                                                               |
+| `@yolk-sdk/agent/providers/openai`                    | `src/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                                |
+| `@yolk-sdk/agent/providers/openai/codex`              | `src/providers/openai/codex.ts`              | OpenAI Codex request and auth helpers                                                                                |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                                                                                           |
+| `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory                                                                               |
+| `@yolk-sdk/agent/providers/openai/realtime`           | `src/providers/openai/realtime`              | OpenAI Realtime session config + event codecs                                                                        |
+| `@yolk-sdk/agent/providers/openai/speech`             | `src/providers/openai/speech.ts`             | OpenAI TTS/STT service adapters                                                                                      |
+| `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                                            |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                      |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                          |
+| `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                             |
+| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts |
+| `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                       |
+| `@yolk-sdk/agent/voice/react`                         | `src/voice/react.ts`                         | Headless browser voice React hook                                                                                    |
 
 ## Boundaries
 
@@ -60,14 +60,14 @@
 - Providers depend on protocol + loop + oauth + Effect; provider factories may use Effect HTTP; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
 - Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
 - Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
-- `@yolk-sdk/agent/tools` owns the domain-free `task` tool contract for subagents; host apps provide subagent execution, available model/reasoning choices, prompts, provider layers, and tool policy. Optional task runtime selections inherit host settings when omitted.
+- `@yolk-sdk/agent/tools` owns the domain-free `subagent` tool contract for subagents; host apps provide subagent execution, available model/reasoning choices, prompts, provider layers, and tool policy. Optional task runtime selections inherit host settings when omitted.
 - `@yolk-sdk/agent/tools` owns the domain-free `question` HITL tool contract; loop intercepts it before executor dispatch.
 - `@yolk-sdk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
 - `ModelVisibleToolError` is for recoverable, model-visible tool failures; `makeTool` returns `ToolResult.isError` with structured `{ type, tool, reason, message, details? }` content.
 - Tool approval is host-enforced policy on normal tools, not a model-callable permission tool; v1 approvals are per-call, no persistent allow-always rules.
 - Use `EmptyToolParams` for no-arg `makeTool` tools instead of `Schema.Struct({})` when author intent is no parameters.
-- v1 subagents may use normal tools but must not receive the `task` tool recursively unless a future explicit capability enables it.
-- Protocol owns `SubagentStarted`/`SubagentCompleted` and `makeSubagentRunId`; loop emits lifecycle events around `task` calls while preserving generic tool lifecycle as the source of truth.
+- v1 subagents may use normal tools but must not receive the `subagent` tool recursively unless a future explicit capability enables it.
+- Protocol owns `SubagentStarted`/`SubagentCompleted` and `makeSubagentRunId`; loop emits lifecycle events around `subagent` calls while preserving generic tool lifecycle as the source of truth.
 
 ## Protocol/loop rules
 
@@ -109,5 +109,5 @@
 
 - Area tests live under `test/protocol`, `test/loop`, `test/runtime`, `test/client`, `test/compaction`, `test/tools`, `test/react`, `test/oauth`, `test/providers`, `test/skillset`, `test/voice`, and `test/property`.
 - Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
-- Cover task tool schema, unknown subagent rejection, and result formatting in `test/tools`.
-- Cover subagent protocol round-trips in `test/protocol` and same-turn parallel task lifecycle in `test/loop`.
+- Cover subagent tool schema, unknown subagent rejection, and result formatting in `test/tools`.
+- Cover subagent protocol round-trips in `test/protocol` and same-turn parallel subagent lifecycle in `test/loop`.

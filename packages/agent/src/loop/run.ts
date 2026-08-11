@@ -94,7 +94,7 @@ export type ToolBatchConfig = {
 
 const questionToolName = 'question'
 
-type TaskCallMetadata = {
+type SubagentCallMetadata = {
   readonly subagentRunId: string
   readonly subagentType: string
   readonly description: string
@@ -111,8 +111,8 @@ const nonEmptyStringField = (input: unknown, key: string) => {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
 }
 
-const taskCallMetadata = (call: ToolCall): TaskCallMetadata | undefined => {
-  if (call.name !== 'task') {
+const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
+  if (call.name !== 'subagent') {
     return undefined
   }
 
@@ -135,7 +135,7 @@ const subagentStartedEvent = (input: {
   readonly model: string
   readonly startedAtMs: number
 }) => {
-  const metadata = taskCallMetadata(input.call)
+  const metadata = subagentCallMetadata(input.call)
 
   return metadata === undefined
     ? undefined
@@ -156,7 +156,7 @@ const subagentCompletedEvent = (input: {
   readonly startedAtMs: number
   readonly endedAtMs: number
 }) => {
-  const metadata = taskCallMetadata(input.call)
+  const metadata = subagentCallMetadata(input.call)
 
   return metadata === undefined
     ? undefined

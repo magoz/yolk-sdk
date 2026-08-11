@@ -20,9 +20,9 @@ import {
   type ToolRegistryError
 } from './registry.ts'
 
-export const taskToolName = 'task'
+export const subagentToolName = 'subagent'
 
-const TaskToolBaseFields = {
+const SubagentToolBaseFields = {
   description: Schema.String.pipe(
     Schema.annotate({ description: 'A short 3-5 word description of the task.' })
   ),
@@ -37,7 +37,7 @@ const TaskToolBaseFields = {
   )
 }
 
-export type TaskToolParams = {
+export type SubagentToolParams = {
   readonly description: string
   readonly prompt: string
   readonly subagent_type: string
@@ -45,43 +45,43 @@ export type TaskToolParams = {
   readonly reasoning_effort?: AgentReasoningEffort
 }
 
-export type TaskSubagentDefinition = {
+export type SubagentDefinition = {
   readonly name: string
   readonly description: string
 }
 
-export type TaskModelDefinition = {
+export type SubagentModelDefinition = {
   readonly id: string
   readonly description: string
 }
 
-export type TaskReasoningEffortDefinition = {
+export type SubagentReasoningEffortDefinition = {
   readonly value: AgentReasoningEffort
   readonly description: string
 }
 
-export type TaskRuntimeSelectionOptions = {
-  readonly models?: ReadonlyArray<TaskModelDefinition>
-  readonly reasoningEfforts?: ReadonlyArray<TaskReasoningEffortDefinition>
+export type SubagentRuntimeSelectionOptions = {
+  readonly models?: ReadonlyArray<SubagentModelDefinition>
+  readonly reasoningEfforts?: ReadonlyArray<SubagentReasoningEffortDefinition>
 }
 
-export type TaskSubagentContext = {
+export type SubagentContext = {
   readonly subagent?: boolean
 }
 
-export type TaskExecutionInput<Context> = {
+export type SubagentExecutionInput<Context> = {
   readonly call: ToolCall
   readonly context: Context
-  readonly params: TaskToolParams
+  readonly params: SubagentToolParams
 }
 
-export type TaskToolOptions<Context> = TaskRuntimeSelectionOptions & {
-  readonly subagents: ReadonlyArray<TaskSubagentDefinition>
+export type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
+  readonly subagents: ReadonlyArray<SubagentDefinition>
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
-  readonly execute: (input: TaskExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
+  readonly execute: (input: SubagentExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
 
-export type TaskToolResultInput = {
+export type SubagentToolResultInput = {
   readonly callId: string
   readonly output: string
   readonly subagentType: string
@@ -94,16 +94,16 @@ export type TaskToolResultInput = {
   readonly isError?: boolean
 }
 
-const taskToolError = (message: string, cause: ToolError['cause']) =>
+const subagentToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
-    tool: taskToolName,
+    tool: subagentToolName,
     message,
     cause
   })
 
-const taskModelVisibleError = (message: string) =>
+const subagentModelVisibleError = (message: string) =>
   modelVisibleToolError({
-    tool: taskToolName,
+    tool: subagentToolName,
     message,
     reason: 'validation'
   })
@@ -120,7 +120,7 @@ const optionalRuntimeSelection = <Value extends string>(input: {
     Schema.Enum(enumRecord(input.values)).pipe(Schema.annotate({ description: input.description }))
   )
 
-const configuredTaskToolParams = (options: TaskRuntimeSelectionOptions) => {
+const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) => {
   const model =
     options.models === undefined || options.models.length === 0
       ? undefined
@@ -139,24 +139,24 @@ const configuredTaskToolParams = (options: TaskRuntimeSelectionOptions) => {
 
   if (model !== undefined && reasoningEffort !== undefined) {
     return Schema.Struct({
-      ...TaskToolBaseFields,
+      ...SubagentToolBaseFields,
       model,
       reasoning_effort: reasoningEffort
     })
   }
 
   if (model !== undefined) {
-    return Schema.Struct({ ...TaskToolBaseFields, model })
+    return Schema.Struct({ ...SubagentToolBaseFields, model })
   }
 
   if (reasoningEffort !== undefined) {
-    return Schema.Struct({ ...TaskToolBaseFields, reasoning_effort: reasoningEffort })
+    return Schema.Struct({ ...SubagentToolBaseFields, reasoning_effort: reasoningEffort })
   }
 
-  return Schema.Struct(TaskToolBaseFields)
+  return Schema.Struct(SubagentToolBaseFields)
 }
 
-const trimmedTaskParams = (params: TaskToolParams): TaskToolParams => ({
+const trimmedSubagentParams = (params: SubagentToolParams): SubagentToolParams => ({
   description: params.description.trim(),
   prompt: params.prompt.trim(),
   subagent_type: params.subagent_type.trim(),
@@ -164,8 +164,8 @@ const trimmedTaskParams = (params: TaskToolParams): TaskToolParams => ({
   ...(params.reasoning_effort === undefined ? {} : { reasoning_effort: params.reasoning_effort })
 })
 
-const validateTaskParams = (
-  params: TaskToolParams
+const validateSubagentParams = (
+  params: SubagentToolParams
 ): Effect.Effect<
   {
     readonly description: string
@@ -174,57 +174,57 @@ const validateTaskParams = (
   },
   ModelVisibleToolError
 > => {
-  const trimmed = trimmedTaskParams(params)
+  const trimmed = trimmedSubagentParams(params)
 
   if (trimmed.description.length === 0) {
-    return Effect.fail(taskModelVisibleError('description must not be empty'))
+    return Effect.fail(subagentModelVisibleError('description must not be empty'))
   }
 
   if (trimmed.prompt.length === 0) {
-    return Effect.fail(taskModelVisibleError('prompt must not be empty'))
+    return Effect.fail(subagentModelVisibleError('prompt must not be empty'))
   }
 
   if (trimmed.subagent_type.length === 0) {
-    return Effect.fail(taskModelVisibleError('subagent_type must not be empty'))
+    return Effect.fail(subagentModelVisibleError('subagent_type must not be empty'))
   }
 
   return Effect.succeed(trimmed)
 }
 
-const findSubagent = (subagents: ReadonlyArray<TaskSubagentDefinition>, name: string) =>
+const findSubagent = (subagents: ReadonlyArray<SubagentDefinition>, name: string) =>
   subagents.find(subagent => subagent.name === name)
 
 const requireKnownSubagent = (
-  subagents: ReadonlyArray<TaskSubagentDefinition>,
+  subagents: ReadonlyArray<SubagentDefinition>,
   name: string
-): Effect.Effect<TaskSubagentDefinition, ModelVisibleToolError> => {
+): Effect.Effect<SubagentDefinition, ModelVisibleToolError> => {
   const subagent = findSubagent(subagents, name)
 
   return subagent === undefined
-    ? Effect.fail(taskModelVisibleError(`Unknown subagent type: ${name}`))
+    ? Effect.fail(subagentModelVisibleError(`Unknown subagent type: ${name}`))
     : Effect.succeed(subagent)
 }
 
-const subagentDescription = (subagent: TaskSubagentDefinition) =>
+const subagentDescription = (subagent: SubagentDefinition) =>
   `- ${subagent.name}: ${subagent.description}`
 
-const modelDescription = (model: TaskModelDefinition) => `- ${model.id}: ${model.description}`
+const modelDescription = (model: SubagentModelDefinition) => `- ${model.id}: ${model.description}`
 
-const reasoningEffortDescription = (effort: TaskReasoningEffortDefinition) =>
+const reasoningEffortDescription = (effort: SubagentReasoningEffortDefinition) =>
   `- ${effort.value}: ${effort.description}`
 
-const taskToolDescription = (
-  options: TaskRuntimeSelectionOptions & {
-    readonly subagents: ReadonlyArray<TaskSubagentDefinition>
+const subagentToolDescription = (
+  options: SubagentRuntimeSelectionOptions & {
+    readonly subagents: ReadonlyArray<SubagentDefinition>
   }
 ) =>
   [
     'Launch a new agent to handle complex, multistep tasks autonomously.',
     'Use this when delegating focused work to a specialized subagent would save context or allow parallel exploration.',
-    'To run subagents in parallel, call this task tool multiple times in the same assistant response.',
-    'Yolk runs same-turn task calls concurrently automatically.',
+    'To run subagents in parallel, call this subagent tool multiple times in the same assistant response.',
+    'Yolk runs same-turn subagent calls concurrently automatically.',
     'A fresh subagent only sees the prompt you provide, so include all required context.',
-    'Subagents can use their normal tools but cannot launch further task subagents in v1.',
+    'Subagents can use their normal tools but cannot launch further subagents in v1.',
     options.subagents.length === 0
       ? 'No subagent types are currently available.'
       : `Available subagent types:\n${options.subagents.map(subagentDescription).join('\n')}`,
@@ -246,53 +246,53 @@ const taskToolDescription = (
     .filter(section => section !== undefined)
     .join('\n\n')
 
-export const makeTaskToolRegistration = <Context>(
-  options: TaskToolOptions<Context>
+export const makeSubagentToolRegistration = <Context>(
+  options: SubagentToolOptions<Context>
 ): ToolRegistration<Context> =>
   makeTool({
-    name: taskToolName,
-    description: taskToolDescription(options),
-    parameters: configuredTaskToolParams(options),
+    name: subagentToolName,
+    description: subagentToolDescription(options),
+    parameters: configuredSubagentToolParams(options),
     access: 'read',
     isEnabled: options.isEnabled,
     invalidParamsMessage: error =>
-      `Invalid task arguments: ${error instanceof Error ? error.message : String(error)}`,
+      `Invalid subagent arguments: ${error instanceof Error ? error.message : String(error)}`,
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
-        if (call.name !== taskToolName) {
+        if (call.name !== subagentToolName) {
           return yield* Effect.fail(
-            taskToolError(`Tool is not configured: ${call.name}`, 'not_found')
+            subagentToolError(`Tool is not configured: ${call.name}`, 'not_found')
           )
         }
 
-        const normalizedParams = yield* validateTaskParams(params)
+        const normalizedParams = yield* validateSubagentParams(params)
         yield* requireKnownSubagent(options.subagents, normalizedParams.subagent_type)
 
         return yield* options.execute({ call, context, params: normalizedParams })
       })
   })
 
-export const makeTaskToolDef = (
-  subagents: ReadonlyArray<TaskSubagentDefinition>,
-  runtimeSelections: TaskRuntimeSelectionOptions = {}
+export const makeSubagentToolDef = (
+  subagents: ReadonlyArray<SubagentDefinition>,
+  runtimeSelections: SubagentRuntimeSelectionOptions = {}
 ) =>
-  makeTaskToolRegistration({
+  makeSubagentToolRegistration({
     subagents,
     ...runtimeSelections,
     execute: ({ call }) => Effect.succeed(ToolResult.make({ toolCallId: call.id, content: '' }))
   }).def
 
-export const makeTaskToolModule = <Context>(
-  options: TaskToolOptions<Context>
+export const makeSubagentToolModule = <Context>(
+  options: SubagentToolOptions<Context>
 ): ToolModule<Context> => ({
-  id: 'task',
-  tools: [makeTaskToolRegistration(options)]
+  id: 'subagent',
+  tools: [makeSubagentToolRegistration(options)]
 })
 
-export const makeNonRecursiveTaskToolModule = <Context extends TaskSubagentContext>(
-  options: TaskToolOptions<Context>
+export const makeNonRecursiveSubagentToolModule = <Context extends SubagentContext>(
+  options: SubagentToolOptions<Context>
 ): ToolModule<Context> =>
-  makeTaskToolModule({
+  makeSubagentToolModule({
     ...options,
     isEnabled: context =>
       context.subagent === true
@@ -302,10 +302,10 @@ export const makeNonRecursiveTaskToolModule = <Context extends TaskSubagentConte
           : options.isEnabled(context)
   })
 
-export const formatTaskResult = (output: string) =>
-  ['<task_result>', output, '</task_result>'].join('\n')
+export const formatSubagentResult = (output: string) =>
+  ['<subagent_result>', output, '</subagent_result>'].join('\n')
 
-export const taskSubagentRunId = makeSubagentRunId
+export const subagentToolRunId = makeSubagentRunId
 
 const latestAssistantText = (messages: ReadonlyArray<AgentMessage>) => {
   const assistant = [...messages].reverse().find(message => message._tag === 'Assistant')
@@ -320,10 +320,10 @@ export const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
   return text.length === 0 ? 'Subagent completed without a final text response.' : text
 }
 
-export const makeTaskToolResult = (input: TaskToolResultInput) =>
+export const makeSubagentToolResult = (input: SubagentToolResultInput) =>
   ToolResult.make({
     toolCallId: input.callId,
-    content: formatTaskResult(input.output),
+    content: formatSubagentResult(input.output),
     isError: input.isError,
     structuredContent: {
       subagent_run_id: input.subagentRunId,
