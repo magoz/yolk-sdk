@@ -278,6 +278,34 @@ describe('Anthropic Claude provider', () => {
     })
   )
 
+  it.effect('lowers supported reasoning effort to Anthropic output config', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-opus-5',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'analyze' })],
+        tools: [],
+        reasoningEffort: 'medium'
+      })
+
+      expect(body).toMatchObject({ output_config: { effort: 'medium' } })
+    })
+  )
+
+  it.effect('omits unsupported minimal effort from Anthropic output config', () =>
+    Effect.gen(function* () {
+      const body = yield* toAnthropicClaudeRequestBody({
+        model: 'claude-opus-5',
+        systemPrompt: '',
+        messages: [UserMessage.make({ content: 'analyze' })],
+        tools: [],
+        reasoningEffort: 'minimal'
+      })
+
+      expect(body).not.toHaveProperty('output_config')
+    })
+  )
+
   it.effect('lowers rich tool results to nested Claude content blocks', () =>
     Effect.gen(function* () {
       const body = yield* toAnthropicClaudeRequestBody({

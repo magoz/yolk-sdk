@@ -72,6 +72,7 @@
 ## Protocol/loop rules
 
 - `AgentReasoningEffort` is protocol-only request config; app/provider layers choose and pass through values.
+- Anthropic Claude lowers `low`, `medium`, `high`, and `xhigh` reasoning efforts to `output_config.effort`; omit `minimal` and an absent effort because Anthropic does not support that value and must not receive an empty output config.
 - `AgentMessage` envelope fields are optional and model-visible: `createdAtMs`, `author.displayName`, and JSON `annotations`; preserve them through protocol round-trips.
 - Provider lowering renders message envelopes via `messageContextText` + `prependMessageContextToContent`; annotations are context only, not instructions.
 - `Content = string | ContentPart[]`; parts include text, image, document, and audio. Media parts carry `InlineBase64`, `Url`, or host-owned `Ref` sources. Use protocol helpers (non-exhaustive: source factories, text/preview/parts, emptiness/append, hydration, document inference, attachment accessors) instead of app-local duplication.
@@ -93,6 +94,7 @@
 - Durable replay may use `LLMTextDelta.textSoFar` / `LLMReasoningDelta.reasoningSoFar`; chat projection prefers snapshots and de-dupes by `eventId`.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
 - Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, loop runs them concurrently within `toolConcurrency`, and dependent work waits for the next model turn.
+- OpenAI Codex streaming preserves every sibling function call and deduplicates `response.completed` replays by call id before parsing replayed arguments; a malformed replay of an already-emitted call must not invalidate unseen sibling calls.
 - Tool executor `ToolError`s are model-visible failed tool results, not stream failures; every host tool call must have a matching `ToolResultMessage` before the next provider request.
 - Use `validateNoDanglingHostToolCalls` before provider lowering and `repairDanglingHostToolCalls` only for persisted/replayed transcripts that already have gaps.
 - HITL semantics live in `patterns/AGENT_HITL.md`: approvals/questions pause with `AgentAwaitingInput`; responses resume through `hitlResponses`/typed client inputs.

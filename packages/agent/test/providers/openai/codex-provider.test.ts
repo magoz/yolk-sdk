@@ -37,6 +37,32 @@ const responseFromText = (text: string) => {
   return HttpClientResponse.fromWeb(request, new Response(text, { status: 200 }))
 }
 
+const responseFromSseEvents = (events: ReadonlyArray<unknown>) =>
+  responseFromText(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+
+type CodexFunctionCallFixture = {
+  readonly type: 'function_call'
+  readonly call_id: string
+  readonly name: string
+  readonly arguments: string
+}
+
+const codexFunctionCall = (
+  callId: string,
+  name: string,
+  argumentsJson = '{}'
+): CodexFunctionCallFixture => ({
+  type: 'function_call',
+  call_id: callId,
+  name,
+  arguments: argumentsJson
+})
+
+const completedCodexResponse = (...output: ReadonlyArray<unknown>) => ({
+  type: 'response.completed',
+  response: { output }
+})
+
 const streamErrorResponse = () => {
   const request = HttpClientRequest.get('https://example.com')
   const response = HttpClientResponse.fromWeb(request, new Response('', { status: 200 }))
@@ -452,6 +478,108 @@ describe('OpenAI Codex provider', () => {
           { type: 'input_image', image_url: 'https://cdn.example.com/image.webp' }
         ]
       })
+    })
+  )
+
+  it.effect('preserves sibling function calls from a streamed Codex response', () =>
+    Effect.gen(function* () {
+      const firstCall = codexFunctionCall('call-1', 'search_one')
+      const secondCall = codexFunctionCall('call-2', 'search_two')
+      const response = responseFromSseEvents([
+        { type: 'response.output_item.done', item: firstCall },
+        { type: 'response.output_item.done', item: secondCall },
+        completedCodexResponse(firstCall, secondCall)
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'ToolCall'
+            ? [{ id: event.call.id, name: event.call.name, params: event.call.params }]
+            : []
+        )
+      ).toEqual([
+        { id: 'call-1', name: 'search_one', params: {} },
+        { id: 'call-2', name: 'search_two', params: {} }
+      ])
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'Done' ? [event.stopReason] : []
+        )
+      ).toEqual(['tool_use'])
+    })
+  )
+
+  it.effect('recovers only missing function calls from the final Codex response', () =>
+    Effect.gen(function* () {
+      const firstCall = codexFunctionCall('call-1', 'search_one')
+      const secondCall = codexFunctionCall('call-2', 'search_two')
+      const response = responseFromSseEvents([
+        { type: 'response.output_item.done', item: firstCall },
+        completedCodexResponse(firstCall, secondCall)
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'ToolCall' ? [event.call.id] : []
+        )
+      ).toEqual(['call-1', 'call-2'])
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'Done' ? [event.stopReason] : []
+        )
+      ).toEqual(['tool_use'])
+    })
+  )
+
+  it.effect('ignores malformed final replays after the call was streamed', () =>
+    Effect.gen(function* () {
+      const firstCall = codexFunctionCall('call-1', 'search_one')
+      const malformedFirstCallReplay = codexFunctionCall('call-1', 'search_one', '{broken')
+      const secondCall = codexFunctionCall('call-2', 'search_two')
+      const response = responseFromSseEvents([
+        { type: 'response.output_item.done', item: firstCall },
+        completedCodexResponse(malformedFirstCallReplay, secondCall)
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'ToolCall' ? [event.call.id] : []
+        )
+      ).toEqual(['call-1', 'call-2'])
+    })
+  )
+
+  it.effect('ends a streamed sibling tool batch without a completion event', () =>
+    Effect.gen(function* () {
+      const response = responseFromSseEvents([
+        {
+          type: 'response.output_item.done',
+          item: codexFunctionCall('call-1', 'search_one')
+        },
+        {
+          type: 'response.output_item.done',
+          item: codexFunctionCall('call-2', 'search_two')
+        }
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'ToolCall' ? [event.call.id] : []
+        )
+      ).toEqual(['call-1', 'call-2'])
+      expect(
+        Array.from(events).flatMap(event =>
+          event._tag === 'Done' ? [event.stopReason] : []
+        )
+      ).toEqual(['tool_use'])
     })
   )
 

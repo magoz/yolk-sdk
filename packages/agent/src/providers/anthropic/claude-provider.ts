@@ -141,6 +141,9 @@ type AnthropicRequestBody = {
   readonly system: ReadonlyArray<AnthropicSystemBlock>
   readonly messages: ReadonlyArray<AnthropicMessage>
   readonly max_tokens: number
+  readonly output_config?: {
+    readonly effort: 'low' | 'medium' | 'high' | 'xhigh'
+  }
   readonly stream?: true
   readonly tools?: ReadonlyArray<AnthropicTool>
 }
@@ -979,11 +982,16 @@ export const toAnthropicClaudeRequestBody = (
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
     const billingSystemBlock = yield* makeAnthropicClaudeBillingSystemBlock(rawMessages)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
+    const outputConfig =
+      request.reasoningEffort === undefined || request.reasoningEffort === 'minimal'
+        ? undefined
+        : { effort: request.reasoningEffort }
     const baseBody = {
       model: request.model,
       system: [billingSystemBlock, anthropicClaudeIdentitySystemBlock],
       messages,
-      max_tokens: config.maxTokens
+      max_tokens: config.maxTokens,
+      ...(outputConfig === undefined ? {} : { output_config: outputConfig })
     }
     const body: AnthropicRequestBody =
       config.stream === true ? { ...baseBody, stream: true } : baseBody

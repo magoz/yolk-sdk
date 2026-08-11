@@ -124,6 +124,11 @@ Codex rejects vendor `max_output_tokens`, so the Codex adapter retains the requi
 omits that field from requests. `OpenAiProviderLayer` reads both `OPENAI_API_KEY` and integer
 `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
+Set optional `reasoningEffort` on `run` or `runRuntime`; provider adapters lower it to vendor
+configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` through
+`output_config.effort`. It omits `minimal`, which Anthropic does not support. Hosts remain
+responsible for choosing an effort accepted by the selected provider and model.
+
 ## Provider failures and retries
 
 Provider adapters classify safe failure metadata at the boundary. The loop owns bounded retry
@@ -285,6 +290,13 @@ const projection = events.reduce(
 
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
+
+## Parallel tool calls
+
+OpenAI and OpenAI Codex requests enable vendor parallel tool calls when tools are available. The
+Codex stream adapter preserves every sibling function call and suppresses final-response replays
+by call id. The loop executes calls emitted in the same model turn concurrently, bounded by the
+host-configured `LoopConfig.toolConcurrency`; dependent work waits for the next model turn.
 
 ## Transcript invariants
 

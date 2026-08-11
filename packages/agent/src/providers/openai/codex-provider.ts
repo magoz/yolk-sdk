@@ -631,7 +631,7 @@ type OpenAiCodexBodyFormat = 'undecided' | 'sse' | 'json'
 type OpenAiCodexSseState = {
   readonly hasTextDelta: boolean
   readonly hasReasoningDelta: boolean
-  readonly hasToolCall: boolean
+  readonly toolCallIds: ReadonlySet<string>
   readonly hasDone: boolean
 }
 
@@ -649,7 +649,7 @@ type OpenAiCodexBodyState = {
 const initialSseState: OpenAiCodexSseState = {
   hasTextDelta: false,
   hasReasoningDelta: false,
-  hasToolCall: false,
+  toolCallIds: new Set(),
   hasDone: false
 }
 
@@ -658,6 +658,22 @@ const initialBodyState: OpenAiCodexBodyState = {
   buffer: '',
   sse: initialSseState
 }
+
+const shouldEmitSseEvent = (state: OpenAiCodexSseState, event: LLMEvent) => {
+  if (state.hasTextDelta && event._tag === 'TextDelta') return false
+  if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') return false
+  if (event._tag === 'ToolCall' && state.toolCallIds.has(event.call.id)) return false
+
+  return true
+}
+
+const dedupeSseEvents = (
+  state: OpenAiCodexSseState,
+  events: ReadonlyArray<LLMEvent>
+): ReadonlyArray<LLMEvent> => events.filter(event => shouldEmitSseEvent(state, event))
+
+const toolCallIdsFromEvents = (events: ReadonlyArray<LLMEvent>) =>
+  events.flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
 
 const normalizeNewlines = (text: string) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
@@ -771,36 +787,32 @@ const eventsFromOutputItemDone = (
     return yield* decodeOpenAiCodexOutputItem(item).pipe(Effect.flatMap(eventsFromOutputItem))
   })
 
+const responseWithoutReplayedToolCalls = (
+  response: OpenAiCodexResponse,
+  emittedCallIds: ReadonlySet<string>
+): OpenAiCodexResponse => ({
+  ...response,
+  output: response.output.filter(
+    item => item.type !== 'function_call' || !emittedCallIds.has(item.call_id)
+  )
+})
+
 const finalResponseToEvents = (
   response: unknown,
   state: OpenAiCodexSseState
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
+    const hasToolCalls = state.toolCallIds.size > 0
     const parsedFinal = yield* decodeOpenAiCodexResponse(response)
-    const finalEvents = yield* toLlmEvents(parsedFinal, {
-      allowEmptyStop: state.hasTextDelta || state.hasToolCall
-    })
+    const finalEvents = yield* toLlmEvents(
+      responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
+      { allowEmptyStop: state.hasTextDelta || hasToolCalls }
+    )
 
-    const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || state.hasToolCall
-    const dedupedEvents = shouldDedupe
-      ? finalEvents.filter(event => {
-          if (state.hasTextDelta && event._tag === 'TextDelta') {
-            return false
-          }
+    const shouldDedupe = state.hasTextDelta || state.hasReasoningDelta || hasToolCalls
+    const dedupedEvents = shouldDedupe ? dedupeSseEvents(state, finalEvents) : finalEvents
 
-          if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
-            return false
-          }
-
-          if (state.hasToolCall && event._tag === 'ToolCall') {
-            return false
-          }
-
-          return true
-        })
-      : finalEvents
-
-    if (!state.hasToolCall) {
+    if (!hasToolCalls) {
       return dedupedEvents
     }
 
@@ -844,28 +856,15 @@ const processSseData = (
 
     const outputItemDoneEvents = yield* eventsFromOutputItemDone(parsed)
     if (outputItemDoneEvents.length > 0) {
-      const events = outputItemDoneEvents.filter(event => {
-        if (state.hasTextDelta && event._tag === 'TextDelta') {
-          return false
-        }
-
-        if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') {
-          return false
-        }
-
-        if (state.hasToolCall && event._tag === 'ToolCall') {
-          return false
-        }
-
-        return true
-      })
+      const events = dedupeSseEvents(state, outputItemDoneEvents)
+      const emittedToolCallIds = toolCallIdsFromEvents(events)
 
       return {
         state: {
           hasTextDelta: state.hasTextDelta || events.some(event => event._tag === 'TextDelta'),
           hasReasoningDelta:
             state.hasReasoningDelta || events.some(event => event._tag === 'ReasoningDelta'),
-          hasToolCall: state.hasToolCall || events.some(event => event._tag === 'ToolCall'),
+          toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
           hasDone: state.hasDone
         },
         events
@@ -876,13 +875,13 @@ const processSseData = (
       const events = yield* finalResponseToEvents(parsed.response, state)
       const emittedText = events.some(event => event._tag === 'TextDelta')
       const emittedReasoning = events.some(event => event._tag === 'ReasoningDelta')
-      const emittedToolCall = events.some(event => event._tag === 'ToolCall')
+      const emittedToolCallIds = toolCallIdsFromEvents(events)
 
       return {
         state: {
           hasTextDelta: state.hasTextDelta || emittedText,
           hasReasoningDelta: state.hasReasoningDelta || emittedReasoning,
-          hasToolCall: state.hasToolCall || emittedToolCall,
+          toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
           hasDone: true
         },
         events
@@ -1000,7 +999,9 @@ const finalizeBodyState = (
     }
 
     if (!sseState.hasDone) {
-      events.push(LLMDone.make({ stopReason: sseState.hasToolCall ? 'tool_use' : 'stop' }))
+      events.push(
+        LLMDone.make({ stopReason: sseState.toolCallIds.size > 0 ? 'tool_use' : 'stop' })
+      )
     }
 
     return events
