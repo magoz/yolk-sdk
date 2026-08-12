@@ -599,6 +599,15 @@ const isJsonObject = (value: unknown): value is JsonObject =>
 const jsonObjectField = (value: JsonObject, key: string) =>
   Object.getOwnPropertyDescriptor(value, key)?.value
 
+// Claude subscription OAuth validates tool schemas more narrowly than the regular
+// Anthropic API: combinators and tuple-only prefixItems can be rejected even when
+// they are valid JSON Schema. Effect Schema emits those constructs for unions,
+// refinements, and tuples, so the provider needs a compatibility projection.
+//
+// This projection is model guidance, not the execution validator. Whenever an
+// unsupported constraint cannot be represented faithfully, normalization must
+// widen it (usually to {}) rather than exclude an input accepted by the original
+// schema. makeTool continues to validate calls against that original Effect Schema.
 const topLevelJsonSchemaCombinatorKeys: ReadonlyArray<TopLevelJsonSchemaCombinatorKey> = [
   'anyOf',
   'oneOf',
@@ -793,6 +802,9 @@ const mergeAllOfSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject
   }
 }
 
+// JSON objects are not always schemas. Values under schema-map keywords are
+// schemas, while values under data keywords are literals and must remain opaque;
+// recursively normalizing enum data or property/definition names can corrupt it.
 const jsonSchemaMapKeywords = new Set([
   'properties',
   'patternProperties',
