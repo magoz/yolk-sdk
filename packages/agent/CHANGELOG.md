@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.56
+
+### Patch Changes
+
+- 2013d5e: Keep Anthropic tool input schemas valid when Effect Schema emits repeated constraints inside `allOf`.
+
 ## 0.1.0-canary.55
 
 ### Minor Changes

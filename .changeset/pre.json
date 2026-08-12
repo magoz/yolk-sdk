@@ -30,6 +30,7 @@
     "figma-runtime-secrets",
     "finite-workflow-retries",
     "fix-afloat-endpoint",
+    "fix-claude-tool-schemas",
     "fix-codex-output-limit",
     "flexible-task-runtimes",
     "fresh-tools-shout",
