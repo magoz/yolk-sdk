@@ -25,6 +25,9 @@ const schemaVariant = Schema.Literals([
   'literalField',
   'deepArrayStruct',
   'optionalNestedStruct',
+  'stackedChecks',
+  'reversedStackedChecks',
+  'tuple',
   'literalArray',
   'recordField',
   'unionField',
@@ -62,6 +65,16 @@ const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
   return [...current, ...Object.values(input).flatMap(collectLocalRefs)]
 }
 
+const collectKeywordValues = (input: unknown, keyword: string): ReadonlyArray<unknown> => {
+  if (Array.isArray(input)) return input.flatMap(value => collectKeywordValues(value, keyword))
+  if (!isJsonObject(input)) return []
+
+  return [
+    ...(Object.hasOwn(input, keyword) ? [field(input, keyword)] : []),
+    ...Object.values(input).flatMap(value => collectKeywordValues(value, keyword))
+  ]
+}
+
 const schemaParameters = (variant: typeof schemaVariant.Type) => {
   switch (variant) {
     case 'emptyParams':
@@ -94,6 +107,16 @@ const schemaParameters = (variant: typeof schemaVariant.Type) => {
           Schema.Struct({ query: Schema.String, limit: Schema.optional(Schema.Number) })
         )
       })
+    case 'stackedChecks':
+      return Schema.Struct({
+        subject: Schema.String.check(Schema.isMaxLength(2_000)).check(Schema.isMaxLength(160))
+      })
+    case 'reversedStackedChecks':
+      return Schema.Struct({
+        subject: Schema.String.check(Schema.isMaxLength(160)).check(Schema.isMaxLength(2_000))
+      })
+    case 'tuple':
+      return Schema.Struct({ pair: Schema.Tuple([Schema.String, Schema.Number]) })
     case 'literalArray':
       return Schema.Struct({ modes: Schema.Array(Schema.Literals(['read', 'write'])) })
     case 'recordField':
@@ -135,6 +158,15 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   expect(field(parameters, 'anyOf')).toBeUndefined()
   expect(field(parameters, 'oneOf')).toBeUndefined()
   expect(field(parameters, 'allOf')).toBeUndefined()
+
+  for (const keyword of ['anyOf', 'oneOf', 'allOf', 'prefixItems']) {
+    expect(collectKeywordValues(parameters, keyword)).toEqual([])
+  }
+  for (const maxLength of collectKeywordValues(parameters, 'maxLength')) {
+    expect(maxLength).toEqual(expect.any(Number))
+    expect(Number.isInteger(maxLength)).toBe(true)
+    expect(Number(maxLength)).toBeGreaterThanOrEqual(0)
+  }
 
   const definitions = field(parameters, '$defs')
   for (const ref of collectLocalRefs(parameters)) {

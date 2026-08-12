@@ -12,9 +12,10 @@ Provider-facing JSON Schema conventions for agent/tool definitions.
 ## Anthropic tool input schemas
 
 - Anthropic `input_schema` must have root `{ "type": "object" }`.
-- Do not send top-level `anyOf`, `oneOf`, or `allOf`; Anthropic rejects root combinators.
-- Flatten root combinators into one object schema with merged `properties`, `required`, and `$defs`.
-- Nested combinators inside properties may remain when needed to preserve field semantics.
+- Do not send `anyOf`, `oneOf`, `allOf`, or tuple-only `prefixItems`; Anthropic rejects schemas containing these constructs on Claude subscription OAuth requests.
+- Flatten root and nested combinators into object/property schemas with merged `properties`, `required`, and `$defs`.
+- Merge repeated `allOf` object fields structurally. Preserve combined `properties`, `required`, and `$defs`; keep other keywords valid with right-biased replacement instead of manufacturing object-valued combinators for scalar keywords.
+- Provider-facing normalization may widen constraints that cannot be represented without combinators. Tool execution still validates calls against the original Effect Schema.
 
 ## Tests
 
