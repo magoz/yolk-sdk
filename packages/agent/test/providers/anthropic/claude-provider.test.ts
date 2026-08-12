@@ -547,6 +547,43 @@ describe('Anthropic Claude provider', () => {
                   type: 'string',
                   allOf: [{ minLength: 1 }, { maxLength: 80 }]
                 },
+                subject: {
+                  type: 'string',
+                  allOf: [{ maxLength: 2_000 }, { maxLength: 160 }]
+                },
+                metadata: {
+                  allOf: [
+                    {
+                      type: 'object',
+                      properties: { first: { type: 'string' } },
+                      required: ['first']
+                    },
+                    {
+                      type: 'object',
+                      properties: { second: { type: 'number' } },
+                      required: ['second']
+                    }
+                  ]
+                },
+                boundedChoice: {
+                  type: 'string',
+                  maxLength: 100,
+                  oneOf: [{ maxLength: 80 }, { maxLength: 60 }]
+                },
+                variant: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      properties: { value: { type: 'string' } },
+                      required: ['value']
+                    },
+                    {
+                      type: 'object',
+                      properties: { value: { type: 'number' } },
+                      required: ['value']
+                    }
+                  ]
+                },
                 items: {
                   type: 'array',
                   prefixItems: [{ type: 'string' }],
@@ -569,6 +606,20 @@ describe('Anthropic Claude provider', () => {
         properties: {
           count: { type: 'number' },
           title: { type: 'string', minLength: 1, maxLength: 80 },
+          subject: { type: 'string', maxLength: 160 },
+          metadata: {
+            type: 'object',
+            properties: { first: { type: 'string' }, second: { type: 'number' } },
+            required: ['first', 'second']
+          },
+          boundedChoice: { type: 'string', maxLength: 100 },
+          variant: {
+            type: 'object',
+            properties: { value: { type: 'string' } },
+            required: ['value'],
+            $defs: {},
+            additionalProperties: false
+          },
           items: { type: 'array', items: { type: 'string' } }
         }
       })
