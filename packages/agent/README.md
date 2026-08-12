@@ -129,6 +129,15 @@ configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` th
 `output_config.effort`. It omits `minimal`, which Anthropic does not support. Hosts remain
 responsible for choosing an effort accepted by the selected provider and model.
 
+### Anthropic tool schemas
+
+Claude subscription OAuth rejects some valid JSON Schema constructs that Effect Schema can emit
+for unions, refinements, and tuples. The Claude adapter therefore projects tool parameters to a
+provider-compatible object schema without `anyOf`, `oneOf`, `allOf`, or tuple-only `prefixItems`.
+When a constraint cannot be represented faithfully, the projection widens the model-facing schema
+rather than excluding a valid call. Tool execution remains safe because `makeTool` validates the
+returned arguments against the original Effect Schema before invoking the executor.
+
 ## Provider failures and retries
 
 Provider adapters classify safe failure metadata at the boundary. The loop owns bounded retry
