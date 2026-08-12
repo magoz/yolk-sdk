@@ -479,6 +479,18 @@ describe('Anthropic Claude provider', () => {
             }
           }),
           ToolDef.make({
+            name: 'root_true',
+            description: 'Root true schema.',
+            parameters: true
+          }),
+          ToolDef.make({
+            name: 'root_boolean_union',
+            description: 'Root boolean union.',
+            parameters: {
+              anyOf: [true, { type: 'object', properties: { value: { type: 'string' } } }]
+            }
+          }),
+          ToolDef.make({
             name: 'root_intersection',
             description: 'Root intersection.',
             parameters: {
@@ -517,6 +529,16 @@ describe('Anthropic Claude provider', () => {
       })
       expect(body.tools?.[2]?.input_schema).toEqual({
         type: 'object',
+        properties: {}
+      })
+      expect(body.tools?.[3]?.input_schema).toEqual({
+        type: 'object',
+        properties: {},
+        required: [],
+        $defs: {}
+      })
+      expect(body.tools?.[4]?.input_schema).toEqual({
+        type: 'object',
         properties: { first: { type: 'string' }, second: { type: 'number' } },
         required: ['first', 'second'],
         $defs: {}
@@ -543,6 +565,9 @@ describe('Anthropic Claude provider', () => {
                     { type: 'null' }
                   ]
                 },
+                nullable: {
+                  anyOf: [{ type: 'string' }, { type: 'null' }]
+                },
                 title: {
                   type: 'string',
                   allOf: [{ minLength: 1 }, { maxLength: 80 }]
@@ -550,6 +575,10 @@ describe('Anthropic Claude provider', () => {
                 subject: {
                   type: 'string',
                   allOf: [{ maxLength: 2_000 }, { maxLength: 160 }]
+                },
+                reversedSubject: {
+                  type: 'string',
+                  allOf: [{ maxLength: 160 }, { maxLength: 2_000 }]
                 },
                 metadata: {
                   allOf: [
@@ -570,7 +599,88 @@ describe('Anthropic Claude provider', () => {
                   maxLength: 100,
                   oneOf: [{ maxLength: 80 }, { maxLength: 60 }]
                 },
+                enumVariant: {
+                  oneOf: [
+                    { type: 'string', enum: ['a'], maxLength: 1 },
+                    { type: 'string', enum: ['bb'], minLength: 2 }
+                  ]
+                },
+                conditionalVariant: {
+                  if: { anyOf: [{ type: 'number' }, { const: 'x' }] },
+                  then: { maxLength: 1 }
+                },
+                booleanVariant: {
+                  anyOf: [true, { type: 'string' }]
+                },
+                conditionalTuple: {
+                  if: {
+                    type: 'array',
+                    prefixItems: [{ type: 'string' }],
+                    items: false
+                  },
+                  then: { maxItems: 0 }
+                },
+                keywordProperty: {
+                  type: 'object',
+                  properties: { not: { type: 'string' } },
+                  required: ['not'],
+                  additionalProperties: false
+                },
+                enumData: {
+                  enum: [{ if: 'literal' }]
+                },
+                keywordDefinition: {
+                  $ref: '#/$defs/not',
+                  $defs: { not: { type: 'string' } }
+                },
+                legacyDependencies: {
+                  type: 'object',
+                  dependencies: {
+                    enum: { anyOf: [{ type: 'string' }, { type: 'number' }] }
+                  }
+                },
+                patternVariant: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      properties: { x: { type: 'string' } }
+                    },
+                    {
+                      type: 'object',
+                      patternProperties: { '^x$': { type: 'number' } },
+                      additionalProperties: false
+                    }
+                  ]
+                },
                 variant: {
+                  oneOf: [
+                    {
+                      type: 'object',
+                      properties: { value: { type: 'string' } },
+                      required: ['value'],
+                      additionalProperties: false
+                    },
+                    {
+                      type: 'object',
+                      properties: { value: { type: 'number' } },
+                      required: ['value'],
+                      additionalProperties: false
+                    }
+                  ]
+                },
+                typelessVariant: {
+                  oneOf: [
+                    {
+                      properties: { first: { type: 'string' } },
+                      required: ['first']
+                    },
+                    {
+                      properties: { second: { type: 'number' } },
+                      required: ['second']
+                    }
+                  ]
+                },
+                openVariant: {
                   oneOf: [
                     {
                       type: 'object',
@@ -579,8 +689,9 @@ describe('Anthropic Claude provider', () => {
                     },
                     {
                       type: 'object',
-                      properties: { value: { type: 'number' } },
-                      required: ['value']
+                      properties: { other: { type: 'number' } },
+                      required: ['other'],
+                      additionalProperties: false
                     }
                   ]
                 },
@@ -588,6 +699,11 @@ describe('Anthropic Claude provider', () => {
                   type: 'array',
                   prefixItems: [{ type: 'string' }],
                   items: { type: 'string' }
+                },
+                tuple: {
+                  type: 'array',
+                  prefixItems: [{ type: 'string' }, { type: 'number' }],
+                  items: false
                 }
               },
               required: ['title']
@@ -604,23 +720,53 @@ describe('Anthropic Claude provider', () => {
       expect(keys).not.toContain('prefixItems')
       expect(schema).toMatchObject({
         properties: {
-          count: { type: 'number' },
+          count: {},
+          nullable: {},
           title: { type: 'string', minLength: 1, maxLength: 80 },
           subject: { type: 'string', maxLength: 160 },
+          reversedSubject: { type: 'string', maxLength: 2_000 },
           metadata: {
             type: 'object',
             properties: { first: { type: 'string' }, second: { type: 'number' } },
             required: ['first', 'second']
           },
           boundedChoice: { type: 'string', maxLength: 100 },
+          enumVariant: { type: 'string' },
+          conditionalVariant: {},
+          booleanVariant: {},
+          conditionalTuple: {},
+          keywordProperty: {
+            type: 'object',
+            properties: { not: { type: 'string' } },
+            required: ['not'],
+            additionalProperties: false
+          },
+          enumData: { enum: [{ if: 'literal' }] },
+          keywordDefinition: {
+            $ref: '#/$defs/not',
+            $defs: { not: { type: 'string' } }
+          },
+          legacyDependencies: {
+            type: 'object',
+            dependencies: { enum: {} }
+          },
+          patternVariant: { type: 'object' },
           variant: {
             type: 'object',
-            properties: { value: { type: 'string' } },
+            properties: { value: {} },
             required: ['value'],
             $defs: {},
             additionalProperties: false
           },
-          items: { type: 'array', items: { type: 'string' } }
+          typelessVariant: {},
+          openVariant: {
+            type: 'object',
+            properties: { value: {}, other: {} },
+            required: [],
+            $defs: {}
+          },
+          items: { type: 'array', items: {} },
+          tuple: { type: 'array', items: {} }
         }
       })
     })

@@ -26,6 +26,8 @@ const schemaVariant = Schema.Literals([
   'deepArrayStruct',
   'optionalNestedStruct',
   'stackedChecks',
+  'reversedStackedChecks',
+  'tuple',
   'literalArray',
   'recordField',
   'unionField',
@@ -109,6 +111,12 @@ const schemaParameters = (variant: typeof schemaVariant.Type) => {
       return Schema.Struct({
         subject: Schema.String.check(Schema.isMaxLength(2_000)).check(Schema.isMaxLength(160))
       })
+    case 'reversedStackedChecks':
+      return Schema.Struct({
+        subject: Schema.String.check(Schema.isMaxLength(160)).check(Schema.isMaxLength(2_000))
+      })
+    case 'tuple':
+      return Schema.Struct({ pair: Schema.Tuple([Schema.String, Schema.Number]) })
     case 'literalArray':
       return Schema.Struct({ modes: Schema.Array(Schema.Literals(['read', 'write'])) })
     case 'recordField':

@@ -630,15 +630,23 @@ const withoutTopLevelJsonSchemaCombinators = (schema: JsonObject): JsonObject =>
 const withoutJsonSchemaCombinatorsAndTupleHints = (schema: JsonObject): JsonObject =>
   Object.fromEntries(
     Object.entries(schema).filter(
-      ([key]) => !isTopLevelJsonSchemaCombinatorKey(key) && key !== 'prefixItems'
+      ([key]) =>
+        !isTopLevelJsonSchemaCombinatorKey(key) &&
+        key !== 'prefixItems' &&
+        key !== 'not' &&
+        key !== 'if' &&
+        key !== 'then' &&
+        key !== 'else'
     )
   )
 
-const jsonSchemaProperties = (schema: JsonObject) => {
-  const properties = jsonObjectField(schema, 'properties')
+const jsonSchemaMap = (schema: JsonObject, key: string) => {
+  const value = jsonObjectField(schema, key)
 
-  return isJsonObject(properties) ? properties : {}
+  return isJsonObject(value) ? value : {}
 }
+
+const jsonSchemaProperties = (schema: JsonObject) => jsonSchemaMap(schema, 'properties')
 
 const jsonSchemaDefinitions = (schema: JsonObject) => {
   const definitions = jsonObjectField(schema, '$defs')
@@ -697,7 +705,14 @@ const mergeEnumPropertySchemas = (left: unknown, right: unknown): unknown | unde
     return undefined
   }
 
-  return { ...left, ...right, enum: uniqueUnknownArray([...leftEnum, ...rightEnum]) }
+  const descriptions = [jsonObjectField(left, 'description'), jsonObjectField(right, 'description')]
+  const description = descriptions.find(value => typeof value === 'string')
+
+  return {
+    ...(leftType === undefined ? {} : { type: leftType }),
+    enum: uniqueUnknownArray([...leftEnum, ...rightEnum]),
+    ...(description === undefined ? {} : { description })
+  }
 }
 
 const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
@@ -713,10 +728,10 @@ const mergePropertySchemas = (left: unknown, right: unknown): unknown => {
     return mergedEnum
   }
 
-  // Anthropic rejects combinators in tool schemas. Keep the first normalized
-  // schema as a provider-facing approximation; makeTool still validates calls
-  // against the complete original Effect Schema.
-  return left
+  // Anthropic rejects combinators in tool schemas. An unconstrained schema
+  // preserves every value accepted by either incompatible variant; makeTool
+  // still validates calls against the complete original Effect Schema.
+  return {}
 }
 
 const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject => {
@@ -735,6 +750,32 @@ const mergeJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject 
   return Object.fromEntries(merged)
 }
 
+const mergeUnionJsonSchemaObjects = (
+  objects: ReadonlyArray<JsonObject>,
+  owners?: ReadonlyArray<JsonObject>
+): JsonObject => {
+  const keys = new Set(objects.flatMap(object => Object.keys(object)))
+
+  return Object.fromEntries(
+    Array.from(keys, key => {
+      const values = objects.flatMap((object, index) => {
+        if (Object.hasOwn(object, key)) return [jsonObjectField(object, key)]
+
+        const additionalProperties = owners?.[index]
+        if (additionalProperties === undefined) return []
+
+        const additionalPropertySchema = jsonObjectField(additionalProperties, 'additionalProperties')
+        if (additionalPropertySchema === false) return []
+
+        return [isJsonObject(additionalPropertySchema) ? additionalPropertySchema : {}]
+      })
+      const [first, ...rest] = values
+
+      return [key, rest.reduce(mergePropertySchemas, first)]
+    })
+  )
+}
+
 const mergeRightBiasedJsonSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject =>
   Object.assign({}, ...objects)
 
@@ -742,7 +783,7 @@ const mergeAllOfSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject
   const merged = mergeRightBiasedJsonSchemaObjects(objects)
   const properties = mergeRightBiasedJsonSchemaObjects(objects.map(jsonSchemaProperties))
   const required = mergeJsonSchemaRequired('allOf', objects)
-  const definitions = mergeRightBiasedJsonSchemaObjects(objects.map(jsonSchemaDefinitions))
+  const definitions = mergeJsonSchemaObjects(objects.map(jsonSchemaDefinitions))
 
   return {
     ...merged,
@@ -752,13 +793,55 @@ const mergeAllOfSchemaObjects = (objects: ReadonlyArray<JsonObject>): JsonObject
   }
 }
 
-const normalizeJsonSchemaObjectFields = (schema: JsonObject): JsonObject =>
-  Object.fromEntries(
-    Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => [
-      key,
-      normalizeAnthropicToolSchema(value)
-    ])
+const jsonSchemaMapKeywords = new Set([
+  'properties',
+  'patternProperties',
+  '$defs',
+  'definitions',
+  'dependentSchemas'
+])
+
+const jsonSchemaDataKeywords = new Set(['const', 'default', 'enum', 'examples'])
+
+const normalizeJsonSchemaObjectFields = (schema: JsonObject): JsonObject => {
+  const normalized = Object.fromEntries(
+    Object.entries(withoutJsonSchemaCombinatorsAndTupleHints(schema)).map(([key, value]) => {
+      if (jsonSchemaDataKeywords.has(key)) return [key, value]
+
+      if (key === 'dependencies' && isJsonObject(value)) {
+        return [
+          key,
+          Object.fromEntries(
+            Object.entries(value).map(([name, dependency]) => [
+              name,
+              Array.isArray(dependency) ? dependency : normalizeAnthropicToolSchema(dependency)
+            ])
+          )
+        ]
+      }
+
+      if (jsonSchemaMapKeywords.has(key) && isJsonObject(value)) {
+        return [
+          key,
+          Object.fromEntries(
+            Object.entries(value).map(([name, childSchema]) => [
+              name,
+              normalizeAnthropicToolSchema(childSchema)
+            ])
+          )
+        ]
+      }
+
+      return [key, normalizeAnthropicToolSchema(value)]
+    })
   )
+
+  if (Array.isArray(jsonObjectField(schema, 'prefixItems'))) {
+    return { ...normalized, items: {} }
+  }
+
+  return normalized
+}
 
 const jsonSchemaType = (schema: JsonObject) => {
   const type = jsonObjectField(schema, 'type')
@@ -766,55 +849,63 @@ const jsonSchemaType = (schema: JsonObject) => {
   return typeof type === 'string' ? type : undefined
 }
 
-const isNullJsonSchema = (schema: JsonObject) => jsonSchemaType(schema) === 'null'
-
 const firstJsonObject = (items: ReadonlyArray<JsonObject>) => items[0]
 
-const mergeCompatibleVariants = (
-  variants: ReadonlyArray<JsonObject>
-): JsonObject | undefined => {
+const independentCommonVariantKeys = new Set([
+  'type',
+  'enum',
+  'const',
+  'format',
+  'pattern',
+  'minLength',
+  'maxLength',
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+  'minItems',
+  'maxItems',
+  'uniqueItems',
+  'minProperties',
+  'maxProperties',
+  'description'
+])
+
+const commonVariantFields = (variants: ReadonlyArray<JsonObject>): JsonObject => {
   const first = firstJsonObject(variants)
-  if (first === undefined) return undefined
+  if (first === undefined) return {}
+  if (variants.length === 1) return first
 
-  let merged: unknown = first
+  return Object.fromEntries(
+    Object.entries(first).filter(([key, value]) => {
+      if (!independentCommonVariantKeys.has(key)) return false
 
-  for (const variant of variants.slice(1)) {
-    merged = mergePropertySchemas(merged, variant)
-  }
-
-  return isJsonObject(merged) ? merged : undefined
-}
-
-const samePrimitiveTypeVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefined => {
-  const first = firstJsonObject(variants)
-  const type = first === undefined ? undefined : jsonSchemaType(first)
-
-  if (type === undefined || type === 'object' || type === 'array' || type === 'null') {
-    return undefined
-  }
-
-  return variants.every(variant => jsonSchemaType(variant) === type) ? first : undefined
+      const valueKey = jsonValueKey(value)
+      return valueKey !== undefined && variants.every(variant => valueKey === jsonValueKey(jsonObjectField(variant, key)))
+    })
+  )
 }
 
 const objectVariant = (variants: ReadonlyArray<JsonObject>): JsonObject | undefined => {
-  if (
-    variants.length === 0 ||
-    !variants.some(variant => jsonSchemaType(variant) === 'object') ||
-    variants.some(variant => {
-      const type = jsonSchemaType(variant)
-
-      return type !== undefined && type !== 'object'
-    })
-  ) {
+  if (variants.length === 0 || variants.some(variant => jsonSchemaType(variant) !== 'object')) {
     return undefined
   }
 
+  if (
+    variants.some(variant => Object.keys(jsonSchemaMap(variant, 'patternProperties')).length > 0)
+  ) {
+    return { type: 'object' }
+  }
+
+  const additionalProperties = mergeAdditionalProperties(variants)
+
   return {
     type: 'object',
-    properties: mergeJsonSchemaObjects(variants.map(jsonSchemaProperties)),
+    properties: mergeUnionJsonSchemaObjects(variants.map(jsonSchemaProperties), variants),
     required: mergeJsonSchemaRequired('oneOf', variants),
     $defs: mergeJsonSchemaObjects(variants.map(jsonSchemaDefinitions)),
-    additionalProperties: mergeAdditionalProperties(variants) ?? false
+    ...(additionalProperties === undefined ? {} : { additionalProperties })
   }
 }
 
@@ -823,22 +914,20 @@ const normalizeJsonSchemaCombinator = (
   combinator: TopLevelJsonSchemaCombinator
 ): JsonObject => {
   const base = normalizeJsonSchemaObjectFields(schema)
-  const variants = combinator.items
-    .map(normalizeAnthropicToolSchema)
-    .filter(isJsonObject)
-    .filter(variant => !isNullJsonSchema(variant))
+  const normalizedItems = combinator.items.map(normalizeAnthropicToolSchema)
+  const variants = normalizedItems.filter(isJsonObject)
   const first = firstJsonObject(variants)
-
-  if (first === undefined) return base
 
   if (combinator.key === 'allOf') {
     return mergeAllOfSchemaObjects([base, ...variants])
   }
 
-  const merged =
-    objectVariant(variants) ?? mergeCompatibleVariants(variants) ?? samePrimitiveTypeVariant(variants)
+  if (normalizedItems.includes(true)) return base
+  if (first === undefined) return base
 
-  return mergeJsonSchemaObjects([base, merged ?? first])
+  const merged = objectVariant(variants) ?? commonVariantFields(variants)
+
+  return mergeAllOfSchemaObjects([merged, base])
 }
 
 function normalizeAnthropicToolSchema(value: unknown): unknown {
@@ -892,19 +981,28 @@ const flattenTopLevelCombinatorToolSchema = (
 ): JsonObject => {
   const base = withoutTopLevelJsonSchemaCombinators(schema)
   const objectVariants = combinator.items.filter(isJsonObject)
+  const hasUnconstrainedUnion =
+    combinator.key !== 'allOf' &&
+    combinator.items.some(item => item === true || !isJsonObject(item))
   const additionalProperties = mergeAdditionalProperties(objectVariants)
   const flattened = {
     ...base,
     type: 'object',
-    properties: mergeJsonSchemaObjects(objectVariants.map(jsonSchemaProperties)),
-    required: mergeJsonSchemaRequired(combinator.key, objectVariants),
+    properties: hasUnconstrainedUnion
+      ? {}
+      : combinator.key === 'allOf'
+        ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
+        : mergeUnionJsonSchemaObjects(objectVariants.map(jsonSchemaProperties), objectVariants),
+    required: hasUnconstrainedUnion
+      ? []
+      : mergeJsonSchemaRequired(combinator.key, objectVariants),
     $defs: mergeJsonSchemaObjects([
       jsonSchemaDefinitions(schema),
       ...objectVariants.map(jsonSchemaDefinitions)
     ])
   }
 
-  if (additionalProperties === undefined) {
+  if (hasUnconstrainedUnion || additionalProperties === undefined) {
     return flattened
   }
 
@@ -913,12 +1011,14 @@ const flattenTopLevelCombinatorToolSchema = (
 
 const anthropicToolInputSchema = (schema: unknown): unknown => {
   if (!isJsonObject(schema)) {
-    return {
-      type: 'object',
-      properties: {},
-      required: [],
-      additionalProperties: false
-    }
+    return schema === true
+      ? { type: 'object', properties: {} }
+      : {
+          type: 'object',
+          properties: {},
+          required: [],
+          additionalProperties: false
+        }
   }
 
   const combinator = topLevelJsonSchemaCombinator(schema)
