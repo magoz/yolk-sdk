@@ -30,13 +30,16 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts              |
 | `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                          |
 | `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                          |
+| `@yolk-sdk/agent/providers/openai/codex-usage`        | Codex subscription-allowance snapshots                         |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                     |
 | `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                         |
 | `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                |
 | `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters               |
 | `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                      |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                |
+| `@yolk-sdk/agent/providers/anthropic/usage`           | Claude subscription-allowance snapshots                        |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                    |
+| `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas               |
 | `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs              |
 | `@yolk-sdk/agent/voice`                               | Voice protocol, controller, tool handler, projection, speech   |
 | `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                 |
@@ -179,6 +182,35 @@ policy and emits protocol-visible retry/error state:
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
+
+## Subscription allowance snapshots
+
+The Claude and Codex usage adapters read best-effort consumer subscription allowance percentages and
+reset windows. Claude currently normalizes its aggregate five-hour and seven-day windows; Codex
+normalizes its primary and secondary rate-limit windows. Additional provider-specific buckets are
+ignored. These private provider endpoints may change without notice. Pass a fresh
+host-owned `OAuthAccessToken` and provide an Effect `HttpClient`:
+
+```ts
+import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { fetchOpenAiCodexSubscriptionUsage } from '@yolk-sdk/agent/providers/openai/codex-usage'
+
+const snapshot = await fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken).pipe(
+  Effect.provide(FetchHttpClient.layer),
+  Effect.runPromise
+)
+```
+
+Use `fetchAnthropicClaudeSubscriptionUsage` from
+`@yolk-sdk/agent/providers/anthropic/usage` for Claude. Provider adapters return semantic window ids,
+percentages, and optional reset/duration fields; hosts own labels, polling, persistence, stale-data
+policy, alert thresholds, billing interpretation, and UI. Configure `requestTimeoutMs` at the
+server integration boundary. Endpoint origins stay fixed so bearer credentials cannot be redirected
+through host configuration.
+
+Subscription allowance snapshots are separate from protocol `AgentUsage`, which accounts for tokens
+used by model requests and nested model work.
 
 ## Usage accounting
 

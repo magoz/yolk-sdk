@@ -75,6 +75,10 @@
       "types": "./src/providers/openai/codex.ts",
       "default": "./src/providers/openai/codex.ts"
     },
+    "./providers/openai/codex-usage": {
+      "types": "./src/providers/openai/codex-usage.ts",
+      "default": "./src/providers/openai/codex-usage.ts"
+    },
     "./providers/openai/codex-provider": {
       "types": "./src/providers/openai/codex-provider.ts",
       "default": "./src/providers/openai/codex-provider.ts"
@@ -99,9 +103,17 @@
       "types": "./src/providers/anthropic/claude.ts",
       "default": "./src/providers/anthropic/claude.ts"
     },
+    "./providers/anthropic/usage": {
+      "types": "./src/providers/anthropic/usage.ts",
+      "default": "./src/providers/anthropic/usage.ts"
+    },
     "./providers/anthropic/claude-provider": {
       "types": "./src/providers/anthropic/claude-provider.ts",
       "default": "./src/providers/anthropic/claude-provider.ts"
+    },
+    "./providers/subscription-usage": {
+      "types": "./src/providers/subscription-usage.ts",
+      "default": "./src/providers/subscription-usage.ts"
     },
     "./skillset": {
       "types": "./src/skillset/index.ts",
@@ -192,6 +204,11 @@
         "import": "./dist/providers/openai/codex.mjs",
         "default": "./dist/providers/openai/codex.mjs"
       },
+      "./providers/openai/codex-usage": {
+        "types": "./dist/providers/openai/codex-usage.d.mts",
+        "import": "./dist/providers/openai/codex-usage.mjs",
+        "default": "./dist/providers/openai/codex-usage.mjs"
+      },
       "./providers/openai/codex-provider": {
         "types": "./dist/providers/openai/codex-provider.d.mts",
         "import": "./dist/providers/openai/codex-provider.mjs",
@@ -222,10 +239,20 @@
         "import": "./dist/providers/anthropic/claude.mjs",
         "default": "./dist/providers/anthropic/claude.mjs"
       },
+      "./providers/anthropic/usage": {
+        "types": "./dist/providers/anthropic/usage.d.mts",
+        "import": "./dist/providers/anthropic/usage.mjs",
+        "default": "./dist/providers/anthropic/usage.mjs"
+      },
       "./providers/anthropic/claude-provider": {
         "types": "./dist/providers/anthropic/claude-provider.d.mts",
         "import": "./dist/providers/anthropic/claude-provider.mjs",
         "default": "./dist/providers/anthropic/claude-provider.mjs"
+      },
+      "./providers/subscription-usage": {
+        "types": "./dist/providers/subscription-usage.d.mts",
+        "import": "./dist/providers/subscription-usage.mjs",
+        "default": "./dist/providers/subscription-usage.mjs"
       },
       "./skillset": {
         "types": "./dist/skillset/index.d.mts",

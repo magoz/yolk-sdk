@@ -59,6 +59,7 @@ OAuth helpers live in `@yolk-sdk/agent/providers/openai` and the exact `@yolk-sd
 - `toOpenAiCodexOAuthAccessToken`
 - `openAiCodexProviderId`
 - OpenAI Codex OAuth URLs/constants
+- `fetchOpenAiCodexSubscriptionUsage` from `@yolk-sdk/agent/providers/openai/codex-usage`
 
 ## Anthropic Claude Code
 
@@ -82,6 +83,32 @@ OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and the exact `@yolk
 - `toAnthropicClaudeOAuthAccessToken`
 - `anthropicClaudeProviderId`
 - Claude OAuth URLs/constants
+- `fetchAnthropicClaudeSubscriptionUsage` from `@yolk-sdk/agent/providers/anthropic/usage`
+
+## Read subscription allowance
+
+Claude and Codex subscription connections can expose current allowance percentages and reset
+windows. Claude currently normalizes aggregate five-hour and seven-day windows; Codex normalizes
+primary and secondary rate-limit windows. Additional provider-specific buckets are ignored. The
+usage adapters use private provider endpoints, so treat snapshots as best-effort and keep failures
+isolated from core agent execution.
+
+This server-side fragment reads Codex allowance using a fresh host-owned token:
+
+```ts
+import { Effect } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { fetchOpenAiCodexSubscriptionUsage } from '@yolk-sdk/agent/providers/openai/codex-usage'
+
+const snapshotEffect = fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken, {
+  requestTimeoutMs: 10_000
+}).pipe(Effect.provide(FetchHttpClient.layer))
+```
+
+Use `fetchAnthropicClaudeSubscriptionUsage` for Claude. Shared snapshot and safe error schemas live
+in `@yolk-sdk/agent/providers/subscription-usage`. Hosts own polling, credential refresh, labels,
+persistence, stale-data policy, thresholds, notifications, and UI. These snapshots report
+subscription allowance, not protocol `AgentUsage` token accounting.
 
 ## Test provider
 

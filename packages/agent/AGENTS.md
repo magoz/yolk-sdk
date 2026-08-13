@@ -5,7 +5,7 @@
 ## Subpaths
 
 | Subpath                                               | Source                                       | Role                                                                                                                 |
-| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --- |
 | `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                     |
 | `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                              |
 | `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                    |
@@ -17,13 +17,16 @@
 | `@yolk-sdk/agent/oauth`                               | `src/oauth`                                  | Provider-neutral OAuth token contracts                                                                               |
 | `@yolk-sdk/agent/providers/openai`                    | `src/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                                |
 | `@yolk-sdk/agent/providers/openai/codex`              | `src/providers/openai/codex.ts`              | OpenAI Codex request and auth helpers                                                                                |
+| `@yolk-sdk/agent/providers/openai/codex-usage`        | `src/providers/openai/codex-usage.ts`        | Best-effort Codex subscription-allowance snapshots                                                                   |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                                                                                           |
 | `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory                                                                               |
 | `@yolk-sdk/agent/providers/openai/realtime`           | `src/providers/openai/realtime`              | OpenAI Realtime session config + event codecs                                                                        |
 | `@yolk-sdk/agent/providers/openai/speech`             | `src/providers/openai/speech.ts`             | OpenAI TTS/STT service adapters                                                                                      |
 | `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                                            |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                      |
+| `@yolk-sdk/agent/providers/anthropic/usage`           | `src/providers/anthropic/usage.ts`           | Best-effort Claude subscription-allowance snapshots                                                                  |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                          |
+| `@yolk-sdk/agent/providers/subscription-usage`        | `src/providers/subscription-usage.ts`        | Shared subscription-usage snapshot and safe error schemas                                                            |     |
 | `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                             |
 | `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts |
 | `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                       |
@@ -34,6 +37,7 @@
 - Core subpaths have no React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
 - `src/react` and `src/voice/react.ts` are the only React-using areas; React is an optional peer.
 - Provider subpaths own vendor mechanics only; hosts still own token storage/refresh and app policy.
+- Subscription-usage adapters expose best-effort snapshots from fixed private provider endpoints. They accept fresh host-owned `OAuthAccessToken` values and an Effect `HttpClient`, force manual Fetch redirect handling, and reject non-2xx redirects; hosts own polling, persistence, stale-data rules, labels, alerts, billing interpretation, and UI.
 - Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, or app packages from agent subpaths.
 - Protocol depends on Effect only.
 - Loop depends on protocol + Effect only.
@@ -85,6 +89,7 @@
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.
+- Provider subscription usage is distinct from protocol `AgentUsage`: it reports consumer subscription allowance percentages and reset windows, not per-request token counts. Keep provider labels and alert eligibility in the host.
 - Anthropic prompt-too-long signals normalize to non-retryable `context_overflow`; generic loop retry must not retry them. `makeContextOverflowRetryProvider` is the explicit exception and may compact and retry once per provider stream.
 - Anthropic `stop_reason: "max_tokens"` is a non-retryable `invalid_response` in JSON and SSE responses; never emit `LLMDone` or report normal completion for a truncated turn.
 - Anthropic provider construction requires host-owned output-token limits; never infer model limits or add hidden fallbacks. ChatGPT subscription Codex does not expose or send an output-token limit because its endpoint rejects the vendor `max_output_tokens` field; the optional deprecated `maxOutputTokens` config field is ignored for compatibility.

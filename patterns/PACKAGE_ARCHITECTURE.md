@@ -20,13 +20,16 @@ metadata.
   - `@yolk-sdk/agent/oauth`
   - `@yolk-sdk/agent/providers/openai`
   - `@yolk-sdk/agent/providers/openai/codex`
+  - `@yolk-sdk/agent/providers/openai/codex-usage`
   - `@yolk-sdk/agent/providers/openai/codex-provider`
   - `@yolk-sdk/agent/providers/openai/provider`
   - `@yolk-sdk/agent/providers/openai/realtime`
   - `@yolk-sdk/agent/providers/openai/speech`
   - `@yolk-sdk/agent/providers/anthropic`
   - `@yolk-sdk/agent/providers/anthropic/claude`
+  - `@yolk-sdk/agent/providers/anthropic/usage`
   - `@yolk-sdk/agent/providers/anthropic/claude-provider`
+  - `@yolk-sdk/agent/providers/subscription-usage`
   - `@yolk-sdk/agent/skillset`
   - `@yolk-sdk/agent/voice`
   - `@yolk-sdk/agent/voice/browser`
@@ -43,7 +46,7 @@ metadata.
 - `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./figma`, `./google`, `./linkedin-search`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, and hosts own concrete Workflow directives.
-- OpenAI/Codex and Anthropic/Claude provider mechanics live under `@yolk-sdk/agent/providers/*`.
+- OpenAI/Codex and Anthropic/Claude provider mechanics live under `@yolk-sdk/agent/providers/*`, including best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout

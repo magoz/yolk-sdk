@@ -14,10 +14,13 @@ For the current provider catalog and setup snippets, see [Model providers](../in
 | `@yolk-sdk/agent/providers/openai`                    | Codex OAuth and token broker helpers                                 |
 | `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible chat provider factory                              |
 | `@yolk-sdk/agent/providers/openai/codex`              | Codex request, authorization header, and token broker helpers        |
+| `@yolk-sdk/agent/providers/openai/codex-usage`        | Best-effort Codex subscription-allowance snapshots                   |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | OpenAI Codex provider factory                                        |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth and token broker helpers                                |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude authorization URL, callback parsing, and token broker helpers |
+| `@yolk-sdk/agent/providers/anthropic/usage`           | Best-effort Claude subscription-allowance snapshots                  |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude provider factory                                              |
+| `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas                     |
 | `@yolk-sdk/agent/oauth`                               | Provider-neutral access-token and broker contracts                   |
 
 ## Provide fresh credentials at runtime
@@ -34,6 +37,10 @@ Provider packages may model vendor auth mechanics, but hosts own:
 
 Give provider layers fresh access tokens at execution time. Do not store raw secrets in protocol messages, annotations, tool results, or docs examples.
 
+Subscription-usage adapters accept the same `OAuthAccessToken` values but do not refresh or persist
+them. Their private provider endpoints are best-effort. Hosts own polling, labels, stale-data rules,
+alerts, and UI; the adapters only fetch and normalize allowance windows with sanitized errors.
+
 ## What the provider gives the loop
 
 Provider layers implement `LLMProvider`. The loop calls that service with messages, tool definitions, system prompt, model id, and optional capabilities. The provider emits text deltas, tool calls, usage, and done/error events.
@@ -41,3 +48,7 @@ Provider layers implement `LLMProvider`. The loop calls that service with messag
 ## Errors and retries
 
 Provider adapters classify safe metadata into `ProviderErrorInfo`. Raw provider response bodies stay out of protocol/UI. The loop owns bounded retry behavior and usage aggregation.
+
+Subscription-usage requests use separate `ProviderSubscriptionUsageError` variants because they run
+outside the LLM loop. They suppress credential-bearing HTTP traces and never preserve raw response
+bodies in typed failures.

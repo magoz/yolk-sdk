@@ -341,13 +341,22 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`     |
 | `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                                                |
+| `@yolk-sdk/agent/providers/openai/codex-usage`        | `fetchOpenAiCodexSubscriptionUsage`, parser, URL, and options                                       |
 | `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody`             |
 | `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                                          |
 | `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec                    |
 | `@yolk-sdk/agent/providers/openai/speech`             | `OpenAiSpeechConfig`, `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`              |
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers                            |
+| `@yolk-sdk/agent/providers/anthropic/usage`           | `fetchAnthropicClaudeSubscriptionUsage`, parser, URL, and options                                   |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                                         |
+| `@yolk-sdk/agent/providers/subscription-usage`        | Snapshot/window schemas and sanitized request/response/auth/rate-limit/configuration errors         |
+
+Subscription-usage fetchers require a matching fresh `OAuthAccessToken` and `HttpClient.HttpClient`.
+Both accept an optional positive `requestTimeoutMs`; endpoint origins stay fixed. Returned windows
+have semantic `id`, `usedPercent`, and optional `resetsAt`, `resetsAfterSeconds`, and
+`windowDurationMinutes` fields. Private endpoint drift is reported through sanitized
+`ProviderSubscriptionUsageError` variants; raw response bodies are not retained.
 
 Provider output limits are host-owned where supported:
 
