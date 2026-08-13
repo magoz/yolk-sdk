@@ -63,13 +63,16 @@ Document explicit subpaths:
 - `oauth`
 - `providers/openai`
 - `providers/openai/codex`
+- `providers/openai/codex-usage`
 - `providers/openai/codex-provider`
 - `providers/openai/provider`
 - `providers/openai/realtime`
 - `providers/openai/speech`
 - `providers/anthropic`
 - `providers/anthropic/claude`
+- `providers/anthropic/usage`
 - `providers/anthropic/claude-provider`
+- `providers/subscription-usage`
 - `skillset`
 - `voice`
 - `voice/browser`
@@ -79,7 +82,7 @@ Mention host-owned providers, persistence, tools, context compaction, token stor
 
 `react` docs should cover hook state/actions, render model, custom transport, optional React peer, and no UI/styling/auth.
 
-`oauth` and `providers/*` docs should cover broker/credential-source flow and host-owned token storage. Never imply package stores secrets.
+`oauth` and `providers/*` docs should cover broker/credential-source flow and host-owned token storage. Never imply package stores secrets. Subscription-usage docs distinguish allowance snapshots from `AgentUsage` and document fixed private endpoints plus credential-bearing redirect constraints.
 
 `skillset` docs should cover skill markdown, command markdown, render/parse APIs, manifests, and merge priority.
 

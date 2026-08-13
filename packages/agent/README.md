@@ -10,7 +10,7 @@ Root export is intentionally tiny. Import feature APIs from explicit subpaths.
 pnpm add @yolk-sdk/agent@canary effect
 ```
 
-Add `react` if you use `@yolk-sdk/agent/react`.
+Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Published package metadata requires Node.js 22+.

@@ -64,7 +64,7 @@ const tools = await Effect.runPromise(
 )
 ```
 
-Use `McpClientOptions.sdk` for official client options such as capabilities, MRTR, and shared response caching. Use `configureClient` to register elicitation or sampling handlers before connection. Use a persistent official `Client` directly for long-lived subscriptions and progress streams.
+Use `McpClientOptions.sdk` for official client options such as capabilities, MRTR, and shared response caching. Set `McpClientOptions.configureClient` to register elicitation or sampling handlers before connection. Use a persistent official `Client` directly for long-lived subscriptions and progress streams.
 
 ## Build a full MCP server
 
