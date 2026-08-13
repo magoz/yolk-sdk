@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.58
+
+### Patch Changes
+
+- a4a3d52: Add best-effort Anthropic Claude and OpenAI Codex subscription-allowance snapshot adapters with portable Effect HTTP, shared schemas, sanitized errors, and host-owned polling policy.
+
 ## 0.1.0-canary.57
 
 ### Patch Changes
