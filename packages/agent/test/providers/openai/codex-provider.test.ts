@@ -82,6 +82,19 @@ const streamErrorResponse = () => {
 }
 
 describe('OpenAI Codex provider', () => {
+  it.effect('allows request lowering without a compatibility config object', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiCodexRequestBody({
+        model: 'gpt-5.4',
+        systemPrompt: 'Be concise.',
+        messages: [UserMessage.make({ content: 'Hello' })],
+        tools: []
+      })
+
+      expect(body).not.toHaveProperty('max_output_tokens')
+    })
+  )
+
   it.effect('lowers protocol transcript to Codex Responses input', () =>
     Effect.gen(function* () {
       const body = yield* toOpenAiCodexRequestBody(

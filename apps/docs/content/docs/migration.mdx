@@ -53,9 +53,9 @@ agent toolsets, and update UI/tool-call matching from `task` to `subagent`.
 ### `0.1.0-canary.52`: Codex omits the unsupported output limit
 
 ChatGPT subscription Codex requests no longer send `max_output_tokens` because the endpoint rejects
-that field. `OpenAiCodexProviderConfig.maxOutputTokens` remains required host configuration in this
-canary API, but the adapter does not serialize it. Existing host construction code does not need to
-change.
+that field. In that historical canary, `OpenAiCodexProviderConfig.maxOutputTokens` remained required
+host configuration but was not serialized. In the next canary it is optional, deprecated, and
+ignored; remove it from Codex provider construction.
 
 ### `0.1.0-canary.48`: required provider output limits
 
@@ -65,11 +65,13 @@ required field for the selected adapter:
 | Provider config                    | Required output-limit field | Previous behavior                    |
 | ---------------------------------- | --------------------------- | ------------------------------------ |
 | `OpenAiProviderConfig`             | `maxCompletionTokens`  | defaulted to `4096`                  |
-| `OpenAiCodexProviderConfig`        | `maxOutputTokens`      | omitted `max_output_tokens`          |
+| `OpenAiCodexProviderConfig`        | `maxOutputTokens`      | historically required but omitted from requests |
 | `AnthropicClaudeProviderConfig`    | `maxTokens`            | defaulted to `8192`                  |
 
-The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
-`toAnthropicClaudeRequestBody` lowerers also require their limit configuration. The env-backed
+In that canary, the public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
+`toAnthropicClaudeRequestBody` lowerers also required their limit configuration. The next canary
+makes the Codex compatibility config optional; OpenAI API and Anthropic lowerers still require their
+host-owned output limits. The env-backed
 `OpenAiProviderLayer` now requires integer `OPENAI_MAX_COMPLETION_TOKENS` alongside
 `OPENAI_API_KEY`. Keep these values in host-owned model configuration.
 

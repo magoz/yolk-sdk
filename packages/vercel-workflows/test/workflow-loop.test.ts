@@ -206,20 +206,37 @@ describe('runVercelAgentWorkflow', () => {
       requests: ['request-approval'],
       messages: ['assistant-1'],
       usage: { turns: 1 },
-      turns: 1
+      turns: 1,
+      eventSequence: 7
     }
 
     const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: input => step(() => toolModelResult(input)),
-      runToolBatchStep: input => step(() => ({ ...toolBatchResult(input), awaitingInput })),
+      runToolBatchStep: input =>
+        step(() => ({
+          ...toolBatchResult(input),
+          usage: { turns: 1, subagentTurns: 3 },
+          awaitingInput
+        })),
       closeStream: emptyStep,
       writeError: value => step(() => {
         errors.push(value)
       })
     })
 
-    expect(result).toMatchObject({ _tag: 'AwaitInputFailed', turn: 1, awaitingInput })
+    expect(result).toMatchObject({
+      _tag: 'AwaitInputFailed',
+      turn: 1,
+      awaitingInput,
+      state: {
+        request: 'request-1',
+        createdMessages: [],
+        usage: { turns: 1, subagentTurns: 3 },
+        turn: 1,
+        eventSequence: 7
+      }
+    })
     expect(errors).toHaveLength(1)
     expect(String(errors[0])).toContain('no awaitInput handler')
   })

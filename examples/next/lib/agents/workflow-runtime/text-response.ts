@@ -19,12 +19,13 @@ import {
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/agent/skillset'
 import {
   UserMessage,
+  type AgentEvent,
   type AgentModelCapabilities,
   type AgentReasoningEffort,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
 import { makeAgentRuntimeLayerWithTools } from '@/lib/agents/runtime-layer'
-import { runRuntime } from '@yolk-sdk/agent/runtime'
+import { runRuntime, runtimeErrorToAgentError } from '@yolk-sdk/agent/runtime'
 import { defaultAgentSystemPrompt } from '@/lib/agents/agent-prompts'
 import {
   agentTextCapabilities,
@@ -114,6 +115,26 @@ const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
+
+export const collectSubagentEvents = (
+  stream: Stream.Stream<AgentEvent, Parameters<typeof runtimeErrorToAgentError>[0], never>
+) => {
+  const events: Array<AgentEvent> = []
+
+  return stream.pipe(
+    Stream.runForEach(event =>
+      Effect.sync(() => {
+        events.push(event)
+      })
+    ),
+    Effect.catch(error =>
+      Effect.sync(() => {
+        events.push(runtimeErrorToAgentError(error))
+      })
+    ),
+    Effect.map((): ReadonlyArray<AgentEvent> => events)
+  )
+}
 
 const getAgentTextConfig = () =>
   Effect.gen(function* () {
@@ -371,32 +392,34 @@ export const makeAgentTextRuntime = (
                 subagent: true
               }
             }).pipe(Effect.mapError(toolRegistryErrorToToolError))
-            const eventsChunk = yield* runRuntime(
-              {
-                _tag: 'Transcript',
-                sessionId: `${input.sessionId}:subagent:${call.id}`,
-                messages: [UserMessage.make({ content: params.prompt })]
-              },
-              {
-                systemPrompt: subagentPrompt({
-                  subagentType: params.subagent_type,
-                  baseSystemPrompt
-                }),
-                tools: subagentToolSet.tools,
-                reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
-                capabilities: agentTextCapabilities,
-                model
-              }
-            ).pipe(
-              Stream.runCollect,
-              Effect.provide(
-                makeAgentRuntimeLayerWithTools(
-                  providerLayer,
-                  makeToolExecutorLayer(subagentToolSet)
+            const reasoningEffort = input.reasoningEffort ?? baseConfig.reasoningEffort
+            const events = yield* collectSubagentEvents(
+              runRuntime(
+                {
+                  _tag: 'Transcript',
+                  sessionId: `${input.sessionId}:subagent:${call.id}`,
+                  messages: [UserMessage.make({ content: params.prompt })]
+                },
+                {
+                  systemPrompt: subagentPrompt({
+                    subagentType: params.subagent_type,
+                    baseSystemPrompt
+                  }),
+                  tools: subagentToolSet.tools,
+                  reasoningEffort,
+                  capabilities: agentTextCapabilities,
+                  model
+                }
+              ).pipe(
+                Stream.provide(
+                  makeAgentRuntimeLayerWithTools(
+                    providerLayer,
+                    makeToolExecutorLayer(subagentToolSet)
+                  )
                 )
               )
             )
-            const summary = subagentResultFromEvents(Array.from(eventsChunk))
+            const summary = subagentResultFromEvents(events)
             const endedAtMs = yield* Clock.currentTimeMillis
 
             return makeSubagentToolResult({
@@ -408,6 +431,7 @@ export const makeAgentTextRuntime = (
               startedAtMs,
               endedAtMs,
               model,
+              reasoningEffort,
               status: summary.status,
               usage: summary.usage,
               turns: summary.turns,
@@ -427,6 +451,7 @@ export const makeAgentTextRuntime = (
                     startedAtMs,
                     endedAtMs,
                     model,
+                    reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
                     isError: true
                   })
                 )
@@ -444,6 +469,7 @@ export const makeAgentTextRuntime = (
                     startedAtMs,
                     endedAtMs,
                     model,
+                    reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
                     isError: true
                   })
                 )

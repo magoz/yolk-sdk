@@ -23,7 +23,8 @@ const questionToolModule = {
   tools: [
     {
       ...questionToolRegistration,
-      isEnabled: (context: AgentToolContext) => Effect.succeed(context.surface === 'text')
+      isEnabled: (context: AgentToolContext) =>
+        Effect.succeed(context.surface === 'text' && context.subagent !== true)
     }
   ]
 }

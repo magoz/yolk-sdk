@@ -302,7 +302,11 @@ export async function runVercelAgentWorkflow(
           turn: modelResult.value.turn,
           error: hitlResponse.error,
           awaitingInput,
-          state
+          state: {
+            ...state,
+            usage: cumulativeUsage,
+            eventSequence: toolEventSequence
+          }
         }
       }
 

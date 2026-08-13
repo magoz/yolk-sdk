@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
+  addAgentUsage,
   assistantContent,
   AgentUsage,
   contentText,
@@ -14,7 +15,8 @@ import {
   type AgentReasoningEffort,
   type HitlRequest,
   type ProviderErrorInfo,
-  type ToolCall
+  type ToolCall,
+  zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import {
   makeTool,
@@ -419,9 +421,21 @@ export const subagentResultFromEvents = (events: ReadonlyArray<AgentEvent>): Sub
   const terminal = [...events].reverse().find(isTerminalAgentEvent)
 
   if (terminal?._tag === 'AgentError') {
+    const usageUpdates = events.filter(event => event._tag === 'UsageUpdate')
+    const usage = usageUpdates.reduce(
+      (total, event) => addAgentUsage(total, event.usage),
+      zeroAgentUsage
+    )
+    const turns = events.reduce(
+      (latest, event) => (event._tag === 'TurnStart' ? Math.max(latest, event.turn) : latest),
+      0
+    )
+
     return {
       status: 'error',
       text: `Subagent failed: ${terminal.message}`,
+      ...(usageUpdates.length === 0 ? {} : { usage }),
+      ...(turns === 0 ? {} : { turns }),
       error: {
         code: terminal.code,
         message: terminal.message,

@@ -11,7 +11,9 @@ import {
   ProviderErrorInfo,
   ToolApprovalRequest,
   ToolCall,
-  ToolResult
+  ToolResult,
+  TurnStart,
+  UsageUpdate
 } from '@yolk-sdk/agent/protocol'
 import {
   formatSubagentResult,
@@ -563,6 +565,14 @@ describe('subagent tool', () => {
       providerCode: 'context_window_exceeded'
     })
     const summary = subagentResultFromEvents([
+      TurnStart.make({ turn: 1 }),
+      UsageUpdate.make({
+        usage: AgentUsage.make({ input: { total: 120 }, output: { total: 30 } })
+      }),
+      TurnStart.make({ turn: 2 }),
+      UsageUpdate.make({
+        usage: AgentUsage.make({ input: { total: 80 }, output: { total: 20 } })
+      }),
       AgentError.make({
         code: 'context_overflow',
         message: 'Input exceeded the context window.',
@@ -579,14 +589,23 @@ describe('subagent tool', () => {
       startedAtMs: 100,
       endedAtMs: 200,
       model: 'test-model',
+      usage: summary.usage,
+      turns: summary.turns,
       error: summary.error,
       isError: true
     })
 
+    expect(summary).toMatchObject({
+      status: 'error',
+      usage: { input: { total: 200 }, output: { total: 50 } },
+      turns: 2
+    })
     expect(summary.text).toContain('Input exceeded the context window.')
     expect(result.isError).toBe(true)
     expect(result.structuredContent).toMatchObject({
       status: 'error',
+      usage: { input: { total: 200 }, output: { total: 50 } },
+      turns: 2,
       error: {
         code: 'context_overflow',
         retryable: false,

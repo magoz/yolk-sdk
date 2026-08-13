@@ -421,7 +421,7 @@ export const toOpenAiCodexRequestBody = (
     readonly maxOutputTokens?: number
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiCodexReasoningSummary
-  }
+  } = {}
 ): Effect.Effect<OpenAiCodexRequestBody, LLMError> =>
   Effect.gen(function* () {
     yield* validateProviderTranscript(request.messages)

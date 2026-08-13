@@ -81,4 +81,5 @@ Use `subagentResultFromEvents` to extract final or awaiting-input text, status, 
 usage, turns, and typed `AgentError` details from child events. Pass that metadata to
 `makeSubagentToolResult`. Durable hosts
 can call `subagentUsageFromToolResult` on completed tool results and add the returned child usage to
-their cumulative workflow usage.
+their cumulative workflow usage. If a host does not implement nested HITL resume, omit approval- and
+question-gated tools from child toolsets rather than returning an unresumable `awaiting_input` result.
