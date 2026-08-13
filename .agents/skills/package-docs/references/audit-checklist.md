@@ -21,7 +21,7 @@ Do not require READMEs for private workspaces unless useful internally.
 - one-line role matches root `README.md` and `packages/AGENTS.md`
 - install snippet uses `@canary`
 - lockstep version note included
-- public subpaths match `package.json` exports
+- feature/API subpaths match `package.json` exports; the standard `./package.json` metadata export may stay centralized in `patterns/PACKAGE_ARCHITECTURE.md`
 - imports use real exported symbols
 - examples do not depend on app internals
 - host-owned responsibilities explicit

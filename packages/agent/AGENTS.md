@@ -2,47 +2,19 @@
 
 `@yolk-sdk/agent` is the main package for building and running agents. Root export stays intentionally tiny; use explicit subpaths.
 
-## Subpaths
+## Structure
 
-| Subpath                                               | Source                                       | Role                                                                                                                 |
-| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                     |
-| `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                              |
-| `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                    |
-| `@yolk-sdk/agent/runtime`                             | `src/runtime`                                | Generic runtime/session orchestration                                                                                |
-| `@yolk-sdk/agent/client`                              | `src/client`                                 | Effect-native HTTP/NDJSON transport, durable run, attachment, and state helpers                                      |
-| `@yolk-sdk/agent/compaction`                          | `src/compaction`                             | Host-owned context compaction utilities                                                                              |
-| `@yolk-sdk/agent/tools`                               | `src/tools`                                  | Generic tool module registry                                                                                         |
-| `@yolk-sdk/agent/react`                               | `src/react`                                  | Headless React chat hook/state helpers                                                                               |
-| `@yolk-sdk/agent/oauth`                               | `src/oauth`                                  | Provider-neutral OAuth token contracts                                                                               |
-| `@yolk-sdk/agent/providers/openai`                    | `src/providers/openai`                       | OpenAI/Codex OAuth and broker helpers                                                                                |
-| `@yolk-sdk/agent/providers/openai/codex`              | `src/providers/openai/codex.ts`              | OpenAI Codex request and auth helpers                                                                                |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | `src/providers/openai/codex-provider.ts`     | Codex LLM provider factory                                                                                           |
-| `@yolk-sdk/agent/providers/openai/provider`           | `src/providers/openai/provider.ts`           | OpenAI-compatible LLM provider factory                                                                               |
-| `@yolk-sdk/agent/providers/openai/realtime`           | `src/providers/openai/realtime`              | OpenAI Realtime session config + event codecs                                                                        |
-| `@yolk-sdk/agent/providers/openai/speech`             | `src/providers/openai/speech.ts`             | OpenAI TTS/STT service adapters                                                                                      |
-| `@yolk-sdk/agent/providers/anthropic`                 | `src/providers/anthropic`                    | Anthropic/Claude OAuth and broker helpers                                                                            |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                      |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                          |
-| `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                             |
-| `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts |
-| `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                       |
-| `@yolk-sdk/agent/voice/react`                         | `src/voice/react.ts`                         | Headless browser voice React hook                                                                                    |
+`package.json` is the export source of truth. See `patterns/PACKAGE_ARCHITECTURE.md` for the public
+subpath catalog, dependency direction, physical layout, and tree-shaking constraints.
 
 ## Boundaries
 
 - Core subpaths have no React, Next.js, app imports, auth, storage drivers, provider SDKs, or product concepts.
 - `src/react` and `src/voice/react.ts` are the only React-using areas; React is an optional peer.
 - Provider subpaths own vendor mechanics only; hosts still own token storage/refresh and app policy.
-- Do not import `@yolk-sdk/knowledge`, `@yolk-sdk/mcp`, or app packages from agent subpaths.
-- Protocol depends on Effect only.
-- Loop depends on protocol + Effect only.
-- Runtime depends on protocol + loop + Effect only.
+- Subscription-usage adapters expose best-effort snapshots from fixed private provider endpoints. They accept fresh host-owned `OAuthAccessToken` values and an Effect `HttpClient`, force manual Fetch redirect handling, and reject non-2xx redirects; hosts own polling, persistence, stale-data rules, labels, alerts, billing interpretation, and UI.
 - Client depends on protocol + Effect HTTP/Stream. HTTP helpers are runtime-portable; attachment helpers require `Blob`/`File` and may use `FileReader`, while Cloudflare WebSocket transport constructs the global `WebSocket` when its stream runs. Browser globals are never read at import time.
-- Compaction depends on protocol + loop + Effect only.
-- Tools depend on protocol + loop + Effect only.
-- OAuth and skillset depend on Effect only.
-- Voice depends on protocol + loop + Effect; `makeWebSocketVoiceTransport` needs a host `Socket.WebSocketConstructor` layer.
+- `makeWebSocketVoiceTransport` needs a host `Socket.WebSocketConstructor` layer.
 - `voice/browser` is the only WebRTC-using area; it accesses browser globals lazily at transport creation, never at import time, and exposes a `WebRtcVoiceRuntime` seam for fakes. Client attachment/WebSocket helpers also use browser APIs as described above.
 - Voice tools execute server-side only: the client `makeVoiceController` forwards provider tool calls to a host endpoint (`VoiceSessionToolCallRequest` in, `VoiceToolCallOutcome` out); `handleVoiceToolCall` applies `ToolDef.approval` policy before the executor and never runs approval-gated tools without a matching approved response.
 - Voice HITL supports tool approval only in v1; the package `question` tool is intentionally deferred for voice sessions and `submitHitlResponse` ignores question responses.
@@ -56,10 +28,6 @@
 - Voice session logs are host-persisted: `VoiceSessionLogState` is the versioned serializable fold state and `foldStoredVoiceEvents` is the pure, replay-safe batch fold; hosts run it inside their storage transaction and append the returned messages. Bump `VOICE_SESSION_LOG_STATE_VERSION` on breaking state-shape changes.
 - Tool lifecycle events use deterministic per-call ids (`voiceToolEventId`); `storedVoiceToolEvents` splits requested batches per call and `storedToolEventsFromOutcome` lets tool endpoints log server-witnessed activity that dedupes against client outbox replays.
 - `makeVoiceEventOutbox` (and the `useYolkVoice` `eventLog` option) is client transport mechanics only: at-least-once batching with boundary flushes and a scope-close drain; hosts own the flush endpoint, auth, and storage, and should flush with keepalive-capable transport.
-- React depends on client + protocol + Effect + optional React only.
-- Providers depend on protocol + loop + oauth + Effect; provider factories may use Effect HTTP; `providers/openai/realtime` and `providers/openai/speech` may also depend on voice for provider-neutral voice contracts.
-- Package architecture constraints live in `patterns/PACKAGE_ARCHITECTURE.md`.
-- Keep all subpaths ESM/tree-shakeable: no top-level env reads, SDK clients, network calls, or side effects.
 - `@yolk-sdk/agent/tools` owns the domain-free `subagent` tool contract for subagents; host apps provide subagent execution, available model/reasoning choices, prompts, provider layers, and tool policy. Optional subagent runtime selections inherit host settings when omitted.
 - `@yolk-sdk/agent/tools` owns the domain-free `question` HITL tool contract; loop intercepts it before executor dispatch.
 - `@yolk-sdk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
@@ -85,6 +53,7 @@
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.
   Loop owns retry/usage aggregation.
+- Provider subscription usage is distinct from protocol `AgentUsage`: it reports consumer subscription allowance percentages and reset windows, not per-request token counts. Keep provider labels and alert eligibility in the host.
 - Anthropic prompt-too-long signals normalize to non-retryable `context_overflow`; generic loop retry must not retry them. `makeContextOverflowRetryProvider` is the explicit exception and may compact and retry once per provider stream.
 - Anthropic `stop_reason: "max_tokens"` is a non-retryable `invalid_response` in JSON and SSE responses; never emit `LLMDone` or report normal completion for a truncated turn.
 - Anthropic provider construction requires host-owned output-token limits; never infer model limits or add hidden fallbacks. ChatGPT subscription Codex does not expose or send an output-token limit because its endpoint rejects the vendor `max_output_tokens` field; the optional deprecated `maxOutputTokens` config field is ignored for compatibility.

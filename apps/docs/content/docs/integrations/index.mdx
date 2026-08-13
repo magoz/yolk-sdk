@@ -7,12 +7,12 @@ Yolk integrations are package-owned adapters you can plug into your host-owned a
 
 ## Model providers
 
-| Provider                           | Use when                                                                    | Import                                                |
-| ---------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
-| OpenAI-compatible chat completions | You have an API key and want a generic OpenAI-compatible chat endpoint      | `@yolk-sdk/agent/providers/openai/provider`           |
-| OpenAI Codex                       | You use Codex OAuth/token-broker flows and the Responses API                | `@yolk-sdk/agent/providers/openai/codex-provider`     |
-| Anthropic Claude Code              | You use Claude OAuth/token-broker flows and Claude Code-compatible requests | `@yolk-sdk/agent/providers/anthropic/claude-provider` |
-| Test provider                      | You need deterministic tests without network calls                          | `@yolk-sdk/agent/loop/testing`                        |
+| Provider                           | Use when                                                                  | Import                                                |
+| ---------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
+| OpenAI-compatible chat completions | You have an API key and want a generic OpenAI-compatible chat endpoint    | `@yolk-sdk/agent/providers/openai/provider`           |
+| OpenAI Codex                       | You use Codex OAuth, Responses, or subscription-allowance snapshots       | `@yolk-sdk/agent/providers/openai/codex-provider`     |
+| Anthropic Claude Code              | You use Claude OAuth, model requests, or subscription-allowance snapshots | `@yolk-sdk/agent/providers/anthropic/claude-provider` |
+| Test provider                      | You need deterministic tests without network calls                        | `@yolk-sdk/agent/loop/testing`                        |
 
 See [Model providers](./model-providers).
 
