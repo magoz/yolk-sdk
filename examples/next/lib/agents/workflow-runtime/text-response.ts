@@ -144,6 +144,11 @@ type SubagentCompletedToolResultInput = SubagentResultToolResultInput & {
   readonly result: SubagentRunResult
 }
 
+type SubagentFailureRecoveryInput = Omit<
+  SubagentFailureToolResultInput,
+  'endedAtMs' | 'error'
+>
+
 export const makeSubagentFailureToolResult = (input: SubagentFailureToolResultInput) => {
   const error = subagentRunErrorFromUnknown(input.error)
 
@@ -164,6 +169,24 @@ export const makeCompletedSubagentToolResult = (input: SubagentCompletedToolResu
     requests: input.result.requests,
     error: input.result.error
   })
+
+export const recoverSubagentToolFailure = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  input: SubagentFailureRecoveryInput
+) => {
+  const recover = (error: unknown) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.map(endedAtMs =>
+        makeSubagentFailureToolResult({
+          ...input,
+          endedAtMs,
+          error
+        })
+      )
+    )
+
+  return effect.pipe(Effect.catch(recover), Effect.catchDefect(recover))
+}
 
 export const collectSubagentEvents = (
   stream: Stream.Stream<AgentEvent, Parameters<typeof runtimeErrorToAgentError>[0], never>
@@ -432,74 +455,68 @@ export const makeAgentTextRuntime = (
           const startedAtMs = yield* Clock.currentTimeMillis
           const subagentRunId = subagentToolRunId(call.id)
 
-          return yield* Effect.gen(function* () {
-            const subagentToolSet = yield* resolveAgentToolSet({
-              modules: subagentToolModules,
-              context: {
-                ...context,
-                sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
-                subagent: true
-              }
-            }).pipe(Effect.mapError(toolRegistryErrorToToolError))
-            const reasoningEffort = input.reasoningEffort ?? baseConfig.reasoningEffort
-            const events = yield* collectSubagentEvents(
-              runRuntime(
-                {
-                  _tag: 'Transcript',
-                  sessionId: `${input.sessionId}:subagent:${call.id}`,
-                  messages: [UserMessage.make({ content: params.prompt })]
-                },
-                {
-                  systemPrompt: subagentPrompt({
-                    subagentType: params.subagent_type,
-                    baseSystemPrompt
-                  }),
-                  tools: subagentToolSet.tools,
-                  reasoningEffort,
-                  capabilities: agentTextCapabilities,
-                  model
+          const reasoningEffort = input.reasoningEffort ?? baseConfig.reasoningEffort
+
+          return yield* recoverSubagentToolFailure(
+            Effect.gen(function* () {
+              const subagentToolSet = yield* resolveAgentToolSet({
+                modules: subagentToolModules,
+                context: {
+                  ...context,
+                  sessionId: `${context.sessionId ?? input.sessionId}:subagent:${call.id}`,
+                  subagent: true
                 }
-              ).pipe(
-                Stream.provide(
-                  makeAgentRuntimeLayerWithTools(
-                    providerLayer,
-                    makeToolExecutorLayer(subagentToolSet)
+              }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+              const events = yield* collectSubagentEvents(
+                runRuntime(
+                  {
+                    _tag: 'Transcript',
+                    sessionId: `${input.sessionId}:subagent:${call.id}`,
+                    messages: [UserMessage.make({ content: params.prompt })]
+                  },
+                  {
+                    systemPrompt: subagentPrompt({
+                      subagentType: params.subagent_type,
+                      baseSystemPrompt
+                    }),
+                    tools: subagentToolSet.tools,
+                    reasoningEffort,
+                    capabilities: agentTextCapabilities,
+                    model
+                  }
+                ).pipe(
+                  Stream.provide(
+                    makeAgentRuntimeLayerWithTools(
+                      providerLayer,
+                      makeToolExecutorLayer(subagentToolSet)
+                    )
                   )
                 )
               )
-            )
-            const summary = subagentResultFromEvents(events)
-            const endedAtMs = yield* Clock.currentTimeMillis
+              const summary = subagentResultFromEvents(events)
+              const endedAtMs = yield* Clock.currentTimeMillis
 
-            return makeCompletedSubagentToolResult({
+              return makeCompletedSubagentToolResult({
+                callId: call.id,
+                subagentType: params.subagent_type,
+                description: params.description,
+                subagentRunId,
+                startedAtMs,
+                endedAtMs,
+                model,
+                reasoningEffort,
+                result: summary
+              })
+            }),
+            {
               callId: call.id,
               subagentType: params.subagent_type,
               description: params.description,
               subagentRunId,
               startedAtMs,
-              endedAtMs,
               model,
-              reasoningEffort,
-              result: summary
-            })
-          }).pipe(
-            Effect.catch(error =>
-              Clock.currentTimeMillis.pipe(
-                Effect.map(endedAtMs =>
-                  makeSubagentFailureToolResult({
-                    callId: call.id,
-                    subagentType: params.subagent_type,
-                    description: params.description,
-                    subagentRunId,
-                    startedAtMs,
-                    endedAtMs,
-                    model,
-                    reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
-                    error
-                  })
-                )
-              )
-            )
+              reasoningEffort
+            }
           )
         })
     })

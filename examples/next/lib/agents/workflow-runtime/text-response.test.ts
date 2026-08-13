@@ -12,7 +12,7 @@ import { resolveAgentToolSet, nodeTextToolModules } from '@/lib/agents/tools/reg
 import {
   collectSubagentEvents,
   makeCompletedSubagentToolResult,
-  makeSubagentFailureToolResult
+  recoverSubagentToolFailure
 } from './text-response'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
@@ -97,53 +97,56 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
     })
   )
 
-  it('returns typed metadata for child setup failures', () => {
-    const common = {
-      callId: 'call_1',
-      subagentType: 'general',
-      description: 'Inspect code',
-      subagentRunId: 'subagent:call_1',
-      startedAtMs: 100,
-      endedAtMs: 200,
-      model: 'test-model',
-      reasoningEffort: 'high' as const
-    }
-    const toolFailure = makeSubagentFailureToolResult({
-      ...common,
-      error: new ToolError({
-        tool: 'subagent',
-        message: 'Child tool setup failed.',
-        cause: 'execution'
+  it.effect('returns typed metadata for child setup failures and defects', () =>
+    Effect.gen(function* () {
+      const common = {
+        callId: 'call_1',
+        subagentType: 'general',
+        description: 'Inspect code',
+        subagentRunId: 'subagent:call_1',
+        startedAtMs: 100,
+        model: 'test-model',
+        reasoningEffort: 'high' as const
+      }
+      const toolFailure = yield* recoverSubagentToolFailure(
+        Effect.fail(
+          new ToolError({
+            tool: 'subagent',
+            message: 'Child tool setup failed.',
+            cause: 'execution'
+          })
+        ),
+        common
+      )
+      const unknownFailure = yield* recoverSubagentToolFailure(
+        Effect.die(new Error('Unexpected child failure.')),
+        common
+      )
+
+      expect(toolFailure).toMatchObject({
+        isError: true,
+        structuredContent: {
+          status: 'error',
+          error: {
+            code: 'tool_error',
+            message: 'Child tool setup failed.',
+            retryable: false
+          }
+        }
+      })
+      expect(unknownFailure).toMatchObject({
+        isError: true,
+        structuredContent: {
+          status: 'error',
+          error: {
+            code: 'unknown',
+            message: 'Unexpected child failure.',
+            retryable: false
+          }
+        }
       })
     })
-    const unknownFailure = makeSubagentFailureToolResult({
-      ...common,
-      error: new Error('Unexpected child failure.')
-    })
-
-    expect(toolFailure).toMatchObject({
-      isError: true,
-      structuredContent: {
-        status: 'error',
-        error: {
-          code: 'tool_error',
-          message: 'Child tool setup failed.',
-          retryable: false
-        }
-      }
-    })
-    expect(unknownFailure).toMatchObject({
-      isError: true,
-      structuredContent: {
-        status: 'error',
-        error: {
-          code: 'unknown',
-          message: 'Unexpected child failure.',
-          retryable: false
-        }
-      }
-    })
-  })
+  )
 
   it('adds complete runtime metadata to subagent results', () => {
     const provider = ProviderErrorInfo.make({

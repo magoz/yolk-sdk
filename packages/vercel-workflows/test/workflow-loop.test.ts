@@ -406,7 +406,7 @@ describe('runVercelAgentWorkflow', () => {
     })
   })
 
-  it('preserves model usage when the initial tool batch fails', async () => {
+  it('returns the current workflow state when the initial tool batch fails', async () => {
     const error = new Error('tools failed')
 
     const result = await runWorkflow({
@@ -426,13 +426,7 @@ describe('runVercelAgentWorkflow', () => {
       _tag: 'ToolBatchStepFailed',
       turn: 1,
       error,
-      state: {
-        request: 'request-1',
-        createdMessages: [],
-        usage: { turns: 1, subagentTurns: 2 },
-        turn: 1,
-        eventSequence: 9
-      }
+      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
     })
   })
 

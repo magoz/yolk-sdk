@@ -270,11 +270,14 @@ export async function runVercelAgentWorkflow(
           _tag: 'ToolBatchStepFailed',
           turn: modelResult.value.turn,
           error: toolsResult.error,
-          state: {
-            ...state,
-            usage: cumulativeUsage,
-            eventSequence: toolEventSequence
-          }
+          state:
+            toolHitlResponses.length === 0
+              ? state
+              : {
+                  ...state,
+                  usage: cumulativeUsage,
+                  eventSequence: toolEventSequence
+                }
         }
       }
 
