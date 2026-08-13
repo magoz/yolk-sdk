@@ -14,6 +14,9 @@ import {
   subagentResultFromEvents,
   subagentToolRunId,
   type SubagentDefinition,
+  type SubagentRunError,
+  type SubagentRunResult,
+  type SubagentToolResultInput,
   type ToolModule
 } from '@yolk-sdk/agent/tools'
 import { formatAvailableSkills, type MergedSkillset } from '@yolk-sdk/agent/skillset'
@@ -115,6 +118,52 @@ const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
 
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
+
+const subagentRunErrorFromUnknown = (error: unknown): SubagentRunError => {
+  if (error instanceof ToolError) {
+    return runtimeErrorToAgentError(error)
+  }
+
+  return {
+    code: 'unknown',
+    message: unknownToMessage(error),
+    retryable: false
+  }
+}
+
+type SubagentResultToolResultInput = Omit<
+  SubagentToolResultInput,
+  'output' | 'usage' | 'turns' | 'status' | 'requests' | 'error' | 'isError'
+>
+
+type SubagentFailureToolResultInput = SubagentResultToolResultInput & {
+  readonly error: unknown
+}
+
+type SubagentCompletedToolResultInput = SubagentResultToolResultInput & {
+  readonly result: SubagentRunResult
+}
+
+export const makeSubagentFailureToolResult = (input: SubagentFailureToolResultInput) => {
+  const error = subagentRunErrorFromUnknown(input.error)
+
+  return makeSubagentToolResult({
+    ...input,
+    output: `Subagent failed: ${error.message}`,
+    error
+  })
+}
+
+export const makeCompletedSubagentToolResult = (input: SubagentCompletedToolResultInput) =>
+  makeSubagentToolResult({
+    ...input,
+    output: input.result.text,
+    status: input.result.status,
+    usage: input.result.usage,
+    turns: input.result.turns,
+    requests: input.result.requests,
+    error: input.result.error
+  })
 
 export const collectSubagentEvents = (
   stream: Stream.Stream<AgentEvent, Parameters<typeof runtimeErrorToAgentError>[0], never>
@@ -422,9 +471,8 @@ export const makeAgentTextRuntime = (
             const summary = subagentResultFromEvents(events)
             const endedAtMs = yield* Clock.currentTimeMillis
 
-            return makeSubagentToolResult({
+            return makeCompletedSubagentToolResult({
               callId: call.id,
-              output: summary.text,
               subagentType: params.subagent_type,
               description: params.description,
               subagentRunId,
@@ -432,37 +480,14 @@ export const makeAgentTextRuntime = (
               endedAtMs,
               model,
               reasoningEffort,
-              status: summary.status,
-              usage: summary.usage,
-              turns: summary.turns,
-              requests: summary.requests,
-              error: summary.error
+              result: summary
             })
           }).pipe(
-            Effect.catchTag('ToolError', error =>
-              Clock.currentTimeMillis.pipe(
-                Effect.map(endedAtMs =>
-                  makeSubagentToolResult({
-                    callId: call.id,
-                    output: `Subagent failed: ${error.message}`,
-                    subagentType: params.subagent_type,
-                    description: params.description,
-                    subagentRunId,
-                    startedAtMs,
-                    endedAtMs,
-                    model,
-                    reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
-                    isError: true
-                  })
-                )
-              )
-            ),
             Effect.catch(error =>
               Clock.currentTimeMillis.pipe(
                 Effect.map(endedAtMs =>
-                  makeSubagentToolResult({
+                  makeSubagentFailureToolResult({
                     callId: call.id,
-                    output: `Subagent failed: ${unknownToMessage(error)}`,
                     subagentType: params.subagent_type,
                     description: params.description,
                     subagentRunId,
@@ -470,7 +495,7 @@ export const makeAgentTextRuntime = (
                     endedAtMs,
                     model,
                     reasoningEffort: input.reasoningEffort ?? baseConfig.reasoningEffort,
-                    isError: true
+                    error
                   })
                 )
               )

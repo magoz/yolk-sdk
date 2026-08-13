@@ -45,7 +45,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - `context-budget.ts` and `context-transformer.ts` wrap `@yolk-sdk/agent/compaction`; app owns thresholds and summary policy.
 - Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
 - Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `subagent` for top-level delegation.
-- Subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; children run normal text tools but without `subagent`, so recursive delegation is disabled in v1.
+- Subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; children run non-HITL text tools without `question` or `subagent`, because nested HITL resume and recursive delegation are disabled in v1.
 - Subagent results include structured metadata for status, timing, model, ids, usage/turns, and typed failures. Workflow tool steps add child usage to cumulative durable usage.
 - Parallel delegation requires multiple `subagent` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
 - Workflow text runtime exposes run id in Activity; replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response; stop calls `DELETE`.

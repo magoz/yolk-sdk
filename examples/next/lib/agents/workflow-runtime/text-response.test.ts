@@ -1,13 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { Effect, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { LLMError } from '@yolk-sdk/agent/loop'
-import { TurnStart, UsageUpdate, AgentUsage } from '@yolk-sdk/agent/protocol'
+import { LLMError, ToolError } from '@yolk-sdk/agent/loop'
+import {
+  TurnStart,
+  UsageUpdate,
+  AgentUsage,
+  ProviderErrorInfo
+} from '@yolk-sdk/agent/protocol'
 import { resolveAgentToolSet, nodeTextToolModules } from '@/lib/agents/tools/registry'
-import { collectSubagentEvents } from './text-response'
+import {
+  collectSubagentEvents,
+  makeCompletedSubagentToolResult,
+  makeSubagentFailureToolResult
+} from './text-response'
 
 const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-response.ts', 'utf8')
-const registrySource = readFileSync('examples/next/lib/agents/tools/registry.ts', 'utf8')
 
 const subagentToolStart = source.indexOf(
   'const subagentToolModule = makeNonRecursiveSubagentToolModule'
@@ -51,7 +59,6 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
       expect(subagentExecuteSource).not.toContain('modules: toolModules')
       expect(subagentExecuteSource).toContain(':subagent:${call.id}')
       expect(subagentExecuteSource).not.toContain(':task:${call.id}')
-      expect(registrySource).toContain('context.subagent !== true')
       expect(childTools.tools.map(tool => tool.name)).not.toContain('question')
     })
   )
@@ -87,22 +94,100 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
         code: 'provider_error',
         message: 'Child failed.'
       })
-      expect(subagentExecuteSource).toContain("Effect.catchTag('ToolError'")
-      expect(subagentExecuteSource).toContain('isError: true')
     })
   )
 
-  it('adds subagent runtime metadata to structured results', () => {
-    expect(source).toContain('subagentResultFromEvents')
-    expect(source).toContain('makeSubagentToolResult')
-    expect(source).toContain('subagentToolRunId')
-    expect(source).toContain('startedAtMs')
-    expect(source).toContain('endedAtMs')
-    expect(source).toContain('reasoningEffort,')
-    expect(source).toContain('status: summary.status')
-    expect(source).toContain('usage: summary.usage')
-    expect(source).toContain('turns: summary.turns')
-    expect(source).toContain('requests: summary.requests')
-    expect(source).toContain('error: summary.error')
+  it('returns typed metadata for child setup failures', () => {
+    const common = {
+      callId: 'call_1',
+      subagentType: 'general',
+      description: 'Inspect code',
+      subagentRunId: 'subagent:call_1',
+      startedAtMs: 100,
+      endedAtMs: 200,
+      model: 'test-model',
+      reasoningEffort: 'high' as const
+    }
+    const toolFailure = makeSubagentFailureToolResult({
+      ...common,
+      error: new ToolError({
+        tool: 'subagent',
+        message: 'Child tool setup failed.',
+        cause: 'execution'
+      })
+    })
+    const unknownFailure = makeSubagentFailureToolResult({
+      ...common,
+      error: new Error('Unexpected child failure.')
+    })
+
+    expect(toolFailure).toMatchObject({
+      isError: true,
+      structuredContent: {
+        status: 'error',
+        error: {
+          code: 'tool_error',
+          message: 'Child tool setup failed.',
+          retryable: false
+        }
+      }
+    })
+    expect(unknownFailure).toMatchObject({
+      isError: true,
+      structuredContent: {
+        status: 'error',
+        error: {
+          code: 'unknown',
+          message: 'Unexpected child failure.',
+          retryable: false
+        }
+      }
+    })
+  })
+
+  it('adds complete runtime metadata to subagent results', () => {
+    const provider = ProviderErrorInfo.make({
+      provider: 'openai_codex',
+      kind: 'context_overflow'
+    })
+    const result = makeCompletedSubagentToolResult({
+      callId: 'call_2',
+      subagentType: 'general',
+      description: 'Inspect code',
+      subagentRunId: 'subagent:call_2',
+      startedAtMs: 100,
+      endedAtMs: 250,
+      model: 'test-model',
+      reasoningEffort: 'high',
+      result: {
+        status: 'error',
+        text: 'Subagent failed: context overflow',
+        usage: AgentUsage.make({ input: { total: 40 }, output: { total: 5 } }),
+        turns: 2,
+        error: {
+          code: 'context_overflow',
+          message: 'context overflow',
+          retryable: false,
+          provider
+        }
+      }
+    })
+
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        subagent_run_id: 'subagent:call_2',
+        started_at_ms: 100,
+        ended_at_ms: 250,
+        reasoning_effort: 'high',
+        status: 'error',
+        usage: { input: { total: 40 }, output: { total: 5 } },
+        turns: 2,
+        error: {
+          code: 'context_overflow',
+          provider: { provider: 'openai_codex', kind: 'context_overflow' }
+        }
+      }
+    })
   })
 })

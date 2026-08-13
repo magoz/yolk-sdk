@@ -365,12 +365,58 @@ describe('runVercelAgentWorkflow', () => {
     expect(toolInputs.map(input => input.eventSequence)).toEqual([3, 3])
   })
 
-  it('returns tool batch failures with the current workflow state', async () => {
-    const error = new Error('tools failed')
+  it('preserves accumulated usage when a resumed tool batch fails', async () => {
+    const error = new Error('resumed tools failed')
+    const awaitingInput = {
+      hookToken: 'hook-1',
+      requests: ['request-approval'],
+      messages: ['assistant-1'],
+      usage: { turns: 1 },
+      turns: 1,
+      eventSequence: 7
+    }
 
     const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
       runModelStep: input => step(() => toolModelResult(input)),
+      runToolBatchStep: input =>
+        input.hitlResponses?.[0] === 'approved'
+          ? failStep(error)
+          : step(() => ({
+              ...toolBatchResult(input),
+              usage: { turns: 1, subagentTurns: 3 },
+              awaitingInput
+            })),
+      awaitInput: () => step(() => 'approved'),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result).toMatchObject({
+      _tag: 'ToolBatchStepFailed',
+      turn: 1,
+      error,
+      state: {
+        request: 'request-1',
+        createdMessages: [],
+        usage: { turns: 1, subagentTurns: 3 },
+        turn: 1,
+        eventSequence: 7
+      }
+    })
+  })
+
+  it('preserves model usage when the initial tool batch fails', async () => {
+    const error = new Error('tools failed')
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input =>
+        step(() => ({
+          ...toolModelResult(input),
+          usage: { turns: 1, subagentTurns: 2 },
+          eventSequence: 9
+        })),
       runToolBatchStep: () => failStep(error),
       closeStream: emptyStep,
       writeError: emptyStep
@@ -380,7 +426,13 @@ describe('runVercelAgentWorkflow', () => {
       _tag: 'ToolBatchStepFailed',
       turn: 1,
       error,
-      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+      state: {
+        request: 'request-1',
+        createdMessages: [],
+        usage: { turns: 1, subagentTurns: 2 },
+        turn: 1,
+        eventSequence: 9
+      }
     })
   })
 
