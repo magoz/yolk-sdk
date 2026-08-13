@@ -203,11 +203,13 @@ const snapshot = await fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken).p
 ```
 
 Use `fetchAnthropicClaudeSubscriptionUsage` from
-`@yolk-sdk/agent/providers/anthropic/usage` for Claude. Provider adapters return semantic window ids,
-percentages, and optional reset/duration fields; hosts own labels, polling, persistence, stale-data
+`@yolk-sdk/agent/providers/anthropic/usage` for Claude. Provider adapters return an immutable Effect
+`Chunk` of semantic window ids, percentages, and optional reset/duration fields; hosts own labels,
+polling, persistence, stale-data
 policy, alert thresholds, billing interpretation, and UI. Configure `requestTimeoutMs` at the
-server integration boundary. Endpoint origins stay fixed so bearer credentials cannot be redirected
-through host configuration.
+server integration boundary. Endpoint origins stay fixed, and `FetchHttpClient.layer` is configured
+for manual redirects. A custom `HttpClient` must not follow redirects for these credential-bearing
+requests.
 
 Subscription allowance snapshots are separate from protocol `AgentUsage`, which accounts for tokens
 used by model requests and nested model work.

@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect'
+import { Chunk, Clock, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
@@ -37,17 +37,17 @@ class OpenAiCodexSubscriptionUsageWindowWire extends Schema.Class<OpenAiCodexSub
   reset_at: Schema.optional(NullableNumber)
 }) {}
 
+class OpenAiCodexSubscriptionRateLimitWire extends Schema.Class<OpenAiCodexSubscriptionRateLimitWire>(
+  'OpenAiCodexSubscriptionRateLimitWire'
+)({
+  primary_window: Schema.optional(Schema.NullOr(OpenAiCodexSubscriptionUsageWindowWire)),
+  secondary_window: Schema.optional(Schema.NullOr(OpenAiCodexSubscriptionUsageWindowWire))
+}) {}
+
 class OpenAiCodexSubscriptionUsageWire extends Schema.Class<OpenAiCodexSubscriptionUsageWire>(
   'OpenAiCodexSubscriptionUsageWire'
 )({
-  rate_limit: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({
-        primary_window: Schema.optional(Schema.NullOr(OpenAiCodexSubscriptionUsageWindowWire)),
-        secondary_window: Schema.optional(Schema.NullOr(OpenAiCodexSubscriptionUsageWindowWire))
-      })
-    )
-  )
+  rate_limit: Schema.optional(Schema.NullOr(OpenAiCodexSubscriptionRateLimitWire))
 }) {}
 
 export const parseOpenAiCodexSubscriptionUsage = (
@@ -58,7 +58,7 @@ export const parseOpenAiCodexSubscriptionUsage = (
 
   if (canonicalFetchedAt === undefined) {
     return Effect.fail(
-      new ProviderSubscriptionUsageResponseError({
+      ProviderSubscriptionUsageResponseError.make({
         provider: openAiCodexProviderId,
         category: 'invalid_response'
       })
@@ -105,15 +105,14 @@ export const parseOpenAiCodexSubscriptionUsage = (
       return ProviderSubscriptionUsageSnapshot.make({
         provider: openAiCodexProviderId,
         fetchedAt: canonicalFetchedAt,
-        windows
+        windows: Chunk.fromIterable(windows)
       })
     }),
-    Effect.mapError(
-      () =>
-        new ProviderSubscriptionUsageResponseError({
-          provider: openAiCodexProviderId,
-          category: 'invalid_response'
-        })
+    Effect.mapError(() =>
+      ProviderSubscriptionUsageResponseError.make({
+        provider: openAiCodexProviderId,
+        category: 'invalid_response'
+      })
     ),
     Effect.withSpan('OpenAiCodexSubscriptionUsage.parse')
   )
@@ -130,7 +129,7 @@ export const fetchOpenAiCodexSubscriptionUsage = (
   Effect.gen(function* () {
     if (token.provider !== openAiCodexProviderId) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageConfigurationError({
+        ProviderSubscriptionUsageConfigurationError.make({
           provider: openAiCodexProviderId,
           reason: 'provider_mismatch'
         })
@@ -141,7 +140,7 @@ export const fetchOpenAiCodexSubscriptionUsage = (
 
     if (accountId === undefined || accountId.length === 0) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageConfigurationError({
+        ProviderSubscriptionUsageConfigurationError.make({
           provider: openAiCodexProviderId,
           reason: 'missing_account_id'
         })
@@ -152,7 +151,7 @@ export const fetchOpenAiCodexSubscriptionUsage = (
 
     if (!validProviderSubscriptionUsageTimeout(requestTimeoutMs)) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageConfigurationError({
+        ProviderSubscriptionUsageConfigurationError.make({
           provider: openAiCodexProviderId,
           reason: 'invalid_request_timeout'
         })

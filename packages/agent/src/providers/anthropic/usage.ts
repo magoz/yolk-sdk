@@ -1,4 +1,4 @@
-import { Clock, Effect } from 'effect'
+import { Chunk, Clock, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
@@ -50,7 +50,7 @@ export const parseAnthropicClaudeSubscriptionUsage = (
 
   if (canonicalFetchedAt === undefined) {
     return Effect.fail(
-      new ProviderSubscriptionUsageResponseError({
+      ProviderSubscriptionUsageResponseError.make({
         provider: anthropicClaudeProviderId,
         category: 'invalid_response'
       })
@@ -87,15 +87,14 @@ export const parseAnthropicClaudeSubscriptionUsage = (
       return ProviderSubscriptionUsageSnapshot.make({
         provider: anthropicClaudeProviderId,
         fetchedAt: canonicalFetchedAt,
-        windows
+        windows: Chunk.fromIterable(windows)
       })
     }),
-    Effect.mapError(
-      () =>
-        new ProviderSubscriptionUsageResponseError({
-          provider: anthropicClaudeProviderId,
-          category: 'invalid_response'
-        })
+    Effect.mapError(() =>
+      ProviderSubscriptionUsageResponseError.make({
+        provider: anthropicClaudeProviderId,
+        category: 'invalid_response'
+      })
     ),
     Effect.withSpan('AnthropicClaudeSubscriptionUsage.parse')
   )
@@ -112,7 +111,7 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
   Effect.gen(function* () {
     if (token.provider !== anthropicClaudeProviderId) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageConfigurationError({
+        ProviderSubscriptionUsageConfigurationError.make({
           provider: anthropicClaudeProviderId,
           reason: 'provider_mismatch'
         })
@@ -123,7 +122,7 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
 
     if (!validProviderSubscriptionUsageTimeout(requestTimeoutMs)) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageConfigurationError({
+        ProviderSubscriptionUsageConfigurationError.make({
           provider: anthropicClaudeProviderId,
           reason: 'invalid_request_timeout'
         })

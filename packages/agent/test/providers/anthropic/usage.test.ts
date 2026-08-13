@@ -16,10 +16,11 @@ import {
 } from '../../../src/providers/anthropic/usage.ts'
 
 const fetchedAt = '2026-08-11T08:00:00.000Z'
+const tokenExpiresAt = 1_800_000_000_000
 const token = OAuthAccessToken.make({
   provider: 'anthropic-claude',
   accessToken: 'anthropic-secret',
-  expiresAt: Date.now() + 60_000
+  expiresAt: tokenExpiresAt
 })
 
 describe('Anthropic Claude subscription usage', () => {
@@ -40,16 +41,16 @@ describe('Anthropic Claude subscription usage', () => {
 
       expect(snapshot).toMatchObject({
         provider: 'anthropic-claude',
-        fetchedAt,
-        windows: [
-          {
-            id: 'five-hour',
-            usedPercent: 72,
-            resetsAt: '2026-08-11T08:00:00.000Z'
-          },
-          { id: 'seven-day', usedPercent: 48.5 }
-        ]
+        fetchedAt
       })
+      expect(Array.from(snapshot.windows)).toMatchObject([
+        {
+          id: 'five-hour',
+          usedPercent: 72,
+          resetsAt: '2026-08-11T08:00:00.000Z'
+        },
+        { id: 'seven-day', usedPercent: 48.5 }
+      ])
     })
   )
 
@@ -93,7 +94,7 @@ describe('Anthropic Claude subscription usage', () => {
         OAuthAccessToken.make({
           provider: 'openai-codex',
           accessToken: 'wrong-provider-secret',
-          expiresAt: Date.now() + 60_000
+          expiresAt: tokenExpiresAt
         })
       ).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)
 

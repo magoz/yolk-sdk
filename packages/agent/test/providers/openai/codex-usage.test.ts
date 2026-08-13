@@ -10,10 +10,11 @@ import {
 } from '../../../src/providers/openai/codex-usage.ts'
 
 const fetchedAt = '2026-08-11T08:00:00.000Z'
+const tokenExpiresAt = 1_800_000_000_000
 const token = OAuthAccessToken.make({
   provider: 'openai-codex',
   accessToken: 'codex-secret',
-  expiresAt: Date.now() + 60_000,
+  expiresAt: tokenExpiresAt,
   accountId: 'redacted-account'
 })
 
@@ -42,23 +43,23 @@ describe('OpenAI Codex subscription usage', () => {
 
       expect(snapshot).toMatchObject({
         provider: 'openai-codex',
-        fetchedAt,
-        windows: [
-          {
-            id: 'primary',
-            usedPercent: 80,
-            windowDurationMinutes: 180,
-            resetsAfterSeconds: 100,
-            resetsAt: '2026-08-11T08:00:00.000Z'
-          },
-          {
-            id: 'secondary',
-            usedPercent: 55,
-            windowDurationMinutes: 10_080,
-            resetsAfterSeconds: 300
-          }
-        ]
+        fetchedAt
       })
+      expect(Array.from(snapshot.windows)).toMatchObject([
+        {
+          id: 'primary',
+          usedPercent: 80,
+          windowDurationMinutes: 180,
+          resetsAfterSeconds: 100,
+          resetsAt: '2026-08-11T08:00:00.000Z'
+        },
+        {
+          id: 'secondary',
+          usedPercent: 55,
+          windowDurationMinutes: 10_080,
+          resetsAfterSeconds: 300
+        }
+      ])
     })
   )
 
@@ -105,7 +106,7 @@ describe('OpenAI Codex subscription usage', () => {
           OAuthAccessToken.make({
             provider: 'openai-codex',
             accessToken: 'secret',
-            expiresAt: Date.now() + 60_000,
+            expiresAt: tokenExpiresAt,
             ...(accountId === undefined ? {} : { accountId })
           })
         ).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.result)

@@ -35,10 +35,10 @@ export const validProviderSubscriptionUsageTimeout = (value: number) =>
 
 const responseError = (provider: string, status: number): ProviderSubscriptionUsageError => {
   if (status === 401 || status === 403) {
-    return new ProviderSubscriptionUsageAuthError({ provider, status })
+    return ProviderSubscriptionUsageAuthError.make({ provider, status })
   }
 
-  return new ProviderSubscriptionUsageResponseError({
+  return ProviderSubscriptionUsageResponseError.make({
     provider,
     category: status >= 300 && status < 400 ? 'redirect' : 'http',
     status
@@ -55,18 +55,17 @@ export const executeProviderSubscriptionUsageRequest = (input: {
     const response = yield* input.client.execute(input.request).pipe(
       Effect.provideService(FetchHttpClient.RequestInit, { redirect: 'manual' }),
       Effect.withTracerEnabled(false),
-      Effect.mapError(
-        () =>
-          new ProviderSubscriptionUsageRequestError({
-            provider: input.provider,
-            category: 'network'
-          })
+      Effect.mapError(() =>
+        ProviderSubscriptionUsageRequestError.make({
+          provider: input.provider,
+          category: 'network'
+        })
       ),
       Effect.timeoutOrElse({
         duration: Duration.millis(input.timeoutMs),
         orElse: () =>
           Effect.fail(
-            new ProviderSubscriptionUsageRequestError({
+            ProviderSubscriptionUsageRequestError.make({
               provider: input.provider,
               category: 'timeout'
             })
@@ -76,7 +75,7 @@ export const executeProviderSubscriptionUsageRequest = (input: {
 
     if (response.status === 429) {
       return yield* Effect.fail(
-        new ProviderSubscriptionUsageRateLimitError({
+        ProviderSubscriptionUsageRateLimitError.make({
           provider: input.provider,
           retryAfterMs: retryAfterMsFromHeaders(response.headers)
         })
@@ -96,12 +95,11 @@ export const readProviderSubscriptionUsageJson = (
 ) =>
   HttpClientResponse.schemaBodyJson(Schema.Unknown)(response).pipe(
     Effect.withTracerEnabled(false),
-    Effect.mapError(
-      () =>
-        new ProviderSubscriptionUsageResponseError({
-          provider,
-          category: 'invalid_response',
-          status: response.status
-        })
+    Effect.mapError(() =>
+      ProviderSubscriptionUsageResponseError.make({
+        provider,
+        category: 'invalid_response',
+        status: response.status
+      })
     )
   )

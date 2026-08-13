@@ -5,7 +5,7 @@
 ## Subpaths
 
 | Subpath                                               | Source                                       | Role                                                                                                                 |
-| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --- |
+| ----------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent/protocol`                            | `src/protocol`                               | Agent wire/message/event schemas                                                                                     |
 | `@yolk-sdk/agent/loop`                                | `src/loop`                                   | Stateless LLM/tool loop                                                                                              |
 | `@yolk-sdk/agent/loop/testing`                        | `src/loop/testing`                           | Loop test helpers                                                                                                    |
@@ -26,7 +26,7 @@
 | `@yolk-sdk/agent/providers/anthropic/claude`          | `src/providers/anthropic/claude.ts`          | Claude request and auth helpers                                                                                      |
 | `@yolk-sdk/agent/providers/anthropic/usage`           | `src/providers/anthropic/usage.ts`           | Best-effort Claude subscription-allowance snapshots                                                                  |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `src/providers/anthropic/claude-provider.ts` | Claude LLM provider factory                                                                                          |
-| `@yolk-sdk/agent/providers/subscription-usage`        | `src/providers/subscription-usage.ts`        | Shared subscription-usage snapshot and safe error schemas                                                            |     |
+| `@yolk-sdk/agent/providers/subscription-usage`        | `src/providers/subscription-usage.ts`        | Shared subscription-usage snapshot and safe error schemas                                                            |
 | `@yolk-sdk/agent/skillset`                            | `src/skillset`                               | Portable skill + command parsing/catalog                                                                             |
 | `@yolk-sdk/agent/voice`                               | `src/voice`                                  | Provider-neutral voice protocol, transport contracts, WebSocket transport, tool bridge, projection, speech contracts |
 | `@yolk-sdk/agent/voice/browser`                       | `src/voice/browser`                          | Browser WebRTC voice transport                                                                                       |

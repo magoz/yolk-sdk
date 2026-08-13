@@ -353,10 +353,13 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | `@yolk-sdk/agent/providers/subscription-usage`        | Snapshot/window schemas and sanitized request/response/auth/rate-limit/configuration errors         |
 
 Subscription-usage fetchers require a matching fresh `OAuthAccessToken` and `HttpClient.HttpClient`.
-Both accept an optional positive `requestTimeoutMs`; endpoint origins stay fixed. Returned windows
-have semantic `id`, `usedPercent`, and optional `resetsAt`, `resetsAfterSeconds`, and
-`windowDurationMinutes` fields. Private endpoint drift is reported through sanitized
-`ProviderSubscriptionUsageError` variants; raw response bodies are not retained.
+Both accept an optional positive `requestTimeoutMs`; endpoint origins stay fixed. With
+`FetchHttpClient.layer`, redirects are manual and rejected. A custom `HttpClient` must not follow
+redirects for these credential-bearing requests. Returned `windows` is an immutable Effect `Chunk`
+whose entries have semantic `id`, `usedPercent`, and optional `resetsAt`, `resetsAfterSeconds`, and
+`windowDurationMinutes` fields. HTTP, decoding,
+and recognized malformed-field failures use sanitized `ProviderSubscriptionUsageError` variants;
+unrecognized or absent buckets may produce an empty snapshot. Raw response bodies are not retained.
 
 Provider output limits are host-owned where supported:
 

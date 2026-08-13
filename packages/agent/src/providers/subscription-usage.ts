@@ -36,7 +36,7 @@ export class ProviderSubscriptionUsageSnapshot extends Schema.Class<ProviderSubs
 )({
   provider: NonEmptyTrimmedString,
   fetchedAt: ProviderSubscriptionUsageInstant,
-  windows: Schema.Array(ProviderSubscriptionUsageWindow)
+  windows: Schema.Chunk(ProviderSubscriptionUsageWindow)
 }) {}
 
 export class ProviderSubscriptionUsageRequestError extends Schema.TaggedErrorClass<ProviderSubscriptionUsageRequestError>()(
