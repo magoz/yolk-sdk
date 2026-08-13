@@ -30,7 +30,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 ## Models + Providers
 
 - Configured in `text-agent-config.ts`; UI/routes import `agentTextModelOptions`, `agentTextCapabilities`, `agentTextModelMaxOutputTokens`, and reasoning defaults from there.
-- Model-specific output limits are host policy: GPT-5.5 uses `128_000`; Claude Sonnet 4.6 uses `64_000`. Next, Workflow, and Cloudflare provider construction must pass the selected model's configured limit. Codex keeps this constructor requirement but omits the unsupported vendor `max_output_tokens` field.
+- Model-specific output limits are host policy where supported: Claude Sonnet 4.6 receives `64_000`. ChatGPT Codex rejects `max_output_tokens`, so Next and Workflow Codex construction do not pass an output limit; its configured `128_000` value remains available for host context budgeting.
 - Package providers are Codex OAuth (`@yolk-sdk/agent/providers/openai/codex-provider`) and Anthropic Claude OAuth (`@yolk-sdk/agent/providers/anthropic/claude-provider`).
 - Next/Workflow providers receive text+image/PDF capabilities; Cloudflare direct WS currently shares UI flags but does not pass package capability validation.
 - Providers use Effect `HttpClient`; app runtimes provide `FetchHttpClient.layer`.
@@ -46,7 +46,7 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
 - Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `subagent` for top-level delegation.
 - Subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; children run normal text tools but without `subagent`, so recursive delegation is disabled in v1.
-- Subagent results include structured metadata for status, timing, model, and ids.
+- Subagent results include structured metadata for status, timing, model, ids, usage/turns, and typed failures. Workflow tool steps add child usage to cumulative durable usage.
 - Parallel delegation requires multiple `subagent` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
 - Workflow text runtime exposes run id in Activity; replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response; stop calls `DELETE`.
 - Realtime voice seeds current protocol transcript via `conversation.item.create`; hold-to-speak routes use OpenAI speech adapters and the normal text runtime. TTS and realtime are mutually exclusive in the UI.

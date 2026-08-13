@@ -408,7 +408,6 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                       Effect.map(token =>
                         makeCodexWsProviderLayer({
                           token,
-                          maxOutputTokens: agentTextModelMaxOutputTokens(model),
                           sessionId,
                           fallback:
                             bootstrap.codexResponsesEndpoint === undefined

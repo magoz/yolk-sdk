@@ -109,19 +109,19 @@ const program = run({
 
 ## Provider configuration
 
-Provider output limits are required and host-owned. Yolk does not infer model limits or apply hidden
-fallbacks.
+Provider output limits are host-owned when the endpoint supports them. Yolk does not infer model
+limits or apply hidden fallbacks.
 
-| Provider factory                   | Required output-limit field |
-| ---------------------------------- | --------------------------- |
-| `makeOpenAiProviderLayer`          | `maxCompletionTokens`       |
-| `makeOpenAiCodexProviderLayer`     | `maxOutputTokens`           |
-| `makeAnthropicClaudeProviderLayer` | `maxTokens`                 |
+| Provider factory                   | Output-limit field      |
+| ---------------------------------- | ----------------------- |
+| `makeOpenAiProviderLayer`          | `maxCompletionTokens`   |
+| `makeOpenAiCodexProviderLayer`     | none                    |
+| `makeAnthropicClaudeProviderLayer` | `maxTokens`             |
 
-The public `toOpenAiRequestBody`, `toOpenAiCodexRequestBody`, and
-`toAnthropicClaudeRequestBody` helpers require the same limit configuration. ChatGPT subscription
-Codex rejects vendor `max_output_tokens`, so the Codex adapter retains the required host config but
-omits that field from requests. `OpenAiProviderLayer` reads both `OPENAI_API_KEY` and integer
+The public `toOpenAiRequestBody` and `toAnthropicClaudeRequestBody` helpers require the matching
+limit configuration. ChatGPT subscription Codex rejects vendor `max_output_tokens`, so
+`makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the optional deprecated
+`maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both `OPENAI_API_KEY` and integer
 `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
 Set optional `reasoningEffort` on `run` or `runRuntime`; provider adapters lower it to vendor
@@ -412,7 +412,8 @@ Recommended setup:
 - use `makeSubagentRunId(call.id)` for protocol-aligned run ids
 - optionally configure model and reasoning-effort choices so the parent can select child runtime settings
 - treat omitted `model` and `reasoning_effort` parameters as inheritance of host runtime settings
-- return `makeSubagentToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, and timing
+- return `makeSubagentToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, timing, optional usage/turns, and typed failure metadata
+- use `subagentUsageFromToolResult(...)` when a host must add child usage to cumulative workflow usage
 
 Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
 

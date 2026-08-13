@@ -50,6 +50,8 @@ export type VercelAgentWorkflowAwaitingInput = {
 export type VercelAgentWorkflowToolBatchStepResult = {
   readonly messages: ReadonlyArray<unknown>
   readonly createdMessages: ReadonlyArray<unknown>
+  /** Updated cumulative usage when tools run nested model work such as subagents. */
+  readonly usage?: unknown
   readonly awaitingInput?: VercelAgentWorkflowAwaitingInput
   readonly eventSequence?: number
 }
@@ -240,6 +242,7 @@ export async function runVercelAgentWorkflow(
 
     let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
     let toolHitlResponses: ReadonlyArray<unknown> = []
+    let cumulativeUsage = modelResult.value.usage
     let toolEventSequence = modelResult.value.eventSequence ?? state.eventSequence
 
     for (;;) {
@@ -252,7 +255,7 @@ export async function runVercelAgentWorkflow(
               calls: modelResult.value.toolCalls,
               createdMessages: modelResult.value.createdMessages,
               hitlResponses: toolHitlResponses,
-              usage: modelResult.value.usage,
+              usage: cumulativeUsage,
               turn: modelResult.value.turn,
               eventSequence: toolEventSequence
             }),
@@ -277,6 +280,7 @@ export async function runVercelAgentWorkflow(
       }
 
       const awaitingInput = toolsResult.value.awaitingInput
+      cumulativeUsage = toolsResult.value.usage ?? awaitingInput.usage ?? cumulativeUsage
       toolEventSequence =
         awaitingInput.eventSequence ?? toolsResult.value.eventSequence ?? toolEventSequence
 
@@ -321,7 +325,7 @@ export async function runVercelAgentWorkflow(
       request: input.request,
       messages: [...modelResult.value.messages, ...completedToolsResult.messages],
       createdMessages: completedToolsResult.createdMessages,
-      usage: modelResult.value.usage,
+      usage: completedToolsResult.usage ?? cumulativeUsage,
       turn: modelResult.value.turn + 1,
       eventSequence: completedToolsResult.eventSequence ?? toolEventSequence
     }

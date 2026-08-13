@@ -23,6 +23,13 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: remove Codex output-token configuration
+
+ChatGPT subscription Codex rejects `max_output_tokens`. Stop passing `maxOutputTokens` to
+`makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody`; the optional deprecated field remains
+accepted but is ignored for compatibility. Keep host-owned input/context budgeting separate from
+provider output configuration.
+
 ### Next canary: rename task delegation to subagent
 
 The model-facing `task` delegation tool is now named `subagent` to distinguish isolated child-agent

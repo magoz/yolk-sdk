@@ -3,12 +3,17 @@ import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   assistantContent,
+  AgentUsage,
   contentText,
+  isTerminalAgentEvent,
   makeSubagentRunId,
   ToolResult,
+  type AgentErrorCode,
   type AgentEvent,
   type AgentMessage,
   type AgentReasoningEffort,
+  type HitlRequest,
+  type ProviderErrorInfo,
   type ToolCall
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -81,6 +86,24 @@ export type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
   readonly execute: (input: SubagentExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
 
+export type SubagentRunError = {
+  readonly code: AgentErrorCode
+  readonly message: string
+  readonly retryable: boolean
+  readonly provider?: ProviderErrorInfo
+}
+
+export type SubagentRunStatus = 'completed' | 'awaiting_input' | 'error'
+
+export type SubagentRunResult = {
+  readonly status: SubagentRunStatus
+  readonly text: string
+  readonly usage?: AgentUsage
+  readonly turns?: number
+  readonly requests?: ReadonlyArray<HitlRequest>
+  readonly error?: SubagentRunError
+}
+
 export type SubagentToolResultInput = {
   readonly callId: string
   readonly output: string
@@ -91,6 +114,11 @@ export type SubagentToolResultInput = {
   readonly endedAtMs: number
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
+  readonly usage?: AgentUsage
+  readonly turns?: number
+  readonly status?: SubagentRunStatus
+  readonly requests?: ReadonlyArray<HitlRequest>
+  readonly error?: SubagentRunError
   readonly isError?: boolean
 }
 
@@ -313,18 +341,118 @@ const latestAssistantText = (messages: ReadonlyArray<AgentMessage>) => {
   return assistant === undefined ? '' : contentText(assistantContent(assistant))
 }
 
-export const subagentResultText = (events: ReadonlyArray<AgentEvent>) => {
-  const messages = [...events].reverse().find(event => event._tag === 'AgentEnd')?.messages ?? []
-  const text = latestAssistantText(messages).trim()
+const subagentProviderMetadata = (provider: ProviderErrorInfo) => ({
+  provider: provider.provider,
+  kind: provider.kind,
+  ...(provider.status === undefined ? {} : { status: provider.status }),
+  ...(provider.providerCode === undefined ? {} : { provider_code: provider.providerCode }),
+  ...(provider.retryAfterMs === undefined ? {} : { retry_after_ms: provider.retryAfterMs })
+})
 
-  return text.length === 0 ? 'Subagent completed without a final text response.' : text
+const subagentUsageMetadata = (usage: AgentUsage) => ({
+  input: {
+    total: usage.input.total,
+    ...(usage.input.uncached === undefined ? {} : { uncached: usage.input.uncached }),
+    ...(usage.input.cacheRead === undefined ? {} : { cache_read: usage.input.cacheRead }),
+    ...(usage.input.cacheWrite === undefined ? {} : { cache_write: usage.input.cacheWrite })
+  },
+  output: {
+    total: usage.output.total,
+    ...(usage.output.text === undefined ? {} : { text: usage.output.text }),
+    ...(usage.output.reasoning === undefined ? {} : { reasoning: usage.output.reasoning })
+  }
+})
+
+const subagentErrorMetadata = (error: SubagentRunError) => ({
+  code: error.code,
+  message: error.message,
+  retryable: error.retryable,
+  ...(error.provider === undefined ? {} : { provider: subagentProviderMetadata(error.provider) })
+})
+
+const SubagentUsageMetadata = Schema.Struct({
+  input: Schema.Struct({
+    total: Schema.Number,
+    uncached: Schema.optional(Schema.Number),
+    cache_read: Schema.optional(Schema.Number),
+    cache_write: Schema.optional(Schema.Number)
+  }),
+  output: Schema.Struct({
+    total: Schema.Number,
+    text: Schema.optional(Schema.Number),
+    reasoning: Schema.optional(Schema.Number)
+  })
+})
+
+const SubagentStructuredUsage = Schema.Struct({
+  subagent_run_id: Schema.String,
+  subagent_type: Schema.String,
+  usage: SubagentUsageMetadata
+})
+
+export const subagentUsageFromToolResult = (result: ToolResult): AgentUsage | undefined => {
+  if (
+    !Schema.is(SubagentStructuredUsage)(result.structuredContent) ||
+    result.structuredContent.subagent_run_id !== subagentToolRunId(result.toolCallId)
+  ) {
+    return undefined
+  }
+
+  const usage = result.structuredContent.usage
+
+  return AgentUsage.make({
+    input: {
+      total: usage.input.total,
+      ...(usage.input.uncached === undefined ? {} : { uncached: usage.input.uncached }),
+      ...(usage.input.cache_read === undefined ? {} : { cacheRead: usage.input.cache_read }),
+      ...(usage.input.cache_write === undefined ? {} : { cacheWrite: usage.input.cache_write })
+    },
+    output: {
+      total: usage.output.total,
+      ...(usage.output.text === undefined ? {} : { text: usage.output.text }),
+      ...(usage.output.reasoning === undefined ? {} : { reasoning: usage.output.reasoning })
+    }
+  })
 }
 
-export const makeSubagentToolResult = (input: SubagentToolResultInput) =>
-  ToolResult.make({
+export const subagentResultFromEvents = (events: ReadonlyArray<AgentEvent>): SubagentRunResult => {
+  const terminal = [...events].reverse().find(isTerminalAgentEvent)
+
+  if (terminal?._tag === 'AgentError') {
+    return {
+      status: 'error',
+      text: `Subagent failed: ${terminal.message}`,
+      error: {
+        code: terminal.code,
+        message: terminal.message,
+        retryable: terminal.retryable,
+        ...(terminal.provider === undefined ? {} : { provider: terminal.provider })
+      }
+    }
+  }
+
+  const messages = terminal?.messages ?? []
+  const text = latestAssistantText(messages).trim()
+
+  return {
+    status: terminal?._tag === 'AgentAwaitingInput' ? 'awaiting_input' : 'completed',
+    text: text.length === 0 ? 'Subagent completed without a final text response.' : text,
+    ...(terminal === undefined ? {} : { usage: terminal.usage, turns: terminal.turns }),
+    ...(terminal?._tag === 'AgentAwaitingInput' ? { requests: terminal.requests } : {})
+  }
+}
+
+export const subagentResultText = (events: ReadonlyArray<AgentEvent>) =>
+  subagentResultFromEvents(events).text
+
+export const makeSubagentToolResult = (input: SubagentToolResultInput) => {
+  const isError = input.isError === true || input.error !== undefined || input.status === 'error'
+  const status = isError ? 'error' : (input.status ?? 'completed')
+
+  return ToolResult.make({
     toolCallId: input.callId,
     content: formatSubagentResult(input.output),
-    isError: input.isError,
+    isError: isError ? true : undefined,
     structuredContent: {
       subagent_run_id: input.subagentRunId,
       subagent_type: input.subagentType,
@@ -332,8 +460,13 @@ export const makeSubagentToolResult = (input: SubagentToolResultInput) =>
       started_at_ms: input.startedAtMs,
       ended_at_ms: input.endedAtMs,
       duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
-      status: input.isError === true ? 'error' : 'completed',
+      status,
       model: input.model,
-      ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort })
+      ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }),
+      ...(input.usage === undefined ? {} : { usage: subagentUsageMetadata(input.usage) }),
+      ...(input.turns === undefined ? {} : { turns: input.turns }),
+      ...(input.requests === undefined ? {} : { hitl_requests: input.requests }),
+      ...(input.error === undefined ? {} : { error: subagentErrorMetadata(input.error) })
     }
   })
+}

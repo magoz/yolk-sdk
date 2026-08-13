@@ -39,7 +39,6 @@ const codexInstallationId = 'yolk-cloudflare-agent'
 
 export type CodexWsConfig = {
   readonly token: TokenBrokerResponse
-  readonly maxOutputTokens: number
   readonly sessionId?: string
   readonly fallback?: CodexResponsesProxyConfig
 }
@@ -244,8 +243,8 @@ const encodeJson = (value: unknown) =>
 // Request
 // ---------------------------------------------------------------------------
 
-export const toWsRequestBody = (request: LLMRequest, maxOutputTokens: number) =>
-  toOpenAiCodexRequestBody(request, { maxOutputTokens }).pipe(
+export const toWsRequestBody = (request: LLMRequest) =>
+  toOpenAiCodexRequestBody(request, {}).pipe(
     Effect.map(body => ({ type: 'response.create' as const, ...body }))
   )
 
@@ -605,7 +604,7 @@ const sendCodexProxyRequest = (
   client: HttpClient.HttpClient
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiCodexRequestBody(request, config)
+    const body = yield* toOpenAiCodexRequestBody(request, {})
     const serializedBody = yield* encodeJson(body)
     const response = yield* client
       .execute(
@@ -667,7 +666,7 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
     stream: (request: LLMRequest) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const body = yield* toWsRequestBody(request, config.maxOutputTokens)
+          const body = yield* toWsRequestBody(request)
           const bodyJson = yield* encodeJson(body)
           const socket = yield* makeCodexSocket(config).pipe(Effect.mapError(socketErrorToLlmError))
           const write = yield* socket.writer

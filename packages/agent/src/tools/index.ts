@@ -25,8 +25,10 @@ export {
   makeSubagentToolDef,
   makeSubagentToolModule,
   makeSubagentToolRegistration,
+  subagentResultFromEvents,
   subagentResultText,
   subagentToolName,
+  subagentUsageFromToolResult,
   subagentToolRunId
 } from './subagent.ts'
 export type {
@@ -47,6 +49,9 @@ export type {
   SubagentRuntimeSelectionOptions,
   SubagentContext,
   SubagentDefinition,
+  SubagentRunError,
+  SubagentRunResult,
+  SubagentRunStatus,
   SubagentToolOptions,
   SubagentToolParams,
   SubagentToolResultInput

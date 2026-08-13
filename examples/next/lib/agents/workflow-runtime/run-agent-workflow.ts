@@ -35,6 +35,7 @@ import {
   validateAgentRouteImages
 } from '@/lib/agents/route-handler'
 import { makeAgentTextRuntime } from './text-response'
+import { addWorkflowToolResultUsage } from './workflow-tool-usage'
 import { AgentWorkflowStepError, workflowErrorEvent, workflowStepError } from './workflow-error'
 
 export type AgentWorkflowInput = {
@@ -310,6 +311,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const userId = yield* decodeWorkflowUserId(input.context)
       const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+      const cumulativeUsage = yield* Ref.make(usage)
       const awaitingInput = yield* Ref.make<AgentAwaitingInput | undefined>(undefined)
       const eventSequence = yield* Ref.make(input.eventSequence ?? 0)
 
@@ -341,21 +343,26 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 return Effect.void
               }
 
-              return Ref.update(toolResultMessages, messages => {
-                const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
+              return Effect.gen(function* () {
+                yield* Ref.update(cumulativeUsage, current =>
+                  addWorkflowToolResultUsage(current, event.result)
+                )
+                yield* Ref.update(toolResultMessages, messages => {
+                  const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
 
-                return [
-                  ...messages,
-                  {
-                    index: callIndex < 0 ? calls.length : callIndex,
-                    message: ToolResultMessage.make({
-                      toolCallId: event.result.toolCallId,
-                      content: event.result.content,
-                      isError: event.result.isError,
-                      structuredContent: event.result.structuredContent
-                    })
-                  }
-                ]
+                  return [
+                    ...messages,
+                    {
+                      index: callIndex < 0 ? calls.length : callIndex,
+                      message: ToolResultMessage.make({
+                        toolCallId: event.result.toolCallId,
+                        content: event.result.content,
+                        isError: event.result.isError,
+                        structuredContent: event.result.structuredContent
+                      })
+                    }
+                  ]
+                })
               })
             })
           )
@@ -366,6 +373,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const messages = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
       const nextCreatedMessages = [...createdMessages, ...messages]
       const currentAwaitingInput = yield* Ref.get(awaitingInput)
+      const currentUsage = yield* Ref.get(cumulativeUsage)
       const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
@@ -373,6 +381,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
         createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
           encodeMessage(message)
         ),
+        usage: yield* encodeUsage(currentUsage),
         awaitingInput:
           currentAwaitingInput === undefined
             ? undefined

@@ -16,8 +16,9 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 | Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                                    |
 | Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                               |
 
-Provider output-token limits are required. Resolve them from the host-owned model configuration;
-Yolk does not maintain a model-limit catalog or apply hidden fallbacks.
+Provider output-token limits are host-owned when supported. OpenAI-compatible chat and Anthropic
+require limits; ChatGPT Codex does not expose one. Yolk does not maintain a model-limit catalog or
+apply hidden fallbacks.
 
 ## OpenAI-compatible chat
 
@@ -43,14 +44,13 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 
 const ProviderLayer = makeOpenAiCodexProviderLayer({
   token: hostOAuthAccessToken,
-  maxOutputTokens: hostModelConfig.maxOutputTokens,
   defaultReasoningEffort: 'medium',
   reasoningSummary: 'auto'
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-`maxOutputTokens` remains required host configuration, but the ChatGPT subscription endpoint rejects
-vendor `max_output_tokens`, so the adapter omits that field from requests.
+The ChatGPT subscription endpoint rejects vendor `max_output_tokens`, so the adapter does not expose
+an output-token limit. The optional deprecated `maxOutputTokens` field is ignored for compatibility.
 
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and the exact `@yolk-sdk/agent/providers/openai/codex` subpath:
 

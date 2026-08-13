@@ -51,7 +51,11 @@ export type OpenAiCodexReasoningSummary = 'auto' | 'concise' | 'detailed'
 
 export type OpenAiCodexProviderConfig = {
   readonly token: OAuthAccessToken
-  readonly maxOutputTokens: number
+  /**
+   * @deprecated The ChatGPT Codex endpoint does not accept `max_output_tokens`; this value is
+   * retained as an ignored compatibility field for existing hosts.
+   */
+  readonly maxOutputTokens?: number
   readonly responsesUrl?: string
   readonly extraHeaders?: Readonly<Record<string, string>>
   readonly defaultReasoningEffort?: AgentReasoningEffort
@@ -413,7 +417,8 @@ const toOpenAiCodexTool = (tool: ToolDef): OpenAiCodexTool => ({
 export const toOpenAiCodexRequestBody = (
   request: LLMRequest,
   config: {
-    readonly maxOutputTokens: number
+    /** @deprecated Ignored by the ChatGPT Codex endpoint. */
+    readonly maxOutputTokens?: number
     readonly defaultReasoningEffort?: AgentReasoningEffort
     readonly reasoningSummary?: OpenAiCodexReasoningSummary
   }

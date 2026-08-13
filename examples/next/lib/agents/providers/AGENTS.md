@@ -15,7 +15,7 @@ that exercise package-backed providers through app runtime wiring.
 
 - Text model/reasoning/capabilities live in `examples/next/lib/agents/text-agent-config.ts`.
 - Active text providers: Codex OAuth (`gpt-5.5`) and Anthropic Claude OAuth (`claude-sonnet-4-6`).
-- Output limits are required host policy from `agentTextModelMaxOutputTokens`: GPT-5.5 uses `128_000`; Claude Sonnet 4.6 uses `64_000`. Pass them to both active provider constructors; Codex retains the required `maxOutputTokens` config but does not serialize unsupported `max_output_tokens`, while dormant OpenAI chat construction requires `maxCompletionTokens` too.
+- Output limits are host policy where supported: Claude Sonnet 4.6 receives `64_000`, and dormant OpenAI chat construction requires `maxCompletionTokens`. ChatGPT Codex rejects `max_output_tokens`, so its provider constructor receives no output limit; the configured `128_000` value remains available for host context budgeting.
 - Provider choice is app boundary policy; package providers implement `LLMProvider` only.
 - Text UI sends per-request `reasoningEffort` (`minimal`/`low`/`medium`/`high`/`xhigh`).
 - Codex requests set `reasoning.summary = 'auto'`; summaries are optional provider output.
@@ -33,8 +33,8 @@ that exercise package-backed providers through app runtime wiring.
 
 - Endpoint: `https://chatgpt.com/backend-api/codex/responses` unless trusted proxy override is supplied.
 - Request uses `store: false`, `stream: true`, and `originator: opencode`. The ChatGPT subscription
-  endpoint rejects `max_output_tokens`, so the adapter omits it despite retaining required host
-  `maxOutputTokens` configuration.
+  endpoint rejects `max_output_tokens`, so the adapter exposes no output-token limit and ignores the
+  optional deprecated `maxOutputTokens` compatibility field.
 - Forward `ChatGPT-Account-Id` when token has account id.
 - Treat SSE as valid even when content-type is `text/plain`; parse by body shape.
 - Function calls may arrive before completion as `response.output_item.done`; emit tool use immediately.

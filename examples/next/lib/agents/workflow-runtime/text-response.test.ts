@@ -42,10 +42,16 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
     expect(subagentExecuteSource).toContain('isError: true')
   })
 
-  it('adds subagent timing metadata to structured results', () => {
+  it('adds subagent runtime metadata to structured results', () => {
+    expect(source).toContain('subagentResultFromEvents')
     expect(source).toContain('makeSubagentToolResult')
     expect(source).toContain('subagentToolRunId')
     expect(source).toContain('startedAtMs')
     expect(source).toContain('endedAtMs')
+    expect(source).toContain('status: summary.status')
+    expect(source).toContain('usage: summary.usage')
+    expect(source).toContain('turns: summary.turns')
+    expect(source).toContain('requests: summary.requests')
+    expect(source).toContain('error: summary.error')
   })
 })

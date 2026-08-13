@@ -11,7 +11,7 @@ import {
   makeNonRecursiveSubagentToolModule,
   makeSubagentToolResult,
   makeToolExecutorLayer,
-  subagentResultText,
+  subagentResultFromEvents,
   subagentToolRunId,
   type SubagentDefinition,
   type ToolModule
@@ -157,8 +157,7 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
             accessToken: token.access,
             expiresAt: token.expires,
             accountId: token.accountId
-          }),
-          maxOutputTokens: agentTextModelMaxOutputTokens(model)
+          })
         }).pipe(Layer.provide(FetchHttpClient.layer))
       }
     }
@@ -397,18 +396,23 @@ export const makeAgentTextRuntime = (
                 )
               )
             )
-            const output = subagentResultText(Array.from(eventsChunk))
+            const summary = subagentResultFromEvents(Array.from(eventsChunk))
             const endedAtMs = yield* Clock.currentTimeMillis
 
             return makeSubagentToolResult({
               callId: call.id,
-              output,
+              output: summary.text,
               subagentType: params.subagent_type,
               description: params.description,
               subagentRunId,
               startedAtMs,
               endedAtMs,
-              model
+              model,
+              status: summary.status,
+              usage: summary.usage,
+              turns: summary.turns,
+              requests: summary.requests,
+              error: summary.error
             })
           }).pipe(
             Effect.catchTag('ToolError', error =>

@@ -143,6 +143,9 @@ const kindFromSignal = (input: ProviderFailureInput): ProviderFailureKind | unde
   if (
     signal.includes('context_length') ||
     signal.includes('context length') ||
+    signal.includes('context_window_exceeded') ||
+    signal.includes('exceeds the context window') ||
+    signal.includes('context window exceeded') ||
     signal.includes('context_overflow') ||
     signal.includes('context overflow') ||
     signal.includes('prompt is too long') ||

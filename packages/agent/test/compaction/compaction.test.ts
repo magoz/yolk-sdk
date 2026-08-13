@@ -91,6 +91,36 @@ describe('agent compaction', () => {
     expect(contextBudgetStatus(80, budget)).toBe('compact')
   })
 
+  it('caps usable input at an endpoint-specific maximum', () => {
+    const budget = makeContextBudget({
+      contextWindowTokens: 1_050_000,
+      reservedOutputTokens: 20_000,
+      maxInputTokens: 272_000,
+      warningRatio: 0.6,
+      compactionRatio: 0.7
+    })
+
+    expect(budget.contextWindowTokens).toBe(1_050_000)
+    expect(budget.reservedOutputTokens).toBe(20_000)
+    expect(budget.usableInputTokens).toBe(272_000)
+    expect(budget.warningInputTokens).toBe(163_200)
+    expect(budget.compactionInputTokens).toBe(190_400)
+  })
+
+  it('falls back to the context-derived ceiling for non-finite input caps', () => {
+    const budget = makeContextBudget({
+      contextWindowTokens: 100,
+      reservedOutputTokens: 20,
+      maxInputTokens: Number.NaN,
+      warningRatio: 0.5,
+      compactionRatio: 0.75
+    })
+
+    expect(budget.usableInputTokens).toBe(80)
+    expect(budget.warningInputTokens).toBe(40)
+    expect(budget.compactionInputTokens).toBe(60)
+  })
+
   it('estimates text, media, and tool-call messages', () => {
     expect(estimateAgentMessageTokens(user('abcd'))).toBe(7)
     expect(

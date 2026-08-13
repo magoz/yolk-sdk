@@ -1,10 +1,16 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
+  AgentAwaitingInput,
   AgentEnd,
+  AgentError,
+  AgentUsage,
   AssistantAgentMessage,
   AssistantTextPart,
   makeSubagentRunId,
+  ProviderErrorInfo,
+  ToolApprovalRequest,
+  ToolCall,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -13,8 +19,10 @@ import {
   makeSubagentToolResult,
   makeSubagentToolModule,
   resolveTools,
+  subagentResultFromEvents,
   subagentResultText,
   subagentToolName,
+  subagentUsageFromToolResult,
   subagentToolRunId,
   type SubagentReasoningEffortDefinition,
   type SubagentDefinition
@@ -446,7 +454,9 @@ describe('subagent tool', () => {
       startedAtMs: 100,
       endedAtMs: 250,
       model: 'test-model',
-      reasoningEffort: 'high'
+      reasoningEffort: 'high',
+      usage: AgentUsage.make({ input: { total: 120 }, output: { total: 30 } }),
+      turns: 4
     })
 
     expect(result).toMatchObject({
@@ -459,9 +469,27 @@ describe('subagent tool', () => {
         duration_ms: 150,
         status: 'completed',
         model: 'test-model',
-        reasoning_effort: 'high'
+        reasoning_effort: 'high',
+        usage: { input: { total: 120 }, output: { total: 30 } },
+        turns: 4
       }
     })
+    expect(subagentUsageFromToolResult(result)).toEqual(
+      AgentUsage.make({ input: { total: 120 }, output: { total: 30 } })
+    )
+    expect(
+      subagentUsageFromToolResult(
+        ToolResult.make({
+          toolCallId: 'call_other',
+          content: 'Other tool.',
+          structuredContent: {
+            subagent_run_id: 'unrelated-run',
+            subagent_type: 'general',
+            usage: { input: { total: 500 }, output: { total: 100 } }
+          }
+        })
+      )
+    ).toBeUndefined()
     expect(subagentToolRunId('call_1')).toBe(makeSubagentRunId('call_1'))
   })
 
@@ -479,5 +507,95 @@ describe('subagent tool', () => {
     ])
 
     expect(text).toBe('Done.')
+  })
+
+  it('extracts text and usage when a subagent awaits input', () => {
+    const summary = subagentResultFromEvents([
+      AgentAwaitingInput.make({
+        requests: [
+          ToolApprovalRequest.make({
+            requestId: 'approval_1',
+            toolCallId: 'call_approval_1',
+            call: ToolCall.make({ id: 'call_approval_1', name: 'write', params: {} })
+          })
+        ],
+        messages: [
+          AssistantAgentMessage.make({
+            parts: [AssistantTextPart.make({ content: 'I need approval.' })]
+          })
+        ],
+        turns: 2,
+        usage: AgentUsage.make({ input: { total: 45 }, output: { total: 12 } })
+      })
+    ])
+
+    expect(summary).toMatchObject({
+      status: 'awaiting_input',
+      text: 'I need approval.',
+      turns: 2,
+      usage: { input: { total: 45 }, output: { total: 12 } },
+      requests: [{ _tag: 'ToolApprovalRequest', requestId: 'approval_1' }]
+    })
+
+    const result = makeSubagentToolResult({
+      callId: 'call_awaiting',
+      output: summary.text,
+      subagentType: 'general',
+      description: 'Ask for approval',
+      subagentRunId: subagentToolRunId('call_awaiting'),
+      startedAtMs: 100,
+      endedAtMs: 200,
+      model: 'test-model',
+      status: summary.status,
+      requests: summary.requests
+    })
+
+    expect(result.structuredContent).toMatchObject({
+      status: 'awaiting_input',
+      hitl_requests: [{ _tag: 'ToolApprovalRequest', requestId: 'approval_1' }]
+    })
+  })
+
+  it('extracts typed subagent errors and includes them in result metadata', () => {
+    const provider = ProviderErrorInfo.make({
+      provider: 'openai_codex',
+      kind: 'context_overflow',
+      providerCode: 'context_window_exceeded'
+    })
+    const summary = subagentResultFromEvents([
+      AgentError.make({
+        code: 'context_overflow',
+        message: 'Input exceeded the context window.',
+        retryable: false,
+        provider
+      })
+    ])
+    const result = makeSubagentToolResult({
+      callId: 'call_2',
+      output: summary.text,
+      subagentType: 'general',
+      description: 'Inspect context',
+      subagentRunId: subagentToolRunId('call_2'),
+      startedAtMs: 100,
+      endedAtMs: 200,
+      model: 'test-model',
+      error: summary.error,
+      isError: true
+    })
+
+    expect(summary.text).toContain('Input exceeded the context window.')
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toMatchObject({
+      status: 'error',
+      error: {
+        code: 'context_overflow',
+        retryable: false,
+        provider: {
+          provider: 'openai_codex',
+          kind: 'context_overflow',
+          provider_code: 'context_window_exceeded'
+        }
+      }
+    })
   })
 })

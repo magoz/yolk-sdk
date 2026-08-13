@@ -5,8 +5,9 @@ description: Wire OpenAI-compatible, OpenAI Codex, or Anthropic Claude provider 
 
 Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
 
-Provider output-token limits are required and should come from the host's model configuration. Yolk
-does not infer model limits or apply hidden fallbacks.
+Provider output-token limits are host-owned when the endpoint supports them. OpenAI-compatible chat
+and Anthropic require limits; ChatGPT Codex does not expose one. Yolk does not infer model limits or
+apply hidden fallbacks.
 
 ## Install
 
@@ -42,14 +43,13 @@ import { makeOpenAiCodexProviderLayer } from '@yolk-sdk/agent/providers/openai/c
 
 const CodexLayer = makeOpenAiCodexProviderLayer({
   token: hostOAuthAccessToken,
-  maxOutputTokens: hostModelConfig.maxOutputTokens,
   defaultReasoningEffort: 'low',
   reasoningSummary: 'auto'
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-`maxOutputTokens` remains required host configuration, but the ChatGPT subscription endpoint rejects
-vendor `max_output_tokens`, so the adapter omits that field from requests.
+The ChatGPT subscription endpoint rejects vendor `max_output_tokens`, so the adapter does not expose
+an output-token limit. The optional deprecated `maxOutputTokens` field is ignored for compatibility.
 
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and `@yolk-sdk/agent/providers/openai/codex`.
 

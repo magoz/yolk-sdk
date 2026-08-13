@@ -604,6 +604,76 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('maps Codex response context-window failures to overflow metadata', () =>
+    Effect.gen(function* () {
+      const response = responseFromSseEvents([
+        {
+          type: 'response.failed',
+          response: {
+            error: {
+              code: 'context_window_exceeded',
+              message: 'Your input exceeds the context window of this model.'
+            }
+          }
+        }
+      ])
+
+      const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'context_overflow',
+        retryable: false,
+        provider: {
+          provider: 'openai_codex',
+          kind: 'context_overflow',
+          providerCode: 'context_window_exceeded'
+        }
+      })
+    })
+  )
+
+  it.effect('maps plain Codex context-window stream errors to overflow metadata', () =>
+    Effect.gen(function* () {
+      const response = responseFromText(
+        [
+          'event: error',
+          'data: {"type":"error","message":"Your input exceeds the context window of this model."}',
+          ''
+        ].join('\n')
+      )
+
+      const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'context_overflow',
+        retryable: false,
+        provider: { provider: 'openai_codex', kind: 'context_overflow' }
+      })
+    })
+  )
+
+  it.effect('does not misclassify incidental context-window wording as overflow', () =>
+    Effect.gen(function* () {
+      const response = responseFromText(
+        [
+          'event: error',
+          'data: {"type":"error","message":"Authentication failed while loading context window settings."}',
+          ''
+        ].join('\n')
+      )
+
+      const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'provider_error',
+        provider: { provider: 'openai_codex', kind: 'unknown' }
+      })
+    })
+  )
+
   it.effect('marks Codex stream read failures retryable', () =>
     Effect.gen(function* () {
       const error = yield* streamOpenAiCodexResponse(streamErrorResponse()).pipe(

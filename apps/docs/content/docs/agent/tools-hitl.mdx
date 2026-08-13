@@ -73,4 +73,12 @@ Use the built-in question tool when the model needs a user choice. Use approval 
 
 ## Spawn a subagent
 
-The `subagent` tool contract is domain-free. Hosts provide child execution, prompts, models, tools, and recursion policy. Current v1 subagents should not receive the `subagent` tool recursively unless explicitly enabled in a future capability.
+The `subagent` tool contract is domain-free. Hosts provide child execution, prompts, models, tools,
+and recursion policy. Current v1 subagents should not receive the `subagent` tool recursively unless
+explicitly enabled in a future capability.
+
+Use `subagentResultFromEvents` to extract final or awaiting-input text, status, HITL requests,
+usage, turns, and typed `AgentError` details from child events. Pass that metadata to
+`makeSubagentToolResult`. Durable hosts
+can call `subagentUsageFromToolResult` on completed tool results and add the returned child usage to
+their cumulative workflow usage.

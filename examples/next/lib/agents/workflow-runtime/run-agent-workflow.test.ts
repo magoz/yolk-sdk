@@ -31,6 +31,12 @@ describe('runAgentWorkflow', () => {
     expect(workflowFunctionSource).toContain('awaitInput:')
   })
 
+  it('carries subagent usage through durable tool results', () => {
+    expect(source).toContain('addWorkflowToolResultUsage')
+    expect(source).toContain('const cumulativeUsage = yield* Ref.make(usage)')
+    expect(source).toContain('usage: yield* encodeUsage(currentUsage)')
+  })
+
   it('scopes durable event ids to the workflow run', () => {
     expect(source).toContain(
       'const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`'

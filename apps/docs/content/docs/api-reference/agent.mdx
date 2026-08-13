@@ -96,9 +96,9 @@ Subagent/question helpers: `makeSubagentToolModule`, `makeSubagentToolDef`, `mak
 Configure `models` and `reasoningEfforts` on a subagent tool module to expose validated optional
 `model` and `reasoning_effort` parameters to the parent agent. Omission means the host should
 inherit its current runtime setting. Hosts remain responsible for provider credentials, capability
-checks, and constructing the selected child runtime. Pass the effective effort to
-`makeSubagentToolResult` as `reasoningEffort` to include `reasoning_effort` in structured result
-metadata.
+checks, constructing the selected child runtime, and context/tool-result budgeting. Pass effective
+runtime metadata to `makeSubagentToolResult`; optional `reasoningEffort`, `usage`, `turns`, and typed
+`error` fields are added to structured result metadata.
 
 The public subagent types are:
 
@@ -149,6 +149,24 @@ type SubagentToolOptions<Context> = SubagentRuntimeSelectionOptions & {
   readonly execute: (input: SubagentExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
 
+type SubagentRunError = {
+  readonly code: AgentErrorCode
+  readonly message: string
+  readonly retryable: boolean
+  readonly provider?: ProviderErrorInfo
+}
+
+type SubagentRunStatus = 'completed' | 'awaiting_input' | 'error'
+
+type SubagentRunResult = {
+  readonly status: SubagentRunStatus
+  readonly text: string
+  readonly usage?: AgentUsage
+  readonly turns?: number
+  readonly requests?: ReadonlyArray<HitlRequest>
+  readonly error?: SubagentRunError
+}
+
 type SubagentToolResultInput = {
   readonly callId: string
   readonly output: string
@@ -159,6 +177,11 @@ type SubagentToolResultInput = {
   readonly endedAtMs: number
   readonly model: string
   readonly reasoningEffort?: AgentReasoningEffort
+  readonly usage?: AgentUsage
+  readonly turns?: number
+  readonly status?: SubagentRunStatus
+  readonly requests?: ReadonlyArray<HitlRequest>
+  readonly error?: SubagentRunError
   readonly isError?: boolean
 }
 ```
@@ -176,14 +199,20 @@ Subagent helper signatures:
 | `makeNonRecursiveSubagentToolModule` | `<Context extends SubagentContext>(options: SubagentToolOptions<Context>) => ToolModule<Context>`                |
 | `makeSubagentToolResult`             | `(input: SubagentToolResultInput) => ToolResult`                                                                 |
 | `formatSubagentResult`               | `(output: string) => string`                                                                                     |
+| `subagentResultFromEvents`           | `(events: ReadonlyArray<AgentEvent>) => SubagentRunResult`                                                       |
 | `subagentResultText`                 | `(events: ReadonlyArray<AgentEvent>) => string`                                                                  |
+| `subagentUsageFromToolResult`        | `(result: ToolResult) => AgentUsage \| undefined`                                                                |
 | `subagentToolRunId`                  | `(parentToolCallId: string) => string`                                                                           |
 | `subagentToolName`                   | `"subagent"`                                                                                                     |
 
 Selections outside the configured enums, empty required strings, and unknown subagent types return
 model-visible validation results before host execution. Their structured error reason is
 `validation`. The host `execute` callback may fail with `ToolError`. `makeSubagentToolResult` includes
-`reasoning_effort` only when `reasoningEffort` is provided.
+optional fields only when provided. `subagentResultFromEvents` extracts terminal text and
+usage/turns from `AgentEnd` or `AgentAwaitingInput`, preserves awaiting HITL requests/status, or
+returns typed `AgentError` metadata. `subagentResultText` remains the compatibility text-only helper. Use
+`subagentUsageFromToolResult` to recover child usage from a structured result for cumulative host
+accounting.
 
 ## Client
 
@@ -226,6 +255,11 @@ model-visible validation results before host execution. Their structured error r
 ## Compaction
 
 `@yolk-sdk/agent/compaction`
+
+`makeContextBudget` accepts an optional `maxInputTokens` cap for provider- or endpoint-specific
+input ceilings below a model's total context window. `usableInputTokens` is the smaller of this cap
+and `contextWindowTokens - reservedOutputTokens`; omit it when the endpoint has no separate input
+ceiling.
 
 | Export                                                                                                       | Purpose                                  |
 | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
@@ -315,14 +349,15 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                                         |
 
-Provider output limits are required and host-owned:
+Provider output limits are host-owned where supported:
 
 - `OpenAiProviderConfig.maxCompletionTokens` becomes vendor `max_completion_tokens`.
-- `OpenAiCodexProviderConfig.maxOutputTokens` remains required host configuration, but ChatGPT
-  subscription Codex requests omit unsupported vendor `max_output_tokens`.
+- ChatGPT subscription Codex rejects vendor `max_output_tokens`; its optional deprecated
+  `maxOutputTokens` compatibility field is ignored.
 - `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
 - `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
   `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
-The three public request lowerers require a second configuration argument containing the matching
+`toOpenAiRequestBody` and `toAnthropicClaudeRequestBody` require matching limit configuration.
+`toOpenAiCodexRequestBody` accepts the optional ignored compatibility field but sends no output
 limit. Yolk does not infer limits from model ids.

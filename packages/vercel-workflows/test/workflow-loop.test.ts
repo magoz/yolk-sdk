@@ -87,7 +87,7 @@ describe('runVercelAgentWorkflow', () => {
       }),
       runToolBatchStep: input => step(() => {
         toolInputs.push(input)
-        return toolBatchResult(input)
+        return { ...toolBatchResult(input), usage: { turns: 1, subagentTurns: 3 } }
       }),
       closeStream: emptyStep,
       writeError: emptyStep
@@ -110,7 +110,7 @@ describe('runVercelAgentWorkflow', () => {
       request: 'request-1',
       messages: ['request-1', 'assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
       createdMessages: ['assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
-      usage: { turns: 1 },
+      usage: { turns: 1, subagentTurns: 3 },
       turn: 2,
       eventSequence: 0
     })
@@ -144,6 +144,7 @@ describe('runVercelAgentWorkflow', () => {
   })
 
   it('waits for HITL input and reruns tool batch with responses', async () => {
+    const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []
     const awaitedInputs: Array<unknown> = []
     let closeCount = 0
@@ -158,14 +159,21 @@ describe('runVercelAgentWorkflow', () => {
 
     const result = await runWorkflow({
       input: { request: 'request-1', context: 'ctx-1' },
-      runModelStep: input =>
-        step(() => (input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input))),
+      runModelStep: input => step(() => {
+        modelStates.push(input.state)
+        return input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input)
+      }),
       runToolBatchStep: input => step(() => {
         toolInputs.push(input)
 
         return input.hitlResponses?.[0] === 'approved'
           ? { ...toolBatchResult(input), eventSequence: 9 }
-          : { ...toolBatchResult(input), awaitingInput, eventSequence: 5 }
+          : {
+              ...toolBatchResult(input),
+              usage: { turns: 1, subagentTurns: 3 },
+              awaitingInput,
+              eventSequence: 5
+            }
       }),
       awaitInput: input => step(() => {
         awaitedInputs.push(input)
@@ -182,7 +190,12 @@ describe('runVercelAgentWorkflow', () => {
     expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
     expect(awaitedInputs).toEqual([awaitingInput])
     expect(toolInputs.map(input => input.hitlResponses)).toEqual([[], ['approved']])
+    expect(toolInputs.map(input => input.usage)).toEqual([
+      { turns: 1 },
+      { turns: 1, subagentTurns: 3 }
+    ])
     expect(toolInputs.map(input => input.eventSequence)).toEqual([0, 7])
+    expect(modelStates[1]?.usage).toEqual({ turns: 1, subagentTurns: 3 })
     expect(closeCount).toBe(1)
   })
 
