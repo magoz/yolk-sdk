@@ -32,11 +32,11 @@ Architecture and convention patterns for the SDK workspace.
 
 ## Code Quality
 
-| Pattern                                                            | Purpose                                                       |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| [SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md) | Deterministic simulation seams, property tests, rollout plan  |
-| [TYPESCRIPT_CONVENTIONS.md](./TYPESCRIPT_CONVENTIONS.md)           | Code style, file naming, type safety rules                    |
-| [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                       | Test philosophy, coverage targets, mock strategy              |
+| Pattern                                                            | Purpose                                                          |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| [SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md) | Deterministic simulation seams, property tests, model invariants |
+| [TYPESCRIPT_CONVENTIONS.md](./TYPESCRIPT_CONVENTIONS.md)           | Code style, file naming, type safety rules                       |
+| [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                       | Test seams, organization, and behavior-first strategy             |
 
 ## Next example
 

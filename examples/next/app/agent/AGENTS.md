@@ -15,21 +15,15 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - Workflow HITL approve/question controls submit through the active run id; do not start a new Workflow run when `hitlResponses` are present.
 - Workflow stop is optimistic in the UI: it aborts the browser stream and calls `cancelAgentRun({ endpoint })` (`DELETE /api/agent/workflow/:runId`), but Vercel may not preempt an already-running model step immediately.
 - Cloudflare session ids must be URL-safe before building `/connect/:sessionId`; avoid raw `:` in browser WS paths.
-- `playground.tsx` owns page composition/wiring: text chat transport selection, voice hook, activity, console, input state.
 - `@yolk-sdk/agent/react` owns headless hook/core/messages/items; app imports `useAgentChat`, `buildAgentChatItems`, and chat item types.
-- `agent-conversation.tsx` renders `AgentChatItem[]` and message action callbacks; no transport or protocol mutation.
 - Chat text renders Markdown with `streamdown`; keep streaming-safe Markdown rendering in conversation view only.
-- `agent-composer.tsx` owns input UX: textarea, image/PDF picker/dropzone/paste, attachment preview/remove, text model and reasoning selectors.
 - Slash command UI stays in `agent-composer.tsx`; command route transport stays in `command-client.ts` using Effect `HttpClient`.
 - Refresh slash command lists after completed `manage_skills` tool runs; new/updated skills may create commands mid-session.
 - Slash command parsing/selection helpers stay pure in `slash-command-model.ts`; test keyboard/index/hint behavior there.
-- `attachment-content.ts` maps composer text+attachments state to protocol `Content`; test it without importing full playground.
-- `agent-console-dialog.tsx` is test harness chrome: auth/status/config/display toggles stay out of chat layout.
-- `agent-status.tsx` owns console status controls: Codex/Claude auth, mirrored text model/reasoning controls, Realtime transcription model, capability/status badges.
-- `agent-activity-model.ts` maps lifecycle/tool/retry/compaction events to activity rows; `agent-activity.tsx` renders them.
+- Keep attachment conversion and activity mapping pure/testable outside the full playground.
+- Keep auth/status/config/debug controls in console chrome, not the chat layout.
 - Activity rows include `SubagentStarted`/`SubagentCompleted`; conversation tool cards render subagent metadata from structured content only.
 - `agent-usage-meter.tsx` formats provider-normalized usage/context budget from `lib/agents/context-budget`; do not duplicate threshold/status logic in UI.
-- `message-edit-model.ts` owns pure edit shortcut/save-state helpers; keep keyboard semantics testable outside JSX.
 
 ## Chat Model
 
@@ -93,10 +87,8 @@ App-local conversation UI over headless `@yolk-sdk/agent/react` chat state.
 - TTS and realtime are mutually exclusive: starting realtime force-disables the TTS toggle, and the event handler additionally ignores TTS chunking while voice mode is active (realtime pipes projected `LLMTextDelta`/`AgentEnd` through the same `onEvent` path and narrates natively — two narrations otherwise).
 - Hold-to-speak sends go through the normal text runtime, so they get the full toolset and HITL.
 
-## References
+## Checks
 
-- `.repos/ai` and `.repos/opencode` model tools as message parts; prefer that over detached tool arrays.
-- `.repos/t3code` is layout inspiration only; do not copy UI implementation.
 - Keep tests for live result visibility, row-before-draft anchoring, orphan result fallback, and status labels.
 - `examples/next/lib/agents/AGENTS.md` covers server/provider/runtime wiring.
 - `packages/AGENTS.md` covers reusable package boundaries.

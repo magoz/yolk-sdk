@@ -28,6 +28,7 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 ## Env
 
 - App env files live under `examples/next`: `.env.local`, `.env.test`, `.env.example`.
+- DB-backed app tests load `.env.test`; root `pnpm test:run` pushes the test schema first, and DB-dependent tests skip when `DATABASE_URL` is absent.
 - Effect app/services use `Config.*`; map config errors around the owning `Effect.gen` block.
 - Direct `process.env` is limited to app config, `lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, DB scripts, and synchronous SDK callbacks such as `TelemetryLayer`.
 - `lib/dotenv.ts` is the only direct `dotenv.config()` owner and loads app-local env for scripts, Vitest, and Playwright.

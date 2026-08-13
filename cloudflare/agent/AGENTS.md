@@ -2,71 +2,11 @@
 
 Cloudflare app for the Yolk durable agent runtime.
 
-## Current Status
+## Role and structure
 
-- This app is a proving adapter for `/agent/cloudflare`; runtime page fails explicitly when unavailable, no Next fallback.
-- Keep the deployed smoke path alive: Worker `/health` + WebSocket `/connect/:sessionId` + `YolkAgent` DO.
-- App bootstrap path: Worker `/bootstrap/:sessionId` stores user/token broker bridge config and remote MCP server configs before direct browser WS.
-- `pnpm cloudflare-agent:smoke` validates deployed `/health` and one WebSocket faux-provider roundtrip.
-- Current path runs Yolk runtime in DO with typed protocol WS messages, append-log transcript storage, app-centralized OAuth refresh, and proxy-first Codex streaming after brokered token handoff.
-- DO storage uses `SessionEventStore`; WS connect sends `SessionSnapshot`; new user input is rejected with `conflict` while a run is active; HITL responses resume paused runs.
-- Stale WS `UserInput.expectedRevision` returns in-band `AgentError { code: 'conflict' }`; malformed WS text is treated as fallback `UserMessage` input.
-- Skillset support is bootstrap-injected: Next sends the runtime `SkillsetManifest`; `src/generated/skillset.ts` remains a smoke/unbootstrapped fallback. No filesystem reads at Worker runtime.
-- Tool modules are runtime-adapter explicit. App tool modules are runtime-portable; never import Node-only code here. Remote MCP config arrives via bootstrap, not Worker env/filesystem.
-- `src/tool-modules.ts` delegates to shared `makeTextToolModules`; `test/tool-modules.test.ts` locks shared base text tool parity, including fake remote MCP.
-- Do not expand into full product infrastructure until package APIs are stable.
-
-## Strategic Direction
-
-Primary work should stay in reusable packages first:
-
-- `@yolk-sdk/agent/protocol`
-- `@yolk-sdk/agent/loop`
-- `@yolk-sdk/agent/runtime`
-- `@yolk-sdk/agent/client`
-- `@yolk-sdk/agent/tools`
-- `@yolk-sdk/mcp`
-- `@yolk-sdk/agent/providers/openai` / `@yolk-sdk/agent/providers/anthropic` for reusable provider adapters
-
-Cloudflare should remain a thin runtime adapter; policy, auth, token refresh, and tools stay app-owned until stable.
-
-## Defer For Now
-
-Do not build these here yet unless explicitly requested:
-
-- Knowledge DO
-- R2 ingestion/files
-- Vectorize
-- Workers AI embeddings
-- Queues
-- full auth bridge (v1 only has app-server bootstrap + bridge secret)
-- production Cloudflare topology
-
-## Adapter Risks To Keep Visible
-
-- Append-log replay and revision conflicts.
-- Bootstrap token bridge and refresh expiry handling.
-- Direct WS reconnect/conflict behavior.
-- Proxy-first provider streaming and dormant direct Codex WS fallback.
-- Product permission policy beyond package HITL approval hooks.
-- Broader client transport abstraction for SSE/fanout/replay beyond current NDJSON + Cloudflare WS helpers.
-
-## Recommended Sequence
-
-1. Keep Cloudflare smoke deploy passing.
-2. Stabilize protocol events in packages.
-3. Harden runtime append-log behavior and Cloudflare coverage.
-4. Add transport/client abstractions in packages.
-5. Add tool policy/context seams in packages.
-6. Test with fake provider/store/tools.
-7. Keep app bootstrap/token bridge narrow and auditable.
-8. Only then expand Cloudflare infra.
-
-## Rule Of Thumb
-
-- If a feature can be generic, build it in `packages/*` first.
-- If it needs Cloudflare bindings/runtime APIs, keep it in `cloudflare/agent`.
-- Avoid hardening immature package abstractions into Cloudflare infrastructure.
+- Keep this a thin adapter: generic protocol, loop, runtime, client, tool, MCP, and provider mechanics belong in `packages/*`; Cloudflare binding/runtime code stays here.
+- Do not add Knowledge DO, R2 ingestion, Vectorize, Workers AI embeddings, Queues, a full auth bridge, or production topology unless explicitly requested.
+- Preserve the deployed smoke path: Worker `/health`, WebSocket `/connect/:sessionId`, and `YolkAgent` DO; `pnpm cloudflare-agent:smoke` verifies health plus a faux-provider roundtrip.
 
 ## Rules
 
@@ -76,7 +16,7 @@ Do not build these here yet unless explicitly requested:
 - Follow Alchemy style: relative TypeScript imports include explicit `.ts` extensions.
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep agent/MCP packages provider-neutral; provider subpaths stay host-runtime agnostic.
-- Route/runtime adapters choose tool modules; a future app-layer AgentDefinition may centralize tool selection once agent product boundaries stabilize.
+- Route/runtime adapters choose tool modules explicitly.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Bootstrapped Anthropic construction must use `agentTextModelMaxOutputTokens(model)` for required Claude `maxTokens`, with no Worker-owned fallback. ChatGPT Codex rejects `max_output_tokens`, so direct/proxied Codex construction does not accept or send an output-token limit.
 - Centralize provider refresh in Next; DO caches `TokenBrokerResponse` (`provider`, `accessToken`, `expiresAt`, optional `accountId`) only and never stores refresh tokens.

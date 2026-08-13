@@ -1,20 +1,8 @@
 # Simulation and Property Testing
 
-Use deterministic simulation seams first, then let property tests explore them.
-
-This pattern is inspired by the current opencode simulation branch:
-
-- simulation lives near the code under test
-- external effects are replaced at explicit boundaries
-- all generated data is seeded
-- reset/snapshot APIs make invariants observable
-- first properties are small and boring, usually no-crash or state-safety checks
-
-It also follows the testing principles in fast-check's JavaScript testing skill:
-
-- https://github.com/dubzzz/fast-check/blob/main/skills/javascript-testing-expert/SKILL.md
-
-Use that skill as the upstream reference for property-testing discipline: tests should find bugs, document behavior, prevent regressions, and challenge assumptions without becoming random oracles.
+Use deterministic simulation seams first, then let property tests explore them. Keep simulations
+near the tested domain, replace external effects at explicit boundaries, seed generated data, expose
+reset/snapshot state, and start with small state-safety properties.
 
 ## Terms
 
@@ -33,11 +21,9 @@ Best use:
 property tests drive real code inside simulation and assert invariants after each step
 ```
 
-## What to copy from opencode
+## Simulation seams
 
-### Simulation before property tests
-
-opencode first builds deterministic seams:
+Build deterministic seams first:
 
 - fake filesystem
 - fake network
@@ -128,9 +114,9 @@ Property tests and example tests are complementary:
 
 Start each area with documenting example tests, then add property tests for invariants and edge cases.
 
-### JavaScript testing expert rules we adopt
+### Property discipline
 
-From the fast-check JavaScript testing skill, keep these rules in force:
+Keep these rules in force:
 
 - Test through public behavior, not internals.
 - Prefer stubs/fakes at boundaries over mocks and call-count assertions.
@@ -241,285 +227,31 @@ Avoid `packages/testing` until at least three domains need the same helpers.
 - `test/property/*` — property specs
 - `test/simulation/*` — fake world, model, command generators, harnesses
 
-## Best Yolk targets
-
-### 1. HITL approvals/questions
-
-Highest-value pilot.
-
-State space:
-
-- request approval
-- approve
-- reject
-- abort
-- timeout
-- reload persisted state
-- stale reply
-- concurrent pending requests
-
-Properties:
-
-- rejected tools never execute
-- stale replies never affect a new request
-- terminal requests never change terminal state
-- pending IDs are unique
-- abort clears or terminalizes pending state according to domain rule
-- reload preserves pending/terminal state
-- every executed tool has a prior approval when approval was required
-
-### 2. Tool schema provider compatibility
-
-Good schema-derived generation target.
-
-Properties:
-
-- provider-normalized schema contains only supported features
-- normalization is idempotent
-- valid generated inputs decode at the internal boundary
-- unsupported schema features fail before provider call
-- tool names/descriptions remain provider-safe
-
-### Tool registry rollout
-
-Tool registry properties should compare resolved tool sets to a tiny model of enabled registrations.
-
-Useful invariants:
-
-- duplicate enabled tool names fail resolution
-- disabled gated tools are absent from tool definitions and metadata
-- metadata preserves module id, tool name, and access for enabled tools
-- unknown or disabled tool execution fails with `not_found`
-- enabled unique tools execute with the original tool call id
-
-### Tool batch rollout
-
-Loop tool batch properties should focus on lifecycle pairing and call/result identity.
-
-Useful invariants:
-
-- successful batches emit one start and one completion for every call
-- completion result `toolCallId` matches the original call id
-- completion content matches executor output for that tool
-- execution failures emit start then error, and never emit completion for that failed call
-- tool errors preserve the failing tool name/cause at the stream failure boundary
-
-### Client reducer rollout
-
-Client reducer properties should tolerate defensive/out-of-order event sequences, but still enforce structural invariants.
-
-Useful invariants:
-
-- duplicate event ids are idempotent
-- tool runs stay unique by tool call id
-- at most one active run exists per generated single-call scenario
-- terminal HITL states are inactive and idempotent
-- done states clear live messages when `AgentEnd` is the terminal event under normal event ordering
-- starting a new user message clears `seenEventIds` and prunes non-completed tool runs
-- error/abort transitions prune active tool runs and preserve completed tool history
-
-### Provider stream and retry rollout
-
-Provider stream properties should exercise real loop turn handling with a scripted provider boundary.
-
-Useful invariants:
-
-- valid provider streams emit exactly one `LLMStreamEnd`, `AssistantMessage`, and `TurnEnd`
-- `LLMStreamStart` precedes provider-mapped deltas; `LLMStreamEnd` precedes `AssistantMessage`; `AssistantMessage` precedes `TurnEnd`
-- generated text/reasoning/usage/tool-call fragments map to matching client-facing event counts
-- exactly one provider `Done` event is required
-- `Done.stopReason` is derived from host tool calls: `tool_use` when any host tool call exists, otherwise `stop`
-- missing, duplicate, or wrong-reason `Done` fails with `LLMError { cause: "invalid_response" }`
-- retryable pre-emission provider failures retry up to `maxRetries`
-- loop-generic retry never retries non-retryable failures, `context_overflow`, or post-emission failures
-- `makeContextOverflowRetryProvider` is the overflow exception: it retries at most once after successful host compaction; skipped/failed compaction or a second overflow terminates
-- provider output-limit/truncation signals fail as non-retryable `invalid_response` and never synthesize `Done`
-
-### Cloudflare storage parity rollout
-
-Cloudflare adapter properties should keep Durable Object storage behavior matched to the package runtime append-log model.
-
-Useful invariants:
-
-- current or absent expected revisions append exactly like `appendRuntimeSessionEventsToLog`
-- stale expected revisions fail with `SessionConflictError` and do not mutate storage
-- reconnect interruption appends `RunInterrupted` only for the latest incomplete run
-- durable revisions remain equal to event count after every generated operation
-- durable log snapshots equal the pure package model after every step
-- direct WebSocket input/HITL paths reject active-run conflicts without mutation
-- stale WebSocket `expectedRevision` values fail with conflict and leave durable state unchanged
-- duplicate or mismatched HITL responses never resume a terminal or unrelated request
-
-### 3. Agent session/message/event model
-
-State space:
-
-- user messages
-- assistant deltas
-- tool calls
-- tool results
-- aborts
-- retries
-- compaction/summarization
-- persistence/reload
-
-Properties:
-
-- message order is stable
-- every tool result references an existing tool call
-- terminal events are not duplicated
-- counters never go negative
-- persisted state decodes after every generated operation
-- revert/unrevert preserve legal graph shape
-
-### 4. File/write/edit/patch tools
-
-Useful once tool execution boundaries are stable.
-
-Properties:
-
-- no write escapes workspace
-- failed edit leaves file unchanged
-- successful edit matches the model
-- read after write returns written content
-- patch either applies exact expected change or leaves state unchanged
-
-## First pilot plan
-
-Pilot: HITL approval/question model tests.
-
-### Phase 1 — inventory
-
-- Locate package/app ownership for HITL state and transitions.
-- List all commands that mutate approval/question state.
-- List all observable state needed for invariants.
-- Decide which boundaries need fake services.
-
-Deliverable: short note in the property test file header or local `README.md`.
-
-### Phase 2 — deterministic simulation seam
-
-Add local test-only harness:
-
-```txt
-test/simulation/
-  hitl-model.ts
-  hitl-commands.ts
-  fake-tool-runner.ts
-  harness.ts
-```
-
-Harness responsibilities:
-
-- construct test layers
-- expose `reset`
-- expose `snapshot`
-- record executed tools
-- optionally persist/reload in memory
-
-Keep implementation local to the first domain.
-
-### Phase 3 — model and commands
-
-Create a minimal model with only state needed for invariants:
-
-```txt
-pending approvals
-terminal approvals
-executed tool IDs
-aborted sessions
-```
-
-Commands should be explicit and small:
-
-```txt
-requestApproval
-approve
-reject
-abort
-timeout
-reload
-replyStale
-```
-
-Generate mostly valid commands, but include some invalid/stale commands because they encode important safety properties.
-
-### Phase 4 — first properties
-
-Start with low `numRuns` in normal tests.
-
-Initial invariants:
-
-- no rejected tool executed
-- no stale reply mutates live state
-- no duplicate pending IDs
-- reload snapshot equals model state
-- no unhandled defect during any command
-
-### Phase 5 — replay and stress mode
-
-On failure, print:
-
-- seed
-- command index
-- command trace
-- real snapshot
-- model snapshot
-
-Normal test run stays cheap. Add opt-in stress by env:
+## High-value targets
+
+| Area                     | Example invariants                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| HITL                     | Rejected/stale/mismatched responses never execute or mutate; terminal stays terminal |
+| Tool schemas/registry    | Normalization is idempotent; unsupported schemas fail; enabled names stay unique     |
+| Tool batches             | Start/result/error lifecycle pairs preserve call identity                            |
+| Client reducer           | Duplicate event IDs are idempotent; active/terminal tool and HITL state stays legal  |
+| Provider streams/retries | Terminal events occur once and in order; retry policy never widens                   |
+| Session/event storage    | Revisions are monotonic; stale writes do not mutate; replay matches the pure model   |
+| File mutation tools      | Writes stay in workspace; failed mutations are atomic                                |
+
+Keep provider-, package-, app-, and Cloudflare-specific expected values beside their tests. The
+shared pattern owns only the method: generated domain inputs/actions, a small model, observable
+state, and invariants checked after each step.
+
+## Replay and stress runs
+
+On failure, preserve the generated seed, command index/trace, real snapshot, and model snapshot. Keep
+normal validation cheap; package-local property areas may share a test-only `PROPERTY_RUNS` helper.
+That env read is allowed only in test config, never package runtime code.
 
 ```txt
 PROPERTY_RUNS=1000 pnpm test:run
 ```
-
-Package-local property tests should share a tiny test-config helper instead of repeating run counts. This helper is an approved test boundary; keep `process.env` reads out of package runtime code.
-
-```ts
-const defaultPropertyRuns = 50
-const propertyRunsEnv = process.env.PROPERTY_RUNS
-const parsedPropertyRuns =
-  propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
-
-export const propertyRuns =
-  Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
-    ? parsedPropertyRuns
-    : defaultPropertyRuns
-
-export const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
-```
-
-Keep the default low in regular validation; raise only for local or scheduled stress.
-
-## First rollout findings
-
-The first HITL properties found two real bugs quickly:
-
-- Loop matching accepted responses when either `requestId` or `toolCallId` matched. Correct rule: both must match.
-- Runtime accepted stale or duplicate terminal HITL responses and appended them to the session log. Correct rule: append only when the response matches the latest active `RunAwaitingInput` request.
-
-Useful first properties:
-
-- matching approval executes iff approved
-- stale approvals/questions never execute or answer pending work
-- mismatched approval/question IDs never affect pending work
-- stale/duplicate runtime responses return conflict and leave event logs unchanged
-- mixed pending HITL requests stay isolated until each matching response arrives
-
-These worked because the fake provider, fake tool executor, and in-memory session store let the real loop/runtime run deterministically while external boundaries stayed controlled.
-
-## Session event model rollout
-
-Session event properties should stay mostly pure and exercise append-log helpers first.
-
-Useful invariants:
-
-- appended revisions are contiguous and monotonic
-- stored event IDs match `sessionId:revision`
-- replayed transcript messages match only input, completed, and awaiting events
-- replayed HITL responses match only appended HITL response events
-- latest incomplete run ignores completed, awaiting, failed, and interrupted runs
-- stale expected revisions fail and leave the in-memory log unchanged
-- generated append sequences accept only current/no expected revisions and keep the real log equal to a small model after every step
 
 ## Test shape
 
@@ -559,9 +291,3 @@ If command generation needs state-aware shrinking, switch the generator to direc
 - Keep CI runs cheap; stress locally or nightly.
 - Prefer local harnesses before global abstractions.
 - Failing property tests are useful only if their replay is clear.
-
-## Resolved pilot decisions
-
-- HITL pilot lives in `@yolk-sdk/agent`; app tests can add app-specific policy later.
-- Start with `@effect/vitest` props and `Schema.toArbitrary()`; add direct `fast-check` only for state-aware shrinkers/schedulers.
-- First invariant set covers matching, stale/mismatched IDs, duplicate terminal responses, and mixed pending isolation.

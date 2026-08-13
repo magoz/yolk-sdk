@@ -64,6 +64,10 @@ examples/next/lib/services/[service-name]/
 - `AppKnowledgeSearchLayer` is composed at storage/knowledge search boundaries, not in `AppLayer`; it requires `OPENAI_API_KEY` only for ingestion/search.
 - Add standalone services to `AppLayer` only when app code needs them directly.
 
+## Tests
+
+- Keep DB tests isolated and external HTTP/config services behind test Layers.
+
 ## Checklist
 
 - [ ] `live-layer.ts` exports service + fully composed static `layer`

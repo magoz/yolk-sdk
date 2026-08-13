@@ -68,120 +68,21 @@ packages/agent/test/providers/anthropic/claude-provider.test.ts
 packages/agent/test/loop/run.test.ts
 ```
 
-**Why colocated?**
+## Coverage
 
-- Easy to find tests for any file
-- Encourages testing during development
-- Clear 1:1 mapping between source and tests
-- Deleted code = deleted tests
-
-### Test Organization Pattern
-
-```typescript
-import { describe, expect, it, layer } from '@effect/vitest'
-
-describe('feature name', () => {
-  // Group related tests
-  describe('happy path', () => {
-    it.effect('does the thing', () => /* ... */)
-  })
-
-  describe('error cases', () => {
-    it.effect('handles invalid input', () => /* ... */)
-    it.effect('handles missing resources', () => /* ... */)
-  })
-})
-```
-
-## Coverage Targets
-
-### Coverage Expectations
-
-| Code Type          | Target | Priority |
-| ------------------ | ------ | -------- |
-| Domain logic       | 80%+   | High     |
-| Server actions     | 60%+   | Medium   |
-| Services           | 70%+   | Medium   |
-| UI components      | 30%+   | Low      |
-| Type definitions   | 0%     | N/A      |
-| Config/setup files | 0%     | N/A      |
-
-**Don't chase 100% coverage** - focus on high-value tests.
-
-### What Matters More Than Coverage
-
-- **Error paths tested** - all domain errors have tests
-- **Edge cases covered** - empty arrays, nulls, boundaries
-- **Integration tests exist** - services compose correctly
-- **Property tests where applicable** - invariants hold
+Do not chase a numeric target. Prioritize behavior, error paths, boundary cases, service composition,
+and invariants; type declarations and framework internals need no runtime coverage.
 
 ## Test Types
 
-### Unit Tests (Most Common)
+| Type        | Use for                                       | Preferred boundary                         |
+| ----------- | --------------------------------------------- | ------------------------------------------ |
+| Unit/model  | Pure rules and focused service behavior       | Public function or service with fake Layer |
+| Integration | Service composition, DB, and adapter behavior | Documented real test Layer/environment     |
+| E2E         | Critical user flows                           | Owning app's browser suite                 |
 
-**When:** Testing isolated domain functions or single service methods
-
-**Pattern:** Mock dependencies via layers
-
-**Example:**
-
-```typescript
-import { layer, expect } from '@effect/vitest'
-import { Effect } from 'effect'
-
-layer(createMockAuth())('post operations', it => {
-  it.effect('creates post with valid input', () =>
-    Effect.gen(function* () {
-      const post = yield* createPost({ title: 'Test', content: 'Content' })
-      expect(post.title).toBe('Test')
-    })
-  )
-})
-```
-
-**Location:** Colocated with source for app/service units, or package-owned `test/*` dirs when documented locally.
-
-### Integration Tests
-
-**When:** Testing service composition or database operations
-
-**Pattern:** Real services via a documented test environment or shared test Layer. Do not assume container libraries unless the package declares and documents them.
-
-**Example:**
-
-```typescript
-layer(TestDbLayer)('database operations', it => {
-  it.effect('persists and retrieves posts', () =>
-    Effect.gen(function* () {
-      const db = yield* Db
-      // Use real database operations
-    })
-  )
-})
-```
-
-**Location:** Colocated with source or documented by the owning app/package.
-
-**Note:** Next app DB tests use `examples/next/.env.test`; root `pnpm test:run` runs `pnpm test:db:push` first and DB-dependent tests skip when `DATABASE_URL` is absent.
-
-### E2E Tests
-
-**When:** Testing full user flows through the UI
-
-**Pattern:** Playwright tests in the owning app's `e2e/` directory. Next-specific rules live in `examples/next/patterns/E2E_TESTING.md`.
-
-**Example:**
-
-```typescript
-test('user can login with OTP', async ({ page }) => {
-  await page.goto('/login')
-  // ...
-})
-```
-
-**Location:** `examples/next/e2e/` for Next app flows (separate from unit/integration tests)
-
-**Run:** `pnpm test:e2e`
+Effect test mechanics live in `patterns/EFFECT_TESTING.md`. Next Playwright setup and conventions
+live in `examples/next/patterns/E2E_TESTING.md`.
 
 ### Protocol and Transport Tests
 
@@ -209,85 +110,17 @@ rules into pure model/service tests before adding many route/action edge cases.
 - Mock only external framework/protocol seams: cookies/cache, workflow runtime, provider IO, webhooks.
 - Avoid mocking several own modules to test one action; that means the seam is too internal.
 
-### Property and Simulation Tests
+### Property and simulation tests
 
-**When:** Example tests are really invariants: many inputs, same always/never law.
+Use properties for always/never laws and simulations for stateful workflows. Prefer domain commands
+over implementation calls and assert invariants after each step. See
+`patterns/SIMULATION_PROPERTY_TESTING.md` for generators, replay, stress runs, and model seams.
 
-Good property targets:
+### Effect service fakes
 
-- parsers, Schema codecs, provider schema compatibility
-- protocol encoders/decoders and transport events
-- tool registry availability and policy
-- sorting/filtering/ranking/cleanup predicates
-- HITL/session/event-log invariants
-
-Good simulation targets:
-
-- agent loop, HITL approvals/questions, tool execution boundaries
-- workflow run/resume/retry/abort behavior
-- chat/session append/edit/delete/regenerate flows
-- event logs and persisted snapshots
-
-Prefer model-level commands (`ApproveTool`, `AppendUserMessage`, `AbortRun`) over UI clicks or
-implementation helper calls. Assert invariants: no stale mutation, no dangling references,
-idempotent retries, monotonic revisions, terminal states stay terminal.
-
-## Mock Strategy for Effect Services
-
-### Factory Pattern for Mocks
-
-**Create factory functions that return layer + test helpers:**
-
-```typescript
-const createMockAuth = (options?: { authenticated: boolean }) => {
-  const calls: Array<{ method: string; args: unknown[] }> = []
-
-  const layer = Layer.succeed(Auth, {
-    getSession: () => {
-      calls.push({ method: 'getSession', args: [] })
-      return options?.authenticated
-        ? Effect.succeed({ user: testUser })
-        : Effect.fail(new UnauthenticatedError())
-    }
-  })
-
-  return { layer, calls }
-}
-```
-
-**Benefits:**
-
-- Reusable across tests
-- Track method calls for assertions
-- Configure behavior per test
-- Type-safe mock implementations
-
-### Layer Sharing with `layer()`
-
-Share mocks across multiple tests:
-
-```typescript
-const { layer: authLayer, calls } = createMockAuth()
-const { layer: dbLayer } = createMockDb()
-
-const testLayer = Layer.mergeAll(authLayer, dbLayer)
-
-layer(testLayer)('post operations', it => {
-  it.effect('test 1', () => /* ... */)
-  it.effect('test 2', () => /* ... */)
-  // All tests share authLayer + dbLayer
-})
-```
-
-### When to Use Real vs Mock Services
-
-| Service | Unit Tests | Integration Tests | E2E Tests |
-| ------- | ---------- | ----------------- | --------- |
-| Auth    | Mock       | Mock              | Real      |
-| Db      | Mock       | Real test DB/layer | Real test DB |
-| Email   | Mock       | Mock              | Mock      |
-
-**Rule:** Mock external services (email, integrations) in automated tests. Use real Db only in integration/E2E tests with test isolation.
+Replace external boundaries, not own-domain logic. Build typed fake Layers with configurable
+behavior and observable state; share a Layer only when tests remain isolated. See
+`patterns/EFFECT_TESTING.md` for current `@effect/vitest`, clock, Layer, and error patterns.
 
 ## Test Commands
 
@@ -303,21 +136,6 @@ layer(testLayer)('post operations', it => {
 1. `pnpm test:run` - unit tests pass
 2. `pnpm tsc` - types pass
 3. `pnpm lint` - no lint errors
-
-## Implementation Patterns
-
-For detailed Effect testing patterns, see:
-
-- **[patterns/EFFECT_TESTING.md](EFFECT_TESTING.md)** - @effect/vitest usage, TestClock, property testing, mocking, integration-test layers
-
-Key patterns from EFFECT_TESTING.md:
-
-- `it.effect` - most tests (provides TestClock + Scope)
-- `it.live` - real time/IO needed (also provides Scope)
-- TestClock - fork before adjust (blocks forever otherwise)
-- Property testing - `it.prop([Schema])` for invariants
-- Error testing - `Effect.result`, `Effect.exit`, `Effect.catchTag`
-- Mock services - factory pattern with layer sharing
 
 ## Anti-Patterns
 
