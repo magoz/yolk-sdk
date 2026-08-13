@@ -66,6 +66,10 @@ const knownRuntimeError = (error: unknown): RuntimeError | AgentLoopError | unde
 }
 
 export const workflowErrorEvent = (error: unknown) => {
+  if (Schema.is(AgentError)(error)) {
+    return error
+  }
+
   const runtimeError = knownRuntimeError(error)
   if (runtimeError !== undefined) {
     return runtimeErrorToAgentError(runtimeError)

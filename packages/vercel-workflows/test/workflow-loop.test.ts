@@ -241,7 +241,8 @@ describe('runVercelAgentWorkflow', () => {
       awaitingInput,
       state: {
         request: 'request-1',
-        createdMessages: [],
+        messages: ['request-1', 'assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
+        createdMessages: ['assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
         usage: { turns: 1, subagentTurns: 3 },
         turn: 1,
         eventSequence: 7
@@ -408,7 +409,8 @@ describe('runVercelAgentWorkflow', () => {
       error,
       state: {
         request: 'request-1',
-        createdMessages: [],
+        messages: ['request-1', 'assistant-1'],
+        createdMessages: ['assistant-1'],
         usage: { turns: 1, subagentTurns: 3 },
         turn: 1,
         eventSequence: 7
@@ -437,6 +439,8 @@ describe('runVercelAgentWorkflow', () => {
       _tag: 'ToolBatchStepFailed',
       error,
       state: {
+        messages: ['request-1', 'assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
+        createdMessages: ['assistant-1', 'result-tool-1-a', 'result-tool-1-b'],
         usage: { turns: 1, subagentTurns: 4 },
         eventSequence: 11
       }
@@ -465,7 +469,8 @@ describe('runVercelAgentWorkflow', () => {
       error,
       state: {
         request: 'request-1',
-        createdMessages: [],
+        messages: ['request-1', 'assistant-1'],
+        createdMessages: ['assistant-1'],
         usage: { turns: 1, subagentTurns: 2 },
         turn: 1,
         eventSequence: 9
@@ -522,6 +527,53 @@ describe('runVercelAgentWorkflow', () => {
     expect(errors[0]).toBeInstanceOf(Error)
     expect(String(errors[0])).toContain('exceeded max turns: 2')
   })
+
+  it.each([
+    [0, 1],
+    [-1, 1],
+    [1.9, 1]
+  ])('normalizes finite max turns (%s) to %s', async (configured, expectedTurns) => {
+    let modelTurns = 0
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      maxTurns: configured,
+      runModelStep: input =>
+        step(() => {
+          modelTurns += 1
+          return toolModelResult(input)
+        }),
+      runToolBatchStep: input => step(() => toolBatchResult(input)),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result).toMatchObject({ _tag: 'MaxTurnsExceeded', maxTurns: expectedTurns })
+    expect(modelTurns).toBe(expectedTurns)
+  })
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'normalizes non-finite max turns (%s) to the default',
+    async configured => {
+      let modelTurns = 0
+
+      const result = await runWorkflow({
+        input: { request: 'request-1', context: 'ctx-1' },
+        maxTurns: configured,
+        runModelStep: input =>
+          step(() => {
+            modelTurns += 1
+            return modelTurns === 2 ? terminalModelResult(input) : toolModelResult(input)
+          }),
+        runToolBatchStep: input => step(() => toolBatchResult(input)),
+        closeStream: emptyStep,
+        writeError: emptyStep
+      })
+
+      expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
+      expect(modelTurns).toBe(2)
+    }
+  )
 })
 
 describe('settleWorkflowStep', () => {

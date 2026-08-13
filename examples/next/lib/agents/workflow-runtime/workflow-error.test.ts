@@ -1,10 +1,21 @@
 import { describe, expect, it } from '@effect/vitest'
 import { ToolError } from '@yolk-sdk/agent/loop'
+import { AgentError } from '@yolk-sdk/agent/protocol'
 import { SessionNotFoundError } from '@yolk-sdk/agent/runtime'
 import { AgentDocumentLimitError, AgentResponseEncodingError } from '@/lib/agents/route-handler'
 import { workflowErrorEvent } from './workflow-error'
 
 describe('workflowErrorEvent', () => {
+  it('preserves already-normalized agent errors', () => {
+    const error = AgentError.make({
+      code: 'context_overflow',
+      message: 'Input exceeded context.',
+      retryable: false
+    })
+
+    expect(workflowErrorEvent(error)).toEqual(error)
+  })
+
   it('maps route validation errors', () => {
     expect(
       workflowErrorEvent(new AgentDocumentLimitError({ message: 'Attach up to 4 PDFs.' }))

@@ -36,7 +36,7 @@ Keep provider calls, tool execution, persistence, telemetry, and Effect runtimes
 | Callback           | Directive     | Input                                                                                     | Output                                                                                 |
 | ------------------ | ------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `runModelStep`     | `'use step'`  | `{ context, state }`                                                                      | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn`  |
-| `runToolBatchStep` | `'use step'`  | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool result messages or `awaitingInput`                                                |
+| `runToolBatchStep` | `'use step'`  | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool results, `awaitingInput`, or a wire-safe partial-progress `failure`               |
 | `awaitInput`       | workflow body | awaiting-input payload                                                                    | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
 | `closeStream`      | `'use step'`  | none                                                                                      | flushes/closes after a successful final model step                                     |
 | `writeError`       | `'use step'`  | unknown error                                                                             | writes safe final error and closes failure stream; best-effort, not retried            |
@@ -80,7 +80,9 @@ Rules:
 
 - Return one tool-result message per host tool call.
 - Preserve original model tool-call order.
-- Represent expected tool failures as result messages, not thrown step errors.
+- Represent expected per-tool failures as result messages, not thrown step errors.
+- If the step boundary catches a batch failure after sibling progress, return wire-safe `failure`,
+  cumulative `usage`, and the latest `eventSequence`.
 - Return `awaitingInput` when approvals/questions must pause the workflow.
 
 ## Run result tags
@@ -114,6 +116,9 @@ await runVercelAgentWorkflow({
 
 Finite `maxAttempts` values are floored and clamped to at least `1`; non-finite values normalize to
 `1`. Retries run immediately with no backoff. `writeError` is best-effort cleanup and is not retried.
+
+`maxTurns` accepts positive integers. Finite values are floored and clamped to at least `1`; omitted
+or non-finite values use `defaultMaxWorkflowTurns`.
 
 Only retry streamed steps if every event has a deterministic `eventId` and clients de-dupe replayed chunks.
 

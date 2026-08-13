@@ -7,7 +7,7 @@ description: Audits and fixes code against Yolk repo patterns. Use when code sho
 
 Make implementation code conform to Yolk's documented patterns.
 
-This is code-changing. For docs-only cleanup, use `/tidy`.
+This is code-changing. For docs-only cleanup, use the `tidy` skill.
 
 ## Scope
 
@@ -192,7 +192,7 @@ Final response:
 
 ## Anti-patterns
 
-- Treating `/conform` as docs cleanup; use `/tidy` instead.
+- Treating `conform` as docs cleanup; use the `tidy` skill instead.
 - Large rewrites across unrelated features.
 - Fixing lint by weakening types.
 - Hiding expected failures by returning generic success.

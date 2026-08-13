@@ -58,6 +58,8 @@ queues, hooks, or stream storage.
 - model step: produce model events/tool calls
 - tool batch step: execute requested tools
 - tool batch result: return one ordered tool-result message per host call, including failed `isError` results
+- partial tool-step failure: return wire-safe `failure`, cumulative `usage`, and `eventSequence` when
+  completed sibling tools must remain observable
 - awaiting-input state: carry pending HITL hook data, wait through `awaitInput`, then rerun the
   same tool batch with accumulated responses
 - close step: flush/close output stream after a successful final model step
@@ -113,6 +115,9 @@ Default retry policy is `noWorkflowStepRetry` (`maxAttempts: 1`). Retries are op
 streamed retries can duplicate chunks unless host/client de-dupe is ready.
 Finite `maxAttempts` values are floored and clamped to at least one; non-finite values normalize to
 one. Retries have no built-in backoff.
+
+`maxTurns` follows the same positive-integer boundary: finite values are floored and clamped to at
+least one. Omitted or non-finite values use `defaultMaxWorkflowTurns`.
 
 ## Durable stream events
 

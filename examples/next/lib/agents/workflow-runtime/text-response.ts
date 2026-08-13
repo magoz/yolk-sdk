@@ -119,6 +119,8 @@ const toolRegistryErrorToToolError = (error: { readonly message: string }) =>
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
 
+const unexpectedSubagentFailureMessage = 'Unexpected subagent failure'
+
 const subagentRunErrorFromUnknown = (error: unknown): SubagentRunError => {
   if (error instanceof ToolError) {
     return runtimeErrorToAgentError(error)
@@ -126,7 +128,7 @@ const subagentRunErrorFromUnknown = (error: unknown): SubagentRunError => {
 
   return {
     code: 'unknown',
-    message: unknownToMessage(error),
+    message: unexpectedSubagentFailureMessage,
     retryable: false
   }
 }

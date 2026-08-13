@@ -2,12 +2,7 @@ import { readFileSync } from 'node:fs'
 import { Effect, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMError, ToolError } from '@yolk-sdk/agent/loop'
-import {
-  TurnStart,
-  UsageUpdate,
-  AgentUsage,
-  ProviderErrorInfo
-} from '@yolk-sdk/agent/protocol'
+import { TurnStart, UsageUpdate, AgentUsage, ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
 import { resolveAgentToolSet, nodeTextToolModules } from '@/lib/agents/tools/registry'
 import {
   collectSubagentEvents,
@@ -84,11 +79,7 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
         )
       )
 
-      expect(events.map(event => event._tag)).toEqual([
-        'TurnStart',
-        'UsageUpdate',
-        'AgentError'
-      ])
+      expect(events.map(event => event._tag)).toEqual(['TurnStart', 'UsageUpdate', 'AgentError'])
       expect(events.at(-1)).toMatchObject({
         _tag: 'AgentError',
         code: 'provider_error',
@@ -129,6 +120,26 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
           }
         }
       })
+
+      const unknownFailure = yield* recoverSubagentToolFailure(
+        Effect.fail({ detail: 'SENSITIVE_CHILD_FAILURE_DETAIL' }),
+        common
+      )
+
+      expect(unknownFailure).toMatchObject({
+        content:
+          '<subagent_result>\nSubagent failed: Unexpected subagent failure\n</subagent_result>',
+        structuredContent: {
+          status: 'error',
+          error: {
+            code: 'unknown',
+            message: 'Unexpected subagent failure',
+            retryable: false
+          }
+        }
+      })
+      expect(unknownFailure.content).not.toContain('SENSITIVE_CHILD_FAILURE_DETAIL')
+
       const defect = yield* recoverSubagentToolFailure(
         Effect.die(new Error('Unexpected child defect.')),
         common

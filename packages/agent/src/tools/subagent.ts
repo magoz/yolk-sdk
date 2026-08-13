@@ -419,18 +419,33 @@ export const subagentUsageFromToolResult = (result: ToolResult): AgentUsage | un
 
 export const subagentResultFromEvents = (events: ReadonlyArray<AgentEvent>): SubagentRunResult => {
   const terminal = [...events].reverse().find(isTerminalAgentEvent)
+  const usageUpdates = events.filter(event => event._tag === 'UsageUpdate')
+  const usage = usageUpdates.reduce(
+    (total, event) => addAgentUsage(total, event.usage),
+    zeroAgentUsage
+  )
+  const turns = events.reduce(
+    (latest, event) => (event._tag === 'TurnStart' ? Math.max(latest, event.turn) : latest),
+    0
+  )
 
-  if (terminal?._tag === 'AgentError') {
-    const usageUpdates = events.filter(event => event._tag === 'UsageUpdate')
-    const usage = usageUpdates.reduce(
-      (total, event) => addAgentUsage(total, event.usage),
-      zeroAgentUsage
-    )
-    const turns = events.reduce(
-      (latest, event) => (event._tag === 'TurnStart' ? Math.max(latest, event.turn) : latest),
-      0
-    )
+  if (terminal === undefined) {
+    const message = 'Subagent stream ended without a terminal event.'
 
+    return {
+      status: 'error',
+      text: `Subagent failed: ${message}`,
+      ...(usageUpdates.length === 0 ? {} : { usage }),
+      ...(turns === 0 ? {} : { turns }),
+      error: {
+        code: 'invalid_response',
+        message,
+        retryable: false
+      }
+    }
+  }
+
+  if (terminal._tag === 'AgentError') {
     return {
       status: 'error',
       text: `Subagent failed: ${terminal.message}`,
@@ -445,14 +460,14 @@ export const subagentResultFromEvents = (events: ReadonlyArray<AgentEvent>): Sub
     }
   }
 
-  const messages = terminal?.messages ?? []
-  const text = latestAssistantText(messages).trim()
+  const text = latestAssistantText(terminal.messages).trim()
 
   return {
-    status: terminal?._tag === 'AgentAwaitingInput' ? 'awaiting_input' : 'completed',
+    status: terminal._tag === 'AgentAwaitingInput' ? 'awaiting_input' : 'completed',
     text: text.length === 0 ? 'Subagent completed without a final text response.' : text,
-    ...(terminal === undefined ? {} : { usage: terminal.usage, turns: terminal.turns }),
-    ...(terminal?._tag === 'AgentAwaitingInput' ? { requests: terminal.requests } : {})
+    usage: terminal.usage,
+    turns: terminal.turns,
+    ...(terminal._tag === 'AgentAwaitingInput' ? { requests: terminal.requests } : {})
   }
 }
 

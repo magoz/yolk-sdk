@@ -12,6 +12,7 @@ import {
 import {
   addAgentUsage,
   AgentEnd,
+  AgentError,
   AgentUsage,
   AssistantMessageEvent,
   AgentMessage,
@@ -45,7 +46,7 @@ export type AgentWorkflowInput = {
 
 type IndexedToolResultMessage = {
   readonly index: number
-  readonly message: AgentMessage
+  readonly message: ToolResultMessage
 }
 
 const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`
@@ -90,6 +91,7 @@ const decodeNonEmptyMessages = (messages: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.NonEmptyArray(AgentMessage))(messages)
 
 const encodeMessage = Schema.encodeUnknownEffect(AgentMessage)
+const encodeAgentError = Schema.encodeUnknownEffect(AgentError)
 const encodeToolCall = Schema.encodeUnknownEffect(ToolCall)
 const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
 const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
@@ -280,6 +282,8 @@ export async function runAgentWorkflowModelStep(input: {
   )
 }
 
+runAgentWorkflowModelStep.maxRetries = 0
+
 export async function runAgentWorkflowToolBatchStep(input: {
   readonly context: unknown
   readonly request: unknown
@@ -295,8 +299,9 @@ export async function runAgentWorkflowToolBatchStep(input: {
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
   const workflowRunId = getWorkflowMetadata().workflowRunId
-  let latestUsage = input.usage
+  let latestUsage = zeroAgentUsage
   let latestEventSequence = input.eventSequence
+  let latestToolResultMessages: ReadonlyArray<ToolResultMessage> = []
 
   const result = await Effect.runPromiseExit(
     Effect.gen(function* () {
@@ -305,6 +310,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const createdMessages = yield* decodeMessages(input.createdMessages)
       const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
       const usage = yield* decodeUsageOrZero(input.usage)
+      latestUsage = usage
       const userId = yield* decodeWorkflowUserId(input.context)
       const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
@@ -356,8 +362,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 latestUsage = yield* Ref.get(cumulativeUsage)
                 yield* Ref.update(toolResultMessages, messages => {
                   const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
-
-                  return [
+                  const nextMessages = [
                     ...messages,
                     {
                       index: callIndex < 0 ? calls.length : callIndex,
@@ -369,6 +374,9 @@ export async function runAgentWorkflowToolBatchStep(input: {
                       })
                     }
                   ]
+                  latestToolResultMessages = orderedToolResultMessages(nextMessages)
+
+                  return nextMessages
                 })
               })
             })
@@ -406,19 +414,31 @@ export async function runAgentWorkflowToolBatchStep(input: {
     return result.value
   }
 
+  if (Cause.hasDies(result.cause) || Cause.hasInterrupts(result.cause)) {
+    return await Effect.runPromise(Effect.failCause(result.cause))
+  }
+
   const expectedFailure = Cause.findFail(result.cause)
   if (Result.isFailure(expectedFailure)) {
     return await Effect.runPromise(Effect.failCause(result.cause))
   }
 
+  const failureMessages = await Effect.runPromise(
+    Effect.forEach(latestToolResultMessages, message => encodeMessage(message))
+  )
+
   return {
-    messages: [],
-    createdMessages: input.createdMessages,
-    usage: latestUsage,
+    messages: failureMessages,
+    createdMessages: [...input.createdMessages, ...failureMessages],
+    usage: await Effect.runPromise(encodeUsage(latestUsage)),
     eventSequence: latestEventSequence,
-    failure: expectedFailure.success.error
+    failure: await Effect.runPromise(
+      encodeAgentError(workflowErrorEvent(expectedFailure.success.error))
+    )
   }
 }
+
+runAgentWorkflowToolBatchStep.maxRetries = 0
 
 export async function closeAgentWorkflowStream() {
   'use step'

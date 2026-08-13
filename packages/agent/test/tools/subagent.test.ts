@@ -511,6 +511,27 @@ describe('subagent tool', () => {
     expect(text).toBe('Done.')
   })
 
+  it('returns an error when a subagent stream has no terminal event', () => {
+    const summary = subagentResultFromEvents([
+      TurnStart.make({ turn: 1 }),
+      UsageUpdate.make({
+        usage: AgentUsage.make({ input: { total: 12 }, output: { total: 3 } })
+      })
+    ])
+
+    expect(summary).toMatchObject({
+      status: 'error',
+      text: 'Subagent failed: Subagent stream ended without a terminal event.',
+      usage: { input: { total: 12 }, output: { total: 3 } },
+      turns: 1,
+      error: {
+        code: 'invalid_response',
+        message: 'Subagent stream ended without a terminal event.',
+        retryable: false
+      }
+    })
+  })
+
   it('extracts text and usage when a subagent awaits input', () => {
     const summary = subagentResultFromEvents([
       AgentAwaitingInput.make({

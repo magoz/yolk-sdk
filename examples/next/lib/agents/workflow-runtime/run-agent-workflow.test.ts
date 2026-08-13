@@ -31,10 +31,19 @@ describe('runAgentWorkflow', () => {
     expect(workflowFunctionSource).toContain('awaitInput:')
   })
 
-  it('carries subagent usage through durable tool results', () => {
+  it('disables platform retries for streamed model and side-effecting tool steps', () => {
+    expect(source).toContain('runAgentWorkflowModelStep.maxRetries = 0')
+    expect(source).toContain('runAgentWorkflowToolBatchStep.maxRetries = 0')
+  })
+
+  it('carries partial progress through durable tool results', () => {
     expect(source).toContain('addWorkflowToolResultUsage')
     expect(source).toContain('const cumulativeUsage = yield* Ref.make(usage)')
     expect(source).toContain('usage: yield* encodeUsage(currentUsage)')
+    expect(source).toContain('const failureMessages = await Effect.runPromise(')
+    expect(source).toContain(
+      'createdMessages: [...input.createdMessages, ...failureMessages]'
+    )
   })
 
   it('scopes durable event ids to the workflow run', () => {

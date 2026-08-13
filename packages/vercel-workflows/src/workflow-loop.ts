@@ -55,8 +55,8 @@ export type VercelAgentWorkflowToolBatchStepResult = {
   readonly awaitingInput?: VercelAgentWorkflowAwaitingInput
   readonly eventSequence?: number
   /**
-   * A failure captured by the tool-step boundary after partial progress. Returning it instead of
-   * rejecting lets orchestration retain usage and event sequencing from completed sibling tools.
+   * A plain wire-safe failure captured after partial progress. Returning it instead of rejecting
+   * lets orchestration retain usage and event sequencing from completed sibling tools.
    */
   readonly failure?: unknown
 }
@@ -164,6 +164,14 @@ const maxRetryAttempts = (policy: VercelAgentWorkflowStepRetryPolicy | undefined
   return Number.isFinite(configured) ? Math.max(1, Math.floor(configured)) : 1
 }
 
+const maxWorkflowTurns = (configured: number | undefined) => {
+  if (configured === undefined || !Number.isFinite(configured)) {
+    return defaultMaxWorkflowTurns
+  }
+
+  return Math.max(1, Math.floor(configured))
+}
+
 export async function retryWorkflowStep<A>(
   runStep: () => Promise<A>,
   policy?: VercelAgentWorkflowStepRetryPolicy
@@ -207,7 +215,7 @@ export async function runVercelAgentWorkflow(
     turn: 1,
     eventSequence: 0
   }
-  const maxTurns = configuredMaxTurns ?? defaultMaxWorkflowTurns
+  const maxTurns = maxWorkflowTurns(configuredMaxTurns)
 
   for (let step = 0; step < maxTurns; step++) {
     const modelResult = await settleWorkflowStep(
@@ -257,6 +265,19 @@ export async function runVercelAgentWorkflow(
     let toolHitlResponses: ReadonlyArray<unknown> = []
     let cumulativeUsage = modelResult.value.usage
     let toolEventSequence = modelResult.value.eventSequence ?? state.eventSequence
+    const currentTurnState = (
+      toolResult?: VercelAgentWorkflowToolBatchStepResult
+    ): SerializableWorkflowState => ({
+      request: input.request,
+      messages:
+        toolResult === undefined
+          ? modelResult.value.messages
+          : [...modelResult.value.messages, ...toolResult.messages],
+      createdMessages: toolResult?.createdMessages ?? modelResult.value.createdMessages,
+      usage: cumulativeUsage,
+      turn: modelResult.value.turn,
+      eventSequence: toolEventSequence
+    })
 
     for (;;) {
       const toolsResult = await settleWorkflowStep(
@@ -283,11 +304,7 @@ export async function runVercelAgentWorkflow(
           _tag: 'ToolBatchStepFailed',
           turn: modelResult.value.turn,
           error: toolsResult.error,
-          state: {
-            ...state,
-            usage: cumulativeUsage,
-            eventSequence: toolEventSequence
-          }
+          state: currentTurnState()
         }
       }
 
@@ -301,11 +318,7 @@ export async function runVercelAgentWorkflow(
           _tag: 'ToolBatchStepFailed',
           turn: modelResult.value.turn,
           error: toolsResult.value.failure,
-          state: {
-            ...state,
-            usage: cumulativeUsage,
-            eventSequence: toolEventSequence
-          }
+          state: currentTurnState(toolsResult.value)
         }
       }
 
@@ -336,11 +349,7 @@ export async function runVercelAgentWorkflow(
           turn: modelResult.value.turn,
           error: hitlResponse.error,
           awaitingInput,
-          state: {
-            ...state,
-            usage: cumulativeUsage,
-            eventSequence: toolEventSequence
-          }
+          state: currentTurnState(toolsResult.value)
         }
       }
 
