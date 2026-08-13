@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.57
+
+### Patch Changes
+
+- da9e8ba: Refresh package documentation with runtime requirements, host responsibilities, subpath boundaries, and corrected usage examples.
+- Updated dependencies [da9e8ba]
+- Updated dependencies [de55946]
+  - @yolk-sdk/agent@0.1.0-canary.57
+
 ## 0.1.0-canary.56
 
 ### Patch Changes
