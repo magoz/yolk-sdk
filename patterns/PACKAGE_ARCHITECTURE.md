@@ -4,6 +4,9 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 
 ## Public Shape
 
+The lists below cover feature/API subpaths. Every public package also exports `./package.json` for
+metadata.
+
 - `@yolk-sdk/agent` is the main agent package.
 - Agent APIs use explicit subpaths:
   - `@yolk-sdk/agent/protocol`
@@ -60,8 +63,8 @@ Rules for `packages/*` public shape, import boundaries, and tree-shaking.
 
 ```txt
 examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpaths
-@yolk-sdk/knowledge -> @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
-@yolk-sdk/mcp -> official @modelcontextprotocol v2 packages + @yolk-sdk/agent/protocol only for tool/content adapters
+@yolk-sdk/knowledge -> gpt-tokenizer + @yolk-sdk/agent/protocol + @yolk-sdk/agent/tools + @yolk-sdk/agent/loop only for agent adapter
+@yolk-sdk/mcp -> official @modelcontextprotocol v2 packages + Effect + @yolk-sdk/agent/protocol only for tool/content adapters; @effect/platform-node stays behind Node subpaths
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy

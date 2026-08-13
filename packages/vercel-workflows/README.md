@@ -9,6 +9,7 @@ pnpm add @yolk-sdk/vercel-workflows@canary effect workflow
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
 
 ## Subpaths
 
@@ -34,7 +35,8 @@ import {
 
 The `./workflow` subpath is also exported for explicit imports.
 
-Use `./effect` at host boundaries that start, replay, resume, or cancel Workflow runs:
+Use `./effect` at host boundaries that start, replay, resume, or cancel Workflow runs. This is a
+host-wiring sketch; `runAgentWorkflow`, `request`, and `context` are host-owned values:
 
 ```ts
 import { Effect } from 'effect'
@@ -69,7 +71,8 @@ Continuation state stays plain serializable data for Workflow persistence.
 
 ## Minimal workflow wrapper
 
-Host apps keep concrete Workflow directives local and pass them into the package loop:
+Host apps keep concrete Workflow directives local and pass them into the package loop. The callback
+names below are host-owned `'use step'` functions:
 
 ```ts
 import { createHook } from 'workflow'
@@ -125,19 +128,20 @@ Workflow streams can replay old chunks after retries or reconnects. Durable stre
 `eventId` on every JSON-serializable event, typically `AgentEvent`, including errors. Clients should
 track seen ids.
 
-Use `writeDurableAgentEvent` to assign deterministic ids and write NDJSON:
+Use `writeDurableAgentEvent` to assign deterministic ids and write NDJSON. The following is an
+`Effect.gen` fragment; `writer`, `event`, `runId`, `turn`, and `eventSequence` are host-owned:
 
 ```ts
 const state = makeDurableAgentEventSequencerState(eventSequence)
 const sequenced =
   yield *
   writeDurableAgentEvent({
-  writer,
-  event,
-  streamId: `workflow:${runId}`,
-  turn,
-  state
-})
+    writer,
+    event,
+    streamId: `workflow:${runId}`,
+    turn,
+    state
+  })
 
 eventSequence = sequenced.nextEventSequence
 ```
@@ -175,18 +179,19 @@ from durable state. Hosts that emit terminal events before persistence should no
 `streamAgentEventStreamUntilTerminal()` as a durable-settled signal.
 
 Use `commitThenWriteTerminalEvent` when a step must commit host state before writing its terminal
-event:
+event. This is an `Effect.gen` fragment whose terminal, persistence, writer, and stream values come
+from the host:
 
 ```ts
 const result =
   yield *
   commitThenWriteTerminalEvent({
-  terminal,
-  commit: persistState,
-  write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
-  writeCommitError: error =>
-    writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state })
-})
+    terminal,
+    commit: persistState,
+    write: event => writeDurableAgentEvent({ writer, event, streamId, turn, state }),
+    writeCommitError: error =>
+      writeDurableAgentEvent({ writer, event: commitErrorEvent(error), streamId, turn, state })
+  })
 ```
 
 The helper never writes the success terminal before `commit` succeeds. If `commit` fails, it writes

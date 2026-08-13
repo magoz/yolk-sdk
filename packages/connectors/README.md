@@ -9,21 +9,22 @@ pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                                  |
-| -------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                  |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                        |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version              |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                         |
-| `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                   |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                 |
-| `@yolk-sdk/connectors/notion`          | Notion page/block/database/data-source/comment/user actions and API token slot constants |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                             |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                       |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                          |
+| Subpath                                | Purpose                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                               |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                     |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version           |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
+| `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
+| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                          |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                    |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                       |
 
 ## Imports
 
@@ -141,7 +142,7 @@ const integration = makeIntegration({
   ]
 })
 
-const result = GoogleConnector.invoke({
+const program = GoogleConnector.invoke({
   integration,
   action: 'gmail.search',
   input: { query: 'from:alice@example.com', maxResults: 10 }

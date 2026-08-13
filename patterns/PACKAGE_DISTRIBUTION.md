@@ -37,12 +37,12 @@ Current Changesets config:
 {
   "fixed": [
     [
-    "@yolk-sdk/agent",
-    "@yolk-sdk/connectors",
-    "@yolk-sdk/knowledge",
-    "@yolk-sdk/mcp",
-    "@yolk-sdk/sandbox",
-    "@yolk-sdk/vercel-workflows"
+      "@yolk-sdk/agent",
+      "@yolk-sdk/connectors",
+      "@yolk-sdk/knowledge",
+      "@yolk-sdk/mcp",
+      "@yolk-sdk/sandbox",
+      "@yolk-sdk/vercel-workflows"
     ]
   ],
   "updateInternalDependencies": "patch",
@@ -54,7 +54,7 @@ Current Changesets config:
 
 Rationale:
 
-- `@yolk-sdk/agent` protocol, loop, runtime, client, tools, React, providers, MCP, connectors, and related packages are tightly coupled.
+- Agent APIs and the sibling MCP, connectors, knowledge, sandbox, and Workflow packages are tightly coupled.
 - Users should not debug package version skew.
 - Early APIs will move quickly.
 - Docs can say: install matching `@yolk-sdk/*` versions.

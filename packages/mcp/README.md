@@ -11,6 +11,7 @@ pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Published package metadata requires Node.js 22+; `client/node` and `server/node` are Node-only.
 
 ## Subpaths
 
@@ -22,6 +23,9 @@ Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 | `@yolk-sdk/mcp/protocol`    | Yolk JSON-RPC/MCP adapter helpers                                      |
 | `@yolk-sdk/mcp/server`      | Official full-core server plus Yolk tool-only server primitives        |
 | `@yolk-sdk/mcp/server/node` | Official dual-era stdio server entrypoint                              |
+
+Use `core` for the official full MCP wire-schema surface. Use `protocol` only for Yolk adapters and
+legacy JSON-RPC helpers; it is not a replacement for the full-core APIs.
 
 ## Use the full MCP v2 client
 
@@ -99,3 +103,11 @@ import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 - Treat tool annotations, server identity, icons, and request state as untrusted input.
 
 Remote MCP requires HTTPS by default; localhost HTTP is an explicit development policy.
+
+## Boundaries
+
+- MCP is external protocol infrastructure, not agent-loop or provider policy.
+- `core`, `client`, and `server` expose protocol mechanics; Yolk adapters bridge generic tool and
+  content contracts only.
+- App auth, credential storage, persisted server config, and product catalogs remain host-owned.
+- Node process and stdio conveniences stay behind `client/node` and `server/node`.

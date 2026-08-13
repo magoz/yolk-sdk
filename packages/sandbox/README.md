@@ -9,6 +9,7 @@ pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Published package metadata requires Node.js 22+; `@yolk-sdk/sandbox/vercel` is server-only.
 
 ## Subpaths
 
@@ -44,6 +45,9 @@ const program = Effect.gen(function* () {
   return yield* sandbox.run({ command: 'node --version' })
 }).pipe(Effect.provide(layer))
 ```
+
+The in-memory state store is for examples and tests only. Production hosts must provide a durable
+`SandboxStateStore`.
 
 ## Lifecycle model
 

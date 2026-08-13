@@ -26,11 +26,11 @@ The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 | Package                      | Role                                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `@yolk-sdk/agent`            | Agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice |
-| `@yolk-sdk/mcp`              | MCP client/server/protocol adapters                                                                    |
-| `@yolk-sdk/knowledge`        | Knowledge document/file/context/search contracts and lookup/manage tool helpers                        |
+| `@yolk-sdk/mcp`              | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                     |
+| `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers       |
 | `@yolk-sdk/connectors`       | Effect-native connector, integration, credential, and action primitives                                |
 | `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                 |
-| `@yolk-sdk/vercel-workflows` | Vercel Workflows agent loop contract and Effect host wrappers                                          |
+| `@yolk-sdk/vercel-workflows` | Workflow loop contract, durable stream helpers, and Effect host wrappers                               |
 
 Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 

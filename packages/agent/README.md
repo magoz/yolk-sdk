@@ -13,6 +13,7 @@ pnpm add @yolk-sdk/agent@canary effect
 Add `react` if you use `@yolk-sdk/agent/react`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
@@ -107,16 +108,35 @@ const program = run({
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
 
+## OAuth credentials
+
+`@yolk-sdk/agent/oauth` defines provider-neutral access-token, broker, freshness, and credential-source
+contracts. Provider subpaths add vendor request/response conversion without owning persistence.
+
+```ts
+import { credentialSourceFromBroker, type TokenBrokerClient } from '@yolk-sdk/agent/oauth'
+
+const makeTokenProgram = (hostBroker: TokenBrokerClient) =>
+  credentialSourceFromBroker(hostBroker, {
+    provider: 'openai-codex',
+    subjectId: 'host-user-id'
+  }).getAccessToken({ minTtlSeconds: 300 })
+```
+
+`hostBroker` is a host implementation of `TokenBrokerClient`. The host stores, refreshes, revokes,
+and authorizes credentials; the package receives short-lived access tokens and never persists
+secrets.
+
 ## Provider configuration
 
 Provider output limits are host-owned when the endpoint supports them. Yolk does not infer model
 limits or apply hidden fallbacks.
 
-| Provider factory                   | Output-limit field      |
-| ---------------------------------- | ----------------------- |
-| `makeOpenAiProviderLayer`          | `maxCompletionTokens`   |
-| `makeOpenAiCodexProviderLayer`     | none                    |
-| `makeAnthropicClaudeProviderLayer` | `maxTokens`             |
+| Provider factory                   | Output-limit field    |
+| ---------------------------------- | --------------------- |
+| `makeOpenAiProviderLayer`          | `maxCompletionTokens` |
+| `makeOpenAiCodexProviderLayer`     | none                  |
+| `makeAnthropicClaudeProviderLayer` | `maxTokens`           |
 
 The public `toOpenAiRequestBody` and `toAnthropicClaudeRequestBody` helpers require the matching
 limit configuration. ChatGPT subscription Codex rejects vendor `max_output_tokens`, so
@@ -202,6 +222,14 @@ and host tool-call identifiers, or pass a whole-transcript `estimateTokens` to p
 transformers. Exact provider-request accounting must also include system prompts, tool definitions,
 vendor framing, and a safety margin. Reuse one estimator for warnings, planning, and before/after
 checks; tokenizer dependencies remain host-owned.
+
+## Skillsets
+
+`@yolk-sdk/agent/skillset` parses skill Markdown and slash-command Markdown into portable
+`SkillInfo`, `CommandInfo`, and `SkillsetManifest` data. Use `parseSkillMarkdown` /
+`parseCommandMarkdown` at file or database boundaries, `renderCommand` for command invocation, and
+`mergeSkillsets` to combine host sources. Earlier sources win name conflicts; duplicate names
+inside one source fail validation. Hosts own file discovery, storage, enablement, and source order.
 
 ## Protocol content
 
@@ -432,7 +460,9 @@ aborts, and implementation bugs outside typed tool execution.
 ## Host responsibilities
 
 - Choose models/providers and provide an LLM provider layer, using SDK provider subpaths or host adapters.
+- Store, refresh, revoke, and authorize OAuth credentials; expose only runtime access tokens.
 - Configure model-specific provider output-token limits.
+- Build UI components and styling, own auth, and wire headless React hooks to host transports.
 - Persist sessions, transcripts, and append logs.
 - Persist/return one `ToolResultMessage` for every host tool call, including `isError` failures.
 - Persist terminal provider failures and clear active run ids where applicable.

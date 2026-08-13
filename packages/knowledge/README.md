@@ -9,6 +9,7 @@ pnpm add @yolk-sdk/knowledge@canary @yolk-sdk/agent@canary effect
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Published package metadata requires Node.js 22+.
 
 ## Model
 
@@ -105,6 +106,10 @@ Add the resulting text to your system prompt. Your app chooses which documents a
 summarizes concurrently, checks embedding cardinality, calls `replaceDocumentChunks`, then marks
 the index record `ready`.
 
+`DefaultKnowledgeChunkerLive` uses the bundled `gpt-tokenizer` `o200k_base` encoding for default
+chunk boundaries and token counts. Hosts can provide another `KnowledgeChunker` layer when they
+need model-specific tokenization.
+
 Failures are returned as `KnowledgeIngestionError` with a `store`, `extract`, `chunk`, `embed`, or
 `summarize` stage. The pipeline then best-effort calls `markDocumentError` with the error message;
 failure to mark the error is suppressed so the original failure survives.
@@ -118,6 +123,9 @@ filtering, and any coordination with the content document store.
 - Own users, workspaces, permissions, routing, and product policy.
 - Implement `KnowledgeStore` with app storage.
 - Implement `KnowledgeFileBlobStore` with R2/S3/blob storage when files are needed.
+- When using ingestion, provide `KnowledgeExtractor`, `KnowledgeChunker`, `KnowledgeEmbedder`,
+  `KnowledgeSummarizer`, and `SearchIndexStore` layers. Summary/title values may be absent, but the
+  current pipeline still requires the summarizer service.
 - Own concrete extraction, embeddings, search SQL/vector storage, and upload URLs.
 - Keep slug uniqueness scoped to the host boundary.
 
