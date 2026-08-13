@@ -54,6 +54,11 @@ export type VercelAgentWorkflowToolBatchStepResult = {
   readonly usage?: unknown
   readonly awaitingInput?: VercelAgentWorkflowAwaitingInput
   readonly eventSequence?: number
+  /**
+   * A failure captured by the tool-step boundary after partial progress. Returning it instead of
+   * rejecting lets orchestration retain usage and event sequencing from completed sibling tools.
+   */
+  readonly failure?: unknown
 }
 
 export type WorkflowStepResult<A> =
@@ -220,6 +225,14 @@ export async function runVercelAgentWorkflow(
     }
 
     if (modelResult.value.done) {
+      const terminalState: SerializableWorkflowState = {
+        request: input.request,
+        messages: modelResult.value.messages,
+        createdMessages: modelResult.value.createdMessages,
+        usage: modelResult.value.usage,
+        turn: modelResult.value.turn,
+        eventSequence: modelResult.value.eventSequence ?? state.eventSequence
+      }
       const closeResult = await settleWorkflowStep(retryWorkflowStep(closeStream, closeStreamRetry))
 
       if (closeResult._tag === 'Failure') {
@@ -229,14 +242,14 @@ export async function runVercelAgentWorkflow(
           _tag: 'CloseStreamFailed',
           turns: modelResult.value.turn,
           error: closeResult.error,
-          state
+          state: terminalState
         }
       }
 
       return {
         _tag: 'Completed',
         turns: modelResult.value.turn,
-        state
+        state: terminalState
       }
     }
 
@@ -270,14 +283,29 @@ export async function runVercelAgentWorkflow(
           _tag: 'ToolBatchStepFailed',
           turn: modelResult.value.turn,
           error: toolsResult.error,
-          state:
-            toolHitlResponses.length === 0
-              ? state
-              : {
-                  ...state,
-                  usage: cumulativeUsage,
-                  eventSequence: toolEventSequence
-                }
+          state: {
+            ...state,
+            usage: cumulativeUsage,
+            eventSequence: toolEventSequence
+          }
+        }
+      }
+
+      cumulativeUsage = toolsResult.value.usage ?? cumulativeUsage
+      toolEventSequence = toolsResult.value.eventSequence ?? toolEventSequence
+
+      if (toolsResult.value.failure !== undefined) {
+        await writeErrorSafely(writeError, toolsResult.value.failure)
+
+        return {
+          _tag: 'ToolBatchStepFailed',
+          turn: modelResult.value.turn,
+          error: toolsResult.value.failure,
+          state: {
+            ...state,
+            usage: cumulativeUsage,
+            eventSequence: toolEventSequence
+          }
         }
       }
 
@@ -288,8 +316,7 @@ export async function runVercelAgentWorkflow(
 
       const awaitingInput = toolsResult.value.awaitingInput
       cumulativeUsage = toolsResult.value.usage ?? awaitingInput.usage ?? cumulativeUsage
-      toolEventSequence =
-        awaitingInput.eventSequence ?? toolsResult.value.eventSequence ?? toolEventSequence
+      toolEventSequence = awaitingInput.eventSequence ?? toolEventSequence
 
       const hitlResponse = await settleWorkflowStep(
         retryWorkflowStep(() => {

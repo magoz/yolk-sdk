@@ -38,6 +38,15 @@ describe('workflowErrorEvent', () => {
     })
   })
 
+  it('redacts unexpected defect details from public errors', () => {
+    expect(workflowErrorEvent(new Error('SENSITIVE_DEFECT_DETAIL'))).toMatchObject({
+      _tag: 'AgentError',
+      code: 'unknown',
+      message: 'Workflow agent failed unexpectedly',
+      retryable: false
+    })
+  })
+
   it('maps response encoding errors', () => {
     expect(
       workflowErrorEvent(new AgentResponseEncodingError({ message: 'bad event' }))

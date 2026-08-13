@@ -31,6 +31,8 @@ export class AgentWorkflowStepError extends Data.TaggedError('AgentWorkflowStepE
 const unknownToMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Workflow agent failed'
 
+const unknownPublicMessage = 'Workflow agent failed unexpectedly'
+
 const knownRuntimeError = (error: unknown): RuntimeError | AgentLoopError | undefined => {
   if (Schema.is(SessionNotFoundError)(error)) {
     return error
@@ -87,7 +89,7 @@ export const workflowErrorEvent = (error: unknown) => {
 
   return AgentError.make({
     code: 'unknown',
-    message: unknownToMessage(error),
+    message: unknownPublicMessage,
     retryable: false
   })
 }

@@ -185,7 +185,7 @@ export const recoverSubagentToolFailure = <A, E, R>(
       )
     )
 
-  return effect.pipe(Effect.catch(recover), Effect.catchDefect(recover))
+  return effect.pipe(Effect.catch(recover))
 }
 
 export const collectSubagentEvents = (

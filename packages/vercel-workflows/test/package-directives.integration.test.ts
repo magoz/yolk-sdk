@@ -97,7 +97,12 @@ describe('package-owned workflow directives', () => {
     await expect(Effect.runPromise(run.returnValue)).resolves.toMatchObject({
       _tag: 'Completed',
       state: {
-        messages: ['request-1', 'assistant-1', 'result-approval-tool-approved'],
+        messages: [
+          'request-1',
+          'assistant-1',
+          'result-approval-tool-approved',
+          'assistant-2'
+        ],
         eventSequence: 9
       }
     })

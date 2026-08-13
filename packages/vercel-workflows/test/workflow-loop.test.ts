@@ -68,7 +68,17 @@ describe('runVercelAgentWorkflow', () => {
       writeError: emptyStep
     })
 
-    expect(result._tag).toBe('Completed')
+    expect(result).toMatchObject({
+      _tag: 'Completed',
+      state: {
+        request: 'request-1',
+        messages: ['request-1', 'assistant-1'],
+        createdMessages: ['assistant-1'],
+        usage: { turns: 1 },
+        turn: 1,
+        eventSequence: 0
+      }
+    })
     expect(states).toEqual([
       { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
     ])
@@ -406,7 +416,34 @@ describe('runVercelAgentWorkflow', () => {
     })
   })
 
-  it('returns the current workflow state when the initial tool batch fails', async () => {
+  it('preserves partial tool usage returned with a captured batch failure', async () => {
+    const error = new Error('tools failed after partial progress')
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input => step(() => toolModelResult(input)),
+      runToolBatchStep: input =>
+        step(() => ({
+          ...toolBatchResult(input),
+          usage: { turns: 1, subagentTurns: 4 },
+          eventSequence: 11,
+          failure: error
+        })),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result).toMatchObject({
+      _tag: 'ToolBatchStepFailed',
+      error,
+      state: {
+        usage: { turns: 1, subagentTurns: 4 },
+        eventSequence: 11
+      }
+    })
+  })
+
+  it('preserves model usage when the initial tool batch fails', async () => {
     const error = new Error('tools failed')
 
     const result = await runWorkflow({
@@ -426,7 +463,13 @@ describe('runVercelAgentWorkflow', () => {
       _tag: 'ToolBatchStepFailed',
       turn: 1,
       error,
-      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+      state: {
+        request: 'request-1',
+        createdMessages: [],
+        usage: { turns: 1, subagentTurns: 2 },
+        turn: 1,
+        eventSequence: 9
+      }
     })
   })
 
@@ -448,7 +491,14 @@ describe('runVercelAgentWorkflow', () => {
       _tag: 'CloseStreamFailed',
       turns: 1,
       error,
-      state: { request: 'request-1', createdMessages: [], turn: 1, eventSequence: 0 }
+      state: {
+        request: 'request-1',
+        messages: ['request-1', 'assistant-1'],
+        createdMessages: ['assistant-1'],
+        usage: { turns: 1 },
+        turn: 1,
+        eventSequence: 0
+      }
     })
     expect(errors).toEqual([error])
   })

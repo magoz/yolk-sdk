@@ -1,5 +1,5 @@
 import { createHook, getWorkflowMetadata, getWritable } from 'workflow'
-import { Effect, Ref, Stream } from 'effect'
+import { Cause, Effect, Ref, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   makeDurableAgentEventSequencerState,
@@ -124,44 +124,39 @@ const collectModelEvent = (input: {
   readonly reason: Ref.Ref<'stop' | 'tool_use'>
   readonly eventSequence: Ref.Ref<number>
   readonly turn: number
-}) =>
-  writeSequencedWorkflowEvent({
-    writer: input.writer,
-    event: input.event,
-    workflowRunId: input.workflowRunId,
-    turn: input.turn,
-    eventSequence: input.eventSequence
-  }).pipe(
-    Effect.flatMap(() => {
-      if (Schema.is(AssistantMessageEvent)(input.event)) {
-        return Schema.decodeUnknownEffect(AssistantMessageEvent)(input.event).pipe(
-          Effect.flatMap(event => Ref.set(input.assistantMessage, event.message))
-        )
-      }
-
-      if (Schema.is(ToolInputEnd)(input.event)) {
-        return Schema.decodeUnknownEffect(ToolInputEnd)(input.event).pipe(
+}) => {
+  const collect = Schema.is(AssistantMessageEvent)(input.event)
+    ? Schema.decodeUnknownEffect(AssistantMessageEvent)(input.event).pipe(
+        Effect.flatMap(event => Ref.set(input.assistantMessage, event.message))
+      )
+    : Schema.is(ToolInputEnd)(input.event)
+      ? Schema.decodeUnknownEffect(ToolInputEnd)(input.event).pipe(
           Effect.flatMap(event => Ref.update(input.toolCalls, calls => [...calls, event.call]))
         )
-      }
-
-      if (Schema.is(TurnEnd)(input.event)) {
-        return Schema.decodeUnknownEffect(TurnEnd)(input.event).pipe(
-          Effect.flatMap(event => Ref.set(input.reason, event.reason))
-        )
-      }
-
-      if (Schema.is(UsageUpdate)(input.event)) {
-        return Schema.decodeUnknownEffect(UsageUpdate)(input.event).pipe(
-          Effect.flatMap(event =>
-            Ref.update(input.usage, usage => addAgentUsage(usage, event.usage))
+      : Schema.is(TurnEnd)(input.event)
+        ? Schema.decodeUnknownEffect(TurnEnd)(input.event).pipe(
+            Effect.flatMap(event => Ref.set(input.reason, event.reason))
           )
-        )
-      }
+        : Schema.is(UsageUpdate)(input.event)
+          ? Schema.decodeUnknownEffect(UsageUpdate)(input.event).pipe(
+              Effect.flatMap(event =>
+                Ref.update(input.usage, usage => addAgentUsage(usage, event.usage))
+              )
+            )
+          : Effect.void
 
-      return Effect.void
-    })
+  return collect.pipe(
+    Effect.andThen(
+      writeSequencedWorkflowEvent({
+        writer: input.writer,
+        event: input.event,
+        workflowRunId: input.workflowRunId,
+        turn: input.turn,
+        eventSequence: input.eventSequence
+      })
+    )
   )
+}
 
 const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
@@ -300,8 +295,10 @@ export async function runAgentWorkflowToolBatchStep(input: {
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
   const workflowRunId = getWorkflowMetadata().workflowRunId
+  let latestUsage = input.usage
+  let latestEventSequence = input.eventSequence
 
-  return await Effect.runPromise(
+  const result = await Effect.runPromiseExit(
     Effect.gen(function* () {
       const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
@@ -332,6 +329,15 @@ export async function runAgentWorkflowToolBatchStep(input: {
             turn: input.turn ?? 0,
             eventSequence
           }).pipe(
+            Effect.tap(() =>
+              Ref.get(eventSequence).pipe(
+                Effect.tap(sequence =>
+                  Effect.sync(() => {
+                    latestEventSequence = sequence
+                  })
+                )
+              )
+            ),
             Effect.flatMap(() => {
               if (Schema.is(AgentAwaitingInput)(event)) {
                 return Schema.decodeUnknownEffect(AgentAwaitingInput)(event).pipe(
@@ -347,6 +353,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 yield* Ref.update(cumulativeUsage, current =>
                   addWorkflowToolResultUsage(current, event.result)
                 )
+                latestUsage = yield* Ref.get(cumulativeUsage)
                 yield* Ref.update(toolResultMessages, messages => {
                   const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
 
@@ -394,6 +401,23 @@ export async function runAgentWorkflowToolBatchStep(input: {
       }
     }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
   )
+
+  if (result._tag === 'Success') {
+    return result.value
+  }
+
+  const expectedFailure = Cause.findFail(result.cause)
+  if (Result.isFailure(expectedFailure)) {
+    return await Effect.runPromise(Effect.failCause(result.cause))
+  }
+
+  return {
+    messages: [],
+    createdMessages: input.createdMessages,
+    usage: latestUsage,
+    eventSequence: latestEventSequence,
+    failure: expectedFailure.success.error
+  }
 }
 
 export async function closeAgentWorkflowStream() {

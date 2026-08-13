@@ -97,7 +97,7 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
     })
   )
 
-  it.effect('returns typed metadata for child setup failures and defects', () =>
+  it.effect('returns typed metadata for expected child setup failures', () =>
     Effect.gen(function* () {
       const common = {
         callId: 'call_1',
@@ -118,11 +118,6 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
         ),
         common
       )
-      const unknownFailure = yield* recoverSubagentToolFailure(
-        Effect.die(new Error('Unexpected child failure.')),
-        common
-      )
-
       expect(toolFailure).toMatchObject({
         isError: true,
         structuredContent: {
@@ -134,17 +129,15 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
           }
         }
       })
-      expect(unknownFailure).toMatchObject({
-        isError: true,
-        structuredContent: {
-          status: 'error',
-          error: {
-            code: 'unknown',
-            message: 'Unexpected child failure.',
-            retryable: false
-          }
-        }
-      })
+      const defect = yield* recoverSubagentToolFailure(
+        Effect.die(new Error('Unexpected child defect.')),
+        common
+      ).pipe(Effect.exit)
+
+      expect(defect._tag).toBe('Failure')
+      if (defect._tag === 'Failure') {
+        expect(String(defect.cause)).toContain('Unexpected child defect.')
+      }
     })
   )
 
