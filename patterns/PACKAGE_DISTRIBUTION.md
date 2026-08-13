@@ -237,7 +237,7 @@ Requirements:
 
 Local npm login as `magoz` is required only for approved local first-publish or emergency-publish exceptions.
 
-Use the `package-release` skill after restarting Pi for the guided release workflow.
+Use the `package-release` skill for the guided release workflow.
 
 ## GitHub Actions Publish
 

@@ -18,6 +18,20 @@ Small project-local ESLint plugin enforcing Effect/type-safety conventions from 
 - Root `eslint.config.mjs` imports `recommended`; update both when adding a rule.
 - Update `AGENTS.md` and relevant `patterns/*` docs when adding/removing enforced rules.
 
+## Enforced Rules
+
+| Rule                                  | Contract                                                   |
+| ------------------------------------- | ---------------------------------------------------------- |
+| `no-disable-validation`               | Ban `{ disableValidation: true }`                          |
+| `no-catch-all-cause`                  | Ban `Effect.catchCause`                                    |
+| `no-schema-from-self`                 | Ban removed `*FromSelf` schemas                            |
+| `no-schema-decode-sync`               | Ban synchronous Schema decode/encode                       |
+| `prefer-option-from-nullable`         | Prefer Effect nullish helpers                              |
+| `no-node-deps-in-agent-tools`         | Ban Node-only deps and raw `fetch()` in Next app tools     |
+
+TypeScript's `no-explicit-any` and `consistent-type-assertions` rules enforce the related bans on
+`any` and `as Type`; see `patterns/TYPESCRIPT_CONVENTIONS.md`.
+
 ## Current Limits
 
 - Most rules match identifiers named exactly `Effect`, `Schema`, or `Option`; aliased/direct imports may bypass checks.

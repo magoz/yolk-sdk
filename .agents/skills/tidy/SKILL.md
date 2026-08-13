@@ -104,7 +104,8 @@ Ignore:
 Move or rewrite content by boundary:
 
 - Next/App Router rules in root → `examples/next/AGENTS.md`, `examples/next/app/AGENTS.md`, or `examples/next/patterns/*`
-- Package release/build/export rules → `packages/AGENTS.md` or `patterns/PACKAGE_DISTRIBUTION.md`
+- Cross-package release/build/export policy → `patterns/PACKAGE_DISTRIBUTION.md` or `patterns/PACKAGE_ARCHITECTURE.md`
+- Package-specific rules → `packages/<name>/AGENTS.md`; keep `packages/AGENTS.md` to the map and high-level boundaries
 - Domain-free package architecture → `patterns/PACKAGE_ARCHITECTURE.md`
 - App-owned service/domain rules → `examples/next/lib/services/AGENTS.md`, `examples/next/lib/core/AGENTS.md`, or local child docs
 - Cloudflare Worker/DO rules → `cloudflare/agent/AGENTS.md`
@@ -216,6 +217,12 @@ When touching package docs/boundaries:
 When touching Cloudflare docs/boundaries:
 
 - `pnpm cloudflare:check`
+
+When changing `.agents/skills/**`:
+
+- run `pnpm skillset:build`
+- inspect `cloudflare/agent/src/generated/skillset.ts`
+- run `pnpm cloudflare:check`
 
 When changing executable scripts/config:
 

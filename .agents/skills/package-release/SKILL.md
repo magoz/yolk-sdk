@@ -203,7 +203,6 @@ Yolk should mirror Effect + MCP SDK:
 - Public `packages/*` manifests are publishable; private apps stay private.
 - Run required checks before finishing any release-prep change.
 - Do not publish from local machine during normal flow.
-- Remind the user to restart Pi after editing this skill so skill discovery refreshes.
 
 ## Reading Order
 

@@ -28,4 +28,12 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 ## Env
 
 - App env files live under `examples/next`: `.env.local`, `.env.test`, `.env.example`.
-- `examples/next/lib/dotenv.ts` loads app-local env files for scripts, Vitest, and Playwright.
+- Effect app/services use `Config.*`; map config errors around the owning `Effect.gen` block.
+- Direct `process.env` is limited to app config, `lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, DB scripts, and synchronous SDK callbacks such as `TelemetryLayer`.
+- `lib/dotenv.ts` is the only direct `dotenv.config()` owner and loads app-local env for scripts, Vitest, and Playwright.
+
+## App Notes
+
+- React Compiler is enabled.
+- PostHog is proxied through `/ph/*`.
+- Drizzle v1 RC uses the Effect-native driver.

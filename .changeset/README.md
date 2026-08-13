@@ -31,4 +31,4 @@ Canary release prep:
 
 Canary versions stay lockstep across every public `@yolk-sdk/*` package.
 
-Use the `package-release` skill after restarting Pi for guided release steps.
+Use the `package-release` skill for guided release steps.

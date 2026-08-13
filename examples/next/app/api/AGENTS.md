@@ -9,15 +9,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | Route                                          | Role                                   |
 | ---------------------------------------------- | -------------------------------------- |
 | `auth/[...all]/route.ts`                       | better-auth Next handler               |
-| `agent/route.ts`                               | Text agent NDJSON stream               |
-| `agent/workflow/route.ts`                      | Vercel Workflow text NDJSON stream     |
-| `agent/workflow/[runId]/route.ts`              | Workflow stream replay/cancel          |
-| `agent/AGENTS.md`                              | Agent route-local contracts            |
-| `agent/commands/route.ts`                      | Agent command list/render              |
-| `agent/realtime/call/route.ts`                 | OpenAI Realtime SDP exchange           |
-| `agent/realtime/tool/route.ts`                 | Voice tool execution bridge            |
-| `agent/voice/transcribe/route.ts`              | Hold-to-speak STT                      |
-| `agent/voice/speak/route.ts`                   | Hold-to-speak TTS                      |
+| `agent/*`                                      | See `agent/AGENTS.md`                   |
 | `knowledge/files/route.ts`                     | Authenticated knowledge file download  |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge               |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
@@ -51,7 +43,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 ## Exceptions
 
 - `auth/[...all]/route.ts` may use `Effect.runPromise()` to construct better-auth's handler at the Next boundary.
-- Workflow `[runId]` routes may use `Effect.runPromise()` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
+- Agent-route exceptions live in `agent/AGENTS.md`.
 - `internal/cloudflare/*` routes require `YOLK_CLOUDFLARE_BRIDGE_SECRET`; do not expose to browsers.
 - Browser/WebRTC specifics stay in `examples/next/app/agent/use-realtime-voice.ts` and `examples/next/lib/agents/realtime/*`, not route bodies.
 

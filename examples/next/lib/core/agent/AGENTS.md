@@ -20,11 +20,8 @@ Domain functions and server actions for provider OAuth, skills/commands, and con
 
 ## Server actions
 
-- One action per `*-action.ts` file with `'use server'`.
-- Redirect unauthenticated users via `NextEffect.redirect('/login')`.
-- Revalidate affected `/agent*` route(s) only after successful mutation.
-- Return explicit ADTs for UI state; do not leak provider error details.
-- Skills, commands, and Telegram connector mutations share the same action/result discipline.
+Follow the parent `examples/next/lib/core/AGENTS.md` action contract. Agent mutations revalidate the
+affected `/agent*` route only after success and never expose provider error details.
 
 ## Anthropic PKCE
 
@@ -33,5 +30,4 @@ Domain functions and server actions for provider OAuth, skills/commands, and con
 
 ## Anti-patterns
 
-- Do not read raw env or call vendor HTTP directly here.
 - Do not store refresh tokens in Cloudflare bootstrap responses.

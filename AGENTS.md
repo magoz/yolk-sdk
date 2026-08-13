@@ -39,24 +39,15 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 
 ## EFFECT / TYPESCRIPT RULES
 
-| Rule                                            | Description                                            |
-| ----------------------------------------------- | ------------------------------------------------------ |
-| `local/no-disable-validation`                   | Never use `{ disableValidation: true }`                |
-| `local/no-catch-all-cause`                      | Never use `Effect.catchCause`                          |
-| `local/no-schema-from-self`                     | Never use `*FromSelf` schemas                          |
-| `local/no-schema-decode-sync`                   | Never use sync Schema decode/encode                    |
-| `local/prefer-option-from-nullable`             | Use Effect nullish helpers                             |
-| `@typescript-eslint/no-explicit-any`            | Never use `any`                                        |
-| `@typescript-eslint/consistent-type-assertions` | Never use `as Type` casts                              |
-| `local/no-node-deps-in-agent-tools`             | Never import Node-only deps/raw `fetch()` in app tools |
-
-Effect v4 notes: use `Context.Service`, `Effect.catch`, `Result`, `Logger.layer([Logger.consolePretty()])`, `Schema.TaggedErrorClass` when schema-bound errors are needed.
+- Shared Effect rules: `patterns/EFFECT_BEST_PRACTICES.md`.
+- TypeScript/import/file rules: `patterns/TYPESCRIPT_CONVENTIONS.md`.
+- Enforced local lint rules and their scope: `eslint-local-rules/AGENTS.md`.
 
 ## ENV BOUNDARIES
 
 - Effect app/service code uses `Config.*` inside `Effect.gen`; map config errors around the whole block.
-- Direct `process.env` only in sync config/script/test boundaries: root/app configs, `examples/next/lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, app DB scripts, and sync SDK callbacks like `TelemetryLayer`.
-- Never add direct `dotenv.config()` outside `examples/next/lib/dotenv.ts`.
+- Direct `process.env` is limited to owner-documented synchronous config, script, test, and SDK callback boundaries.
+- Never add ad hoc `dotenv.config()` calls; use the loader documented by the owning app.
 
 ## WHERE TO LOOK
 
@@ -107,9 +98,6 @@ Reference repos are shallow, gitignored, read-only inspiration. Run `pnpm clone-
 ## NOTES
 
 - No full CI workflow currently checked in; Vercel auto-deploys app. Package publish policy lives in `patterns/PACKAGE_DISTRIBUTION.md`.
-- React Compiler enabled.
-- PostHog proxied via `/ph/*`.
-- Drizzle v1 RC with Effect-native driver.
 - LSP may show stale Effect v3 errors; trust `pnpm tsc`.
 - Root Vitest may discover package tests; `pnpm test:run` also runs package tests.
 - This is canonical root knowledge.
