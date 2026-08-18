@@ -17,36 +17,37 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                               | Purpose                                                        |
-| ----------------------------------------------------- | -------------------------------------------------------------- |
-| `@yolk-sdk/agent/protocol`                            | Wire messages, events, content, usage, tool schemas            |
-| `@yolk-sdk/agent/loop`                                | Stateless LLM/tool loop                                        |
-| `@yolk-sdk/agent/loop/testing`                        | Faux provider and tool executor test helpers                   |
-| `@yolk-sdk/agent/runtime`                             | Transcript or append-backed runtime orchestration              |
-| `@yolk-sdk/agent/client`                              | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
-| `@yolk-sdk/agent/compaction`                          | Host-owned compaction budgets, checkpoints, formatting, retry  |
-| `@yolk-sdk/agent/tools`                               | Tool registry, `makeTool`, subagent/question contracts         |
-| `@yolk-sdk/agent/react`                               | Headless React chat hook, reducer, selectors, and render model |
-| `@yolk-sdk/agent/oauth`                               | Provider-neutral OAuth token and broker contracts              |
-| `@yolk-sdk/agent/providers/openai`                    | OpenAI/Codex OAuth and broker helpers                          |
-| `@yolk-sdk/agent/providers/openai/codex`              | OpenAI Codex request and auth helpers                          |
-| `@yolk-sdk/agent/providers/openai/codex-usage`        | Codex subscription-allowance snapshots                         |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | Codex LLM provider factory                                     |
-| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible LLM provider factory                         |
-| `@yolk-sdk/agent/providers/openai/realtime`           | OpenAI Realtime session config and event codecs                |
-| `@yolk-sdk/agent/providers/openai/speech`             | OpenAI text-to-speech and transcription adapters               |
-| `@yolk-sdk/agent/providers/anthropic`                 | Anthropic/Claude OAuth and broker helpers                      |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                |
-| `@yolk-sdk/agent/providers/anthropic/usage`           | Claude subscription-allowance snapshots                        |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                    |
-| `@yolk-sdk/agent/providers/xai`                       | Grok subscription OAuth and token broker helpers               |
-| `@yolk-sdk/agent/providers/xai/grok`                  | Grok subscription request and auth helpers                     |
-| `@yolk-sdk/agent/providers/xai/grok-provider`         | Grok subscription LLM provider factory                         |
-| `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas               |
-| `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs              |
-| `@yolk-sdk/agent/voice`                               | Voice protocol, controller, tool handler, projection, speech   |
-| `@yolk-sdk/agent/voice/browser`                       | Browser WebRTC voice transport                                 |
-| `@yolk-sdk/agent/voice/react`                         | Headless browser voice React hook                              |
+| Subpath                                                | Purpose                                                        |
+| ------------------------------------------------------ | -------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                             | Wire messages, events, content, usage, tool schemas            |
+| `@yolk-sdk/agent/loop`                                 | Stateless LLM/tool loop                                        |
+| `@yolk-sdk/agent/loop/testing`                         | Faux provider and tool executor test helpers                   |
+| `@yolk-sdk/agent/runtime`                              | Transcript or append-backed runtime orchestration              |
+| `@yolk-sdk/agent/client`                               | HTTP/NDJSON transport, HITL resume, retry/error state helpers  |
+| `@yolk-sdk/agent/compaction`                           | Host-owned compaction budgets, checkpoints, formatting, retry  |
+| `@yolk-sdk/agent/tools`                                | Tool registry, `makeTool`, subagent/question contracts         |
+| `@yolk-sdk/agent/react`                                | Headless React chat hook, reducer, selectors, and render model |
+| `@yolk-sdk/agent/oauth`                                | Provider-neutral OAuth token and broker contracts              |
+| `@yolk-sdk/agent/providers/openai`                     | OpenAI/Codex OAuth and broker helpers                          |
+| `@yolk-sdk/agent/providers/openai/codex`               | OpenAI Codex request and auth helpers                          |
+| `@yolk-sdk/agent/providers/openai/codex-usage`         | Codex subscription-allowance snapshots                         |
+| `@yolk-sdk/agent/providers/openai/codex-provider`      | Codex LLM provider factory                                     |
+| `@yolk-sdk/agent/providers/openai/provider`            | OpenAI-compatible LLM provider factory                         |
+| `@yolk-sdk/agent/providers/openai/realtime`            | OpenAI Realtime session config and event codecs                |
+| `@yolk-sdk/agent/providers/openai/speech`              | OpenAI text-to-speech and transcription adapters               |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | Vercel AI Gateway Chat Completions provider factory            |
+| `@yolk-sdk/agent/providers/anthropic`                  | Anthropic/Claude OAuth and broker helpers                      |
+| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request and auth helpers                                |
+| `@yolk-sdk/agent/providers/anthropic/usage`            | Claude subscription-allowance snapshots                        |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | Claude LLM provider factory                                    |
+| `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers               |
+| `@yolk-sdk/agent/providers/xai/grok`                   | Grok subscription request and auth helpers                     |
+| `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription LLM provider factory                         |
+| `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas               |
+| `@yolk-sdk/agent/skillset`                             | Portable skill and slash-command parsing/catalogs              |
+| `@yolk-sdk/agent/voice`                                | Voice protocol, controller, tool handler, projection, speech   |
+| `@yolk-sdk/agent/voice/browser`                        | Browser WebRTC voice transport                                 |
+| `@yolk-sdk/agent/voice/react`                          | Headless browser voice React hook                              |
 
 ## Imports
 
@@ -88,7 +89,7 @@ import {
   makeAgentChatEventProjectionState,
   useAgentChat
 } from '@yolk-sdk/agent/react'
-import { makeOpenAiProviderLayer } from '@yolk-sdk/agent/providers/openai/provider'
+import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
 ```
 
 Test helpers live behind their own subpath:
@@ -153,6 +154,7 @@ limits or apply hidden fallbacks.
 | Provider factory                   | Output-limit field    |
 | ---------------------------------- | --------------------- |
 | `makeOpenAiProviderLayer`          | `maxCompletionTokens` |
+| `makeVercelAiGatewayProviderLayer` | `maxCompletionTokens` |
 | `makeOpenAiCodexProviderLayer`     | none                  |
 | `makeAnthropicClaudeProviderLayer` | `maxTokens`           |
 | `makeXAiGrokProviderLayer`         | `maxOutputTokens`     |
@@ -162,6 +164,15 @@ require the matching limit configuration. ChatGPT subscription Codex rejects ven
 `max_output_tokens`, so `makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the
 optional deprecated `maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both
 `OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+
+Vercel AI Gateway uses its OpenAI-compatible JSON Chat Completions endpoint. Pass either an AI
+Gateway API key or Vercel OIDC token as `apiKey`; `maxCompletionTokens` is sent as Gateway
+`max_tokens`. The env-backed `VercelAiGatewayProviderLayer` tries `AI_GATEWAY_API_KEY` first, then
+`VERCEL_OIDC_TOKEN`, and requires integer
+`AI_GATEWAY_MAX_COMPLETION_TOKENS`. Model ids are opaque `provider/model` strings. Hosts may set
+`fallbackModels`, provider `routing`, and optional `http-referer` / `x-title` attribution headers.
+Required authorization and JSON headers cannot be replaced through `extraHeaders`. Only override
+`chatCompletionsUrl` with a trusted proxy because it receives the bearer credential.
 
 Grok subscription access uses `https://cli-chat-proxy.grok.com/v1/responses`, not the xAI developer
 API-key endpoint. The adapter sends the required CLI-session and model-routing headers and rejects
@@ -202,8 +213,9 @@ policy and emits protocol-visible retry/error state:
 - `buildAgentChatItems` can project active retry state as an `AgentChatItem` with `_tag: 'Retry'`.
 - Anthropic prompt-too-long responses become non-retryable `context_overflow`; the host-owned
   compaction wrapper may compact and retry once.
-- Anthropic `max_tokens` completion fails as non-retryable `invalid_response` instead of reporting
-  a truncated turn as complete.
+- Anthropic `max_tokens` and OpenAI-compatible `finish_reason: "length"` / `"content_filter"`
+  completions fail as non-retryable `invalid_response` instead of reporting truncated or filtered
+  output as complete.
 
 Raw provider response bodies stay out of protocol/UI. Hosts own durable persistence and display of
 typed retry/error state.
@@ -300,8 +312,9 @@ inside one source fail validation. Hosts own file discovery, storage, enablement
 - `AudioPart` with `InlineBase64`, `Url`, or host-owned `Ref` source
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
-`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat supports image
-URLs; OpenAI Codex supports image and document URLs; Anthropic supports image and PDF URLs. The Grok
+`refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat and Vercel AI
+Gateway support image URLs; OpenAI Codex supports image and document URLs; Anthropic supports image
+and PDF URLs. The Grok
 Responses lowerer can encode image URLs/data URLs, but hosts should enable image capability only for
 subscription models they have verified accept image input. Use
 inline base64 for simple apps, durable URLs for app-owned uploads, or persist `Ref` values and call
@@ -391,7 +404,7 @@ replay.
 
 ## Parallel tool calls
 
-OpenAI, OpenAI Codex, and Grok requests enable vendor parallel tool calls when tools are available. The
+OpenAI, Vercel AI Gateway, OpenAI Codex, and Grok requests enable vendor parallel tool calls when tools are available. The
 Codex stream adapter preserves every sibling function call and suppresses final-response replays
 by call id. The loop executes calls emitted in the same model turn concurrently, bounded by the
 host-configured `LoopConfig.toolConcurrency`; dependent work waits for the next model turn.

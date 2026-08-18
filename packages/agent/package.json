@@ -95,6 +95,10 @@
       "types": "./src/providers/openai/speech.ts",
       "default": "./src/providers/openai/speech.ts"
     },
+    "./providers/vercel/ai-gateway-provider": {
+      "types": "./src/providers/vercel/ai-gateway-provider.ts",
+      "default": "./src/providers/vercel/ai-gateway-provider.ts"
+    },
     "./providers/anthropic": {
       "types": "./src/providers/anthropic/index.ts",
       "default": "./src/providers/anthropic/index.ts"
@@ -240,6 +244,11 @@
         "types": "./dist/providers/openai/speech.d.mts",
         "import": "./dist/providers/openai/speech.mjs",
         "default": "./dist/providers/openai/speech.mjs"
+      },
+      "./providers/vercel/ai-gateway-provider": {
+        "types": "./dist/providers/vercel/ai-gateway-provider.d.mts",
+        "import": "./dist/providers/vercel/ai-gateway-provider.mjs",
+        "default": "./dist/providers/vercel/ai-gateway-provider.mjs"
       },
       "./providers/anthropic": {
         "types": "./dist/providers/anthropic/index.d.mts",

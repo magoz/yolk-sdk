@@ -32,6 +32,7 @@ const packages: ReadonlyArray<PackageShape> = [
       './providers/openai/provider',
       './providers/openai/realtime',
       './providers/openai/speech',
+      './providers/vercel/ai-gateway-provider',
       './providers/subscription-usage',
       './providers/xai',
       './providers/xai/grok',
