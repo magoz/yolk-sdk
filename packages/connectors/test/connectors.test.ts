@@ -50,6 +50,22 @@ import {
   linkedInSearchAction
 } from '@yolk-sdk/connectors/linkedin-search'
 import {
+  MicrosoftConnector,
+  MicrosoftOAuthCredentialSlot,
+  microsoftGraphMailReadScope,
+  microsoftGraphMailReadSharedScope,
+  microsoftGraphMailReadWriteScope,
+  microsoftGraphMailReadWriteSharedScope,
+  microsoftGraphMailSendScope,
+  microsoftGraphMailSendSharedScope,
+  outlookCreateReplyDraftAction,
+  outlookGetMessageAction,
+  outlookListMessagesAction,
+  outlookSearchMessagesAction,
+  outlookSendDraftAction,
+  outlookSendMailAction
+} from '@yolk-sdk/connectors/microsoft'
+import {
   NotionApiTokenSlot,
   NotionConnector,
   notionCreateCommentAction,
@@ -156,6 +172,27 @@ const GoogleCredentialResolverTest = Layer.succeed(
       )
   })
 )
+
+const microsoftIntegration = makeIntegration({
+  connectorId: 'microsoft',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: MicrosoftOAuthCredentialSlot.id,
+      credentialRef: 'microsoft-token'
+    })
+  ]
+})
+
+const microsoftApplicationIntegration = makeIntegration({
+  connectorId: 'microsoft',
+  config: { mailboxAccessMode: 'application' },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: MicrosoftOAuthCredentialSlot.id,
+      credentialRef: 'microsoft-application-token'
+    })
+  ]
+})
 
 const jsonHttpResponse = (body: string) =>
   ConnectorHttpResponse.make({
@@ -333,7 +370,7 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
 
 describe('@yolk-sdk/connectors', () => {
   it('imports public subpaths', async () => {
-    const [root, agent, afloat, figma, google, linkedIn, notion, r2, telegram, todoist] =
+    const [root, agent, afloat, figma, google, linkedIn, microsoft, notion, r2, telegram, todoist] =
       await Promise.all([
         import('@yolk-sdk/connectors'),
         import('@yolk-sdk/connectors/agent'),
@@ -341,6 +378,7 @@ describe('@yolk-sdk/connectors', () => {
         import('@yolk-sdk/connectors/figma'),
         import('@yolk-sdk/connectors/google'),
         import('@yolk-sdk/connectors/linkedin-search'),
+        import('@yolk-sdk/connectors/microsoft'),
         import('@yolk-sdk/connectors/notion'),
         import('@yolk-sdk/connectors/r2-storage'),
         import('@yolk-sdk/connectors/telegram'),
@@ -353,6 +391,7 @@ describe('@yolk-sdk/connectors', () => {
     expect(figma.FigmaConnector).toBeDefined()
     expect(google.GoogleConnector).toBeDefined()
     expect(linkedIn.LinkedInSearchConnector).toBeDefined()
+    expect(microsoft.MicrosoftConnector).toBeDefined()
     expect(notion.NotionConnector).toBeDefined()
     expect(r2.R2StorageConnector).toBeDefined()
     expect(telegram.TelegramConnector).toBeDefined()
@@ -391,6 +430,15 @@ describe('@yolk-sdk/connectors', () => {
       'linkedin_search.search',
       'linkedin_search.profile',
       'linkedin_search.email'
+    ])
+    expect(MicrosoftConnector.actions.map(action => action.id)).toEqual([
+      'outlook.list_messages',
+      'outlook.search_messages',
+      'outlook.get_message',
+      'outlook.create_draft',
+      'outlook.create_reply_draft',
+      'outlook.send_mail',
+      'outlook.send_draft'
     ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
@@ -1113,6 +1161,334 @@ describe('@yolk-sdk/connectors', () => {
       expect(gmailScopes).not.toContain(googleCalendarEventsScope)
       expect(calendarScopes).toContain(googleCalendarEventsScope)
       expect(calendarScopes).not.toContain(googleGmailReadonlyScope)
+    })
+  )
+
+  it.effect('lists and searches Outlook mail with scoped Graph permissions and opaque paging', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const nextLink =
+        'https://graph.microsoft.com/v1.0/me/messages?%24select=id&%24skip=27&%24top=5'
+      const sharedNextLink =
+        'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages?%24select=id&%24skip=27&%24top=3'
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            value: [
+              {
+                id: 'message_1',
+                subject: 'Planning',
+                from: { emailAddress: { address: 'alice@example.com', name: 'Alice' } }
+              }
+            ],
+            '@odata.nextLink': nextLink
+          })
+        ),
+        jsonHttpResponse('{"value":[]}'),
+        jsonHttpResponse('{"value":[]}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const listResult = yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            folderId: 'inbox',
+            top: 5,
+            filter: 'isRead eq false',
+            orderBy: 'receivedDateTime desc'
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookSearchMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            query: 'from:alice@example.com',
+            mailbox: 'shared@example.com',
+            top: 3
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* outlookSearchMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            query: 'ignored for continuation',
+            mailbox: 'shared@example.com',
+            nextLink: sharedNextLink
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      const listRequest = requests.at(0)
+      const searchRequest = requests.at(1)
+      if (listRequest === undefined || searchRequest === undefined) {
+        throw new Error('Expected Microsoft Graph requests')
+      }
+      const listUrl = new URL(listRequest.url)
+      const searchUrl = new URL(searchRequest.url)
+
+      expect(listResult).toMatchObject({
+        _tag: 'Success',
+        value: {
+          messages: [{ id: 'message_1', subject: 'Planning' }],
+          nextLink
+        }
+      })
+      expect(listUrl.pathname).toBe('/v1.0/me/mailFolders/inbox/messages')
+      expect(listUrl.searchParams.get('$top')).toBe('5')
+      expect(listUrl.searchParams.get('$filter')).toBe('isRead eq false')
+      expect(listUrl.searchParams.get('$orderby')).toBe('receivedDateTime desc')
+      expect(searchUrl.pathname).toBe('/v1.0/users/shared%40example.com/messages')
+      expect(searchUrl.searchParams.get('$search')).toBe('"from:alice@example.com"')
+      expect(requests.at(2)?.url).toBe(sharedNextLink)
+      expect(listRequest.headers?.prefer).toBe('IdType="ImmutableId"')
+      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(1)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(2)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadWriteScope)
+      expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailSendScope)
+    })
+  )
+
+  it.effect('uses application mail permissions for explicit Exchange Online mailboxes', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"value":[]}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_application_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftApplicationIntegration,
+          input: { mailbox: 'finance@example.com' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const missingMailboxResult = yield* outlookListMessagesAction
+        .execute({ integration: microsoftApplicationIntegration, input: {} })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+
+      expect(requests.at(0)?.url).toContain('/v1.0/users/finance%40example.com/messages')
+      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
+      expect(missingMailboxResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(requests).toHaveLength(1)
+    })
+  )
+
+  it.effect('creates Outlook reply drafts and submits new and draft messages', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        ConnectorHttpResponse.make({
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+          body: '{"id":"reply_draft_1","isDraft":true}'
+        }),
+        ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' }),
+        ConnectorHttpResponse.make({ status: 202, headers: {}, body: '' })
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const replyResult = yield* outlookCreateReplyDraftAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            messageId: 'source/message',
+            mailbox: 'shared@example.com',
+            body: '<p>Thanks</p>',
+            contentType: 'html'
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const sendResult = yield* outlookSendMailAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            mailbox: 'shared@example.com',
+            to: ['lead@example.com'],
+            cc: ['team@example.com'],
+            subject: 'Hello',
+            body: 'Welcome',
+            saveToSentItems: false
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const sendDraftResult = yield* outlookSendDraftAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'reply_draft_1', mailbox: 'shared@example.com' }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      expect(replyResult).toMatchObject({
+        _tag: 'Success',
+        value: { id: 'reply_draft_1', isDraft: true }
+      })
+      expect(sendResult).toEqual({ _tag: 'Success', value: { accepted: true } })
+      expect(sendDraftResult).toEqual({ _tag: 'Success', value: { accepted: true } })
+      expect(requests.at(0)).toMatchObject({
+        method: 'POST',
+        url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/source%2Fmessage/createReply',
+        headers: { prefer: 'IdType="ImmutableId"' },
+        body: JSON.stringify({
+          message: { body: { contentType: 'HTML', content: '<p>Thanks</p>' } }
+        })
+      })
+      expect(requests.at(1)).toMatchObject({
+        method: 'POST',
+        url: 'https://graph.microsoft.com/v1.0/users/shared%40example.com/sendMail',
+        body: JSON.stringify({
+          message: {
+            subject: 'Hello',
+            body: { contentType: 'Text', content: 'Welcome' },
+            toRecipients: [{ emailAddress: { address: 'lead@example.com' } }],
+            from: { emailAddress: { address: 'shared@example.com' } },
+            ccRecipients: [{ emailAddress: { address: 'team@example.com' } }]
+          },
+          saveToSentItems: false
+        })
+      })
+      expect(requests.at(2)?.url).toBe(
+        'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/reply_draft_1/send'
+      )
+      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadWriteSharedScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadWriteScope)
+      expect(requestedScopes.at(1)).toContain(microsoftGraphMailSendSharedScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphMailSendScope)
+      expect(requestedScopes.at(2)).toContain(microsoftGraphMailSendSharedScope)
+    })
+  )
+
+  it.effect('maps Microsoft Graph errors and rejects untrusted nextLink URLs', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        ConnectorHttpResponse.make({
+          status: 429,
+          headers: { 'retry-after': '2' },
+          body: '{"error":{"code":"TooManyRequests","message":"Slow down"}}'
+        }),
+        jsonHttpResponse('{"subject":"Missing required id"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const providerResult = yield* outlookSearchMessagesAction
+        .execute({ integration: microsoftIntegration, input: { query: 'invoice' } })
+        .pipe(Effect.provide(TestLayer))
+      const invalidNextLinkResult = yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            nextLink: 'https://graph.microsoft.com/v1.0/users/other/messages?%24skip=10'
+          }
+        })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+      const invalidPageSizeResult = yield* outlookListMessagesAction
+        .execute({ integration: microsoftIntegration, input: { top: 1_001 } })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+      const malformedResponseResult = yield* outlookGetMessageAction
+        .execute({ integration: microsoftIntegration, input: { messageId: 'message_1' } })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+
+      expect(providerResult).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'microsoft_rate_limited',
+          message: 'Microsoft Outlook search messages failed: Slow down',
+          status: 429,
+          retryAfterMs: 2_000
+        }
+      })
+      expect(invalidNextLinkResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidPageSizeResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(malformedResponseResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(requests.at(1)?.headers?.prefer).toBe(
+        'IdType="ImmutableId", outlook.body-content-type="text"'
+      )
+      expect(requests).toHaveLength(2)
     })
   )
 

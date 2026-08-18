@@ -145,6 +145,28 @@ Connector provider modules declare credential slots needed by their actions. Bin
 
 Provide a `ConnectorHttpClient` layer. Preserve method, URL, headers, body, and content type exactly when adapting to your HTTP client.
 
+### Microsoft Outlook action is unauthorized
+
+Microsoft Outlook actions call Microsoft Graph, so the token audience and consent must be for
+Graph rather than the retired `outlook.office.com/api` endpoint. Read actions need `Mail.Read`,
+draft actions need `Mail.ReadWrite`, and send actions need the separate `Mail.Send` permission.
+All action-scoped credential slots share the `microsoft.oauth` binding id.
+
+When `mailbox` targets another Exchange Online mailbox, delegated tokens need the corresponding
+`Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared` permission. Reads and writes need
+the relevant shared-folder or Full Access grant. Sending requires **Send As** or **Send on Behalf**;
+the connector's `/users/{mailbox}` send path also requires Full Access. Microsoft Graph cannot list
+which mailboxes the signed-in user may access, so the host must obtain and authorize the mailbox
+identifier.
+
+Application-token hosts set integration config `mailboxAccessMode` to `application` and must provide
+`mailbox`. Grant the non-Shared application permission and apply mailbox scoping through host/admin
+policy.
+
+A successful send returns `{ accepted: true }` when Graph responds `202 Accepted`. This means Graph
+accepted the submission; it does not prove processing or delivery. Honor `retryAfterMs` when a
+provider failure maps a Graph `429` response.
+
 ## Sandbox errors
 
 ### Workspace resets unexpectedly

@@ -50,6 +50,10 @@
       "types": "./src/linkedin-search/index.ts",
       "default": "./src/linkedin-search/index.ts"
     },
+    "./microsoft": {
+      "types": "./src/microsoft/index.ts",
+      "default": "./src/microsoft/index.ts"
+    },
     "./notion": {
       "types": "./src/notion/index.ts",
       "default": "./src/notion/index.ts"
@@ -108,6 +112,11 @@
         "types": "./dist/linkedin-search/index.d.mts",
         "import": "./dist/linkedin-search/index.mjs",
         "default": "./dist/linkedin-search/index.mjs"
+      },
+      "./microsoft": {
+        "types": "./dist/microsoft/index.d.mts",
+        "import": "./dist/microsoft/index.mjs",
+        "default": "./dist/microsoft/index.mjs"
       },
       "./notion": {
         "types": "./dist/notion/index.d.mts",
