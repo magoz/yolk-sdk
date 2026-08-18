@@ -1,5 +1,19 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.59
+
+### Minor Changes
+
+- 3770fcd: Add the Dropbox OAuth connector with metadata, search, pagination, and file-management actions.
+- 8c9ba43: Add a Microsoft Graph v1.0 connector with one shared `microsoft.oauth` credential binding, scoped Outlook and OneDrive OAuth slots, delegated/application Exchange and drive targeting, typed Outlook mail actions, and OneDrive list, search, metadata, folder-create, and recycle-bin actions. Connector actions can now declare default read, write, or destructive access metadata for agent adapters.
+
+### Patch Changes
+
+- a5581f7: Refresh public package documentation with verified imports, runtime boundaries, and host responsibilities.
+- Updated dependencies [eb908b7]
+- Updated dependencies [a5581f7]
+  - @yolk-sdk/agent@0.1.0-canary.59
+
 ## 0.1.0-canary.58
 
 ### Patch Changes

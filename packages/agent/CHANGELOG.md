@@ -1,5 +1,12 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.59
+
+### Patch Changes
+
+- eb908b7: Add xAI Grok subscription OAuth/broker helpers and a streaming Responses provider for the xAI CLI proxy, with host-owned output limits, normalized reasoning/tools/usage, and safe provider failures.
+- a5581f7: Refresh public package documentation with verified imports, runtime boundaries, and host responsibilities.
+
 ## 0.1.0-canary.58
 
 ### Patch Changes

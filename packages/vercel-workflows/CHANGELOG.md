@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.59
+
+### Patch Changes
+
+- a5581f7: Refresh public package documentation with verified imports, runtime boundaries, and host responsibilities.
+
 ## 0.1.0-canary.58
 
 ## 0.1.0-canary.57

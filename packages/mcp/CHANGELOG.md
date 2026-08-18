@@ -1,5 +1,14 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.59
+
+### Patch Changes
+
+- a5581f7: Refresh public package documentation with verified imports, runtime boundaries, and host responsibilities.
+- Updated dependencies [eb908b7]
+- Updated dependencies [a5581f7]
+  - @yolk-sdk/agent@0.1.0-canary.59
+
 ## 0.1.0-canary.58
 
 ### Patch Changes
