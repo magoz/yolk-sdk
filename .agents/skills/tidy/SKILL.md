@@ -166,7 +166,7 @@ Always grep for moved/stale refs relevant to the run:
 - stale old Next pattern paths: `patterns/EFFECT_PAGES`, `patterns/EFFECT_API_ROUTES`, `patterns/EFFECT_SERVER_ACTIONS`
 - stale old Next pattern paths: `patterns/DATA_ACCESS_PATTERNS`, `patterns/NUQS_URL_STATE`, `patterns/USABILITY_BEST_PRACTICES`
 - current Next pattern paths: `examples/next/patterns/*.md`
-- removed integrations like `Sentry` if recently removed
+- recently removed integrations, providers, and environment keys identified from the requested change
 - generated dirs: `.next`, `.turbo`, `dist`
 
 For broad docs cleanup, also grep for preservation of important package terms when touched:

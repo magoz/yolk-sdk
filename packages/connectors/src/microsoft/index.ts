@@ -1,0 +1,100 @@
+export {
+  MicrosoftMailboxAccessMode,
+  microsoftMailboxAccessModeConfigKey,
+  OutlookComposeInput,
+  outlookCreateDraftAction,
+  OutlookCreateReplyDraftInput,
+  outlookCreateReplyDraftAction,
+  OutlookEmailAddress,
+  outlookGetMessageAction,
+  OutlookListMessagesInput,
+  OutlookListMessagesOutput,
+  outlookListMessagesAction,
+  outlookMailActions,
+  OutlookMessage,
+  OutlookMessageBody,
+  OutlookMessageIdInput,
+  OutlookRecipient,
+  OutlookSearchMessagesInput,
+  outlookSearchMessagesAction,
+  OutlookSendMailInput,
+  outlookSendDraftAction,
+  outlookSendMailAction,
+  OutlookSendOutput
+} from './mail.ts'
+export {
+  MicrosoftOneDriveAccessMode,
+  microsoftOneDriveAccessModeConfigKey,
+  OneDriveCreateFolderInput,
+  OneDriveDeleteItemInput,
+  OneDriveDeleteItemOutput,
+  OneDriveFileFacet,
+  OneDriveFolderFacet,
+  OneDriveHashes,
+  OneDriveItem,
+  OneDriveItemIdInput,
+  OneDriveListItemsInput,
+  OneDriveListItemsOutput,
+  OneDrivePackageFacet,
+  OneDriveParentReference,
+  OneDriveSearchItemsInput,
+  oneDriveActions,
+  oneDriveCreateFolderAction,
+  oneDriveDeleteItemAction,
+  oneDriveGetItemAction,
+  oneDriveListItemsAction,
+  oneDriveSearchItemsAction
+} from './drive.ts'
+export {
+  MicrosoftCombinedOAuthCredentialSlot,
+  MicrosoftOAuthCredentialSlot,
+  MicrosoftOneDriveReadAllOAuthCredentialSlot,
+  MicrosoftOneDriveReadOAuthCredentialSlot,
+  MicrosoftOneDriveWriteAllOAuthCredentialSlot,
+  MicrosoftOneDriveWriteOAuthCredentialSlot,
+  MicrosoftOutlookReadOAuthCredentialSlot,
+  MicrosoftOutlookSendOAuthCredentialSlot,
+  MicrosoftOutlookSharedReadOAuthCredentialSlot,
+  MicrosoftOutlookSharedSendOAuthCredentialSlot,
+  MicrosoftOutlookSharedWriteOAuthCredentialSlot,
+  MicrosoftOutlookWriteOAuthCredentialSlot,
+  microsoftAuthorizationHeaders,
+  microsoftConnectorId,
+  microsoftGraphFilesReadAllScope,
+  microsoftGraphFilesReadScope,
+  microsoftGraphFilesReadWriteAllScope,
+  microsoftGraphFilesReadWriteScope,
+  microsoftGraphMailReadScope,
+  microsoftGraphMailReadSharedScope,
+  microsoftGraphMailReadWriteScope,
+  microsoftGraphMailReadWriteSharedScope,
+  microsoftGraphMailSendScope,
+  microsoftGraphMailSendSharedScope,
+  microsoftIdentityAuthorityUrl,
+  microsoftOAuthAuthorizeUrl,
+  microsoftOAuthSlotId,
+  microsoftOAuthTenant,
+  microsoftOAuthTokenUrl,
+  microsoftOneDriveReadAllScopes,
+  microsoftOneDriveReadScopes,
+  microsoftOneDriveWriteAllScopes,
+  microsoftOneDriveWriteScopes,
+  microsoftOutlookReadScopes,
+  microsoftOutlookSendScopes,
+  microsoftOutlookSharedReadScopes,
+  microsoftOutlookSharedSendScopes,
+  microsoftOutlookSharedWriteScopes,
+  microsoftOutlookWriteScopes
+} from './oauth.ts'
+export { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
+
+import { defineConnector } from '../connector.ts'
+import { oneDriveActions } from './drive.ts'
+import { outlookMailActions } from './mail.ts'
+import { microsoftConnectorId } from './oauth.ts'
+
+export const MicrosoftConnector = defineConnector({
+  id: microsoftConnectorId,
+  description: 'Microsoft Outlook and OneDrive actions through Microsoft Graph.',
+  actions: [...outlookMailActions, ...oneDriveActions]
+})

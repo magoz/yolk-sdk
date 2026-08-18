@@ -96,6 +96,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './figma',
       './google',
       './linkedin-search',
+      './microsoft',
       './notion',
       './r2-storage',
       './telegram',

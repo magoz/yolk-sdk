@@ -9,6 +9,7 @@ import {
   type ToolRegistration
 } from '@yolk-sdk/agent/tools'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
+import type { ConnectorActionAccess } from './action.ts'
 import type { Connector } from './connector.ts'
 import type { ConnectorIntegration } from './integration.ts'
 import type { ProviderFailure } from './result.ts'
@@ -40,13 +41,14 @@ const resolveIntegration = <Context>(
 
 const resolveAccess = (
   resolver: ConnectorToolAccessResolver | undefined,
-  actionId: string
+  actionId: string,
+  actionAccess: ConnectorActionAccess | undefined
 ): ToolAccess => {
   if (typeof resolver === 'function') {
     return resolver(actionId)
   }
 
-  return resolver ?? 'read'
+  return resolver ?? actionAccess ?? 'read'
 }
 
 const unknownToMessage = (error: unknown) => {
@@ -82,7 +84,7 @@ export const makeConnectorToolRegistration = <Context, Env = never, Error = neve
     name,
     description: action?.description ?? `Invoke connector action ${actionId}.`,
     parameters: action?.inputSchema ?? Schema.Unknown,
-    access: resolveAccess(options.access, actionId),
+    access: resolveAccess(options.access, actionId, action?.access),
     invalidParamsMessage: error => `Invalid ${name} arguments: ${unknownToMessage(error)}`,
     execute: ({ call, context, params }) =>
       resolveIntegration(options.integration, context).pipe(

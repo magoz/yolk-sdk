@@ -15,15 +15,6 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |
 | `internal/cloudflare/AGENTS.md`                | Bridge auth/header/token contracts     |
 
-## Effect Route Pattern
-
-- Use `HttpEffect.toWebHandlerLayer(handler, Layer)` for Effect-backed routes unless a framework SDK requires Web `Response` directly.
-- Parse JSON with `HttpServerRequest.schemaBodyJson(...)`.
-- Return `HttpServerResponse.*`; wrap raw streamed `Response` with `HttpServerResponse.raw(...)`.
-- Add `export const dynamic = 'force-dynamic'` for auth/session/tool routes.
-- Provide `AppLayer`; add `FetchHttpClient.layer` when the route itself calls external HTTP.
-- Catch specific tags before catch-all; report only at route boundary.
-
 ## Status Conventions
 
 - Unauthenticated: `401`.

@@ -34,6 +34,10 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 
 ## Connectors
 
+`defineAction` accepts optional `access: 'read' | 'write' | 'destructive'` metadata, exported as
+`ConnectorActionAccess`. `makeConnectorToolModule` uses it unless the host supplies an access
+override.
+
 | Subpath                                | Main exports                                                                                                               |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors`                 | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient` |
@@ -45,7 +49,26 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 | `@yolk-sdk/connectors/telegram`        | `TelegramConnector`, `TelegramBotTokenSlot`                                                                                |
 | `@yolk-sdk/connectors/figma`           | `FigmaConnector`, `FigmaOAuthCredentialSlot`                                                                               |
 | `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots                                                                  |
+| `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas                                        |
 | `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots                                                                   |
+
+Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
+`OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
+`OutlookComposeInput`, `OutlookCreateReplyDraftInput`, `OutlookSendMailInput`, and
+`OutlookSendOutput`. OAuth exports include generic, signed-in-mailbox, shared-mailbox, and combined
+slots that share `microsoft.oauth`. Action inputs use `/me` by default and accept optional `mailbox`
+for `/users/{id|userPrincipalName}` Exchange Online targets. Set integration config key
+`microsoftMailboxAccessModeConfigKey` (`mailboxAccessMode`) to `application` for application-token
+mailbox targeting; delegated is the default.
+
+OneDrive's principal contracts are `OneDriveItem`, `OneDriveItemIdInput`,
+`OneDriveListItemsInput`, `OneDriveSearchItemsInput`, `OneDriveListItemsOutput`,
+`OneDriveCreateFolderInput`, `OneDriveDeleteItemInput`, and `OneDriveDeleteItemOutput`. Inputs default
+to `/me/drive`; explicit `driveId` targets `/drives/{driveId}`. Set
+`microsoftOneDriveAccessModeConfigKey` (`oneDriveAccessMode`) to `delegated_all` for broad delegated
+slots or `application` for application-token access; application mode requires `driveId`. Microsoft
+actions use Graph v1.0 with `outlook.*` and `onedrive.*`
+ids, and all scoped slots share `microsoft.oauth`.
 
 Google's normalized thread contracts are `GmailGetThreadInput`, `GmailThreadAttachment`,
 `GmailThreadMessage`, and `GmailThreadOutput`.

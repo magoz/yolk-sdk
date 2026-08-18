@@ -2,6 +2,7 @@ export { defineAction } from './action.ts'
 export type {
   ActionExecutionInput,
   ConnectorAction,
+  ConnectorActionAccess,
   DefineActionOptions,
   UnknownActionExecutionInput
 } from './action.ts'
