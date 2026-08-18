@@ -3,7 +3,7 @@ title: Connectors package
 description: Define external API actions and turn them into agent tools.
 ---
 
-Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Google, Microsoft Outlook, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
+Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Google, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
 
 Install:
 
@@ -84,21 +84,24 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                     |
 | `@yolk-sdk/connectors/google`          | Gmail and Calendar                                             |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email               |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook mail through Microsoft Graph                 |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph         |
 | `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users |
 | `@yolk-sdk/connectors/r2-storage`      | R2 upload URL with host presigner                              |
 | `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                     |
 | `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                |
 
-Microsoft Outlook mail is exposed from the provider-level `microsoft` subpath because Microsoft
-Graph is the supported API and OAuth resource boundary. Outlook action ids stay workload-specific.
-Bind one host-owned credential to the shared `microsoft.oauth` slot id. Inputs use `/me` by default;
-set `mailbox` to an Exchange Online user ID or user principal name for shared/delegated access through
-`/users/{mailbox}`. Signed-in mailbox actions request `Mail.Read`, `Mail.ReadWrite`, or `Mail.Send`;
-explicit mailbox targets request the matching `Mail.*.Shared` delegated permission. Application
-token hosts set integration config `mailboxAccessMode` to `application` and always pass `mailbox` to
-select non-Shared application permission hints. The host still owns Entra tenant policy, OAuth
-callbacks, refresh, storage, consent, application mailbox scoping, and Exchange mailbox grants.
+Microsoft Outlook and OneDrive are exposed from the provider-level `microsoft` subpath because
+Microsoft Graph is their shared API and OAuth resource boundary. Workload action ids remain
+`outlook.*` and `onedrive.*`, while every scoped slot uses the same `microsoft.oauth` binding. One
+credential can therefore cover both workloads when consent includes their `Mail.*` and `Files.*`
+permissions.
+
+Outlook inputs use `/me` by default; set `mailbox` for Exchange Online shared/delegated access.
+Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/me/drive` by default;
+set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
+permissions, or `oneDriveAccessMode: 'application'` for application tokens. The host still owns
+Entra tenant policy, OAuth callbacks, refresh, storage, consent,
+application resource scoping, Exchange grants, and binary file-content transport.
 
 Google's `gmail.get_thread` action returns normalized messages with decoded message text and
 attachment metadata, without raw MIME or attachment content. See the

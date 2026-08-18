@@ -145,9 +145,9 @@ Connector provider modules declare credential slots needed by their actions. Bin
 
 Provide a `ConnectorHttpClient` layer. Preserve method, URL, headers, body, and content type exactly when adapting to your HTTP client.
 
-### Microsoft Outlook action is unauthorized
+### Microsoft action is unauthorized
 
-Microsoft Outlook actions call Microsoft Graph, so the token audience and consent must be for
+Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for
 Graph rather than the retired `outlook.office.com/api` endpoint. Read actions need `Mail.Read`,
 draft actions need `Mail.ReadWrite`, and send actions need the separate `Mail.Send` permission.
 All action-scoped credential slots share the `microsoft.oauth` binding id.
@@ -166,6 +166,17 @@ policy.
 A successful send returns `{ accepted: true }` when Graph responds `202 Accepted`. This means Graph
 accepted the submission; it does not prove processing or delivery. Honor `retryAfterMs` when a
 provider failure maps a Graph `429` response.
+
+For OneDrive, delegated reads and writes use `Files.Read` or `Files.ReadWrite` by default, including
+an explicit `driveId` when those permissions cover the target. Set `oneDriveAccessMode` to
+`delegated_all` when broader delegated access requires `Files.Read.All` or `Files.ReadWrite.All`.
+Application-token hosts set it to `application` and must provide `driveId`; apply tenant/admin policy
+to limit the app's accessible drives. Reusing an Outlook credential works only when its consent also
+includes the required `Files.*` permission.
+
+If OneDrive pagination is rejected, pass the full Graph `nextLink` unchanged and repeat `driveId`.
+For `onedrive.list_items`, also repeat the original `parentItemId`. Binary download/upload is not
+part of the current connector action set; the host owns file-content transfer.
 
 ## Sandbox errors
 

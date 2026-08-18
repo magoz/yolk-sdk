@@ -52,12 +52,21 @@ import {
 import {
   MicrosoftConnector,
   MicrosoftOAuthCredentialSlot,
+  microsoftGraphFilesReadAllScope,
+  microsoftGraphFilesReadScope,
+  microsoftGraphFilesReadWriteAllScope,
+  microsoftGraphFilesReadWriteScope,
   microsoftGraphMailReadScope,
   microsoftGraphMailReadSharedScope,
   microsoftGraphMailReadWriteScope,
   microsoftGraphMailReadWriteSharedScope,
   microsoftGraphMailSendScope,
   microsoftGraphMailSendSharedScope,
+  oneDriveCreateFolderAction,
+  oneDriveDeleteItemAction,
+  oneDriveGetItemAction,
+  oneDriveListItemsAction,
+  oneDriveSearchItemsAction,
   outlookCreateReplyDraftAction,
   outlookGetMessageAction,
   outlookListMessagesAction,
@@ -186,6 +195,28 @@ const microsoftIntegration = makeIntegration({
 const microsoftApplicationIntegration = makeIntegration({
   connectorId: 'microsoft',
   config: { mailboxAccessMode: 'application' },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: MicrosoftOAuthCredentialSlot.id,
+      credentialRef: 'microsoft-application-token'
+    })
+  ]
+})
+
+const microsoftDriveDelegatedAllIntegration = makeIntegration({
+  connectorId: 'microsoft',
+  config: { oneDriveAccessMode: 'delegated_all' },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: MicrosoftOAuthCredentialSlot.id,
+      credentialRef: 'microsoft-token'
+    })
+  ]
+})
+
+const microsoftDriveApplicationIntegration = makeIntegration({
+  connectorId: 'microsoft',
+  config: { oneDriveAccessMode: 'application' },
   credentialBindings: [
     makeCredentialBinding({
       slotId: MicrosoftOAuthCredentialSlot.id,
@@ -438,7 +469,12 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.create_draft',
       'outlook.create_reply_draft',
       'outlook.send_mail',
-      'outlook.send_draft'
+      'outlook.send_draft',
+      'onedrive.list_items',
+      'onedrive.search_items',
+      'onedrive.get_item',
+      'onedrive.create_folder',
+      'onedrive.delete_item'
     ])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
@@ -1489,6 +1525,274 @@ describe('@yolk-sdk/connectors', () => {
         'IdType="ImmutableId", outlook.body-content-type="text"'
       )
       expect(requests).toHaveLength(2)
+    })
+  )
+
+  it.effect('lists and searches OneDrive items with scoped Graph permissions and paging', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const listNextLink =
+        'https://graph.microsoft.com/v1.0/me/drive/root/children?%24skiptoken=list_page_2'
+      const searchNextLink =
+        "https://graph.microsoft.com/v1.0/drives/shared%2Fdrive/root/search(q='quarterly')?%24skiptoken=search_page_2"
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            value: [
+              {
+                id: 'item_1',
+                name: 'Plan.docx',
+                size: 42,
+                file: {
+                  mimeType:
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                },
+                parentReference: { driveId: 'personal_drive', id: 'root' }
+              }
+            ],
+            '@odata.nextLink': listNextLink
+          })
+        ),
+        jsonHttpResponse('{"value":[]}'),
+        jsonHttpResponse('{"value":[]}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const listResult = yield* oneDriveListItemsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { parentItemId: 'folder/root', top: 25, orderBy: 'name asc' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* oneDriveSearchItemsAction
+        .execute({
+          integration: microsoftDriveDelegatedAllIntegration,
+          input: { query: "quarterly's report", driveId: 'shared/drive', top: 10 }
+        })
+        .pipe(Effect.provide(TestLayer))
+      yield* oneDriveSearchItemsAction
+        .execute({
+          integration: microsoftDriveDelegatedAllIntegration,
+          input: {
+            query: 'ignored for continuation',
+            driveId: 'shared/drive',
+            nextLink: searchNextLink
+          }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      const listRequest = requests.at(0)
+      const searchRequest = requests.at(1)
+      if (listRequest === undefined || searchRequest === undefined) {
+        throw new Error('Expected Microsoft OneDrive requests')
+      }
+      const listUrl = new URL(listRequest.url)
+      const searchUrl = new URL(searchRequest.url)
+
+      expect(listResult).toMatchObject({
+        _tag: 'Success',
+        value: {
+          items: [{ id: 'item_1', name: 'Plan.docx', size: 42 }],
+          nextLink: listNextLink
+        }
+      })
+      expect(listUrl.pathname).toBe('/v1.0/me/drive/items/folder%2Froot/children')
+      expect(listUrl.searchParams.get('$top')).toBe('25')
+      expect(listUrl.searchParams.get('$orderby')).toBe('name asc')
+      expect(searchUrl.pathname).toBe(
+        "/v1.0/drives/shared%2Fdrive/root/search(q='quarterly%27%27s%20report')"
+      )
+      expect(searchUrl.searchParams.get('$top')).toBe('10')
+      expect(requests.at(2)?.url).toBe(searchNextLink)
+      expect(requestedScopes.at(0)).toContain(microsoftGraphFilesReadScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphFilesReadAllScope)
+      expect(requestedScopes.at(1)).toContain(microsoftGraphFilesReadAllScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphFilesReadScope)
+      expect(requestedScopes.at(2)).toContain(microsoftGraphFilesReadAllScope)
+    })
+  )
+
+  it.effect('gets OneDrive metadata and creates and deletes folders with write scopes', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          '{"id":"item_1","name":"Budget.xlsx","file":{"mimeType":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}}'
+        ),
+        ConnectorHttpResponse.make({
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+          body: '{"id":"folder_1","name":"Reports","folder":{"childCount":0}}'
+        }),
+        ConnectorHttpResponse.make({ status: 204, headers: {}, body: '' })
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const itemResult = yield* oneDriveGetItemAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { driveId: 'shared/drive', itemId: 'item/1' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const folderResult = yield* oneDriveCreateFolderAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { parentItemId: 'parent/1', name: 'Reports', conflictBehavior: 'rename' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const deleteResult = yield* oneDriveDeleteItemAction
+        .execute({
+          integration: microsoftDriveDelegatedAllIntegration,
+          input: { driveId: 'shared/drive', itemId: 'folder/1', ifMatch: 'etag_1' }
+        })
+        .pipe(Effect.provide(TestLayer))
+
+      expect(itemResult).toMatchObject({
+        _tag: 'Success',
+        value: { id: 'item_1', name: 'Budget.xlsx' }
+      })
+      expect(folderResult).toMatchObject({
+        _tag: 'Success',
+        value: { id: 'folder_1', name: 'Reports', folder: { childCount: 0 } }
+      })
+      expect(deleteResult).toEqual({ _tag: 'Success', value: { deleted: true } })
+      expect(requests.at(0)?.url).toContain(
+        'https://graph.microsoft.com/v1.0/drives/shared%2Fdrive/items/item%2F1?'
+      )
+      expect(requests.at(1)).toMatchObject({
+        method: 'POST',
+        url: 'https://graph.microsoft.com/v1.0/me/drive/items/parent%2F1/children',
+        body: JSON.stringify({
+          name: 'Reports',
+          folder: {},
+          '@microsoft.graph.conflictBehavior': 'rename'
+        })
+      })
+      expect(requests.at(2)).toMatchObject({
+        method: 'DELETE',
+        url: 'https://graph.microsoft.com/v1.0/drives/shared%2Fdrive/items/folder%2F1',
+        headers: { 'if-match': 'etag_1' }
+      })
+      expect(requestedScopes.at(0)).toContain(microsoftGraphFilesReadScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphFilesReadAllScope)
+      expect(requestedScopes.at(1)).toContain(microsoftGraphFilesReadWriteScope)
+      expect(requestedScopes.at(1)).not.toContain(microsoftGraphFilesReadWriteAllScope)
+      expect(requestedScopes.at(2)).toContain(microsoftGraphFilesReadWriteAllScope)
+      expect(requestedScopes.at(2)).not.toContain(microsoftGraphFilesReadWriteScope)
+    })
+  )
+
+  it.effect('guards application OneDrive access, pagination, page size, and provider errors', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        ConnectorHttpResponse.make({
+          status: 423,
+          headers: { 'retry-after': '3' },
+          body: '{"error":{"code":"resourceLocked","message":"The item is locked"}}'
+        })
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_application_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const providerResult = yield* oneDriveListItemsAction
+        .execute({
+          integration: microsoftDriveApplicationIntegration,
+          input: { driveId: 'finance_drive' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const missingDriveResult = yield* oneDriveListItemsAction
+        .execute({ integration: microsoftDriveApplicationIntegration, input: {} })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+      const invalidNextLinkResult = yield* oneDriveListItemsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            driveId: 'finance_drive',
+            nextLink:
+              'https://graph.microsoft.com/v1.0/drives/other_drive/root/children?%24skiptoken=page_2'
+          }
+        })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+      const invalidPageSizeResult = yield* oneDriveSearchItemsAction
+        .execute({ integration: microsoftIntegration, input: { query: 'invoice', top: 1_000 } })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+
+      expect(providerResult).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'microsoft_locked',
+          message: 'Microsoft OneDrive list items failed: The item is locked',
+          status: 423,
+          retryAfterMs: 3_000
+        }
+      })
+      expect(missingDriveResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidNextLinkResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidPageSizeResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(requests.at(0)?.url).toContain('/v1.0/drives/finance_drive/root/children?')
+      expect(requestedScopes.at(0)).toContain(microsoftGraphFilesReadAllScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphFilesReadScope)
+      expect(requests).toHaveLength(1)
     })
   )
 

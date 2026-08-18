@@ -7,6 +7,8 @@ import type { ConnectorIntegration } from '../integration.ts'
 import { ActionResult, ProviderFailure } from '../result.ts'
 import { MicrosoftOAuthCredentialSlot } from './oauth.ts'
 
+export const microsoftGraphApiBaseUrl = 'https://graph.microsoft.com/v1.0'
+
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
 const isJsonObject = Schema.is(JsonObject)
 
@@ -61,10 +63,18 @@ const providerCode = (fallback: string, status: number) => {
       return 'microsoft_unauthorized'
     case 404:
       return 'microsoft_not_found'
+    case 409:
+      return 'microsoft_conflict'
+    case 412:
+      return 'microsoft_precondition_failed'
     case 413:
       return 'microsoft_payload_too_large'
+    case 423:
+      return 'microsoft_locked'
     case 429:
       return 'microsoft_rate_limited'
+    case 507:
+      return 'microsoft_storage_limit'
     default:
       return fallback
   }

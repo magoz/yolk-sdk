@@ -14,6 +14,11 @@ export const microsoftGraphMailReadSharedScope = 'https://graph.microsoft.com/Ma
 export const microsoftGraphMailReadWriteSharedScope =
   'https://graph.microsoft.com/Mail.ReadWrite.Shared'
 export const microsoftGraphMailSendSharedScope = 'https://graph.microsoft.com/Mail.Send.Shared'
+export const microsoftGraphFilesReadScope = 'https://graph.microsoft.com/Files.Read'
+export const microsoftGraphFilesReadAllScope = 'https://graph.microsoft.com/Files.Read.All'
+export const microsoftGraphFilesReadWriteScope = 'https://graph.microsoft.com/Files.ReadWrite'
+export const microsoftGraphFilesReadWriteAllScope =
+  'https://graph.microsoft.com/Files.ReadWrite.All'
 
 export const microsoftOutlookReadScopes = Object.freeze([microsoftGraphMailReadScope])
 export const microsoftOutlookWriteScopes = Object.freeze([microsoftGraphMailReadWriteScope])
@@ -23,6 +28,10 @@ export const microsoftOutlookSharedWriteScopes = Object.freeze([
   microsoftGraphMailReadWriteSharedScope
 ])
 export const microsoftOutlookSharedSendScopes = Object.freeze([microsoftGraphMailSendSharedScope])
+export const microsoftOneDriveReadScopes = Object.freeze([microsoftGraphFilesReadScope])
+export const microsoftOneDriveReadAllScopes = Object.freeze([microsoftGraphFilesReadAllScope])
+export const microsoftOneDriveWriteScopes = Object.freeze([microsoftGraphFilesReadWriteScope])
+export const microsoftOneDriveWriteAllScopes = Object.freeze([microsoftGraphFilesReadWriteAllScope])
 
 export const MicrosoftOAuthCredentialSlot = CredentialSlot.make({
   id: microsoftOAuthSlotId,
@@ -65,6 +74,30 @@ export const MicrosoftOutlookSharedSendOAuthCredentialSlot = CredentialSlot.make
   requiredScopes: [...microsoftOutlookSharedSendScopes]
 })
 
+export const MicrosoftOneDriveReadOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOneDriveReadScopes]
+})
+
+export const MicrosoftOneDriveReadAllOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOneDriveReadAllScopes]
+})
+
+export const MicrosoftOneDriveWriteOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOneDriveWriteScopes]
+})
+
+export const MicrosoftOneDriveWriteAllOAuthCredentialSlot = CredentialSlot.make({
+  id: microsoftOAuthSlotId,
+  kind: 'oauth',
+  requiredScopes: [...microsoftOneDriveWriteAllScopes]
+})
+
 export const MicrosoftCombinedOAuthCredentialSlot = CredentialSlot.make({
   id: microsoftOAuthSlotId,
   kind: 'oauth',
@@ -74,7 +107,11 @@ export const MicrosoftCombinedOAuthCredentialSlot = CredentialSlot.make({
     microsoftGraphMailSendScope,
     microsoftGraphMailReadSharedScope,
     microsoftGraphMailReadWriteSharedScope,
-    microsoftGraphMailSendSharedScope
+    microsoftGraphMailSendSharedScope,
+    microsoftGraphFilesReadScope,
+    microsoftGraphFilesReadAllScope,
+    microsoftGraphFilesReadWriteScope,
+    microsoftGraphFilesReadWriteAllScope
   ]
 })
 

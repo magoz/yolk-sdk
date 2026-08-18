@@ -18,11 +18,10 @@ import {
 } from './oauth.ts'
 import {
   isMicrosoftSuccessStatus,
+  microsoftGraphApiBaseUrl,
   microsoftProviderFailure,
   resolveMicrosoftAccessToken
 } from './shared.ts'
-
-export const microsoftGraphApiBaseUrl = 'https://graph.microsoft.com/v1.0'
 export const microsoftMailboxAccessModeConfigKey = 'mailboxAccessMode'
 export const MicrosoftMailboxAccessMode = Schema.Literals(['delegated', 'application'])
 export type MicrosoftMailboxAccessMode = typeof MicrosoftMailboxAccessMode.Type
@@ -214,7 +213,8 @@ const outlookMailboxPath = (mailbox: string | undefined) =>
 const invalidNextLink = (actionId: string) =>
   new ConnectorError({
     cause: 'validation_failed',
-    message: 'Microsoft Graph nextLink must target a message collection in the selected v1.0 mailbox',
+    message:
+      'Microsoft Graph nextLink must target a message collection in the selected v1.0 mailbox',
     connectorId: microsoftConnectorId,
     actionId
   })

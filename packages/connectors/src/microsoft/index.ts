@@ -1,5 +1,4 @@
 export {
-  microsoftGraphApiBaseUrl,
   MicrosoftMailboxAccessMode,
   microsoftMailboxAccessModeConfigKey,
   OutlookComposeInput,
@@ -24,8 +23,35 @@ export {
   OutlookSendOutput
 } from './mail.ts'
 export {
+  MicrosoftOneDriveAccessMode,
+  microsoftOneDriveAccessModeConfigKey,
+  OneDriveCreateFolderInput,
+  OneDriveDeleteItemInput,
+  OneDriveDeleteItemOutput,
+  OneDriveFileFacet,
+  OneDriveFolderFacet,
+  OneDriveHashes,
+  OneDriveItem,
+  OneDriveItemIdInput,
+  OneDriveListItemsInput,
+  OneDriveListItemsOutput,
+  OneDrivePackageFacet,
+  OneDriveParentReference,
+  OneDriveSearchItemsInput,
+  oneDriveActions,
+  oneDriveCreateFolderAction,
+  oneDriveDeleteItemAction,
+  oneDriveGetItemAction,
+  oneDriveListItemsAction,
+  oneDriveSearchItemsAction
+} from './drive.ts'
+export {
   MicrosoftCombinedOAuthCredentialSlot,
   MicrosoftOAuthCredentialSlot,
+  MicrosoftOneDriveReadAllOAuthCredentialSlot,
+  MicrosoftOneDriveReadOAuthCredentialSlot,
+  MicrosoftOneDriveWriteAllOAuthCredentialSlot,
+  MicrosoftOneDriveWriteOAuthCredentialSlot,
   MicrosoftOutlookReadOAuthCredentialSlot,
   MicrosoftOutlookSendOAuthCredentialSlot,
   MicrosoftOutlookSharedReadOAuthCredentialSlot,
@@ -34,6 +60,10 @@ export {
   MicrosoftOutlookWriteOAuthCredentialSlot,
   microsoftAuthorizationHeaders,
   microsoftConnectorId,
+  microsoftGraphFilesReadAllScope,
+  microsoftGraphFilesReadScope,
+  microsoftGraphFilesReadWriteAllScope,
+  microsoftGraphFilesReadWriteScope,
   microsoftGraphMailReadScope,
   microsoftGraphMailReadSharedScope,
   microsoftGraphMailReadWriteScope,
@@ -45,6 +75,10 @@ export {
   microsoftOAuthSlotId,
   microsoftOAuthTenant,
   microsoftOAuthTokenUrl,
+  microsoftOneDriveReadAllScopes,
+  microsoftOneDriveReadScopes,
+  microsoftOneDriveWriteAllScopes,
+  microsoftOneDriveWriteScopes,
   microsoftOutlookReadScopes,
   microsoftOutlookSendScopes,
   microsoftOutlookSharedReadScopes,
@@ -52,14 +86,15 @@ export {
   microsoftOutlookSharedWriteScopes,
   microsoftOutlookWriteScopes
 } from './oauth.ts'
-export { resolveMicrosoftAccessToken } from './shared.ts'
+export { microsoftGraphApiBaseUrl, resolveMicrosoftAccessToken } from './shared.ts'
 
 import { defineConnector } from '../connector.ts'
+import { oneDriveActions } from './drive.ts'
 import { outlookMailActions } from './mail.ts'
 import { microsoftConnectorId } from './oauth.ts'
 
 export const MicrosoftConnector = defineConnector({
   id: microsoftConnectorId,
-  description: 'Microsoft Outlook mail actions through Microsoft Graph.',
-  actions: outlookMailActions
+  description: 'Microsoft Outlook and OneDrive actions through Microsoft Graph.',
+  actions: [...outlookMailActions, ...oneDriveActions]
 })

@@ -21,7 +21,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
 | `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook mail actions through Microsoft Graph and OAuth slot constants       |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants      |
 | `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot |
 | `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                          |
 | `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                    |
@@ -156,7 +156,7 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; Gmail inline attachments may omit that id and cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
-## Microsoft Outlook connector
+## Microsoft connector
 
 ```ts
 import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
@@ -172,7 +172,7 @@ const integration = makeIntegration({
   ]
 })
 
-const program = MicrosoftConnector.invoke({
+const mailProgram = MicrosoftConnector.invoke({
   integration,
   action: 'outlook.search_messages',
   input: {
@@ -181,38 +181,56 @@ const program = MicrosoftConnector.invoke({
     top: 10
   }
 })
+
+const filesProgram = MicrosoftConnector.invoke({
+  integration,
+  action: 'onedrive.search_items',
+  input: { query: 'quarterly plan', top: 10 }
+})
 ```
 
-This integration targets **Microsoft Outlook mail through Microsoft Graph v1.0**. It does not use
-the retired Outlook REST endpoint and does not call Exchange Online APIs directly. Microsoft Graph
-is the supported API and OAuth resource boundary; Outlook is the mail workload, while Exchange
-Online remains the backing organizational mailbox service.
+This integration targets **Microsoft Outlook and OneDrive through Microsoft Graph v1.0**. It does
+not use the retired Outlook REST endpoint, direct Exchange Online APIs, or legacy OneDrive APIs.
+Microsoft Graph is the shared API and OAuth resource boundary.
 
-All action-scoped slots share the `microsoft.oauth` binding id. Inputs default to the signed-in
-mailbox (`/me`). Set `mailbox` to a user ID or user principal name to target an Exchange Online
-shared/delegated mailbox through `/users/{mailbox}`. Signed-in mailbox actions request `Mail.Read`,
-`Mail.ReadWrite`, or `Mail.Send`; explicit mailbox targets request the corresponding
-`Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared` delegated permission. Use
-`MicrosoftCombinedOAuthCredentialSlot` only when broad consent is appropriate.
+All action-scoped slots share the `microsoft.oauth` binding id, so one host credential can serve
+Outlook and OneDrive when its consent includes the selected actions' `Mail.*` and `Files.*`
+permissions. Use `MicrosoftCombinedOAuthCredentialSlot` only when broad consent is appropriate.
+
+Outlook inputs default to the signed-in mailbox (`/me`). Set `mailbox` to a user ID or user principal
+name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`. Signed-in
+mailbox actions request `Mail.Read`, `Mail.ReadWrite`, or `Mail.Send`; explicit mailbox targets
+request the corresponding `Mail.Read.Shared`, `Mail.ReadWrite.Shared`, or `Mail.Send.Shared`
+delegated permission.
 
 The signed-in user still needs the relevant Exchange folder/full-access grant. Sending from another
 mailbox also requires Exchange **Send As** or **Send on Behalf** rights; targeting that mailbox's
-`/users/{mailbox}` endpoint requires Full Access. For application tokens, set integration config to `{ mailboxAccessMode: 'application' }` and always
-provide `mailbox`. The connector then uses the non-Shared `Mail.Read`, `Mail.ReadWrite`, and
+`/users/{mailbox}` endpoint requires Full Access. For application tokens, set integration config to
+`{ mailboxAccessMode: 'application' }` and always provide `mailbox`. The connector then uses the non-Shared `Mail.Read`, `Mail.ReadWrite`, and
 `Mail.Send` application-permission hints. Scope application access to approved mailboxes with host
 or admin policy, such as Exchange Online RBAC for Applications. Hosts own Entra app registration,
 tenant/authority selection, OAuth callbacks, refresh, credential storage, and consent.
 
-Pass Graph `@odata.nextLink` values back through `nextLink` unchanged and repeat `mailbox` for an
-explicit mailbox continuation. The connector only accepts global Graph v1.0 links for the selected
-mailbox's message collections, so access tokens are not forwarded to arbitrary resources.
-`outlook.get_message` requests a text body; read and draft-returning actions request immutable IDs.
-Sending returns `{ accepted: true }` for Graph's `202 Accepted`; that confirms submission, not
-processing or delivery. The built-in endpoint targets
-the global Microsoft cloud; national-cloud hosts need a cloud-specific connector until the API base
-is configurable.
+Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged and repeat `mailbox`
+for an explicit mailbox continuation. The connector only accepts global Graph v1.0 links for the
+selected mailbox's message collections. `outlook.get_message` requests a text body; read and
+draft-returning actions request immutable IDs. Sending returns `{ accepted: true }` for Graph's
+`202 Accepted`; that confirms submission, not processing or delivery.
 
-See Microsoft's [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folder guide](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [send-from-another-user guide](https://learn.microsoft.com/en-us/graph/outlook-send-mail-from-other-user), and [Outlook REST migration notice](https://learn.microsoft.com/en-us/outlook/rest/compare-graph).
+OneDrive actions default to the signed-in user's `/me/drive`; set `driveId` to target
+`/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read` or `Files.ReadWrite`. Set
+`oneDriveAccessMode` to `delegated_all` when the host has consented `Files.Read.All` or
+`Files.ReadWrite.All` for broader delegated access. For application tokens, set it to `application`
+and always provide `driveId`; application mode also uses the `Files.*.All` slots. List and search
+continuations must repeat the same drive target; list continuations must also repeat `parentItemId`.
+
+The OneDrive action set lists, searches, and gets file/folder metadata, creates folders, and moves
+items to the recycle bin. Binary content download/upload and resumable upload sessions are not part
+of the connector's current string/JSON HTTP boundary; hosts own file-content transfer. The built-in
+Microsoft endpoint targets the global cloud; national-cloud hosts need a cloud-specific connector
+until the API base is configurable.
+
+See Microsoft's [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folder guide](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive DriveItem overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), and [DriveItem addressing guide](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems).
 
 Notion and Todoist actions decode provider wire pagination and expose SDK outputs with camelCase fields such as `nextCursor`. Inputs accept documented camelCase fields and common provider-native snake_case aliases where useful, such as Notion `data_source_id` / `rich_text` and Todoist `project_id` / `task_id` / `filter_lang`.
 
@@ -226,7 +244,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
 | `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |
-| `@yolk-sdk/connectors/microsoft`       | Outlook list/search/get, draft/reply-draft, send-mail, and send-draft actions                               |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                         |
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                |
 | `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                                     |
 | `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                |

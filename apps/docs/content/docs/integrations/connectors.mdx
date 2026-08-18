@@ -7,17 +7,17 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 
 ## Summary
 
-| Connector         | Import                                 | Credential slots                             | Config keys                                | Actions                          |
-| ----------------- | -------------------------------------- | -------------------------------------------- | ------------------------------------------ | -------------------------------- |
-| Afloat            | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                       | `afloat.mcp_auth`                |
-| Figma             | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                       | `figma.mcp_auth`                 |
-| Google            | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                       | Gmail + Calendar actions         |
-| LinkedIn search   | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                       | search, profile, email           |
-| Microsoft Outlook | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode` optional               | Outlook mail through Graph       |
-| Notion            | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                       | Notion workspace/content actions |
-| Cloudflare R2     | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional | presigned upload URL             |
-| Telegram          | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                   | send, validate                   |
-| Todoist           | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                       | project/task/label actions       |
+| Connector       | Import                                 | Credential slots                             | Config keys                                        | Actions                          |
+| --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | -------------------------------- |
+| Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                |
+| Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                 |
+| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar actions         |
+| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email           |
+| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph |
+| Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions |
+| Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL             |
+| Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                   |
+| Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions       |
 
 ## Afloat
 
@@ -94,25 +94,29 @@ action.
 | `calendar.delete_event`   | delete an event                   |
 | `calendar.list_accounts`  | list accessible Calendar accounts |
 
-## Microsoft Outlook
+## Microsoft
 
-Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail. The supported API and OAuth
-resource boundary is Microsoft Graph v1.0. The connector does not use the retired Outlook REST
-endpoint or direct Exchange Online APIs; Exchange Online is the backing mailbox service for
-organizational Microsoft 365 accounts.
+Use `@yolk-sdk/connectors/microsoft` for Microsoft Outlook mail and OneDrive files. Both workloads
+share Microsoft Graph v1.0 as the API and OAuth resource boundary, plus the same `microsoft.oauth`
+credential binding. The connector does not use the retired Outlook REST endpoint, direct Exchange
+Online APIs, or legacy OneDrive APIs.
 
 All OAuth slots use the shared `microsoft.oauth` binding id:
 
-| Slot                                             | Required delegated scope |
-| ------------------------------------------------ | ------------------------ |
-| `MicrosoftOutlookReadOAuthCredentialSlot`        | `Mail.Read`              |
-| `MicrosoftOutlookWriteOAuthCredentialSlot`       | `Mail.ReadWrite`         |
-| `MicrosoftOutlookSendOAuthCredentialSlot`        | `Mail.Send`              |
-| `MicrosoftOutlookSharedReadOAuthCredentialSlot`  | `Mail.Read.Shared`       |
-| `MicrosoftOutlookSharedWriteOAuthCredentialSlot` | `Mail.ReadWrite.Shared`  |
-| `MicrosoftOutlookSharedSendOAuthCredentialSlot`  | `Mail.Send.Shared`       |
-| `MicrosoftCombinedOAuthCredentialSlot`           | all connector scopes     |
-| `MicrosoftOAuthCredentialSlot`                   | none declared            |
+| Slot                                             | Permission hint         |
+| ------------------------------------------------ | ----------------------- |
+| `MicrosoftOutlookReadOAuthCredentialSlot`        | `Mail.Read`             |
+| `MicrosoftOutlookWriteOAuthCredentialSlot`       | `Mail.ReadWrite`        |
+| `MicrosoftOutlookSendOAuthCredentialSlot`        | `Mail.Send`             |
+| `MicrosoftOutlookSharedReadOAuthCredentialSlot`  | `Mail.Read.Shared`      |
+| `MicrosoftOutlookSharedWriteOAuthCredentialSlot` | `Mail.ReadWrite.Shared` |
+| `MicrosoftOutlookSharedSendOAuthCredentialSlot`  | `Mail.Send.Shared`      |
+| `MicrosoftOneDriveReadOAuthCredentialSlot`       | `Files.Read`            |
+| `MicrosoftOneDriveWriteOAuthCredentialSlot`      | `Files.ReadWrite`       |
+| `MicrosoftOneDriveReadAllOAuthCredentialSlot`    | `Files.Read.All`        |
+| `MicrosoftOneDriveWriteAllOAuthCredentialSlot`   | `Files.ReadWrite.All`   |
+| `MicrosoftCombinedOAuthCredentialSlot`           | all connector scopes    |
+| `MicrosoftOAuthCredentialSlot`                   | none declared           |
 
 Inputs default to the signed-in mailbox through `/me`. Set optional `mailbox` to a user ID or user
 principal name to target an Exchange Online shared/delegated mailbox through `/users/{mailbox}`.
@@ -130,7 +134,10 @@ such as Exchange Online RBAC for Applications.
 
 Hosts own Entra app registration, OAuth authority/tenant selection, consent, callbacks, token
 refresh, credential storage, and Exchange mailbox authorization. Use action-scoped slots for
-least-privilege consent.
+least-privilege consent. A single credential can cover Outlook and OneDrive when it has both the
+required `Mail.*` and `Files.*` grants.
+
+### Outlook actions
 
 | Action id                    | What it does                                               |
 | ---------------------------- | ---------------------------------------------------------- |
@@ -149,10 +156,34 @@ use Graph immutable IDs; `outlook.get_message` requests text for the full body. 
 change when sent, which is a documented immutable-ID exception.
 
 Send actions return `{ accepted: true }` for Graph's `202 Accepted`. Acceptance confirms submission,
-not processing or delivery. The built-in endpoint targets the global Microsoft cloud; it does not
-currently configure national-cloud Graph hosts.
+not processing or delivery.
 
-Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [send from another user](https://learn.microsoft.com/en-us/graph/outlook-send-mail-from-other-user), [message search](https://learn.microsoft.com/en-us/graph/search-query-parameter#use-search-on-message-collections), and [Outlook REST retirement](https://learn.microsoft.com/en-us/outlook/rest/compare-graph).
+### OneDrive actions
+
+OneDrive inputs default to `/me/drive`; set `driveId` to target `/drives/{driveId}`. Default
+delegated mode uses least-privilege `Files.Read` or `Files.ReadWrite`. Set integration config
+`oneDriveAccessMode` to `delegated_all` to select `Files.Read.All` or `Files.ReadWrite.All` for
+broader delegated access. Application-token hosts set it to `application`, must provide `driveId`,
+and use the same `Files.*.All` permission hints. The host owns admin consent and application access
+policy.
+
+| Action id                | What it does                                                 |
+| ------------------------ | ------------------------------------------------------------ |
+| `onedrive.list_items`    | list root or folder children with opaque Graph paging        |
+| `onedrive.search_items`  | search names, metadata, and indexed content                  |
+| `onedrive.get_item`      | fetch metadata by stable DriveItem id                        |
+| `onedrive.create_folder` | create a root or child folder with conflict behavior         |
+| `onedrive.delete_item`   | move a file or folder to the recycle bin, optionally by ETag |
+
+Pass list/search `nextLink` values back unchanged. Repeat `driveId` for explicit-drive
+continuations and `parentItemId` for folder-list continuations. The connector validates the global
+Graph origin and selected OneDrive collection before replaying a link.
+
+The current connector intentionally excludes binary download/upload and resumable upload sessions:
+its HTTP port is string/JSON-oriented, and hosts own file-content transport. The built-in endpoint
+targets the global Microsoft cloud; it does not currently configure national-cloud Graph hosts.
+
+Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
 
 ## LinkedIn search
 
