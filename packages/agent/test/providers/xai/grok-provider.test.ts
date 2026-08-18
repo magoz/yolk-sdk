@@ -130,6 +130,7 @@ describe('xAI Grok subscription provider', () => {
       expect(error).toMatchObject({
         _tag: 'LLMError',
         cause: 'validation_error',
+        message: 'xAI Grok subscription maxOutputTokens must be a positive safe integer',
         retryable: false
       })
     })
@@ -331,6 +332,30 @@ describe('xAI Grok subscription provider', () => {
 
       expect(Array.from(events).filter(event => event._tag === 'Done')).toHaveLength(1)
       expect(Array.from(events).filter(event => event._tag === 'Usage')).toHaveLength(1)
+    })
+  )
+
+  it.effect('ignores provider events after terminal completion', () =>
+    Effect.gen(function* () {
+      const completed = {
+        type: 'response.completed',
+        response: {
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done' }] }],
+          usage: { input_tokens: 10, output_tokens: 5 }
+        }
+      }
+      const events = yield* streamXAiGrokResponse(
+        responseFromSseEvents([
+          completed,
+          { type: 'response.output_text.delta', delta: 'late text' },
+          {
+            type: 'response.failed',
+            response: { error: { code: 'server_error', message: 'late failure' } }
+          }
+        ])
+      ).pipe(Stream.runCollect)
+
+      expect(Array.from(events).map(event => event._tag)).toEqual(['TextDelta', 'Done', 'Usage'])
     })
   )
 

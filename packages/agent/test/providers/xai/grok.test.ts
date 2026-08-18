@@ -51,6 +51,8 @@ describe('xAI Grok subscription OAuth helpers', () => {
     expect(
       parseXAiGrokAuthorizationCode('https://attacker.example/callback?code=code-4&state=state-4')
     ).toBeUndefined()
+    expect(parseXAiGrokAuthorizationCode('http://127.0.0.1:56121/callback?code=')).toBeUndefined()
+    expect(parseXAiGrokAuthorizationCode('error=access_denied&state=state-5')).toBeUndefined()
     expect(parseXAiGrokAuthorizationCode('  ')).toBeUndefined()
   })
 

@@ -46,7 +46,7 @@ import {
 } from './provider-error.ts'
 import { validateProviderTranscript } from './transcript.ts'
 
-export type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
+type OpenAiResponsesReasoningSummary = 'auto' | 'concise' | 'detailed'
 
 export type OpenAiResponsesProviderConfig = {
   readonly token: OAuthAccessToken
@@ -125,7 +125,7 @@ type OpenAiResponsesTool = {
   readonly parameters: unknown
 }
 
-export type OpenAiResponsesRequestBody = {
+type OpenAiResponsesRequestBody = {
   readonly model: string
   readonly instructions: string
   readonly input: ReadonlyArray<OpenAiResponsesInputItem>
@@ -140,7 +140,7 @@ export type OpenAiResponsesRequestBody = {
   readonly parallel_tool_calls?: true
 }
 
-export type OpenAiResponsesRequestBodyWithReasoning = OpenAiResponsesRequestBody & {
+type OpenAiResponsesRequestBodyWithReasoning = OpenAiResponsesRequestBody & {
   readonly reasoning: NonNullable<OpenAiResponsesRequestBody['reasoning']>
 }
 
@@ -960,6 +960,10 @@ const processSseData = (
   data: string
 ): Effect.Effect<OpenAiResponsesSseStep, LLMError> =>
   Effect.gen(function* () {
+    if (state.hasDone) {
+      return { state, events: [] }
+    }
+
     const parsed = yield* parseOpenAiResponsesSseJson(data)
 
     if (!isRecord(parsed)) {

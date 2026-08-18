@@ -121,8 +121,10 @@ export const parseXAiGrokAuthorizationCode = (
           return undefined
         }
 
-        const code = url.searchParams.get('code') ?? undefined
-        const state = url.searchParams.get('state') ?? undefined
+        const codeParam = url.searchParams.get('code')
+        const stateParam = url.searchParams.get('state')
+        const code = codeParam === null || codeParam.length === 0 ? undefined : codeParam
+        const state = stateParam === null || stateParam.length === 0 ? undefined : stateParam
 
         if (code === undefined) {
           return undefined
@@ -141,14 +143,18 @@ export const parseXAiGrokAuthorizationCode = (
     return undefined
   }
 
-  if (trimmed.includes('code=')) {
+  if (trimmed.includes('=')) {
     const params = new URLSearchParams(trimmed)
-    const code = params.get('code') ?? undefined
-    const state = params.get('state') ?? undefined
+    const codeParam = params.get('code')
+    const stateParam = params.get('state')
+    const code = codeParam === null || codeParam.length === 0 ? undefined : codeParam
+    const state = stateParam === null || stateParam.length === 0 ? undefined : stateParam
 
-    if (code !== undefined) {
-      return state === undefined ? { code } : { code, state }
+    if (code === undefined) {
+      return undefined
     }
+
+    return state === undefined ? { code } : { code, state }
   }
 
   return { code: trimmed }
