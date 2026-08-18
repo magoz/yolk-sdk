@@ -57,8 +57,10 @@ override.
 Generic email's principal contracts are `EmailIncomingConnection`, `EmailSmtpConnection`,
 `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`, `EmailMessageSummary`, `EmailMessage`,
 `EmailListMessagesInput`, `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
-`EmailComposeMessage`, `EmailSendMessageInput`, and `EmailSendMessageOutput`. `EmailClient` receives
-protocol-neutral list/get/send requests plus a runtime `UsernamePasswordCredential`. The connector
+`EmailComposeMessage`, `EmailFolderName`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`,
+`EmailSendMessageInput`, and
+`EmailSendMessageOutput`. `EmailClient` receives protocol-neutral list/get/draft/send requests plus a
+runtime `UsernamePasswordCredential`. The connector
 exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and does not
 bundle transport or MIME libraries.
 

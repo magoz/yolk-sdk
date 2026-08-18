@@ -19,7 +19,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                     |
 | `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version           |
 | `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants       |
-| `@yolk-sdk/connectors/email`           | Portable IMAP/POP3 reads and SMTP submission through a host-provided email client     |
+| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email port |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
 | `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
@@ -173,7 +173,15 @@ reads. Incoming and SMTP bindings are separate, but both may point to the same h
 Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains available through
 the Google and Microsoft connectors.
 
-The common action set is `email.list_messages`, `email.get_message`, and `email.send_message`.
+The common action set is `email.list_messages`, `email.get_message`, `email.create_draft`, and
+`email.send_message`. Draft creation requires IMAP and uses the incoming credential. An optional
+`folder` selects the target mailbox; when omitted, the host adapter resolves the mailbox marked with
+IMAP's `\Drafts` special-use attribute and may fall back to `Drafts`. Drafts may omit recipients.
+The result reports `{ saved: true, folder, draftId? }` because IMAP servers without UIDPLUS may not
+return an `APPENDUID`. `draftId`, when present, is an opaque adapter identifier; UIDPLUS adapters
+must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host adapter generates MIME
+and performs `APPEND` with the `\Draft` flag.
+
 Messages expose normalized addresses, text/HTML bodies, and attachment metadata only—never raw MIME
 or attachment bytes. List `id` values are opaque adapter identifiers that callers pass unchanged to
 `email.get_message`; POP3 adapters must use UIDL or another stable mapping, never transient message
@@ -330,7 +338,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                           |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                                 |
-| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.send_message`                                            |
+| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.create_draft`, `email.send_message`                      |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
 | `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |

@@ -13,12 +13,15 @@ import {
 import {
   EmailClient,
   EmailConnector,
+  EmailCreateDraftOutput,
   EmailIncomingCredentialSlot,
   EmailSendMessageOutput,
   EmailSmtpCredentialSlot,
+  emailCreateDraftAction,
   emailGetMessageAction,
   emailListMessagesAction,
   emailSendMessageAction,
+  type EmailCreateDraftRequest,
   type EmailGetMessageRequest,
   type EmailListMessagesOutput,
   type EmailListMessagesRequest,
@@ -45,10 +48,11 @@ const message = {
 type EmailRequests = {
   readonly list: Array<EmailListMessagesRequest>
   readonly get: Array<EmailGetMessageRequest>
+  readonly draft: Array<EmailCreateDraftRequest>
   readonly send: Array<EmailSendMessageRequest>
 }
 
-const makeRequests = (): EmailRequests => ({ list: [], get: [], send: [] })
+const makeRequests = (): EmailRequests => ({ list: [], get: [], draft: [], send: [] })
 
 const makeEmailClientLayer = (input?: {
   readonly requests?: EmailRequests
@@ -79,6 +83,17 @@ const makeEmailClientLayer = (input?: {
         Effect.sync(() => {
           requests.get.push(request)
           return ActionResult.success({ message })
+        }),
+      createDraft: request =>
+        Effect.sync(() => {
+          requests.draft.push(request)
+          return ActionResult.success(
+            EmailCreateDraftOutput.make({
+              saved: true,
+              folder: request.folder ?? 'Drafts',
+              draftId: 'imap:uid-validity-123:uid-456'
+            })
+          )
         }),
       sendMessage: request =>
         Effect.sync(() => {
@@ -125,10 +140,12 @@ describe('generic email connector', () => {
     expect(EmailConnector.actions.map(action => action.id)).toEqual([
       'email.list_messages',
       'email.get_message',
+      'email.create_draft',
       'email.send_message'
     ])
     expect(emailListMessagesAction.access).toBe('read')
     expect(emailGetMessageAction.access).toBe('read')
+    expect(emailCreateDraftAction.access).toBe('write')
     expect(emailSendMessageAction.access).toBe('destructive')
   })
 
@@ -160,6 +177,68 @@ describe('generic email connector', () => {
         limit: 50,
         credential: { _tag: 'UsernamePasswordCredential', username: 'alice@example.com' }
       })
+    }).pipe(Effect.provide(makeHostLayer({ requests })))
+  })
+
+  it.effect('saves recipient-less drafts through IMAP and allows an explicit folder', () => {
+    const requests = makeRequests()
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.create_draft',
+        input: {
+          folder: 'Saved Drafts',
+          message: { to: [], subject: 'Work in progress', body: {} }
+        }
+      })
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          saved: true,
+          folder: 'Saved Drafts',
+          draftId: 'imap:uid-validity-123:uid-456'
+        }
+      })
+      expect(requests.draft[0]).toMatchObject({
+        connection: {
+          protocol: 'imap',
+          host: 'imap.example.com',
+          port: 993,
+          security: 'tls'
+        },
+        folder: 'Saved Drafts',
+        message: { subject: 'Work in progress', to: [], body: {} }
+      })
+    }).pipe(Effect.provide(makeHostLayer({ requests })))
+  })
+
+  it.effect('rejects empty explicit draft folders before dispatch', () => {
+    const requests = makeRequests()
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.create_draft',
+        input: { folder: '   ', message: { to: [], body: {} } }
+      }).pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(requests.draft).toHaveLength(0)
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
@@ -305,6 +384,31 @@ describe('generic email connector', () => {
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
+  it.effect('rejects draft creation through POP3 before resolving credentials or dispatching', () => {
+    const requests = makeRequests()
+    const refs: Array<string> = []
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingProtocol: 'pop3', incomingHost: 'pop.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.create_draft',
+        input: { message: { to: [], body: { text: 'Not supported' } } }
+      }).pipe(Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(refs).toHaveLength(0)
+      expect(requests.draft).toHaveLength(0)
+    }).pipe(Effect.provide(makeHostLayer({ requests, refs })))
+  })
+
   it.effect('rejects recipient-less SMTP messages but permits BCC-only submission', () => {
     const requests = makeRequests()
     const integration = makeIntegration({
@@ -442,6 +546,10 @@ describe('generic email connector', () => {
             new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
           ),
         getMessage: () =>
+          Effect.fail(
+            new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
+          ),
+        createDraft: () =>
           Effect.fail(
             new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
           ),

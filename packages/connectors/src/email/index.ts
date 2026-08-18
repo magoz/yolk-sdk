@@ -149,6 +149,24 @@ export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('Emai
   references: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
+export const EmailFolderName = Schema.Trimmed.check(Schema.isNonEmpty())
+export type EmailFolderName = typeof EmailFolderName.Type
+
+export class EmailCreateDraftInput extends Schema.Class<EmailCreateDraftInput>(
+  'EmailCreateDraftInput'
+)({
+  message: EmailComposeMessage,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
+export class EmailCreateDraftOutput extends Schema.Class<EmailCreateDraftOutput>(
+  'EmailCreateDraftOutput'
+)({
+  saved: Schema.Literal(true),
+  folder: EmailFolderName,
+  draftId: Schema.optional(Schema.String)
+}) {}
+
 export class EmailSendMessageInput extends Schema.Class<EmailSendMessageInput>(
   'EmailSendMessageInput'
 )({
@@ -181,6 +199,15 @@ export class EmailGetMessageRequest extends Schema.Class<EmailGetMessageRequest>
   folder: Schema.optional(Schema.String)
 }) {}
 
+export class EmailCreateDraftRequest extends Schema.Class<EmailCreateDraftRequest>(
+  'EmailCreateDraftRequest'
+)({
+  connection: EmailIncomingConnection,
+  credential: UsernamePasswordCredential,
+  message: EmailComposeMessage,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
 export class EmailSendMessageRequest extends Schema.Class<EmailSendMessageRequest>(
   'EmailSendMessageRequest'
 )({
@@ -196,6 +223,9 @@ export type EmailClientApi = {
   readonly getMessage: (
     input: EmailGetMessageRequest
   ) => Effect.Effect<ActionResult<EmailGetMessageOutput>, ConnectorError>
+  readonly createDraft: (
+    input: EmailCreateDraftRequest
+  ) => Effect.Effect<ActionResult<EmailCreateDraftOutput>, ConnectorError>
   readonly sendMessage: (
     input: EmailSendMessageRequest
   ) => Effect.Effect<ActionResult<EmailSendMessageOutput>, ConnectorError>
@@ -351,6 +381,15 @@ const rejectPop3Folder = (
       )
     : Effect.void
 
+const requireImap = (
+  integration: ConnectorIntegration,
+  connection: EmailIncomingConnection,
+  operation: string
+) =>
+  connection.protocol === 'imap'
+    ? Effect.void
+    : Effect.fail(validationError(integration, `${operation} requires IMAP; POP3 is read-only`))
+
 export const emailListMessagesAction = defineAction({
   id: 'email.list_messages',
   description: 'List normalized messages from a configured IMAP or POP3 account.',
@@ -400,6 +439,30 @@ export const emailGetMessageAction = defineAction({
     })
 })
 
+export const emailCreateDraftAction = defineAction({
+  id: 'email.create_draft',
+  description: 'Save a normalized message draft in a configured IMAP account.',
+  access: 'write',
+  inputSchema: EmailCreateDraftInput,
+  outputSchema: EmailCreateDraftOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const connection = yield* incomingConnection(integration)
+      yield* requireImap(integration, connection, 'Draft creation')
+      const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
+      const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
+      const client = yield* EmailClient
+      return yield* client.createDraft(
+        EmailCreateDraftRequest.make({
+          connection,
+          credential,
+          message: input.message,
+          folder: input.folder
+        })
+      )
+    })
+})
+
 export const emailSendMessageAction = defineAction({
   id: 'email.send_message',
   description: 'Submit a normalized message to a configured SMTP server.',
@@ -419,7 +482,12 @@ export const emailSendMessageAction = defineAction({
     })
 })
 
-export const emailActions = [emailListMessagesAction, emailGetMessageAction, emailSendMessageAction]
+export const emailActions = [
+  emailListMessagesAction,
+  emailGetMessageAction,
+  emailCreateDraftAction,
+  emailSendMessageAction
+]
 
 export const EmailConnector = defineConnector({
   id: emailConnectorId,
