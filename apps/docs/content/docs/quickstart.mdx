@@ -105,13 +105,13 @@ It is sunny in Barcelona.
 
 In a real app you replace only the boundaries:
 
-| Boundary      | Replace fake quickstart part with                                                                                            |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Provider      | `makeOpenAiProviderLayer`, `makeOpenAiCodexProviderLayer`, `makeAnthropicClaudeProviderLayer`, or `makeXAiGrokProviderLayer` |
-| Tool executor | app-owned tools, connector tools, MCP tools, knowledge search, sandbox tool                                                  |
-| Transport     | Next route, Worker, Durable Object, CLI, or Workflow stream                                                                  |
-| Storage       | database/session event log owned by your app                                                                                 |
-| UI            | React client helpers or app-owned chat state                                                                                 |
+| Boundary      | Replace fake quickstart part with                                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provider      | `makeOpenAiProviderLayer`, `makeVercelAiGatewayProviderLayer`, `makeOpenAiCodexProviderLayer`, `makeAnthropicClaudeProviderLayer`, or `makeXAiGrokProviderLayer` |
+| Tool executor | app-owned tools, connector tools, MCP tools, knowledge search, sandbox tool                                                                                      |
+| Transport     | Next route, Worker, Durable Object, CLI, or Workflow stream                                                                                                      |
+| Storage       | database/session event log owned by your app                                                                                                                     |
+| UI            | React client helpers or app-owned chat state                                                                                                                     |
 
 ## Runtime choices
 

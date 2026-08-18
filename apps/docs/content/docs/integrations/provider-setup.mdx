@@ -1,13 +1,13 @@
 ---
 title: Use model providers
-description: Wire OpenAI-compatible, Codex, Claude, or Grok provider layers into an agent loop.
+description: Wire OpenAI-compatible, Vercel AI Gateway, Codex, Claude, or Grok provider layers into an agent loop.
 ---
 
 Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
 
 Provider output-token limits are host-owned when the endpoint supports them. OpenAI-compatible chat,
-Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not infer model limits or
-apply hidden fallbacks.
+Vercel AI Gateway, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does
+not infer model limits or apply hidden fallbacks.
 
 ## Install
 
@@ -30,7 +30,31 @@ const OpenAiLayer = makeOpenAiProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-Use `chatCompletionsUrl` for OpenAI-compatible proxies or gateways.
+Use `chatCompletionsUrl` for generic OpenAI-compatible endpoints.
+
+## Vercel AI Gateway
+
+Use this for Vercel's OpenAI-compatible Gateway endpoint and `provider/model` routing.
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
+
+const GatewayLayer = makeVercelAiGatewayProviderLayer({
+  apiKey: Redacted.make(hostGatewayApiKeyOrOidcToken),
+  maxCompletionTokens: hostModelConfig.maxOutputTokens,
+  fallbackModels: hostFallbackModelIds,
+  routing: { only: hostAllowedGatewayProviders }
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+The factory sends `maxCompletionTokens` as Gateway `max_tokens`. The env-backed
+`VercelAiGatewayProviderLayer` reads `AI_GATEWAY_API_KEY`, falls back to
+`VERCEL_OIDC_TOKEN`, and requires `AI_GATEWAY_MAX_COMPLETION_TOKENS`. The factory also accepts
+`extraHeaders` for optional `http-referer` and `x-title` attribution. Required authorization and JSON
+headers cannot be overridden. A custom `chatCompletionsUrl` must be a trusted proxy because it
+receives the Bearer credential.
 
 ## OpenAI Codex
 
@@ -127,6 +151,7 @@ Then provide `AppAgentLayer` to `run` or `runRuntime`.
 | Provider              | Media notes                                                             |
 | --------------------- | ----------------------------------------------------------------------- |
 | OpenAI-compatible     | text, image URLs/data URLs, inline text documents                       |
+| Vercel AI Gateway     | OpenAI-compatible text, tools, image URLs/data URLs, text documents     |
 | OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files       |
 | Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents   |
 | xAI Grok subscription | text, reasoning, tools; can encode model-dependent image URL/data input |

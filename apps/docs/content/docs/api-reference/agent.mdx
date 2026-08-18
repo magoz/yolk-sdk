@@ -337,23 +337,24 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 
 ## Providers
 
-| Subpath                                               | Main exports                                                                                        |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai/provider`           | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`     |
-| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, auth, OAuth token, and broker helpers                                                |
-| `@yolk-sdk/agent/providers/openai/codex-usage`        | `fetchOpenAiCodexSubscriptionUsage`, parser, URL, and options                                       |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody`             |
-| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth/broker helpers                                                                          |
-| `@yolk-sdk/agent/providers/openai/realtime`           | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec                    |
-| `@yolk-sdk/agent/providers/openai/speech`             | `OpenAiSpeechConfig`, `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`              |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request, auth, OAuth token, authorization URL, and broker helpers                            |
-| `@yolk-sdk/agent/providers/anthropic/usage`           | `fetchAnthropicClaudeSubscriptionUsage`, parser, URL, and options                                   |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
-| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                                         |
-| `@yolk-sdk/agent/providers/xai/grok`                  | Grok OAuth constants, authorization URL/parser, auth headers, token, and broker helpers             |
-| `@yolk-sdk/agent/providers/xai/grok-provider`         | `makeXAiGrokProviderLayer`, `toXAiGrokRequestBody`, `streamXAiGrokResponse`, config/reasoning types |
-| `@yolk-sdk/agent/providers/xai`                       | Grok OAuth/broker helpers                                                                           |
-| `@yolk-sdk/agent/providers/subscription-usage`        | Snapshot/window schemas and sanitized request/response/auth/rate-limit/configuration errors         |
+| Subpath                                                | Main exports                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/providers/openai/provider`            | `makeOpenAiProviderLayer`, `OpenAiProviderLayer`, `OpenAiProviderConfig`, `toOpenAiRequestBody`     |
+| `@yolk-sdk/agent/providers/openai/codex`               | Codex request, auth, OAuth token, and broker helpers                                                |
+| `@yolk-sdk/agent/providers/openai/codex-usage`         | `fetchOpenAiCodexSubscriptionUsage`, parser, URL, and options                                       |
+| `@yolk-sdk/agent/providers/openai/codex-provider`      | `makeOpenAiCodexProviderLayer`, `OpenAiCodexProviderConfig`, `toOpenAiCodexRequestBody`             |
+| `@yolk-sdk/agent/providers/openai`                     | Codex OAuth/broker helpers                                                                          |
+| `@yolk-sdk/agent/providers/openai/realtime`            | Realtime session config, server-event decoder, `VoiceEvent` mapper, client codec                    |
+| `@yolk-sdk/agent/providers/openai/speech`              | `OpenAiSpeechConfig`, `makeOpenAiSpeechSynthesizerLayer`, `makeOpenAiTranscriberLayer`              |
+| `@yolk-sdk/agent/providers/vercel/ai-gateway-provider` | `makeVercelAiGatewayProviderLayer`, `VercelAiGatewayProviderLayer`, config/routing types, URL/id    |
+| `@yolk-sdk/agent/providers/anthropic/claude`           | Claude request, auth, OAuth token, authorization URL, and broker helpers                            |
+| `@yolk-sdk/agent/providers/anthropic/usage`            | `fetchAnthropicClaudeSubscriptionUsage`, parser, URL, and options                                   |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider`  | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
+| `@yolk-sdk/agent/providers/anthropic`                  | Claude OAuth/broker helpers                                                                         |
+| `@yolk-sdk/agent/providers/xai/grok`                   | Grok OAuth constants, authorization URL/parser, auth headers, token, and broker helpers             |
+| `@yolk-sdk/agent/providers/xai/grok-provider`          | `makeXAiGrokProviderLayer`, `toXAiGrokRequestBody`, `streamXAiGrokResponse`, config/reasoning types |
+| `@yolk-sdk/agent/providers/xai`                        | Grok OAuth/broker helpers                                                                           |
+| `@yolk-sdk/agent/providers/subscription-usage`         | Snapshot/window schemas and sanitized request/response/auth/rate-limit/configuration errors         |
 
 Subscription-usage fetchers require a matching fresh `OAuthAccessToken` and `HttpClient.HttpClient`.
 Both accept an optional positive `requestTimeoutMs`; endpoint origins stay fixed. With
@@ -367,13 +368,20 @@ unrecognized or absent buckets may produce an empty snapshot. Raw response bodie
 Provider output limits are host-owned where supported:
 
 - `OpenAiProviderConfig.maxCompletionTokens` becomes vendor `max_completion_tokens`.
+- `VercelAiGatewayProviderConfig.maxCompletionTokens` becomes Gateway `max_tokens`; optional
+  `fallbackModels` and `routing` become Gateway request extensions.
 - ChatGPT subscription Codex rejects vendor `max_output_tokens`; its optional deprecated
   `maxOutputTokens` compatibility field is ignored.
 - `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
 - `XAiGrokProviderConfig.maxOutputTokens` becomes vendor `max_output_tokens` on the xAI CLI proxy.
 - `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
   `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+- `VercelAiGatewayProviderLayer` reads `AI_GATEWAY_API_KEY`, falls back to `VERCEL_OIDC_TOKEN`, and
+  requires integer `AI_GATEWAY_MAX_COMPLETION_TOKENS`.
 
 `toOpenAiRequestBody`, `toAnthropicClaudeRequestBody`, and `toXAiGrokRequestBody` require matching
-limit configuration. `toOpenAiCodexRequestBody` accepts the optional ignored compatibility field but sends no output
-limit. Yolk does not infer limits from model ids.
+limit configuration. `toOpenAiCodexRequestBody` accepts the optional ignored compatibility field but
+sends no output limit. Yolk does not infer limits from model ids. Generic OpenAI-compatible hosts may
+select `OpenAiProviderConfig.completionTokenField`, add endpoint extensions through `extraBody`, and
+set `providerIdentity` for accurate safe error metadata; canonical request fields and required HTTP
+headers take precedence.

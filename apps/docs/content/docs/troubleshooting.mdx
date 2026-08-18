@@ -54,6 +54,13 @@ Build one app-level layer and provide it at the route/runtime boundary.
 The output limit must parse as an integer. If you do not want env config, use
 `makeOpenAiProviderLayer({ apiKey, maxCompletionTokens })` and provide an HTTP layer.
 
+### Missing Vercel AI Gateway environment configuration
+
+`VercelAiGatewayProviderLayer` reads `AI_GATEWAY_API_KEY`, falling back to `VERCEL_OIDC_TOKEN`, and
+requires integer `AI_GATEWAY_MAX_COMPLETION_TOKENS`. If you configure the layer explicitly, pass the
+selected credential as `apiKey` to `makeVercelAiGatewayProviderLayer`; model ids must use Gateway's
+opaque `provider/model` form.
+
 ### OAuth provider returns unauthorized
 
 Codex, Claude, and Grok provider layers need a fresh `OAuthAccessToken`. Your host owns token storage,

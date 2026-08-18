@@ -12,14 +12,15 @@ For copy-paste provider layer setup, see [Use model providers](./provider-setup)
 | Provider               | Factory                            | Auth               | Notes                                                                                                               |
 | ---------------------- | ---------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | OpenAI-compatible chat | `makeOpenAiProviderLayer`          | API key            | Chat Completions-style endpoint; `OpenAiProviderLayer` can read its API key and output limit through Effect Config. |
+| Vercel AI Gateway      | `makeVercelAiGatewayProviderLayer` | API key or OIDC    | OpenAI-compatible Gateway endpoint with provider routing and model fallbacks.                                       |
 | OpenAI Codex           | `makeOpenAiCodexProviderLayer`     | `OAuthAccessToken` | Responses API adapter with reasoning summaries and OAuth broker helpers.                                            |
 | Anthropic Claude Code  | `makeAnthropicClaudeProviderLayer` | `OAuthAccessToken` | Claude Code-compatible adapter with Claude OAuth broker helpers.                                                    |
 | xAI Grok subscription  | `makeXAiGrokProviderLayer`         | `OAuthAccessToken` | Responses adapter for Grok consumer subscriptions through the xAI CLI proxy.                                        |
 | Faux provider          | `FauxProvider.layer(...)`          | none               | Test-only deterministic provider from `@yolk-sdk/agent/loop/testing`.                                               |
 
-Provider output-token limits are host-owned when supported. OpenAI-compatible chat, Anthropic, and
-Grok require limits; ChatGPT Codex does not expose one. Yolk does not maintain a model-limit catalog or
-apply hidden fallbacks.
+Provider output-token limits are host-owned when supported. OpenAI-compatible chat, Vercel AI
+Gateway, Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not
+maintain a model-limit catalog or apply hidden fallbacks.
 
 ## OpenAI-compatible chat
 
@@ -34,7 +35,39 @@ const ProviderLayer = makeOpenAiProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-Use `chatCompletionsUrl` for OpenAI-compatible gateways.
+Use `chatCompletionsUrl` for generic OpenAI-compatible endpoints. Prefer the dedicated adapter below
+for correct Vercel Gateway error attribution and routing options.
+
+## Vercel AI Gateway
+
+This is a server-side configuration fragment. The host supplies credentials and model policy:
+
+```ts
+import { Layer, Redacted } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeVercelAiGatewayProviderLayer } from '@yolk-sdk/agent/providers/vercel/ai-gateway-provider'
+
+const ProviderLayer = makeVercelAiGatewayProviderLayer({
+  apiKey: Redacted.make(hostGatewayApiKeyOrOidcToken),
+  maxCompletionTokens: hostModelConfig.maxOutputTokens,
+  fallbackModels: hostFallbackModelIds,
+  routing: { order: ['vertex', 'anthropic'] },
+  extraHeaders: {
+    'http-referer': hostPublicAppUrl,
+    'x-title': hostAppName
+  }
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+The adapter uses `https://ai-gateway.vercel.sh/v1/chat/completions`, sends non-streamed JSON Chat
+Completions requests, and lowers `maxCompletionTokens` to Gateway `max_tokens`. Pass opaque Gateway
+model ids such as `provider/model`; query Vercel's model
+catalog instead of hard-coding an SDK model union. `VercelAiGatewayProviderLayer` tries
+`AI_GATEWAY_API_KEY`, then `VERCEL_OIDC_TOKEN`, and also reads integer
+`AI_GATEWAY_MAX_COMPLETION_TOKENS`. Required auth and JSON headers override `extraHeaders`. Override
+`chatCompletionsUrl` only with a trusted proxy because it receives the Bearer credential. Gateway
+`finish_reason` values `length` and `content_filter` fail as non-retryable `invalid_response` rather
+than reporting partial or filtered output as complete.
 
 ## OpenAI Codex
 

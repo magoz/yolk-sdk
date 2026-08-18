@@ -43,10 +43,21 @@ import {
 } from '../provider-error.ts'
 import { validateProviderTranscript } from '../transcript.ts'
 
+type OpenAiProviderIdentity = {
+  readonly id: string
+  readonly name: string
+}
+
 export type OpenAiProviderConfig = {
   readonly chatCompletionsUrl?: string
   readonly maxCompletionTokens: number
+  /** Selects the compatible endpoint's output-limit parameter. Defaults to `max_completion_tokens`. */
+  readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraHeaders?: Readonly<Record<string, string>>
+  /** Adds compatible endpoint extensions; canonical model/messages/limit/stream fields win. */
+  readonly extraBody?: Readonly<Record<string, unknown>>
+  /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
+  readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
 }
 
@@ -95,9 +106,23 @@ type OpenAiTool = {
 type OpenAiRequestBody = {
   readonly model: string
   readonly messages: ReadonlyArray<OpenAiMessage>
-  readonly max_completion_tokens: number
+  readonly max_completion_tokens?: number
+  readonly max_tokens?: number
+  readonly stream: false
   readonly tools?: ReadonlyArray<OpenAiTool>
   readonly parallel_tool_calls?: true
+}
+
+type OpenAiRequestBodyConfig = {
+  readonly maxCompletionTokens: number
+  readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
+  readonly extraBody?: Readonly<Record<string, unknown>>
+  readonly providerName?: string
+}
+
+const defaultOpenAiProviderIdentity: OpenAiProviderIdentity = {
+  id: 'openai',
+  name: 'OpenAI'
 }
 
 class OpenAiFunctionResponse extends Schema.Class<OpenAiFunctionResponse>('OpenAiFunctionResponse')(
@@ -121,7 +146,8 @@ class OpenAiMessageResponse extends Schema.Class<OpenAiMessageResponse>('OpenAiM
 }) {}
 
 class OpenAiChoiceResponse extends Schema.Class<OpenAiChoiceResponse>('OpenAiChoiceResponse')({
-  message: OpenAiMessageResponse
+  message: OpenAiMessageResponse,
+  finish_reason: Schema.optional(Schema.NullOr(Schema.String))
 }) {}
 
 class OpenAiPromptTokensDetails extends Schema.Class<OpenAiPromptTokensDetails>(
@@ -199,19 +225,23 @@ const decodeJsonString = (raw: string, message: string) =>
     )
   )
 
-const unsupportedContentError = (contentType: string) =>
+const unsupportedContentError = (contentType: string, providerName: string) =>
   new LLMError({
     cause: 'provider_error',
-    message: `${contentType} content is not supported by the OpenAI provider yet`,
+    message: `${contentType} content is not supported by the ${providerName} provider yet`,
     retryable: false
   })
 
-const textDocumentToOpenAiPart = (part: Extract<ContentPart, { readonly _tag: 'Document' }>) =>
+const textDocumentToOpenAiPart = (
+  part: Extract<ContentPart, { readonly _tag: 'Document' }>,
+  providerName: string
+) =>
   attachmentSourceText(part.source).pipe(
-    Effect.mapError(() => unsupportedContentError('Invalid document text')),
+    Effect.mapError(() => unsupportedContentError('Invalid document text', providerName)),
     Effect.flatMap(
       Option.match({
-        onNone: () => Effect.fail(unsupportedContentError('Unresolved document source')),
+        onNone: () =>
+          Effect.fail(unsupportedContentError('Unresolved document source', providerName)),
         onSome: text => {
           const block: OpenAiTextContentPart = {
             type: 'text',
@@ -225,73 +255,92 @@ const textDocumentToOpenAiPart = (part: Extract<ContentPart, { readonly _tag: 'D
   )
 
 const contentPartToUserPart = (
-  part: ContentPart
+  part: ContentPart,
+  providerName: string
 ): Effect.Effect<OpenAiTextContentPart | OpenAiImageContentPart, LLMError> => {
   switch (part._tag) {
     case 'Text':
       return Effect.succeed({ type: 'text', text: part.text })
     case 'Image':
       return Option.match(attachmentSourceUrl(part.source, part.mimeType), {
-        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source')),
+        onNone: () => Effect.fail(unsupportedContentError('Unresolved image source', providerName)),
         onSome: url => Effect.succeed({ type: 'image_url', image_url: { url } })
       })
     case 'Document':
       return isTextDocumentMimeType(part.mimeType)
-        ? textDocumentToOpenAiPart(part)
-        : Effect.fail(unsupportedContentError('Document'))
+        ? textDocumentToOpenAiPart(part, providerName)
+        : Effect.fail(unsupportedContentError('Document', providerName))
     case 'Audio':
-      return Effect.fail(unsupportedContentError('Audio'))
+      return Effect.fail(unsupportedContentError('Audio', providerName))
   }
 }
 
-const contentToUserContent = (content: Content): Effect.Effect<OpenAiUserContent, LLMError> =>
+const contentToUserContent = (
+  content: Content,
+  providerName: string
+): Effect.Effect<OpenAiUserContent, LLMError> =>
   typeof content === 'string'
     ? Effect.succeed(content)
-    : Effect.forEach(content, contentPartToUserPart)
+    : Effect.forEach(content, part => contentPartToUserPart(part, providerName))
 
-const contentPartToText = (part: ContentPart, owner: string): Effect.Effect<string, LLMError> => {
+const contentPartToText = (
+  part: ContentPart,
+  owner: string,
+  providerName: string
+): Effect.Effect<string, LLMError> => {
   switch (part._tag) {
     case 'Text':
       return Effect.succeed(part.text)
     case 'Image':
-      return Effect.fail(unsupportedContentError(`${owner} image`))
+      return Effect.fail(unsupportedContentError(`${owner} image`, providerName))
     case 'Document':
-      return Effect.fail(unsupportedContentError(`${owner} document`))
+      return Effect.fail(unsupportedContentError(`${owner} document`, providerName))
     case 'Audio':
-      return Effect.fail(unsupportedContentError(`${owner} audio`))
+      return Effect.fail(unsupportedContentError(`${owner} audio`, providerName))
   }
 }
 
-const contentToText = (content: Content, owner: string): Effect.Effect<string, LLMError> =>
+const contentToText = (
+  content: Content,
+  owner: string,
+  providerName: string
+): Effect.Effect<string, LLMError> =>
   typeof content === 'string'
     ? Effect.succeed(content)
-    : Effect.forEach(content, part => contentPartToText(part, owner)).pipe(
+    : Effect.forEach(content, part => contentPartToText(part, owner, providerName)).pipe(
         Effect.map(textParts => textParts.join('\n'))
       )
 
-const serializeToolArguments = (params: unknown) =>
-  encodeJsonString(params, 'Could not serialize OpenAI tool arguments')
+const serializeToolArguments = (params: unknown, providerName: string) =>
+  encodeJsonString(params, `Could not serialize ${providerName} tool arguments`)
 
-const toolCallToOpenAiToolCall = (call: ToolCall): Effect.Effect<OpenAiToolCall, LLMError> =>
+const toolCallToOpenAiToolCall = (
+  call: ToolCall,
+  providerName: string
+): Effect.Effect<OpenAiToolCall, LLMError> =>
   Effect.gen(function* () {
     return {
       id: call.id,
       type: 'function',
       function: {
         name: call.name,
-        arguments: yield* serializeToolArguments(call.params)
+        arguments: yield* serializeToolArguments(call.params, providerName)
       }
     }
   })
 
-const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LLMError> =>
+const toOpenAiMessage = (
+  message: AgentMessage,
+  providerName: string
+): Effect.Effect<OpenAiMessage, LLMError> =>
   Effect.gen(function* () {
     switch (message._tag) {
       case 'User':
         return {
           role: 'user',
           content: yield* contentToUserContent(
-            prependMessageContextToContent(message.content, messageContextText(message))
+            prependMessageContextToContent(message.content, messageContextText(message)),
+            providerName
           )
         }
       case 'Assistant': {
@@ -299,22 +348,21 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
           assistantContent(message),
           messageContextText(message)
         )
-        const toolCalls = yield* Effect.forEach(
-          assistantHostToolCalls(message),
-          toolCallToOpenAiToolCall
+        const toolCalls = yield* Effect.forEach(assistantHostToolCalls(message), call =>
+          toolCallToOpenAiToolCall(call, providerName)
         )
 
         if (toolCalls.length > 0) {
           return {
             role: 'assistant',
-            content: yield* contentToText(content, 'Assistant'),
+            content: yield* contentToText(content, 'Assistant', providerName),
             tool_calls: toolCalls
           }
         }
 
         return {
           role: 'assistant',
-          content: yield* contentToText(content, 'Assistant')
+          content: yield* contentToText(content, 'Assistant', providerName)
         }
       }
       case 'ToolResult':
@@ -323,7 +371,8 @@ const toOpenAiMessage = (message: AgentMessage): Effect.Effect<OpenAiMessage, LL
           tool_call_id: message.toolCallId,
           content: yield* contentToText(
             prependMessageContextToContent(message.content, messageContextText(message)),
-            'Tool result'
+            'Tool result',
+            providerName
           )
         }
     }
@@ -340,18 +389,38 @@ const toOpenAiTool = (tool: ToolDef): OpenAiTool => ({
 
 export const toOpenAiRequestBody = (
   request: LLMRequest,
-  config: { readonly maxCompletionTokens: number }
+  config: OpenAiRequestBodyConfig
 ): Effect.Effect<OpenAiRequestBody, LLMError> =>
   Effect.gen(function* () {
+    const providerName = config.providerName ?? defaultOpenAiProviderIdentity.name
+
+    if (!Number.isSafeInteger(config.maxCompletionTokens) || config.maxCompletionTokens <= 0) {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'validation_error',
+          message: `${providerName} maxCompletionTokens must be a positive safe integer`,
+          retryable: false
+        })
+      )
+    }
+
     yield* validateProviderTranscript(request.messages)
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
-    const requestMessages = yield* Effect.forEach(request.messages, toOpenAiMessage)
+    const requestMessages = yield* Effect.forEach(request.messages, message =>
+      toOpenAiMessage(message, providerName)
+    )
     const messages = [systemMessage, ...requestMessages]
 
-    const body = {
+    const completionTokenLimit =
+      config.completionTokenField === 'max_tokens'
+        ? { max_tokens: config.maxCompletionTokens }
+        : { max_completion_tokens: config.maxCompletionTokens }
+    const body: OpenAiRequestBody = {
+      ...config.extraBody,
       model: request.model,
       messages,
-      max_completion_tokens: config.maxCompletionTokens
+      ...completionTokenLimit,
+      stream: false
     }
 
     if (request.tools.length === 0) {
@@ -365,17 +434,33 @@ export const toOpenAiRequestBody = (
     }
   })
 
-const parseToolArguments = (raw: string) =>
-  decodeJsonString(raw, 'Invalid OpenAI tool arguments JSON')
+const parseToolArguments = (raw: string, providerName: string) =>
+  decodeJsonString(raw, `Invalid ${providerName} tool arguments JSON`)
 
 const toLlmEvents = (
-  message: OpenAiMessageResponse
+  choice: OpenAiChoiceResponse,
+  providerIdentity: OpenAiProviderIdentity
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const content = message.content ?? ''
+    if (choice.finish_reason === 'length' || choice.finish_reason === 'content_filter') {
+      return yield* Effect.fail(
+        new LLMError({
+          cause: 'invalid_response',
+          message: `${providerIdentity.name} response stopped with ${choice.finish_reason}`,
+          retryable: false,
+          provider: providerErrorInfo({
+            provider: providerIdentity.id,
+            kind: 'invalid_response',
+            providerCode: choice.finish_reason
+          })
+        })
+      )
+    }
+
+    const content = choice.message.content ?? ''
     const textEvents = content.length > 0 ? [LLMTextDelta.make({ text: content })] : []
-    const toolCallEvents = yield* Effect.forEach(message.tool_calls ?? [], call =>
-      parseToolArguments(call.function.arguments).pipe(
+    const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
+      parseToolArguments(call.function.arguments, providerIdentity.name).pipe(
         Effect.map(params =>
           LLMToolCall.make({
             call: ToolCall.make({
@@ -410,26 +495,28 @@ const toAgentUsage = (usage: OpenAiUsageResponse) =>
   })
 
 const toHttpClientLlmError =
-  (message: string, retryable: boolean) => (error: HttpClientError.HttpClientError) =>
+  (providerIdentity: OpenAiProviderIdentity, retryable: boolean) =>
+  (error: HttpClientError.HttpClientError) =>
     new LLMError({
       cause: 'provider_error',
-      message: `${message}: ${error.message}`,
+      message: `${providerIdentity.name} request failed: ${error.message}`,
       retryable,
       provider: providerErrorInfo({
-        provider: 'openai',
+        provider: providerIdentity.id,
         kind: retryable ? 'network' : 'unknown'
       })
     })
 
 const parseOpenAiResponseJson = (
-  response: HttpClientResponse.HttpClientResponse
+  response: HttpClientResponse.HttpClientResponse,
+  providerName: string
 ): Effect.Effect<unknown, LLMError> =>
   response.json.pipe(
     Effect.mapError(
       error =>
         new LLMError({
           cause: 'invalid_response',
-          message: `Could not parse OpenAI response JSON: ${error.message}`,
+          message: `Could not parse ${providerName} response JSON: ${error.message}`,
           retryable: false
         })
     )
@@ -441,28 +528,36 @@ const sendOpenAiRequest = (
   client: HttpClient.HttpClient
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
-    const body = yield* toOpenAiRequestBody(request, config)
+    const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
+    const body = yield* toOpenAiRequestBody(request, {
+      maxCompletionTokens: config.maxCompletionTokens,
+      providerName: providerIdentity.name,
+      ...(config.completionTokenField === undefined
+        ? {}
+        : { completionTokenField: config.completionTokenField }),
+      ...(config.extraBody === undefined ? {} : { extraBody: config.extraBody })
+    })
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* encodeJsonString(
       replaceLoneSurrogatesDeep(body),
-      'Could not serialize OpenAI request'
+      `Could not serialize ${providerIdentity.name} request`
     )
 
     const httpRequest = HttpClientRequest.post(
       config.chatCompletionsUrl ?? 'https://api.openai.com/v1/chat/completions'
     ).pipe(
       HttpClientRequest.setHeaders({
+        ...config.extraHeaders,
         accept: 'application/json',
         authorization: `Bearer ${Redacted.value(config.apiKey)}`,
-        'content-type': 'application/json',
-        ...config.extraHeaders
+        'content-type': 'application/json'
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
     const response = yield* client
       .execute(httpRequest)
-      .pipe(Effect.mapError(toHttpClientLlmError('OpenAI request failed', true)))
+      .pipe(Effect.mapError(toHttpClientLlmError(providerIdentity, true)))
 
     if (response.status < 200 || response.status >= 300) {
       const errorText = yield* response.text.pipe(
@@ -470,14 +565,14 @@ const sendOpenAiRequest = (
           error =>
             new LLMError({
               cause: 'provider_error',
-              message: `Could not read OpenAI error body: ${error.message}`,
+              message: `Could not read ${providerIdentity.name} error body: ${error.message}`,
               retryable: false
             })
         )
       )
 
       const provider = classifyProviderFailure({
-        provider: 'openai',
+        provider: providerIdentity.id,
         status: response.status,
         headers: response.headers,
         body: errorText
@@ -486,20 +581,20 @@ const sendOpenAiRequest = (
       return yield* Effect.fail(
         new LLMError({
           cause: providerFailureCause(provider.kind),
-          message: `OpenAI returned ${response.status}`,
+          message: `${providerIdentity.name} returned ${response.status}`,
           retryable: providerFailureRetryable(provider.kind),
           provider
         })
       )
     }
 
-    const json = yield* parseOpenAiResponseJson(response)
+    const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
       Effect.mapError(
         error =>
           new LLMError({
             cause: 'invalid_response',
-            message: `Invalid OpenAI response: ${unknownToMessage(error)}`,
+            message: `Invalid ${providerIdentity.name} response: ${unknownToMessage(error)}`,
             retryable: false
           })
       )
@@ -510,20 +605,22 @@ const sendOpenAiRequest = (
       return yield* Effect.fail(
         new LLMError({
           cause: 'invalid_response',
-          message: 'OpenAI response contained no choices',
+          message: `${providerIdentity.name} response contained no choices`,
           retryable: false
         })
       )
     }
 
-    const events = yield* toLlmEvents(choice.message)
+    const events = yield* toLlmEvents(choice, providerIdentity)
 
     if (parsed.usage === undefined) {
       return events
     }
 
     return [...events, LLMUsage.make({ usage: toAgentUsage(parsed.usage) })]
-  }).pipe(Effect.withSpan('OpenAiProvider.stream'))
+  }).pipe(
+    Effect.withSpan(`${config.providerIdentity?.id ?? defaultOpenAiProviderIdentity.id}.stream`)
+  )
 
 export const makeOpenAiProviderLayer = (config: OpenAiProviderConfig) =>
   Layer.effect(
