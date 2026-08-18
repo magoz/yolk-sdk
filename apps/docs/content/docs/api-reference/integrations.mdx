@@ -54,12 +54,12 @@ override.
 | `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas                                        |
 | `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots                                                                   |
 
-Generic email's principal contracts are `EmailIncomingConnection`, `EmailSmtpConnection`,
-`EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`, `EmailMessageSummary`, `EmailMessage`,
-`EmailListMessagesInput`, `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
-`EmailComposeMessage`, `EmailFolderName`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`,
-`EmailSendMessageInput`, and
-`EmailSendMessageOutput`. `EmailClient` receives protocol-neutral list/get/draft/send requests plus a
+Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapConnection`,
+`EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
+`EmailMessageSummary`, `EmailMessage`, `EmailListMessagesInput`, `EmailListMessagesOutput`,
+`EmailGetMessageInput`, `EmailGetMessageOutput`, `EmailComposeMessage`, `EmailFolderName`,
+`EmailDraftId`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`, `EmailSendMessageInput`, and
+`EmailSendMessageOutput`. `EmailClient` receives typed list/get/IMAP-draft/SMTP-send requests plus a
 runtime `UsernamePasswordCredential`. The connector
 exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and does not
 bundle transport or MIME libraries.

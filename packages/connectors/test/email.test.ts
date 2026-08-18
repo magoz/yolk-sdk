@@ -14,6 +14,8 @@ import {
   EmailClient,
   EmailConnector,
   EmailCreateDraftOutput,
+  EmailDraftId,
+  EmailFolderName,
   EmailIncomingCredentialSlot,
   EmailSendMessageOutput,
   EmailSmtpCredentialSlot,
@@ -90,8 +92,8 @@ const makeEmailClientLayer = (input?: {
           return ActionResult.success(
             EmailCreateDraftOutput.make({
               saved: true,
-              folder: request.folder ?? 'Drafts',
-              draftId: 'imap:uid-validity-123:uid-456'
+              folder: request.folder ?? EmailFolderName.make('Drafts'),
+              draftId: EmailDraftId.make('imap:uid-validity-123:uid-456')
             })
           )
         }),
@@ -216,6 +218,29 @@ describe('generic email connector', () => {
         folder: 'Saved Drafts',
         message: { subject: 'Work in progress', to: [], body: {} }
       })
+    }).pipe(Effect.provide(makeHostLayer({ requests })))
+  })
+
+  it.effect('leaves an omitted draft folder for host mailbox discovery', () => {
+    const requests = makeRequests()
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.create_draft',
+        input: { message: { to: [], body: { text: 'Unfiled draft' } } }
+      })
+
+      expect(result).toMatchObject({
+        _tag: 'Success',
+        value: { saved: true, folder: 'Drafts' }
+      })
+      expect(requests.draft[0]?.folder).toBeUndefined()
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
