@@ -4,6 +4,7 @@ import { defineAction } from '../action.ts'
 import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
+import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest } from '../http.ts'
 import { ActionResult, ProviderFailure } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
@@ -28,6 +29,15 @@ const resolveTelegramBotToken = (integration: ConnectorIntegration) =>
         return credential.token
       case 'OAuthCredential':
         return credential.accessToken
+      case 'UsernamePasswordCredential':
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'credential_invalid',
+            message: 'Telegram connector does not accept username/password credentials',
+            connectorId: integration.connectorId,
+            slotId: TelegramBotTokenSlot.id
+          })
+        )
     }
   })
 

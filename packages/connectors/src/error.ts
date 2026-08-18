@@ -6,6 +6,7 @@ export const ConnectorErrorCause = Schema.Literals([
   'credential_binding_missing',
   'credential_invalid',
   'credential_missing',
+  'transport_failed',
   'validation_failed'
 ])
 export type ConnectorErrorCause = typeof ConnectorErrorCause.Type

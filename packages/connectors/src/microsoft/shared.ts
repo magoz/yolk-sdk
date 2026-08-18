@@ -25,6 +25,7 @@ export const resolveMicrosoftAccessToken = (
       case 'BearerTokenCredential':
         return credential.token
       case 'ApiKeyCredential':
+      case 'UsernamePasswordCredential':
         return yield* Effect.fail(
           new ConnectorError({
             cause: 'credential_invalid',

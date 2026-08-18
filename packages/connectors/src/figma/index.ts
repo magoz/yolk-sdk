@@ -40,6 +40,7 @@ const resolveFigmaAccessToken = (integration: ConnectorIntegration) =>
           expiresAt: credential.expiresAt
         }
       case 'ApiKeyCredential':
+      case 'UsernamePasswordCredential':
         return yield* Effect.fail(
           new ConnectorError({
             cause: 'credential_invalid',

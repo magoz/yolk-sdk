@@ -53,6 +53,7 @@ const packages: ReadonlyArray<PackageShape> = [
       './agent',
       './afloat',
       './dropbox',
+      './email',
       './figma',
       './google',
       './linkedin-search',

@@ -44,6 +44,7 @@ override.
 | `@yolk-sdk/connectors/agent`           | `makeConnectorToolModule`                                                                                                  |
 | `@yolk-sdk/connectors/afloat`          | `AfloatConnector`, `AfloatApiKeyCredentialSlot`, MCP endpoint and protocol constants                                       |
 | `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, and file actions                                                |
+| `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                           |
 | `@yolk-sdk/connectors/google`          | `GoogleConnector`, Google OAuth slots, Gmail/Calendar actions                                                              |
 | `@yolk-sdk/connectors/notion`          | `NotionConnector`, `NotionApiTokenSlot`                                                                                    |
 | `@yolk-sdk/connectors/todoist`         | `TodoistConnector`, `TodoistApiTokenSlot`                                                                                  |
@@ -52,6 +53,16 @@ override.
 | `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots                                                                  |
 | `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas                                        |
 | `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots                                                                   |
+
+Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapConnection`,
+`EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
+`EmailMessageSummary`, `EmailMessage`, `EmailListMessagesInput`, `EmailListMessagesOutput`,
+`EmailGetMessageInput`, `EmailGetMessageOutput`, `EmailComposeMessage`, `EmailFolderName`,
+`EmailDraftId`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`, `EmailSendMessageInput`, and
+`EmailSendMessageOutput`. `EmailClient` receives typed list/get/IMAP-draft/SMTP-send requests plus a
+runtime `UsernamePasswordCredential`. The connector
+exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and does not
+bundle transport or MIME libraries.
 
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,

@@ -17,6 +17,7 @@ export {
   CredentialSlot,
   OAuthCredential,
   RuntimeCredential,
+  UsernamePasswordCredential,
   findCredentialBinding,
   makeCredentialBinding,
   resolveCredential

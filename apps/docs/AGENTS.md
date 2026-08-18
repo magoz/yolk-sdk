@@ -28,3 +28,4 @@ Private Fumadocs/Next site for public `@yolk-sdk/*` package documentation.
 - Do not add auth, DB, telemetry, or product policy here unless the docs site itself needs it.
 - Run `pnpm docs:check` after docs changes.
 - Run `pnpm build:docs` after routing/config changes.
+- Run docs checks/builds serially; both regenerate `.source`/`.next` types, and concurrent runs can produce transient TS6053 missing-file failures.

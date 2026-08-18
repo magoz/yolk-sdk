@@ -3,7 +3,12 @@ import * as Schema from 'effect/Schema'
 import { ConnectorError } from './error.ts'
 import type { ConnectorIntegration } from './integration.ts'
 
-export const CredentialKind = Schema.Literals(['api_key', 'bearer_token', 'oauth'])
+export const CredentialKind = Schema.Literals([
+  'api_key',
+  'bearer_token',
+  'oauth',
+  'username_password'
+])
 export type CredentialKind = typeof CredentialKind.Type
 
 export class CredentialSlot extends Schema.Class<CredentialSlot>('CredentialSlot')({
@@ -43,10 +48,19 @@ export class OAuthCredential extends Schema.Class<OAuthCredential>('OAuthCredent
   scopes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
+export class UsernamePasswordCredential extends Schema.Class<UsernamePasswordCredential>(
+  'UsernamePasswordCredential'
+)({
+  _tag: Schema.Literal('UsernamePasswordCredential'),
+  username: Schema.String,
+  password: Schema.String
+}) {}
+
 export const RuntimeCredential = Schema.Union([
   ApiKeyCredential,
   BearerTokenCredential,
-  OAuthCredential
+  OAuthCredential,
+  UsernamePasswordCredential
 ])
 export type RuntimeCredential = typeof RuntimeCredential.Type
 

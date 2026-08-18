@@ -84,6 +84,15 @@ const resolveNotionToken = (integration: ConnectorIntegration) =>
         return credential.token
       case 'OAuthCredential':
         return credential.accessToken
+      case 'UsernamePasswordCredential':
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'credential_invalid',
+            message: 'Notion connector does not accept username/password credentials',
+            connectorId: integration.connectorId,
+            slotId: NotionApiTokenSlot.id
+          })
+        )
     }
   })
 

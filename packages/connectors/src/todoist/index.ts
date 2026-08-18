@@ -96,6 +96,15 @@ const resolveTodoistToken = (integration: ConnectorIntegration) =>
         return credential.token
       case 'OAuthCredential':
         return credential.accessToken
+      case 'UsernamePasswordCredential':
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'credential_invalid',
+            message: 'Todoist connector does not accept username/password credentials',
+            connectorId: integration.connectorId,
+            slotId: TodoistApiTokenSlot.id
+          })
+        )
     }
   })
 

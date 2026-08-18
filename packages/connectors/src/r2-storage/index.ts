@@ -4,8 +4,8 @@ import { defineAction } from '../action.ts'
 import { optionalStringConfig, requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
+import { ConnectorError } from '../error.ts'
 import { ActionResult } from '../result.ts'
-import type { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const r2StorageConnectorId = 'r2-storage'
@@ -52,6 +52,15 @@ const resolveApiToken = (integration: ConnectorIntegration, slot: CredentialSlot
         return credential.token
       case 'OAuthCredential':
         return credential.accessToken
+      case 'UsernamePasswordCredential':
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'credential_invalid',
+            message: 'R2 connector does not accept username/password credentials',
+            connectorId: integration.connectorId,
+            slotId: slot.id
+          })
+        )
     }
   })
 
