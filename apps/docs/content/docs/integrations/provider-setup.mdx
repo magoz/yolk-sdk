@@ -1,12 +1,12 @@
 ---
 title: Use model providers
-description: Wire OpenAI-compatible, OpenAI Codex, or Anthropic Claude provider layers into an agent loop.
+description: Wire OpenAI-compatible, Codex, Claude, or Grok provider layers into an agent loop.
 ---
 
 Provider layers implement `LLMProvider`. Your app chooses the provider, model id, credentials, HTTP layer, and policy.
 
-Provider output-token limits are host-owned when the endpoint supports them. OpenAI-compatible chat
-and Anthropic require limits; ChatGPT Codex does not expose one. Yolk does not infer model limits or
+Provider output-token limits are host-owned when the endpoint supports them. OpenAI-compatible chat,
+Anthropic, and Grok require limits; ChatGPT Codex does not expose one. Yolk does not infer model limits or
 apply hidden fallbacks.
 
 ## Install
@@ -53,6 +53,32 @@ an output-token limit. The optional deprecated `maxOutputTokens` field is ignore
 
 OAuth helpers live in `@yolk-sdk/agent/providers/openai` and `@yolk-sdk/agent/providers/openai/codex`.
 
+## xAI Grok subscription
+
+Use this for consumer Grok subscriptions through xAI's CLI Responses proxy.
+
+Configuration fragment (the host supplies the token, model policy, and HTTP layer):
+
+```ts
+import { Layer } from 'effect'
+import { FetchHttpClient } from 'effect/unstable/http'
+import { makeXAiGrokProviderLayer } from '@yolk-sdk/agent/providers/xai/grok-provider'
+
+const GrokLayer = makeXAiGrokProviderLayer({
+  token: hostOAuthAccessToken,
+  maxOutputTokens: hostModelConfig.maxOutputTokens
+}).pipe(Layer.provide(FetchHttpClient.layer))
+```
+
+OAuth and broker helpers live in `@yolk-sdk/agent/providers/xai` and
+`@yolk-sdk/agent/providers/xai/grok`. The package exports browser-PKCE and device-flow constants, not
+a complete device polling service. The host must implement the chosen authorization flow, serialize
+refreshes, persist replacement refresh tokens, verify token provider/freshness, and select an
+available subscription model. The adapter defaults to the xAI CLI proxy rather than the developer
+API-key endpoint. Treat a custom `responsesUrl` as a trusted credential-bearing proxy. xAI controls
+the public CLI OAuth client and private, unsupported proxy contract; both may change and should be
+used only when permitted by xAI's terms.
+
 ## Anthropic Claude Code
 
 Use this for Claude OAuth/token-broker flows and Claude Code-compatible requests.
@@ -98,11 +124,12 @@ Then provide `AppAgentLayer` to `run` or `runRuntime`.
 
 ## Capability notes
 
-| Provider              | Media notes                                                           |
-| --------------------- | --------------------------------------------------------------------- |
-| OpenAI-compatible     | text, image URLs/data URLs, inline text documents                     |
-| OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files     |
-| Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents |
+| Provider              | Media notes                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| OpenAI-compatible     | text, image URLs/data URLs, inline text documents                       |
+| OpenAI Codex          | text, reasoning, tools, image URLs/data URLs, document data/files       |
+| Anthropic Claude Code | text, reasoning, tools, images, PDF URL/base64, inline text documents   |
+| xAI Grok subscription | text, reasoning, tools; can encode model-dependent image URL/data input |
 
 Codex preserves text, image, and document tool results as native function output content. Claude
 preserves text, images, inline text documents, and URL/base64 PDFs as nested tool-result content.

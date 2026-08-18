@@ -9,19 +9,22 @@ For the current provider catalog and setup snippets, see [Model providers](../in
 
 ## Pick a provider subpath
 
-| Subpath                                               | Purpose                                                              |
-| ----------------------------------------------------- | -------------------------------------------------------------------- |
-| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth and token broker helpers                                 |
-| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible chat provider factory                              |
-| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, authorization header, and token broker helpers        |
-| `@yolk-sdk/agent/providers/openai/codex-usage`        | Best-effort Codex subscription-allowance snapshots                   |
-| `@yolk-sdk/agent/providers/openai/codex-provider`     | OpenAI Codex provider factory                                        |
-| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth and token broker helpers                                |
-| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude authorization URL, callback parsing, and token broker helpers |
-| `@yolk-sdk/agent/providers/anthropic/usage`           | Best-effort Claude subscription-allowance snapshots                  |
-| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude provider factory                                              |
-| `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas                     |
-| `@yolk-sdk/agent/oauth`                               | Provider-neutral access-token and broker contracts                   |
+| Subpath                                               | Purpose                                                                |
+| ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `@yolk-sdk/agent/providers/openai`                    | Codex OAuth and token broker helpers                                   |
+| `@yolk-sdk/agent/providers/openai/provider`           | OpenAI-compatible chat provider factory                                |
+| `@yolk-sdk/agent/providers/openai/codex`              | Codex request, authorization header, and token broker helpers          |
+| `@yolk-sdk/agent/providers/openai/codex-usage`        | Best-effort Codex subscription-allowance snapshots                     |
+| `@yolk-sdk/agent/providers/openai/codex-provider`     | OpenAI Codex provider factory                                          |
+| `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth and token broker helpers                                  |
+| `@yolk-sdk/agent/providers/anthropic/claude`          | Claude authorization URL, callback parsing, and token broker helpers   |
+| `@yolk-sdk/agent/providers/anthropic/usage`           | Best-effort Claude subscription-allowance snapshots                    |
+| `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude provider factory                                                |
+| `@yolk-sdk/agent/providers/xai`                       | Grok subscription OAuth and token broker helpers                       |
+| `@yolk-sdk/agent/providers/xai/grok`                  | Grok PKCE/device constants, callback parsing, auth, and broker helpers |
+| `@yolk-sdk/agent/providers/xai/grok-provider`         | Grok subscription Responses provider factory                           |
+| `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas                       |
+| `@yolk-sdk/agent/oauth`                               | Provider-neutral access-token and broker contracts                     |
 
 ## Provide fresh credentials at runtime
 
@@ -36,6 +39,14 @@ Provider packages may model vendor auth mechanics, but hosts own:
 - policy and audit
 
 Give provider layers fresh access tokens at execution time. Do not store raw secrets in protocol messages, annotations, tool results, or docs examples.
+
+Grok subscription tokens default to the fixed xAI CLI proxy, not the developer API-key origin.
+Browser PKCE uses xAI's fixed loopback callback. The package exports device-flow constants only; a
+host that cannot listen on the callback must implement device-code initiation, polling, cancellation,
+and exchange itself. Validate token provider/freshness before construction, serialize refreshes, and
+atomically persist any replacement refresh token. Only configure a custom Grok response URL when it
+is a trusted credential-bearing proxy. The default CLI proxy is a private, unsupported surface that
+may change; use it only when permitted by xAI's terms.
 
 Subscription-usage adapters accept the same `OAuthAccessToken` values but do not refresh or persist
 them. Their private provider endpoints are best-effort. Hosts own polling, labels, stale-data rules,

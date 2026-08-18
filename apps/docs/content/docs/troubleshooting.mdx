@@ -56,7 +56,16 @@ The output limit must parse as an integer. If you do not want env config, use
 
 ### OAuth provider returns unauthorized
 
-Codex and Claude provider layers need a fresh `OAuthAccessToken`. Your host owns token storage, refresh, broker routes, account linking, and audit.
+Codex, Claude, and Grok provider layers need a fresh `OAuthAccessToken`. Your host owns token storage,
+refresh, broker routes, account linking, and audit.
+
+For Grok subscriptions, send the token to the default xAI CLI proxy, not `api.x.ai`. A custom
+`responsesUrl` must be a trusted proxy because it receives the bearer. Browser PKCE requires xAI's
+fixed loopback callback. The SDK exports device-flow constants but the host must implement initiation
+and polling when it cannot listen there. Coalesce concurrent refreshes and persist a rotated refresh
+token atomically. The provider rejects mismatched or expired access-token envelopes before HTTP.
+The CLI proxy is a private, unsupported surface that may change; use it only when permitted by xAI's
+terms.
 
 ### Media input rejected
 
