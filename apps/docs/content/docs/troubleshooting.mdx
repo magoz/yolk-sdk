@@ -162,9 +162,9 @@ Google or Microsoft connector for their provider-specific OAuth flows.
 
 Use only `none`, `starttls`, or `tls` for security and ports from `1` through `65535`. POP3 has no
 folder or draft model, so omit `folder` for reads and configure IMAP for `email.create_draft`. When a
-draft omits `folder`, the host adapter must resolve the mailbox marked with the `\Drafts` special-use
-attribute and may fall back to `Drafts`; servers without UIDPLUS may save successfully without
-returning `draftId`. SMTP `{ accepted: true }` means
+draft omits `folder`, the host adapter must discover a mailbox advertised with `\Drafts` by the IMAP
+SPECIAL-USE extension and may fall back to `Drafts`; servers without UIDPLUS may save successfully
+without returning `draftId`. SMTP `{ accepted: true }` means
 the server accepted the submission; it does not prove delivery. Transport failures should remain
 typed `ConnectorError`
 effects, while expected server rejection should be returned by the host port as

@@ -26,7 +26,7 @@
 | `error`           | typed package/runtime failures                                                                   |
 | `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                 |
 | `dropbox`         | Dropbox metadata/file-management actions plus OAuth slot constants                               |
-| `email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email client            |
+| `email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email client          |
 | `figma`           | Figma remote MCP auth data action and OAuth constants                                            |
 | `google`          | Gmail/Calendar actions plus Google OAuth slot constants                                          |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                        |
@@ -48,7 +48,8 @@
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
 - Dropbox action-scoped OAuth slots share the `dropbox.oauth` binding id; metadata reads require `files.metadata.read`, file-management writes require `files.content.write`, and binary upload/download stays outside the string-body HTTP port.
 - Dropbox HTTP 409 covers not-found and conflict cases; classify from `error_summary`, not status alone. Single-item `move_v2`/`copy_v2` return `{ metadata }`; async job unions belong to batch routes.
-- Generic email actions depend on the host-provided `EmailClient` port and never bundle socket, TLS, MIME, IMAP, POP3, or SMTP libraries. Incoming and SMTP use separate stable credential slots; POP3 rejects folder inputs and draft creation, IMAP draft adapters own MIME `APPEND` with the `\Draft` flag plus `\Drafts` mailbox resolution, and SMTP acceptance means submission only, not delivery.
+- Generic email actions depend on the host-provided `EmailClient` port and never bundle socket, TLS, MIME, IMAP, POP3, or SMTP libraries.
+- Keep incoming and SMTP credential slots separate. POP3 rejects folders and drafts. IMAP draft adapters generate MIME, `APPEND` with `\Draft`, and, when no folder is provided, discover an advertised `\Drafts` SPECIAL-USE mailbox with a host-defined fallback. SMTP acceptance means submission only, not delivery.
 - Microsoft actions use Microsoft Graph v1.0, not the retired Outlook REST endpoint, direct Exchange APIs, or legacy OneDrive endpoints. Outlook and OneDrive action-scoped slots share the `microsoft.oauth` binding id; hosts own OAuth authority/tenant selection and token lifecycle.
 - Outlook inputs default to `/me`; optional `mailbox` targets `/users/{id|userPrincipalName}` for Exchange Online mailboxes. Delegated mode selects `Mail.*.Shared`; integration config `mailboxAccessMode: 'application'` selects non-Shared application permission hints and requires `mailbox`. Exchange mailbox grants and application-token scoping remain host/admin policy.
 - OneDrive inputs default to `/me/drive`; optional `driveId` targets `/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read`/`Files.ReadWrite`; `oneDriveAccessMode: 'delegated_all'` selects `Files.*.All`, while `application` also selects `Files.*.All` and requires `driveId`. Binary upload/download and upload-session mechanics are outside the current string/JSON HTTP port.

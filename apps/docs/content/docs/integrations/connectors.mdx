@@ -98,9 +98,9 @@ Google or Microsoft connectors for their OAuth flows. Outputs contain normalized
 text/HTML, and attachment metadata, never raw MIME or attachment bytes.
 
 `email.create_draft` requires IMAP, accepts drafts without recipients, and uses the incoming
-credential. Optional `folder` selects the mailbox. When omitted, the host adapter resolves the
-mailbox marked with IMAP's `\Drafts` special-use attribute and may fall back to `Drafts`. The port
-owns MIME generation and `APPEND` with the `\Draft` flag. Output is
+credential. Optional `folder` selects the mailbox. When omitted, the host adapter discovers a
+mailbox advertised with `\Drafts` by the IMAP SPECIAL-USE extension and may fall back to `Drafts`.
+The port owns MIME generation and `APPEND` with the `\Draft` flag. Output is
 `{ saved: true, folder, draftId? }`; `draftId` is optional because servers without UIDPLUS may not
 return `APPENDUID`. When present, it is opaque; UIDPLUS adapters must encode both UIDVALIDITY and UID,
 never a bare UID. POP3 rejects draft creation.

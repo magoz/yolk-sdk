@@ -175,8 +175,9 @@ the Google and Microsoft connectors.
 
 The common action set is `email.list_messages`, `email.get_message`, `email.create_draft`, and
 `email.send_message`. Draft creation requires IMAP and uses the incoming credential. An optional
-`folder` selects the target mailbox; when omitted, the host adapter resolves the mailbox marked with
-IMAP's `\Drafts` special-use attribute and may fall back to `Drafts`. Drafts may omit recipients.
+`folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
+with `\Drafts` by the IMAP SPECIAL-USE extension and may fall back to `Drafts`. Drafts may omit
+recipients.
 The result reports `{ saved: true, folder, draftId? }` because IMAP servers without UIDPLUS may not
 return an `APPENDUID`. `draftId`, when present, is an opaque adapter identifier; UIDPLUS adapters
 must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host adapter generates MIME
