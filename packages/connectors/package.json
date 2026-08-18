@@ -38,6 +38,10 @@
       "types": "./src/afloat/index.ts",
       "default": "./src/afloat/index.ts"
     },
+    "./dropbox": {
+      "types": "./src/dropbox/index.ts",
+      "default": "./src/dropbox/index.ts"
+    },
     "./figma": {
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
@@ -97,6 +101,11 @@
         "types": "./dist/afloat/index.d.mts",
         "import": "./dist/afloat/index.mjs",
         "default": "./dist/afloat/index.mjs"
+      },
+      "./dropbox": {
+        "types": "./dist/dropbox/index.d.mts",
+        "import": "./dist/dropbox/index.mjs",
+        "default": "./dist/dropbox/index.mjs"
       },
       "./figma": {
         "types": "./dist/figma/index.d.mts",
