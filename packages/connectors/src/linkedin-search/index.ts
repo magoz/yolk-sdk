@@ -31,6 +31,15 @@ const resolveApiToken = (integration: ConnectorIntegration, slot: CredentialSlot
         return credential.token
       case 'OAuthCredential':
         return credential.accessToken
+      case 'UsernamePasswordCredential':
+        return yield* Effect.fail(
+          new ConnectorError({
+            cause: 'credential_invalid',
+            message: 'LinkedIn search connector does not accept username/password credentials',
+            connectorId: integration.connectorId,
+            slotId: slot.id
+          })
+        )
     }
   })
 

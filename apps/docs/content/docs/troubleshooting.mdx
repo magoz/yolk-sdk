@@ -152,6 +152,20 @@ Connector provider modules declare credential slots needed by their actions. Bin
 
 Provide a `ConnectorHttpClient` layer. Preserve method, URL, headers, body, and content type exactly when adapting to your HTTP client.
 
+### Generic email action fails before transport
+
+Provide `EmailClient` and `CredentialResolver` layers. Incoming actions require `incomingHost` plus
+an `EmailIncomingCredentialSlot` binding; SMTP send requires `smtpHost` plus an
+`EmailSmtpCredentialSlot` binding. The slots may point to the same credential ref, but one binding
+does not silently satisfy the other. Both slots require `UsernamePasswordCredential`; use the
+Google or Microsoft connector for their provider-specific OAuth flows.
+
+Use only `none`, `starttls`, or `tls` for security and ports from `1` through `65535`. POP3 has no
+folder model, so omit `folder` or configure IMAP. SMTP `{ accepted: true }` means the server accepted
+the submission; it does not prove delivery. Transport failures should remain typed `ConnectorError`
+effects, while expected server rejection should be returned by the host port as
+`ActionResult.failure`.
+
 ### Microsoft action is unauthorized
 
 Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for

@@ -42,6 +42,10 @@
       "types": "./src/dropbox/index.ts",
       "default": "./src/dropbox/index.ts"
     },
+    "./email": {
+      "types": "./src/email/index.ts",
+      "default": "./src/email/index.ts"
+    },
     "./figma": {
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
@@ -106,6 +110,11 @@
         "types": "./dist/dropbox/index.d.mts",
         "import": "./dist/dropbox/index.mjs",
         "default": "./dist/dropbox/index.mjs"
+      },
+      "./email": {
+        "types": "./dist/email/index.d.mts",
+        "import": "./dist/email/index.mjs",
+        "default": "./dist/email/index.mjs"
       },
       "./figma": {
         "types": "./dist/figma/index.d.mts",

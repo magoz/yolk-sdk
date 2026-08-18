@@ -19,6 +19,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                     |
 | `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version           |
 | `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants       |
+| `@yolk-sdk/connectors/email`           | Portable IMAP/POP3 reads and SMTP submission through a host-provided email client     |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
 | `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
@@ -45,6 +46,7 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **CredentialBinding**: integration slot-to-host-credential-ref mapping.
 - **CredentialResolver**: host Effect service that resolves refs at runtime.
 - **ConnectorHttpClient**: host-provided HTTP port used by provider actions.
+- **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
 
 ## HTTP port
 
@@ -126,6 +128,60 @@ const program = Todoist.invoke({
   input: {}
 }).pipe(Effect.provide(CredentialResolverLive))
 ```
+
+## Generic email connector
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import {
+  EmailConnector,
+  EmailIncomingCredentialSlot,
+  EmailSmtpCredentialSlot
+} from '@yolk-sdk/connectors/email'
+
+const integration = makeIntegration({
+  connectorId: 'email',
+  config: {
+    incomingProtocol: 'imap',
+    incomingHost: 'imap.example.com',
+    smtpHost: 'smtp.example.com'
+  },
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: EmailIncomingCredentialSlot.id,
+      credentialRef: 'incoming-email-credential'
+    }),
+    makeCredentialBinding({
+      slotId: EmailSmtpCredentialSlot.id,
+      credentialRef: 'smtp-email-credential'
+    })
+  ]
+})
+
+const program = EmailConnector.invoke({
+  integration,
+  action: 'email.list_messages',
+  input: { limit: 25 }
+})
+```
+
+Provide `CredentialResolver` and `EmailClient` layers. The package never imports socket, TLS, MIME,
+IMAP, POP3, or SMTP libraries. Incoming config defaults to IMAP with TLS (`993`); POP3 with TLS
+defaults to `995`. SMTP defaults to STARTTLS on `587`, while explicit SMTP TLS defaults to `465`.
+Ports accept integers or numeric strings. A POP3 action rejects `folder`; use IMAP for folder-aware
+reads. Incoming and SMTP bindings are separate, but both may point to the same host credential ref.
+Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains available through
+the Google and Microsoft connectors.
+
+The common action set is `email.list_messages`, `email.get_message`, and `email.send_message`.
+Messages expose normalized addresses, text/HTML bodies, and attachment metadata only—never raw MIME
+or attachment bytes. List `id` values are opaque adapter identifiers that callers pass unchanged to
+`email.get_message`; POP3 adapters must use UIDL or another stable mapping, never transient message
+sequence numbers. When IMAP `folder` is omitted, adapters use `INBOX`; POP3 uses its single mailbox.
+Adapters return deterministic newest-first pages. Cursors are opaque, scoped to the integration,
+protocol, folder, and ordering, and may fail after mailbox changes. Send success returns
+`{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
+delivered.
 
 ## Google connector
 
@@ -274,6 +330,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                           |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                                 |
+| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.send_message`                                            |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
 | `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |

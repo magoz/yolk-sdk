@@ -41,8 +41,9 @@ const telegramTools = makeConnectorToolModule(TelegramConnector, {
 Your `HostConnectorLayer` provides credentials and HTTP execution. When `access` is omitted, the
 adapter uses the action's declared `read`, `write`, or `destructive` access and falls back to `read`
 for legacy actions without metadata. A host-provided value or resolver overrides action metadata.
-Microsoft actions declare write/destructive access where applicable; keep explicit host
-classification for other connectors until their actions do.
+Microsoft actions declare write/destructive access where applicable. Generic email declares reads
+as `read` and SMTP submission as `destructive`; keep explicit host classification for other
+connectors until their actions do.
 
 ## Use directly without an agent
 

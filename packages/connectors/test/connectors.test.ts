@@ -529,6 +529,7 @@ describe('@yolk-sdk/connectors', () => {
       agent,
       afloat,
       dropbox,
+      email,
       figma,
       google,
       linkedIn,
@@ -542,6 +543,7 @@ describe('@yolk-sdk/connectors', () => {
       import('@yolk-sdk/connectors/agent'),
       import('@yolk-sdk/connectors/afloat'),
       import('@yolk-sdk/connectors/dropbox'),
+      import('@yolk-sdk/connectors/email'),
       import('@yolk-sdk/connectors/figma'),
       import('@yolk-sdk/connectors/google'),
       import('@yolk-sdk/connectors/linkedin-search'),
@@ -556,6 +558,7 @@ describe('@yolk-sdk/connectors', () => {
     expect(agent.makeConnectorToolModule).toBeDefined()
     expect(afloat.AfloatConnector).toBeDefined()
     expect(dropbox.DropboxConnector).toBeDefined()
+    expect(email.EmailConnector).toBeDefined()
     expect(figma.FigmaConnector).toBeDefined()
     expect(google.GoogleConnector).toBeDefined()
     expect(linkedIn.LinkedInSearchConnector).toBeDefined()
