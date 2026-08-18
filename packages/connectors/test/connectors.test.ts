@@ -145,6 +145,7 @@ const testAction = defineAction({
 const failureAction = defineAction({
   id: 'test.fail',
   description: 'Return a provider failure.',
+  access: 'write',
   inputSchema: Schema.Struct({}),
   outputSchema: TestOutput,
   execute: () => Effect.succeed(ActionResult.failure({ code: 'upstream_failed', message: 'Nope' }))
@@ -476,6 +477,16 @@ describe('@yolk-sdk/connectors', () => {
       'onedrive.create_folder',
       'onedrive.delete_item'
     ])
+    expect(
+      MicrosoftConnector.actions
+        .filter(action => action.access === 'write')
+        .map(action => action.id)
+    ).toEqual(['outlook.create_draft', 'outlook.create_reply_draft', 'onedrive.create_folder'])
+    expect(
+      MicrosoftConnector.actions
+        .filter(action => action.access === 'destructive')
+        .map(action => action.id)
+    ).toEqual(['outlook.send_mail', 'outlook.send_draft', 'onedrive.delete_item'])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
       'notion.get_page',
@@ -715,10 +726,19 @@ describe('@yolk-sdk/connectors', () => {
     Effect.gen(function* () {
       const toolModule = makeConnectorToolModule(TestConnector, {
         integration,
-        layer: Layer.empty,
-        access: action => (action.includes('fail') ? 'write' : 'read')
+        layer: Layer.empty
       })
       const toolSet = yield* resolveTools([toolModule], {})
+      const overriddenToolSet = yield* resolveTools(
+        [
+          makeConnectorToolModule(TestConnector, {
+            integration,
+            layer: Layer.empty,
+            access: 'read'
+          })
+        ],
+        {}
+      )
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: 'test.echo',
@@ -729,6 +749,11 @@ describe('@yolk-sdk/connectors', () => {
         moduleId: 'test',
         name: 'test.fail',
         access: 'write'
+      })
+      expect(overriddenToolSet.metadata).toContainEqual({
+        moduleId: 'test',
+        name: 'test.fail',
+        access: 'read'
       })
       expect(result).toMatchObject({
         toolCallId: 'call_1',
@@ -1205,7 +1230,7 @@ describe('@yolk-sdk/connectors', () => {
       const requests: Array<ConnectorHttpRequest> = []
       const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
       const nextLink =
-        'https://graph.microsoft.com/v1.0/me/messages?%24select=id&%24skip=27&%24top=5'
+        'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?%24select=id&%24skip=27&%24top=5'
       const sharedNextLink =
         'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages?%24select=id&%24skip=27&%24top=3'
       const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
@@ -1221,6 +1246,7 @@ describe('@yolk-sdk/connectors', () => {
             '@odata.nextLink': nextLink
           })
         ),
+        jsonHttpResponse('{"value":[]}'),
         jsonHttpResponse('{"value":[]}'),
         jsonHttpResponse('{"value":[]}')
       ])
@@ -1273,6 +1299,12 @@ describe('@yolk-sdk/connectors', () => {
           }
         })
         .pipe(Effect.provide(TestLayer))
+      yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { folderId: 'inbox', nextLink }
+        })
+        .pipe(Effect.provide(TestLayer))
 
       const listRequest = requests.at(0)
       const searchRequest = requests.at(1)
@@ -1296,6 +1328,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(searchUrl.pathname).toBe('/v1.0/users/shared%40example.com/messages')
       expect(searchUrl.searchParams.get('$search')).toBe('"from:alice@example.com"')
       expect(requests.at(2)?.url).toBe(sharedNextLink)
+      expect(requests.at(3)?.url).toBe(nextLink)
       expect(listRequest.headers?.prefer).toBe('IdType="ImmutableId"')
       expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
@@ -1305,6 +1338,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadScope)
       expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailReadWriteScope)
       expect(requestedScopes.at(2)).not.toContain(microsoftGraphMailSendScope)
+      expect(requestedScopes.at(3)).toContain(microsoftGraphMailReadScope)
     })
   )
 
@@ -1493,6 +1527,15 @@ describe('@yolk-sdk/connectors', () => {
           }
         })
         .pipe(Effect.provide(TestLayer), Effect.result)
+      const mismatchedFolderNextLinkResult = yield* outlookListMessagesAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            folderId: 'inbox',
+            nextLink: 'https://graph.microsoft.com/v1.0/me/messages?%24skip=10'
+          }
+        })
+        .pipe(Effect.provide(TestLayer), Effect.result)
       const invalidPageSizeResult = yield* outlookListMessagesAction
         .execute({ integration: microsoftIntegration, input: { top: 1_001 } })
         .pipe(Effect.provide(TestLayer), Effect.result)
@@ -1510,6 +1553,10 @@ describe('@yolk-sdk/connectors', () => {
         }
       })
       expect(invalidNextLinkResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(mismatchedFolderNextLinkResult).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
       })

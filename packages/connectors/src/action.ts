@@ -7,6 +7,8 @@ import type { ConnectorIntegration } from './integration.ts'
 type ActionInputSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
 type ActionOutputSchema = Schema.Schema<unknown> & { readonly EncodingServices: never }
 
+export type ConnectorActionAccess = 'read' | 'write' | 'destructive'
+
 export type ActionExecutionInput<Input> = {
   readonly integration: ConnectorIntegration
   readonly input: Input
@@ -20,6 +22,7 @@ export type UnknownActionExecutionInput = {
 export type ConnectorAction<Env = never, Error = never> = {
   readonly id: string
   readonly description?: string
+  readonly access?: ConnectorActionAccess
   readonly inputSchema: ActionInputSchema
   readonly outputSchema: ActionOutputSchema
   readonly execute: (
@@ -30,6 +33,7 @@ export type ConnectorAction<Env = never, Error = never> = {
 export type DefineActionOptions<InputSchema extends ActionInputSchema, Output, Env, Error> = {
   readonly id: string
   readonly description?: string
+  readonly access?: ConnectorActionAccess
   readonly inputSchema: InputSchema
   readonly outputSchema: Schema.Schema<Output> & { readonly EncodingServices: never }
   readonly execute: (
@@ -55,6 +59,7 @@ export const defineAction = <
 ): ConnectorAction<Env, Error> => ({
   id: options.id,
   description: options.description,
+  ...(options.access === undefined ? {} : { access: options.access }),
   inputSchema: options.inputSchema,
   outputSchema: options.outputSchema,
   execute: input =>

@@ -213,8 +213,7 @@ const outlookMailboxPath = (mailbox: string | undefined) =>
 const invalidNextLink = (actionId: string) =>
   new ConnectorError({
     cause: 'validation_failed',
-    message:
-      'Microsoft Graph nextLink must target a message collection in the selected v1.0 mailbox',
+    message: 'Microsoft Graph nextLink must target the selected v1.0 mailbox folder collection',
     connectorId: microsoftConnectorId,
     actionId
   })
@@ -222,17 +221,17 @@ const invalidNextLink = (actionId: string) =>
 const requireMicrosoftNextLink = (
   nextLink: string,
   actionId: string,
-  mailbox: string | undefined
+  mailbox: string | undefined,
+  folderId: string | undefined
 ) => {
   if (!URL.canParse(nextLink)) return Effect.fail(invalidNextLink(actionId))
 
   const parsed = new URL(nextLink)
   const mailboxRoot = `/v1.0${outlookMailboxPath(mailbox)}`
-  const directMessagesPath = `${mailboxRoot}/messages`
-  const folderMessagesPrefix = `${mailboxRoot}/mailFolders/`
-  const isSelectedMailCollection =
-    parsed.pathname === directMessagesPath ||
-    (parsed.pathname.startsWith(folderMessagesPrefix) && parsed.pathname.endsWith('/messages'))
+  const selectedMessagesPath =
+    folderId === undefined
+      ? `${mailboxRoot}/messages`
+      : `${mailboxRoot}/mailFolders/${encodeURIComponent(folderId)}/messages`
   const isGraphV1Url =
     parsed.protocol === 'https:' &&
     parsed.hostname === 'graph.microsoft.com' &&
@@ -241,7 +240,7 @@ const requireMicrosoftNextLink = (
     parsed.password === '' &&
     parsed.hash === ''
 
-  return isGraphV1Url && isSelectedMailCollection
+  return isGraphV1Url && parsed.pathname === selectedMessagesPath
     ? Effect.succeed(nextLink)
     : Effect.fail(invalidNextLink(actionId))
 }
@@ -314,7 +313,12 @@ const outlookSendSlot = (integration: ConnectorIntegration, mailbox: string | un
 
 const outlookListUrl = (input: OutlookListMessagesInput) => {
   if (input.nextLink !== undefined) {
-    return requireMicrosoftNextLink(input.nextLink, 'outlook.list_messages', input.mailbox)
+    return requireMicrosoftNextLink(
+      input.nextLink,
+      'outlook.list_messages',
+      input.mailbox,
+      input.folderId
+    )
   }
 
   const params = new URLSearchParams()
@@ -333,7 +337,12 @@ const escapedSearchQuery = (query: string) => query.replaceAll('\\', '\\\\').rep
 
 const outlookSearchUrl = (input: OutlookSearchMessagesInput) => {
   if (input.nextLink !== undefined) {
-    return requireMicrosoftNextLink(input.nextLink, 'outlook.search_messages', input.mailbox)
+    return requireMicrosoftNextLink(
+      input.nextLink,
+      'outlook.search_messages',
+      input.mailbox,
+      input.folderId
+    )
   }
 
   const params = new URLSearchParams()
@@ -451,6 +460,7 @@ export const outlookGetMessageAction = defineAction({
 export const outlookCreateDraftAction = defineAction({
   id: 'outlook.create_draft',
   description: 'Create a new Microsoft Outlook message draft.',
+  access: 'write',
   inputSchema: OutlookComposeInput,
   outputSchema: OutlookMessage,
   execute: ({ integration, input }) =>
@@ -485,6 +495,7 @@ export const outlookCreateDraftAction = defineAction({
 export const outlookCreateReplyDraftAction = defineAction({
   id: 'outlook.create_reply_draft',
   description: 'Create a Microsoft Outlook reply draft for an existing message.',
+  access: 'write',
   inputSchema: OutlookCreateReplyDraftInput,
   outputSchema: OutlookMessage,
   execute: ({ integration, input }) =>
@@ -526,6 +537,7 @@ export const outlookCreateReplyDraftAction = defineAction({
 export const outlookSendMailAction = defineAction({
   id: 'outlook.send_mail',
   description: 'Submit a new Microsoft Outlook message for sending.',
+  access: 'destructive',
   inputSchema: OutlookSendMailInput,
   outputSchema: OutlookSendOutput,
   execute: ({ integration, input }) =>
@@ -564,6 +576,7 @@ export const outlookSendMailAction = defineAction({
 export const outlookSendDraftAction = defineAction({
   id: 'outlook.send_draft',
   description: 'Submit an existing Microsoft Outlook draft for sending.',
+  access: 'destructive',
   inputSchema: OutlookMessageIdInput,
   outputSchema: OutlookSendOutput,
   execute: ({ integration, input }) =>

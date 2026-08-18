@@ -211,9 +211,9 @@ mailbox also requires Exchange **Send As** or **Send on Behalf** rights; targeti
 or admin policy, such as Exchange Online RBAC for Applications. Hosts own Entra app registration,
 tenant/authority selection, OAuth callbacks, refresh, credential storage, and consent.
 
-Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged and repeat `mailbox`
-for an explicit mailbox continuation. The connector only accepts global Graph v1.0 links for the
-selected mailbox's message collections. `outlook.get_message` requests a text body; read and
+Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
+an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
+accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message` requests a text body; read and
 draft-returning actions request immutable IDs. Sending returns `{ accepted: true }` for Graph's
 `202 Accepted`; that confirms submission, not processing or delivery.
 
@@ -266,6 +266,12 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 ```
 
 `HostConnectorLayer` should provide `CredentialResolver`, `ConnectorHttpClient`, and any other connector dependencies.
+
+Connector actions can declare default `read`, `write`, or `destructive` access metadata. The agent
+adapter uses that declaration unless the host supplies `access`; host access resolvers always win.
+Microsoft draft/folder-create actions declare `write`; message sends and OneDrive deletion declare
+`destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning
+explicit access when adapting other write-capable connectors.
 
 Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
 canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;

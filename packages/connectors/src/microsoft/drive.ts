@@ -407,6 +407,7 @@ export const oneDriveGetItemAction = defineAction({
 export const oneDriveCreateFolderAction = defineAction({
   id: 'onedrive.create_folder',
   description: 'Create a folder in a Microsoft OneDrive root or selected parent folder.',
+  access: 'write',
   inputSchema: OneDriveCreateFolderInput,
   outputSchema: OneDriveItem,
   execute: ({ integration, input }) =>
@@ -450,6 +451,7 @@ export const oneDriveCreateFolderAction = defineAction({
 export const oneDriveDeleteItemAction = defineAction({
   id: 'onedrive.delete_item',
   description: 'Move a Microsoft OneDrive file or folder to the recycle bin.',
+  access: 'destructive',
   inputSchema: OneDriveDeleteItemInput,
   outputSchema: OneDriveDeleteItemOutput,
   execute: ({ integration, input }) =>

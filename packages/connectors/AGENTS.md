@@ -37,7 +37,7 @@
 ## Design rules
 
 - Connector = reusable implementation; Integration = host-owned config that makes a connector invokable.
-- Actions declare typed input/output schemas; action execution stays Effect-native.
+- Actions declare typed input/output schemas and optional `read`/`write`/`destructive` access metadata; action execution stays Effect-native. Agent adapter host overrides win, otherwise declared access is used.
 - `http.ts` is infrastructure: connectors emit typed requests; hosts provide `ConnectorHttpClient` and preserve headers/body content type.
 - Hosts provide credential resolution, storage, OAuth callbacks, refresh, auditing, and authorization.
 - Use `ActionResult.failure` for expected provider/API failures; use Effect errors for missing config, credential, validation, or transport/runtime failures.

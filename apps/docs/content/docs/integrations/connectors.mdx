@@ -150,8 +150,9 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.send_draft`         | submit an existing draft for sending                       |
 
 List and search outputs expose Graph's complete `@odata.nextLink` as `nextLink`. Pass it back
-unchanged and repeat `mailbox` for explicit-mailbox continuations. The connector accepts only global
-Graph v1.0 links for the selected mailbox's message collections. Read and draft-returning requests
+unchanged; repeat `mailbox` for explicit-mailbox continuations and `folderId` for folder
+continuations. The connector accepts only global Graph v1.0 links for the selected mailbox and
+folder collection. Read and draft-returning requests
 use Graph immutable IDs; `outlook.get_message` requests text for the full body. A draft ID can still
 change when sent, which is a documented immutable-ID exception.
 

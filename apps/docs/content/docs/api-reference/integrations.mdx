@@ -34,6 +34,10 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 
 ## Connectors
 
+`defineAction` accepts optional `access: 'read' | 'write' | 'destructive'` metadata, exported as
+`ConnectorActionAccess`. `makeConnectorToolModule` uses it unless the host supplies an access
+override.
+
 | Subpath                                | Main exports                                                                                                               |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors`                 | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient` |
