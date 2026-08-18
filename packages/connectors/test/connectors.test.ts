@@ -25,6 +25,21 @@ import {
   AfloatConnector
 } from '@yolk-sdk/connectors/afloat'
 import {
+  DropboxConnector,
+  DropboxOAuthCredentialSlot,
+  dropboxFilesContentWriteScope,
+  dropboxFilesMetadataReadScope,
+  dropboxCopyAction,
+  dropboxCreateFolderAction,
+  dropboxDeleteAction,
+  dropboxGetMetadataAction,
+  dropboxListFolderAction,
+  dropboxListFolderContinueAction,
+  dropboxMoveAction,
+  dropboxSearchAction,
+  dropboxSearchContinueAction
+} from '@yolk-sdk/connectors/dropbox'
+import {
   figmaMcpAuthAction,
   FigmaConnector,
   FigmaOAuthCredentialSlot
@@ -168,6 +183,31 @@ const googleIntegration = makeIntegration({
   ]
 })
 
+const dropboxIntegration = makeIntegration({
+  connectorId: 'dropbox',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: DropboxOAuthCredentialSlot.id,
+      credentialRef: 'dropbox-token'
+    })
+  ]
+})
+
+const DropboxCredentialResolverTest = Layer.succeed(
+  CredentialResolver,
+  CredentialResolver.of({
+    resolve: () =>
+      Effect.succeed(
+        OAuthCredential.make({
+          _tag: 'OAuthCredential',
+          provider: 'dropbox',
+          accessToken: 'dropbox_token',
+          expiresAt: Date.now() + 60_000
+        })
+      )
+  })
+)
+
 const GoogleCredentialResolverTest = Layer.succeed(
   CredentialResolver,
   CredentialResolver.of({
@@ -295,6 +335,13 @@ const successBody = (name: string) => {
       return '{"results":[],"has_more":false,"next_cursor":null}'
     case 'Notion create page':
       return '{"id":"page_1","object":"page"}'
+    case 'Dropbox create folder':
+    case 'Dropbox move':
+    case 'Dropbox copy':
+    case 'Dropbox delete':
+      return '{"metadata":{".tag":"folder","id":"id:folder_1","name":"Archive","path_lower":"/archive","path_display":"/Archive"}}'
+    case 'Dropbox get metadata':
+      return '{".tag":"file","id":"id:file_1","name":"notes.txt","path_lower":"/notes.txt","path_display":"/Notes.txt","client_modified":"2026-05-21T10:00:00Z","server_modified":"2026-05-21T10:00:01Z","rev":"abc123456","size":12}'
     case 'Todoist create task':
       return '{"id":"task_1","content":"Buy milk"}'
     case 'LinkedIn search':
@@ -326,6 +373,81 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
         start: { dateTime: '2026-05-21T10:00:00Z' },
         end: { dateTime: '2026-05-21T10:30:00Z' }
       }
+    }
+  },
+  {
+    name: 'Dropbox create folder',
+    execute: dropboxCreateFolderAction.execute,
+    connectorId: 'dropbox',
+    slotId: DropboxOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: { path: '/Archive', autorename: true },
+    expected: {
+      method: 'POST',
+      url: 'https://api.dropboxapi.com/2/files/create_folder_v2',
+      body: { path: '/Archive', autorename: true }
+    }
+  },
+  {
+    name: 'Dropbox get metadata',
+    execute: dropboxGetMetadataAction.execute,
+    connectorId: 'dropbox',
+    slotId: DropboxOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: { path: 'id:file_1', includeDeleted: true },
+    expected: {
+      method: 'POST',
+      url: 'https://api.dropboxapi.com/2/files/get_metadata',
+      body: { path: 'id:file_1', include_deleted: true }
+    }
+  },
+  {
+    name: 'Dropbox move',
+    execute: dropboxMoveAction.execute,
+    connectorId: 'dropbox',
+    slotId: DropboxOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: {
+      fromPath: '/Drafts',
+      toPath: '/Archive',
+      autorename: true,
+      allowOwnershipTransfer: false
+    },
+    expected: {
+      method: 'POST',
+      url: 'https://api.dropboxapi.com/2/files/move_v2',
+      body: {
+        from_path: '/Drafts',
+        to_path: '/Archive',
+        autorename: true,
+        allow_ownership_transfer: false
+      }
+    }
+  },
+  {
+    name: 'Dropbox copy',
+    execute: dropboxCopyAction.execute,
+    connectorId: 'dropbox',
+    slotId: DropboxOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: { fromPath: '/Template', toPath: '/Template copy', autorename: false },
+    expected: {
+      method: 'POST',
+      url: 'https://api.dropboxapi.com/2/files/copy_v2',
+      body: { from_path: '/Template', to_path: '/Template copy', autorename: false }
+    }
+  },
+  {
+    name: 'Dropbox delete',
+    execute: dropboxDeleteAction.execute,
+    connectorId: 'dropbox',
+    slotId: DropboxOAuthCredentialSlot.id,
+    credentialKind: 'oauth',
+    input: { path: '/Archive', parentRev: 'abc123456' },
+    expected: {
+      method: 'POST',
+      url: 'https://api.dropboxapi.com/2/files/delete_v2',
+      body: { path: '/Archive', parent_rev: 'abc123456' }
     }
   },
   {
@@ -402,24 +524,38 @@ const jsonRequestCases: ReadonlyArray<JsonRequestCase> = [
 
 describe('@yolk-sdk/connectors', () => {
   it('imports public subpaths', async () => {
-    const [root, agent, afloat, figma, google, linkedIn, microsoft, notion, r2, telegram, todoist] =
-      await Promise.all([
-        import('@yolk-sdk/connectors'),
-        import('@yolk-sdk/connectors/agent'),
-        import('@yolk-sdk/connectors/afloat'),
-        import('@yolk-sdk/connectors/figma'),
-        import('@yolk-sdk/connectors/google'),
-        import('@yolk-sdk/connectors/linkedin-search'),
-        import('@yolk-sdk/connectors/microsoft'),
-        import('@yolk-sdk/connectors/notion'),
-        import('@yolk-sdk/connectors/r2-storage'),
-        import('@yolk-sdk/connectors/telegram'),
-        import('@yolk-sdk/connectors/todoist')
-      ])
+    const [
+      root,
+      agent,
+      afloat,
+      dropbox,
+      figma,
+      google,
+      linkedIn,
+      microsoft,
+      notion,
+      r2,
+      telegram,
+      todoist
+    ] = await Promise.all([
+      import('@yolk-sdk/connectors'),
+      import('@yolk-sdk/connectors/agent'),
+      import('@yolk-sdk/connectors/afloat'),
+      import('@yolk-sdk/connectors/dropbox'),
+      import('@yolk-sdk/connectors/figma'),
+      import('@yolk-sdk/connectors/google'),
+      import('@yolk-sdk/connectors/linkedin-search'),
+      import('@yolk-sdk/connectors/microsoft'),
+      import('@yolk-sdk/connectors/notion'),
+      import('@yolk-sdk/connectors/r2-storage'),
+      import('@yolk-sdk/connectors/telegram'),
+      import('@yolk-sdk/connectors/todoist')
+    ])
 
     expect(root.defineConnector).toBeDefined()
     expect(agent.makeConnectorToolModule).toBeDefined()
     expect(afloat.AfloatConnector).toBeDefined()
+    expect(dropbox.DropboxConnector).toBeDefined()
     expect(figma.FigmaConnector).toBeDefined()
     expect(google.GoogleConnector).toBeDefined()
     expect(linkedIn.LinkedInSearchConnector).toBeDefined()
@@ -457,6 +593,25 @@ describe('@yolk-sdk/connectors', () => {
       'calendar.list_accounts'
     ])
     expect(AfloatConnector.actions.map(action => action.id)).toEqual(['afloat.mcp_auth'])
+    expect(DropboxConnector.actions.map(action => action.id)).toEqual([
+      'dropbox.list_folder',
+      'dropbox.list_folder_continue',
+      'dropbox.search',
+      'dropbox.search_continue',
+      'dropbox.get_metadata',
+      'dropbox.create_folder',
+      'dropbox.move',
+      'dropbox.copy',
+      'dropbox.delete'
+    ])
+    expect(
+      DropboxConnector.actions.filter(action => action.access === 'write').map(action => action.id)
+    ).toEqual(['dropbox.create_folder', 'dropbox.move', 'dropbox.copy'])
+    expect(
+      DropboxConnector.actions
+        .filter(action => action.access === 'destructive')
+        .map(action => action.id)
+    ).toEqual(['dropbox.delete'])
     expect(FigmaConnector.actions.map(action => action.id)).toEqual(['figma.mcp_auth'])
     expect(LinkedInSearchConnector.actions.map(action => action.id)).toEqual([
       'linkedin_search.search',
@@ -844,6 +999,369 @@ describe('@yolk-sdk/connectors', () => {
       })
     )
   }
+
+  it.effect('lists and continues Dropbox folders with normalized metadata', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            entries: [
+              {
+                '.tag': 'file',
+                id: 'id:file_1',
+                name: 'Notes.txt',
+                path_lower: '/notes.txt',
+                path_display: '/Notes.txt',
+                client_modified: '2026-05-21T10:00:00Z',
+                server_modified: '2026-05-21T10:00:01Z',
+                rev: 'abc123456',
+                size: 12,
+                is_downloadable: true,
+                content_hash: 'content_hash'
+              },
+              {
+                '.tag': 'folder',
+                id: 'id:folder_1',
+                name: 'Projects',
+                path_lower: '/projects',
+                path_display: '/Projects'
+              }
+            ],
+            cursor: 'cursor_1',
+            has_more: true
+          })
+        ),
+        jsonHttpResponse(
+          JSON.stringify({
+            entries: [
+              {
+                '.tag': 'deleted',
+                name: 'Old.txt',
+                path_lower: '/old.txt',
+                path_display: '/Old.txt',
+                is_restorable: true
+              }
+            ],
+            cursor: 'cursor_2',
+            has_more: false
+          })
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'dropbox',
+                accessToken: 'dropbox_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const layer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const first = yield* dropboxListFolderAction
+        .execute({
+          integration: dropboxIntegration,
+          input: { recursive: true, includeDeleted: true, limit: 50 }
+        })
+        .pipe(Effect.provide(layer))
+      const second = yield* dropboxListFolderContinueAction
+        .execute({ integration: dropboxIntegration, input: { cursor: 'cursor_1' } })
+        .pipe(Effect.provide(layer))
+
+      expect(first).toMatchObject({
+        _tag: 'Success',
+        value: {
+          entries: [
+            {
+              type: 'file',
+              id: 'id:file_1',
+              pathLower: '/notes.txt',
+              clientModified: '2026-05-21T10:00:00Z',
+              contentHash: 'content_hash'
+            },
+            { type: 'folder', id: 'id:folder_1', pathDisplay: '/Projects' }
+          ],
+          cursor: 'cursor_1',
+          hasMore: true
+        }
+      })
+      expect(second).toMatchObject({
+        _tag: 'Success',
+        value: {
+          entries: [{ type: 'deleted', name: 'Old.txt', isRestorable: true }],
+          cursor: 'cursor_2',
+          hasMore: false
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'POST',
+        url: 'https://api.dropboxapi.com/2/files/list_folder',
+        headers: {
+          authorization: 'Bearer dropbox_token',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          path: '',
+          recursive: true,
+          include_deleted: true,
+          limit: 50
+        })
+      })
+      expect(requests.at(1)).toMatchObject({
+        method: 'POST',
+        url: 'https://api.dropboxapi.com/2/files/list_folder/continue',
+        body: JSON.stringify({ cursor: 'cursor_1' })
+      })
+      expect(requestedScopes).toEqual([
+        [dropboxFilesMetadataReadScope],
+        [dropboxFilesMetadataReadScope]
+      ])
+    })
+  )
+
+  it.effect('normalizes Dropbox search pagination and highlights', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const match = {
+        metadata: {
+          '.tag': 'metadata',
+          metadata: {
+            '.tag': 'folder',
+            id: 'id:folder_1',
+            name: 'Roadmap',
+            path_lower: '/roadmap',
+            path_display: '/Roadmap'
+          }
+        },
+        match_type: { '.tag': 'filename' },
+        highlight_spans: [{ highlight_str: 'Road', is_highlighted: true }]
+      }
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(JSON.stringify({ matches: [match], has_more: true, cursor: 'search_1' })),
+        jsonHttpResponse(JSON.stringify({ matches: [], has_more: false }))
+      ])
+      const layer = Layer.mergeAll(DropboxCredentialResolverTest, ConnectorHttpClientTest)
+
+      const first = yield* dropboxSearchAction
+        .execute({
+          integration: dropboxIntegration,
+          input: {
+            query: 'roadmap',
+            path: '/Projects',
+            maxResults: 20,
+            filenameOnly: true,
+            fileExtensions: ['pdf']
+          }
+        })
+        .pipe(Effect.provide(layer))
+      const second = yield* dropboxSearchContinueAction
+        .execute({ integration: dropboxIntegration, input: { cursor: 'search_1' } })
+        .pipe(Effect.provide(layer))
+
+      expect(first).toMatchObject({
+        _tag: 'Success',
+        value: {
+          matches: [
+            {
+              metadata: { type: 'folder', id: 'id:folder_1' },
+              matchType: 'filename',
+              highlightSpans: [{ text: 'Road', isHighlighted: true }]
+            }
+          ],
+          hasMore: true,
+          cursor: 'search_1'
+        }
+      })
+      expect(second).toMatchObject({
+        _tag: 'Success',
+        value: { matches: [], hasMore: false }
+      })
+      expect(requests.at(0)).toMatchObject({
+        url: 'https://api.dropboxapi.com/2/files/search_v2',
+        body: JSON.stringify({
+          query: 'roadmap',
+          options: {
+            path: '/Projects',
+            max_results: 20,
+            filename_only: true,
+            file_extensions: ['pdf']
+          }
+        })
+      })
+      expect(requests.at(1)).toMatchObject({
+        url: 'https://api.dropboxapi.com/2/files/search/continue_v2',
+        body: JSON.stringify({ cursor: 'search_1' })
+      })
+    })
+  )
+
+  it.effect('uses Dropbox write scopes for file-management actions', () =>
+    Effect.gen(function* () {
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'dropbox',
+                accessToken: 'dropbox_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(
+            '{"metadata":{".tag":"folder","id":"id:folder_1","name":"Archive","path_lower":"/archive","path_display":"/Archive"}}'
+          )
+        ]
+      )
+
+      yield* dropboxCreateFolderAction
+        .execute({
+          integration: dropboxIntegration,
+          input: { path: '/Archive' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(requestedScopes).toEqual([[dropboxFilesContentWriteScope]])
+    })
+  )
+
+  it.effect('maps Dropbox error summaries and retry details into provider failures', () =>
+    Effect.gen(function* () {
+      const notFoundHttp = makeConnectorHttpClientTest(
+        [],
+        [jsonStatusHttpResponse(409, '{"error_summary":"path/not_found/..."}')]
+      )
+      const conflictHttp = makeConnectorHttpClientTest(
+        [],
+        [jsonStatusHttpResponse(409, '{"error_summary":"path/conflict/folder/..."}')]
+      )
+      const rateLimitHttp = Layer.succeed(
+        ConnectorHttpClient,
+        ConnectorHttpClient.of({
+          request: () =>
+            Effect.succeed(
+              ConnectorHttpResponse.make({
+                status: 429,
+                headers: { 'Retry-After': '3' },
+                body: '{"error_summary":"too_many_requests/..."}'
+              })
+            )
+        })
+      )
+
+      const notFound = yield* dropboxGetMetadataAction
+        .execute({ integration: dropboxIntegration, input: { path: '/missing' } })
+        .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, notFoundHttp)))
+      const conflict = yield* dropboxCreateFolderAction
+        .execute({ integration: dropboxIntegration, input: { path: '/existing' } })
+        .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, conflictHttp)))
+      const rateLimited = yield* dropboxListFolderAction
+        .execute({ integration: dropboxIntegration, input: {} })
+        .pipe(Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, rateLimitHttp)))
+
+      expect(notFound).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'dropbox_not_found',
+          message: 'Dropbox get metadata failed: path/not_found/...',
+          status: 409
+        }
+      })
+      expect(conflict).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'dropbox_conflict',
+          message: 'Dropbox create folder failed: path/conflict/folder/...',
+          status: 409
+        }
+      })
+      expect(rateLimited).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'dropbox_rate_limited',
+          message: 'Dropbox list folder failed: too_many_requests/...',
+          status: 429,
+          retryAfterMs: 3000
+        }
+      })
+    })
+  )
+
+  it.effect('rejects invalid Dropbox inputs and API-key credentials', () =>
+    Effect.gen(function* () {
+      const invalidInput = yield* dropboxSearchAction
+        .execute({ integration: dropboxIntegration, input: { query: '', maxResults: 1001 } })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(DropboxCredentialResolverTest, makeConnectorHttpClientTest([], []))
+          ),
+          Effect.result
+        )
+      const ApiKeyCredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: 'api_key' }))
+        })
+      )
+      const invalidCredential = yield* dropboxListFolderAction
+        .execute({ integration: dropboxIntegration, input: {} })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(ApiKeyCredentialResolverTest, makeConnectorHttpClientTest([], []))
+          ),
+          Effect.result
+        )
+
+      expect(invalidInput).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidCredential).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
+      })
+    })
+  )
+
+  it.effect('fails malformed Dropbox success responses as validation errors', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [jsonHttpResponse('{"entries":[],"has_more":false}')]
+      )
+
+      const result = yield* dropboxListFolderAction
+        .execute({ integration: dropboxIntegration, input: {} })
+        .pipe(
+          Effect.provide(Layer.mergeAll(DropboxCredentialResolverTest, ConnectorHttpClientTest)),
+          Effect.result
+        )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+    })
+  )
 
   it.effect('normalizes Notion search pagination', () =>
     Effect.gen(function* () {

@@ -25,6 +25,7 @@
 | `result`          | value-level success/failure results for expected upstream failures                               |
 | `error`           | typed package/runtime failures                                                                   |
 | `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                 |
+| `dropbox`         | Dropbox metadata/file-management actions plus OAuth slot constants                               |
 | `figma`           | Figma remote MCP auth data action and OAuth constants                                            |
 | `google`          | Gmail/Calendar actions plus Google OAuth slot constants                                          |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                        |
@@ -44,6 +45,7 @@
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
+- Dropbox action-scoped OAuth slots share the `dropbox.oauth` binding id; metadata reads require `files.metadata.read`, file-management writes require `files.content.write`, and binary upload/download stays outside the string-body HTTP port.
 - Microsoft actions use Microsoft Graph v1.0, not the retired Outlook REST endpoint, direct Exchange APIs, or legacy OneDrive endpoints. Outlook and OneDrive action-scoped slots share the `microsoft.oauth` binding id; hosts own OAuth authority/tenant selection and token lifecycle.
 - Outlook inputs default to `/me`; optional `mailbox` targets `/users/{id|userPrincipalName}` for Exchange Online mailboxes. Delegated mode selects `Mail.*.Shared`; integration config `mailboxAccessMode: 'application'` selects non-Shared application permission hints and requires `mailbox`. Exchange mailbox grants and application-token scoping remain host/admin policy.
 - OneDrive inputs default to `/me/drive`; optional `driveId` targets `/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read`/`Files.ReadWrite`; `oneDriveAccessMode: 'delegated_all'` selects `Files.*.All`, while `application` also selects `Files.*.All` and requires `driveId`. Binary upload/download and upload-session mechanics are outside the current string/JSON HTTP port.

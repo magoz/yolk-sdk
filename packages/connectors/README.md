@@ -18,6 +18,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                               |
 | `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                     |
 | `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version           |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants       |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
 | `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
@@ -156,6 +157,37 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; Gmail inline attachments may omit that id and cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
+## Dropbox connector
+
+Minimal wiring fragment (host layer and Effect execution omitted):
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { DropboxConnector, DropboxCombinedOAuthCredentialSlot } from '@yolk-sdk/connectors/dropbox'
+
+const integration = makeIntegration({
+  connectorId: 'dropbox',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: DropboxCombinedOAuthCredentialSlot.id,
+      credentialRef: 'dropbox-oauth-credential'
+    })
+  ]
+})
+
+const program = DropboxConnector.invoke({
+  integration,
+  action: 'dropbox.list_folder',
+  input: { path: '', limit: 100 }
+})
+```
+
+Provide host-owned `CredentialResolver` and `ConnectorHttpClient` layers. Dropbox action-scoped slots share the `dropbox.oauth` binding id: metadata reads request `files.metadata.read`, while create/move/copy/delete actions request `files.content.write`. The host owns OAuth code exchange, refresh, storage, consent, and App Folder versus Full Dropbox configuration.
+
+Use `path: ''` or omit `path` to list the Dropbox API root. Continue folder listings with `dropbox.list_folder_continue` while `hasMore` is true, and continue searches with `dropbox.search_continue`. Outputs normalize Dropbox `.tag` metadata into `type: 'file' | 'folder' | 'deleted'` and camelCase fields.
+
+Upload and download actions are intentionally not included: Dropbox content routes are binary, while the portable connector HTTP port currently carries string bodies. Hosts can implement binary transfer outside this connector without lossy encoding.
+
 ## Microsoft connector
 
 ```ts
@@ -241,6 +273,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | Subpath                                | Actions                                                                                                     |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                           |
+| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                                 |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
 | `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |
