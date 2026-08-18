@@ -317,6 +317,8 @@ from the runtime `OAuthCredential`. Keep these values in the host credential sto
 
 - Store, encrypt, refresh, revoke, and audit credentials.
 - Own OAuth routes, callbacks, state, token persistence, and required-scope consent.
+- Provide the `ConnectorHttpClient` implementation and Effect layers required by enabled connectors.
+- Preserve connector request headers and body content types while applying host networking policy.
 - Map integrations to users, workspaces, agents, or projects outside this package.
 - Authorize action execution before invoking connectors.
 

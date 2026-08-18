@@ -1,6 +1,6 @@
 # @yolk-sdk/vercel-workflows
 
-Vercel Workflow-specific contracts for durable agent model/tool step loops.
+Vercel Workflow agent-loop contracts, durable stream helpers, and an Effect-native Workflow client/layer.
 
 ## Install
 

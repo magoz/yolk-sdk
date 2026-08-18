@@ -35,7 +35,9 @@ KnowledgeDocument
 - `searchable`: host may expose through search tools.
 - `archived`: retained, normally omitted from prompt and search.
 
-Optional files and chunks are modeled as `KnowledgeFile` and `KnowledgeChunk`.
+Optional files and chunks are modeled as `KnowledgeFile` and `KnowledgeChunk`. File records carry
+metadata and host-owned blob keys; `KnowledgeFileBlobStore` stores the bytes separately. Chunks are
+search-index records. Hosts own blob storage, chunk persistence, transactions, and lifecycle.
 
 `KnowledgeSource` is a separate ingestion ADT:
 
@@ -60,12 +62,16 @@ These are contracts, not automatic policy. `buildKnowledgeContext` formats exact
 you pass; `searchKnowledge` delegates candidate filtering to `SearchIndexStore`. Hosts must select
 ready/pinned documents and exclude processing, error, or archived records as appropriate.
 
+`KnowledgeScope` and `KnowledgeSearchScope` are opaque, caller-provided routing metadata. Hosts
+construct and enforce them; the package does not infer identity, tenancy, or permissions from scope
+ids or kinds.
+
 ## Subpaths
 
 | Subpath                             | Purpose                                                        |
 | ----------------------------------- | -------------------------------------------------------------- |
 | `@yolk-sdk/knowledge`               | Root context/store/file/error helpers                          |
-| `@yolk-sdk/knowledge/documents`     | Document, file, chunk, status, availability, and scope schemas |
+| `@yolk-sdk/knowledge/documents`     | Document, source, file, chunk, status, availability, and scope schemas |
 | `@yolk-sdk/knowledge/files`         | File blob-store contract                                       |
 | `@yolk-sdk/knowledge/store`         | Document store and search-index store contracts                |
 | `@yolk-sdk/knowledge/context`       | Pinned context builder                                         |
@@ -99,6 +105,27 @@ const context = buildKnowledgeContext({
 ```
 
 Add the resulting text to your system prompt. Your app chooses which documents are pinned.
+
+## Agent tools
+
+`makeKnowledgeLookupTool` creates the read-only `knowledge_lookup` tool with `search` and `get`
+operations. `makeKnowledgeManageTool` creates the write-classified `knowledge_manage` tool with
+`upsert`, `set_availability`, `rename_slug`, and `delete` operations.
+
+```ts
+import { makeKnowledgeLookupTool, makeKnowledgeManageTool } from '@yolk-sdk/knowledge/agent'
+
+const lookupTool = makeKnowledgeLookupTool({ search: searchKnowledge, get: getKnowledge })
+const manageTool = makeKnowledgeManageTool({
+  upsert: upsertKnowledge,
+  setAvailability: setKnowledgeAvailability,
+  renameSlug: renameKnowledgeSlug,
+  delete: deleteKnowledge
+})
+```
+
+The callbacks are host adapters and receive the agent tool context. Hosts own authorization,
+storage, scope enforcement, and safe `ToolError` mapping.
 
 ## Ingestion semantics
 

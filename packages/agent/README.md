@@ -97,6 +97,18 @@ Test helpers live behind their own subpath:
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 ```
 
+## Headless React chat
+
+`useAgentChat` exposes protocol messages, render-oriented chat messages, run/error/waiting state,
+and actions for submit, stop, edit, regenerate, delete, tool approval, and question responses. The
+package supplies no components, styling, auth, or route ownership, and React remains an optional
+peer used only by React subpaths.
+
+By default the hook streams HTTP/NDJSON through `@yolk-sdk/agent/client`. Pass an
+`AgentChatTransport` through the `transport` option to use another runtime. A custom transport
+receives the transcript, session/model options, HITL responses, and an `AbortSignal`, and returns an
+`AsyncIterable<AgentEvent>`; the host still owns endpoint auth and persistence.
+
 ## Quick start
 
 ```ts
@@ -454,10 +466,10 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
 
 - `useYolkVoice` (`@yolk-sdk/agent/voice/react`) owns browser session lifecycle, user drafts,
   and pending approvals; provider codecs come from `@yolk-sdk/agent/providers/openai/realtime`.
-- Tools execute server-side only: the controller forwards provider tool calls as
-  `VoiceSessionToolCallRequest` to your endpoint; `handleVoiceToolCall` applies
-  `ToolDef.approval` policy and never runs approval-gated tools without a matching approved
-  response.
+- Tools execute server-side only: the controller forwards the normalized
+  `VoiceSessionToolCallRequest` JSON envelope to your endpoint; `handleVoiceToolCall` returns a
+  JSON-compatible `VoiceToolCallOutcome` envelope, applies `ToolDef.approval` policy, and never runs
+  approval-gated tools without a matching approved response.
 - Approval-gated calls pause with `AwaitingInput`; approvals/denials resume through
   `submitHitlResponse`. Voice `question` is deferred in v1.
 - `projectVoiceEvent` turns voice events into protocol messages with no dangling host tool

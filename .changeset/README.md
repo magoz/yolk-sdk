@@ -14,6 +14,7 @@ Canary release prep:
    - `pnpm tsc`
    - `pnpm lint`
    - `pnpm test:run`
+   - `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`
 5. verify public `packages/*` are publishable and private apps stay private
 6. verify `git status` is clean/understood
 7. commit/push release prep after approval

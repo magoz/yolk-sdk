@@ -1,6 +1,6 @@
 # @yolk-sdk/sandbox
 
-Effect-native sandbox execution plane primitives plus a Vercel Sandbox adapter for Yolk agents.
+Effect-native sandbox execution contracts, an agent tool, testing fakes, and a Vercel Sandbox adapter.
 
 ## Install
 
@@ -83,6 +83,7 @@ recreates a workspace; reattachment preserves the existing workspace.
 
 ```ts
 import { GitSandboxInitialSource } from '@yolk-sdk/sandbox'
+import { makeVercelSandboxLayer } from '@yolk-sdk/sandbox/vercel'
 
 const source = GitSandboxInitialSource.make({
   url: 'https://github.com/example/project.git',
@@ -124,7 +125,7 @@ session records or logs.
 
 ## Boundaries
 
-- Core is provider-free and app-free.
+- Core is provider-SDK-free and app-free; it includes Vercel-compatible state and naming contracts but not the live SDK.
 - Vercel SDK imports live only under `@yolk-sdk/sandbox/vercel`. That adapter is Node/server-only
   because `@vercel/sandbox` imports Node built-ins; browser/Worker code must call a host endpoint.
 - `runtime` applies to empty, Git, and tarball creation. Snapshot creation inherits the snapshot's

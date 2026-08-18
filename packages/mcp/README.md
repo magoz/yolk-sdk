@@ -27,6 +27,16 @@ Published package metadata requires Node.js 22+; `client/node` and `server/node`
 Use `core` for the official full MCP wire-schema surface. Use `protocol` only for Yolk adapters and
 legacy JSON-RPC helpers; it is not a replacement for the full-core APIs.
 
+## Imports
+
+```ts
+import { Client } from '@yolk-sdk/mcp/client'
+import { listLocalMcpServerToolsNode } from '@yolk-sdk/mcp/client/node'
+import * as McpCore from '@yolk-sdk/mcp/core'
+import { McpServer } from '@yolk-sdk/mcp/server'
+import { serveStdio } from '@yolk-sdk/mcp/server/node'
+```
+
 ## Use the full MCP v2 client
 
 The official client surface supports tools, resources, prompts, completions, MRTR, response caching, subscriptions, OAuth helpers, and legacy negotiation.
@@ -66,6 +76,31 @@ const tools = await Effect.runPromise(
 
 Use `McpClientOptions.sdk` for official client options such as capabilities, MRTR, and shared response caching. Set `McpClientOptions.configureClient` to register elicitation or sampling handlers before connection. Use a persistent official `Client` directly for long-lived subscriptions and progress streams.
 
+## Connect to a local stdio server
+
+Node hosts can use the convenience wrappers from `client/node`:
+
+```ts
+import { Effect } from 'effect'
+import { listLocalMcpServerToolsNode } from '@yolk-sdk/mcp/client/node'
+
+const tools = await Effect.runPromise(
+  listLocalMcpServerToolsNode(
+    {
+      name: 'local-tools',
+      type: 'local',
+      command: [process.execPath, './mcp-server.mjs'],
+      environment: {}
+    },
+    { securityPolicy: { allowLocalServers: true, allowDevHttpLocalhost: false } }
+  )
+)
+```
+
+Local servers are disabled by default. The host must explicitly allow them, choose a trusted
+command, and provide the complete child environment; configured environment values do not extend
+the host environment.
+
 ## Build a full MCP server
 
 Use the official server surface for tools, resources, prompts, completions, MRTR, and subscriptions:
@@ -84,7 +119,9 @@ export default { fetch: handler.fetch }
 
 `createMcpHandler` serves stateless `2026-07-28` and legacy initialize-based HTTP clients from one endpoint. Validate `Origin` and `Host` before calling `handler.fetch`.
 
-For dual-era Node stdio, import `serveStdio` from `@yolk-sdk/mcp/server/node`.
+For dual-era Node stdio, import `serveStdio` from `@yolk-sdk/mcp/server/node`. This subpath owns the
+Node stdio transport only; the host owns authorization, process lifecycle, logging, and deployment
+policy.
 
 ## Adapt Yolk tools into MCP
 
@@ -99,7 +136,7 @@ import { makeMcpToolServer, runStdioMcpServer } from '@yolk-sdk/mcp/server'
 - Own persisted server config, credentials, authorization policy, and enabled capabilities.
 - Partition private MCP caches by authorization context.
 - Validate HTTP `Origin` and `Host` at deployment boundaries.
-- Keep Node stdio usage behind trusted Node hosts.
+- Keep Node stdio usage behind trusted Node hosts and explicitly control child commands and environments.
 - Treat tool annotations, server identity, icons, and request state as untrusted input.
 
 Remote MCP requires HTTPS by default; localhost HTTP is an explicit development policy.
