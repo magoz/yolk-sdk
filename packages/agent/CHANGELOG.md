@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.60
+
+### Patch Changes
+
+- 8ac2ad9: Add a dedicated Vercel AI Gateway provider with API key or OIDC authentication, provider routing, model fallbacks, safe error attribution, tests, and public documentation.
+
 ## 0.1.0-canary.59
 
 ### Patch Changes

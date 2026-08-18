@@ -1,5 +1,13 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.60
+
+### Patch Changes
+
+- c4eea3f: Add a portable generic email connector with host-provided IMAP, POP3, and SMTP transport, normalized message schemas, IMAP draft creation, separate incoming and SMTP credential slots, and username/password runtime credentials.
+- Updated dependencies [8ac2ad9]
+  - @yolk-sdk/agent@0.1.0-canary.60
+
 ## 0.1.0-canary.59
 
 ### Minor Changes
