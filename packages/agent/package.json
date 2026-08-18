@@ -111,6 +111,18 @@
       "types": "./src/providers/anthropic/claude-provider.ts",
       "default": "./src/providers/anthropic/claude-provider.ts"
     },
+    "./providers/xai": {
+      "types": "./src/providers/xai/index.ts",
+      "default": "./src/providers/xai/index.ts"
+    },
+    "./providers/xai/grok": {
+      "types": "./src/providers/xai/grok.ts",
+      "default": "./src/providers/xai/grok.ts"
+    },
+    "./providers/xai/grok-provider": {
+      "types": "./src/providers/xai/grok-provider.ts",
+      "default": "./src/providers/xai/grok-provider.ts"
+    },
     "./providers/subscription-usage": {
       "types": "./src/providers/subscription-usage.ts",
       "default": "./src/providers/subscription-usage.ts"
@@ -248,6 +260,21 @@
         "types": "./dist/providers/anthropic/claude-provider.d.mts",
         "import": "./dist/providers/anthropic/claude-provider.mjs",
         "default": "./dist/providers/anthropic/claude-provider.mjs"
+      },
+      "./providers/xai": {
+        "types": "./dist/providers/xai/index.d.mts",
+        "import": "./dist/providers/xai/index.mjs",
+        "default": "./dist/providers/xai/index.mjs"
+      },
+      "./providers/xai/grok": {
+        "types": "./dist/providers/xai/grok.d.mts",
+        "import": "./dist/providers/xai/grok.mjs",
+        "default": "./dist/providers/xai/grok.mjs"
+      },
+      "./providers/xai/grok-provider": {
+        "types": "./dist/providers/xai/grok-provider.d.mts",
+        "import": "./dist/providers/xai/grok-provider.mjs",
+        "default": "./dist/providers/xai/grok-provider.mjs"
       },
       "./providers/subscription-usage": {
         "types": "./dist/providers/subscription-usage.d.mts",

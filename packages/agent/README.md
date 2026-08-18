@@ -39,6 +39,9 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/providers/anthropic/claude`          | Claude request and auth helpers                                |
 | `@yolk-sdk/agent/providers/anthropic/usage`           | Claude subscription-allowance snapshots                        |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | Claude LLM provider factory                                    |
+| `@yolk-sdk/agent/providers/xai`                       | Grok subscription OAuth and token broker helpers               |
+| `@yolk-sdk/agent/providers/xai/grok`                  | Grok subscription request and auth helpers                     |
+| `@yolk-sdk/agent/providers/xai/grok-provider`         | Grok subscription LLM provider factory                         |
 | `@yolk-sdk/agent/providers/subscription-usage`        | Shared allowance snapshot and safe error schemas               |
 | `@yolk-sdk/agent/skillset`                            | Portable skill and slash-command parsing/catalogs              |
 | `@yolk-sdk/agent/voice`                               | Voice protocol, controller, tool handler, projection, speech   |
@@ -140,12 +143,22 @@ limits or apply hidden fallbacks.
 | `makeOpenAiProviderLayer`          | `maxCompletionTokens` |
 | `makeOpenAiCodexProviderLayer`     | none                  |
 | `makeAnthropicClaudeProviderLayer` | `maxTokens`           |
+| `makeXAiGrokProviderLayer`         | `maxOutputTokens`     |
 
-The public `toOpenAiRequestBody` and `toAnthropicClaudeRequestBody` helpers require the matching
-limit configuration. ChatGPT subscription Codex rejects vendor `max_output_tokens`, so
-`makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the optional deprecated
-`maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both `OPENAI_API_KEY` and integer
-`OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+The public `toOpenAiRequestBody`, `toAnthropicClaudeRequestBody`, and `toXAiGrokRequestBody` helpers
+require the matching limit configuration. ChatGPT subscription Codex rejects vendor
+`max_output_tokens`, so `makeOpenAiCodexProviderLayer` and `toOpenAiCodexRequestBody` ignore the
+optional deprecated `maxOutputTokens` compatibility field. `OpenAiProviderLayer` reads both
+`OPENAI_API_KEY` and integer `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
+
+Grok subscription access uses `https://cli-chat-proxy.grok.com/v1/responses`, not the xAI developer
+API-key endpoint. The adapter sends the required CLI-session and model-routing headers and rejects
+mismatched or expired access-token envelopes before HTTP. The package exports browser-PKCE and
+device-flow constants; hosts own the callback listener or device polling, token exchange/refresh,
+secure storage, and model discovery. Only set `responsesUrl` to a trusted proxy because it receives
+the OAuth bearer. xAI controls the public CLI OAuth client and private, unsupported proxy contract,
+so hosts should treat those surfaces as changeable and confirm that their use complies with xAI
+terms.
 
 Set optional `reasoningEffort` on `run` or `runRuntime`; provider adapters lower it to vendor
 configuration. Anthropic Claude forwards `low`, `medium`, `high`, and `xhigh` through
@@ -276,7 +289,9 @@ inside one source fail validation. Hosts own file discovery, storage, enablement
 
 Build sources with `inlineBase64AttachmentSource`, `urlAttachmentSource`, or
 `refAttachmentSource`. Providers can pass through supported media URLs: OpenAI Chat supports image
-URLs; OpenAI Codex supports image and document URLs; Anthropic supports image and PDF URLs. Use
+URLs; OpenAI Codex supports image and document URLs; Anthropic supports image and PDF URLs. The Grok
+Responses lowerer can encode image URLs/data URLs, but hosts should enable image capability only for
+subscription models they have verified accept image input. Use
 inline base64 for simple apps, durable URLs for app-owned uploads, or persist `Ref` values and call
 `resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
 upload, auth, retention, URL durability, and ref hydration policy.
@@ -364,7 +379,7 @@ replay.
 
 ## Parallel tool calls
 
-OpenAI and OpenAI Codex requests enable vendor parallel tool calls when tools are available. The
+OpenAI, OpenAI Codex, and Grok requests enable vendor parallel tool calls when tools are available. The
 Codex stream adapter preserves every sibling function call and suppresses final-response replays
 by call id. The loop executes calls emitted in the same model turn concurrently, bounded by the
 host-configured `LoopConfig.toolConcurrency`; dependent work waits for the next model turn.

@@ -350,6 +350,9 @@ parsers. Use them only on host-produced projected context, not arbitrary user-au
 | `@yolk-sdk/agent/providers/anthropic/usage`           | `fetchAnthropicClaudeSubscriptionUsage`, parser, URL, and options                                   |
 | `@yolk-sdk/agent/providers/anthropic/claude-provider` | `makeAnthropicClaudeProviderLayer`, `AnthropicClaudeProviderConfig`, `toAnthropicClaudeRequestBody` |
 | `@yolk-sdk/agent/providers/anthropic`                 | Claude OAuth/broker helpers                                                                         |
+| `@yolk-sdk/agent/providers/xai/grok`                  | Grok OAuth constants, authorization URL/parser, auth headers, token, and broker helpers             |
+| `@yolk-sdk/agent/providers/xai/grok-provider`         | `makeXAiGrokProviderLayer`, `toXAiGrokRequestBody`, `streamXAiGrokResponse`, config/reasoning types |
+| `@yolk-sdk/agent/providers/xai`                       | Grok OAuth/broker helpers                                                                           |
 | `@yolk-sdk/agent/providers/subscription-usage`        | Snapshot/window schemas and sanitized request/response/auth/rate-limit/configuration errors         |
 
 Subscription-usage fetchers require a matching fresh `OAuthAccessToken` and `HttpClient.HttpClient`.
@@ -367,9 +370,10 @@ Provider output limits are host-owned where supported:
 - ChatGPT subscription Codex rejects vendor `max_output_tokens`; its optional deprecated
   `maxOutputTokens` compatibility field is ignored.
 - `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
+- `XAiGrokProviderConfig.maxOutputTokens` becomes vendor `max_output_tokens` on the xAI CLI proxy.
 - `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
   `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 
-`toOpenAiRequestBody` and `toAnthropicClaudeRequestBody` require matching limit configuration.
-`toOpenAiCodexRequestBody` accepts the optional ignored compatibility field but sends no output
+`toOpenAiRequestBody`, `toAnthropicClaudeRequestBody`, and `toXAiGrokRequestBody` require matching
+limit configuration. `toOpenAiCodexRequestBody` accepts the optional ignored compatibility field but sends no output
 limit. Yolk does not infer limits from model ids.
