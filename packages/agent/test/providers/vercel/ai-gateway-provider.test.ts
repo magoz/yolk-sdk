@@ -234,34 +234,38 @@ describe('Vercel AI Gateway provider', () => {
     })
   )
 
-  it.effect('rejects truncated completions instead of reporting normal completion', () =>
+  it.effect('rejects truncated and filtered completions instead of reporting success', () =>
     Effect.gen(function* () {
-      const requests: Array<CapturedRequest> = []
-      const error = yield* runProvider(
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: { content: 'partial output' },
-                finish_reason: 'length'
-              }
-            ]
-          })
-        ),
-        requests
-      ).pipe(Effect.flip)
+      const finishReasons: ReadonlyArray<'length' | 'content_filter'> = ['length', 'content_filter']
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'invalid_response',
-        message: 'Vercel AI Gateway response stopped with length',
-        retryable: false,
-        provider: {
-          provider: 'vercel_ai_gateway',
-          kind: 'invalid_response',
-          providerCode: 'length'
-        }
-      })
+      for (const finishReason of finishReasons) {
+        const requests: Array<CapturedRequest> = []
+        const error = yield* runProvider(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: { content: 'partial output' },
+                  finish_reason: finishReason
+                }
+              ]
+            })
+          ),
+          requests
+        ).pipe(Effect.flip)
+
+        expect(error).toMatchObject({
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          message: `Vercel AI Gateway response stopped with ${finishReason}`,
+          retryable: false,
+          provider: {
+            provider: 'vercel_ai_gateway',
+            kind: 'invalid_response',
+            providerCode: finishReason
+          }
+        })
+      }
     })
   )
 

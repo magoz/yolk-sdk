@@ -415,12 +415,12 @@ export const toOpenAiRequestBody = (
       config.completionTokenField === 'max_tokens'
         ? { max_tokens: config.maxCompletionTokens }
         : { max_completion_tokens: config.maxCompletionTokens }
-    const body = {
+    const body: OpenAiRequestBody = {
       ...config.extraBody,
       model: request.model,
       messages,
       ...completionTokenLimit,
-      stream: false as const
+      stream: false
     }
 
     if (request.tools.length === 0) {
