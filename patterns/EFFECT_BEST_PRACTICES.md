@@ -4,90 +4,14 @@ This document covers critical rules and patterns for using Effect in this projec
 
 ## Critical Rules
 
-### 1. NEVER Use `any` Type or Type Casts (`x as Y`)
+### 1. Keep Effect Programs Type-Safe
 
-```typescript
-// WRONG - never use any
-const result: any = someValue
-const data = value as any
-function process(input: any): any { ... }
+The repo-wide bans on `any`, type assertions, and unjustified ESLint disables—and the approved
+Schema, generic, type-guard, `identity`, and database-row alternatives—live in
+[`TYPESCRIPT_CONVENTIONS.md`](./TYPESCRIPT_CONVENTIONS.md#type-safe-alternatives-to-casting).
 
-// WRONG - never use type casts
-const account = data as Account
-const id = value as AccountId
-const amount = num as number
-
-// CORRECT - use proper types, generics, or unknown
-const result: SomeType = someValue
-function process<T>(input: T): Result<T> { ... }
-
-// CORRECT - use Schema.make() for branded types
-const id = AccountId.make(rawId)
-const amount = Percentage.make(value)
-
-// CORRECT - use Schema.decodeUnknownEffect for parsing
-const account = yield* Schema.decodeUnknownEffect(Account)(data)
-```
-
-Using `any` defeats TypeScript's type system. Type casts (`x as Y`) bypass type checking and can hide bugs.
-
-**AVOID `eslint-disable` comments** - Using disable comments should be an absolute last resort. Before adding one, exhaust ALL alternatives:
-
-1. Use `Schema.make()` for branded types
-2. Use `Schema.decodeUnknownEffect()` for parsing unknown data
-3. Use `Option.some<T>()` / `Option.none<T>()` for explicit Option types
-4. Use `identity<T>()` from `effect/Function` for compile-time type verification
-5. Use proper generics and type parameters
-6. Refactor the code to avoid the need for casting
-
-Do not disable `no-explicit-any` or `consistent-type-assertions`. If a vendor type is weak, contain it at the boundary with `unknown`, Schema decoding, overloads, or a tiny typed wrapper.
-
-#### Type-Safe Alternatives to Casting
-
-```typescript
-// When you need to specify the type for Option.some/none, use type parameters
-const someValue = Option.some<Account>(account) // Option<Account>
-const noneValue = Option.none<Account>() // Option<Account>
-
-// Use Option.fromNullishOr for nullable values (enforced by ESLint rule local/prefer-option-from-nullable)
-// WRONG - verbose ternary
-const desc = row.description !== null ? Option.some(row.description) : Option.none<string>()
-
-// CORRECT - use Option.fromNullishOr
-const desc = Option.fromNullishOr(row.description)
-
-// When you need to assert a value matches a type (without casting), use identity
-import { identity } from 'effect/Function'
-
-// This verifies x is already of type Account at compile time - if it isn't, you get an error
-const verified = identity<Account>(x)
-
-// identity is useful when returning values that TypeScript can't infer correctly
-return identity<Effect.Effect<Result, MyError, Deps>>(someEffect)
-```
-
-#### Database Row Types - Usually No Cast Needed
-
-```typescript
-// WRONG - using `as` to cast database row fields
-const accountType = row.account_type as AccountType
-
-// WRONG - using Schema.decode for simple type aliases (overkill)
-const accountType = yield * Schema.decodeUnknownEffect(AccountType)(row.account_type)
-
-// CORRECT - if the type is a simple string literal union, just use identity (if needed at all)
-const accountType = identity<AccountType>(row.account_type)
-
-// BEST - most of the time no cast is needed at all!
-// If your SQL query returns the right type and your row type is properly defined:
-const account = {
-  id: row.id,
-  type: row.account_type, // TypeScript infers this correctly if row is typed
-  name: row.name
-}
-```
-
-The key insight: if your database row type is properly defined, you don't need any cast. Only use `identity<T>()` when TypeScript can't infer the type correctly, and even then question if your types are set up right.
+At Effect boundaries, decode unknown data with `Schema.decodeUnknownEffect`. For nullable values,
+use `Option.fromNullishOr` rather than manually branching into `Option.some`/`Option.none`.
 
 ### 2. NEVER Use `catch` When Error Type Is `never`
 
