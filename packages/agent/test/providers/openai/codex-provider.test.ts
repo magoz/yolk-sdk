@@ -494,6 +494,64 @@ describe('OpenAI Codex provider', () => {
     })
   )
 
+  it.effect('separates streamed Codex reasoning summary parts', () =>
+    Effect.gen(function* () {
+      const response = responseFromSseEvents([
+        {
+          type: 'response.reasoning_summary_text.delta',
+          item_id: 'reasoning-1',
+          summary_index: 0,
+          delta: '**Planning municipality searches**'
+        },
+        {
+          type: 'response.reasoning_summary_text.delta',
+          item_id: 'reasoning-1',
+          summary_index: 1,
+          delta: '**Expanding preschool searches**'
+        },
+        completedCodexResponse({
+          type: 'message',
+          content: [{ type: 'output_text', text: 'Done' }]
+        })
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+      const reasoning = Array.from(events)
+        .flatMap(event => (event._tag === 'ReasoningDelta' ? [event.text] : []))
+        .join('')
+
+      expect(reasoning).toBe(
+        '**Planning municipality searches**\n\n**Expanding preschool searches**'
+      )
+    })
+  )
+
+  it.effect('separates completed Codex reasoning summary parts', () =>
+    Effect.gen(function* () {
+      const response = responseFromSseEvents([
+        completedCodexResponse(
+          {
+            type: 'reasoning',
+            summary: [
+              { type: 'summary_text', text: '**Planning municipality searches**' },
+              { type: 'summary_text', text: '**Expanding preschool searches**' }
+            ]
+          },
+          { type: 'message', content: [{ type: 'output_text', text: 'Done' }] }
+        )
+      ])
+
+      const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+      const reasoning = Array.from(events).flatMap(event =>
+        event._tag === 'ReasoningDelta' ? [event.text] : []
+      )
+
+      expect(reasoning).toEqual([
+        '**Planning municipality searches**\n\n**Expanding preschool searches**'
+      ])
+    })
+  )
+
   it.effect('preserves sibling function calls from a streamed Codex response', () =>
     Effect.gen(function* () {
       const firstCall = codexFunctionCall('call-1', 'search_one')
@@ -517,9 +575,7 @@ describe('OpenAI Codex provider', () => {
         { id: 'call-2', name: 'search_two', params: {} }
       ])
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'Done' ? [event.stopReason] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
       ).toEqual(['tool_use'])
     })
   )
@@ -536,14 +592,10 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'ToolCall' ? [event.call.id] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
       ).toEqual(['call-1', 'call-2'])
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'Done' ? [event.stopReason] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
       ).toEqual(['tool_use'])
     })
   )
@@ -561,9 +613,7 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'ToolCall' ? [event.call.id] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
       ).toEqual(['call-1', 'call-2'])
     })
   )
@@ -584,14 +634,10 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'ToolCall' ? [event.call.id] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
       ).toEqual(['call-1', 'call-2'])
       expect(
-        Array.from(events).flatMap(event =>
-          event._tag === 'Done' ? [event.stopReason] : []
-        )
+        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
       ).toEqual(['tool_use'])
     })
   )

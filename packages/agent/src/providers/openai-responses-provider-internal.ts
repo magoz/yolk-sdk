@@ -633,7 +633,7 @@ const reasoningFromOutputItem = (item: OpenAiResponsesOutputItem) => {
 const reasoningFromOutputItems = (items: ReadonlyArray<OpenAiResponsesOutputItem>) => {
   const reasoningParts = Arr.flatten(Arr.map(items, reasoningFromOutputItem))
 
-  return reasoningParts.join('')
+  return reasoningParts.join('\n\n')
 }
 
 const isValidTokenCount = (value: number) => Number.isSafeInteger(value) && value >= 0
@@ -762,6 +762,7 @@ type OpenAiResponsesBodyFormat = 'undecided' | 'sse' | 'json'
 type OpenAiResponsesSseState = {
   readonly hasTextDelta: boolean
   readonly hasReasoningDelta: boolean
+  readonly reasoningSummaryPartKey: string | undefined
   readonly toolCallIds: ReadonlySet<string>
   readonly hasDone: boolean
 }
@@ -780,6 +781,7 @@ type OpenAiResponsesBodyState = {
 const initialSseState: OpenAiResponsesSseState = {
   hasTextDelta: false,
   hasReasoningDelta: false,
+  reasoningSummaryPartKey: undefined,
   toolCallIds: new Set(),
   hasDone: false
 }
@@ -954,6 +956,14 @@ const finalResponseToEvents = (
     )
   })
 
+const reasoningSummaryPartKey = (event: Record<string, unknown>) => {
+  if (typeof event.item_id !== 'string' || typeof event.summary_index !== 'number') {
+    return undefined
+  }
+
+  return `${event.item_id}:${event.summary_index}`
+}
+
 const processSseData = (
   descriptor: OpenAiResponsesProviderDescriptor,
   state: OpenAiResponsesSseState,
@@ -982,10 +992,26 @@ const processSseData = (
     }
 
     if (
-      (parsed.type === 'response.reasoning_summary_text.delta' ||
-        parsed.type === 'response.reasoning_text.delta') &&
+      parsed.type === 'response.reasoning_summary_text.delta' &&
       typeof parsed.delta === 'string'
     ) {
+      const partKey = reasoningSummaryPartKey(parsed)
+      const startsNewPart =
+        partKey !== undefined &&
+        state.reasoningSummaryPartKey !== undefined &&
+        partKey !== state.reasoningSummaryPartKey
+
+      return {
+        state: {
+          ...state,
+          hasReasoningDelta: true,
+          reasoningSummaryPartKey: partKey ?? state.reasoningSummaryPartKey
+        },
+        events: [LLMReasoningDelta.make({ text: `${startsNewPart ? '\n\n' : ''}${parsed.delta}` })]
+      }
+    }
+
+    if (parsed.type === 'response.reasoning_text.delta' && typeof parsed.delta === 'string') {
       return {
         state: { ...state, hasReasoningDelta: true },
         events: [LLMReasoningDelta.make({ text: parsed.delta })]
@@ -1002,6 +1028,7 @@ const processSseData = (
           hasTextDelta: state.hasTextDelta || events.some(event => event._tag === 'TextDelta'),
           hasReasoningDelta:
             state.hasReasoningDelta || events.some(event => event._tag === 'ReasoningDelta'),
+          reasoningSummaryPartKey: state.reasoningSummaryPartKey,
           toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
           hasDone: state.hasDone
         },
@@ -1023,6 +1050,7 @@ const processSseData = (
         state: {
           hasTextDelta: state.hasTextDelta || emittedText,
           hasReasoningDelta: state.hasReasoningDelta || emittedReasoning,
+          reasoningSummaryPartKey: state.reasoningSummaryPartKey,
           toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
           hasDone: true
         },
