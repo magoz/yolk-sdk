@@ -88,7 +88,7 @@ const packages: ReadonlyArray<PackageShape> = [
     exports: ['.', './client', './client/node', './core', './protocol', './server', './server/node']
   },
   { name: '@yolk-sdk/sandbox', exports: ['.', './agent', './testing', './vercel'] },
-  { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './workflow'] }
+  { name: '@yolk-sdk/vercel-workflows', exports: ['.', './effect', './testing', './workflow'] }
 ]
 
 const extractTarballName = (output: string) => {
