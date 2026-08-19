@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.62
+
+### Patch Changes
+
+- 7677e18: Require a host-owned Grok CLI `clientVersion` on `XAiGrokProviderConfig`, sent as `x-grok-client-version`, because the xAI CLI proxy version-gates subscription requests and rejects missing or outdated versions with HTTP 426.
+
 ## 0.1.0-canary.61
 
 ### Patch Changes
