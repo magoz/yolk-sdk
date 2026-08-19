@@ -19,6 +19,17 @@ export default defineConfig({
   ],
   test: {
     environment: 'jsdom',
-    exclude: ['**/e2e/**', '**/node_modules/**', '**/.repos/**', '**/*.integration.test.ts']
+    exclude: [
+      '**/e2e/**',
+      '**/node_modules/**',
+      '**/.repos/**',
+      '**/*.integration.test.ts',
+      // Package suites run in their own node-environment vitest configs (see
+      // `pnpm --filter './packages/*' test:run`). Running them again under the
+      // root jsdom environment double-covers them and breaks `workflow` v5,
+      // whose hardened serialization captures Node URL intrinsics at import
+      // and rejects jsdom's URL shape.
+      'packages/**'
+    ]
   }
 })
