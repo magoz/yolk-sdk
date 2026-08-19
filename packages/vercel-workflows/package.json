@@ -86,11 +86,11 @@
   },
   "dependencies": {
     "effect": "catalog:",
-    "workflow": "^4.2.4"
+    "workflow": "^5.0.0-beta.42"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@workflow/vitest": "^4.0.5",
+    "@workflow/vitest": "^5.0.0-beta.42",
     "vitest": "catalog:"
   }
 }
