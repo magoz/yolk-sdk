@@ -1,5 +1,11 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.66
+
+### Patch Changes
+
+- Document the `workflow@^5.0.0-beta.42` requirement, the `./testing` subpath, and region-pinned streaming behavior in the published README.
+
 ## 0.1.0-canary.65
 
 ### Patch Changes

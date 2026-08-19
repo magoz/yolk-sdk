@@ -1,5 +1,11 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.66
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.66
+
 ## 0.1.0-canary.65
 
 ### Patch Changes
