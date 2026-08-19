@@ -177,7 +177,10 @@ Required authorization and JSON headers cannot be replaced through `extraHeaders
 
 Grok subscription access uses `https://cli-chat-proxy.grok.com/v1/responses`, not the xAI developer
 API-key endpoint. The adapter sends the required CLI-session and model-routing headers and rejects
-mismatched or expired access-token envelopes before HTTP. The package exports browser-PKCE and
+mismatched or expired access-token envelopes before HTTP. `makeXAiGrokProviderLayer` also requires
+a truthful host-owned `clientVersion`, sent as `x-grok-client-version`, because the xAI CLI proxy
+version-gates requests and rejects missing or outdated versions with HTTP 426; required headers
+stay non-overridable through `extraHeaders`. The package exports browser-PKCE and
 device-flow constants; hosts own the callback listener or device polling, token exchange/refresh,
 secure storage, and model discovery. Only set `responsesUrl` to a trusted proxy because it receives
 the OAuth bearer. xAI controls the public CLI OAuth client and private, unsupported proxy contract,
