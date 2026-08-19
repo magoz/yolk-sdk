@@ -33,6 +33,7 @@ metadata.
   - `@yolk-sdk/agent/providers/xai`
   - `@yolk-sdk/agent/providers/xai/grok`
   - `@yolk-sdk/agent/providers/xai/grok-provider`
+  - `@yolk-sdk/agent/providers/xai/usage`
   - `@yolk-sdk/agent/providers/subscription-usage`
   - `@yolk-sdk/agent/skillset`
   - `@yolk-sdk/agent/voice`
@@ -50,7 +51,7 @@ metadata.
 - `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./dropbox`, `./email`, `./figma`, `./google`, `./linkedin-search`, `./microsoft`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, and hosts own concrete Workflow directives.
-- OpenAI/Codex, Vercel AI Gateway, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex and Claude also expose best-effort subscription-allowance snapshots from private provider endpoints.
+- OpenAI/Codex, Vercel AI Gateway, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, and Grok also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
 ## Physical Layout

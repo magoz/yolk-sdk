@@ -76,7 +76,13 @@ export class ProviderSubscriptionUsageConfigurationError extends Schema.TaggedEr
   'ProviderSubscriptionUsageConfigurationError',
   {
     provider: Schema.String,
-    reason: Schema.Literals(['invalid_request_timeout', 'missing_account_id', 'provider_mismatch'])
+    reason: Schema.Literals([
+      'invalid_request_timeout',
+      'missing_account_id',
+      'missing_client_version',
+      'missing_xai_user_id',
+      'provider_mismatch'
+    ])
   }
 ) {}
 

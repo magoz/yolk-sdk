@@ -101,7 +101,9 @@ refreshes, persist replacement refresh tokens, verify token provider/freshness, 
 available subscription model. The adapter defaults to the xAI CLI proxy rather than the developer
 API-key endpoint. Treat a custom `responsesUrl` as a trusted credential-bearing proxy. xAI controls
 the public CLI OAuth client and private, unsupported proxy contract; both may change and should be
-used only when permitted by xAI's terms.
+used only when permitted by xAI's terms. Best-effort allowance snapshots are available from
+`@yolk-sdk/agent/providers/xai/usage`; the fetcher requires the authenticated xAI `user_id` and your
+host integration's truthful version as explicit options.
 
 ## Anthropic Claude Code
 

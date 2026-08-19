@@ -40,6 +40,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './providers/xai',
       './providers/xai/grok',
       './providers/xai/grok-provider',
+      './providers/xai/usage',
       './react',
       './runtime',
       './skillset',

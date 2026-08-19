@@ -127,6 +127,10 @@
       "types": "./src/providers/xai/grok-provider.ts",
       "default": "./src/providers/xai/grok-provider.ts"
     },
+    "./providers/xai/usage": {
+      "types": "./src/providers/xai/usage.ts",
+      "default": "./src/providers/xai/usage.ts"
+    },
     "./providers/subscription-usage": {
       "types": "./src/providers/subscription-usage.ts",
       "default": "./src/providers/subscription-usage.ts"
@@ -284,6 +288,11 @@
         "types": "./dist/providers/xai/grok-provider.d.mts",
         "import": "./dist/providers/xai/grok-provider.mjs",
         "default": "./dist/providers/xai/grok-provider.mjs"
+      },
+      "./providers/xai/usage": {
+        "types": "./dist/providers/xai/usage.d.mts",
+        "import": "./dist/providers/xai/usage.mjs",
+        "default": "./dist/providers/xai/usage.mjs"
       },
       "./providers/subscription-usage": {
         "types": "./dist/providers/subscription-usage.d.mts",

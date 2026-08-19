@@ -103,3 +103,25 @@ export const readProviderSubscriptionUsageJson = (
       })
     )
   )
+
+export const executeAndReadProviderSubscriptionUsageJson = (input: {
+  readonly provider: string
+  readonly client: HttpClient.HttpClient
+  readonly request: HttpClientRequest.HttpClientRequest
+  readonly timeoutMs: number
+}) =>
+  Effect.gen(function* () {
+    const response = yield* executeProviderSubscriptionUsageRequest(input)
+    return yield* readProviderSubscriptionUsageJson(input.provider, response)
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.millis(input.timeoutMs),
+      orElse: () =>
+        Effect.fail(
+          ProviderSubscriptionUsageRequestError.make({
+            provider: input.provider,
+            category: 'timeout'
+          })
+        )
+    })
+  )
