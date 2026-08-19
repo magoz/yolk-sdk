@@ -44,8 +44,8 @@ override.
 | `@yolk-sdk/connectors/agent`           | `makeConnectorToolModule`                                                                                                  |
 | `@yolk-sdk/connectors/afloat`          | `AfloatConnector`, `AfloatApiKeyCredentialSlot`, MCP endpoint and protocol constants                                       |
 | `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, and file actions                                                |
-| `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                           |
-| `@yolk-sdk/connectors/google`          | `GoogleConnector`, Google OAuth slots, Gmail/Calendar actions                                                              |
+| `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                            |
+| `@yolk-sdk/connectors/google`          | `GoogleConnector`, shared Google OAuth slots, Gmail/Calendar/Drive actions and schemas                                     |
 | `@yolk-sdk/connectors/notion`          | `NotionConnector`, `NotionApiTokenSlot`                                                                                    |
 | `@yolk-sdk/connectors/todoist`         | `TodoistConnector`, `TodoistApiTokenSlot`                                                                                  |
 | `@yolk-sdk/connectors/telegram`        | `TelegramConnector`, `TelegramBotTokenSlot`                                                                                |
@@ -81,6 +81,26 @@ to `/me/drive`; explicit `driveId` targets `/drives/{driveId}`. Set
 slots or `application` for application-token access; application mode requires `driveId`. Microsoft
 actions use Graph v1.0 with `outlook.*` and `onedrive.*`
 ids, and all scoped slots share `microsoft.oauth`.
+
+Google Drive's principal contracts are `GoogleDriveFile`, `GoogleDriveUser`,
+`GoogleDriveCapabilities`, `GoogleDriveListFilesInput`, `GoogleDriveSearchFilesInput`,
+`GoogleDriveListFilesOutput`, `GoogleDriveFileIdInput`, `GoogleDriveCreateFolderInput`, and
+`GoogleDriveDeleteFileOutput`. Public actions are `googleDriveListFilesAction`,
+`googleDriveSearchFilesAction`, `googleDriveGetFileAction`, `googleDriveCreateFolderAction`,
+`googleDriveTrashFileAction`, and `googleDriveDeleteFileAction`; `googleDriveActions` composes them
+into `GoogleConnector`.
+
+`GoogleDriveListFilesOutput.files` and repeated `GoogleDriveFile` metadata fields decode to Effect
+`Chunk` values for structural equality. `GoogleDriveFileIdInput` accepts optional `resourceKey`;
+parent-scoped list, search, and create inputs accept optional `parentResourceKey`. These values
+produce `X-Goog-Drive-Resource-Keys` for protected link-shared files.
+
+`GoogleDriveMetadataReadonlyOAuthCredentialSlot` requests `googleDriveMetadataReadonlyScope` for
+list/search/get. `GoogleDriveFileOAuthCredentialSlot` requests `googleDriveFileScope` for folder
+create, trash, and permanent delete. Both use `googleOAuthSlotId` (`google.oauth`), and
+`GoogleCombinedOAuthCredentialSlot` includes both Drive scopes alongside Gmail and Calendar scopes.
+Constants also include `googleDriveApiBaseUrl`, `googleDriveFolderMimeType`, and
+`googleDriveFileFields`.
 
 Google's normalized thread contracts are `GmailGetThreadInput`, `GmailThreadAttachment`,
 `GmailThreadMessage`, and `GmailThreadOutput`.

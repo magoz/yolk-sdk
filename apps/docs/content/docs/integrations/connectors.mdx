@@ -13,7 +13,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management actions |
 | Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send             |
 | Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                   |
-| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar actions           |
+| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions   |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email             |
 | Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph   |
 | Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions   |
@@ -78,12 +78,12 @@ adapter instead of base64-encoding it through these actions.
 `EmailClient` Effect layer backed by their chosen IMAP, POP3, SMTP, TLS, and MIME libraries; the
 package does not bundle those libraries.
 
-| Action id             | What it does                                      | Access        |
-| --------------------- | ------------------------------------------------- | ------------- |
-| `email.list_messages` | list normalized messages with an opaque cursor    | `read`        |
-| `email.get_message`   | fetch one normalized message                      | `read`        |
-| `email.create_draft`  | append a message draft to an IMAP mailbox         | `write`       |
-| `email.send_message`  | submit a normalized message to the SMTP server    | `destructive` |
+| Action id             | What it does                                   | Access        |
+| --------------------- | ---------------------------------------------- | ------------- |
+| `email.list_messages` | list normalized messages with an opaque cursor | `read`        |
+| `email.get_message`   | fetch one normalized message                   | `read`        |
+| `email.create_draft`  | append a message draft to an IMAP mailbox      | `write`       |
+| `email.send_message`  | submit a normalized message to the SMTP server | `destructive` |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
 `incomingProtocol: 'imap'`, `incomingSecurity: 'tls'`, and port `993`; POP3 with TLS defaults to
@@ -115,7 +115,25 @@ delivery.
 
 ## Google
 
-Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots, and `GoogleCombinedOAuthCredentialSlot` for broad-consent hosts.
+Google exports a generic `GoogleOAuthCredentialSlot`, action-scoped OAuth slots, and
+`GoogleCombinedOAuthCredentialSlot` for broad-consent hosts. Every slot uses the same `google.oauth`
+binding id, so one host credential can cover selected Gmail, Calendar, and Drive actions when its
+consent includes those scopes.
+
+Drive-specific slots use least-privilege consent hints:
+
+| Slot                                             | Scope                                 |
+| ------------------------------------------------ | ------------------------------------- |
+| `GoogleDriveMetadataReadonlyOAuthCredentialSlot` | `drive.metadata.readonly`             |
+| `GoogleDriveFileOAuthCredentialSlot`             | `drive.file`                          |
+| `GoogleCombinedOAuthCredentialSlot`              | all Gmail, Calendar, and Drive scopes |
+| `GoogleOAuthCredentialSlot`                      | none declared                         |
+
+`drive.metadata.readonly` is a restricted scope that can read metadata across the authorized
+Drive. `drive.file` is non-sensitive and permits create/update/delete only for files the app created
+or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary
+existing files own broader restricted-scope consent, verification, and authorization policy. The
+connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 
 ### Gmail actions
 
@@ -165,6 +183,37 @@ action.
 | `calendar.update_event`   | update an event                   |
 | `calendar.delete_event`   | delete an event                   |
 | `calendar.list_accounts`  | list accessible Calendar accounts |
+
+### Drive actions
+
+| Action id             | What it does                                         | Access        |
+| --------------------- | ---------------------------------------------------- | ------------- |
+| `drive.list_files`    | list file/folder metadata, optionally under a parent | `read`        |
+| `drive.search_files`  | search file names and indexed text                   | `read`        |
+| `drive.get_file`      | fetch metadata by file id                            | `read`        |
+| `drive.create_folder` | create a root or child folder                        | `write`       |
+| `drive.trash_file`    | move a file or folder to trash                       | `destructive` |
+| `drive.delete_file`   | permanently delete without moving to trash           | `destructive` |
+
+List and search outputs contain `files`, optional `nextPageToken`, and optional
+`incompleteSearch`. Pass the token back through `pageToken`. Trashed files are excluded by default;
+set `includeTrashed: true` to include them. Search accepts a plain `query` and applies it to Drive
+file names and indexed text rather than exposing raw Drive query syntax.
+
+Set optional `driveId` to search or list one shared drive through `corpora=drive`. Drive requests
+send current shared-drive support parameters, and returned file metadata may include `driveId`,
+`resourceKey`, and operation `capabilities`. Pass `resourceKey` with get/trash/delete or
+`parentResourceKey` with parent-scoped list/search/create; the connector forwards it through
+`X-Goog-Drive-Resource-Keys` for protected link-shared files. The host should check and enforce
+capabilities before destructive calls; Google still applies ownership, shared-drive role,
+administrator, and per-file rules.
+
+`drive.trash_file` is the reversible default. `drive.delete_file` bypasses trash and permanently
+removes the item; deleting a folder can also remove owned descendants. Binary upload/download is
+outside the connector because its HTTP port carries string bodies. Hosts own content transfer and
+Google Picker or equivalent per-file authorization.
+
+Google references: [files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list), [search syntax](https://developers.google.com/workspace/drive/api/guides/search-files), [create folders](https://developers.google.com/workspace/drive/api/guides/folder), [trash and delete](https://developers.google.com/workspace/drive/api/guides/delete), [shared drives](https://developers.google.com/workspace/drive/api/guides/enable-shareddrives), [resource keys](https://developers.google.com/workspace/drive/api/guides/resource-keys), and [OAuth scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
 
 ## Microsoft
 

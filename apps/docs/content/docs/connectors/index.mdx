@@ -3,7 +3,7 @@ title: Connectors package
 description: Define external API actions and turn them into agent tools.
 ---
 
-Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, generic IMAP/POP3/SMTP email, Google, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
+Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, generic IMAP/POP3/SMTP email, Google Gmail/Calendar/Drive, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
 
 Install:
 
@@ -48,6 +48,8 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 
 const destructiveGoogleActions = new Set([
   'calendar.delete_event',
+  'drive.trash_file',
+  'drive.delete_file',
   'gmail.trash',
   'gmail.draft_delete'
 ])
@@ -55,6 +57,7 @@ const destructiveGoogleActions = new Set([
 const writingGoogleActions = new Set([
   'calendar.create_event',
   'calendar.update_event',
+  'drive.create_folder',
   'gmail.modify_labels',
   'gmail.untrash',
   'gmail.draft_compose',
@@ -84,7 +87,7 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 | `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                  |
 | `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts, POP3 reads, and SMTP submission     |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                     |
-| `@yolk-sdk/connectors/google`          | Gmail and Calendar                                             |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                     |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email               |
 | `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph         |
 | `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users |
@@ -109,6 +112,13 @@ Google's `gmail.get_thread` action returns normalized messages with decoded mess
 attachment metadata, without raw MIME or attachment content. See the
 [Connectors catalog](../integrations/connectors#fetch-a-normalized-gmail-thread) for its required
 format and output contract.
+
+Google Drive actions stay in the provider-level `google` subpath and share the existing
+`google.oauth` credential binding with Gmail and Calendar. Metadata reads request
+`drive.metadata.readonly`; folder creation, trash, and permanent deletion request `drive.file`,
+which is limited to files created by or explicitly opened/shared with the app. The host owns OAuth
+refresh, consent policy, Google Picker integration, restricted-scope compliance, and binary file
+transfer.
 
 ## What the host provides
 

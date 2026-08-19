@@ -64,11 +64,35 @@ const providerMessage = (fallback: string, body: string) =>
     Effect.map(detail => (detail === undefined ? fallback : `${fallback}: ${detail}`))
   )
 
-const providerCode = (fallback: string, status: number) => {
+const googleErrorReasons = (body: string) =>
+  decodeJsonObject(body).pipe(
+    Effect.map(parsed => {
+      if (parsed === undefined) return []
+      const error = parsed.error
+      if (!isJsonObject(error) || !Array.isArray(error.errors)) return []
+      return error.errors.flatMap(item => {
+        if (!isJsonObject(item)) return []
+        const reason = item.reason
+        return typeof reason === 'string' ? [reason] : []
+      })
+    })
+  )
+
+const googleRateLimitReasons = new Set([
+  'dailyLimitExceeded',
+  'rateLimitExceeded',
+  'sharingRateLimitExceeded',
+  'userRateLimitExceeded'
+])
+
+const providerCode = (fallback: string, status: number, reasons: ReadonlyArray<string>) => {
   switch (status) {
     case 401:
-    case 403:
       return 'google_unauthorized'
+    case 403:
+      return reasons.some(reason => googleRateLimitReasons.has(reason))
+        ? 'google_rate_limited'
+        : 'google_unauthorized'
     case 404:
       return 'google_not_found'
     case 429:
@@ -78,24 +102,36 @@ const providerCode = (fallback: string, status: number) => {
   }
 }
 
+const retryAfterMs = (headers: Readonly<Record<string, string>> | undefined) => {
+  const retryAfter = Object.entries(headers ?? {}).find(
+    ([name]) => name.toLowerCase() === 'retry-after'
+  )?.[1]
+  if (retryAfter === undefined) return undefined
+  const seconds = Number(retryAfter)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined
+}
+
 export const providerFailureFromResponse = (input: {
   readonly code: string
   readonly message: string
   readonly status: number
+  readonly headers?: Readonly<Record<string, string>>
   readonly body: string
 }) =>
-  providerMessage(input.message, input.body).pipe(
-    Effect.map(message =>
-      ActionResult.failure(
-        new ProviderFailure({
-          code: providerCode(input.code, input.status),
-          message,
-          status: input.status,
-          underlying: input.body
-        })
-      )
+  Effect.gen(function* () {
+    const message = yield* providerMessage(input.message, input.body)
+    const reasons = yield* googleErrorReasons(input.body)
+    const retry = retryAfterMs(input.headers)
+    return ActionResult.failure(
+      new ProviderFailure({
+        code: providerCode(input.code, input.status, reasons),
+        message,
+        status: input.status,
+        underlying: input.body,
+        ...(retry === undefined ? {} : { retryAfterMs: retry })
+      })
     )
-  )
+  })
 
 export const isSuccessStatus = (status: number) => status >= 200 && status < 300
 

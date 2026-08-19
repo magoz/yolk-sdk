@@ -177,6 +177,31 @@ typed `ConnectorError`
 effects, while expected server rejection should be returned by the host port as
 `ActionResult.failure`.
 
+### Google Drive action is unauthorized or search is incomplete
+
+All Google workloads share the `google.oauth` credential binding, but the resolved token still needs
+the selected action's consent. Drive list/search/get request `drive.metadata.readonly`; folder
+create, trash, and permanent delete request `drive.file`. The latter only covers files the app
+created or that the user explicitly opened/shared with the app. Use Google Picker or equivalent
+host-owned UX to grant per-file access. If the product must mutate arbitrary existing files, the
+host owns broader restricted-scope consent, Google verification, storage/security requirements, and
+authorization policy.
+
+For shared-drive list/search, pass that shared drive's `driveId`. If output reports
+`incompleteSearch: true`, narrow the search to one drive rather than assuming the page is complete.
+Pass `nextPageToken` back unchanged as `pageToken`. Google still checks returned file
+`capabilities`, ownership, shared-drive role, and administrator policy for destructive calls.
+
+For a protected link-shared item, pass its returned `resourceKey` with get/trash/delete or
+`parentResourceKey` with parent-scoped list/search/create. The connector sends
+`X-Goog-Drive-Resource-Keys`; omitting the key can look like a permission failure even when the user
+opened the item through Picker. Drive quota-related `403` reasons map to `google_rate_limited`
+rather than re-consent errors; honor `retryAfterMs` when present.
+
+The connector excludes trashed files unless `includeTrashed` is true. Prefer `drive.trash_file` for
+reversible removal; `drive.delete_file` permanently bypasses trash. Upload/download is not in the
+string/JSON HTTP port, so the host must transfer binary content separately.
+
 ### Microsoft action is unauthorized
 
 Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for
