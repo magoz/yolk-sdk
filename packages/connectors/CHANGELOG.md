@@ -1,5 +1,15 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.63
+
+### Minor Changes
+
+- 9085104: Add Google Drive metadata listing, search, lookup, folder creation, trash, and permanent deletion actions with action-scoped Google OAuth consent hints.
+
+### Patch Changes
+
+- @yolk-sdk/agent@0.1.0-canary.63
+
 ## 0.1.0-canary.62
 
 ### Patch Changes
