@@ -21,7 +21,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants       |
 | `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email port |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
-| `@yolk-sdk/connectors/google`          | Gmail/Calendar actions and Google OAuth slot constants                                |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                   |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
 | `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants      |
 | `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot |
@@ -218,9 +218,15 @@ const program = GoogleConnector.invoke({
 
 Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Hosts own OAuth refresh before returning `OAuthCredential`. If using Effect HTTP, adapt `effect/unstable/http` in host code rather than importing a Yolk wrapper. Preserve connector request headers and body content type when adapting HTTP; provider connectors may rely on `content-type: application/json` for request parsing.
 
-Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, and `GoogleCalendarEventsOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
+Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; Gmail inline attachments may omit that id and cannot be retrieved through that action. Use `full` when decoded bodies are required.
+
+Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
+
+`drive.list_files` and `drive.search_files` return `GoogleDriveListFilesOutput` with a `Chunk` of files and an opaque `nextPageToken`; pass the token back through `pageToken`. Repeated file metadata such as parents and owners also decodes to `Chunk`. Trashed items are excluded unless `includeTrashed` is true. Optional `driveId` targets one shared drive using `corpora=drive`; requests include current shared-drive support parameters. Pass a returned link-shared file `resourceKey` with get/trash/delete, or `parentResourceKey` with parent-scoped list/search/create, so the connector sends `X-Goog-Drive-Resource-Keys`. `drive.trash_file` is reversible until Google removes the item, while `drive.delete_file` permanently deletes it without moving it to trash. Hosts should authorize both as destructive and may inspect returned `capabilities` first.
+
+Binary Drive upload/download is intentionally excluded because the connector HTTP port carries string bodies. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
 
 ## Dropbox connector
 
@@ -335,19 +341,19 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 
 ## Provider actions
 
-| Subpath                                | Actions                                                                                                     |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                           |
-| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                                 |
-| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.create_draft`, `email.send_message`                      |
-| `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                            |
-| `@yolk-sdk/connectors/google`          | Gmail search/list/message/thread/draft/send-as/label/trash actions; Calendar calendar/event/account actions |
-| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                |
-| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                         |
-| `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                |
-| `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                                     |
-| `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                |
-| `@yolk-sdk/connectors/todoist`         | Todoist project, task, and label actions                                                                    |
+| Subpath                                | Actions                                                                                              |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
+| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                          |
+| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.create_draft`, `email.send_message`               |
+| `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
+| `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions |
+| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                         |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                  |
+| `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                         |
+| `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                              |
+| `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                         |
+| `@yolk-sdk/connectors/todoist`         | Todoist project, task, and label actions                                                             |
 
 R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled. `r2_storage.upload_url` includes `publicUrl` only when integration config provides `publicUrl`.
 

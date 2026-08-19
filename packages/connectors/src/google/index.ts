@@ -20,6 +20,30 @@ export {
   GoogleCalendarUpdateEventInput
 } from './calendar.ts'
 export {
+  googleDriveActions,
+  googleDriveApiBaseUrl,
+  googleDriveCreateFolderAction,
+  GoogleDriveCapabilities,
+  GoogleDriveContentRestriction,
+  GoogleDriveCreateFolderInput,
+  googleDriveDeleteFileAction,
+  GoogleDriveDeleteFileOutput,
+  GoogleDriveFile,
+  googleDriveFileFields,
+  GoogleDriveFileIdInput,
+  googleDriveFolderMimeType,
+  googleDriveGetFileAction,
+  GoogleDriveLinkShareMetadata,
+  GoogleDriveListFilesInput,
+  GoogleDriveListFilesOutput,
+  googleDriveListFilesAction,
+  GoogleDriveSearchFilesInput,
+  googleDriveSearchFilesAction,
+  GoogleDriveShortcutDetails,
+  googleDriveTrashFileAction,
+  GoogleDriveUser
+} from './drive.ts'
+export {
   gmailActions,
   gmailDraftComposeAction,
   GmailDraftComposeInput,
@@ -69,6 +93,12 @@ export {
   googleCalendarEventsScope,
   googleCalendarReadonlyScope,
   googleConnectorId,
+  GoogleDriveFileOAuthCredentialSlot,
+  googleDriveFileScope,
+  googleDriveFileScopes,
+  GoogleDriveMetadataReadonlyOAuthCredentialSlot,
+  googleDriveMetadataReadonlyScope,
+  googleDriveMetadataReadonlyScopes,
   GoogleGmailComposeOAuthCredentialSlot,
   googleGmailComposeScope,
   googleGmailComposeScopes,
@@ -92,11 +122,12 @@ export { resolveGoogleAccessToken } from './shared.ts'
 
 import { defineConnector } from '../connector.ts'
 import { googleCalendarActions } from './calendar.ts'
+import { googleDriveActions } from './drive.ts'
 import { gmailActions } from './gmail.ts'
 import { googleConnectorId } from './oauth.ts'
 
 export const GoogleConnector = defineConnector({
   id: googleConnectorId,
-  description: 'Google Gmail and Calendar connector actions.',
-  actions: [...gmailActions, ...googleCalendarActions]
+  description: 'Google Gmail, Calendar, and Drive connector actions.',
+  actions: [...gmailActions, ...googleCalendarActions, ...googleDriveActions]
 })

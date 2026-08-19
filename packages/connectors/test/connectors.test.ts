@@ -593,7 +593,13 @@ describe('@yolk-sdk/connectors', () => {
       'calendar.create_event',
       'calendar.update_event',
       'calendar.delete_event',
-      'calendar.list_accounts'
+      'calendar.list_accounts',
+      'drive.list_files',
+      'drive.search_files',
+      'drive.get_file',
+      'drive.create_folder',
+      'drive.trash_file',
+      'drive.delete_file'
     ])
     expect(AfloatConnector.actions.map(action => action.id)).toEqual(['afloat.mcp_auth'])
     expect(DropboxConnector.actions.map(action => action.id)).toEqual([
