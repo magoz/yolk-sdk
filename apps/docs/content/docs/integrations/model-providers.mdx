@@ -121,6 +121,7 @@ This adapter sends consumer OAuth credentials only to the xAI CLI proxy by defau
 - `toXAiGrokOAuthAccessToken`
 - `xAiGrokProviderId`
 - Grok browser-PKCE/device-flow URLs and constants
+- `fetchXAiGrokSubscriptionUsage` from `@yolk-sdk/agent/providers/xai/usage`
 
 The public xAI CLI client uses a fixed loopback callback. The package exports browser-PKCE and
 device-flow constants only; your host must implement the callback listener or complete device-code
@@ -156,11 +157,11 @@ OAuth helpers live in `@yolk-sdk/agent/providers/anthropic` and the exact `@yolk
 
 ## Read subscription allowance
 
-Claude and Codex subscription connections can expose current allowance percentages and reset
-windows. Claude currently normalizes aggregate five-hour and seven-day windows; Codex normalizes
-primary and secondary rate-limit windows. Additional provider-specific buckets are ignored. The
-usage adapters use private provider endpoints, so treat snapshots as best-effort and keep failures
-isolated from core agent execution.
+Claude, Codex, and Grok subscription connections can expose current allowance percentages and
+reset windows. Claude normalizes aggregate five-hour and seven-day windows; Codex normalizes primary
+and secondary rate-limit windows; Grok normalizes its aggregate shared credit allowance. Additional
+provider-specific buckets are ignored. The usage adapters use private provider endpoints, so treat
+snapshots as best-effort and keep failures isolated from core agent execution.
 
 This server-side fragment reads Codex allowance using a fresh host-owned token:
 
@@ -174,8 +175,14 @@ const snapshotEffect = fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken, {
 }).pipe(Effect.provide(FetchHttpClient.layer))
 ```
 
-Use `fetchAnthropicClaudeSubscriptionUsage` for Claude. Shared snapshot and safe error schemas live
-in `@yolk-sdk/agent/providers/subscription-usage`. Hosts own polling, credential refresh, labels,
+Use `fetchAnthropicClaudeSubscriptionUsage` for Claude. For Grok, call
+`fetchXAiGrokSubscriptionUsage(token, { xAiUserId, clientVersion })`. `xAiUserId` must be the
+authenticated xAI `user_id`; the adapter does not reinterpret generic `OAuthAccessToken.accountId`.
+`clientVersion` must truthfully identify your host integration rather than impersonate an official
+Grok release. The adapter reports its programmatic request as `headless`.
+
+Shared snapshot and safe error schemas live in
+`@yolk-sdk/agent/providers/subscription-usage`. Hosts own polling, credential refresh, labels,
 persistence, stale-data policy, thresholds, notifications, and UI. These snapshots report
 subscription allowance, not protocol `AgentUsage` token accounting.
 

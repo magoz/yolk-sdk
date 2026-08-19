@@ -6,9 +6,8 @@ import { openAiCodexProviderId } from './codex.ts'
 import {
   canonicalSubscriptionUsageInstant,
   defaultProviderSubscriptionUsageTimeoutMs,
-  executeProviderSubscriptionUsageRequest,
+  executeAndReadProviderSubscriptionUsageJson,
   positiveSubscriptionUsageNumber,
-  readProviderSubscriptionUsageJson,
   validProviderSubscriptionUsageTimeout,
   validSubscriptionUsagePercent
 } from '../subscription-usage-internal.ts'
@@ -166,13 +165,12 @@ export const fetchOpenAiCodexSubscriptionUsage = (
         'chatgpt-account-id': accountId
       })
     )
-    const response = yield* executeProviderSubscriptionUsageRequest({
+    const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: openAiCodexProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
-    const json = yield* readProviderSubscriptionUsageJson(openAiCodexProviderId, response)
     const fetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseOpenAiCodexSubscriptionUsage(json, fetchedAt)

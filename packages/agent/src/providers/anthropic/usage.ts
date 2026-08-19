@@ -6,8 +6,7 @@ import { anthropicClaudeAuthorizationHeaders, anthropicClaudeProviderId } from '
 import {
   canonicalSubscriptionUsageInstant,
   defaultProviderSubscriptionUsageTimeoutMs,
-  executeProviderSubscriptionUsageRequest,
-  readProviderSubscriptionUsageJson,
+  executeAndReadProviderSubscriptionUsageJson,
   validProviderSubscriptionUsageTimeout,
   validSubscriptionUsagePercent
 } from '../subscription-usage-internal.ts'
@@ -137,13 +136,12 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
         'anthropic-beta': 'oauth-2025-04-20'
       })
     )
-    const response = yield* executeProviderSubscriptionUsageRequest({
+    const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: anthropicClaudeProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
-    const json = yield* readProviderSubscriptionUsageJson(anthropicClaudeProviderId, response)
     const fetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseAnthropicClaudeSubscriptionUsage(json, fetchedAt)

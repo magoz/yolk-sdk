@@ -43,6 +43,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers               |
 | `@yolk-sdk/agent/providers/xai/grok`                   | Grok subscription request and auth helpers                     |
 | `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription LLM provider factory                         |
+| `@yolk-sdk/agent/providers/xai/usage`                  | Grok subscription-allowance snapshots                          |
 | `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas               |
 | `@yolk-sdk/agent/skillset`                             | Portable skill and slash-command parsing/catalogs              |
 | `@yolk-sdk/agent/voice`                                | Voice protocol, controller, tool handler, projection, speech   |
@@ -222,11 +223,12 @@ typed retry/error state.
 
 ## Subscription allowance snapshots
 
-The Claude and Codex usage adapters read best-effort consumer subscription allowance percentages and
-reset windows. Claude currently normalizes its aggregate five-hour and seven-day windows; Codex
-normalizes its primary and secondary rate-limit windows. Additional provider-specific buckets are
-ignored. These private provider endpoints may change without notice. Pass a fresh
-host-owned `OAuthAccessToken` and provide an Effect `HttpClient`:
+The Claude, Codex, and Grok usage adapters read best-effort consumer subscription allowance
+percentages and reset windows. Claude normalizes its aggregate five-hour and seven-day windows;
+Codex normalizes primary and secondary rate-limit windows; Grok normalizes its aggregate shared
+credit allowance. Additional provider-specific buckets are ignored. These private provider
+endpoints may change without notice. Pass a fresh host-owned `OAuthAccessToken` and provide an
+Effect `HttpClient`:
 
 ```ts
 import { Effect } from 'effect'
@@ -240,13 +242,18 @@ const snapshot = await fetchOpenAiCodexSubscriptionUsage(hostOAuthAccessToken).p
 ```
 
 Use `fetchAnthropicClaudeSubscriptionUsage` from
-`@yolk-sdk/agent/providers/anthropic/usage` for Claude. Provider adapters return an immutable Effect
-`Chunk` of semantic window ids, percentages, and optional reset/duration fields; hosts own labels,
-polling, persistence, stale-data
-policy, alert thresholds, billing interpretation, and UI. Configure `requestTimeoutMs` at the
-server integration boundary. Endpoint origins stay fixed, and `FetchHttpClient.layer` is configured
-for manual redirects. A custom `HttpClient` must not follow redirects for these credential-bearing
-requests.
+`@yolk-sdk/agent/providers/anthropic/usage` for Claude. Use
+`fetchXAiGrokSubscriptionUsage` from `@yolk-sdk/agent/providers/xai/usage` for Grok and pass the
+actual authenticated xAI `user_id` as `xAiUserId`. The generic token `accountId` is not interpreted
+as an xAI user id. Also pass your host integration's truthful version as `clientVersion`; the
+adapter sends it with `x-grok-client-mode: headless` and never claims an official Grok client
+version.
+
+Provider adapters return an immutable Effect `Chunk` of semantic window ids, percentages, and
+optional reset/duration fields; hosts own labels, polling, persistence, stale-data policy, alert
+thresholds, billing interpretation, and UI. Configure `requestTimeoutMs` at the server integration
+boundary. Endpoint origins stay fixed, and `FetchHttpClient.layer` is configured for manual
+redirects. A custom `HttpClient` must not follow redirects for these credential-bearing requests.
 
 Subscription allowance snapshots are separate from protocol `AgentUsage`, which accounts for tokens
 used by model requests and nested model work.

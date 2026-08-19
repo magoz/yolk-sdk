@@ -24,6 +24,7 @@ For the current provider catalog and setup snippets, see [Model providers](../in
 | `@yolk-sdk/agent/providers/xai`                        | Grok subscription OAuth and token broker helpers                       |
 | `@yolk-sdk/agent/providers/xai/grok`                   | Grok PKCE/device constants, callback parsing, auth, and broker helpers |
 | `@yolk-sdk/agent/providers/xai/grok-provider`          | Grok subscription Responses provider factory                           |
+| `@yolk-sdk/agent/providers/xai/usage`                  | Best-effort Grok subscription-allowance snapshots                      |
 | `@yolk-sdk/agent/providers/subscription-usage`         | Shared allowance snapshot and safe error schemas                       |
 | `@yolk-sdk/agent/oauth`                                | Provider-neutral access-token and broker contracts                     |
 
@@ -54,8 +55,11 @@ is a trusted credential-bearing proxy. The default CLI proxy is a private, unsup
 may change; use it only when permitted by xAI's terms.
 
 Subscription-usage adapters accept the same `OAuthAccessToken` values but do not refresh or persist
-them. Their private provider endpoints are best-effort. Hosts own polling, labels, stale-data rules,
-alerts, and UI; the adapters only fetch and normalize allowance windows with sanitized errors.
+them. Grok usage also requires the authenticated xAI `user_id` and a truthful host integration
+version as explicit options; it does not reinterpret generic token `accountId` or impersonate an
+official client version. Their private provider endpoints are best-effort. Hosts own polling,
+labels, stale-data rules, alerts, and UI; the adapters only fetch and normalize allowance windows
+with sanitized errors.
 
 ## What the provider gives the loop
 

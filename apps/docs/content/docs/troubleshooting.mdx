@@ -74,6 +74,13 @@ token atomically. The provider rejects mismatched or expired access-token envelo
 The CLI proxy is a private, unsupported surface that may change; use it only when permitted by xAI's
 terms.
 
+### Grok allowance returns HTTP 412
+
+The private Grok billing endpoint may return `412` for team or organization principals without a
+personal team even while model requests still work. Treat the sanitized usage error as allowance
+unavailable; do not classify it as token expiry or expose the raw response body. The host owns any
+principal-specific fallback or UI message.
+
 ### Media input rejected
 
 Set model capabilities to match the provider/model. The loop rejects unsupported image, document, or audio parts before provider execution.
