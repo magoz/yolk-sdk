@@ -209,10 +209,16 @@ const integration = makeIntegration({
   ]
 })
 
-const program = GoogleConnector.invoke({
+const gmailProgram = GoogleConnector.invoke({
   integration,
   action: 'gmail.search',
   input: { query: 'from:alice@example.com', maxResults: 10 }
+})
+
+const driveProgram = GoogleConnector.invoke({
+  integration,
+  action: 'drive.list_files',
+  input: { parentId: 'folder-id', pageSize: 100 }
 })
 ```
 
@@ -224,7 +230,7 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 
 Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
 
-`drive.list_files` and `drive.search_files` return `GoogleDriveListFilesOutput` with a `Chunk` of files and an opaque `nextPageToken`; pass the token back through `pageToken`. Repeated file metadata such as parents and owners also decodes to `Chunk`. Trashed items are excluded unless `includeTrashed` is true. Optional `driveId` targets one shared drive using `corpora=drive`; requests include current shared-drive support parameters. Pass a returned link-shared file `resourceKey` with get/trash/delete, or `parentResourceKey` with parent-scoped list/search/create, so the connector sends `X-Goog-Drive-Resource-Keys`. `drive.trash_file` is reversible until Google removes the item, while `drive.delete_file` permanently deletes it without moving it to trash. Hosts should authorize both as destructive and may inspect returned `capabilities` first.
+`drive.list_files` and `drive.search_files` return `GoogleDriveListFilesOutput` with a `Chunk` of files and an opaque `nextPageToken`; pass the token back through `pageToken`. Repeated file metadata such as parents and owners also decodes to `Chunk`. Trashed items are excluded unless `includeTrashed` is true. Optional `driveId` targets one shared drive using `corpora=drive`; requests include current shared-drive support parameters. Pass a returned link-shared file `resourceKey` with get/trash/delete, or `parentResourceKey` with parent-scoped list/search/create, so the connector sends `X-Goog-Drive-Resource-Keys`; `parentResourceKey` requires `parentId`. `drive.trash_file` is reversible until Google removes the item, while `drive.delete_file` permanently deletes it without moving it to trash. Hosts should authorize both as destructive and may inspect returned `capabilities` first.
 
 Binary Drive upload/download is intentionally excluded because the connector HTTP port carries string bodies. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
 
@@ -365,8 +371,7 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 
 const toolModule = makeConnectorToolModule(GoogleConnector, {
   integration,
-  layer: HostConnectorLayer,
-  access: action => (action.includes('create') ? 'write' : 'read')
+  layer: HostConnectorLayer
 })
 ```
 
@@ -374,9 +379,10 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 
 Connector actions can declare default `read`, `write`, or `destructive` access metadata. The agent
 adapter uses that declaration unless the host supplies `access`; host access resolvers always win.
-Microsoft draft/folder-create actions declare `write`; message sends and OneDrive deletion declare
-`destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning
-explicit access when adapting other write-capable connectors.
+Google Drive folder creation and Microsoft draft/folder-create actions declare `write`. Google Drive
+trash/delete, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions
+without metadata default to `read`, so hosts should continue assigning explicit access when adapting
+other write-capable connectors.
 
 Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
 canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;
