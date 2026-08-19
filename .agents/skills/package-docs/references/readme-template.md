@@ -68,10 +68,15 @@ Document explicit subpaths:
 - `providers/openai/provider`
 - `providers/openai/realtime`
 - `providers/openai/speech`
+- `providers/vercel/ai-gateway-provider`
 - `providers/anthropic`
 - `providers/anthropic/claude`
 - `providers/anthropic/usage`
 - `providers/anthropic/claude-provider`
+- `providers/xai`
+- `providers/xai/grok`
+- `providers/xai/grok-provider`
+- `providers/xai/usage`
 - `providers/subscription-usage`
 - `skillset`
 - `voice`
