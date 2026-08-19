@@ -164,10 +164,12 @@ describe('xAI Grok subscription provider', () => {
       const layer = makeXAiGrokProviderLayer({
         token: grokToken,
         maxOutputTokens: 30_000,
+        clientVersion: '0.2.95',
         extraHeaders: {
           authorization: 'Bearer wrong',
           'X-XAI-Token-Auth': 'wrong',
-          'x-grok-model-override': 'wrong'
+          'x-grok-model-override': 'wrong',
+          'x-grok-client-version': 'wrong'
         }
       }).pipe(
         Layer.provide(
@@ -194,7 +196,8 @@ describe('xAI Grok subscription provider', () => {
         authorization: 'Bearer subscription-token',
         'content-type': 'application/json',
         'x-xai-token-auth': 'xai-grok-cli',
-        'x-grok-model-override': 'grok-build'
+        'x-grok-model-override': 'grok-build',
+        'x-grok-client-version': '0.2.95'
       })
       expect(JSON.parse(readCapturedBody(requests))).toMatchObject({
         model: 'grok-build',
@@ -221,7 +224,8 @@ describe('xAI Grok subscription provider', () => {
           accessToken: 'wrong-provider',
           expiresAt: Date.now() + 60_000
         }),
-        maxOutputTokens: 1_000
+        maxOutputTokens: 1_000,
+        clientVersion: '0.2.95'
       }).pipe(Layer.provide(httpLayer))
 
       const error = yield* Effect.gen(function* () {

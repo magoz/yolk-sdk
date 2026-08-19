@@ -90,9 +90,13 @@ import { makeXAiGrokProviderLayer } from '@yolk-sdk/agent/providers/xai/grok-pro
 
 const GrokLayer = makeXAiGrokProviderLayer({
   token: hostOAuthAccessToken,
-  maxOutputTokens: hostModelConfig.maxOutputTokens
+  maxOutputTokens: hostModelConfig.maxOutputTokens,
+  clientVersion: hostGrokCliClientVersion
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
+
+The required `clientVersion` is sent as `x-grok-client-version`; the CLI proxy rejects missing or
+outdated client versions with HTTP 426.
 
 OAuth and broker helpers live in `@yolk-sdk/agent/providers/xai` and
 `@yolk-sdk/agent/providers/xai/grok`. The package exports browser-PKCE and device-flow constants, not

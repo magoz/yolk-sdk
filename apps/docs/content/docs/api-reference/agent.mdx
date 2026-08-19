@@ -377,6 +377,8 @@ Provider output limits are host-owned where supported:
   `maxOutputTokens` compatibility field is ignored.
 - `AnthropicClaudeProviderConfig.maxTokens` becomes vendor `max_tokens`.
 - `XAiGrokProviderConfig.maxOutputTokens` becomes vendor `max_output_tokens` on the xAI CLI proxy.
+- `XAiGrokProviderConfig.clientVersion` is required and sent as `x-grok-client-version`; the xAI
+  CLI proxy version-gates requests and rejects missing or outdated client versions with HTTP 426.
 - `OpenAiProviderLayer` reads `OPENAI_API_KEY` and integer
   `OPENAI_MAX_COMPLETION_TOKENS` through Effect Config.
 - `VercelAiGatewayProviderLayer` reads `AI_GATEWAY_API_KEY`, falls back to `VERCEL_OIDC_TOKEN`, and

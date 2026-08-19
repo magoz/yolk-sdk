@@ -16,6 +16,12 @@ export type XAiGrokReasoningSummary = 'auto' | 'concise' | 'detailed'
 export type XAiGrokProviderConfig = {
   readonly token: OAuthAccessToken
   readonly maxOutputTokens: number
+  /**
+   * Grok CLI client version sent as `x-grok-client-version`. The xAI CLI proxy version-gates
+   * requests and rejects missing or outdated versions with HTTP 426. The host owns this value and
+   * must use the proxy only as permitted by xAI's terms.
+   */
+  readonly clientVersion: string
   /** Override only with a trusted proxy because the OAuth bearer is sent to this URL. */
   readonly responsesUrl?: string
   readonly extraHeaders?: Readonly<Record<string, string>>
@@ -122,7 +128,10 @@ export const makeXAiGrokProviderLayer = (config: XAiGrokProviderConfig) =>
     providerId: xAiGrokProviderDescriptor.providerId,
     providerName: xAiGrokProviderDescriptor.providerName,
     responsesUrl: config.responsesUrl ?? xAiGrokResponsesUrl,
-    authorizationHeaders: xAiGrokAuthorizationHeaders,
+    authorizationHeaders: (token, model) => ({
+      ...xAiGrokAuthorizationHeaders(token, model),
+      'x-grok-client-version': config.clientVersion
+    }),
     alwaysIncludeReasoning: false,
     allowEofCompletion: false,
     expectedTokenProvider: xAiGrokProviderId
