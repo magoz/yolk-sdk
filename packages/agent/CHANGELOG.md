@@ -1,5 +1,12 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.61
+
+### Patch Changes
+
+- 025b16b: Preserve paragraph boundaries between OpenAI Responses reasoning summary parts.
+- f495460: Add a best-effort xAI Grok consumer subscription-allowance adapter with modern and safe legacy normalization, explicit xAI identity headers, and sanitized private-endpoint failures.
+
 ## 0.1.0-canary.60
 
 ### Patch Changes
