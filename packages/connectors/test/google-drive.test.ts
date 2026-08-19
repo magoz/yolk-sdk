@@ -1,6 +1,7 @@
 import { Chunk, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
+import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ConnectorHttpClient,
   ConnectorHttpResponse,
@@ -10,6 +11,7 @@ import {
   OAuthCredential
 } from '@yolk-sdk/connectors'
 import type { ConnectorHttpRequest } from '@yolk-sdk/connectors'
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import {
   GoogleCombinedOAuthCredentialSlot,
   GoogleConnector,
@@ -117,6 +119,29 @@ describe('Google Drive connector', () => {
     )
   })
 
+  it.effect('generates provider-facing object schemas for every Drive action', () =>
+    Effect.gen(function* () {
+      const layer = Layer.mergeAll(makeCredentialLayer([]), makeHttpLayer([], []))
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(GoogleConnector, { integration: googleDriveIntegration, layer })],
+        {}
+      )
+      const driveTools = toolSet.tools.filter(tool => tool.name.startsWith('drive.'))
+
+      expect(driveTools.map(tool => tool.name)).toEqual([
+        'drive.list_files',
+        'drive.search_files',
+        'drive.get_file',
+        'drive.create_folder',
+        'drive.trash_file',
+        'drive.delete_file'
+      ])
+      for (const tool of driveTools) {
+        expect(tool.parameters).toMatchObject({ type: 'object' })
+      }
+    })
+  )
+
   it.effect(
     'lists and searches metadata with paging, shared-drive parameters, and read scope',
     () =>
@@ -144,7 +169,7 @@ describe('Google Drive connector', () => {
                 incompleteSearch: false
               })
             ),
-            jsonResponse('{"files":[],"incompleteSearch":false}')
+            jsonResponse('{"incompleteSearch":false}')
           ])
         )
 
@@ -416,6 +441,21 @@ describe('Google Drive connector', () => {
       const invalidSearch = yield* googleDriveSearchFilesAction
         .execute({ integration: googleDriveIntegration, input: { query: '   ' } })
         .pipe(Effect.provide(layer), Effect.result)
+      const orphanedParentResourceKey = yield* googleDriveListFilesAction
+        .execute({ integration: googleDriveIntegration, input: { parentResourceKey: 'orphaned' } })
+        .pipe(Effect.provide(layer), Effect.result)
+      const invalidFileIdHeader = yield* googleDriveGetFileAction
+        .execute({
+          integration: googleDriveIntegration,
+          input: { fileId: 'file\r\nx-injected: yes' }
+        })
+        .pipe(Effect.provide(layer), Effect.result)
+      const invalidResourceKeyHeader = yield* googleDriveGetFileAction
+        .execute({
+          integration: googleDriveIntegration,
+          input: { fileId: 'file', resourceKey: 'key\nx-injected: yes' }
+        })
+        .pipe(Effect.provide(layer), Effect.result)
       const providerResult = yield* googleDriveGetFileAction
         .execute({ integration: googleDriveIntegration, input: { fileId: 'missing' } })
         .pipe(Effect.provide(layer))
@@ -434,6 +474,18 @@ describe('Google Drive connector', () => {
         failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
       })
       expect(invalidSearch).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(orphanedParentResourceKey).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidFileIdHeader).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidResourceKeyHeader).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
       })

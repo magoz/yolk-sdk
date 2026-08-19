@@ -21,7 +21,17 @@ export const googleDriveApiBaseUrl = 'https://www.googleapis.com/drive/v3'
 export const googleDriveFolderMimeType = 'application/vnd.google-apps.folder'
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
+const GoogleDriveHeaderValue = NonEmptyString.check(Schema.isPattern(/^[^\r\n]+$/))
 const GoogleDrivePageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+
+const parentResourceKeyRequiresParentId = Schema.makeFilter<{
+  readonly parentId?: string
+  readonly parentResourceKey?: string
+}>(input =>
+  input.parentResourceKey === undefined || input.parentId !== undefined
+    ? undefined
+    : { path: ['parentResourceKey'], issue: 'parentResourceKey requires parentId' }
+)
 
 export class GoogleDriveUser extends Schema.Class<GoogleDriveUser>('GoogleDriveUser')({
   displayName: Schema.optional(Schema.String),
@@ -199,8 +209,8 @@ const googleDriveFileFromApi = (file: GoogleDriveFileApi): GoogleDriveFile => {
 export class GoogleDriveListFilesInput extends Schema.Class<GoogleDriveListFilesInput>(
   'GoogleDriveListFilesInput'
 )({
-  parentId: Schema.optional(NonEmptyString),
-  parentResourceKey: Schema.optional(NonEmptyString),
+  parentId: Schema.optional(GoogleDriveHeaderValue),
+  parentResourceKey: Schema.optional(GoogleDriveHeaderValue),
   driveId: Schema.optional(NonEmptyString),
   pageSize: Schema.optional(GoogleDrivePageSize),
   pageToken: Schema.optional(NonEmptyString),
@@ -208,18 +218,26 @@ export class GoogleDriveListFilesInput extends Schema.Class<GoogleDriveListFiles
   includeTrashed: Schema.optional(Schema.Boolean)
 }) {}
 
+const GoogleDriveListFilesActionInput = GoogleDriveListFilesInput.check(
+  parentResourceKeyRequiresParentId
+)
+
 export class GoogleDriveSearchFilesInput extends Schema.Class<GoogleDriveSearchFilesInput>(
   'GoogleDriveSearchFilesInput'
 )({
   query: NonEmptyString,
-  parentId: Schema.optional(NonEmptyString),
-  parentResourceKey: Schema.optional(NonEmptyString),
+  parentId: Schema.optional(GoogleDriveHeaderValue),
+  parentResourceKey: Schema.optional(GoogleDriveHeaderValue),
   driveId: Schema.optional(NonEmptyString),
   pageSize: Schema.optional(GoogleDrivePageSize),
   pageToken: Schema.optional(NonEmptyString),
   orderBy: Schema.optional(NonEmptyString),
   includeTrashed: Schema.optional(Schema.Boolean)
 }) {}
+
+const GoogleDriveSearchFilesActionInput = GoogleDriveSearchFilesInput.check(
+  parentResourceKeyRequiresParentId
+)
 
 export class GoogleDriveListFilesOutput extends Schema.Class<GoogleDriveListFilesOutput>(
   'GoogleDriveListFilesOutput'
@@ -231,7 +249,7 @@ export class GoogleDriveListFilesOutput extends Schema.Class<GoogleDriveListFile
 }) {}
 
 const GoogleDriveListFilesApiOutput = Schema.Struct({
-  files: Schema.Array(GoogleDriveFileApi),
+  files: Schema.optional(Schema.Array(GoogleDriveFileApi)),
   nextPageToken: Schema.optional(Schema.String),
   incompleteSearch: Schema.optional(Schema.Boolean),
   kind: Schema.optional(Schema.String)
@@ -241,7 +259,7 @@ const googleDriveListFilesOutputFromApi = (
   output: typeof GoogleDriveListFilesApiOutput.Type
 ): GoogleDriveListFilesOutput =>
   GoogleDriveListFilesOutput.make({
-    files: Chunk.fromIterable(output.files.map(googleDriveFileFromApi)),
+    files: Chunk.fromIterable((output.files ?? []).map(googleDriveFileFromApi)),
     ...(output.nextPageToken === undefined ? {} : { nextPageToken: output.nextPageToken }),
     ...(output.incompleteSearch === undefined ? {} : { incompleteSearch: output.incompleteSearch }),
     ...(output.kind === undefined ? {} : { kind: output.kind })
@@ -250,17 +268,21 @@ const googleDriveListFilesOutputFromApi = (
 export class GoogleDriveFileIdInput extends Schema.Class<GoogleDriveFileIdInput>(
   'GoogleDriveFileIdInput'
 )({
-  fileId: NonEmptyString,
-  resourceKey: Schema.optional(NonEmptyString)
+  fileId: GoogleDriveHeaderValue,
+  resourceKey: Schema.optional(GoogleDriveHeaderValue)
 }) {}
 
 export class GoogleDriveCreateFolderInput extends Schema.Class<GoogleDriveCreateFolderInput>(
   'GoogleDriveCreateFolderInput'
 )({
   name: NonEmptyString,
-  parentId: Schema.optional(NonEmptyString),
-  parentResourceKey: Schema.optional(NonEmptyString)
+  parentId: Schema.optional(GoogleDriveHeaderValue),
+  parentResourceKey: Schema.optional(GoogleDriveHeaderValue)
 }) {}
+
+const GoogleDriveCreateFolderActionInput = GoogleDriveCreateFolderInput.check(
+  parentResourceKeyRequiresParentId
+)
 
 export class GoogleDriveDeleteFileOutput extends Schema.Class<GoogleDriveDeleteFileOutput>(
   'GoogleDriveDeleteFileOutput'
@@ -428,7 +450,7 @@ const googleDriveListAction = (input: {
 export const googleDriveListFilesAction = defineAction({
   id: 'drive.list_files',
   description: 'List Google Drive file and folder metadata, optionally within a parent folder.',
-  inputSchema: GoogleDriveListFilesInput,
+  inputSchema: GoogleDriveListFilesActionInput,
   outputSchema: GoogleDriveListFilesOutput,
   execute: ({ integration, input }) =>
     googleDriveListAction({
@@ -444,7 +466,7 @@ export const googleDriveListFilesAction = defineAction({
 export const googleDriveSearchFilesAction = defineAction({
   id: 'drive.search_files',
   description: 'Search Google Drive file names and indexed text.',
-  inputSchema: GoogleDriveSearchFilesInput,
+  inputSchema: GoogleDriveSearchFilesActionInput,
   outputSchema: GoogleDriveListFilesOutput,
   execute: ({ integration, input }) =>
     googleDriveListAction({
@@ -503,7 +525,7 @@ export const googleDriveCreateFolderAction = defineAction({
   id: 'drive.create_folder',
   description: 'Create a Google Drive folder, optionally within a parent folder.',
   access: 'write',
-  inputSchema: GoogleDriveCreateFolderInput,
+  inputSchema: GoogleDriveCreateFolderActionInput,
   outputSchema: GoogleDriveFile,
   execute: ({ integration, input }) =>
     Effect.gen(function* () {
