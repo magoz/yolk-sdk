@@ -19,6 +19,14 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 - Keep Effect runtime work out of workflow orchestration helpers; Effect may run inside host/package step callbacks.
 - Import Workflow orchestration APIs from `@yolk-sdk/vercel-workflows`; `./workflow` remains an explicit equivalent subpath.
 - Effect-native Workflow client/layer lives under `./effect`: `VercelWorkflows.layer` wraps public `workflow/api`; `VercelWorkflows.layerFromSdk` is the fake SDK seam.
+- `./testing` ships `TestWorkflowWorld`: a behavioral platform emulator (run lifecycle,
+  append-only durable streams with close-once -> 409 conflicts, retrying step executor,
+  hooks/resume, cancellation) plus `testWorkflowModule` for mocking the ambient `workflow` module.
+- Requires `workflow@^5.0.0-beta.42` (region-pinned runs; the 4.x backend was `iad1`-only and
+  cross-region streaming arrived in multi-second bursts). v5's hardened serialization captures
+  Node `URL` intrinsics at import and rejects jsdom's URL shape: any test whose import graph
+  reaches the `workflow` package must run in a node vitest environment, never jsdom (this repo's
+  root jsdom vitest excludes `packages/**` for exactly this reason).
 
 ## Design Rules
 

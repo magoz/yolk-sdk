@@ -11,6 +11,11 @@ pnpm add @yolk-sdk/vercel-workflows@canary effect workflow
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
 Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
 
+Requires `workflow@^5.0.0-beta.42`. The 5.x line region-pins Vercel runs so durable streams are
+served from the deployment's own region; the 4.x backend was `iad1`-only, which made deployed
+streaming from other regions arrive in multi-second bursts. Host apps must resolve a single
+`workflow` instance shared with this package.
+
 ## Subpaths
 
 | Subpath                               | Purpose                                                 |
@@ -18,6 +23,7 @@ Requires Node.js 22+ and a server runtime supported by Vercel Workflow.
 | `@yolk-sdk/vercel-workflows`          | Workflow-safe agent loop orchestration APIs             |
 | `@yolk-sdk/vercel-workflows/workflow` | Explicit equivalent subpath                             |
 | `@yolk-sdk/vercel-workflows/effect`   | Effect-native wrapper around public `workflow/api` APIs |
+| `@yolk-sdk/vercel-workflows/testing`  | `TestWorkflowWorld` behavioral platform emulator        |
 
 ## Imports
 

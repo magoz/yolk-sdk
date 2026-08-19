@@ -251,6 +251,20 @@ Timeout is owned by Yolk. Long-running commands may be killed and returned as co
 
 ## Vercel Workflow errors
 
+### `Missing intrinsic getter: href` at import
+
+`workflow` 5.x hardens serialization by capturing Node `URL` intrinsics when the module loads and
+rejects jsdom's URL shape. Run any test whose import graph reaches the `workflow` package (any
+entrypoint, including through `@yolk-sdk/vercel-workflows`) in a node vitest environment — add
+`// @vitest-environment node` or exclude those suites from jsdom projects.
+
+### Deployed streams arrive in multi-second bursts
+
+On `workflow` 4.x the hosted backend served durable streams only from `iad1`; deployments in other
+regions paid a cross-region round trip per 10 ms write batch, with writer backpressure compounding
+the delay. Upgrade to `workflow@^5.0.0-beta.42`: 5.x region-pins each run so storage, queuing, and
+streams are served from the run's own region.
+
 ### Duplicate or replayed events
 
 Durable clients should de-dupe by `eventId` when available and resume from the last known stream index.

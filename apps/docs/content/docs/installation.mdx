@@ -18,13 +18,13 @@ pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/vercel-workflows@canary
 
 ## Runtime expectations
 
-| Requirement   | Notes                                               |
-| ------------- | --------------------------------------------------- |
-| Node          | Packages declare `>=22`                             |
-| Module format | ESM only                                            |
-| Effect        | Runtime dependency during canary                    |
-| React         | Optional peer only for `@yolk-sdk/agent/react`      |
-| Workflow      | Required only by `@yolk-sdk/vercel-workflows` hosts |
+| Requirement   | Notes                                                                                                                                                       |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node          | Packages declare `>=22`                                                                                                                                     |
+| Module format | ESM only                                                                                                                                                    |
+| Effect        | Runtime dependency during canary                                                                                                                            |
+| React         | Optional peer only for `@yolk-sdk/agent/react`                                                                                                              |
+| Workflow      | Required only by `@yolk-sdk/vercel-workflows` hosts; `workflow@^5.0.0-beta.42` (5.x region-pins runs — 4.x streams were `iad1`-only and burst cross-region) |
 
 ## Canary policy
 
