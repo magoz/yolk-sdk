@@ -56,18 +56,26 @@ override.
 
 Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapConnection`,
 `EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
-`EmailMessageSummary`, `EmailMessage`, `EmailListMessagesInput`, `EmailListMessagesOutput`,
-`EmailGetMessageInput`, `EmailGetMessageOutput`, `EmailComposeMessage`, `EmailFolderName`,
+`EmailAttachmentBase64`, `EmailAttachmentContent`, `EmailMessageSummary`, `EmailMessage`,
+`EmailListMessagesInput`,
+`EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
+`EmailGetAttachmentInput`, `EmailGetAttachmentOutput`, `EmailComposeMessage`, `EmailFolderName`,
 `EmailDraftId`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`, `EmailSendMessageInput`, and
 `EmailSendMessageOutput`. `EmailClient` receives typed list/get/IMAP-draft/SMTP-send requests plus a
-runtime `UsernamePasswordCredential`. The connector
+runtime `UsernamePasswordCredential`; hosts opt into attachment retrieval through its optional
+`getAttachment` method. The connector
 exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and does not
 bundle transport or MIME libraries.
 
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
-`OutlookComposeInput`, `OutlookCreateReplyDraftInput`, `OutlookSendMailInput`, and
-`OutlookSendOutput`. OAuth exports include generic, signed-in-mailbox, shared-mailbox, and combined
+`OutlookAttachmentKind`, `OutlookAttachmentMetadata`, `OutlookAttachment`,
+`OutlookListAttachmentsInput`, `OutlookListAttachmentsOutput`, `OutlookGetAttachmentInput`,
+`OutlookGetAttachmentOutput`, `OutlookComposeInput`, `OutlookCreateReplyDraftInput`,
+`OutlookSendMailInput`, and `OutlookSendOutput`. File attachment retrieval exposes Graph base64 as
+`contentBase64`; item and reference attachments are available only as list metadata. OAuth exports
+include generic,
+signed-in-mailbox, shared-mailbox, and combined
 slots that share `microsoft.oauth`. Action inputs use `/me` by default and accept optional `mailbox`
 for `/users/{id|userPrincipalName}` Exchange Online targets. Set integration config key
 `microsoftMailboxAccessModeConfigKey` (`mailboxAccessMode`) to `application` for application-token
@@ -102,17 +110,27 @@ create, trash, and permanent delete. Both use `googleOAuthSlotId` (`google.oauth
 Constants also include `googleDriveApiBaseUrl`, `googleDriveFolderMimeType`, and
 `googleDriveFileFields`.
 
-Google's normalized thread contracts are `GmailGetThreadInput`, `GmailThreadAttachment`,
-`GmailThreadMessage`, and `GmailThreadOutput`.
+Google's normalized attachment and thread contracts are `GmailListAttachmentsInput`,
+`GmailListAttachmentsOutput`, `GmailGetAttachmentInput`, `GmailGetAttachmentOutput`,
+`GmailAttachmentBase64Url`, `GmailAttachmentBase64`, `GmailGetThreadInput`,
+`GmailThreadAttachment`, `GmailThreadMessage`, and `GmailThreadOutput`.
 
 - `GmailGetThreadInput`: required `threadId` and `format: 'full' | 'metadata' | 'minimal'`.
 - `GmailThreadOutput`: required `id` and `messages`; optional `historyId`.
 - `GmailThreadMessage`: required `id`, `headers`, and `attachments`; optional `threadId`, `labelIds`,
   `snippet`, `internalDate`, `body`, and `bodyMimeType`.
-- `GmailThreadAttachment`: optional `partId`, `filename`, `mimeType`, `size`, and `attachmentId`.
+- `GmailThreadAttachment`: optional `partId`, `filename`, `mimeType`, `size`, `attachmentId`,
+  `inline`, and `contentId`.
+- `GmailListAttachmentsInput` / `GmailListAttachmentsOutput`: one `messageId` to a metadata-only
+  attachment list.
+- `GmailGetAttachmentInput`: required `messageId` and `attachmentId`.
+- `GmailGetAttachmentOutput`: required input IDs, non-negative integer `size`, Gmail base64url `data`,
+  and standard-base64 `contentBase64`.
 
-Non-success provider responses return `ActionResult.failure` with code `gmail_get_thread_failed`.
-Invalid JSON or response shape fails with `ConnectorError { cause: 'validation_failed' }`.
+Non-success provider responses return `ActionResult.failure`; authorization failures use
+`google_unauthorized`, while action-specific failures use `gmail_get_thread_failed`,
+`gmail_list_attachments_failed`, or `gmail_get_attachment_failed`. Invalid JSON or response shape
+fails with `ConnectorError { cause: 'validation_failed' }`.
 
 See [Connectors catalog](../integrations/connectors) for action ids.
 

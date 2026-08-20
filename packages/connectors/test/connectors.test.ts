@@ -47,7 +47,9 @@ import {
 import {
   gmailDraftComposeAction,
   gmailDraftReplyAction,
+  gmailGetAttachmentAction,
   gmailGetThreadAction,
+  gmailListAttachmentsAction,
   gmailListDraftsAction,
   gmailListSendAsAction,
   GoogleConnector,
@@ -83,7 +85,9 @@ import {
   oneDriveListItemsAction,
   oneDriveSearchItemsAction,
   outlookCreateReplyDraftAction,
+  outlookGetAttachmentAction,
   outlookGetMessageAction,
+  outlookListAttachmentsAction,
   outlookListMessagesAction,
   outlookSearchMessagesAction,
   outlookSendDraftAction,
@@ -576,6 +580,7 @@ describe('@yolk-sdk/connectors', () => {
       'gmail.list_drafts',
       'gmail.get_message',
       'gmail.draft_reply',
+      'gmail.list_attachments',
       'gmail.get_attachment',
       'gmail.draft_compose',
       'gmail.draft_update',
@@ -631,6 +636,8 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.list_messages',
       'outlook.search_messages',
       'outlook.get_message',
+      'outlook.list_attachments',
+      'outlook.get_attachment',
       'outlook.create_draft',
       'outlook.create_reply_draft',
       'outlook.send_mail',
@@ -1869,6 +1876,278 @@ describe('@yolk-sdk/connectors', () => {
     })
   )
 
+  it.effect('lists Outlook attachment metadata, including inline attachments', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const nextLink =
+        'https://graph.microsoft.com/v1.0/users/shared%40example.com/messages/message%2Fid/attachments?%24skip=4'
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            value: [
+              {
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                id: 'attachment/file',
+                name: 'invoice.pdf',
+                contentType: 'application/pdf',
+                size: 1_024,
+                isInline: false
+              },
+              {
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                id: 'inline-image',
+                name: 'logo.png',
+                contentType: 'image/png',
+                size: 512,
+                isInline: true,
+                contentId: 'company-logo'
+              },
+              {
+                '@odata.type': '#microsoft.graph.itemAttachment',
+                id: 'attached-message',
+                name: 'original.eml',
+                contentType: 'message/rfc822',
+                size: 2_048,
+                isInline: false
+              },
+              {
+                '@odata.type': '#microsoft.graph.referenceAttachment',
+                id: 'reference-file',
+                name: 'shared-plan.docx',
+                contentType:
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                size: 4_096,
+                isInline: false
+              }
+            ],
+            '@odata.nextLink': nextLink
+          })
+        ),
+        jsonHttpResponse('{"value":[]}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* outlookListAttachmentsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message/id', mailbox: 'shared@example.com', top: 4 }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+      yield* outlookListAttachmentsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message/id', mailbox: 'shared@example.com', nextLink }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      const request = requests.at(0)
+      if (request === undefined) throw new Error('Expected Microsoft Graph attachment request')
+      const url = new URL(request.url)
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          attachments: [
+            {
+              id: 'attachment/file',
+              kind: 'file',
+              name: 'invoice.pdf',
+              contentType: 'application/pdf',
+              size: 1_024,
+              isInline: false
+            },
+            {
+              id: 'inline-image',
+              kind: 'file',
+              name: 'logo.png',
+              contentType: 'image/png',
+              size: 512,
+              isInline: true,
+              contentId: 'company-logo'
+            },
+            {
+              id: 'attached-message',
+              kind: 'item',
+              name: 'original.eml',
+              contentType: 'message/rfc822',
+              size: 2_048,
+              isInline: false
+            },
+            {
+              id: 'reference-file',
+              kind: 'reference',
+              name: 'shared-plan.docx',
+              contentType:
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              size: 4_096,
+              isInline: false
+            }
+          ],
+          nextLink
+        }
+      })
+      expect(url.pathname).toBe(
+        '/v1.0/users/shared%40example.com/messages/message%2Fid/attachments'
+      )
+      expect(url.searchParams.get('$select')).toBe(
+        'id,name,contentType,size,isInline,contentId,lastModifiedDateTime'
+      )
+      expect(url.searchParams.get('$top')).toBe('4')
+      expect(requests.at(1)?.url).toBe(nextLink)
+      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadSharedScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadScope)
+    })
+  )
+
+  it.effect('retrieves Outlook file attachment content as base64', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            id: 'attachment/id',
+            name: 'invoice.pdf',
+            contentType: 'application/pdf',
+            size: 4,
+            isInline: false,
+            contentBytes: 'JVBERg=='
+          })
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: request => {
+            requestedScopes.push(request.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* outlookGetAttachmentAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message/id', attachmentId: 'attachment/id' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          attachment: {
+            id: 'attachment/id',
+            kind: 'file',
+            name: 'invoice.pdf',
+            contentType: 'application/pdf',
+            size: 4,
+            isInline: false,
+            contentBase64: 'JVBERg=='
+          }
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://graph.microsoft.com/v1.0/me/messages/message%2Fid/attachments/attachment%2Fid',
+        headers: { prefer: 'IdType="ImmutableId"' }
+      })
+      expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
+      expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
+    })
+  )
+
+  it.effect('maps Outlook attachment failures and rejects malformed attachment responses', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          ConnectorHttpResponse.make({
+            status: 403,
+            headers: {},
+            body: '{"error":{"message":"Attachment access denied"}}'
+          }),
+          jsonHttpResponse('{"name":"missing attachment id"}')
+        ]
+      )
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+
+      const providerResult = yield* outlookListAttachmentsAction
+        .execute({ integration: microsoftIntegration, input: { messageId: 'message_1' } })
+        .pipe(Effect.provide(TestLayer))
+      const invalidNextLinkResult = yield* outlookListAttachmentsAction
+        .execute({
+          integration: microsoftIntegration,
+          input: {
+            messageId: 'message_1',
+            nextLink:
+              'https://graph.microsoft.com/v1.0/me/messages/other_message/attachments?%24skip=2'
+          }
+        })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+      const malformedResult = yield* outlookGetAttachmentAction
+        .execute({
+          integration: microsoftIntegration,
+          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
+        })
+        .pipe(Effect.provide(TestLayer), Effect.result)
+
+      expect(providerResult).toMatchObject({
+        _tag: 'Failure',
+        error: {
+          code: 'microsoft_unauthorized',
+          message: 'Microsoft Outlook list attachments failed: Attachment access denied',
+          status: 403
+        }
+      })
+      expect(invalidNextLinkResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(malformedResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+    })
+  )
+
   it.effect('uses application mail permissions for explicit Exchange Online mailboxes', () =>
     Effect.gen(function* () {
       const requests: Array<ConnectorHttpRequest> = []
@@ -2367,6 +2646,224 @@ describe('@yolk-sdk/connectors', () => {
       expect(requestedScopes.at(0)).toContain(microsoftGraphFilesReadAllScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphFilesReadScope)
       expect(requests).toHaveLength(1)
+    })
+  )
+
+  it.effect('lists Gmail attachment metadata without returning content', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const inlineData = encodeBase64Url('INLINE_BYTES')
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse(
+          JSON.stringify({
+            id: 'message/id',
+            payload: {
+              mimeType: 'multipart/mixed',
+              parts: [
+                {
+                  partId: '1',
+                  filename: 'invoice.pdf',
+                  mimeType: 'application/pdf',
+                  body: { size: 1024, attachmentId: 'attachment/id' }
+                },
+                {
+                  partId: '2',
+                  mimeType: 'image/png',
+                  headers: [
+                    { name: 'Content-Disposition', value: 'inline' },
+                    { name: 'Content-ID', value: '<logo@example.com>' }
+                  ],
+                  body: { size: 256, data: inlineData }
+                }
+              ]
+            }
+          })
+        )
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: input => {
+            requestedScopes.push(input.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'google',
+                accessToken: 'google_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* gmailListAttachmentsAction
+        .execute({ integration: googleIntegration, input: { messageId: 'message/id' } })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          attachments: [
+            {
+              partId: '1',
+              filename: 'invoice.pdf',
+              mimeType: 'application/pdf',
+              size: 1024,
+              attachmentId: 'attachment/id'
+            },
+            {
+              partId: '2',
+              mimeType: 'image/png',
+              size: 256,
+              inline: true,
+              contentId: '<logo@example.com>'
+            }
+          ]
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/message%2Fid?format=full'
+      })
+      expect(requestedScopes.at(0)).toContain(googleGmailReadonlyScope)
+      expect(JSON.stringify(result)).not.toContain(inlineData)
+    })
+  )
+
+  it.effect('normalizes Gmail attachment base64url content while preserving wire fields', () =>
+    Effect.gen(function* () {
+      const requests: Array<ConnectorHttpRequest> = []
+      const requestedScopes: Array<ReadonlyArray<string> | undefined> = []
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(requests, [
+        jsonHttpResponse('{"size":3,"data":"--__"}')
+      ])
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: input => {
+            requestedScopes.push(input.slot.requiredScopes)
+            return Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'google',
+                accessToken: 'google_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+          }
+        })
+      )
+
+      const result = yield* gmailGetAttachmentAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message/id', attachmentId: 'attachment/id' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)))
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          messageId: 'message/id',
+          attachmentId: 'attachment/id',
+          size: 3,
+          data: '--__',
+          contentBase64: '++//'
+        }
+      })
+      expect(requests.at(0)).toMatchObject({
+        method: 'GET',
+        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/message%2Fid/attachments/attachment%2Fid'
+      })
+      expect(requestedScopes.at(0)).toContain(googleGmailReadonlyScope)
+    })
+  )
+
+  it.effect('normalizes Gmail attachment padding tails and zero-byte content', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse('{"size":1,"data":"Zg"}'),
+          jsonHttpResponse('{"size":2,"data":"Zm8"}'),
+          jsonHttpResponse('{"size":1,"data":"Zg=="}'),
+          jsonHttpResponse('{"size":0,"data":""}')
+        ]
+      )
+      const TestLayer = Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)
+      const results = yield* Effect.forEach(['two', 'three', 'padded', 'empty'], attachmentId =>
+        gmailGetAttachmentAction
+          .execute({
+            integration: googleIntegration,
+            input: { messageId: 'message_1', attachmentId }
+          })
+          .pipe(Effect.provide(TestLayer))
+      )
+
+      expect(results).toMatchObject([
+        { _tag: 'Success', value: { size: 1, data: 'Zg', contentBase64: 'Zg==' } },
+        { _tag: 'Success', value: { size: 2, data: 'Zm8', contentBase64: 'Zm8=' } },
+        { _tag: 'Success', value: { size: 1, data: 'Zg==', contentBase64: 'Zg==' } },
+        { _tag: 'Success', value: { size: 0, data: '', contentBase64: '' } }
+      ])
+    })
+  )
+
+  it.effect('maps Gmail attachment failures and rejects malformed content responses', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonStatusHttpResponse(403, '{"error":{"message":"Attachment access denied"}}'),
+          jsonHttpResponse('{"size":-1,"data":"Zg"}'),
+          jsonHttpResponse('{"size":1,"data":"***"}')
+        ]
+      )
+
+      const providerResult = yield* gmailGetAttachmentAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
+        })
+        .pipe(Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)))
+      const invalidSizeResult = yield* gmailGetAttachmentAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
+        })
+        .pipe(
+          Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)),
+          Effect.result
+        )
+      const invalidDataResult = yield* gmailGetAttachmentAction
+        .execute({
+          integration: googleIntegration,
+          input: { messageId: 'message_1', attachmentId: 'attachment_1' }
+        })
+        .pipe(
+          Effect.provide(Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)),
+          Effect.result
+        )
+
+      expect(providerResult).toEqual({
+        _tag: 'Failure',
+        error: {
+          code: 'google_unauthorized',
+          message: 'Gmail get attachment failed: Attachment access denied',
+          status: 403,
+          underlying: '{"error":{"message":"Attachment access denied"}}'
+        }
+      })
+      expect(invalidSizeResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+      expect(invalidDataResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
     })
   )
 

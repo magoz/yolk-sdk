@@ -53,9 +53,7 @@ export class EmailIncomingConnection extends Schema.Class<EmailIncomingConnectio
   security: EmailSecurity
 }) {}
 
-export class EmailImapConnection extends Schema.Class<EmailImapConnection>(
-  'EmailImapConnection'
-)({
+export class EmailImapConnection extends Schema.Class<EmailImapConnection>('EmailImapConnection')({
   protocol: Schema.Literal('imap'),
   host: Schema.String,
   port: Schema.Int,
@@ -88,6 +86,25 @@ export class EmailAttachmentMetadata extends Schema.Class<EmailAttachmentMetadat
   size: Schema.optional(Schema.Number),
   inline: Schema.optional(Schema.Boolean),
   contentId: Schema.optional(Schema.String)
+}) {}
+
+export const EmailAttachmentBase64 = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+)
+export type EmailAttachmentBase64 = typeof EmailAttachmentBase64.Type
+
+const EmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
+export class EmailAttachmentContent extends Schema.Class<EmailAttachmentContent>(
+  'EmailAttachmentContent'
+)({
+  id: Schema.String,
+  filename: Schema.optional(Schema.String),
+  contentType: Schema.optional(Schema.String),
+  size: Schema.optional(EmailAttachmentSize),
+  inline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.String),
+  contentBase64: EmailAttachmentBase64
 }) {}
 
 export class EmailMessageSummary extends Schema.Class<EmailMessageSummary>('EmailMessageSummary')({
@@ -149,6 +166,20 @@ export class EmailGetMessageOutput extends Schema.Class<EmailGetMessageOutput>(
   'EmailGetMessageOutput'
 )({
   message: EmailMessage
+}) {}
+
+export class EmailGetAttachmentInput extends Schema.Class<EmailGetAttachmentInput>(
+  'EmailGetAttachmentInput'
+)({
+  messageId: Schema.String,
+  attachmentId: Schema.String,
+  folder: Schema.optionalKey(EmailFolderName)
+}) {}
+
+export class EmailGetAttachmentOutput extends Schema.Class<EmailGetAttachmentOutput>(
+  'EmailGetAttachmentOutput'
+)({
+  attachment: EmailAttachmentContent
 }) {}
 
 export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('EmailComposeMessage')({
@@ -215,6 +246,16 @@ export class EmailGetMessageRequest extends Schema.Class<EmailGetMessageRequest>
   folder: Schema.optional(EmailFolderName)
 }) {}
 
+export class EmailGetAttachmentRequest extends Schema.Class<EmailGetAttachmentRequest>(
+  'EmailGetAttachmentRequest'
+)({
+  connection: EmailIncomingConnection,
+  credential: UsernamePasswordCredential,
+  messageId: Schema.String,
+  attachmentId: Schema.String,
+  folder: Schema.optional(EmailFolderName)
+}) {}
+
 export class EmailCreateDraftRequest extends Schema.Class<EmailCreateDraftRequest>(
   'EmailCreateDraftRequest'
 )({
@@ -239,6 +280,9 @@ export type EmailClientApi = {
   readonly getMessage: (
     input: EmailGetMessageRequest
   ) => Effect.Effect<ActionResult<EmailGetMessageOutput>, ConnectorError>
+  readonly getAttachment?: (
+    input: EmailGetAttachmentRequest
+  ) => Effect.Effect<ActionResult<EmailGetAttachmentOutput>, ConnectorError>
   readonly createDraft: (
     input: EmailCreateDraftRequest
   ) => Effect.Effect<ActionResult<EmailCreateDraftOutput>, ConnectorError>
@@ -375,10 +419,7 @@ const usableCredential = (
   )
 }
 
-const requireRecipient = (
-  integration: ConnectorIntegration,
-  message: EmailComposeMessage
-) =>
+const requireRecipient = (integration: ConnectorIntegration, message: EmailComposeMessage) =>
   message.to.length > 0 || (message.cc?.length ?? 0) > 0 || (message.bcc?.length ?? 0) > 0
     ? Effect.void
     : Effect.fail(validationError(integration, 'Email submission requires at least one recipient'))
@@ -410,9 +451,7 @@ const requireImap = (
           security: connection.security
         })
       )
-    : Effect.fail(
-        validationError(integration, 'Draft creation requires IMAP; POP3 is read-only')
-      )
+    : Effect.fail(validationError(integration, 'Draft creation requires IMAP; POP3 is read-only'))
 
 export const emailListMessagesAction = defineAction({
   id: 'email.list_messages',
@@ -457,6 +496,37 @@ export const emailGetMessageAction = defineAction({
           connection,
           credential,
           messageId: input.messageId,
+          folder: input.folder
+        })
+      )
+    })
+})
+
+export const emailGetAttachmentAction = defineAction({
+  id: 'email.get_attachment',
+  description: 'Get one decoded attachment from a configured IMAP or POP3 account as base64.',
+  access: 'read',
+  inputSchema: EmailGetAttachmentInput,
+  outputSchema: EmailGetAttachmentOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const connection = yield* incomingConnection(integration)
+      yield* rejectPop3Folder(integration, connection, input.folder)
+      const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
+      const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
+      const client = yield* EmailClient
+      const getAttachment = client.getAttachment
+      if (getAttachment === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support attachment retrieval')
+        )
+      }
+      return yield* getAttachment(
+        EmailGetAttachmentRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          attachmentId: input.attachmentId,
           folder: input.folder
         })
       )
@@ -509,6 +579,7 @@ export const emailSendMessageAction = defineAction({
 export const emailActions = [
   emailListMessagesAction,
   emailGetMessageAction,
+  emailGetAttachmentAction,
   emailCreateDraftAction,
   emailSendMessageAction
 ]

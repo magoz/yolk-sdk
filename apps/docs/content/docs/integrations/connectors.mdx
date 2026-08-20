@@ -78,12 +78,13 @@ adapter instead of base64-encoding it through these actions.
 `EmailClient` Effect layer backed by their chosen IMAP, POP3, SMTP, TLS, and MIME libraries; the
 package does not bundle those libraries.
 
-| Action id             | What it does                                   | Access        |
-| --------------------- | ---------------------------------------------- | ------------- |
-| `email.list_messages` | list normalized messages with an opaque cursor | `read`        |
-| `email.get_message`   | fetch one normalized message                   | `read`        |
-| `email.create_draft`  | append a message draft to an IMAP mailbox      | `write`       |
-| `email.send_message`  | submit a normalized message to the SMTP server | `destructive` |
+| Action id              | What it does                                   | Access        |
+| ---------------------- | ---------------------------------------------- | ------------- |
+| `email.list_messages`  | list normalized messages with an opaque cursor | `read`        |
+| `email.get_message`    | fetch one normalized message                   | `read`        |
+| `email.get_attachment` | retrieve decoded attachment content as base64  | `read`        |
+| `email.create_draft`   | append a message draft to an IMAP mailbox      | `write`       |
+| `email.send_message`   | submit a normalized message to the SMTP server | `destructive` |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
 `incomingProtocol: 'imap'`, `incomingSecurity: 'tls'`, and port `993`; POP3 with TLS defaults to
@@ -94,8 +95,18 @@ or numeric string from `1` through `65535`. Security is explicit: `none`, `start
 
 The two slots may bind separate host credential refs or the same ref. Resolve credentials immediately
 before transport calls. Both slots require `UsernamePasswordCredential`; use the provider-specific
-Google or Microsoft connectors for their OAuth flows. Outputs contain normalized addresses, body
-text/HTML, and attachment metadata, never raw MIME or attachment bytes.
+Google or Microsoft connectors for their OAuth flows. Message list/get outputs contain normalized
+addresses, body text/HTML, and attachment metadata, never raw MIME.
+
+When attachment metadata includes `id`, pass it with the parent `messageId` to
+`email.get_attachment`. The output repeats normalized metadata and exposes decoded file bytes—not
+MIME transfer-encoded text—as base64 in `contentBase64`; decoded `size` is a non-negative
+integer. Existing `EmailClient` implementations may omit the optional `getAttachment` method;
+invoking the action then fails with a typed validation error. Hosts that implement it own MIME
+parsing, base64 encoding, size limits, durable storage, and content scanning. IMAP adapters should fetch the selected part without marking
+the message read when supported. POP3 has no standard partial-part retrieval, so adapters may fetch
+the whole stable UIDL-addressed message before extracting the part. POP3 rejects `folder`; omit it
+for attachment retrieval.
 
 `email.create_draft` requires IMAP, accepts drafts without recipients, and uses the incoming
 credential. Optional `folder` selects the mailbox. When omitted, the host adapter discovers a
@@ -137,24 +148,25 @@ connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 
 ### Gmail actions
 
-| Action id              | What it does                   |
-| ---------------------- | ------------------------------ |
-| `gmail.search`         | search Gmail messages          |
-| `gmail.get_message`    | fetch one message              |
-| `gmail.list`           | list messages                  |
-| `gmail.list_drafts`    | list drafts                    |
-| `gmail.get_thread`     | fetch normalized thread        |
-| `gmail.list_labels`    | list labels                    |
-| `gmail.modify_labels`  | add/remove labels              |
-| `gmail.trash`          | move a message to trash        |
-| `gmail.untrash`        | restore a trashed message      |
-| `gmail.draft_compose`  | create a draft                 |
-| `gmail.draft_update`   | update a draft                 |
-| `gmail.draft_delete`   | delete a draft                 |
-| `gmail.draft_reply`    | create a reply draft           |
-| `gmail.get_attachment` | fetch an attachment            |
-| `gmail.list_send_as`   | list send-as aliases           |
-| `gmail.list_accounts`  | list accessible Gmail accounts |
+| Action id                | What it does                   |
+| ------------------------ | ------------------------------ |
+| `gmail.search`           | search Gmail messages          |
+| `gmail.get_message`      | fetch one message              |
+| `gmail.list`             | list messages                  |
+| `gmail.list_drafts`      | list drafts                    |
+| `gmail.get_thread`       | fetch normalized thread        |
+| `gmail.list_labels`      | list labels                    |
+| `gmail.modify_labels`    | add/remove labels              |
+| `gmail.trash`            | move a message to trash        |
+| `gmail.untrash`          | restore a trashed message      |
+| `gmail.draft_compose`    | create a draft                 |
+| `gmail.draft_update`     | update a draft                 |
+| `gmail.draft_delete`     | delete a draft                 |
+| `gmail.draft_reply`      | create a reply draft           |
+| `gmail.list_attachments` | list attachment metadata       |
+| `gmail.get_attachment`   | fetch attachment content       |
+| `gmail.list_send_as`     | list send-as aliases           |
+| `gmail.list_accounts`    | list accessible Gmail accounts |
 
 #### Fetch a normalized Gmail thread
 
@@ -167,10 +179,13 @@ preferred when available; otherwise HTML is used. Text and nested-message attach
 the message body. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`, `From`, `In-Reply-To`,
 `Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
 
-Raw MIME and attachment content are intentionally omitted. `attachmentId` is optional because Gmail
-may return inline attachment data instead. When present, use the parent message `id` as `messageId`
-plus `attachmentId` with `gmail.get_attachment`; omitted inline data is not retrievable through that
-action.
+Raw MIME and attachment content are intentionally omitted. Use `gmail.list_attachments` with one
+`messageId` for metadata-only discovery without fetching a whole thread; metadata includes
+inline/content-ID details when Gmail supplies them. `attachmentId` is optional because Gmail may
+return inline attachment data instead. When present, pass the parent message `id`
+as `messageId` plus `attachmentId` to `gmail.get_attachment`. Its typed output preserves Gmail's
+`size` and base64url `data`, then adds `messageId`, `attachmentId`, and standard-base64
+`contentBase64`. Omitted inline data is not retrievable through that action.
 
 ### Calendar actions
 
@@ -265,6 +280,8 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging   |
 | `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax |
 | `outlook.get_message`        | fetch one message with a text body                         |
+| `outlook.list_attachments`   | list attachment metadata, including inline attachments     |
+| `outlook.get_attachment`     | fetch one file attachment with base64 content              |
 | `outlook.create_draft`       | create a new message draft                                 |
 | `outlook.create_reply_draft` | create a reply draft for an existing message               |
 | `outlook.send_mail`          | submit a new message for sending                           |
@@ -276,6 +293,14 @@ continuations. The connector accepts only global Graph v1.0 links for the select
 folder collection. Read and draft-returning requests
 use Graph immutable IDs; `outlook.get_message` requests text for the full body. A draft ID can still
 change when sent, which is a documented immutable-ID exception.
+
+`outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |
+'unknown'`; unlike `hasAttachments`, listing also discovers inline attachments. It accepts `top` and
+returns an opaque `nextLink`; pass that link back unchanged with the same `messageId` and `mailbox`.
+Use `outlook.get_attachment` with a returned file attachment ID. It exposes Graph's base64
+`contentBytes` as `contentBase64`. Item and reference attachments remain available only as list
+metadata and are not promised as retrievable by this action. Hosts own base64 decoding, size limits,
+durable storage, and content scanning.
 
 Send actions return `{ accepted: true }` for Graph's `202 Accepted`. Acceptance confirms submission,
 not processing or delivery.

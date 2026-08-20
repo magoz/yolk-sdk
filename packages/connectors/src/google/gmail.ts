@@ -98,6 +98,12 @@ export class GmailDraftUpdateInput extends Schema.Class<GmailDraftUpdateInput>(
   from: Schema.optional(Schema.String)
 }) {}
 
+export class GmailListAttachmentsInput extends Schema.Class<GmailListAttachmentsInput>(
+  'GmailListAttachmentsInput'
+)({
+  messageId: Schema.String
+}) {}
+
 export class GmailGetAttachmentInput extends Schema.Class<GmailGetAttachmentInput>(
   'GmailGetAttachmentInput'
 )({
@@ -138,7 +144,9 @@ export class GmailThreadAttachment extends Schema.Class<GmailThreadAttachment>(
   filename: Schema.optional(Schema.String),
   mimeType: Schema.optional(Schema.String),
   size: Schema.optional(Schema.Number),
-  attachmentId: Schema.optional(Schema.String)
+  attachmentId: Schema.optional(Schema.String),
+  inline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.String)
 }) {}
 
 export class GmailThreadMessage extends Schema.Class<GmailThreadMessage>('GmailThreadMessage')({
@@ -158,6 +166,39 @@ export class GmailThreadOutput extends Schema.Class<GmailThreadOutput>('GmailThr
   historyId: Schema.optional(Schema.String),
   messages: Schema.Array(GmailThreadMessage)
 }) {}
+
+export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachmentsOutput>(
+  'GmailListAttachmentsOutput'
+)({
+  attachments: Schema.Array(GmailThreadAttachment)
+}) {}
+
+const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
+export const GmailAttachmentBase64Url = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/)
+)
+export type GmailAttachmentBase64Url = typeof GmailAttachmentBase64Url.Type
+
+export const GmailAttachmentBase64 = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+)
+export type GmailAttachmentBase64 = typeof GmailAttachmentBase64.Type
+
+export class GmailGetAttachmentOutput extends Schema.Class<GmailGetAttachmentOutput>(
+  'GmailGetAttachmentOutput'
+)({
+  messageId: Schema.String,
+  attachmentId: Schema.String,
+  size: GmailAttachmentSize,
+  data: GmailAttachmentBase64Url,
+  contentBase64: GmailAttachmentBase64
+}) {}
+
+const GmailAttachmentWireOutput = Schema.Struct({
+  size: GmailAttachmentSize,
+  data: GmailAttachmentBase64Url
+})
 
 const GmailThreadWireMessage = Schema.Struct({
   id: Schema.String,
@@ -316,10 +357,14 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
   const attachmentId = unknownStringField(body, 'attachmentId')
   const hasFilename = filename !== undefined && filename.trim() !== ''
   const contentDisposition = gmailPartHeader(part, 'content-disposition')?.trim().toLowerCase()
+  const contentId = gmailPartHeader(part, 'content-id')
+  const isInline = contentDisposition?.startsWith('inline') === true || contentId !== undefined
+  const isTextBody = mimeType === 'text/plain' || mimeType === 'text/html'
   const isAttachment =
     hasFilename ||
     attachmentId !== undefined ||
     contentDisposition?.startsWith('attachment') === true ||
+    (isInline && !isTextBody) ||
     mimeType === 'message/rfc822'
 
   if (isAttachment) {
@@ -329,7 +374,9 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
         ...(hasFilename ? { filename } : {}),
         ...(mimeType === undefined ? {} : { mimeType }),
         ...(size === undefined ? {} : { size }),
-        ...(attachmentId === undefined ? {} : { attachmentId })
+        ...(attachmentId === undefined ? {} : { attachmentId }),
+        ...(isInline ? { inline: true } : {}),
+        ...(contentId === undefined ? {} : { contentId })
       })
     )
     return
@@ -346,6 +393,12 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
   for (const child of unknownArrayField(part, 'parts')) {
     collectGmailParts(child, collected)
   }
+}
+
+const gmailAttachmentsFromPayload = (payload: unknown) => {
+  const collected: GmailCollectedParts = { plain: [], html: [], attachments: [] }
+  collectGmailParts(payload, collected)
+  return collected.attachments
 }
 
 const normalizeGmailThreadMessage = (
@@ -376,6 +429,12 @@ const normalizeGmailThread = (thread: typeof GmailThreadWireOutput.Type) =>
     ...(thread.historyId === undefined ? {} : { historyId: thread.historyId }),
     messages: (thread.messages ?? []).map(normalizeGmailThreadMessage)
   })
+
+const base64UrlToBase64 = (value: string) => {
+  const withoutPadding = value.replace(/=+$/, '')
+  const base64 = withoutPadding.replaceAll('-', '+').replaceAll('_', '/')
+  return `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
+}
 
 const gmailProviderFailure = (code: string, message: string, status: number, body: string) =>
   providerFailureFromResponse({ code, message, status, body })
@@ -1072,23 +1131,86 @@ export const gmailDraftReplyAction = defineAction({
     })
 })
 
+export const gmailListAttachmentsAction = defineAction({
+  id: 'gmail.list_attachments',
+  description:
+    'List normalized Gmail attachment metadata for one message without returning attachment content.',
+  inputSchema: GmailListAttachmentsInput,
+  outputSchema: GmailListAttachmentsOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
+        gmailRequest({
+          token,
+          method: 'GET',
+          path: `/users/me/messages/${encodeURIComponent(input.messageId)}?format=full`
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_list_attachments_failed',
+          'Gmail list attachments failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const message = yield* decodeJsonResponse(GmailThreadWireMessage, response)
+      return ActionResult.success(
+        GmailListAttachmentsOutput.make({
+          attachments: gmailAttachmentsFromPayload(message.payload)
+        })
+      )
+    })
+})
+
 export const gmailGetAttachmentAction = defineAction({
   id: 'gmail.get_attachment',
-  description: 'Get a Gmail attachment by message and attachment id.',
+  description:
+    'Get Gmail attachment content as standard base64 while preserving Gmail base64url data.',
   inputSchema: GmailGetAttachmentInput,
-  outputSchema: GmailUnknownOutput,
+  outputSchema: GmailGetAttachmentOutput,
   execute: ({ integration, input }) =>
-    runGmailJsonAction(
-      integration,
-      token =>
+    Effect.gen(function* () {
+      const token = yield* resolveGoogleAccessToken(
+        integration,
+        GoogleGmailReadonlyOAuthCredentialSlot
+      )
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
         gmailRequest({
           token,
           method: 'GET',
           path: `/users/me/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}`
-        }),
-      'gmail_get_attachment_failed',
-      'Gmail get attachment failed'
-    )
+        })
+      )
+
+      if (!isSuccessStatus(response.status)) {
+        return yield* gmailProviderFailure(
+          'gmail_get_attachment_failed',
+          'Gmail get attachment failed',
+          response.status,
+          response.body
+        )
+      }
+
+      const output = yield* decodeJsonResponse(GmailAttachmentWireOutput, response)
+      return ActionResult.success(
+        GmailGetAttachmentOutput.make({
+          messageId: input.messageId,
+          attachmentId: input.attachmentId,
+          size: output.size,
+          data: output.data,
+          contentBase64: base64UrlToBase64(output.data)
+        })
+      )
+    })
 })
 
 export const gmailListSendAsAction = defineAction({
@@ -1125,6 +1247,7 @@ export const gmailActions = [
   gmailListDraftsAction,
   gmailGetMessageAction,
   gmailDraftReplyAction,
+  gmailListAttachmentsAction,
   gmailGetAttachmentAction,
   gmailDraftComposeAction,
   gmailDraftUpdateAction,

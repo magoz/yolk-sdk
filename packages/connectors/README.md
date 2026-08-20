@@ -173,8 +173,9 @@ reads. Incoming and SMTP bindings are separate, but both may point to the same h
 Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains available through
 the Google and Microsoft connectors.
 
-The common action set is `email.list_messages`, `email.get_message`, `email.create_draft`, and
-`email.send_message`. Draft creation requires IMAP and uses the incoming credential. An optional
+The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
+`email.create_draft`, and `email.send_message`. Draft creation requires IMAP and uses the incoming
+credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
 with `\Drafts` by the IMAP SPECIAL-USE extension and may fall back to `Drafts`. Drafts may omit
 recipients.
@@ -183,10 +184,18 @@ return an `APPENDUID`. `draftId`, when present, is an opaque adapter identifier;
 must encode both UIDVALIDITY and UID rather than exposing a bare UID. The host adapter generates MIME
 and performs `APPEND` with the `\Draft` flag.
 
-Messages expose normalized addresses, text/HTML bodies, and attachment metadata only—never raw MIME
-or attachment bytes. List `id` values are opaque adapter identifiers that callers pass unchanged to
-`email.get_message`; POP3 adapters must use UIDL or another stable mapping, never transient message
-sequence numbers. When IMAP `folder` is omitted, adapters use `INBOX`; POP3 uses its single mailbox.
+Message list/get outputs expose normalized addresses, text/HTML bodies, and attachment metadata,
+never raw MIME. When `EmailAttachmentMetadata.id` is present, pass it with the parent message ID to
+`email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
+base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
+implementations may omit the optional `getAttachment` method; invoking the action then fails with a
+typed validation error. Hosts that implement it own MIME parsing, base64 encoding, size policy,
+storage, and content scanning.
+IMAP adapters should fetch parts without marking messages read when supported. POP3 has no standard
+partial-part fetch, so adapters may retrieve the whole stable UIDL-addressed message before
+extracting the part. POP3 rejects `folder` for attachment retrieval just as it does for list/get.
+List `id` values are opaque adapter identifiers that callers pass unchanged to `email.get_message`;
+POP3 adapters must use UIDL or another stable mapping, never transient message sequence numbers. When IMAP `folder` is omitted, adapters use `INBOX`; POP3 uses its single mailbox.
 Adapters return deterministic newest-first pages. Cursors are opaque, scoped to the integration,
 protocol, folder, and ordering, and may fail after mailbox changes. Send success returns
 `{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
@@ -226,7 +235,7 @@ Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Ho
 
 Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
 
-`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; Gmail inline attachments may omit that id and cannot be retrieved through that action. Use `full` when decoded bodies are required.
+`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
 Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
 
@@ -322,9 +331,20 @@ tenant/authority selection, OAuth callbacks, refresh, credential storage, and co
 
 Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
-accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message` requests a text body; read and
-draft-returning actions request immutable IDs. Sending returns `{ accepted: true }` for Graph's
-`202 Accepted`; that confirms submission, not processing or delivery.
+accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
+requests a text body; read and draft-returning actions request immutable IDs.
+
+Use `outlook.list_attachments` with a message ID to return metadata for file, item, reference, and
+inline attachments. It accepts `top` and returns an opaque `nextLink`; pass that link back unchanged
+with the same `messageId` and `mailbox`. Pass a returned file attachment ID to
+`outlook.get_attachment`; it includes Graph's base64 `contentBytes` as `contentBase64`. Item and
+reference attachments remain available only as list metadata and are not promised as retrievable by
+this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
+permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
+size policy, durable storage, and content scanning.
+
+Sending returns `{ accepted: true }` for Graph's `202 Accepted`; that confirms submission, not
+processing or delivery.
 
 OneDrive actions default to the signed-in user's `/me/drive`; set `driveId` to target
 `/drives/{driveId}`. Delegated mode uses least-privilege `Files.Read` or `Files.ReadWrite`. Set
@@ -351,7 +371,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                          |
-| `@yolk-sdk/connectors/email`           | `email.list_messages`, `email.get_message`, `email.create_draft`, `email.send_message`               |
+| `@yolk-sdk/connectors/email`           | list/get messages, retrieve attachments, create drafts, and send messages                            |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
 | `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                         |
