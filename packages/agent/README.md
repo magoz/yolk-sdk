@@ -1,8 +1,8 @@
 # @yolk-sdk/agent
 
-Domain-free agent protocol, loop, runtime, client, compaction, tools, React, providers, OAuth, skillset, and voice primitives.
+Domain-free agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice primitives.
 
-Root export is intentionally tiny. Import feature APIs from explicit subpaths.
+Root export is intentionally empty. Import feature APIs from explicit subpaths.
 
 ## Install
 

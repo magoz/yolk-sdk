@@ -1,7 +1,7 @@
 {
   "name": "@yolk-sdk/knowledge",
   "version": "0.1.0-canary.66",
-  "description": "Domain-free durable knowledge document, file, search, context, and tool contracts for Yolk agents.",
+  "description": "Domain-free knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers for agents.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 # Agent Package
 
-`@yolk-sdk/agent` is the main package for building and running agents. Root export stays intentionally tiny; use explicit subpaths.
+`@yolk-sdk/agent` is the main package for building and running agents. Root export stays intentionally empty; use explicit subpaths.
 
 ## Structure
 

@@ -401,9 +401,10 @@ const toolModule = makeConnectorToolModule(GoogleConnector, {
 Connector actions can declare default `read`, `write`, or `destructive` access metadata. The agent
 adapter uses that declaration unless the host supplies `access`; host access resolvers always win.
 Google Drive folder creation and Microsoft draft/folder-create actions declare `write`. Google Drive
-trash/delete, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions
-without metadata default to `read`, so hosts should continue assigning explicit access when adapting
-other write-capable connectors.
+trash/delete, Microsoft message sends, and OneDrive deletion declare `destructive`. Legacy actions without metadata default to `read`, so hosts should continue assigning explicit access
+when adapting other write-capable connectors. This currently includes write-capable Gmail, Google
+Calendar, Notion, Todoist, Telegram, and R2 actions; hosts should provide an `access` resolver for
+those actions rather than relying on the fallback.
 
 Afloat MCP auth reads an `afloat_` API key from the host runtime credential and returns the
 canonical MCP endpoint and required `2026-07-28` protocol version. Keep the API key server-side;

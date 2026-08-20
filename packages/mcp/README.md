@@ -1,8 +1,8 @@
 # @yolk-sdk/mcp
 
-MCP `2026-07-28` client, server, protocol, and Yolk tool adapters with legacy MCP compatibility.
+MCP v2 (`2026-07-28`) client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility.
 
-The root export is intentionally tiny. Import APIs from explicit subpaths.
+The root export is intentionally empty. Import APIs from explicit subpaths.
 
 ## Install
 
