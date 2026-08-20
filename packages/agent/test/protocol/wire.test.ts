@@ -69,6 +69,7 @@ import {
   UsageUpdate,
   UserInput,
   UserMessage,
+  UserMessageEvent,
   addAgentUsage,
   hitlResponseEvent,
   inlineBase64Source,
@@ -228,6 +229,11 @@ describe('protocol wire schemas', () => {
         source: 'user',
         reason: 'skip'
       })
+      const user = UserMessage.make({
+        content: 'steer toward the durable queue',
+        createdAtMs: 1781260200000,
+        author: { displayName: 'Magoz' }
+      })
       const assistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'done' }), HostToolCallPart.make({ call })]
       })
@@ -254,6 +260,11 @@ describe('protocol wire schemas', () => {
         ToolInputDelta.make({ id: call.id, delta: '{"url"' }),
         ToolInputEnd.make({ call }),
         LLMStreamEnd.make({ turn: 1 }),
+        UserMessageEvent.make({
+          eventId: 'workflow:1:user-message',
+          createdAtMs: 1781260201000,
+          message: user
+        }),
         AssistantMessageEvent.make({ message: assistant }),
         ToolApprovalRequested.make({ call, request: approvalRequest }),
         ToolApprovalGranted.make({ toolCallId: call.id, response: approvalResponse }),

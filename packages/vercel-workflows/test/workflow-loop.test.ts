@@ -126,6 +126,47 @@ describe('runVercelAgentWorkflow', () => {
     })
   })
 
+  it('continues directly to the next model step when no tools were requested', async () => {
+    const modelStates: Array<SerializableWorkflowState> = []
+    let toolBatchCalls = 0
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      runModelStep: input => step(() => {
+        modelStates.push(input.state)
+
+        return input.state.turn === 1
+          ? {
+              done: false,
+              messages: ['request-1', 'assistant-1', 'steered-user-2'],
+              createdMessages: ['assistant-1', 'steered-user-2'],
+              toolCalls: [],
+              usage: { inputTokens: 12, outputTokens: 4 },
+              turn: input.state.turn,
+              eventSequence: 7
+            }
+          : terminalModelResult(input)
+      }),
+      runToolBatchStep: input => step(() => {
+        toolBatchCalls += 1
+        return toolBatchResult(input)
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
+    expect(toolBatchCalls).toBe(0)
+    expect(modelStates[1]).toEqual({
+      request: 'request-1',
+      messages: ['request-1', 'assistant-1', 'steered-user-2'],
+      createdMessages: ['assistant-1', 'steered-user-2'],
+      usage: { inputTokens: 12, outputTokens: 4 },
+      turn: 2,
+      eventSequence: 7
+    })
+  })
+
   it('carries event sequence across model and tool steps', async () => {
     const modelStates: Array<SerializableWorkflowState> = []
     const toolInputs: Array<VercelAgentWorkflowToolBatchStepInput> = []

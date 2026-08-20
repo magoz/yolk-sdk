@@ -31,6 +31,7 @@ import {
   ToolInputEnd,
   ToolInputStart,
   UserMessage,
+  UserMessageEvent,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 import {
@@ -98,6 +99,15 @@ describe('reduceAgentEvents', () => {
 
     expect(state.liveMessages).toEqual([message])
     expect(state.toolRuns).toEqual([expect.objectContaining({ _tag: 'Completed', call, result })])
+  })
+
+  it('keeps replayed durable user messages in live run state once', () => {
+    const message = UserMessage.make({ content: 'steer the next turn' })
+    const event = UserMessageEvent.make({ eventId: 'workflow:1:steer:0', message })
+    const state = reduceAgentEvents([AgentStart.make({}), event, event])
+
+    expect(state.liveMessages).toEqual([message])
+    expect(state.seenEventIds).toEqual(['workflow:1:steer:0'])
   })
 
   it('projects rich tool lifecycle states', () => {

@@ -19,7 +19,8 @@ import {
   ToolExecutionStarted,
   ToolInputEnd,
   ToolResult,
-  UserMessage
+  UserMessage,
+  UserMessageEvent
 } from '@yolk-sdk/agent/protocol'
 import {
   applyAgentEventToChatProjection,
@@ -131,6 +132,39 @@ describe('agent chat core', () => {
     expect(state.seenEventIds).toEqual(['workflow:1:0', 'workflow:1:1'])
     expect(state.chatMessages[0]?.parts).toEqual([
       { _tag: 'Text', id: 'message-0-assistant-text', content: 'hello', state: 'streaming' }
+    ])
+  })
+
+  it('projects promoted durable user messages once across event replay', () => {
+    const message = UserMessage.make({
+      content: 'Please steer toward the queued follow-up.',
+      createdAtMs: 1781260200000,
+      author: { displayName: 'Magoz' }
+    })
+    const event = UserMessageEvent.make({ eventId: 'workflow:1:steer:0', message })
+    const state = [event, event].reduce(
+      (current, replayedEvent) => applyAgentEventToChatProjection(current, replayedEvent),
+      makeAgentChatEventProjectionState()
+    )
+
+    expect(state.seenEventIds).toEqual(['workflow:1:steer:0'])
+    expect(state.chatMessages).toEqual([
+      {
+        id: 'message-0-user',
+        turnId: 'turn-0',
+        sequence: 0,
+        role: 'user',
+        createdAtMs: 1781260200000,
+        author: { displayName: 'Magoz' },
+        parts: [
+          {
+            _tag: 'Text',
+            id: 'message-0-user-text',
+            content: 'Please steer toward the queued follow-up.',
+            state: 'done'
+          }
+        ]
+      }
     ])
   })
 

@@ -261,6 +261,18 @@ export async function runVercelAgentWorkflow(
       }
     }
 
+    if (modelResult.value.toolCalls.length === 0) {
+      state = {
+        request: input.request,
+        messages: modelResult.value.messages,
+        createdMessages: modelResult.value.createdMessages,
+        usage: modelResult.value.usage,
+        turn: modelResult.value.turn + 1,
+        eventSequence: modelResult.value.eventSequence ?? state.eventSequence
+      }
+      continue
+    }
+
     let completedToolsResult: VercelAgentWorkflowToolBatchStepResult | undefined
     let toolHitlResponses: ReadonlyArray<unknown> = []
     let cumulativeUsage = modelResult.value.usage

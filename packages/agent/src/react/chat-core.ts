@@ -323,6 +323,7 @@ export const reduceAgentChatState = (
         case 'TurnEnd':
         case 'TurnStart':
         case 'UsageUpdate':
+        case 'UserMessage':
           return rememberEvent(
             clearRetryInfo({
               ...state,

@@ -41,6 +41,7 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
   `AgentAwaitingInput` releases its writer lock but leaves the Workflow stream open for resume.
 - Keep APIs Workflow-specific and free of app/provider/tool/storage policy.
 - Preserve tool result order by original model tool-call order.
+- A model result with `done: false` and no tool calls continues directly to the next model step; do not invoke a tool-batch step solely to continue host-promoted input.
 - Tool batch steps must return one `ToolResultMessage` per host call, including failed `isError` results, before the next model step.
 - Treat cancellation as host-observable state; do not assume Vercel preempts active steps.
 - Keep max-turn guard explicit and terminal.

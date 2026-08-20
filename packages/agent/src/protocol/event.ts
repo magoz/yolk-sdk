@@ -1,5 +1,5 @@
 import * as Schema from 'effect/Schema'
-import { AssistantAgentMessage, AgentMessage } from './message.ts'
+import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
 import {
   HitlRequest,
   QuestionAnswer,
@@ -220,6 +220,11 @@ export class LLMStreamEnd extends Schema.TaggedClass<LLMStreamEnd>()('LLMStreamE
   turn: Schema.Number
 }) {}
 
+export class UserMessageEvent extends Schema.TaggedClass<UserMessageEvent>()('UserMessage', {
+  ...EventIdentity,
+  message: UserMessage
+}) {}
+
 export class AssistantMessageEvent extends Schema.TaggedClass<AssistantMessageEvent>()(
   'AssistantMessage',
   {
@@ -359,6 +364,7 @@ export const AgentEvent = Schema.Union([
   ToolInputDelta,
   ToolInputEnd,
   LLMStreamEnd,
+  UserMessageEvent,
   AssistantMessageEvent,
   ToolApprovalRequested,
   ToolApprovalGranted,

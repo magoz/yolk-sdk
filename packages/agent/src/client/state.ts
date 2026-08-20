@@ -392,6 +392,7 @@ const applyAgentEventUnchecked = (
           result: event.result
         })
       })
+    case 'UserMessage':
     case 'AssistantMessage':
       return clearRetryInfo({
         ...state,
