@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Chunk, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig } from '../config.ts'
@@ -54,6 +54,16 @@ const outlookMessageSelect = [
   'categories',
   'parentFolderId',
   'sender'
+].join(',')
+
+const outlookAttachmentSelect = [
+  'id',
+  'name',
+  'contentType',
+  'size',
+  'isInline',
+  'contentId',
+  'lastModifiedDateTime'
 ].join(',')
 
 export class OutlookEmailAddress extends Schema.Class<OutlookEmailAddress>('OutlookEmailAddress')({
@@ -134,6 +144,144 @@ export class OutlookMessageIdInput extends Schema.Class<OutlookMessageIdInput>(
   mailbox: Schema.optional(Schema.String)
 }) {}
 
+export const OutlookAttachmentKind = Schema.Literals(['file', 'item', 'reference', 'unknown'])
+export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
+
+const OutlookAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+const OutlookAttachmentBase64 = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+)
+
+export class OutlookAttachmentMetadata extends Schema.Class<OutlookAttachmentMetadata>(
+  'OutlookAttachmentMetadata'
+)({
+  id: Schema.String,
+  kind: OutlookAttachmentKind,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  contentType: Schema.optional(Schema.NullOr(Schema.String)),
+  size: Schema.optional(OutlookAttachmentSize),
+  isInline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.NullOr(Schema.String)),
+  lastModifiedDateTime: Schema.optional(Schema.String)
+}) {}
+
+export class OutlookListAttachmentsInput extends Schema.Class<OutlookListAttachmentsInput>(
+  'OutlookListAttachmentsInput'
+)({
+  messageId: Schema.String,
+  mailbox: Schema.optional(Schema.String),
+  top: Schema.optional(OutlookPageSize),
+  nextLink: Schema.optional(Schema.String)
+}) {}
+
+export class OutlookListAttachmentsOutput extends Schema.Class<OutlookListAttachmentsOutput>(
+  'OutlookListAttachmentsOutput'
+)({
+  attachments: Schema.Chunk(OutlookAttachmentMetadata),
+  nextLink: Schema.optional(Schema.String)
+}) {}
+
+export class OutlookGetAttachmentInput extends Schema.Class<OutlookGetAttachmentInput>(
+  'OutlookGetAttachmentInput'
+)({
+  messageId: Schema.String,
+  attachmentId: Schema.String,
+  mailbox: Schema.optional(Schema.String)
+}) {}
+
+export class OutlookAttachment extends Schema.Class<OutlookAttachment>('OutlookAttachment')({
+  id: Schema.String,
+  kind: Schema.Literal('file'),
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  contentType: Schema.optional(Schema.NullOr(Schema.String)),
+  size: Schema.optional(OutlookAttachmentSize),
+  isInline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.NullOr(Schema.String)),
+  lastModifiedDateTime: Schema.optional(Schema.String),
+  contentBase64: OutlookAttachmentBase64
+}) {}
+
+export class OutlookGetAttachmentOutput extends Schema.Class<OutlookGetAttachmentOutput>(
+  'OutlookGetAttachmentOutput'
+)({
+  attachment: OutlookAttachment
+}) {}
+
+const OutlookAttachmentApi = Schema.Struct({
+  '@odata.type': Schema.optional(Schema.String),
+  id: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  contentType: Schema.optional(Schema.NullOr(Schema.String)),
+  size: Schema.optional(OutlookAttachmentSize),
+  isInline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.NullOr(Schema.String)),
+  lastModifiedDateTime: Schema.optional(Schema.String),
+  contentBytes: Schema.optional(Schema.String)
+})
+
+const OutlookFileAttachmentApi = Schema.Struct({
+  '@odata.type': Schema.Literal('#microsoft.graph.fileAttachment'),
+  id: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  contentType: Schema.optional(Schema.NullOr(Schema.String)),
+  size: Schema.optional(OutlookAttachmentSize),
+  isInline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.NullOr(Schema.String)),
+  lastModifiedDateTime: Schema.optional(Schema.String),
+  contentBytes: OutlookAttachmentBase64
+})
+
+const OutlookAttachmentsApiOutput = Schema.Struct({
+  value: Schema.Array(OutlookAttachmentApi),
+  '@odata.nextLink': Schema.optional(Schema.String)
+})
+
+const outlookAttachmentKind = (
+  odataType: string | undefined
+): typeof OutlookAttachmentKind.Type => {
+  switch (odataType) {
+    case '#microsoft.graph.fileAttachment':
+      return 'file'
+    case '#microsoft.graph.itemAttachment':
+      return 'item'
+    case '#microsoft.graph.referenceAttachment':
+      return 'reference'
+    default:
+      return 'unknown'
+  }
+}
+
+const outlookAttachmentMetadata = (
+  attachment: typeof OutlookAttachmentApi.Type
+): OutlookAttachmentMetadata =>
+  OutlookAttachmentMetadata.make({
+    id: attachment.id,
+    kind: outlookAttachmentKind(attachment['@odata.type']),
+    ...(attachment.name === undefined ? {} : { name: attachment.name }),
+    ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
+    ...(attachment.size === undefined ? {} : { size: attachment.size }),
+    ...(attachment.isInline === undefined ? {} : { isInline: attachment.isInline }),
+    ...(attachment.contentId === undefined ? {} : { contentId: attachment.contentId }),
+    ...(attachment.lastModifiedDateTime === undefined
+      ? {}
+      : { lastModifiedDateTime: attachment.lastModifiedDateTime })
+  })
+
+const outlookAttachment = (attachment: typeof OutlookFileAttachmentApi.Type): OutlookAttachment =>
+  OutlookAttachment.make({
+    id: attachment.id,
+    kind: 'file',
+    ...(attachment.name === undefined ? {} : { name: attachment.name }),
+    ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
+    ...(attachment.size === undefined ? {} : { size: attachment.size }),
+    ...(attachment.isInline === undefined ? {} : { isInline: attachment.isInline }),
+    ...(attachment.contentId === undefined ? {} : { contentId: attachment.contentId }),
+    ...(attachment.lastModifiedDateTime === undefined
+      ? {}
+      : { lastModifiedDateTime: attachment.lastModifiedDateTime }),
+    contentBase64: attachment.contentBytes
+  })
+
 export class OutlookComposeInput extends Schema.Class<OutlookComposeInput>('OutlookComposeInput')({
   mailbox: Schema.optional(Schema.String),
   to: Schema.Array(Schema.String),
@@ -210,10 +358,15 @@ const outlookDraftWriteHeaders = (token: string) => ({
 const outlookMailboxPath = (mailbox: string | undefined) =>
   mailbox === undefined ? '/me' : `/users/${encodeURIComponent(mailbox)}`
 
-const invalidNextLink = (actionId: string) =>
+const invalidNextLink = (
+  actionId: string,
+  collection:
+    | 'mailbox folder collection'
+    | 'message attachment collection' = 'mailbox folder collection'
+) =>
   new ConnectorError({
     cause: 'validation_failed',
-    message: 'Microsoft Graph nextLink must target the selected v1.0 mailbox folder collection',
+    message: `Microsoft Graph nextLink must target the selected v1.0 ${collection}`,
     connectorId: microsoftConnectorId,
     actionId
   })
@@ -243,6 +396,30 @@ const requireMicrosoftNextLink = (
   return isGraphV1Url && parsed.pathname === selectedMessagesPath
     ? Effect.succeed(nextLink)
     : Effect.fail(invalidNextLink(actionId))
+}
+
+const requireMicrosoftAttachmentNextLink = (
+  nextLink: string,
+  mailbox: string | undefined,
+  messageId: string
+) => {
+  if (!URL.canParse(nextLink)) {
+    return Effect.fail(invalidNextLink('outlook.list_attachments', 'message attachment collection'))
+  }
+
+  const parsed = new URL(nextLink)
+  const selectedAttachmentsPath = `/v1.0${outlookMailboxPath(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments`
+  const isGraphV1Url =
+    parsed.protocol === 'https:' &&
+    parsed.hostname === 'graph.microsoft.com' &&
+    parsed.port === '' &&
+    parsed.username === '' &&
+    parsed.password === '' &&
+    parsed.hash === ''
+
+  return isGraphV1Url && parsed.pathname === selectedAttachmentsPath
+    ? Effect.succeed(nextLink)
+    : Effect.fail(invalidNextLink('outlook.list_attachments', 'message attachment collection'))
 }
 
 const outlookMessagesPath = (mailbox: string | undefined, folderId: string | undefined) => {
@@ -457,6 +634,92 @@ export const outlookGetMessageAction = defineAction({
     })
 })
 
+export const outlookListAttachmentsAction = defineAction({
+  id: 'outlook.list_attachments',
+  description: 'List attachment metadata for one Microsoft Outlook message.',
+  inputSchema: OutlookListAttachmentsInput,
+  outputSchema: OutlookListAttachmentsOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookReadSlot(integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+      const url = yield* (() => {
+        if (input.nextLink !== undefined) {
+          return requireMicrosoftAttachmentNextLink(input.nextLink, input.mailbox, input.messageId)
+        }
+
+        const params = new URLSearchParams({ $select: outlookAttachmentSelect })
+        if (input.top !== undefined) params.set('$top', String(input.top))
+        return Effect.succeed(
+          `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/messages/${encodeURIComponent(input.messageId)}/attachments?${params.toString()}`
+        )
+      })()
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url,
+          headers: outlookReadHeaders(token, false)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_list_attachments_failed',
+          message: 'Microsoft Outlook list attachments failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookAttachmentsApiOutput, response)
+      return ActionResult.success(
+        OutlookListAttachmentsOutput.make({
+          attachments: Chunk.fromIterable(output.value.map(outlookAttachmentMetadata)),
+          ...(output['@odata.nextLink'] === undefined
+            ? {}
+            : { nextLink: output['@odata.nextLink'] })
+        })
+      )
+    })
+})
+
+export const outlookGetAttachmentAction = defineAction({
+  id: 'outlook.get_attachment',
+  description: 'Get one Microsoft Outlook file attachment with base64 content.',
+  inputSchema: OutlookGetAttachmentInput,
+  outputSchema: OutlookGetAttachmentOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const slot = yield* outlookReadSlot(integration, input.mailbox)
+      const token = yield* resolveMicrosoftAccessToken(integration, slot)
+      const http = yield* ConnectorHttpClient
+      const response = yield* http.request(
+        ConnectorHttpRequest.make({
+          method: 'GET',
+          url: `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/messages/${encodeURIComponent(input.messageId)}/attachments/${encodeURIComponent(input.attachmentId)}`,
+          headers: outlookReadHeaders(token, false)
+        })
+      )
+
+      if (!isMicrosoftSuccessStatus(response.status)) {
+        return yield* microsoftProviderFailure({
+          code: 'outlook_get_attachment_failed',
+          message: 'Microsoft Outlook get attachment failed',
+          status: response.status,
+          headers: response.headers,
+          body: response.body
+        })
+      }
+
+      const output = yield* decodeJsonResponse(OutlookFileAttachmentApi, response)
+      return ActionResult.success(
+        OutlookGetAttachmentOutput.make({ attachment: outlookAttachment(output) })
+      )
+    })
+})
+
 export const outlookCreateDraftAction = defineAction({
   id: 'outlook.create_draft',
   description: 'Create a new Microsoft Outlook message draft.',
@@ -610,6 +873,8 @@ export const outlookMailActions = [
   outlookListMessagesAction,
   outlookSearchMessagesAction,
   outlookGetMessageAction,
+  outlookListAttachmentsAction,
+  outlookGetAttachmentAction,
   outlookCreateDraftAction,
   outlookCreateReplyDraftAction,
   outlookSendMailAction,

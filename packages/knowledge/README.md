@@ -1,6 +1,6 @@
 # @yolk-sdk/knowledge
 
-Domain-free knowledge document, file, context, search, and lookup/manage tool contracts for agents.
+Domain-free knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers for agents.
 
 ## Install
 

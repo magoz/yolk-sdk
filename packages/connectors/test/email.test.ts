@@ -1,5 +1,7 @@
 import { Effect, Layer } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
+import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
   type ActionResultType,
@@ -10,7 +12,9 @@ import {
   makeCredentialBinding,
   makeIntegration
 } from '@yolk-sdk/connectors'
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
 import {
+  EmailAttachmentContent,
   EmailClient,
   EmailConnector,
   EmailCreateDraftOutput,
@@ -20,10 +24,13 @@ import {
   EmailSendMessageOutput,
   EmailSmtpCredentialSlot,
   emailCreateDraftAction,
+  emailGetAttachmentAction,
   emailGetMessageAction,
   emailListMessagesAction,
   emailSendMessageAction,
   type EmailCreateDraftRequest,
+  type EmailGetAttachmentOutput,
+  type EmailGetAttachmentRequest,
   type EmailGetMessageRequest,
   type EmailListMessagesOutput,
   type EmailListMessagesRequest,
@@ -50,15 +57,23 @@ const message = {
 type EmailRequests = {
   readonly list: Array<EmailListMessagesRequest>
   readonly get: Array<EmailGetMessageRequest>
+  readonly attachment: Array<EmailGetAttachmentRequest>
   readonly draft: Array<EmailCreateDraftRequest>
   readonly send: Array<EmailSendMessageRequest>
 }
 
-const makeRequests = (): EmailRequests => ({ list: [], get: [], draft: [], send: [] })
+const makeRequests = (): EmailRequests => ({
+  list: [],
+  get: [],
+  attachment: [],
+  draft: [],
+  send: []
+})
 
 const makeEmailClientLayer = (input?: {
   readonly requests?: EmailRequests
   readonly listResult?: ActionResultType<EmailListMessagesOutput>
+  readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
 }) => {
   const requests = input?.requests ?? makeRequests()
   return Layer.succeed(
@@ -86,6 +101,23 @@ const makeEmailClientLayer = (input?: {
           requests.get.push(request)
           return ActionResult.success({ message })
         }),
+      getAttachment: request =>
+        Effect.sync(() => {
+          requests.attachment.push(request)
+          return (
+            input?.attachmentResult ??
+            ActionResult.success({
+              attachment: {
+                id: request.attachmentId,
+                filename: 'invoice.pdf',
+                contentType: 'application/pdf',
+                size: 4,
+                inline: false,
+                contentBase64: 'JVBERg=='
+              }
+            })
+          )
+        }),
       createDraft: request =>
         Effect.sync(() => {
           requests.draft.push(request)
@@ -112,6 +144,7 @@ const makeHostLayer = (input?: {
   readonly requests?: EmailRequests
   readonly refs?: Array<string>
   readonly listResult?: ActionResultType<EmailListMessagesOutput>
+  readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
 }) => {
   const refs = input?.refs ?? []
   const credentials = Layer.succeed(
@@ -142,13 +175,128 @@ describe('generic email connector', () => {
     expect(EmailConnector.actions.map(action => action.id)).toEqual([
       'email.list_messages',
       'email.get_message',
+      'email.get_attachment',
       'email.create_draft',
       'email.send_message'
     ])
     expect(emailListMessagesAction.access).toBe('read')
     expect(emailGetMessageAction.access).toBe('read')
+    expect(emailGetAttachmentAction.access).toBe('read')
     expect(emailCreateDraftAction.access).toBe('write')
     expect(emailSendMessageAction.access).toBe('destructive')
+  })
+
+  it.effect('exposes a provider-safe attachment tool schema', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const toolSet = yield* resolveTools(
+        [makeConnectorToolModule(EmailConnector, { integration, layer: makeHostLayer() })],
+        {}
+      )
+      const tool = toolSet.tools.find(candidate => candidate.name === 'email.get_attachment')
+      const schema = JSON.stringify(tool?.parameters)
+
+      expect(tool?.parameters).toMatchObject({ type: 'object' })
+      expect(schema).not.toContain('"type":"null"')
+    })
+  })
+
+  it.effect('rejects malformed base64 and invalid decoded-byte sizes', () =>
+    Effect.gen(function* () {
+      const malformedBase64 = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
+        id: 'mime-part-2',
+        size: 4,
+        contentBase64: 'not-base64'
+      }).pipe(Effect.result)
+      const invalidSize = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
+        id: 'mime-part-2',
+        size: -1,
+        contentBase64: 'JVBERg=='
+      }).pipe(Effect.result)
+
+      expect(malformedBase64._tag).toBe('Failure')
+      expect(invalidSize._tag).toBe('Failure')
+    })
+  )
+
+  it.effect('rejects malformed host attachment output through the public action', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+    const attachmentResult = ActionResult.success<EmailGetAttachmentOutput>({
+      attachment: {
+        id: 'mime-part-2',
+        size: -1,
+        contentBase64: 'not-base64'
+      }
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      }).pipe(Effect.provide(makeHostLayer({ attachmentResult })), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+    })
+  })
+
+  it.effect('allows existing EmailClient hosts to omit attachment retrieval', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+    const legacyClient = Layer.succeed(
+      EmailClient,
+      EmailClient.of({
+        listMessages: () => Effect.succeed(ActionResult.success({ messages: [] })),
+        getMessage: () => Effect.succeed(ActionResult.success({ message })),
+        createDraft: request =>
+          Effect.succeed(
+            ActionResult.success(
+              EmailCreateDraftOutput.make({
+                saved: true,
+                folder: request.folder ?? EmailFolderName.make('Drafts')
+              })
+            )
+          ),
+        sendMessage: () =>
+          Effect.succeed(ActionResult.success(EmailSendMessageOutput.make({ accepted: true })))
+      })
+    )
+    const credentials = Layer.succeed(
+      CredentialResolver,
+      CredentialResolver.of({ resolve: () => Effect.succeed(usernamePassword) })
+    )
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      }).pipe(Effect.provide(Layer.merge(credentials, legacyClient)), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'ConnectorError',
+          cause: 'validation_failed',
+          message: 'EmailClient does not support attachment retrieval'
+        }
+      })
+    })
   })
 
   it.effect('applies incoming defaults and dispatches normalized list input', () => {
@@ -177,6 +325,52 @@ describe('generic email connector', () => {
         },
         cursor: 'opaque-cursor',
         limit: 50,
+        credential: { _tag: 'UsernamePasswordCredential', username: 'alice@example.com' }
+      })
+    }).pipe(Effect.provide(makeHostLayer({ requests })))
+  })
+
+  it.effect('retrieves decoded IMAP attachment content as base64', () => {
+    const requests = makeRequests()
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* emailGetAttachmentAction.execute({
+        integration,
+        input: {
+          messageId: 'message-1',
+          attachmentId: 'mime-part-2',
+          folder: 'Archive'
+        }
+      })
+
+      expect(result).toEqual({
+        _tag: 'Success',
+        value: {
+          attachment: {
+            id: 'mime-part-2',
+            filename: 'invoice.pdf',
+            contentType: 'application/pdf',
+            size: 4,
+            inline: false,
+            contentBase64: 'JVBERg=='
+          }
+        }
+      })
+      expect(requests.attachment[0]).toMatchObject({
+        connection: {
+          protocol: 'imap',
+          host: 'imap.example.com',
+          port: 993,
+          security: 'tls'
+        },
+        messageId: 'message-1',
+        attachmentId: 'mime-part-2',
+        folder: 'Archive',
         credential: { _tag: 'UsernamePasswordCredential', username: 'alice@example.com' }
       })
     }).pipe(Effect.provide(makeHostLayer({ requests })))
@@ -330,12 +524,22 @@ describe('generic email connector', () => {
       })
       yield* EmailConnector.invoke({
         integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      })
+      yield* EmailConnector.invoke({
+        integration,
         action: 'email.send_message',
         input: { message: { to: [{ address: 'bob@example.com' }], body: { html: '<p>Hi</p>' } } }
       })
 
-      expect(refs).toEqual(['incoming-credential', 'smtp-credential'])
+      expect(refs).toEqual(['incoming-credential', 'incoming-credential', 'smtp-credential'])
       expect(requests.get[0]?.connection).toMatchObject({
+        protocol: 'pop3',
+        port: 1110,
+        security: 'none'
+      })
+      expect(requests.attachment[0]?.connection).toMatchObject({
         protocol: 'pop3',
         port: 1110,
         security: 'none'
@@ -376,7 +580,7 @@ describe('generic email connector', () => {
     }).pipe(Effect.provide(makeHostLayer()))
   })
 
-  it.effect('rejects a folder for POP3 list and get actions before dispatch', () => {
+  it.effect('rejects a folder for POP3 list, get, and attachment actions before dispatch', () => {
     const requests = makeRequests()
     const integration = makeIntegration({
       connectorId: 'email',
@@ -395,6 +599,11 @@ describe('generic email connector', () => {
         action: 'email.get_message',
         input: { messageId: 'message-1', folder: 'Archive' }
       }).pipe(Effect.result)
+      const attachment = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2', folder: 'Archive' }
+      }).pipe(Effect.result)
 
       expect(listed).toMatchObject({
         _tag: 'Failure',
@@ -404,8 +613,13 @@ describe('generic email connector', () => {
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
       })
+      expect(attachment).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
       expect(requests.list).toHaveLength(0)
       expect(requests.get).toHaveLength(0)
+      expect(requests.attachment).toHaveLength(0)
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
@@ -536,7 +750,7 @@ describe('generic email connector', () => {
     }).pipe(Effect.provide(Layer.merge(invalidCredentialLayer, makeEmailClientLayer())))
   })
 
-  it.effect('passes provider rejection through as ActionResult.failure', () => {
+  it.effect('passes provider rejections through as ActionResult.failure', () => {
     const rejection = ActionResult.failure({
       code: 'authentication_rejected',
       message: 'The server rejected authentication'
@@ -548,13 +762,19 @@ describe('generic email connector', () => {
     })
 
     return Effect.gen(function* () {
-      const result = yield* EmailConnector.invoke({
+      const listResult = yield* EmailConnector.invoke({
         integration,
         action: 'email.list_messages',
         input: {}
       })
-      expect(result).toEqual(rejection)
-    }).pipe(Effect.provide(makeHostLayer({ listResult: rejection })))
+      const attachmentResult = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      })
+      expect(listResult).toEqual(rejection)
+      expect(attachmentResult).toEqual(rejection)
+    }).pipe(Effect.provide(makeHostLayer({ listResult: rejection, attachmentResult: rejection })))
   })
 
   it.effect('keeps transport failures in the typed ConnectorError channel', () => {
@@ -574,6 +794,10 @@ describe('generic email connector', () => {
           Effect.fail(
             new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
           ),
+        getAttachment: () =>
+          Effect.fail(
+            new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
+          ),
         createDraft: () =>
           Effect.fail(
             new ConnectorError({ cause: 'transport_failed', message: 'Transport unavailable' })
@@ -586,12 +810,21 @@ describe('generic email connector', () => {
     )
 
     return Effect.gen(function* () {
-      const result = yield* EmailConnector.invoke({
+      const listResult = yield* EmailConnector.invoke({
         integration,
         action: 'email.list_messages',
         input: {}
       }).pipe(Effect.result)
-      expect(result).toMatchObject({
+      const attachmentResult = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      }).pipe(Effect.result)
+      expect(listResult).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', message: 'Transport unavailable' }
+      })
+      expect(attachmentResult).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', message: 'Transport unavailable' }
       })
