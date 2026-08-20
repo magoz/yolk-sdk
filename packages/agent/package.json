@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/agent",
-  "version": "0.1.0-canary.66",
+  "version": "0.1.0-canary.67",
   "description": "Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice primitives.",
   "license": "MIT",
   "type": "module",

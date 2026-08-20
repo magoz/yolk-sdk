@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.67
+
+### Patch Changes
+
+- 57795cf: Add single-message Gmail attachment discovery and typed retrieval output with validated Gmail base64url data plus standard-base64 content while preserving existing wire fields.
+- 57795cf: Add Outlook attachment metadata listing and file attachment retrieval through Microsoft Graph, including inline attachment discovery and shared-mailbox permission selection.
+- 57795cf: Refresh public package descriptions, connector access guidance, and documented package subpaths.
+- 57795cf: Add generic IMAP and POP3 attachment retrieval through an optional host email port method, returning decoded file bytes as base64 with normalized attachment metadata while preserving existing host adapters.
+- Updated dependencies [0da67d1]
+- Updated dependencies [57795cf]
+  - @yolk-sdk/agent@0.1.0-canary.67
+
 ## 0.1.0-canary.66
 
 ### Patch Changes
