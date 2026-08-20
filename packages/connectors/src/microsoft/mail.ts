@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Chunk, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig } from '../config.ts'
@@ -147,6 +147,11 @@ export class OutlookMessageIdInput extends Schema.Class<OutlookMessageIdInput>(
 export const OutlookAttachmentKind = Schema.Literals(['file', 'item', 'reference', 'unknown'])
 export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
 
+const OutlookAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+const OutlookAttachmentBase64 = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
+)
+
 export class OutlookAttachmentMetadata extends Schema.Class<OutlookAttachmentMetadata>(
   'OutlookAttachmentMetadata'
 )({
@@ -154,7 +159,7 @@ export class OutlookAttachmentMetadata extends Schema.Class<OutlookAttachmentMet
   kind: OutlookAttachmentKind,
   name: Schema.optional(Schema.NullOr(Schema.String)),
   contentType: Schema.optional(Schema.NullOr(Schema.String)),
-  size: Schema.optional(Schema.Number),
+  size: Schema.optional(OutlookAttachmentSize),
   isInline: Schema.optional(Schema.Boolean),
   contentId: Schema.optional(Schema.NullOr(Schema.String)),
   lastModifiedDateTime: Schema.optional(Schema.String)
@@ -172,7 +177,7 @@ export class OutlookListAttachmentsInput extends Schema.Class<OutlookListAttachm
 export class OutlookListAttachmentsOutput extends Schema.Class<OutlookListAttachmentsOutput>(
   'OutlookListAttachmentsOutput'
 )({
-  attachments: Schema.Array(OutlookAttachmentMetadata),
+  attachments: Schema.Chunk(OutlookAttachmentMetadata),
   nextLink: Schema.optional(Schema.String)
 }) {}
 
@@ -186,14 +191,14 @@ export class OutlookGetAttachmentInput extends Schema.Class<OutlookGetAttachment
 
 export class OutlookAttachment extends Schema.Class<OutlookAttachment>('OutlookAttachment')({
   id: Schema.String,
-  kind: OutlookAttachmentKind,
+  kind: Schema.Literal('file'),
   name: Schema.optional(Schema.NullOr(Schema.String)),
   contentType: Schema.optional(Schema.NullOr(Schema.String)),
-  size: Schema.optional(Schema.Number),
+  size: Schema.optional(OutlookAttachmentSize),
   isInline: Schema.optional(Schema.Boolean),
   contentId: Schema.optional(Schema.NullOr(Schema.String)),
   lastModifiedDateTime: Schema.optional(Schema.String),
-  contentBase64: Schema.optional(Schema.String)
+  contentBase64: OutlookAttachmentBase64
 }) {}
 
 export class OutlookGetAttachmentOutput extends Schema.Class<OutlookGetAttachmentOutput>(
@@ -207,11 +212,23 @@ const OutlookAttachmentApi = Schema.Struct({
   id: Schema.String,
   name: Schema.optional(Schema.NullOr(Schema.String)),
   contentType: Schema.optional(Schema.NullOr(Schema.String)),
-  size: Schema.optional(Schema.Number),
+  size: Schema.optional(OutlookAttachmentSize),
   isInline: Schema.optional(Schema.Boolean),
   contentId: Schema.optional(Schema.NullOr(Schema.String)),
   lastModifiedDateTime: Schema.optional(Schema.String),
   contentBytes: Schema.optional(Schema.String)
+})
+
+const OutlookFileAttachmentApi = Schema.Struct({
+  '@odata.type': Schema.Literal('#microsoft.graph.fileAttachment'),
+  id: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  contentType: Schema.optional(Schema.NullOr(Schema.String)),
+  size: Schema.optional(OutlookAttachmentSize),
+  isInline: Schema.optional(Schema.Boolean),
+  contentId: Schema.optional(Schema.NullOr(Schema.String)),
+  lastModifiedDateTime: Schema.optional(Schema.String),
+  contentBytes: OutlookAttachmentBase64
 })
 
 const OutlookAttachmentsApiOutput = Schema.Struct({
@@ -250,10 +267,10 @@ const outlookAttachmentMetadata = (
       : { lastModifiedDateTime: attachment.lastModifiedDateTime })
   })
 
-const outlookAttachment = (attachment: typeof OutlookAttachmentApi.Type): OutlookAttachment =>
+const outlookAttachment = (attachment: typeof OutlookFileAttachmentApi.Type): OutlookAttachment =>
   OutlookAttachment.make({
     id: attachment.id,
-    kind: outlookAttachmentKind(attachment['@odata.type']),
+    kind: 'file',
     ...(attachment.name === undefined ? {} : { name: attachment.name }),
     ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
     ...(attachment.size === undefined ? {} : { size: attachment.size }),
@@ -262,7 +279,7 @@ const outlookAttachment = (attachment: typeof OutlookAttachmentApi.Type): Outloo
     ...(attachment.lastModifiedDateTime === undefined
       ? {}
       : { lastModifiedDateTime: attachment.lastModifiedDateTime }),
-    ...(attachment.contentBytes === undefined ? {} : { contentBase64: attachment.contentBytes })
+    contentBase64: attachment.contentBytes
   })
 
 export class OutlookComposeInput extends Schema.Class<OutlookComposeInput>('OutlookComposeInput')({
@@ -659,7 +676,7 @@ export const outlookListAttachmentsAction = defineAction({
       const output = yield* decodeJsonResponse(OutlookAttachmentsApiOutput, response)
       return ActionResult.success(
         OutlookListAttachmentsOutput.make({
-          attachments: output.value.map(outlookAttachmentMetadata),
+          attachments: Chunk.fromIterable(output.value.map(outlookAttachmentMetadata)),
           ...(output['@odata.nextLink'] === undefined
             ? {}
             : { nextLink: output['@odata.nextLink'] })
@@ -696,7 +713,7 @@ export const outlookGetAttachmentAction = defineAction({
         })
       }
 
-      const output = yield* decodeJsonResponse(OutlookAttachmentApi, response)
+      const output = yield* decodeJsonResponse(OutlookFileAttachmentApi, response)
       return ActionResult.success(
         OutlookGetAttachmentOutput.make({ attachment: outlookAttachment(output) })
       )

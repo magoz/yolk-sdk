@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Chunk, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
@@ -1963,7 +1963,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(result).toEqual({
         _tag: 'Success',
         value: {
-          attachments: [
+          attachments: Chunk.fromIterable([
             {
               id: 'attachment/file',
               kind: 'file',
@@ -1998,7 +1998,7 @@ describe('@yolk-sdk/connectors', () => {
               size: 4_096,
               isInline: false
             }
-          ],
+          ]),
           nextLink
         }
       })
@@ -2012,6 +2012,54 @@ describe('@yolk-sdk/connectors', () => {
       expect(requests.at(1)?.url).toBe(nextLink)
       expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadSharedScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadScope)
+    })
+  )
+
+  it.effect('rejects invalid Outlook attachment metadata sizes', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(
+            JSON.stringify({
+              value: [
+                {
+                  '@odata.type': '#microsoft.graph.fileAttachment',
+                  id: 'attachment_1',
+                  name: 'invalid.pdf',
+                  size: -1
+                }
+              ]
+            })
+          )
+        ]
+      )
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+
+      const result = yield* outlookListAttachmentsAction
+        .execute({ integration: microsoftIntegration, input: { messageId: 'message_1' } })
+        .pipe(
+          Effect.provide(Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)),
+          Effect.result
+        )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
     })
   )
 
@@ -2077,6 +2125,67 @@ describe('@yolk-sdk/connectors', () => {
       })
       expect(requestedScopes.at(0)).toContain(microsoftGraphMailReadScope)
       expect(requestedScopes.at(0)).not.toContain(microsoftGraphMailReadSharedScope)
+    })
+  )
+
+  it.effect('rejects non-file Outlook attachments and missing or malformed content', () =>
+    Effect.gen(function* () {
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(
+            JSON.stringify({
+              '@odata.type': '#microsoft.graph.itemAttachment',
+              id: 'item_1',
+              name: 'forwarded-message.eml'
+            })
+          ),
+          jsonHttpResponse(
+            JSON.stringify({
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              id: 'file_1',
+              name: 'empty.pdf'
+            })
+          ),
+          jsonHttpResponse(
+            JSON.stringify({
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              id: 'file_2',
+              name: 'invalid.pdf',
+              contentBytes: 'not-base64'
+            })
+          )
+        ]
+      )
+      const CredentialResolverTest = Layer.succeed(
+        CredentialResolver,
+        CredentialResolver.of({
+          resolve: () =>
+            Effect.succeed(
+              OAuthCredential.make({
+                _tag: 'OAuthCredential',
+                provider: 'microsoft',
+                accessToken: 'microsoft_token',
+                expiresAt: Date.now() + 60_000
+              })
+            )
+        })
+      )
+      const TestLayer = Layer.mergeAll(CredentialResolverTest, ConnectorHttpClientTest)
+      const results = yield* Effect.forEach(['item_1', 'file_1', 'file_2'], attachmentId =>
+        outlookGetAttachmentAction
+          .execute({
+            integration: microsoftIntegration,
+            input: { messageId: 'message_1', attachmentId }
+          })
+          .pipe(Effect.provide(TestLayer), Effect.result)
+      )
+
+      expect(results).toMatchObject([
+        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } },
+        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } },
+        { _tag: 'Failure', failure: { _tag: 'ConnectorError', cause: 'validation_failed' } }
+      ])
     })
   )
 
@@ -2705,7 +2814,7 @@ describe('@yolk-sdk/connectors', () => {
       expect(result).toEqual({
         _tag: 'Success',
         value: {
-          attachments: [
+          attachments: Chunk.fromIterable([
             {
               partId: '1',
               filename: 'invoice.pdf',
@@ -2720,7 +2829,7 @@ describe('@yolk-sdk/connectors', () => {
               inline: true,
               contentId: '<logo@example.com>'
             }
-          ]
+          ])
         }
       })
       expect(requests.at(0)).toMatchObject({

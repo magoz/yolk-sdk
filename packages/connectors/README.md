@@ -189,7 +189,8 @@ never raw MIME. When `EmailAttachmentMetadata.id` is present, pass it with the p
 `email.get_attachment`. The host returns decoded file bytes—not MIME transfer-encoded text—as
 base64 in `contentBase64`; decoded `size` is a non-negative integer. Existing `EmailClient`
 implementations may omit the optional `getAttachment` method; invoking the action then fails with a
-typed validation error. Hosts that implement it own MIME parsing, base64 encoding, size policy,
+typed validation error. Successful host output is schema-validated at the connector boundary before
+it is returned. Hosts that implement it own MIME parsing, base64 encoding, size policy,
 storage, and content scanning.
 IMAP adapters should fetch parts without marking messages read when supported. POP3 has no standard
 partial-part fetch, so adapters may retrieve the whole stable UIDL-addressed message before
@@ -235,7 +236,7 @@ Provide `CredentialResolver` and `ConnectorHttpClient` layers from host code. Ho
 
 Gmail draft compose, update, and reply inputs accept optional `from` values for Gmail send-as aliases. Explicit `from` values are validated through `users.settings.sendAs`; reply drafts can infer a matching alias from recipient headers. Google exports action-scoped OAuth slots such as `GoogleGmailComposeOAuthCredentialSlot`, `GoogleGmailDraftReplyOAuthCredentialSlot`, `GoogleCalendarEventsOAuthCredentialSlot`, `GoogleDriveMetadataReadonlyOAuthCredentialSlot`, and `GoogleDriveFileOAuthCredentialSlot`; hosts should request the selected slot's `requiredScopes`. `GoogleOAuthCredentialSlot` keeps the generic `google.oauth` binding id for existing integrations, while `GoogleCombinedOAuthCredentialSlot` contains all Google connector scopes for broad-consent hosts.
 
-`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
+`gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
 Google Drive actions list, search, and get metadata; create folders; move items to trash; and permanently delete items. The action ids are `drive.list_files`, `drive.search_files`, `drive.get_file`, `drive.create_folder`, `drive.trash_file`, and `drive.delete_file`. Metadata reads request `drive.metadata.readonly`. Mutations request the least-privilege `drive.file` scope, which only covers files the app created or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary existing files own broader restricted-scope consent, verification, and policy. All slots still bind through `google.oauth`.
 
@@ -334,12 +335,12 @@ an explicit mailbox continuation and `folderId` for a folder continuation. The c
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
 requests a text body; read and draft-returning actions request immutable IDs.
 
-Use `outlook.list_attachments` with a message ID to return metadata for file, item, reference, and
-inline attachments. It accepts `top` and returns an opaque `nextLink`; pass that link back unchanged
+Use `outlook.list_attachments` with a message ID to return an Effect `Chunk` of metadata for file,
+item, reference, and inline attachments. It accepts `top` and returns an opaque `nextLink`; pass that link back unchanged
 with the same `messageId` and `mailbox`. Pass a returned file attachment ID to
-`outlook.get_attachment`; it includes Graph's base64 `contentBytes` as `contentBase64`. Item and
-reference attachments remain available only as list metadata and are not promised as retrievable by
-this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
+`outlook.get_attachment`; it requires a Graph file attachment with valid base64 `contentBytes` and
+returns those bytes as required `contentBase64`. Item and reference attachments remain available only
+as list metadata and are rejected by this action. Both actions use the existing signed-in, shared/delegated, or application `Mail.Read`
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning.
 

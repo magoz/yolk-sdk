@@ -10,7 +10,7 @@ import {
 } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
-import type { ActionResult } from '../result.ts'
+import { ActionResult } from '../result.ts'
 
 export const emailConnectorId = 'email'
 
@@ -521,7 +521,7 @@ export const emailGetAttachmentAction = defineAction({
           validationError(integration, 'EmailClient does not support attachment retrieval')
         )
       }
-      return yield* getAttachment(
+      const result = yield* getAttachment(
         EmailGetAttachmentRequest.make({
           connection,
           credential,
@@ -530,6 +530,15 @@ export const emailGetAttachmentAction = defineAction({
           folder: input.folder
         })
       )
+      if (result._tag === 'Failure') {
+        return result
+      }
+      const output = yield* Schema.decodeUnknownEffect(EmailGetAttachmentOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          validationError(integration, 'EmailClient returned invalid attachment output', error)
+        )
+      )
+      return ActionResult.success(output)
     })
 })
 

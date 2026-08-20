@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Chunk, Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -170,7 +170,7 @@ export class GmailThreadOutput extends Schema.Class<GmailThreadOutput>('GmailThr
 export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachmentsOutput>(
   'GmailListAttachmentsOutput'
 )({
-  attachments: Schema.Array(GmailThreadAttachment)
+  attachments: Schema.Chunk(GmailThreadAttachment)
 }) {}
 
 const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
@@ -1164,7 +1164,7 @@ export const gmailListAttachmentsAction = defineAction({
       const message = yield* decodeJsonResponse(GmailThreadWireMessage, response)
       return ActionResult.success(
         GmailListAttachmentsOutput.make({
-          attachments: gmailAttachmentsFromPayload(message.payload)
+          attachments: Chunk.fromIterable(gmailAttachmentsFromPayload(message.payload))
         })
       )
     })

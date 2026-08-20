@@ -57,24 +57,25 @@ override.
 Generic email's principal contracts are `EmailIncomingConnection`, `EmailImapConnection`,
 `EmailSmtpConnection`, `EmailAddress`, `EmailBody`, `EmailAttachmentMetadata`,
 `EmailAttachmentBase64`, `EmailAttachmentContent`, `EmailMessageSummary`, `EmailMessage`,
-`EmailListMessagesInput`,
-`EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
-`EmailGetAttachmentInput`, `EmailGetAttachmentOutput`, `EmailComposeMessage`, `EmailFolderName`,
-`EmailDraftId`, `EmailCreateDraftInput`, `EmailCreateDraftOutput`, `EmailSendMessageInput`, and
-`EmailSendMessageOutput`. `EmailClient` receives typed list/get/IMAP-draft/SMTP-send requests plus a
-runtime `UsernamePasswordCredential`; hosts opt into attachment retrieval through its optional
-`getAttachment` method. The connector
-exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and does not
-bundle transport or MIME libraries.
+`EmailListMessagesInput`, `EmailListMessagesOutput`, `EmailGetMessageInput`, `EmailGetMessageOutput`,
+`EmailGetAttachmentInput`, `EmailGetAttachmentRequest`, `EmailGetAttachmentOutput`,
+`EmailComposeMessage`, `EmailFolderName`, `EmailDraftId`, `EmailCreateDraftInput`,
+`EmailCreateDraftOutput`, `EmailSendMessageInput`, and `EmailSendMessageOutput`. `EmailClient` receives
+typed list/get/get-attachment/IMAP-draft/SMTP-send requests plus a runtime
+`UsernamePasswordCredential`; hosts opt into attachment retrieval through its optional
+`getAttachment` method, and successful attachment output is schema-validated before exposure. The
+connector exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and
+does not bundle transport or MIME libraries.
 
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
 `OutlookAttachmentKind`, `OutlookAttachmentMetadata`, `OutlookAttachment`,
 `OutlookListAttachmentsInput`, `OutlookListAttachmentsOutput`, `OutlookGetAttachmentInput`,
 `OutlookGetAttachmentOutput`, `OutlookComposeInput`, `OutlookCreateReplyDraftInput`,
-`OutlookSendMailInput`, and `OutlookSendOutput`. File attachment retrieval exposes Graph base64 as
-`contentBase64`; item and reference attachments are available only as list metadata. OAuth exports
-include generic,
+`OutlookSendMailInput`, and `OutlookSendOutput`. File attachment retrieval requires Graph's file
+discriminator and valid base64 content, then exposes it as required `contentBase64`; item and
+reference attachments are available only as list metadata.
+`OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. OAuth exports include generic,
 signed-in-mailbox, shared-mailbox, and combined
 slots that share `microsoft.oauth`. Action inputs use `/me` by default and accept optional `mailbox`
 for `/users/{id|userPrincipalName}` Exchange Online targets. Set integration config key
@@ -122,7 +123,7 @@ Google's normalized attachment and thread contracts are `GmailListAttachmentsInp
 - `GmailThreadAttachment`: optional `partId`, `filename`, `mimeType`, `size`, `attachmentId`,
   `inline`, and `contentId`.
 - `GmailListAttachmentsInput` / `GmailListAttachmentsOutput`: one `messageId` to a metadata-only
-  attachment list.
+  attachment `Chunk`.
 - `GmailGetAttachmentInput`: required `messageId` and `attachmentId`.
 - `GmailGetAttachmentOutput`: required input IDs, non-negative integer `size`, Gmail base64url `data`,
   and standard-base64 `contentBase64`.

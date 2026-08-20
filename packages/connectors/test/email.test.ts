@@ -224,6 +224,34 @@ describe('generic email connector', () => {
     })
   )
 
+  it.effect('rejects malformed host attachment output through the public action', () => {
+    const integration = makeIntegration({
+      connectorId: 'email',
+      config: { incomingHost: 'imap.example.com' },
+      credentialBindings: [incomingBinding]
+    })
+    const attachmentResult = ActionResult.success<EmailGetAttachmentOutput>({
+      attachment: {
+        id: 'mime-part-2',
+        size: -1,
+        contentBase64: 'not-base64'
+      }
+    })
+
+    return Effect.gen(function* () {
+      const result = yield* EmailConnector.invoke({
+        integration,
+        action: 'email.get_attachment',
+        input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
+      }).pipe(Effect.provide(makeHostLayer({ attachmentResult })), Effect.result)
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+      })
+    })
+  })
+
   it.effect('allows existing EmailClient hosts to omit attachment retrieval', () => {
     const integration = makeIntegration({
       connectorId: 'email',

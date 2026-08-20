@@ -102,7 +102,8 @@ When attachment metadata includes `id`, pass it with the parent `messageId` to
 `email.get_attachment`. The output repeats normalized metadata and exposes decoded file bytes—not
 MIME transfer-encoded text—as base64 in `contentBase64`; decoded `size` is a non-negative
 integer. Existing `EmailClient` implementations may omit the optional `getAttachment` method;
-invoking the action then fails with a typed validation error. Hosts that implement it own MIME
+invoking the action then fails with a typed validation error. Successful host output is
+schema-validated at the connector boundary before it is returned. Hosts that implement it own MIME
 parsing, base64 encoding, size limits, durable storage, and content scanning. IMAP adapters should fetch the selected part without marking
 the message read when supported. POP3 has no standard partial-part retrieval, so adapters may fetch
 the whole stable UIDL-addressed message before extracting the part. POP3 rejects `folder`; omit it
@@ -297,9 +298,9 @@ change when sent, which is a documented immutable-ID exception.
 `outlook.list_attachments` returns normalized metadata with `kind: 'file' | 'item' | 'reference' |
 'unknown'`; unlike `hasAttachments`, listing also discovers inline attachments. It accepts `top` and
 returns an opaque `nextLink`; pass that link back unchanged with the same `messageId` and `mailbox`.
-Use `outlook.get_attachment` with a returned file attachment ID. It exposes Graph's base64
-`contentBytes` as `contentBase64`. Item and reference attachments remain available only as list
-metadata and are not promised as retrievable by this action. Hosts own base64 decoding, size limits,
+Use `outlook.get_attachment` with a returned file attachment ID. It requires a Graph file attachment
+with valid base64 `contentBytes` and returns required `contentBase64`. Item and reference attachments
+remain available only as list metadata and are rejected by this action. Hosts own base64 decoding, size limits,
 durable storage, and content scanning.
 
 Send actions return `{ accepted: true }` for Graph's `202 Accepted`. Acceptance confirms submission,
