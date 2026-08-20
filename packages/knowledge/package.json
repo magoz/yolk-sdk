@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/knowledge",
-  "version": "0.1.0-canary.66",
+  "version": "0.1.0-canary.67",
   "description": "Domain-free knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers for agents.",
   "license": "MIT",
   "type": "module",

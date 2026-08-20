@@ -1,5 +1,12 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.67
+
+### Patch Changes
+
+- 0da67d1: Add replay-safe durable user-message events and skip empty tool-batch steps when a workflow model turn continues without tool calls.
+- 57795cf: Refresh public package descriptions, connector access guidance, and documented package subpaths.
+
 ## 0.1.0-canary.66
 
 ### Patch Changes

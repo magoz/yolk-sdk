@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/mcp",
-  "version": "0.1.0-canary.66",
+  "version": "0.1.0-canary.67",
   "description": "MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility.",
   "license": "MIT",
   "type": "module",

@@ -1,5 +1,14 @@
 # @yolk-sdk/knowledge
 
+## 0.1.0-canary.67
+
+### Patch Changes
+
+- 57795cf: Refresh public package descriptions, connector access guidance, and documented package subpaths.
+- Updated dependencies [0da67d1]
+- Updated dependencies [57795cf]
+  - @yolk-sdk/agent@0.1.0-canary.67
+
 ## 0.1.0-canary.66
 
 ### Patch Changes

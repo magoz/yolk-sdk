@@ -1,5 +1,15 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.67
+
+### Minor Changes
+
+- 0da67d1: Add replay-safe durable user-message events and skip empty tool-batch steps when a workflow model turn continues without tool calls.
+
+### Patch Changes
+
+- 57795cf: Refresh public package descriptions, connector access guidance, and documented package subpaths.
+
 ## 0.1.0-canary.66
 
 ## 0.1.0-canary.65
