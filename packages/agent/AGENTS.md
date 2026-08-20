@@ -67,6 +67,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Built-in token estimates are provider-neutral heuristics. `countTextTokens` improves selected message text/reasoning/host-call estimates only; exact provider-request accounting must also include non-message input and vendor framing. Hosts may inject a whole-transcript `estimateTokens`, reuse one estimator across warnings/planning/before-after checks, and keep tokenizer dependencies outside the package.
 - Only preserve provider-supplied reasoning summaries (`LLMReasoningDelta` / assistant reasoning parts); never fabricate reasoning.
 - Durable replay may use `LLMTextDelta.textSoFar` / `LLMReasoningDelta.reasoningSoFar`; chat projection prefers snapshots and de-dupes by `eventId`.
+- `UserMessageEvent` is the replay-safe durable-stream projection for host-promoted user input. Hosts own queue/promotion policy and must supply a stable `eventId`.
 - `accumulateAssistantMessage` preserves ordered assistant parts: text, reasoning, host tool calls, provider tool calls/results.
 - Same-turn sibling tool calls are native parallelism: providers emit normal tool calls, loop runs them concurrently within `toolConcurrency`, and dependent work waits for the next model turn.
 - OpenAI Codex streaming preserves every sibling function call and deduplicates `response.completed` replays by call id before parsing replayed arguments; a malformed replay of an already-emitted call must not invalidate unseen sibling calls.

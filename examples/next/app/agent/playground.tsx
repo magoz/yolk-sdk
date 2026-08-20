@@ -406,6 +406,7 @@ export function AgentPlayground({
         case 'AgentError':
         case 'AgentRetry':
         case 'AssistantMessage':
+        case 'UserMessage':
         case 'LLMReasoningDelta':
         case 'LLMStreamEnd':
         case 'LLMStreamStart':
@@ -635,6 +636,7 @@ export function AgentPlayground({
           return
         }
         case 'AssistantMessage':
+        case 'UserMessage':
         case 'CompactionEnd':
         case 'CompactionStart':
         case 'LLMReasoningDelta':

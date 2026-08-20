@@ -1024,6 +1024,8 @@ export const applyAgentEventToChatMessages = (
       })
     case 'ToolInputEnd':
       return upsertToolCallPart(messages, event.call, { _tag: 'Called' })
+    case 'UserMessage':
+      return appendProtocolMessage(messages, event.message)
     case 'AssistantMessage':
       return appendOrReplaceAssistantMessage(messages, event.message)
     case 'ToolInputStart':

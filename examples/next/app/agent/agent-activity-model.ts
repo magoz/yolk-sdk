@@ -154,6 +154,7 @@ export const activityItemFromAgentEvent = (
         tone: 'success'
       }
     case 'AssistantMessage':
+    case 'UserMessage':
     case 'LLMReasoningDelta':
     case 'LLMStreamEnd':
     case 'LLMTextDelta':

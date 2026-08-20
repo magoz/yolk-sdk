@@ -81,6 +81,7 @@ export {
   TurnEnd,
   TurnStart,
   UsageUpdate,
+  UserMessageEvent,
   isTerminalAgentEvent,
   type TerminalAgentEvent
 } from './event.ts'
