@@ -1,5 +1,13 @@
 # @yolk-sdk/sandbox
 
+## 0.1.0-canary.68
+
+### Patch Changes
+
+- 73e7a9b: Refresh public guidance for durable user-message events, voice WebSocket wiring, Calendar event boundaries, and Workflow testing.
+- Updated dependencies [73e7a9b]
+  - @yolk-sdk/agent@0.1.0-canary.68
+
 ## 0.1.0-canary.67
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.68
+
+### Minor Changes
+
+- 4b3c984: Require Google Calendar event boundaries to contain exactly one non-empty date or date-time value, and expose strict non-null alternatives to agent tool providers.
+
+### Patch Changes
+
+- 73e7a9b: Refresh public guidance for durable user-message events, voice WebSocket wiring, Calendar event boundaries, and Workflow testing.
+- Updated dependencies [73e7a9b]
+  - @yolk-sdk/agent@0.1.0-canary.68
+
 ## 0.1.0-canary.67
 
 ### Patch Changes
