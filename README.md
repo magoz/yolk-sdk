@@ -23,14 +23,14 @@ Public packages use the `@yolk-sdk/*` scope and release in lockstep.
 
 The Next.js app in `examples/next` is a dogfood/reference app for the SDK.
 
-| Package                      | Role                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Package                      | Role                                                                                                                 |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/agent`            | Agent protocol, loop, runtime, Effect-native client, compaction, tools, React, providers, OAuth, skillset, and voice |
-| `@yolk-sdk/mcp`              | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                     |
-| `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers       |
-| `@yolk-sdk/connectors`       | Effect-native connector, integration, credential, and action primitives                                |
-| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                 |
-| `@yolk-sdk/vercel-workflows` | Workflow loop contract, durable stream helpers, and Effect Workflow client/layer                       |
+| `@yolk-sdk/mcp`              | MCP v2 client/server/protocol APIs, Effect/Yolk adapters, and legacy compatibility                                   |
+| `@yolk-sdk/knowledge`        | Knowledge document/source/file/context, ingestion, hybrid search, and lookup/manage tool helpers                     |
+| `@yolk-sdk/connectors`       | Effect-native connector primitives and reusable provider actions                                                     |
+| `@yolk-sdk/sandbox`          | Sandbox execution plane, agent tool, Vercel adapter, and testing fakes                                               |
+| `@yolk-sdk/vercel-workflows` | Workflow loop contract, durable stream helpers, and Effect Workflow client/layer                                     |
 
 Docs site source lives in `apps/docs` and uses Fumadocs to explain the public SDK package set.
 

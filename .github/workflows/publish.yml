@@ -59,6 +59,8 @@ jobs:
 
       - name: Verify release version
         id: release-version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           node <<'NODE'
           const { execFileSync } = require('node:child_process')
@@ -76,6 +78,12 @@ jobs:
           const versions = [...new Set(packages.map((pkg) => pkg.version))]
           if (versions.length !== 1) {
             throw new Error(`Public package versions are not lockstep: ${versions.join(', ')}`)
+          }
+
+          const version = versions[0]
+          const expectedTag = version.includes('-') ? 'canary' : 'latest'
+          if (process.env.RELEASE_TAG !== expectedTag) {
+            throw new Error(`Release tag mismatch: ${version} must publish with ${expectedTag}, received ${process.env.RELEASE_TAG}`)
           }
 
           const publishedPackages = []

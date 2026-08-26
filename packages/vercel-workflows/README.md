@@ -5,7 +5,7 @@ Vercel Workflow agent-loop contracts, durable stream helpers, and an Effect-nati
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/vercel-workflows@canary effect workflow
+pnpm add @yolk-sdk/vercel-workflows@canary effect workflow@^5.0.0-beta.42
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
@@ -59,11 +59,40 @@ const program = Effect.gen(function* () {
 The API wrapper keeps Vercel's SDK underneath. It does not reimplement Vercel backend HTTP,
 queues, hooks, or stream storage.
 
+## Test Workflow behavior
+
+`@yolk-sdk/vercel-workflows/testing` provides `TestWorkflowWorld`, a behavioral emulator for host
+tests. It covers run lifecycle, append-only streams with close-once conflicts, step retries and
+attempt metadata, hooks/resume, cancellation, and the SDK seam used by
+`VercelWorkflows.layerFromSdk`. Ambient module mocks do not apply retry policy by themselves: wrap
+host step callbacks with `world.step(...)` or call `world.runStep(...)` explicitly when the test
+must exercise platform retry attempts and `getStepMetadata().attempt`.
+
+Mock the ambient `workflow` module so production orchestration runs against the active test world:
+
+```ts
+import { vi } from 'vitest'
+import { TestWorkflowWorld } from '@yolk-sdk/vercel-workflows/testing'
+
+vi.mock('workflow', async () => {
+  const { testWorkflowModule } = await import('@yolk-sdk/vercel-workflows/testing')
+  return testWorkflowModule
+})
+
+const world = new TestWorkflowWorld()
+```
+
+Tests whose import graph reaches `workflow` must use Vitest's Node environment, not jsdom, because
+Workflow 5 captures Node `URL` intrinsics at import time. Hosts should test their own `'use workflow'`
+and `'use step'` directive files with `@workflow/vitest` in addition to using the emulator.
+
 ## Runtime model
 
 `runVercelAgentWorkflow` coordinates host-provided callbacks:
 
 - model step: produce model events/tool calls
+- no-tool continuation: when a model step returns `done: false` with no tool calls, continue
+  directly to the next model step without invoking the tool-batch callback
 - tool batch step: execute requested tools
 - tool batch result: return one ordered tool-result message per host call, including failed `isError` results
 - partial tool-step failure: return wire-safe `failure`, cumulative `usage`, and `eventSequence` when
@@ -222,7 +251,8 @@ Never close on resumable `AgentAwaitingInput`.
 - Write durable terminal events only after host persistence has settled.
 - Implement `closeStream` for successful final closure and `writeError` for safe final error write
   plus failure closure. Release, but do not close, the writer after `AgentAwaitingInput`.
-- Test directive behavior with `@workflow/vitest` when changing package-owned Workflow files.
+- Test host-owned Workflow directive files with `@workflow/vitest`; use the `./testing` emulator for
+  platform behavior in host tests.
 
 ## Boundaries
 

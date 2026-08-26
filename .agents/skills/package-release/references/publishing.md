@@ -153,6 +153,7 @@ Current workflow policy:
 - Manual `workflow_dispatch` only.
 - Uses `contents: write` for git tags and `id-token: write`; provenance currently disabled with `NPM_CONFIG_PROVENANCE=false`.
 - Installs/builds/tests with `pnpm`.
+- Fails before publish if the requested dist-tag does not match the version channel (`canary` for prereleases, `latest` for stable versions).
 - Fails before publish if `v<version>` already exists.
 - Skips package tarballs whose exact `name@version` already exists on npm, so partial retries and missing-tag repair reuse the same version.
 - Packs package artifacts with `pnpm pack`.

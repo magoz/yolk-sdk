@@ -98,6 +98,12 @@ Approval-gated calls pause: the controller emits `AwaitingInput`, the hook expos
 
 Project voice events into protocol messages with `projectVoiceEvent`; final user/assistant transcripts and settled tool call/result pairs become normal `AgentMessage`s with no dangling host tool calls. Assistant drafts are keyed per provider output item (falling back to response id): back-to-back responses, multi-item responses, and duplicate final transcript event families never concatenate, wipe, or duplicate messages, and finals for already-flushed items project nothing. Use `sequenceVoiceEvent`/`dedupeStoredVoiceEvents` for replay-safe durable event ids and `voiceSeedTextsFromMessages` to seed a new provider session after reconnect. Reconnect never resumes a provider session.
 
+## Server WebSocket transport
+
+`makeWebSocketVoiceTransport` supports provider realtime sessions from Node/server runtimes. It
+requires an Effect `Socket.WebSocketConstructor` layer from the host, for example
+`Socket.layerWebSocketConstructorGlobal`; it does not construct a platform socket implicitly.
+
 ## One-shot speech and transcription
 
 ```ts

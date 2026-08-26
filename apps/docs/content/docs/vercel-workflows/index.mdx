@@ -8,7 +8,7 @@ Use `@yolk-sdk/vercel-workflows` when an agent run can outlive one HTTP request 
 Install:
 
 ```bash
-pnpm add @yolk-sdk/vercel-workflows@canary effect workflow
+pnpm add @yolk-sdk/vercel-workflows@canary effect workflow@^5.0.0-beta.42
 ```
 
 ## Wrap your Workflow
@@ -36,7 +36,7 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 }
 ```
 
-`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in those steps.
+`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in those steps. When a model result is `done: false` with no tool calls, the package continues directly to the next model step without invoking the tool-batch callback.
 
 ## Use Effect at route boundaries
 

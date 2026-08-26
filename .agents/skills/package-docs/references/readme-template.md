@@ -107,7 +107,10 @@ Document execution-plane service, source/lifecycle ADTs, `sandbox` agent tool, t
 
 ### Vercel Workflows
 
-Import Vercel Workflow APIs from `@yolk-sdk/vercel-workflows`.
+Import Vercel Workflow APIs from `@yolk-sdk/vercel-workflows`. Document the supported `workflow`
+version, the `./effect` host boundary, and the `./testing` behavioral emulator. Testing guidance
+must cover `TestWorkflowWorld`, `testWorkflowModule`, and the Node Vitest environment required by
+Workflow 5 imports.
 
 ## Style
 

@@ -10,6 +10,7 @@ description: Core transcript and event terms used across Yolk packages.
 | `ToolResultMessage`     | host-authored result for a tool call                                    |
 | `AgentMessage`          | union of user, assistant, and tool-result messages                      |
 | `AgentEvent`            | stream event emitted by loop/runtime/client surfaces                    |
+| `UserMessageEvent`      | replay-safe event for host-promoted user input in durable streams       |
 | `ToolDef`               | model-visible tool name, description, parameters, and approval metadata |
 | `ToolCall`              | model request to execute a host tool                                    |
 | `ToolResult`            | host result returned to the model                                       |

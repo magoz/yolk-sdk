@@ -3,7 +3,50 @@ title: Test Workflows
 description: Test pure Workflow contracts and directive behavior for durable agent runs.
 ---
 
-Test two layers: pure callback contracts and real Workflow directive behavior.
+Test three layers: package loop contracts, host behavior against a platform emulator, and real
+Workflow directives.
+
+Tests whose import graph reaches `workflow` must use Vitest's Node environment, not jsdom, because
+Workflow 5 captures Node `URL` intrinsics when the module loads.
+
+## Behavioral platform emulator
+
+`@yolk-sdk/vercel-workflows/testing` exports `TestWorkflowWorld`. Use it to exercise host code
+against run lifecycle, append-only stream replay, close-once HTTP 409-style conflicts, step retry
+attempts, hooks/resume, cancellation, and the SDK seam consumed by `VercelWorkflows.layerFromSdk`.
+
+This is a test fragment; initialize one world per test and mock the ambient module before importing
+the host Workflow under test:
+
+```ts
+// @vitest-environment node
+import { expect, it, vi } from 'vitest'
+import { TestWorkflowWorld } from '@yolk-sdk/vercel-workflows/testing'
+
+vi.mock('workflow', async () => {
+  const { testWorkflowModule } = await import('@yolk-sdk/vercel-workflows/testing')
+  return testWorkflowModule
+})
+
+it('runs host orchestration against Workflow behavior', async () => {
+  const world = new TestWorkflowWorld()
+  const doubledStep = world.step(async (value: number) => value * 2, 'double')
+  const { runId } = world.start(doubledStep, [21])
+
+  expect(world.status(runId)).toBe('pending')
+  await world.settled(runId)
+  expect(world.status(runId)).toBe('completed')
+  await expect(world.sdk.getRun<number>(runId).returnValue).resolves.toBe(42)
+})
+```
+
+`testWorkflowModule` delegates `getWritable`, `getWorkflowMetadata`, `getStepMetadata`, and
+`createHook` to the active world's `AsyncLocalStorage` context, so host code runs unchanged. The
+ambient mock does not apply platform retry policy by itself: wrap host step callbacks with
+`world.step(...)` or call `world.runStep(...)` when the test must exercise retries and
+`getStepMetadata().attempt`. Use `world.inspect(runId)` for stream closure, write-after-close
+attempts, step attempts, status, and run errors. Use `world.sdk` with
+`VercelWorkflows.layerFromSdk` when testing Effect route/service boundaries.
 
 ## Pure contract tests
 
@@ -57,7 +100,7 @@ import { waitForHook } from '@workflow/vitest'
 
 Cover:
 
-- starting workflow functions with `start`
+- starting host Workflow functions with `start`
 - reading stream chunks and replaying with `getRun(runId).getReadable({ startIndex })`
 - waiting for hooks with `waitForHook`
 - resuming with `resumeHook`
@@ -65,6 +108,7 @@ Cover:
 
 ## Assertions to keep
 
+- A `done: false` model result with no tool calls continues directly to the next model step.
 - One ordered tool-result message per tool call.
 - HITL reruns the same tool batch with accumulated responses.
 - Event sequence advances across model, tool, and HITL resume.

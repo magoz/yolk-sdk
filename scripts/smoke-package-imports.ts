@@ -138,7 +138,7 @@ const main = async () => {
         effect: '4.0.0-beta.65',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
-        workflow: '^4.2.4'
+        workflow: '^5.0.0-beta.42'
       }
     }
 

@@ -248,6 +248,7 @@ Requirements before dispatch:
 
 - changesets consumed by `pnpm changeset:version`
 - every public package has same version
+- the requested npm dist-tag matches the version channel (`canary` for prereleases, `latest` for stable versions)
 - `v<version>` tag does not exist
 - normal publishes have at least one unpublished public package; all-published runs are only for missing-tag repair
 - validation passes: package build/publint/smoke/check, Cloudflare check, `pnpm tsc`, `pnpm lint`, `pnpm test:run`, and `pnpm --filter @yolk-sdk/vercel-workflows test:workflow`

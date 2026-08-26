@@ -54,7 +54,8 @@ Check:
 - workflow_dispatch input tag
 - current package versions
 
-If uncertain, stop and ask before rerunning publish.
+The publish workflow rejects `latest` for prerelease versions and `canary` for stable versions. If
+uncertain, stop and ask before rerunning publish.
 
 ## Package accidentally still private
 

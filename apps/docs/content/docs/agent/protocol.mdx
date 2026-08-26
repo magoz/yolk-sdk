@@ -76,7 +76,20 @@ Streams emit `AgentEvent` values such as:
 - `TurnStart`, `TurnEnd`
 - `LLMStreamStart`, `LLMTextDelta`, `LLMReasoningDelta`, `LLMStreamEnd`
 - `ToolExecutionStarted`, `ToolExecutionCompleted`, `ToolExecutionError`
+- `UserMessageEvent`, `AssistantMessageEvent`
 - `AgentAwaitingInput`, `QuestionRequested`, approval events
+
+Use `UserMessageEvent` when a host promotes queued user input into a durable stream. The host owns
+queue/promotion policy and assigns a stable `eventId` so replay does not project the message twice:
+
+```ts
+import { UserMessage, UserMessageEvent } from '@yolk-sdk/agent/protocol'
+
+const event = UserMessageEvent.make({
+  eventId: 'session_1:user-message_42',
+  message: UserMessage.make({ content: 'Please compare the alternatives too.' })
+})
+```
 
 Use `isTerminalAgentEvent` to detect logical stream termination.
 

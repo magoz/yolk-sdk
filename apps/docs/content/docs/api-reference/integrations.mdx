@@ -91,6 +91,10 @@ slots or `application` for application-token access; application mode requires `
 actions use Graph v1.0 with `outlook.*` and `onedrive.*`
 ids, and all scoped slots share `microsoft.oauth`.
 
+`GoogleCalendarEventDateTime` is the exclusive union `{ date, timeZone? } | { dateTime,
+timeZone? }`. Create/update boundaries require exactly one non-empty `date` or `dateTime` and reject
+null, missing, empty, and dual-field values before provider execution.
+
 Google Drive's principal contracts are `GoogleDriveFile`, `GoogleDriveUser`,
 `GoogleDriveCapabilities`, `GoogleDriveListFilesInput`, `GoogleDriveSearchFilesInput`,
 `GoogleDriveListFilesOutput`, `GoogleDriveFileIdInput`, `GoogleDriveCreateFolderInput`, and

@@ -57,6 +57,8 @@ Rules:
 
 - Return `done: true` when no tool batch is needed; the workflow closes the stream.
 - Return `done: false` with ordered `toolCalls` when tools must run.
+- A `done: false` result with no tool calls continues directly to the next model step without
+  invoking `runToolBatchStep`; use this when host-promoted input already advanced model state.
 - Put assistant/model-created messages in `createdMessages`.
 - Carry `eventSequence` if the model step wrote durable stream events.
 
@@ -127,12 +129,14 @@ Only retry streamed steps if every event has a deterministic `eventId` and clien
 Use `commitThenWriteTerminalEvent` when terminal events imply durable state is settled:
 
 ```ts
-const result = yield* commitThenWriteTerminalEvent({
-  terminal: agentEndEvent,
-  commit: persistRunState,
-  write: event => writeEvent(event),
-  writeCommitError: error => writeEvent(toAgentErrorEvent(error))
-})
+const result =
+  yield *
+  commitThenWriteTerminalEvent({
+    terminal: agentEndEvent,
+    commit: persistRunState,
+    write: event => writeEvent(event),
+    writeCommitError: error => writeEvent(toAgentErrorEvent(error))
+  })
 ```
 
 The helper never writes success terminal before `commit` succeeds, cannot infer finality from the

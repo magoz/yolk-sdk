@@ -412,6 +412,20 @@ const projection = events.reduce(
 Use `applyAgentEventToChatMessages` only for ephemeral local streams where append-only deltas cannot
 replay.
 
+When the host promotes queued user input into a durable stream, emit a replay-safe user event:
+
+```ts
+import { UserMessage, UserMessageEvent } from '@yolk-sdk/agent/protocol'
+
+const event = UserMessageEvent.make({
+  eventId: 'session_1:user-message_42',
+  message: UserMessage.make({ content: 'Please also compare the alternatives.' })
+})
+```
+
+The host owns queueing and promotion policy and must assign a stable `eventId` so reconnects do not
+project the same promoted message twice.
+
 ## Parallel tool calls
 
 OpenAI, Vercel AI Gateway, OpenAI Codex, and Grok requests enable vendor parallel tool calls when tools are available. The
@@ -502,7 +516,8 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
   give replay-safe durable event ids; `voiceSeedTextsFromMessages` seeds new provider sessions
   after reconnect, optionally prefixing user seeds with author display names via
   `{ includeAuthors: true }` for multi-user transcripts.
-- `makeWebSocketVoiceTransport` covers Node/server realtime sessions;
+- `makeWebSocketVoiceTransport` covers Node/server realtime sessions and requires a host-provided
+  `Socket.WebSocketConstructor` layer, such as `Socket.layerWebSocketConstructorGlobal`;
   `@yolk-sdk/agent/providers/openai/speech` provides `makeOpenAiSpeechSynthesizerLayer` and
   `makeOpenAiTranscriberLayer` for the provider-neutral voice services.
   `VoiceSpeechRequest.instructions` steers delivery style only, and

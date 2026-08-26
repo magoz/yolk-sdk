@@ -3,7 +3,7 @@ title: Workflow APIs
 description: Public Vercel Workflow orchestration exports.
 ---
 
-Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath for orchestration. Use `@yolk-sdk/vercel-workflows/effect` for Effect-native host route wrappers around public `workflow/api` calls.
+Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/workflow` subpath for orchestration. Use `@yolk-sdk/vercel-workflows/effect` for Effect-native host route wrappers around public `workflow/api` calls, and `@yolk-sdk/vercel-workflows/testing` for host tests.
 
 ## Loop exports
 
@@ -82,34 +82,48 @@ Every Effect operation on `VercelWorkflows` and `VercelWorkflowRun` fails with
 `VercelWorkflowsClient` is the Effect service shape. `VercelWorkflowsSdkClient` and
 `VercelWorkflowsSdkRun` are the lower-level Promise SDK seam used by `VercelWorkflowsSdk`.
 
+## Testing exports
+
+Import from `@yolk-sdk/vercel-workflows/testing`.
+
+| Export                                                                                                                               | Purpose                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `TestWorkflowWorld`                                                                                                                  | behavioral emulator for lifecycle, streams, steps, hooks, and cancellation |
+| `testWorkflowModule`                                                                                                                 | ambient `workflow` module surface for `vi.mock`                            |
+| `defaultTestWorkflowStepMaxRetries`                                                                                                  | emulated platform default retry budget                                     |
+| `TestWorkflowStreamConflictError`, `TestWorkflowRunConflictError`                                                                    | close-once and run-state conflict errors                                   |
+| `TestWorkflowHookNotFoundError`, `TestWorkflowHookConflictError`, `TestWorkflowRunNotFoundError`, `TestWorkflowRunCancelledError`    | hook/run lookup and cancellation errors                                    |
+| `TestWorkflowRunStatus`, `TestWorkflowRunInspection`, `TestWorkflowMetadata`, `TestWorkflowStepMetadata`, `TestWorkflowStepFunction` | test-world status, inspection, and step contracts                          |
+| `TestWorkflowHook`                                                                                                                   | disposable promise returned by emulated `createHook`                       |
+
 ## Callback types
 
-| Type                                     | Meaning                                                 |
+| Type                                     | Meaning                                                                           |
 | ---------------------------------------- | --------------------------------------------------------------------------------- |
-| `VercelAgentWorkflowInput`               | `{ request, context }` passed to workflow               |
-| `SerializableWorkflowState`              | persisted loop state between steps                      |
-| `VercelAgentWorkflowLoopConfig`          | full config for `runVercelAgentWorkflow`                |
-| `VercelAgentWorkflowModelStepInput`      | model callback input                                    |
-| `VercelAgentWorkflowModelStepResult`     | model callback result                                   |
-| `VercelAgentWorkflowToolBatchStepInput`  | tool callback input                                     |
-| `VercelAgentWorkflowToolBatchStepResult` | tool callback result                                    |
-| `VercelAgentWorkflowAwaitingInput`       | HITL hook payload                                       |
-| `VercelAgentWorkflowRunResult`           | terminal run result union                               |
+| `VercelAgentWorkflowInput`               | `{ request, context }` passed to workflow                                         |
+| `SerializableWorkflowState`              | persisted loop state between steps                                                |
+| `VercelAgentWorkflowLoopConfig`          | full config for `runVercelAgentWorkflow`                                          |
+| `VercelAgentWorkflowModelStepInput`      | model callback input                                                              |
+| `VercelAgentWorkflowModelStepResult`     | model callback result                                                             |
+| `VercelAgentWorkflowToolBatchStepInput`  | tool callback input                                                               |
+| `VercelAgentWorkflowToolBatchStepResult` | tool callback result                                                              |
+| `VercelAgentWorkflowAwaitingInput`       | HITL hook payload                                                                 |
+| `VercelAgentWorkflowRunResult`           | terminal run result union                                                         |
 | `VercelAgentWorkflowStepRetryPolicy`     | `{ maxAttempts }`; finite values floor/clamp to `1`, non-finite values become `1` |
-| `WorkflowStepResult`                     | `Success` / `Failure` wrapper from `settleWorkflowStep` |
+| `WorkflowStepResult`                     | `Success` / `Failure` wrapper from `settleWorkflowStep`                           |
 
 ## Durable event types
 
-| Type                                       | Meaning                                  |
+| Type                                 | Meaning                                  |
 | ------------------------------------ | ---------------------------------------- |
-| `DurableAgentEvent`                        | JSON event with deterministic `eventId`  |
-| `DurableAgentEventIdInput`                 | input for `durableAgentEventId`          |
-| `DurableAgentEventSequencerState`          | current durable event sequence state     |
-| `SequenceDurableAgentEventInput`           | input for `sequenceDurableAgentEvent`    |
-| `SequencedDurableAgentEvent`               | event plus current/next sequence values  |
-| `WriteDurableAgentEventInput`              | sequenced event input plus stream writer |
-| `CommitThenWriteTerminalEventInput`        | terminal barrier input                    |
-| `CommitThenWriteTerminalEventResult`       | terminal barrier result union             |
+| `DurableAgentEvent`                  | JSON event with deterministic `eventId`  |
+| `DurableAgentEventIdInput`           | input for `durableAgentEventId`          |
+| `DurableAgentEventSequencerState`    | current durable event sequence state     |
+| `SequenceDurableAgentEventInput`     | input for `sequenceDurableAgentEvent`    |
+| `SequencedDurableAgentEvent`         | event plus current/next sequence values  |
+| `WriteDurableAgentEventInput`        | sequenced event input plus stream writer |
+| `CommitThenWriteTerminalEventInput`  | terminal barrier input                   |
+| `CommitThenWriteTerminalEventResult` | terminal barrier result union            |
 
 ## Run result tags
 
@@ -124,12 +138,12 @@ Every Effect operation on `VercelWorkflows` and `VercelWorkflowRun` fails with
 
 ## Terminal helper results
 
-| Tag                      | Meaning                                                                                     |
+| Tag                      | Meaning                                                 |
 | ------------------------ | ------------------------------------------------------- |
-| `Committed`              | commit succeeded and terminal write succeeded                                           |
-| `CommitFailed`           | commit failed and commit-error terminal write succeeded                                     |
-| `TerminalWriteFailed`    | commit succeeded but terminal write failed                                                  |
-| `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed                                        |
+| `Committed`              | commit succeeded and terminal write succeeded           |
+| `CommitFailed`           | commit failed and commit-error terminal write succeeded |
+| `TerminalWriteFailed`    | commit succeeded but terminal write failed              |
+| `CommitErrorWriteFailed` | commit failed and commit-error terminal write failed    |
 
 The terminal helper does not close streams or infer finality from event tags. Successful
 `AgentEnd` closes through `closeStream`; failure `AgentError` closes through `writeError`. Release

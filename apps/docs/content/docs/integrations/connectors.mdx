@@ -200,6 +200,11 @@ as `messageId` plus `attachmentId` to `gmail.get_attachment`. Its typed output p
 | `calendar.delete_event`   | delete an event                   |
 | `calendar.list_accounts`  | list accessible Calendar accounts |
 
+For `calendar.create_event` and `calendar.update_event`, each `start`/`end` boundary uses exactly
+one non-empty field: `{ date, timeZone? }` for an all-day value or `{ dateTime, timeZone? }` for a
+date-time value. Null, empty, missing, and dual `date`/`dateTime` boundaries fail validation before
+the provider request.
+
 ### Drive actions
 
 | Action id             | What it does                                         | Access        |
