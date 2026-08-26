@@ -2,7 +2,7 @@ import { Effect, Layer, Redacted, Schema, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMProvider } from '@yolk-sdk/agent/loop'
-import { ToolResult, UserMessage } from '@yolk-sdk/agent/protocol'
+import { ToolResult, UserMessage, type AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import { makeTool } from '@yolk-sdk/agent/tools'
 import {
   makeVercelAiGatewayProviderLayer,
@@ -35,22 +35,31 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
   return JSON.parse(new TextDecoder().decode(body.body))
 }
 
+const defaultGatewayConfig: Parameters<typeof makeVercelAiGatewayProviderLayer>[0] = {
+  apiKey: Redacted.make('gateway-key'),
+  maxCompletionTokens: 2_000
+}
+
 const runProvider = (
   response: Response,
   requests: Array<CapturedRequest>,
-  config: Parameters<typeof makeVercelAiGatewayProviderLayer>[0] = {
-    apiKey: Redacted.make('gateway-key'),
-    maxCompletionTokens: 2_000
-  }
+  config: Parameters<typeof makeVercelAiGatewayProviderLayer>[0] = defaultGatewayConfig,
+  request: {
+    readonly model?: string
+    readonly reasoningEffort?: AgentReasoningEffort
+  } = {}
 ) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
     return yield* provider
       .stream({
-        model: 'anthropic/claude-sonnet',
+        model: request.model ?? 'anthropic/claude-sonnet',
         systemPrompt: 'Be concise.',
         messages: [UserMessage.make({ content: 'Hello' })],
-        tools: []
+        tools: [],
+        ...(request.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: request.reasoningEffort })
       })
       .pipe(Stream.runCollect)
   }).pipe(
@@ -107,10 +116,28 @@ describe('Vercel AI Gateway provider', () => {
         }
       })
       expect(readCapturedBody(requests)).not.toHaveProperty('max_completion_tokens')
+      expect(readCapturedBody(requests)).not.toHaveProperty('reasoning')
       expect(Array.from(events)).toMatchObject([
         { _tag: 'TextDelta', text: 'Hello from Gateway' },
         { _tag: 'Done', stopReason: 'stop' }
       ])
+    })
+  )
+
+  it.effect('forwards reasoning effort for any opaque Gateway model id', () =>
+    Effect.gen(function* () {
+      const requests: Array<CapturedRequest> = []
+      yield* runProvider(
+        new Response(JSON.stringify({ choices: [{ message: { content: 'reasoned' } }] })),
+        requests,
+        defaultGatewayConfig,
+        { model: 'provider/opaque-reasoning-model', reasoningEffort: 'xhigh' }
+      )
+
+      expect(readCapturedBody(requests)).toMatchObject({
+        model: 'provider/opaque-reasoning-model',
+        reasoning: { effort: 'xhigh' }
+      })
     })
   )
 

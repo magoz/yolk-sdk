@@ -21,6 +21,7 @@ import {
   replaceLoneSurrogatesDeep,
   prependMessageContextToContent,
   type AgentMessage,
+  type AgentReasoningEffort,
   type Content,
   type ContentPart,
   type ToolDef
@@ -54,8 +55,10 @@ export type OpenAiProviderConfig = {
   /** Selects the compatible endpoint's output-limit parameter. Defaults to `max_completion_tokens`. */
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraHeaders?: Readonly<Record<string, string>>
-  /** Adds compatible endpoint extensions; canonical model/messages/limit/stream fields win. */
+  /** Adds endpoint extensions; enabled reasoning and canonical model/messages/limit/stream fields win. */
   readonly extraBody?: Readonly<Record<string, unknown>>
+  /** Opts into a compatible endpoint's `{ reasoning: { effort } }` request extension. */
+  readonly reasoningEffortFormat?: 'reasoning-object'
   /** Customizes safe error metadata for a branded OpenAI-compatible endpoint. */
   readonly providerIdentity?: OpenAiProviderIdentity
   readonly apiKey: Redacted.Redacted<string>
@@ -109,6 +112,9 @@ type OpenAiRequestBody = {
   readonly max_completion_tokens?: number
   readonly max_tokens?: number
   readonly stream: false
+  readonly reasoning?: {
+    readonly effort: AgentReasoningEffort
+  }
   readonly tools?: ReadonlyArray<OpenAiTool>
   readonly parallel_tool_calls?: true
 }
@@ -117,6 +123,7 @@ type OpenAiRequestBodyConfig = {
   readonly maxCompletionTokens: number
   readonly completionTokenField?: 'max_completion_tokens' | 'max_tokens'
   readonly extraBody?: Readonly<Record<string, unknown>>
+  readonly reasoningEffortFormat?: 'reasoning-object'
   readonly providerName?: string
 }
 
@@ -415,8 +422,13 @@ export const toOpenAiRequestBody = (
       config.completionTokenField === 'max_tokens'
         ? { max_tokens: config.maxCompletionTokens }
         : { max_completion_tokens: config.maxCompletionTokens }
+    const reasoning =
+      config.reasoningEffortFormat === 'reasoning-object' && request.reasoningEffort !== undefined
+        ? { reasoning: { effort: request.reasoningEffort } }
+        : {}
     const body: OpenAiRequestBody = {
       ...config.extraBody,
+      ...reasoning,
       model: request.model,
       messages,
       ...completionTokenLimit,
@@ -535,7 +547,10 @@ const sendOpenAiRequest = (
       ...(config.completionTokenField === undefined
         ? {}
         : { completionTokenField: config.completionTokenField }),
-      ...(config.extraBody === undefined ? {} : { extraBody: config.extraBody })
+      ...(config.extraBody === undefined ? {} : { extraBody: config.extraBody }),
+      ...(config.reasoningEffortFormat === undefined
+        ? {}
+        : { reasoningEffortFormat: config.reasoningEffortFormat })
     })
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
