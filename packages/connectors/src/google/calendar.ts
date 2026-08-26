@@ -18,13 +18,21 @@ import {
 
 export const googleCalendarApiBaseUrl = 'https://www.googleapis.com/calendar/v3'
 
-export class GoogleCalendarEventDateTime extends Schema.Class<GoogleCalendarEventDateTime>(
-  'GoogleCalendarEventDateTime'
-)({
-  date: Schema.optional(Schema.String),
-  dateTime: Schema.optional(Schema.String),
-  timeZone: Schema.optional(Schema.String)
-}) {}
+const GoogleCalendarEventDate = Schema.Struct({
+  date: Schema.Trimmed.check(Schema.isNonEmpty()),
+  timeZone: Schema.optionalKey(Schema.String)
+}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+
+const GoogleCalendarEventTime = Schema.Struct({
+  dateTime: Schema.Trimmed.check(Schema.isNonEmpty()),
+  timeZone: Schema.optionalKey(Schema.String)
+}).annotate({ parseOptions: { onExcessProperty: 'error' } })
+
+export const GoogleCalendarEventDateTime = Schema.Union([
+  GoogleCalendarEventDate,
+  GoogleCalendarEventTime
+])
+export type GoogleCalendarEventDateTime = typeof GoogleCalendarEventDateTime.Type
 
 export class GoogleCalendarEvent extends Schema.Class<GoogleCalendarEvent>('GoogleCalendarEvent')({
   id: Schema.optional(Schema.String),
