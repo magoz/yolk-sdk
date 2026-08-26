@@ -1,6 +1,6 @@
 {
   "name": "@yolk-sdk/connectors",
-  "version": "0.1.0-canary.68",
+  "version": "0.1.0-canary.69",
   "description": "Effect-native connector primitives and reusable provider actions for Yolk hosts.",
   "license": "MIT",
   "type": "module",

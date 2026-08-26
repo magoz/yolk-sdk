@@ -1,5 +1,11 @@
 # @yolk-sdk/agent
 
+## 0.1.0-canary.69
+
+### Patch Changes
+
+- 9747ec9: Forward run-level reasoning effort to every Vercel AI Gateway model through the Gateway reasoning object.
+
 ## 0.1.0-canary.68
 
 ### Patch Changes

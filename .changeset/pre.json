@@ -41,6 +41,7 @@
     "fix-calendar-event-boundaries",
     "fix-claude-tool-schemas",
     "fix-codex-output-limit",
+    "fix-gateway-reasoning",
     "flexible-task-runtimes",
     "fresh-dropbox-files",
     "fresh-email-ports",
