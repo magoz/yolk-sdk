@@ -49,8 +49,10 @@ const GatewayLayer = makeVercelAiGatewayProviderLayer({
 }).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
-The factory sends `maxCompletionTokens` as Gateway `max_tokens`. The env-backed
-`VercelAiGatewayProviderLayer` reads `AI_GATEWAY_API_KEY`, falls back to
+The factory sends `maxCompletionTokens` as Gateway `max_tokens`. Run-level `reasoningEffort` is
+forwarded as `{ reasoning: { effort } }` for every opaque Gateway model id; the host must restrict its
+choices to efforts supported by the selected model. The env-backed `VercelAiGatewayProviderLayer`
+reads `AI_GATEWAY_API_KEY`, falls back to
 `VERCEL_OIDC_TOKEN`, and requires `AI_GATEWAY_MAX_COMPLETION_TOKENS`. The factory also accepts
 `extraHeaders` for optional `http-referer` and `x-title` attribution. Required authorization and JSON
 headers cannot be overridden. A custom `chatCompletionsUrl` must be a trusted proxy because it

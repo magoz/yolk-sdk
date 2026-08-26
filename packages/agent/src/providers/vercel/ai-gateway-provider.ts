@@ -40,6 +40,7 @@ export const makeVercelAiGatewayProviderLayer = (config: VercelAiGatewayProvider
     apiKey: config.apiKey,
     maxCompletionTokens: config.maxCompletionTokens,
     completionTokenField: 'max_tokens',
+    reasoningEffortFormat: 'reasoning-object',
     chatCompletionsUrl: config.chatCompletionsUrl ?? vercelAiGatewayChatCompletionsUrl,
     providerIdentity: vercelAiGatewayProviderIdentity,
     extraBody: gatewayExtraBody(config),

@@ -108,6 +108,27 @@ describe('OpenAI provider', () => {
     })
   )
 
+  it.effect('lowers opt-in reasoning after compatible endpoint extensions', () =>
+    Effect.gen(function* () {
+      const body = yield* lowerOpenAiRequestBody(
+        {
+          model: 'provider/reasoning-model',
+          systemPrompt: '',
+          reasoningEffort: 'high',
+          messages: [UserMessage.make({ content: 'Think carefully' })],
+          tools: []
+        },
+        {
+          maxCompletionTokens: openAiTestMaxOutputTokens,
+          reasoningEffortFormat: 'reasoning-object',
+          extraBody: { reasoning: { effort: 'low' } }
+        }
+      )
+
+      expect(body.reasoning).toEqual({ effort: 'high' })
+    })
+  )
+
   it.effect('rejects non-text documents for Chat Completions input', () =>
     Effect.gen(function* () {
       const unsupportedDocuments = [
