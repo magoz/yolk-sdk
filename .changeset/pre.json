@@ -42,6 +42,7 @@
     "fix-claude-tool-schemas",
     "fix-codex-output-limit",
     "fix-gateway-reasoning",
+    "fix-http-stream-cleanup",
     "flexible-task-runtimes",
     "fresh-dropbox-files",
     "fresh-email-ports",
