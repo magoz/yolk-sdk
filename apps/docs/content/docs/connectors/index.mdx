@@ -81,19 +81,19 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 
 ## Provider modules
 
-| Subpath                                | Use for                                                        |
-| -------------------------------------- | -------------------------------------------------------------- |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth data                                    |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                  |
-| `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts, POP3 reads, and SMTP submission     |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                     |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                     |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email               |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph         |
-| `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users |
-| `@yolk-sdk/connectors/r2-storage`      | R2 upload URL with host presigner                              |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                     |
-| `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                |
+| Subpath                                | Use for                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------ |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth data                                              |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                            |
+| `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts/message state, POP3 reads, and SMTP submission |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                               |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                               |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email                         |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph                   |
+| `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users           |
+| `@yolk-sdk/connectors/r2-storage`      | R2 upload URL with host presigner                                        |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                               |
+| `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                          |
 
 Microsoft Outlook and OneDrive are exposed from the provider-level `microsoft` subpath because
 Microsoft Graph is their shared API and OAuth resource boundary. Workload action ids remain
@@ -119,6 +119,13 @@ Google Drive actions stay in the provider-level `google` subpath and share the e
 which is limited to files created by or explicitly opened/shared with the app. The host owns OAuth
 refresh, consent policy, Google Picker integration, restricted-scope compliance, and binary file
 transfer.
+
+Outlook and generic IMAP email support `set_read` (with boolean `isRead`), `trash`, and `untrash`
+actions in their respective `outlook.*` and `email.*` namespaces. Outlook calls Graph directly;
+generic email requires optional host `EmailClient.setRead`, `trash`, and `untrash` methods.
+POP3/SMTP do not support these mailbox-state actions. Restore defaults to the inbox rather than
+remembering the original folder. See the [Connectors catalog](../integrations/connectors) for
+inputs, permissions, and safe IMAP adapter requirements.
 
 ## What the host provides
 

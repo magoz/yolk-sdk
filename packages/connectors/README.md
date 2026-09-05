@@ -13,21 +13,21 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                               |
-| -------------------------------------- | ------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                               |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                     |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version           |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants       |
-| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email port |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                      |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                   |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                              |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants      |
-| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                          |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                    |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                       |
+| Subpath                                | Purpose                                                                                             |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                             |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                   |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                         |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants                     |
+| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                    |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                 |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                            |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                    |
+| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot               |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                                        |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                  |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                                     |
 
 ## Imports
 
@@ -174,7 +174,8 @@ Both slots require `UsernamePasswordCredential`; provider-specific OAuth remains
 the Google and Microsoft connectors.
 
 The common action set is `email.list_messages`, `email.get_message`, `email.get_attachment`,
-`email.create_draft`, and `email.send_message`. Draft creation requires IMAP and uses the incoming
+`email.create_draft`, `email.send_message`, `email.set_read`, `email.trash`, and `email.untrash`.
+Draft creation requires IMAP and uses the incoming
 credential. An optional
 `folder` selects the target mailbox; when omitted, the host adapter discovers a mailbox advertised
 with `\Drafts` by the IMAP SPECIAL-USE extension and may fall back to `Drafts`. Drafts may omit
@@ -201,6 +202,39 @@ Adapters return deterministic newest-first pages. Cursors are opaque, scoped to 
 protocol, folder, and ordering, and may fail after mailbox changes. Send success returns
 `{ accepted: true }`, which means the SMTP server accepted submission, not that the message was
 delivered.
+
+### Read state and trash (IMAP only)
+
+| Action           | Input                                        | Host method           | Access        |
+| ---------------- | -------------------------------------------- | --------------------- | ------------- |
+| `email.set_read` | `{ messageId, isRead, folder? }`             | `EmailClient.setRead` | `write`       |
+| `email.trash`    | `{ messageId, folder?, trashFolder? }`       | `EmailClient.trash`   | `destructive` |
+| `email.untrash`  | `{ messageId, folder?, destinationFolder? }` | `EmailClient.untrash` | `write`       |
+
+Set `isRead: true` to mark read, or `false` to mark unread. These actions use the incoming
+credential and require IMAP; POP3 is rejected before credential resolution or adapter calls.
+SMTP is submission-only. The three host methods are optional for compatibility: old adapters
+continue working, but calling an unsupported action fails with a typed validation error.
+Successful host output is schema-validated; provider failures pass through unchanged.
+
+Hosts implement `setRead` using UID-addressed `STORE` to add/remove only `\Seen`, preserving
+other flags. It returns `EmailSetReadOutput` (`{ messageId, isRead }`) after the server confirms
+success. Set-read and trash source `folder` default to `INBOX`.
+
+For trash, the adapter uses explicit `trashFolder` or discovers a `\Trash` SPECIAL-USE mailbox;
+any fallback is host-configured, not a guessed folder or permanent deletion. For untrash, `folder`
+selects the source trash mailbox; when omitted the adapter discovers it using the same policy.
+The destination defaults to `INBOX`, or uses explicit `destinationFolder`. This does **not** restore
+the original folder automatically. Hosts must reject missing/ambiguous trash discovery and unsafe
+moves (including identical source/destination folders).
+
+Use UID `MOVE` where supported, or a safe per-message copy/delete fallback. Never use a blanket
+`EXPUNGE` that can delete unrelated messages, or treat setting `\Deleted` alone as a trash move.
+If a safe move is unavailable, return a failure. Trash/untrash return `EmailMoveMessageOutput`
+(`{ moved: true, folder, messageId? }`). `folder` is the destination; `messageId`, when known, is the
+**new** opaque identifier there. UIDPLUS mappings must encode destination UIDVALIDITY and UID.
+If no reliable mapping is available, omit `messageId` and re-list the destination; never reuse a
+stale source UID. Hosts own safe retry/reconciliation after partially completed moves.
 
 ## Google connector
 
@@ -348,6 +382,21 @@ as list metadata and are rejected by this action. Both actions use the existing 
 permission selection. Base64 content remains in the string/JSON HTTP boundary; hosts own decoding,
 size policy, durable storage, and content scanning.
 
+### Outlook read state and trash
+
+- `outlook.set_read` takes `{ messageId, isRead, mailbox? }`: `true` marks read, `false` marks
+  unread using Graph `PATCH` on the message.
+- `outlook.trash` takes `{ messageId, mailbox? }` and moves the message to `deleteditems` using
+  Graph `/move`; it never performs permanent deletion.
+- `outlook.untrash` takes `{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted
+  Items to `inbox` by default, or the supplied destination folder ID/well-known name. It does not
+  recover permanently deleted messages or infer the original folder.
+
+All three return the provider's updated `OutlookMessage` and request immutable IDs. Use the returned
+`id` for subsequent calls. They use `Mail.ReadWrite` for the signed-in mailbox/application mode and
+`Mail.ReadWrite.Shared` for explicit delegated mailboxes, with the same application mailbox guard
+as draft writes. Read-state and restore actions declare `write`; trash declares `destructive`.
+
 Sending returns `{ accepted: true }` for Graph's `202 Accepted`; that confirms submission, not
 processing or delivery.
 
@@ -376,7 +425,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                          |
-| `@yolk-sdk/connectors/email`           | list/get messages, retrieve attachments, create drafts, and send messages                            |
+| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                      |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
 | `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                         |

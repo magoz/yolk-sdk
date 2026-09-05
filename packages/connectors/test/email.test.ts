@@ -177,7 +177,10 @@ describe('generic email connector', () => {
       'email.get_message',
       'email.get_attachment',
       'email.create_draft',
-      'email.send_message'
+      'email.send_message',
+      'email.set_read',
+      'email.trash',
+      'email.untrash'
     ])
     expect(emailListMessagesAction.access).toBe('read')
     expect(emailGetMessageAction.access).toBe('read')
@@ -623,30 +626,33 @@ describe('generic email connector', () => {
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
-  it.effect('rejects draft creation through POP3 before resolving credentials or dispatching', () => {
-    const requests = makeRequests()
-    const refs: Array<string> = []
-    const integration = makeIntegration({
-      connectorId: 'email',
-      config: { incomingProtocol: 'pop3', incomingHost: 'pop.example.com' },
-      credentialBindings: [incomingBinding]
-    })
-
-    return Effect.gen(function* () {
-      const result = yield* EmailConnector.invoke({
-        integration,
-        action: 'email.create_draft',
-        input: { message: { to: [], body: { text: 'Not supported' } } }
-      }).pipe(Effect.result)
-
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+  it.effect(
+    'rejects draft creation through POP3 before resolving credentials or dispatching',
+    () => {
+      const requests = makeRequests()
+      const refs: Array<string> = []
+      const integration = makeIntegration({
+        connectorId: 'email',
+        config: { incomingProtocol: 'pop3', incomingHost: 'pop.example.com' },
+        credentialBindings: [incomingBinding]
       })
-      expect(refs).toHaveLength(0)
-      expect(requests.draft).toHaveLength(0)
-    }).pipe(Effect.provide(makeHostLayer({ requests, refs })))
-  })
+
+      return Effect.gen(function* () {
+        const result = yield* EmailConnector.invoke({
+          integration,
+          action: 'email.create_draft',
+          input: { message: { to: [], body: { text: 'Not supported' } } }
+        }).pipe(Effect.result)
+
+        expect(result).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
+        })
+        expect(refs).toHaveLength(0)
+        expect(requests.draft).toHaveLength(0)
+      }).pipe(Effect.provide(makeHostLayer({ requests, refs })))
+    }
+  )
 
   it.effect('rejects recipient-less SMTP messages but permits BCC-only submission', () => {
     const requests = makeRequests()

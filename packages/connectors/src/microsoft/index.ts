@@ -29,6 +29,12 @@ export {
   OutlookSendMailInput,
   outlookSendDraftAction,
   outlookSendMailAction,
+  outlookSetReadAction,
+  OutlookSetReadInput,
+  outlookTrashAction,
+  OutlookTrashInput,
+  outlookUntrashAction,
+  OutlookUntrashInput,
   OutlookSendOutput
 } from './mail.ts'
 export {

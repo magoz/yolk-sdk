@@ -42,7 +42,8 @@ Your `HostConnectorLayer` provides credentials and HTTP execution. When `access`
 adapter uses the action's declared `read`, `write`, or `destructive` access and falls back to `read`
 for legacy actions without metadata. A host-provided value or resolver overrides action metadata.
 Microsoft and Google Drive actions declare write/destructive access where applicable. Generic email
-declares reads as `read`, IMAP draft creation as `write`, and SMTP submission as `destructive`; keep
+declares reads as `read`, IMAP draft/read-state/restore actions as `write`, and trash/SMTP submission
+as `destructive`. Its mailbox-state actions require optional host adapter methods; keep
 explicit host classification for other connectors until their actions do.
 
 ## Use directly without an agent

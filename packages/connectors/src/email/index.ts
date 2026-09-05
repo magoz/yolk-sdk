@@ -182,6 +182,63 @@ export class EmailGetAttachmentOutput extends Schema.Class<EmailGetAttachmentOut
   attachment: EmailAttachmentContent
 }) {}
 
+const EmailNonEmptyMessageId = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class EmailSetReadInput extends Schema.Class<EmailSetReadInput>('EmailSetReadInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  isRead: Schema.Boolean
+}) {}
+
+export class EmailSetReadOutput extends Schema.Class<EmailSetReadOutput>('EmailSetReadOutput')({
+  messageId: EmailNonEmptyMessageId,
+  isRead: Schema.Boolean
+}) {}
+
+export class EmailTrashInput extends Schema.Class<EmailTrashInput>('EmailTrashInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  trashFolder: Schema.optional(EmailFolderName)
+}) {}
+
+export class EmailUntrashInput extends Schema.Class<EmailUntrashInput>('EmailUntrashInput')({
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: Schema.optional(EmailFolderName)
+}) {}
+
+export class EmailMoveMessageOutput extends Schema.Class<EmailMoveMessageOutput>(
+  'EmailMoveMessageOutput'
+)({
+  moved: Schema.Literal(true),
+  folder: EmailFolderName,
+  messageId: Schema.optional(EmailNonEmptyMessageId)
+}) {}
+
+export class EmailSetReadRequest extends Schema.Class<EmailSetReadRequest>('EmailSetReadRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  isRead: Schema.Boolean
+}) {}
+
+export class EmailTrashRequest extends Schema.Class<EmailTrashRequest>('EmailTrashRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: EmailFolderName,
+  trashFolder: Schema.optional(EmailFolderName)
+}) {}
+
+export class EmailUntrashRequest extends Schema.Class<EmailUntrashRequest>('EmailUntrashRequest')({
+  connection: EmailImapConnection,
+  credential: UsernamePasswordCredential,
+  messageId: EmailNonEmptyMessageId,
+  folder: Schema.optional(EmailFolderName),
+  destinationFolder: EmailFolderName
+}) {}
+
 export class EmailComposeMessage extends Schema.Class<EmailComposeMessage>('EmailComposeMessage')({
   from: Schema.optional(EmailAddress),
   to: Schema.Array(EmailAddress),
@@ -283,6 +340,15 @@ export type EmailClientApi = {
   readonly getAttachment?: (
     input: EmailGetAttachmentRequest
   ) => Effect.Effect<ActionResult<EmailGetAttachmentOutput>, ConnectorError>
+  readonly setRead?: (
+    input: EmailSetReadRequest
+  ) => Effect.Effect<ActionResult<EmailSetReadOutput>, ConnectorError>
+  readonly trash?: (
+    input: EmailTrashRequest
+  ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
+  readonly untrash?: (
+    input: EmailUntrashRequest
+  ) => Effect.Effect<ActionResult<EmailMoveMessageOutput>, ConnectorError>
   readonly createDraft: (
     input: EmailCreateDraftRequest
   ) => Effect.Effect<ActionResult<EmailCreateDraftOutput>, ConnectorError>
@@ -440,7 +506,8 @@ const rejectPop3Folder = (
 
 const requireImap = (
   integration: ConnectorIntegration,
-  connection: EmailIncomingConnection
+  connection: EmailIncomingConnection,
+  operation = 'Draft creation'
 ): Effect.Effect<EmailImapConnection, ConnectorError> =>
   connection.protocol === 'imap'
     ? Effect.succeed(
@@ -451,7 +518,7 @@ const requireImap = (
           security: connection.security
         })
       )
-    : Effect.fail(validationError(integration, 'Draft creation requires IMAP; POP3 is read-only'))
+    : Effect.fail(validationError(integration, `${operation} requires IMAP; POP3 is read-only`))
 
 export const emailListMessagesAction = defineAction({
   id: 'email.list_messages',
@@ -585,12 +652,130 @@ export const emailSendMessageAction = defineAction({
     })
 })
 
+const emailMutationContext = (integration: ConnectorIntegration, operation: string) =>
+  Effect.gen(function* () {
+    const incoming = yield* incomingConnection(integration)
+    const connection = yield* requireImap(integration, incoming, operation)
+    const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot)
+    const credential = yield* usableCredential(integration, resolved, EmailIncomingCredentialSlot)
+    const client = yield* EmailClient
+    return { connection, credential, client }
+  })
+
+export const emailSetReadAction = defineAction({
+  id: 'email.set_read',
+  description:
+    'Mark an IMAP message read (isRead: true) or unread (isRead: false). Folder defaults to INBOX; requires host setRead support.',
+  access: 'write',
+  inputSchema: EmailSetReadInput,
+  outputSchema: EmailSetReadOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(
+        integration,
+        'Changing read state'
+      )
+      if (client.setRead === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support setRead')
+        )
+      }
+      const result = yield* client.setRead(
+        EmailSetReadRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          isRead: input.isRead
+        })
+      )
+      if (result._tag === 'Failure') return result
+      const output = yield* Schema.decodeUnknownEffect(EmailSetReadOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          validationError(integration, 'EmailClient returned invalid setRead output', error)
+        )
+      )
+      return ActionResult.success(output)
+    })
+})
+
+export const emailTrashAction = defineAction({
+  id: 'email.trash',
+  description:
+    'Move an IMAP message to trash, never permanently delete it. Source folder defaults to INBOX; host discovers trash unless trashFolder is supplied.',
+  access: 'destructive',
+  inputSchema: EmailTrashInput,
+  outputSchema: EmailMoveMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(integration, 'Trash')
+      if (client.trash === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support trash')
+        )
+      }
+      const result = yield* client.trash(
+        EmailTrashRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder ?? EmailFolderName.make('INBOX'),
+          trashFolder: input.trashFolder
+        })
+      )
+      if (result._tag === 'Failure') return result
+      const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          validationError(integration, 'EmailClient returned invalid trash output', error)
+        )
+      )
+      return ActionResult.success(output)
+    })
+})
+
+export const emailUntrashAction = defineAction({
+  id: 'email.untrash',
+  description:
+    'Move an IMAP message out of trash to destinationFolder (default: INBOX), not its original folder. Host discovers the source trash folder unless folder is supplied.',
+  access: 'write',
+  inputSchema: EmailUntrashInput,
+  outputSchema: EmailMoveMessageOutput,
+  execute: ({ integration, input }) =>
+    Effect.gen(function* () {
+      const { connection, credential, client } = yield* emailMutationContext(integration, 'Untrash')
+      if (client.untrash === undefined) {
+        return yield* Effect.fail(
+          validationError(integration, 'EmailClient does not support untrash')
+        )
+      }
+      const result = yield* client.untrash(
+        EmailUntrashRequest.make({
+          connection,
+          credential,
+          messageId: input.messageId,
+          folder: input.folder,
+          destinationFolder: input.destinationFolder ?? EmailFolderName.make('INBOX')
+        })
+      )
+      if (result._tag === 'Failure') return result
+      const output = yield* Schema.decodeUnknownEffect(EmailMoveMessageOutput)(result.value).pipe(
+        Effect.mapError(error =>
+          validationError(integration, 'EmailClient returned invalid untrash output', error)
+        )
+      )
+      return ActionResult.success(output)
+    })
+})
+
 export const emailActions = [
   emailListMessagesAction,
   emailGetMessageAction,
   emailGetAttachmentAction,
   emailCreateDraftAction,
-  emailSendMessageAction
+  emailSendMessageAction,
+  emailSetReadAction,
+  emailTrashAction,
+  emailUntrashAction
 ]
 
 export const EmailConnector = defineConnector({

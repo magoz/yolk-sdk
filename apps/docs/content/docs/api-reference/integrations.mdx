@@ -67,12 +67,24 @@ typed list/get/get-attachment/IMAP-draft/SMTP-send requests plus a runtime
 connector exports separate `EmailIncomingCredentialSlot` and `EmailSmtpCredentialSlot` bindings and
 does not bundle transport or MIME libraries.
 
+IMAP mailbox mutations export `emailSetReadAction`, `emailTrashAction`, and `emailUntrashAction`,
+with `EmailSetReadInput`, `EmailTrashInput`, `EmailUntrashInput`, matching `*Request` classes,
+`EmailSetReadOutput`, and `EmailMoveMessageOutput`. Optional `EmailClient.setRead`, `trash`, and
+`untrash` methods receive IMAP connections and incoming credentials. Successful output is validated;
+POP3 is rejected. Move output includes the destination folder and an optional new message ID.
+See the [catalog](../integrations/connectors#mark-readunread-and-move-tofrom-trash) for adapter safety
+and trash-discovery requirements.
+
 Microsoft Outlook's principal contracts are `OutlookMessage`, `OutlookMessageIdInput`,
 `OutlookListMessagesInput`, `OutlookSearchMessagesInput`, `OutlookListMessagesOutput`,
 `OutlookAttachmentKind`, `OutlookAttachmentMetadata`, `OutlookAttachment`,
 `OutlookListAttachmentsInput`, `OutlookListAttachmentsOutput`, `OutlookGetAttachmentInput`,
 `OutlookGetAttachmentOutput`, `OutlookComposeInput`, `OutlookCreateReplyDraftInput`,
-`OutlookSendMailInput`, and `OutlookSendOutput`. File attachment retrieval requires Graph's file
+`OutlookSendMailInput`, `OutlookSendOutput`, `OutlookSetReadInput`, `OutlookTrashInput`, and
+`OutlookUntrashInput`. `outlookSetReadAction`, `outlookTrashAction`, and `outlookUntrashAction`
+return the updated `OutlookMessage`, select mailbox-aware write permissions, and request immutable
+IDs. Restore targets Deleted Items as its source and defaults the destination to inbox.
+File attachment retrieval requires Graph's file
 discriminator and valid base64 content, then exposes it as required `contentBase64`; item and
 reference attachments are available only as list metadata.
 `OutlookListAttachmentsOutput.attachments` decodes to an Effect `Chunk`. OAuth exports include generic,
