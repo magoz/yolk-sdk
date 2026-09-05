@@ -5,12 +5,12 @@ packages:
   - 'cloudflare/*'
 catalog:
   '@effect/language-service': ^0.77.0
-  '@effect/opentelemetry': 4.0.0-beta.59
-  '@effect/platform-bun': 4.0.0-beta.65
-  '@effect/platform-node': 4.0.0-beta.65
-  '@effect/sql-pg': 4.0.0-beta.59
-  '@effect/vitest': 4.0.0-beta.65
-  effect: 4.0.0-beta.65
+  '@effect/opentelemetry': 4.0.0-beta.80
+  '@effect/platform-bun': 4.0.0-beta.80
+  '@effect/platform-node': 4.0.0-beta.80
+  '@effect/sql-pg': 4.0.0-beta.80
+  '@effect/vitest': 4.0.0-beta.80
+  effect: 4.0.0-beta.80
   typescript: ^5.9.3
   vitest: ^4.0.17
 allowBuilds:
@@ -27,5 +27,7 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   workerd: true
+overrides:
+  '@effect/platform-node-shared': 4.0.0-beta.80
 patchedDependencies:
   alchemy@2.0.0-beta.36: patches/alchemy@2.0.0-beta.36.patch

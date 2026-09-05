@@ -130,15 +130,19 @@ const main = async () => {
       type: 'module',
       private: true,
       dependencies: {
-        '@effect/platform-node': '4.0.0-beta.65',
+        '@effect/platform-node': '4.0.0-beta.80',
         '@modelcontextprotocol/client': '2.0.0',
         '@modelcontextprotocol/core': '2.0.0',
         '@modelcontextprotocol/server': '2.0.0',
         '@vercel/sandbox': '2.2.1',
-        effect: '4.0.0-beta.65',
+        effect: '4.0.0-beta.80',
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
-        workflow: '^5.0.0-beta.42'
+        workflow: '5.0.0-beta.42'
+      },
+      // Match the workspace's tested platform graph rather than a newer prerelease.
+      pnpm: {
+        overrides: { '@effect/platform-node-shared': '4.0.0-beta.80' }
       }
     }
 

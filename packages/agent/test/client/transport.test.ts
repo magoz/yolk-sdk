@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Exit, Layer, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -43,10 +43,7 @@ type CapturedRequest = {
 const encodeEvents = (events: ReadonlyArray<unknown>) =>
   events.map(event => JSON.stringify(event)).join('\n')
 
-const hangingEventResponse = (
-  events: ReadonlyArray<unknown>,
-  init?: ResponseInit
-) =>
+const hangingEventResponse = (events: ReadonlyArray<unknown>, init?: ResponseInit) =>
   new Response(
     new ReadableStream<Uint8Array>({
       start: controller => {
@@ -82,6 +79,20 @@ const makeHttpClientLayerFromResponses = (
 
 const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest>) =>
   makeHttpClientLayerFromResponses([response], requests)
+
+const settleTransport = async <A>(promise: Promise<A>): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Transport did not settle')), 1_000)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>, index = 0) => {
   const body = requests[index]?.request.body
@@ -147,6 +158,83 @@ describe('collectAgentEvents', () => {
       )
     ).rejects.toMatchObject({ _tag: 'AgentTransportError' })
   })
+
+  it.each([
+    ['single run', streamAgentRunEventStream],
+    ['run until terminal', streamAgentRunEventStreamUntilTerminal],
+    [
+      'start until terminal',
+      (request: Parameters<typeof streamAgentRunEventStream>[0]) =>
+        streamAgentEventStreamUntilTerminal({
+          ...request,
+          sessionId: 'session_1',
+          messages: [UserMessage.make({ content: 'hello' })]
+        })
+    ],
+    [
+      'HITL until terminal',
+      (request: Parameters<typeof streamAgentRunEventStream>[0]) =>
+        streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
+    ]
+  ] as const)(
+    'reports a rejected response body for %s instead of hanging',
+    async (_, streamRun) => {
+      const requests: Array<CapturedRequest> = []
+      let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            bodyController = controller
+            controller.enqueue(new TextEncoder().encode(`${encodeEvents([AgentStart.make({})])}\n`))
+          }
+        })
+      )
+      const events = Stream.toAsyncIterable(
+        streamRun({
+          endpoint: '/api/agent/run_1',
+          httpClientLayer: makeHttpClientLayer(response, requests)
+        })
+      )[Symbol.asyncIterator]()
+      expect((await events.next()).value?._tag).toBe('AgentStart')
+      bodyController?.error(new TypeError('Response body terminated'))
+
+      await expect(settleTransport(events.next())).rejects.toMatchObject({
+        _tag: 'AgentTransportError'
+      })
+    }
+  )
+
+  it.each(['start', 'run', 'hitl'] as const)(
+    'propagates a host callback defect from %s without hanging or wrapping it',
+    async mode => {
+      const defect = new Error('Host callback defect')
+      const request = {
+        endpoint: '/api/agent/run_1',
+        httpClientLayer: makeHttpClientLayer(new Response(encodeEvents([AgentStart.make({})])), []),
+        onEvent: () => {
+          throw defect
+        }
+      }
+      const stream =
+        mode === 'start'
+          ? streamAgentEventStreamUntilTerminal({
+              ...request,
+              sessionId: 'session_1',
+              messages: [UserMessage.make({ content: 'hello' })]
+            })
+          : mode === 'hitl'
+            ? streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
+            : streamAgentRunEventStreamUntilTerminal(request)
+      const exit = await settleTransport(Effect.runPromiseExit(Stream.runDrain(stream)))
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(exit.cause.reasons).toHaveLength(1)
+        const reason = exit.cause.reasons[0]
+        expect(reason?._tag).toBe('Die')
+        if (reason?._tag === 'Die') expect(reason.defect).toBe(defect)
+      }
+    }
+  )
 
   it('decodes in-band agent errors', async () => {
     const responseEvents = [
@@ -296,7 +384,9 @@ describe('collectAgentEvents', () => {
         httpClientLayer: makeHttpClientLayerFromResponses(
           [
             hangingEventResponse([AgentStart.make({})]),
-            new Response(encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })]))
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
           ],
           requests
         )
@@ -325,7 +415,9 @@ describe('collectAgentEvents', () => {
             hangingEventResponse([AgentStart.make({})], {
               headers: { 'x-workflow-run-id': 'run_1' }
             }),
-            new Response(encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })]))
+            new Response(
+              encodeEvents([AgentEnd.make({ messages: [], turns: 1, usage: zeroAgentUsage })])
+            )
           ],
           requests
         )
@@ -717,7 +809,10 @@ describe('collectAgentEvents', () => {
         )
       ])
 
-      expect(Array.from(events).map(event => event._tag)).toEqual(['AgentStart', 'AgentAwaitingInput'])
+      expect(Array.from(events).map(event => event._tag)).toEqual([
+        'AgentStart',
+        'AgentAwaitingInput'
+      ])
       expect(cancelled).toBe(false)
       expect(closed).toBe(false)
     } finally {
