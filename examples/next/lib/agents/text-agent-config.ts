@@ -18,6 +18,18 @@ const agentTextModelConfigById = {
     label: 'Claude Sonnet 4.6',
     provider: 'anthropic-claude',
     maxOutputTokens: 64_000
+  },
+  astra: {
+    model: 'astra',
+    label: 'OpenAI Astra',
+    provider: 'openai-codex',
+    maxOutputTokens: 128_000
+  },
+  'claude-fable-5-1': {
+    model: 'claude-fable-5-1',
+    label: 'Claude Fable 5.1',
+    provider: 'anthropic-claude',
+    maxOutputTokens: 64_000
   }
 } as const
 export const agentTextModelOptions = Object.values(agentTextModelConfigById)
