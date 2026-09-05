@@ -77,6 +77,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Question resume content must be model-visible text with selected answer labels plus structured answers; never replay only `answered`.
 - Use SDK HITL helpers for durable apps: `plainHitlResponse`, `questionResponseStructuredContent`, `hitlResponseEvent`, and `toolRunsFromHitlRequests`.
 - Client HTTP transport treats `AgentEnd`/`AgentError`/`AgentAwaitingInput` as logical end, but only pre-terminal consumer cancellation should abort the body.
+- HTTP callback producers forward failed exits to their output queues with the original Cause. Typed-only catches strand consumers when host callbacks or cleanup defect; preserve defects rather than wrapping them as recoverable transport errors.
 - Use `isTerminalAgentEvent` as the canonical protocol helper for `AgentEnd`/`AgentError`/`AgentAwaitingInput` checks.
 - Client durable-run helpers are transport-only: they follow NDJSON continuation chunks via run/tail headers, poll empty non-terminal chunks without advancing `startIndex`, require outbound `startIndex >= 0`, and do not own Workflow hook tokens, route auth, run ownership, or HITL request matching.
 - Client public helpers are Effect-native: stream helpers return `Stream`; `cancelAgentRun`, `collectAgentEvents`, `textFromBlob`, and `documentPartFromTextFile` return `Effect`; HTTP helpers accept `httpClientLayer`.

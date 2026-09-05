@@ -303,9 +303,7 @@ const idleReconnectMaxAttemptsEffect = (limit: number | undefined) => {
     : Effect.fail(invalidIdleReconnectMaxAttemptsError(limit))
 }
 
-const validateAgentRunIdleReconnectEffect = (
-  options: AgentRunIdleReconnectOptions | undefined
-) => {
+const validateAgentRunIdleReconnectEffect = (options: AgentRunIdleReconnectOptions | undefined) => {
   if (options === undefined) return Effect.void
 
   if (!Number.isSafeInteger(options.idleTimeoutMs) || options.idleTimeoutMs <= 0) {
@@ -565,7 +563,10 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
 
 const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
   Effect.gen(function* () {
-    const endpoint = yield* agentRunEndpointWithStartIndexEffect(request.endpoint, request.startIndex)
+    const endpoint = yield* agentRunEndpointWithStartIndexEffect(
+      request.endpoint,
+      request.startIndex
+    )
 
     const client = yield* HttpClient.HttpClient
     const response = yield* client
@@ -725,10 +726,14 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
         })
       )
 
-      yield* run().pipe(
-        Effect.catch(error => Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid))
+      yield* run()
+    }).pipe(
+      // Callback producers must settle their queue on defects too, without turning
+      // programmer failures into recoverable AgentTransportErrors.
+      Effect.onExit(exit =>
+        Exit.isFailure(exit) ? Queue.failCause(queue, exit.cause).pipe(Effect.asVoid) : Effect.void
       )
-    })
+    )
   )
 
 const abortSignalError = (signal: AbortSignal) =>
@@ -1063,8 +1068,8 @@ export const streamAgentEventStreamUntilTerminal = (
       )
       yield* Queue.end(queue).pipe(Effect.asVoid)
     }).pipe(
-      Effect.catch((error: AgentTransportError) =>
-        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      Effect.onExit(exit =>
+        Exit.isFailure(exit) ? Queue.failCause(queue, exit.cause).pipe(Effect.asVoid) : Effect.void
       )
     )
   )
@@ -1107,8 +1112,8 @@ export const streamAgentRunEventStreamUntilTerminal = (
       )
       yield* Queue.end(queue).pipe(Effect.asVoid)
     }).pipe(
-      Effect.catch((error: AgentTransportError) =>
-        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      Effect.onExit(exit =>
+        Exit.isFailure(exit) ? Queue.failCause(queue, exit.cause).pipe(Effect.asVoid) : Effect.void
       )
     )
   )
@@ -1122,12 +1127,12 @@ const streamAgentRunHitlResponseInitialChunk = (
   drainAgentEventStream({
     queue,
     stream: streamAgentRunHitlResponseEventStream({
-        ...request,
-        onResponse: response => {
-          setStartIndex(agentRunStreamStartIndexFromHeaders(response.headers))
-          request.onResponse?.(response)
-        }
-      }),
+      ...request,
+      onResponse: response => {
+        setStartIndex(agentRunStreamStartIndexFromHeaders(response.headers))
+        request.onResponse?.(response)
+      }
+    }),
     countOffset: 0,
     idleReconnect: request.idleReconnect,
     onEvent: request.onEvent
@@ -1170,8 +1175,8 @@ export const streamAgentRunHitlResponseEventStreamUntilTerminal = (
       )
       yield* Queue.end(queue).pipe(Effect.asVoid)
     }).pipe(
-      Effect.catch((error: AgentTransportError) =>
-        Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid)
+      Effect.onExit(exit =>
+        Exit.isFailure(exit) ? Queue.failCause(queue, exit.cause).pipe(Effect.asVoid) : Effect.void
       )
     )
   )
