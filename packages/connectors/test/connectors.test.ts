@@ -642,6 +642,9 @@ describe('@yolk-sdk/connectors', () => {
       'outlook.create_reply_draft',
       'outlook.send_mail',
       'outlook.send_draft',
+      'outlook.set_read',
+      'outlook.trash',
+      'outlook.untrash',
       'onedrive.list_items',
       'onedrive.search_items',
       'onedrive.get_item',
@@ -652,12 +655,18 @@ describe('@yolk-sdk/connectors', () => {
       MicrosoftConnector.actions
         .filter(action => action.access === 'write')
         .map(action => action.id)
-    ).toEqual(['outlook.create_draft', 'outlook.create_reply_draft', 'onedrive.create_folder'])
+    ).toEqual([
+      'outlook.create_draft',
+      'outlook.create_reply_draft',
+      'outlook.set_read',
+      'outlook.untrash',
+      'onedrive.create_folder'
+    ])
     expect(
       MicrosoftConnector.actions
         .filter(action => action.access === 'destructive')
         .map(action => action.id)
-    ).toEqual(['outlook.send_mail', 'outlook.send_draft', 'onedrive.delete_item'])
+    ).toEqual(['outlook.send_mail', 'outlook.send_draft', 'outlook.trash', 'onedrive.delete_item'])
     expect(NotionConnector.actions.map(action => action.id)).toEqual([
       'notion.search',
       'notion.get_page',

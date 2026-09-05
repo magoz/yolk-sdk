@@ -13,28 +13,28 @@
 
 ## Public model
 
-| Export area       | Purpose                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------ |
-| `connector`       | connector definition and action dispatch                                                         |
-| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                       |
-| `integration`     | configured invokable connector instance data                                                     |
-| `action`          | typed action definitions over Effect Schema                                                      |
-| `config`          | required/optional string config helpers for integration config                                   |
-| `credential`      | slots, bindings, host resolver service, runtime credential values                                |
-| `http`            | host-provided HTTP request/response port; not a connector                                        |
-| `result`          | value-level success/failure results for expected upstream failures                               |
-| `error`           | typed package/runtime failures                                                                   |
-| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                 |
-| `dropbox`         | Dropbox metadata/file-management actions plus OAuth slot constants                               |
-| `email`           | Portable IMAP reads/drafts, POP3 reads, and SMTP submission through a host email client          |
-| `figma`           | Figma remote MCP auth data action and OAuth constants                                            |
-| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                       |
-| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                        |
-| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants         |
-| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants |
-| `r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                                     |
-| `telegram`        | Telegram bot send/validate actions                                                               |
-| `todoist`         | Todoist project/task/label actions plus API token slot constants                                 |
+| Export area       | Purpose                                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `connector`       | connector definition and action dispatch                                                              |
+| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                            |
+| `integration`     | configured invokable connector instance data                                                          |
+| `action`          | typed action definitions over Effect Schema                                                           |
+| `config`          | required/optional string config helpers for integration config                                        |
+| `credential`      | slots, bindings, host resolver service, runtime credential values                                     |
+| `http`            | host-provided HTTP request/response port; not a connector                                             |
+| `result`          | value-level success/failure results for expected upstream failures                                    |
+| `error`           | typed package/runtime failures                                                                        |
+| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                      |
+| `dropbox`         | Dropbox metadata/file-management actions plus OAuth slot constants                                    |
+| `email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email client |
+| `figma`           | Figma remote MCP auth data action and OAuth constants                                                 |
+| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                            |
+| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                             |
+| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants              |
+| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants      |
+| `r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                                          |
+| `telegram`        | Telegram bot send/validate actions                                                                    |
+| `todoist`         | Todoist project/task/label actions plus API token slot constants                                      |
 
 ## Design rules
 
@@ -55,6 +55,8 @@
 - Generic attachment retrieval uses the incoming connection and credential through optional `EmailClient.getAttachment`, preserving existing host adapters. Hosts resolve metadata IDs and return decoded file bytes as `contentBase64`; the connector schema-validates successful host output before exposing it. Hosts own MIME parsing, size policy, storage, and scanning; POP3 may require fetching the whole UIDL-addressed message.
 - Keep incoming and SMTP credential slots separate. POP3 rejects folders and drafts. IMAP draft adapters generate MIME, `APPEND` with `\Draft`, and, when no folder is provided, discover an advertised `\Drafts` SPECIAL-USE mailbox with a host-defined fallback. SMTP acceptance means submission only, not delivery.
 - Preserve generic email port invariants in schemas: draft requests carry `EmailImapConnection`; folder names and draft IDs are branded non-empty values; UIDPLUS-derived opaque IDs include both UIDVALIDITY and UID.
+- Generic email `set_read`, `trash`, and `untrash` require IMAP and optional host `setRead`/`trash`/`untrash` methods; preserve old adapters and schema-validate successful outputs. Hosts own UID `STORE`/safe UID moves, `\Trash` discovery, and partial-move reconciliation; never blanket-expunge or fabricate destination IDs. Restore defaults to INBOX, not the original folder; moved IDs must use destination UIDVALIDITY/UID when known.
+- Outlook `set_read` uses Graph PATCH; `trash`/`untrash` use `/move` to Deleted Items/from Deleted Items. Restore defaults to inbox, not the original folder. Preserve immutable-ID headers, return the provider message, and reuse draft-write permission selection and application mailbox guards.
 - Microsoft actions use Microsoft Graph v1.0, not the retired Outlook REST endpoint, direct Exchange APIs, or legacy OneDrive endpoints. Outlook and OneDrive action-scoped slots share the `microsoft.oauth` binding id; hosts own OAuth authority/tenant selection and token lifecycle.
 - Outlook inputs default to `/me`; optional `mailbox` targets `/users/{id|userPrincipalName}` for Exchange Online mailboxes. Delegated mode selects `Mail.*.Shared`; integration config `mailboxAccessMode: 'application'` selects non-Shared application permission hints and requires `mailbox`. Exchange mailbox grants and application-token scoping remain host/admin policy.
 - Outlook attachment listing is metadata-only and includes inline attachments. File attachment retrieval requires Graph's file discriminator and validated `contentBytes`, then maps it to required `contentBase64`; item/reference attachments remain list-only metadata, and hosts own decoding, size policy, storage, and scanning.

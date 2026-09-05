@@ -144,6 +144,25 @@ export class OutlookMessageIdInput extends Schema.Class<OutlookMessageIdInput>(
   mailbox: Schema.optional(Schema.String)
 }) {}
 
+const OutlookNonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
+
+export class OutlookSetReadInput extends Schema.Class<OutlookSetReadInput>('OutlookSetReadInput')({
+  messageId: OutlookNonEmptyString,
+  mailbox: Schema.optional(OutlookNonEmptyString),
+  isRead: Schema.Boolean
+}) {}
+
+export class OutlookTrashInput extends Schema.Class<OutlookTrashInput>('OutlookTrashInput')({
+  messageId: OutlookNonEmptyString,
+  mailbox: Schema.optional(OutlookNonEmptyString)
+}) {}
+
+export class OutlookUntrashInput extends Schema.Class<OutlookUntrashInput>('OutlookUntrashInput')({
+  messageId: OutlookNonEmptyString,
+  mailbox: Schema.optional(OutlookNonEmptyString),
+  destinationFolderId: Schema.optional(OutlookNonEmptyString)
+}) {}
+
 export const OutlookAttachmentKind = Schema.Literals(['file', 'item', 'reference', 'unknown'])
 export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
 
@@ -869,6 +888,91 @@ export const outlookSendDraftAction = defineAction({
     })
 })
 
+const outlookMutateMessage = (input: {
+  readonly integration: ConnectorIntegration
+  readonly mailbox: string | undefined
+  readonly messageId: string
+  readonly operation: 'set_read' | 'trash' | 'untrash'
+  readonly body: { readonly isRead: boolean } | { readonly destinationId: string }
+}) =>
+  Effect.gen(function* () {
+    const slot = yield* outlookWriteSlot(input.integration, input.mailbox)
+    const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
+    const http = yield* ConnectorHttpClient
+    const mailboxPath = outlookMailboxPath(input.mailbox)
+    const collection =
+      input.operation === 'untrash' ? `${mailboxPath}/mailFolders/deleteditems` : mailboxPath
+    const suffix = input.operation === 'set_read' ? '' : '/move'
+    const response = yield* http.request(
+      ConnectorHttpRequest.make({
+        method: input.operation === 'set_read' ? 'PATCH' : 'POST',
+        url: `${microsoftGraphApiBaseUrl}${collection}/messages/${encodeURIComponent(input.messageId)}${suffix}`,
+        headers: outlookDraftWriteHeaders(token),
+        body: JSON.stringify(input.body)
+      })
+    )
+    if (!isMicrosoftSuccessStatus(response.status)) {
+      return yield* microsoftProviderFailure({
+        code: `outlook_${input.operation}_failed`,
+        message: `Microsoft Outlook ${input.operation} failed`,
+        status: response.status,
+        headers: response.headers,
+        body: response.body
+      })
+    }
+    const output = yield* decodeJsonResponse(OutlookMessage, response)
+    return ActionResult.success(output)
+  })
+
+export const outlookSetReadAction = defineAction({
+  id: 'outlook.set_read',
+  description: 'Mark an Outlook message read (isRead: true) or unread (isRead: false).',
+  access: 'write',
+  inputSchema: OutlookSetReadInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'set_read',
+      body: { isRead: input.isRead }
+    })
+})
+
+export const outlookTrashAction = defineAction({
+  id: 'outlook.trash',
+  description: 'Move an Outlook message to Deleted Items without permanently deleting it.',
+  access: 'destructive',
+  inputSchema: OutlookTrashInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'trash',
+      body: { destinationId: 'deleteditems' }
+    })
+})
+
+export const outlookUntrashAction = defineAction({
+  id: 'outlook.untrash',
+  description:
+    'Move an Outlook message from Deleted Items to destinationFolderId (default: inbox), not its original folder.',
+  access: 'write',
+  inputSchema: OutlookUntrashInput,
+  outputSchema: OutlookMessage,
+  execute: ({ integration, input }) =>
+    outlookMutateMessage({
+      integration,
+      mailbox: input.mailbox,
+      messageId: input.messageId,
+      operation: 'untrash',
+      body: { destinationId: input.destinationFolderId ?? 'inbox' }
+    })
+})
+
 export const outlookMailActions = [
   outlookListMessagesAction,
   outlookSearchMessagesAction,
@@ -878,5 +982,8 @@ export const outlookMailActions = [
   outlookCreateDraftAction,
   outlookCreateReplyDraftAction,
   outlookSendMailAction,
-  outlookSendDraftAction
+  outlookSendDraftAction,
+  outlookSetReadAction,
+  outlookTrashAction,
+  outlookUntrashAction
 ]

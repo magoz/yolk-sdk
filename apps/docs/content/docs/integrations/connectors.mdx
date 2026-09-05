@@ -7,19 +7,19 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 
 ## Summary
 
-| Connector       | Import                                 | Credential slots                             | Config keys                                        | Actions                            |
-| --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ---------------------------------- |
-| Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                  |
-| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management actions |
-| Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send             |
-| Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                   |
-| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions   |
-| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email             |
-| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph   |
-| Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions   |
-| Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL               |
-| Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                     |
-| Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions         |
+| Connector       | Import                                 | Credential slots                             | Config keys                                        | Actions                                    |
+| --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------ |
+| Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                          |
+| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management actions         |
+| Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state |
+| Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                           |
+| Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions           |
+| LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                     |
+| Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph           |
+| Notion          | `@yolk-sdk/connectors/notion`          | `NotionApiTokenSlot`                         | none                                               | Notion workspace/content actions           |
+| Cloudflare R2   | `@yolk-sdk/connectors/r2-storage`      | `R2AccessKeyIdSlot`, `R2SecretAccessKeySlot` | `endpoint`, `bucket`, `publicUrl` optional         | presigned upload URL                       |
+| Telegram        | `@yolk-sdk/connectors/telegram`        | `TelegramBotTokenSlot`                       | `chatId`                                           | send, validate                             |
+| Todoist         | `@yolk-sdk/connectors/todoist`         | `TodoistApiTokenSlot`                        | none                                               | project/task/label actions                 |
 
 ## Afloat
 
@@ -85,6 +85,9 @@ package does not bundle those libraries.
 | `email.get_attachment` | retrieve decoded attachment content as base64  | `read`        |
 | `email.create_draft`   | append a message draft to an IMAP mailbox      | `write`       |
 | `email.send_message`   | submit a normalized message to the SMTP server | `destructive` |
+| `email.set_read`       | mark an IMAP message read or unread            | `write`       |
+| `email.trash`          | move an IMAP message to trash                  | `destructive` |
+| `email.untrash`        | move an IMAP message out of trash              | `write`       |
 
 Incoming actions require `incomingHost` and use `EmailIncomingCredentialSlot`. They default to
 `incomingProtocol: 'imap'`, `incomingSecurity: 'tls'`, and port `993`; POP3 with TLS defaults to
@@ -124,6 +127,31 @@ return deterministic newest-first pages. Cursors are opaque and scoped to the in
 folder, and ordering; mailbox changes may invalidate them. SMTP input needs at least one recipient
 across `to`, `cc`, and `bcc`. `{ accepted: true }` confirms server submission acceptance only, not
 delivery.
+
+### Mark read/unread and move to/from trash
+
+These actions require IMAP and the incoming credential. POP3 is rejected before adapter calls;
+SMTP cannot manage mailbox state. Hosts opt in through optional `EmailClient.setRead`, `trash`,
+and `untrash` methods. Existing adapters remain compatible; invoking a missing method returns a
+typed validation error. All successful mutation outputs are schema-validated.
+
+- `email.set_read`: `{ messageId, isRead, folder? }`. Set `isRead` to `true` for read or `false`
+  for unread. The connector defaults `folder` to `INBOX`. Hosts add/remove only the `\Seen` flag
+  using UID `STORE`, preserving all other flags, and return `{ messageId, isRead }` after success.
+- `email.trash`: `{ messageId, folder?, trashFolder? }`. Source `folder` defaults to `INBOX`.
+  Hosts use `trashFolder` or discover a `\Trash` SPECIAL-USE mailbox with a host-configured fallback.
+- `email.untrash`: `{ messageId, folder?, destinationFolder? }`. Here `folder` is the source
+  trash mailbox; if omitted, hosts discover it. `destinationFolder` defaults to `INBOX`, **not**
+  the original folder. Supply an explicit destination to restore elsewhere.
+
+Hosts perform UID `MOVE` or a safe per-message copy/delete fallback. Never use blanket `EXPUNGE`,
+permanent deletion, or merely set `\Deleted` as a substitute for a trash move. Return a failure
+when trash discovery is missing/ambiguous, folders are identical, or a safe move is unavailable.
+Trash/untrash return `{ moved: true, folder, messageId? }` (`EmailMoveMessageOutput`), where `folder`
+is the destination and optional `messageId` identifies the moved message there. UIDPLUS mappings
+must include destination UIDVALIDITY and UID. If no reliable ID mapping exists, omit it and re-list
+the destination. Hosts own partial-move reconciliation; never blindly reuse a source UID or retry
+a potentially completed copy/delete.
 
 ## Google
 
@@ -281,17 +309,20 @@ required `Mail.*` and `Files.*` grants.
 
 ### Outlook actions
 
-| Action id                    | What it does                                               |
-| ---------------------------- | ---------------------------------------------------------- |
-| `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging   |
-| `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax |
-| `outlook.get_message`        | fetch one message with a text body                         |
-| `outlook.list_attachments`   | list attachment metadata, including inline attachments     |
-| `outlook.get_attachment`     | fetch one file attachment with base64 content              |
-| `outlook.create_draft`       | create a new message draft                                 |
-| `outlook.create_reply_draft` | create a reply draft for an existing message               |
-| `outlook.send_mail`          | submit a new message for sending                           |
-| `outlook.send_draft`         | submit an existing draft for sending                       |
+| Action id                    | What it does                                                 |
+| ---------------------------- | ------------------------------------------------------------ |
+| `outlook.list_messages`      | list mailbox or folder messages with opaque Graph paging     |
+| `outlook.search_messages`    | search messages with Microsoft Graph mail `$search` syntax   |
+| `outlook.get_message`        | fetch one message with a text body                           |
+| `outlook.list_attachments`   | list attachment metadata, including inline attachments       |
+| `outlook.get_attachment`     | fetch one file attachment with base64 content                |
+| `outlook.create_draft`       | create a new message draft                                   |
+| `outlook.create_reply_draft` | create a reply draft for an existing message                 |
+| `outlook.send_mail`          | submit a new message for sending                             |
+| `outlook.send_draft`         | submit an existing draft for sending                         |
+| `outlook.set_read`           | mark a message read or unread                                |
+| `outlook.trash`              | move a message to Deleted Items                              |
+| `outlook.untrash`            | move a message from Deleted Items to inbox or another folder |
 
 List and search outputs expose Graph's complete `@odata.nextLink` as `nextLink`. Pass it back
 unchanged; repeat `mailbox` for explicit-mailbox continuations and `folderId` for folder
@@ -307,6 +338,21 @@ Use `outlook.get_attachment` with a returned file attachment ID. It requires a G
 with valid base64 `contentBytes` and returns required `contentBase64`. Item and reference attachments
 remain available only as list metadata and are rejected by this action. Hosts own base64 decoding, size limits,
 durable storage, and content scanning.
+
+#### Read state and trash
+
+`outlook.set_read` accepts `{ messageId, isRead, mailbox? }`: `true` marks read and `false` marks
+unread via Graph `PATCH`. `outlook.trash` accepts `{ messageId, mailbox? }` and calls Graph `/move`
+with destination `deleteditems`, never permanent deletion. `outlook.untrash` accepts
+`{ messageId, mailbox?, destinationFolderId? }` and moves from Deleted Items to `inbox` by default,
+or the specified folder ID/well-known name. It neither infers the original folder nor recovers
+permanently deleted messages.
+
+All three return the updated `OutlookMessage` and request immutable IDs. Use the returned `id`
+for subsequent operations. Permission hints are `Mail.ReadWrite` for the signed-in mailbox and
+application mode, or `Mail.ReadWrite.Shared` for explicit delegated mailboxes. Application mode
+still requires `mailbox`; hosts own consent and Exchange grants. Read-state and restore actions
+have `write` access; trash has `destructive` access.
 
 Send actions return `{ accepted: true }` for Graph's `202 Accepted`. Acceptance confirms submission,
 not processing or delivery.
