@@ -28,7 +28,9 @@ After successful release prep:
 
 ## Agent release-prep flow
 
-Use for canary/stable prep. This does not publish.
+Use for canary/stable prep only after the readiness audits in [package-release](../SKILL.md)
+pass and any documentation/code/changeset fixes have landed on `main`. The parent runs this
+from a clean release-prep checkout; audit children never run it. This does not publish.
 
 ```bash
 pnpm changeset:version
@@ -42,6 +44,9 @@ pnpm lint
 pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
+
+If readiness work touched `apps/docs`, also run `pnpm docs:check` and `pnpm build:docs`, serially
+with `pnpm tsc`. Do not repeat the suite per auditor.
 
 Then inspect, commit, push after explicit approval.
 

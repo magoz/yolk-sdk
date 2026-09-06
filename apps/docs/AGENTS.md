@@ -10,7 +10,7 @@ Private Fumadocs/Next site for public `@yolk-sdk/*` package documentation.
 
 ## Content rules
 
-- Follow `.agents/skills/docs-sync/SKILL.md` for the canonical audit, writing, discovery-page, and validation workflow.
+- Follow `.agents/skills/package-release/references/docs-site.md` for the canonical audit, writing, discovery-page, and validation workflow; documentation-only work does not authorize versioning or publishing.
 - Lead with the smallest runnable path; keep architecture and reference details secondary.
 - Use real exported symbols and descriptive host-owned placeholders; never invent imports.
 - Keep auth, storage, DB, credentials, UI, deployment, and policy clearly host-owned.

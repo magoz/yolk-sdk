@@ -1,32 +1,29 @@
----
-name: docs-sync
-description: Audits and updates Yolk docs after code changes. Use when package exports, runtime semantics, integrations, examples, or docs content may drift.
----
+# Docs Site
 
-# Docs Sync
-
-Use this skill to keep `apps/docs` aligned with actual Yolk package code and examples.
+Reference for the docs-site phase of [package-release](../SKILL.md).
+Keep `apps/docs` aligned with actual Yolk package code and examples. Auditors return findings
+only; the parent applies approved fixes and runs validation.
 
 This is a deep public-docs drift workflow. It verifies code reality first, maps changed surfaces to
 docs, updates docs surgically, and validates the docs site plus relevant repo checks.
 
-- Use `package-docs` for package README and package-local documentation.
+- Use [package-documentation.md](./package-documentation.md) for package README and package-local documentation.
 - Use `learn` to capture durable contributor knowledge from the current session.
 - Use `tidy` for broad AGENTS/pattern hierarchy cleanup.
 
 ## In This Skill
 
-| File                                                 | Purpose                     |
-| ---------------------------------------------------- | --------------------------- |
-| [references/checklist.md](./references/checklist.md) | Full audit/update checklist |
-| [references/doc-map.md](./references/doc-map.md)     | Changed-code → docs mapping |
+| File                                               | Purpose                     |
+| -------------------------------------------------- | --------------------------- |
+| [docs-site-checklist.md](./docs-site-checklist.md) | Full audit/update checklist |
+| [docs-site-map.md](./docs-site-map.md)             | Changed-code → docs mapping |
 
 ## Modes
 
 | User intent                            | Behavior                                          |
 | -------------------------------------- | ------------------------------------------------- |
 | “audit docs”, “what’s stale?”          | Read-only audit; return gaps and file-level plan. |
-| “sync docs”, “update docs”, “fix docs” | Audit, edit docs, validate.                       |
+| “sync docs”, “update docs”, “fix docs” | Audit, parent edits docs, parent validates.       |
 | ambiguous                              | Ask whether to audit only or edit.                |
 
 ## Quick Start
@@ -36,14 +33,14 @@ docs, updates docs surgically, and validates the docs site plus relevant repo ch
    - root `AGENTS.md`
    - package-local `packages/*/AGENTS.md` for changed packages
 
-2. Establish the requested comparison scope, then inspect it:
+2. Use the parent's shared base/target SHAs and approved working-tree scope, then inspect it:
    - `git status --short`
    - `git diff --stat`
    - `git diff --name-only`
    - recent commits only if needed for context
    - do not attribute unrelated pre-existing working-tree changes to the requested docs sync
 
-3. Map changed code to docs with [doc-map.md](./references/doc-map.md).
+3. Map changed code to docs with [docs-site-map.md](./docs-site-map.md).
 
 4. Verify source of truth before editing:
    - package `package.json` exports and `publishConfig.exports`
@@ -64,7 +61,8 @@ docs, updates docs surgically, and validates the docs site plus relevant repo ch
 
 ## Required Validation
 
-Always run after docs edits:
+Parent runs after docs edits, once rather than per auditor. Run docs check/build and root
+`pnpm tsc` serially because they regenerate shared docs types:
 
 ```bash
 pnpm docs:check
@@ -100,13 +98,13 @@ pnpm test:run            # broad behavioral docs or test-backed examples
 
 ## Reading Order
 
-| Task                           | Files                                                                        |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| Quick docs drift audit         | SKILL.md → checklist.md                                                      |
-| Package API change             | SKILL.md → doc-map.md → checklist.md → package-docs skill if README affected |
-| Provider/connector change      | SKILL.md → doc-map.md → relevant package source/tests                        |
-| Workflow/runtime change        | SKILL.md → doc-map.md → tests/source → docs pages                            |
-| Docs philosophy/process update | SKILL.md → apps/docs/AGENTS.md                                               |
+| Task                           | Files                                                                                   |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| Quick docs drift audit         | docs-site.md → docs-site-checklist.md                                                   |
+| Package API change             | docs-site-map.md → docs-site-checklist.md → package-documentation.md if README affected |
+| Provider/connector change      | docs-site-map.md → relevant package source/tests                                        |
+| Workflow/runtime change        | docs-site-map.md → tests/source → docs pages                                            |
+| Docs philosophy/process update | docs-site.md → apps/docs/AGENTS.md                                                      |
 
 ## Output Format
 

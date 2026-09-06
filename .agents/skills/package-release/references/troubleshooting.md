@@ -120,7 +120,8 @@ Fix:
 
 - Stop before committing.
 - Inspect `git status` and diffs.
-- Commit only release files: package versions, changelogs, lockfile, `.changeset/pre.json`, and intentional release workflow/docs changes.
+- Commit only generated release files: package versions, changelogs, lockfile, consumed changesets, and `.changeset/pre.json`.
+- Land workflow/docs/code fixes separately before release prep; do not mix them into the release PR.
 - Never commit env files or generated outputs.
 - Ask user to approve the exact commit scope.
 

@@ -1,6 +1,7 @@
-# Docs sync checklist
+# Docs Site Checklist
 
-Use this checklist for thorough drift detection and update work.
+Use this checklist for the docs-site readiness audit in [package-release](../SKILL.md).
+Auditors report gaps; the parent owns edits and validation.
 
 ## 1. Scope the change
 
@@ -92,6 +93,8 @@ Workflow/runtime changes require:
 - troubleshooting/migration
 
 ## 6. Validation matrix
+
+Parent-run only. Run docs checks/builds and root `pnpm tsc` serially; do not repeat in audit children.
 
 | Change                  | Commands                                                      |
 | ----------------------- | ------------------------------------------------------------- |

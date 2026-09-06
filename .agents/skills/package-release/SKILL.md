@@ -1,26 +1,98 @@
 ---
 name: package-release
-description: Manage Yolk package releases via GitHub Actions. Use for @yolk-sdk canary/stable version bumps, Changesets release notes, validation, and publish workflow prep.
+description: Prepare and release @yolk-sdk packages end to end. Use for release-readiness audits, package README and docs-site updates, Changesets coverage, canary/stable versioning, validation, and approved GitHub Actions publishing.
 ---
 
 # Package Release
 
-Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
+One entry point for Yolk public npm package releases under `@yolk-sdk/*`, including package
+READMEs, public docs-site readiness, and release notes. The parent owns orchestration, edits,
+versioning, validation, and approval gates; subagents audit independently.
+
+Read `patterns/PACKAGE_DISTRIBUTION.md` and relevant owner `AGENTS.md` files first.
+A request to audit or update docs is not permission to version, commit, push, or publish.
 
 ## In This Skill
 
-| File                                                             | Purpose                          |
-| ---------------------------------------------------------------- | -------------------------------- |
-| [references/versioning.md](./references/versioning.md)           | SemVer, canary, Changesets rules |
-| [references/publishing.md](./references/publishing.md)           | GitHub Actions publish flow      |
-| [references/troubleshooting.md](./references/troubleshooting.md) | Common release failures          |
+| File                                                                           | Purpose                                        |
+| ------------------------------------------------------------------------------ | ---------------------------------------------- |
+| [references/package-documentation.md](./references/package-documentation.md)   | Package README workflow and boundaries         |
+| [references/package-docs-checklist.md](./references/package-docs-checklist.md) | Package documentation audit                    |
+| [references/readme-template.md](./references/readme-template.md)               | README structure and package-specific guidance |
+| [references/docs-site.md](./references/docs-site.md)                           | Public docs-site workflow and writing rules    |
+| [references/docs-site-checklist.md](./references/docs-site-checklist.md)       | Docs drift and discovery audit                 |
+| [references/docs-site-map.md](./references/docs-site-map.md)                   | Changed-code → docs mapping                    |
+| [references/versioning.md](./references/versioning.md)                         | SemVer, canary, Changesets rules               |
+| [references/publishing.md](./references/publishing.md)                         | GitHub Actions publish flow                    |
+| [references/troubleshooting.md](./references/troubleshooting.md)               | Common release failures                        |
 
-## Quick Start
+## Workflow
+
+```text
+Scope → parallel audits → parent fixes → version → validate → approval → publish → verify
+```
+
+### 1. Scope
+
+- Confirm intent: audit only, docs update only, dry run, canary prep, or explicitly approved stable.
+- Audit-only is read-only. Docs-only stops after edits and relevant validation. Dry run checks
+  readiness and existing artifacts without versioning, committing, pushing, or publishing.
+- Record `git status --short`, target commit SHA, release channel, and comparison base before work.
+  Inspect staged, unstaged, and untracked files separately; exclude unrelated pre-existing changes.
+- Use the latest release tag reachable from the target commit, not the highest tag on another branch.
+  If no tag exists, use the previous release-prep commit or agree an explicit initial-release scope.
+- Give every auditor the same base/target SHAs, changed-file list, approved working-tree scope,
+  and relevant owner docs. Freeze that scope while audits run.
+
+### 2. Parallel readiness audits
+
+Discover available subagents first (in Pi, `subagent({ action: "list" })`); use only executable,
+non-disabled read-only reviewers with fresh context. Run these three tasks in parallel:
+
+| Audit                 | References to read                                                                                             | Required result                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Package documentation | `references/package-documentation.md`, `references/package-docs-checklist.md`, `references/readme-template.md` | README/import/subpath/host-boundary gaps verified against manifests and source                |
+| Docs site             | `references/docs-site.md`, `references/docs-site-checklist.md`, `references/docs-site-map.md`                  | Missing/stale guides, catalogs, API reference, migration and troubleshooting pages            |
+| Changeset coverage    | `references/versioning.md`, `.changeset/config.json`, `.changeset/pre.json` when present, pending changesets   | User-facing changes missing from notes, inaccurate notes, lockstep coverage and bump concerns |
+
+Resolve `references/*` paths relative to this skill directory; other repo paths are root-relative.
+Pass each child its audit assignment and resolved reference paths, not a mandate to execute the
+whole release skill. Children must not edit project files, run builds/versioning, commit, push,
+publish, or spawn more agents. Return findings through the response or distinct temporary
+artifacts outside the repo. Ask for:
+
+- scope inspected and source/test evidence with file references
+- concrete gaps and proposed file-level fixes, or an explicit no-gaps result
+- required validation and unresolved questions
+
+Wait for all three results before editing or advancing. A failed or incomplete audit is not a
+pass: retry it or complete it in the parent. If delegation is unavailable or the user declines it,
+run the same three audits sequentially and report that fallback.
+
+### 3. Reconcile and fix
+
+For audit-only or dry run, report readiness findings without applying fixes. The following edits
+apply only to docs-update or release-prep requests.
+
+- Parent verifies findings against code/tests, resolves overlaps, and applies the smallest fixes as
+  the sole writer. Never change implementation merely to make documentation true.
+- Escalate unapproved API, scope, or release-channel decisions to the user.
+- Add or repair user-facing changesets before versioning; preserve lockstep release-note coverage.
+- Recheck affected audit findings after fixes. If target/scope changes materially, refresh the audits.
+- Documentation/code/changeset fixes belong in feature/docs PRs and must land on `main` before a
+  separate generated-only release-prep PR. Stop for explicit commit/push/merge approval as needed;
+  do not mix readiness fixes into release bookkeeping or create a worktree without a request.
+- For audit-only, report findings and stop. For docs-only or dry run, perform only the requested
+  work and applicable validation, then stop. Read-only audit findings do not authorize fixes.
+
+### 4. Prepare, validate, and publish
+
+Proceed only after readiness gaps are resolved and the release-prep checkout is clean. The parent
+runs the following steps; do not delegate mutation or approval gates to audit children.
 
 1. Confirm release intent.
    - Canary: prerelease testing, default for now.
    - Stable: only after explicit user approval.
-   - Dry run: validate artifacts only; never publish.
 
 2. Inspect release state.
    - Check `.changeset/config.json`.
@@ -28,22 +100,11 @@ Use this skill for Yolk public npm package releases under `@yolk-sdk/*`.
    - Check pending changesets in `.changeset/*.md`.
    - Check public package manifests in `packages/*/package.json`.
 
-3. Ensure release notes exist.
-   - Add or update `.changeset/*.md` before versioning.
-   - Cover all public packages for lockstep release notes.
-   - Keep notes concise, user-facing, and accurate.
-   - If writing notes from repo history, compare from latest release tag.
-
-```bash
-git fetch --tags
-base=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-if [ -n "$base" ]; then
-  git log --oneline "${base}..HEAD"
-  git diff --stat "${base}..HEAD" -- packages
-else
-  git log --oneline -20
-fi
-```
+3. Confirm audited release notes are present.
+   - Pending changesets cover all public packages for lockstep release notes.
+   - Notes are concise, user-facing, and accurate for the agreed comparison scope.
+   - If notes need changes, return to phase 3 and land fixes separately before versioning.
+   - See [versioning.md](./references/versioning.md) for history comparison and Changesets rules.
 
 4. Use fixed lockstep public package versioning.
    - Public scope: `@yolk-sdk/*` in `packages/*`.
@@ -108,7 +169,8 @@ if (unpublishedPackages.length === 0) console.log('all packages already publishe
 NODE
 ```
 
-7. Validate before push/action.
+7. Validate the final release files before push/action. Run the suite once in the parent, not
+   once per auditor. Earlier feature/docs fixes still require their own pre-merge checks.
 
 ```bash
 pnpm packages:build
@@ -122,9 +184,14 @@ pnpm test:run
 pnpm --filter @yolk-sdk/vercel-workflows test:workflow
 ```
 
+If readiness work touched `apps/docs`, also run `pnpm docs:check` and `pnpm build:docs`.
+Run docs check/build and `pnpm tsc` serially: they regenerate shared docs types.
+If `.agents/skills/**` changed, run `pnpm skillset:build`, inspect the documented generated
+Cloudflare fallback, and run `pnpm cloudflare:check`.
+
 8. Do not proceed if validation fails.
-   - Fix package manifests, exports, deps, or tests first.
-   - Re-run full validation.
+   - Return code/docs fixes to phase 3 and land them separately; do not mix them into release prep.
+   - Re-run full validation on the corrected release candidate.
 
 9. Commit and push release prep only after explicit approval.
    - Inspect `git status` and changed files.
@@ -206,9 +273,20 @@ Yolk should mirror Effect + MCP SDK:
 
 ## Reading Order
 
-| Task           | Files                         |
-| -------------- | ----------------------------- |
-| Decide version | SKILL.md → versioning.md      |
-| Publish canary | SKILL.md → publishing.md      |
-| Add CI release | SKILL.md → publishing.md      |
-| Debug failure  | SKILL.md → troubleshooting.md |
+| Task                    | Files                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| Audit release readiness | SKILL.md → three audit assignments above                                             |
+| Update package READMEs  | SKILL.md → package-documentation.md → package-docs-checklist.md → readme-template.md |
+| Update public docs site | SKILL.md → docs-site.md → docs-site-checklist.md → docs-site-map.md                  |
+| Decide version          | SKILL.md → versioning.md                                                             |
+| Publish canary          | SKILL.md → publishing.md                                                             |
+| Add CI release          | SKILL.md → publishing.md                                                             |
+| Debug failure           | SKILL.md → troubleshooting.md                                                        |
+
+## Report
+
+- Comparison base/target and mode.
+- Audit findings resolved, remaining blockers, and audit artifact paths when used.
+- Files changed and validation commands/results.
+- Version/channel and next approval needed; after publishing, workflow URL and package/tag verification.
+- Do not describe preparation or an approved dispatch as a successful publish.
