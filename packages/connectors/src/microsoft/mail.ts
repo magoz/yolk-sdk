@@ -1,4 +1,4 @@
-import { Chunk, Effect } from 'effect'
+import { Chunk, Effect, SchemaTransformation } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { optionalStringConfig } from '../config.ts'
@@ -104,25 +104,59 @@ export class OutlookMessage extends Schema.Class<OutlookMessage>('OutlookMessage
   webLink: Schema.optional(Schema.String)
 }) {}
 
+// Models use null/blank placeholders for absent read options. Normalize at
+// decoding, not in URL construction; never trim or rewrite a real cursor.
+const OptionalOutlookReadString = Schema.optional(
+  Schema.NullOr(Schema.String).pipe(
+    Schema.decodeTo(
+      Schema.UndefinedOr(Schema.String),
+      SchemaTransformation.transform({
+        decode: value => (value === null || value.trim() === '' ? undefined : value),
+        encode: value => value ?? null
+      })
+    )
+  )
+)
+
+const OptionalOutlookPageSize = Schema.optional(
+  Schema.NullOr(OutlookPageSize).pipe(
+    Schema.decodeTo(
+      Schema.UndefinedOr(OutlookPageSize),
+      SchemaTransformation.transform({
+        decode: value => value ?? undefined,
+        encode: value => value ?? null
+      })
+    )
+  )
+)
+
+const outlookReadPaginationFields = {
+  mailbox: OptionalOutlookReadString.annotate({
+    description: 'Mailbox address or ID. Omit or use null for the connected user.'
+  }),
+  folderId: OptionalOutlookReadString.annotate({
+    description: 'Folder ID or well-known name. Omit or use null to read the entire mailbox.'
+  }),
+  top: OptionalOutlookPageSize,
+  nextLink: OptionalOutlookReadString.annotate({
+    description:
+      'Omit or use null for the first page. For another page, copy nextLink from the previous result unchanged and keep the same mailbox and folderId. Do not invent a URL.'
+  })
+}
+
 export class OutlookListMessagesInput extends Schema.Class<OutlookListMessagesInput>(
   'OutlookListMessagesInput'
 )({
-  mailbox: Schema.optional(Schema.String),
-  folderId: Schema.optional(Schema.String),
-  top: Schema.optional(OutlookPageSize),
-  filter: Schema.optional(Schema.String),
-  orderBy: Schema.optional(Schema.String),
-  nextLink: Schema.optional(Schema.String)
+  ...outlookReadPaginationFields,
+  filter: OptionalOutlookReadString,
+  orderBy: OptionalOutlookReadString
 }) {}
 
 export class OutlookSearchMessagesInput extends Schema.Class<OutlookSearchMessagesInput>(
   'OutlookSearchMessagesInput'
 )({
   query: Schema.String,
-  mailbox: Schema.optional(Schema.String),
-  folderId: Schema.optional(Schema.String),
-  top: Schema.optional(OutlookPageSize),
-  nextLink: Schema.optional(Schema.String)
+  ...outlookReadPaginationFields
 }) {}
 
 export class OutlookListMessagesOutput extends Schema.Class<OutlookListMessagesOutput>(
