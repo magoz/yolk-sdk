@@ -368,6 +368,12 @@ mailbox also requires Exchange **Send As** or **Send on Behalf** rights; targeti
 or admin policy, such as Exchange Online RBAC for Applications. Hosts own Entra app registration,
 tenant/authority selection, OAuth callbacks, refresh, credential storage, and consent.
 
+`outlook.search_messages` and `outlook.list_messages` accept omitted, `null`, or blank optional
+string inputs (`mailbox`, `folderId`, `nextLink`, plus list `filter`/`orderBy`) as absent. `top`
+accepts omission or `null` for the provider default; explicit values must be integers from 1 to 1000. Decoding normalizes these placeholders to `undefined`, while preserving non-blank values
+unchanged. Search still requires a string `query`, and application access still requires an
+explicit non-blank `mailbox`. This applies to direct connector calls and generated agent tools.
+
 Pass Outlook Graph `@odata.nextLink` values back through `nextLink` unchanged. Repeat `mailbox` for
 an explicit mailbox continuation and `folderId` for a folder continuation. The connector only
 accepts global Graph v1.0 links for the selected mailbox and folder collection. `outlook.get_message`
