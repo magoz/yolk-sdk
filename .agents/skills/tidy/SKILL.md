@@ -23,7 +23,8 @@ Tidy:
 
 Do not tidy source code unless docs require tiny path/config updates. For implementation fixes, use
 the `conform` skill. For knowledge captured from the current session, use the `learn` skill. For
-public `apps/docs` drift after code changes, use the `docs-sync` skill.
+public `apps/docs` drift, use the docs-site phase of `package-release`
+(`.agents/skills/package-release/references/docs-site.md`).
 
 ## Arguments
 
@@ -73,12 +74,8 @@ Read first:
 
 If package/release/docs hierarchy changed, also read relevant project skills:
 
-- `.agents/skills/package-docs/SKILL.md`
-- `.agents/skills/package-docs/references/*.md`
 - `.agents/skills/package-release/SKILL.md`
-- `.agents/skills/package-release/references/*.md`
-- `.agents/skills/docs-sync/SKILL.md`
-- `.agents/skills/docs-sync/references/*.md`
+- `.agents/skills/package-release/references/*.md` (release, package README, and docs-site phases)
 - `.agents/skills/tidy/SKILL.md`
 - `.agents/skills/conform/SKILL.md`
 - `.agents/skills/learn/SKILL.md`

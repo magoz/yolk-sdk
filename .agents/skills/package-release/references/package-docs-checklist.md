@@ -1,6 +1,7 @@
 # Package Docs Audit Checklist
 
-Use this checklist before npm canaries and after package API changes.
+Use this checklist for the package-documentation readiness audit in [package-release](../SKILL.md).
+Auditors report gaps; the parent owns edits and validation.
 
 ## Package README coverage
 
@@ -67,9 +68,11 @@ First Alpha
 Planned Changesets
 ```
 
-Use `grep` tool, not shell grep, for content searches.
+Use the harness's content-search tool (`rg` in Pi) for content searches.
 
 ## Validation commands
+
+Parent-run only; do not repeat these in audit children.
 
 For package docs that affect public imports/examples:
 
@@ -90,6 +93,7 @@ For pure wording-only docs:
 ```bash
 pnpm tsc
 pnpm lint
+pnpm packages:check # when packages/* changed
 ```
 
 ## Common failures

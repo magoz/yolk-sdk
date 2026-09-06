@@ -76,20 +76,23 @@ Expected `.changeset/config.json` traits:
 
 ## Release-note source
 
-Prefer writing changeset notes from git history since last release tag:
+Use the parent's shared comparison base/target from [package-release](../SKILL.md).
+For the default release scope, inspect history since the latest reachable release tag:
 
 ```bash
 git fetch --tags
-base=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
+target=$(git rev-parse HEAD)
+base=$(git describe --tags --match 'v[0-9]*' --abbrev=0 "$target" 2>/dev/null || true)
 if [ -n "$base" ]; then
-  git log --oneline "${base}..HEAD"
-  git diff --stat "${base}..HEAD" -- packages
+  git log --oneline "${base}..${target}"
+  git diff --stat "${base}..${target}" -- packages
 else
-  git log --oneline -20
+  printf '%s\n' 'No reachable release tag; establish an explicit comparison base before auditing.'
 fi
 ```
 
-If no tags exist yet, use the previous `prepare canary release` commit as base and note that tags start after next publish.
+If no tag is reachable, use the previous release-prep commit or agree an explicit initial-release
+scope. Audit children use the supplied SHAs; they do not fetch tags or select a different base.
 
 ## Release PR rules
 

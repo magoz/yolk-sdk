@@ -1,18 +1,15 @@
----
-name: package-docs
-description: Maintain Yolk package documentation. Use when adding/updating package READMEs, public subpaths, package boundaries, host responsibilities, or release-readiness docs.
----
+# Package Documentation
 
-# Package Docs
-
-Use this skill for public `@yolk-sdk/*` package documentation and package knowledge hygiene.
+Reference for the package-documentation phase of [package-release](../SKILL.md).
+Audit public `@yolk-sdk/*` READMEs and package knowledge against code reality. Auditors return
+findings only; the parent applies approved fixes and runs validation.
 
 ## In This Skill
 
-| File                                                             | Purpose                                         |
-| ---------------------------------------------------------------- | ----------------------------------------------- |
-| [references/readme-template.md](./references/readme-template.md) | Package README structure and examples           |
-| [references/audit-checklist.md](./references/audit-checklist.md) | Release-readiness and stale-doc audit checklist |
+| File                                                     | Purpose                                         |
+| -------------------------------------------------------- | ----------------------------------------------- |
+| [readme-template.md](./readme-template.md)               | Package README structure and examples           |
+| [package-docs-checklist.md](./package-docs-checklist.md) | Release-readiness and stale-doc audit checklist |
 
 ## Quick Start
 
@@ -46,25 +43,10 @@ Use this skill for public `@yolk-sdk/*` package documentation and package knowle
    - `patterns/PACKAGE_DISTRIBUTION.md` package/release policy.
    - `scripts/AGENTS.md` if package docs/check scripts change.
 
-5. Validate after edits.
-
-```bash
-pnpm packages:build
-pnpm packages:publint
-pnpm packages:smoke
-pnpm packages:check
-pnpm cloudflare:check
-pnpm tsc
-pnpm lint
-pnpm test:run
-```
-
-For docs-only edits, at minimum run:
-
-```bash
-pnpm tsc
-pnpm lint
-```
+5. Parent validates after edits, not each auditor.
+   - Full release prep: use the suite in [package-release](../SKILL.md).
+   - Docs-only: `pnpm tsc`, `pnpm lint`, and `pnpm packages:check` when `packages/*` changed.
+   - For public import/example changes, also use the [audit validation checklist](./package-docs-checklist.md).
 
 ## Documentation Boundaries
 
@@ -79,8 +61,8 @@ pnpm lint
 
 ## Reading Order
 
-| Task                   | Files                                                           |
-| ---------------------- | --------------------------------------------------------------- |
-| Create README          | SKILL.md → readme-template.md                                   |
-| Audit all packages     | SKILL.md → audit-checklist.md                                   |
-| Fix stale release docs | SKILL.md → audit-checklist.md → package-release skill if needed |
+| Task                   | Files                                                |
+| ---------------------- | ---------------------------------------------------- |
+| Create README          | package-documentation.md → readme-template.md        |
+| Audit all packages     | package-documentation.md → package-docs-checklist.md |
+| Fix stale release docs | package-docs-checklist.md → publishing.md            |

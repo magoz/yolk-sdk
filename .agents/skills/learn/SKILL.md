@@ -13,8 +13,8 @@ This is a focused maintenance skill, not a broad documentation audit:
 - Use `learn` to preserve verified discoveries from current work.
 - Use `tidy` to audit stale, duplicated, or misplaced knowledge across the repo.
 - Use `conform` to change implementation code.
-- Use `package-docs` for package READMEs and package-local documentation.
-- Use `docs-sync` to align the public `apps/docs` site with package code and examples.
+- Use the documentation phases of `package-release` for package READMEs and public `apps/docs`
+  alignment with package code and examples; docs-only requests do not authorize release actions.
 
 ## Core principles
 
@@ -54,8 +54,8 @@ capture.
 | Next app-owned implementation constraints              | Nearest `examples/next/**/AGENTS.md`                          |
 | Docs app, Cloudflare app, scripts, lint implementation | Nearest owner `AGENTS.md`                                     |
 | Reusable agent workflow instructions                   | `.agents/skills/<name>/SKILL.md`                              |
-| Package README and package-local docs                  | `package-docs` skill                                          |
-| Public guides, integrations, and API reference         | `docs-sync` skill                                             |
+| Package README and package-local docs                  | `package-release/references/package-documentation.md`         |
+| Public guides, integrations, and API reference         | `package-release/references/docs-site.md`                     |
 
 `.repos/*` contains gitignored, read-only references. Never document reference-repo behavior as a
 Yolk contract unless Yolk code or owner docs adopt it explicitly.
@@ -123,8 +123,10 @@ Do not scan every `AGENTS.md` by default. A repo-wide hierarchy/staleness audit 
 - Put Next-only behavior under `examples/next`, never in root patterns.
 - Put Cloudflare, docs-app, script, and lint behavior with those owners.
 - Put reusable agent workflow instructions in `.agents/skills`.
-- Route package README/import/host-responsibility documentation through `package-docs`.
-- Route public guides, integration catalogs, and API reference drift through `docs-sync`.
+- Route package README/import/host-responsibility documentation through `package-release`'s
+  `references/package-documentation.md`.
+- Route public guides, integration catalogs, and API reference drift through `package-release`'s
+  `references/docs-site.md`.
 
 When one learning affects multiple layers, keep the detailed rule at the narrow owner and add only a
 short pointer at broader layers when discoverability requires it.
@@ -167,7 +169,7 @@ Final response:
 - owner files changed
 - existing duplicate/stale statement corrected, if any
 - checks run and results
-- follow-up `tidy`, `package-docs`, `docs-sync`, or implementation work, if needed
+- follow-up `tidy`, `package-release` documentation phases, or implementation work, if needed
 
 If nothing qualifies, report: `Nothing durable to capture from this session.`
 
