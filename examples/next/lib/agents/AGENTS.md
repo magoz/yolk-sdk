@@ -46,8 +46,9 @@ App-owned provider/runtime glue over the domain-free `packages/*` agent stack.
 - Text/Workflow/Cloudflare runtimes pass protocol transcripts with message envelopes intact; package providers render envelopes through protocol helpers.
 - Next/Workflow/Cloudflare text runtimes expose package `question` HITL; Next/Workflow also expose package `subagent` for top-level delegation.
 - Subagent types are `general` and `explore` in `workflow-runtime/text-response.ts`; children run non-HITL text tools without `question` or `subagent`, because nested HITL resume and recursive delegation are disabled in v1.
-- Subagent results include structured metadata for status, timing, model, ids, usage/turns, and typed failures. Workflow tool steps add child usage to cumulative durable usage.
+- Subagent results include structured metadata for status, timing, model, ids, usage/turns, and typed failures. Workflow foreground tool results add child usage once; background status/wait observations do not re-charge it.
 - Parallel delegation requires multiple `subagent` calls in the same assistant turn; `parallel_tool_calls: true` is a hint.
+- Workflow children execute as independent durable runs (foreground by default, optional background); host registry/Stop/ownership policy is documented in `workflow-runtime/AGENTS.md`.
 - Workflow text runtime exposes run id in Activity; replay uses `GET /api/agent/workflow/:runId`; HITL resume posts one response; stop calls `DELETE`.
 - Realtime voice seeds current protocol transcript via `conversation.item.create`; hold-to-speak routes use OpenAI speech adapters and the normal text runtime. TTS and realtime are mutually exclusive in the UI.
 

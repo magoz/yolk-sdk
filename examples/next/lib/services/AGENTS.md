@@ -76,3 +76,11 @@ examples/next/lib/services/[service-name]/
 - [ ] HTTP uses injectable `HttpClient` layer when external
 - [ ] Public methods have spans and useful annotations
 - [ ] AppLayer updated only if app code needs direct service access
+
+## Agent Workflow registry
+
+`agent-workflow/live-layer.ts` owns the bounded `agentWorkflowRun` JSON registry. Mutations lock
+the parent row so reservation/admission/Stop serialize atomically; pure transitions are shared
+with DB-free behavioral tests. `read-child.ts` performs owned short platform status reads,
+`stop.ts` preserves the tombstone and exposes incomplete sweeps, and `policy.ts` is safe for
+Workflow orchestration imports. No DB operations are needed for these fake tests.

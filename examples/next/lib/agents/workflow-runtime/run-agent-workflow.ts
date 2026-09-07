@@ -1,497 +1,223 @@
-import { createHook, getWorkflowMetadata, getWritable } from 'workflow'
-import { Cause, Effect, Ref, Result, Stream } from 'effect'
-import * as Schema from 'effect/Schema'
+import { createHook, sleep } from 'workflow'
+import { start } from 'workflow/api'
 import {
-  makeDurableAgentEventSequencerState,
+  awaitWorkflowChild,
+  orchestrateWorkflowToolBatch,
   runVercelAgentWorkflow,
-  writeDurableAgentEvent,
-  type SerializableWorkflowState,
-  type VercelAgentWorkflowModelStepResult,
+  type VercelAgentWorkflowToolBatchStepInput,
   type VercelAgentWorkflowToolBatchStepResult
 } from '@yolk-sdk/vercel-workflows'
 import {
-  addAgentUsage,
-  AgentEnd,
-  AgentError,
-  AgentUsage,
-  AssistantMessageEvent,
-  AgentMessage,
-  AgentAwaitingInput,
-  ToolCall,
-  HitlRequest,
-  HitlResponse,
-  ToolInputEnd,
-  ToolResultMessage,
-  TurnEnd,
-  UsageUpdate,
-  type AgentEvent,
-  zeroAgentUsage
-} from '@yolk-sdk/agent/protocol'
-import { runModelTurn, runToolBatch } from '@yolk-sdk/agent/loop'
-import { AppLayer } from '@/lib/layers'
-import { reportError } from '@/lib/services/telemetry/report-error'
+  maxChildWorkflowTurns,
+  workflowToolConcurrency
+} from '@/lib/services/agent-workflow/policy'
+import type { ChildLaunch, ChildRead } from './child-control'
+import type * as StepRuntimeModule from './agent-workflow-steps'
+import type { AgentWorkflowInput } from './workflow-contract'
 import {
-  AgentRouteRequest,
-  validateAgentRouteDocuments,
-  validateAgentRouteImages
-} from '@/lib/agents/route-handler'
-import { makeAgentTextRuntime } from './text-response'
-import { addWorkflowToolResultUsage } from './workflow-tool-usage'
-import { AgentWorkflowStepError, workflowErrorEvent, workflowStepError } from './workflow-error'
+  registerWorkflowStep,
+  planWorkflowCallStep,
+  admitChildWorkflowStep,
+  persistChildTerminalStep,
+  readChildWorkflowStep,
+  attachChildWorkflowStep,
+  childToolResultStep,
+  uncertainChildLaunchStep,
+  childControlFailureStep
+} from './workflow-child-steps'
+export { agentWorkflowHitlHookToken } from './workflow-contract'
+export type { AgentWorkflowInput } from './workflow-contract'
 
-export type AgentWorkflowInput = {
-  readonly userId: string
-  readonly request: unknown
-}
-
-type IndexedToolResultMessage = {
-  readonly index: number
-  readonly message: ToolResultMessage
-}
-
-const workflowEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}`
-const workflowErrorEventStreamId = (workflowRunId: string) => `workflow:${workflowRunId}:error`
-
-// App-owned token strategy, not an SDK transport contract. The client only posts
-// `{ hitlResponses }` to the run endpoint; this route authorizes run access, and
-// the agent loop validates `requestId`/`toolCallId` before executing anything.
-export const agentWorkflowHitlHookToken = (input: { readonly runId: string }) =>
-  `agent-hitl:${input.runId}`
-
-const writeSequencedWorkflowEvent = (input: {
-  readonly writer: WritableStreamDefaultWriter<Uint8Array>
-  readonly event: AgentEvent
-  readonly workflowRunId: string
-  readonly turn: number
-  readonly eventSequence: Ref.Ref<number>
-}) =>
-  Effect.gen(function* () {
-    const sequence = yield* Ref.get(input.eventSequence)
-    const result = yield* writeDurableAgentEvent({
-      writer: input.writer,
-      event: input.event,
-      streamId: workflowEventStreamId(input.workflowRunId),
-      turn: input.turn,
-      state: makeDurableAgentEventSequencerState(sequence)
-    })
-
-    yield* Ref.set(input.eventSequence, result.nextEventSequence)
-  })
-
-const closeWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
-  Effect.promise(() => writer.close())
-
-const releaseWorkflowWriter = (writer: WritableStreamDefaultWriter<Uint8Array>) =>
-  Effect.sync(() => writer.releaseLock())
-
-const decodeMessages = (messages: ReadonlyArray<unknown>) =>
-  Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(messages)
-
-const decodeNonEmptyMessages = (messages: ReadonlyArray<unknown>) =>
-  Schema.decodeUnknownEffect(Schema.NonEmptyArray(AgentMessage))(messages)
-
-const encodeMessage = Schema.encodeUnknownEffect(AgentMessage)
-const encodeAgentError = Schema.encodeUnknownEffect(AgentError)
-const encodeToolCall = Schema.encodeUnknownEffect(ToolCall)
-const encodeHitlRequest = Schema.encodeUnknownEffect(HitlRequest)
-const encodeUsage = Schema.encodeUnknownEffect(AgentUsage)
-
-const decodeUsageOrZero = (usage: unknown | undefined) =>
-  usage === undefined
-    ? Effect.succeed(zeroAgentUsage)
-    : Schema.decodeUnknownEffect(AgentUsage)(usage)
-
-const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
-  responses === undefined
-    ? Effect.succeed<ReadonlyArray<HitlResponse>>([])
-    : Schema.decodeUnknownEffect(Schema.Array(HitlResponse))(responses)
-
-const decodeStepRequest = (state: SerializableWorkflowState) =>
-  Effect.gen(function* () {
-    const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(state.request)
-    const messages = yield* state.messages === undefined
-      ? Effect.succeed(request.messages)
-      : decodeNonEmptyMessages(state.messages)
-
-    return new AgentRouteRequest({ ...request, messages })
-  })
-
-const collectModelEvent = (input: {
-  readonly event: AgentEvent
-  readonly workflowRunId: string
-  readonly writer: WritableStreamDefaultWriter<Uint8Array>
-  readonly assistantMessage: Ref.Ref<AgentMessage | undefined>
-  readonly toolCalls: Ref.Ref<ReadonlyArray<ToolCall>>
-  readonly usage: Ref.Ref<AgentUsage>
-  readonly reason: Ref.Ref<'stop' | 'tool_use'>
-  readonly eventSequence: Ref.Ref<number>
-  readonly turn: number
-}) => {
-  const collect = Schema.is(AssistantMessageEvent)(input.event)
-    ? Schema.decodeUnknownEffect(AssistantMessageEvent)(input.event).pipe(
-        Effect.flatMap(event => Ref.set(input.assistantMessage, event.message))
-      )
-    : Schema.is(ToolInputEnd)(input.event)
-      ? Schema.decodeUnknownEffect(ToolInputEnd)(input.event).pipe(
-          Effect.flatMap(event => Ref.update(input.toolCalls, calls => [...calls, event.call]))
-        )
-      : Schema.is(TurnEnd)(input.event)
-        ? Schema.decodeUnknownEffect(TurnEnd)(input.event).pipe(
-            Effect.flatMap(event => Ref.set(input.reason, event.reason))
-          )
-        : Schema.is(UsageUpdate)(input.event)
-          ? Schema.decodeUnknownEffect(UsageUpdate)(input.event).pipe(
-              Effect.flatMap(event =>
-                Ref.update(input.usage, usage => addAgentUsage(usage, event.usage))
-              )
-            )
-          : Effect.void
-
-  return collect.pipe(
-    Effect.andThen(
-      writeSequencedWorkflowEvent({
-        writer: input.writer,
-        event: input.event,
-        workflowRunId: input.workflowRunId,
-        turn: input.turn,
-        eventSequence: input.eventSequence
-      })
-    )
-  )
-}
-
-const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
-  [...results].sort((left, right) => left.index - right.index).map(result => result.message)
-
-const workflowAwaitingInput = (input: {
-  readonly runId: string
-  readonly event: AgentAwaitingInput
-  readonly eventSequence: number
-}) =>
-  Effect.gen(function* () {
-    const firstRequest = input.event.requests[0]
-
-    if (firstRequest === undefined) {
-      return yield* Effect.fail(
-        new AgentWorkflowStepError({ message: 'Workflow HITL pause has no requests' })
-      )
-    }
-
-    return {
-      hookToken: agentWorkflowHitlHookToken({
-        runId: input.runId
-      }),
-      requests: yield* Effect.forEach(input.event.requests, request => encodeHitlRequest(request)),
-      messages: yield* Effect.forEach(input.event.messages, message => encodeMessage(message)),
-      usage: yield* encodeUsage(input.event.usage),
-      turns: input.event.turns,
-      eventSequence: input.eventSequence
-    }
-  })
-
-export async function runAgentWorkflowModelStep(input: {
-  readonly context: unknown
-  readonly state: SerializableWorkflowState
-}): Promise<VercelAgentWorkflowModelStepResult> {
+// These wrappers are the durable boundaries; runtime imports belong inside them.
+type StepRuntime = typeof StepRuntimeModule
+export async function runAgentWorkflowModelStep(
+  ...args: Parameters<StepRuntime['runAgentWorkflowModelStep']>
+): ReturnType<StepRuntime['runAgentWorkflowModelStep']> {
   'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.runAgentWorkflowModelStep(...args)
+}
 
-  const writable = getWritable<Uint8Array>()
-  const writer = writable.getWriter()
-  const workflowRunId = getWorkflowMetadata().workflowRunId
+export async function runAgentWorkflowToolBatchStep(
+  ...args: Parameters<StepRuntime['runAgentWorkflowToolBatchStep']>
+): ReturnType<StepRuntime['runAgentWorkflowToolBatchStep']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.runAgentWorkflowToolBatchStep(...args)
+}
 
-  return await Effect.runPromise(
-    Effect.gen(function* () {
-      const request = yield* decodeStepRequest(input.state)
-      yield* validateAgentRouteImages(request)
-      yield* validateAgentRouteDocuments(request)
-      const createdMessages = yield* decodeMessages(input.state.createdMessages)
-      const initialUsage = yield* decodeUsageOrZero(input.state.usage)
-      const userId = yield* decodeWorkflowUserId(input.context)
-      const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
-      const assistantMessage = yield* Ref.make<AgentMessage | undefined>(undefined)
-      const toolCalls = yield* Ref.make<ReadonlyArray<ToolCall>>([])
-      const usage = yield* Ref.make(initialUsage)
-      const reason = yield* Ref.make<'stop' | 'tool_use'>('stop')
-      const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
+export async function closeAgentWorkflowStream(
+  ...args: Parameters<StepRuntime['closeAgentWorkflowStream']>
+): ReturnType<StepRuntime['closeAgentWorkflowStream']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.closeAgentWorkflowStream(...args)
+}
 
-      yield* runModelTurn({
-        messages: runtime.input.messages,
-        systemPrompt: runtime.config.systemPrompt,
-        tools: runtime.config.tools,
-        reasoningEffort: runtime.input.reasoningEffort ?? runtime.config.reasoningEffort,
-        capabilities: runtime.config.capabilities,
-        model: runtime.config.model,
-        turn: input.state.turn
-      }).pipe(
-        Stream.runForEach(event =>
-          collectModelEvent({
-            event,
-            workflowRunId,
-            writer,
-            assistantMessage,
-            toolCalls,
-            usage,
-            reason,
-            eventSequence,
-            turn: input.state.turn
-          })
-        ),
-        Effect.provide(runtime.layer)
-      )
+export async function writeAgentWorkflowError(
+  ...args: Parameters<StepRuntime['writeAgentWorkflowError']>
+): ReturnType<StepRuntime['writeAgentWorkflowError']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.writeAgentWorkflowError(...args)
+}
 
-      const currentAssistantMessage = yield* Ref.get(assistantMessage)
-      const currentToolCalls = yield* Ref.get(toolCalls)
-      const currentUsage = yield* Ref.get(usage)
-      const currentReason = yield* Ref.get(reason)
-      const nextCreatedMessages =
-        currentAssistantMessage === undefined
-          ? createdMessages
-          : [...createdMessages, currentAssistantMessage]
-      const nextMessages =
-        currentAssistantMessage === undefined
-          ? runtime.input.messages
-          : [...runtime.input.messages, currentAssistantMessage]
+export async function mergeWorkflowToolResultsStep(
+  ...args: Parameters<StepRuntime['mergeWorkflowToolResultsStep']>
+): ReturnType<StepRuntime['mergeWorkflowToolResultsStep']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.mergeWorkflowToolResultsStep(...args)
+}
 
-      if (currentReason === 'stop') {
-        yield* writeSequencedWorkflowEvent({
-          writer,
-          event: AgentEnd.make({
-            messages: nextCreatedMessages,
-            turns: input.state.turn,
-            usage: currentUsage
-          }),
-          workflowRunId,
-          turn: input.state.turn,
-          eventSequence
-        })
-      }
-      const nextEventSequence = yield* Ref.get(eventSequence)
+export async function startWorkflowChildToolStep(
+  ...args: Parameters<StepRuntime['startWorkflowChildToolStep']>
+): ReturnType<StepRuntime['startWorkflowChildToolStep']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.startWorkflowChildToolStep(...args)
+}
 
-      return {
-        done: currentReason === 'stop',
-        messages: yield* Effect.forEach(nextMessages, message => encodeMessage(message)),
-        createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
-          encodeMessage(message)
-        ),
-        toolCalls: yield* Effect.forEach(currentToolCalls, call => encodeToolCall(call)),
-        usage: yield* encodeUsage(currentUsage),
-        turn: input.state.turn,
-        eventSequence: nextEventSequence
-      }
-    }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
-  )
+export async function executableWorkflowCallStep(
+  ...args: Parameters<StepRuntime['executableWorkflowCallStep']>
+): ReturnType<StepRuntime['executableWorkflowCallStep']> {
+  'use step'
+  const runtime = await import('./agent-workflow-steps')
+  return await runtime.executableWorkflowCallStep(...args)
 }
 
 runAgentWorkflowModelStep.maxRetries = 0
-
-export async function runAgentWorkflowToolBatchStep(input: {
-  readonly context: unknown
-  readonly request: unknown
-  readonly calls: ReadonlyArray<unknown>
-  readonly createdMessages: ReadonlyArray<unknown>
-  readonly hitlResponses?: ReadonlyArray<unknown>
-  readonly usage?: unknown
-  readonly turn?: number
-  readonly eventSequence?: number
-}): Promise<VercelAgentWorkflowToolBatchStepResult> {
-  'use step'
-
-  const writable = getWritable<Uint8Array>()
-  const writer = writable.getWriter()
-  const workflowRunId = getWorkflowMetadata().workflowRunId
-  let latestUsage = zeroAgentUsage
-  let latestEventSequence = input.eventSequence
-  let latestToolResultMessages: ReadonlyArray<ToolResultMessage> = []
-
-  const result = await Effect.runPromiseExit(
-    Effect.gen(function* () {
-      const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(input.request)
-      const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
-      const createdMessages = yield* decodeMessages(input.createdMessages)
-      const hitlResponses = yield* decodeHitlResponses(input.hitlResponses)
-      const usage = yield* decodeUsageOrZero(input.usage)
-      latestUsage = usage
-      const userId = yield* decodeWorkflowUserId(input.context)
-      const runtime = yield* makeAgentTextRuntime(request, userId, '/agent/workflow')
-      const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
-      const cumulativeUsage = yield* Ref.make(usage)
-      const awaitingInput = yield* Ref.make<AgentAwaitingInput | undefined>(undefined)
-      const eventSequence = yield* Ref.make(input.eventSequence ?? 0)
-
-      yield* runToolBatch({
-        calls,
-        tools: runtime.config.tools,
-        hitlResponses,
-        model: runtime.config.model,
-        createdMessages,
-        turn: input.turn,
-        usage
-      }).pipe(
-        Stream.runForEach(event =>
-          writeSequencedWorkflowEvent({
-            writer,
-            event,
-            workflowRunId,
-            turn: input.turn ?? 0,
-            eventSequence
-          }).pipe(
-            Effect.tap(() =>
-              Ref.get(eventSequence).pipe(
-                Effect.tap(sequence =>
-                  Effect.sync(() => {
-                    latestEventSequence = sequence
-                  })
-                )
-              )
-            ),
-            Effect.flatMap(() => {
-              if (Schema.is(AgentAwaitingInput)(event)) {
-                return Schema.decodeUnknownEffect(AgentAwaitingInput)(event).pipe(
-                  Effect.flatMap(decoded => Ref.set(awaitingInput, decoded))
-                )
-              }
-
-              if (event._tag !== 'ToolExecutionCompleted') {
-                return Effect.void
-              }
-
-              return Effect.gen(function* () {
-                yield* Ref.update(cumulativeUsage, current =>
-                  addWorkflowToolResultUsage(current, event.result)
-                )
-                latestUsage = yield* Ref.get(cumulativeUsage)
-                yield* Ref.update(toolResultMessages, messages => {
-                  const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
-                  const nextMessages = [
-                    ...messages,
-                    {
-                      index: callIndex < 0 ? calls.length : callIndex,
-                      message: ToolResultMessage.make({
-                        toolCallId: event.result.toolCallId,
-                        content: event.result.content,
-                        isError: event.result.isError,
-                        structuredContent: event.result.structuredContent
-                      })
-                    }
-                  ]
-                  latestToolResultMessages = orderedToolResultMessages(nextMessages)
-
-                  return nextMessages
-                })
-              })
-            })
-          )
-        ),
-        Effect.provide(runtime.layer)
-      )
-
-      const messages = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
-      const nextCreatedMessages = [...createdMessages, ...messages]
-      const currentAwaitingInput = yield* Ref.get(awaitingInput)
-      const currentUsage = yield* Ref.get(cumulativeUsage)
-      const nextEventSequence = yield* Ref.get(eventSequence)
-
-      return {
-        messages: yield* Effect.forEach(messages, message => encodeMessage(message)),
-        createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
-          encodeMessage(message)
-        ),
-        usage: yield* encodeUsage(currentUsage),
-        awaitingInput:
-          currentAwaitingInput === undefined
-            ? undefined
-            : yield* workflowAwaitingInput({
-                runId: workflowRunId,
-                event: currentAwaitingInput,
-                eventSequence: nextEventSequence
-              }),
-        eventSequence: nextEventSequence
-      }
-    }).pipe(Effect.ensuring(releaseWorkflowWriter(writer)), Effect.provide(AppLayer), Effect.scoped)
-  )
-
-  if (result._tag === 'Success') {
-    return result.value
-  }
-
-  if (Cause.hasDies(result.cause) || Cause.hasInterrupts(result.cause)) {
-    return await Effect.runPromise(Effect.failCause(result.cause))
-  }
-
-  const expectedFailure = Cause.findFail(result.cause)
-  if (Result.isFailure(expectedFailure)) {
-    return await Effect.runPromise(Effect.failCause(result.cause))
-  }
-
-  const failureMessages = await Effect.runPromise(
-    Effect.forEach(latestToolResultMessages, message => encodeMessage(message))
-  )
-
-  return {
-    messages: failureMessages,
-    createdMessages: [...input.createdMessages, ...failureMessages],
-    usage: await Effect.runPromise(encodeUsage(latestUsage)),
-    eventSequence: latestEventSequence,
-    failure: await Effect.runPromise(
-      encodeAgentError(workflowErrorEvent(expectedFailure.success.error))
-    )
-  }
-}
-
 runAgentWorkflowToolBatchStep.maxRetries = 0
-
-export async function closeAgentWorkflowStream() {
-  'use step'
-
-  const writable = getWritable<Uint8Array>()
-  const writer = writable.getWriter()
-
-  await Effect.runPromise(closeWorkflowWriter(writer).pipe(Effect.catch(() => Effect.void)))
-}
-
-export async function writeAgentWorkflowError(error: unknown) {
-  'use step'
-
-  const writable = getWritable<Uint8Array>()
-  const writer = writable.getWriter()
-  const workflowRunId = getWorkflowMetadata().workflowRunId
-
-  await Effect.runPromise(
-    writeDurableAgentEvent({
-      writer,
-      event: workflowErrorEvent(error),
-      streamId: workflowErrorEventStreamId(workflowRunId),
-      turn: 0,
-      state: makeDurableAgentEventSequencerState()
-    }).pipe(
-      Effect.asVoid,
-      Effect.tap(() => reportError(workflowStepError(error), { operation: 'agent.workflow.step' })),
-      Effect.catch(() => Effect.void),
-      Effect.ensuring(closeWorkflowWriter(writer))
-    )
-  )
-}
+startWorkflowChildToolStep.maxRetries = 0
 
 const writeWorkflowErrorStep = (error: unknown) =>
   writeAgentWorkflowError(error).catch(() => undefined)
 
-const decodeWorkflowUserId = (context: unknown) =>
-  typeof context === 'string'
-    ? Effect.succeed(context)
-    : Effect.fail(new AgentWorkflowStepError({ message: 'Invalid workflow context' }))
+// This is workflow orchestration, NOT a step. Concrete tool/model work remains in steps.
+async function orchestrateAgentWorkflowTools(
+  input: VercelAgentWorkflowToolBatchStepInput
+): Promise<VercelAgentWorkflowToolBatchStepResult> {
+  const prepared = await runAgentWorkflowToolBatchStep({ ...input, preflightOnly: true })
+  const batch = await orchestrateWorkflowToolBatch<
+    unknown,
+    VercelAgentWorkflowToolBatchStepResult,
+    VercelAgentWorkflowToolBatchStepResult
+  >({
+    calls: input.calls,
+    concurrency: workflowToolConcurrency,
+    preflight: async () =>
+      prepared.awaitingInput !== undefined || prepared.failure !== undefined
+        ? { ready: false as const, value: prepared }
+        : { ready: true as const },
+    execute: async (call, index) => {
+      // Index namespace avoids shared event counters under parallel Workflow steps.
+      const single = {
+        ...input,
+        calls: [call],
+        createdMessages: [],
+        usage: undefined,
+        eventSequence: 0,
+        eventNamespace: `${input.turn ?? 0}:${index}`
+      }
+      const eligible = await executableWorkflowCallStep(call, prepared.executableIds ?? [])
+      if (!eligible) return await runAgentWorkflowToolBatchStep(single)
+      const plan = await planWorkflowCallStep({
+        context: input.context,
+        request: input.request,
+        call
+      })
+      if (plan.type === 'normal') return await runAgentWorkflowToolBatchStep(single)
+      if (plan.type === 'result')
+        return await runAgentWorkflowToolBatchStep({ ...single, result: plan.result })
+      const lifecycle = await startWorkflowChildToolStep({
+        ...single,
+        call,
+        childModel: plan.type === 'launch' ? plan.model : null
+      })
+      const completion = {
+        ...single,
+        eventSequence: lifecycle.eventSequence,
+        executionStartedAtMs: lifecycle.startedAtMs
+      }
+      let result: unknown
+      try {
+        let attemptedRunId: string | undefined
+        if (plan.type === 'launch' && plan.workflowRunId === null) {
+          try {
+            const attempt = await start(runChildAgentWorkflow, [plan.child])
+            attemptedRunId = attempt.runId
+            await attachChildWorkflowStep(plan.child, attempt.runId)
+          } catch (error) {
+            await uncertainChildLaunchStep(plan.child)
+            throw error
+          }
+        }
+        const child = await awaitWorkflowChild<ChildRead>({
+          read: async () => {
+            const value = await readChildWorkflowStep(plan.child, attemptedRunId)
+            const wait = plan.type === 'lookup' ? plan.wait : !plan.background
+            return value.done || (!wait && (plan.type === 'lookup' || value.workflowRunId !== null))
+              ? { done: true as const, value }
+              : { done: false as const }
+          },
+          sleep: async () => {
+            await sleep('1s')
+          }
+        })
+        result = await childToolResultStep({
+          callId: eligible,
+          child,
+          lookup: plan.type === 'lookup',
+          background: plan.type === 'launch' && plan.background,
+          parentRunId: plan.child.parentRunId
+        })
+      } catch {
+        // Isolate transport/launch failure here, not inside the child execution boundary.
+        result = await childControlFailureStep(eligible)
+      }
+      return await runAgentWorkflowToolBatchStep({ ...completion, result })
+    }
+  })
+  return batch.ready
+    ? await mergeWorkflowToolResultsStep(input, batch.results, batch.failures?.[0]?.error)
+    : batch.value
+}
+
+export async function runChildAgentWorkflow(input: ChildLaunch) {
+  'use workflow'
+
+  const admitted = await admitChildWorkflowStep(input)
+  if (admitted === null) return { status: 'not-admitted' } as const
+  const terminal = await runVercelAgentWorkflow({
+    input: admitted,
+    maxTurns: maxChildWorkflowTurns,
+    runModelStep: runAgentWorkflowModelStep,
+    runToolBatchStep: runAgentWorkflowToolBatchStep,
+    closeStream: closeAgentWorkflowStream,
+    writeError: writeWorkflowErrorStep
+  })
+  const outcome = await persistChildTerminalStep(input, {
+    status: terminal._tag === 'Completed' ? 'completed' : 'error',
+    state: terminal.state
+  })
+  // The isolated child boundary stays visibly failed (including defects), even when the
+  // parent observes a sanitized failed ToolResult. Never mask child defects globally.
+  if (terminal._tag !== 'Completed') throw new Error('Child workflow failed')
+  return outcome
+}
 
 export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
-  await runVercelAgentWorkflow({
-    input: { request: input.request, context: input.userId },
+  await registerWorkflowStep(input.userId)
+  return await runVercelAgentWorkflow({
+    input: { request: input.request, context: { userId: input.userId } },
     runModelStep: runAgentWorkflowModelStep,
-    runToolBatchStep: runAgentWorkflowToolBatchStep,
+    runToolBatchStep: orchestrateAgentWorkflowTools,
     closeStream: closeAgentWorkflowStream,
     writeError: writeWorkflowErrorStep,
     awaitInput: async awaitingInput => {
       using hook = createHook<unknown>({ token: awaitingInput.hookToken })
-
       return await hook
     }
   })

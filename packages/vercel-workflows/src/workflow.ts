@@ -35,3 +35,4 @@ export type {
   SequencedDurableAgentEvent,
   WriteDurableAgentEventInput
 } from './workflow-events.ts'
+export { awaitWorkflowChild, orchestrateWorkflowToolBatch } from './workflow-children.ts'

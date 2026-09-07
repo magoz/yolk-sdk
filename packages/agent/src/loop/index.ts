@@ -24,8 +24,14 @@ export {
   LLMToolInputStart,
   LLMUsage
 } from './llm-event.ts'
-export { run, runModelTurn, runToolBatch } from './run.ts'
-export type { AgentLoopRunId, ModelTurnConfig, RunConfig, ToolBatchConfig } from './run.ts'
+export { run, runModelTurn, runToolBatch, prepareToolBatch } from './run.ts'
+export type {
+  AgentLoopRunId,
+  ModelTurnConfig,
+  RunConfig,
+  ToolBatchConfig,
+  PreparedToolBatch
+} from './run.ts'
 export { ContextTransformer } from './services/context-transformer.ts'
 export type { ContextTransformResult } from './services/context-transformer.ts'
 export { LLMProvider } from './services/llm-provider.ts'

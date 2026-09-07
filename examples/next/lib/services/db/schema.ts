@@ -549,3 +549,14 @@ export const relations = defineRelations(
   },
   () => ({})
 )
+
+// Bounded host-owned durable run registry. Updates lock this row; children are immutable
+// reservations unique by tool call id, with exactly one admitted physical Workflow run.
+export const agentWorkflowRun = pgTable('agentWorkflowRun', {
+  runId: text('runId').primaryKey(),
+  userId: text('userId')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  registry: jsonb('registry').$type<unknown>().notNull(),
+  createdAt: timestamp('createdAt').notNull().defaultNow()
+})
