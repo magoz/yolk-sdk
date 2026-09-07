@@ -531,7 +531,7 @@ handler, approval HITL, transcript projection, and one-shot TTS/STT contracts.
 
 `subagent` is the package-owned contract for child-agent delegation. The SDK provides schema,
 validation, non-recursive module wiring, subagent result extraction, and structured result
-metadata. Host apps provide the actual nested runtime.
+metadata. Host apps provide inline or independently durable child execution.
 
 Recommended setup:
 
@@ -544,6 +544,20 @@ Recommended setup:
 - treat omitted `model` and `reasoning_effort` parameters as inheritance of host runtime settings
 - return `makeSubagentToolResult(...)` so UI can show subagent id, type, status, model, reasoning effort, timing, optional usage/turns, and typed failure metadata
 - use `subagentUsageFromToolResult(...)` when a host must add child usage to cumulative workflow usage
+
+Durable hosts may opt into `background: true` in the tool registration options. This advertises
+an optional model parameter `background`; inline hosts keep their existing schema and behavior.
+Return `makeSubagentAcceptedToolResult({ callId, workflowRunId, parentRunId })` for background acceptance.
+The optional parent identity lets a later conversation run address the original child. Keep
+acceptance independent of how quickly the child finishes.
+It emits normal tool completion but **not** `SubagentCompleted`, and carries no usage. Keep the
+logical `subagent:<toolCallId>` identity separate from the physical Workflow id. Never append a
+second tool result for the original launch; expose host-owned status/wait tools whose observations
+do not masquerade as fresh child usage. Host-owned storage must remain readable after parent end.
+
+`prepareToolBatch` from `@yolk-sdk/agent/loop` exposes the same HITL preflight used by the loop.
+Durable orchestration must check `pendingRequests` before dispatching **any** tool, even calls
+listed in `callsToExecute`. Preserve synthetic results and original call ordering when committing.
 
 Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
 

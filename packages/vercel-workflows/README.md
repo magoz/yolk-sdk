@@ -132,9 +132,33 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 }
 ```
 
-`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are host-owned
-`'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in
+`runModelStep`, `closeStream`, and `writeError` are host-owned `'use step'` functions.
+`runToolBatchStep` may instead be Workflow orchestration calling concrete per-call steps. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in
 those steps, not in the `'use workflow'` orchestration body.
+
+## Independent children
+
+`orchestrateWorkflowToolBatch` runs a full-batch `preflight` before any `execute` callback,
+limits local concurrency, and returns results in original call order. Both callbacks are host
+seams: perform IO in steps, not in the orchestration helper. The host commits exactly one tool
+result per call. Return a pause value from preflight when any HITL request is pending.
+If an execution rejects, the helper stops dispatching new calls, settles already-active siblings,
+and returns their ordered progress plus `failures`. Hosts must propagate those failures while
+retaining completed results and usage; do not treat a partial batch as successful.
+
+Start child workflows with Workflow 5 `start(childWorkflow, args)` **from orchestration**, not
+inside the parent tool step. A child wrapper runs its own model/tool steps and returns a typed
+application outcome; platform `completed` alone does not prove application success. Foreground
+hosts await that child outcome; background hosts return an accepted handle and continue.
+
+`awaitWorkflowChild({ read, sleep })` polls short durable read steps with a host-provided Workflow
+`sleep` between reads. Do not hold a step open awaiting a long `run.returnValue` poll.
+
+Hosts own immutable logical reservations, admission/CAS, ownership checks, storage, bounded
+fanout, safe errors, credentials, and cancellation policy. Parent completion/failure must not
+implicitly cancel independent children. Explicit Stop should persist a durable tombstone before
+sweeping admitted child ids, reject late admission, and expose partial sweep failures for retry.
+Give each independent stream and parallel call its own deterministic event-id namespace.
 
 ## Awaiting input
 

@@ -22,6 +22,7 @@ export {
   formatSubagentResult,
   makeNonRecursiveSubagentToolModule,
   makeSubagentToolResult,
+  makeSubagentAcceptedToolResult,
   makeSubagentToolDef,
   makeSubagentToolModule,
   makeSubagentToolRegistration,

@@ -88,3 +88,10 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Use `@yolk-sdk/agent/loop/testing` for fake providers/tool executors outside loop internals.
 - Cover subagent tool schema, unknown subagent rejection, and result formatting in `test/tools`.
 - Cover subagent protocol round-trips in `test/protocol` and same-turn parallel subagent lifecycle in `test/loop`.
+
+## Durable subagent host seams
+
+- `prepareToolBatch` is public via `./loop`; `pendingRequests` fences **all** launches, including otherwise executable sibling calls. Hosts preserve synthetic results and original order.
+- `makeSubagentAcceptedToolResult` is an opt-in background acknowledgement (`background: true` registration option); it must never emit `SubagentCompleted` or contribute child usage.
+- Keep logical `subagent:<callId>` identity independent of physical run ids. Status/wait observations use their own tool-call ids and must not duplicate original usage accounting.
+- Existing inline registrations do not advertise background execution and retain final-result compatibility.

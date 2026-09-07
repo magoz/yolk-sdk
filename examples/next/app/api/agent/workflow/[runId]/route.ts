@@ -2,6 +2,8 @@ import { Data, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
+import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
+import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { AppLayer } from '@/lib/layers'
 import { agentWorkflowHitlHookToken } from '@/lib/agents/workflow-runtime/run-agent-workflow'
 import { getSession } from '@/lib/services/auth/get-session'
@@ -14,7 +16,11 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-const WorkflowRunRouteLayer = Layer.merge(AppLayer, VercelWorkflows.layer)
+const WorkflowRunRouteLayer = Layer.mergeAll(
+  AppLayer,
+  VercelWorkflows.layer,
+  AgentWorkflowStore.layer
+)
 
 type RouteContext = {
   readonly params: Promise<{ readonly runId: string }>
@@ -84,9 +90,11 @@ const parseStartIndex = (request: Request) => {
 
 const resumeProgram = (request: Request, context: RouteContext) =>
   Effect.gen(function* () {
-    yield* getSession()
+    const session = yield* getSession()
     const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
+    const store = yield* AgentWorkflowStore
+    yield* store.read(runId, session.user.id)
     const startIndex = yield* parseStartIndex(request)
     const readable = yield* workflows.getReadable<Uint8Array>(
       runId,
@@ -96,6 +104,9 @@ const resumeProgram = (request: Request, context: RouteContext) =>
     return workflowResumeReadableResponse(runId, readable)
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.get'),
+    Effect.catchTag('WorkflowRunForbidden', () =>
+      Effect.succeed(Response.json({ error: 'Not found' }, { status: 404 }))
+    ),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))
     ),
@@ -123,9 +134,11 @@ const resumeProgram = (request: Request, context: RouteContext) =>
 
 const hitlResumeProgram = (request: Request, context: RouteContext) =>
   Effect.gen(function* () {
-    yield* getSession()
+    const session = yield* getSession()
     const workflows = yield* VercelWorkflows
     const runId = yield* getRunId(context)
+    const store = yield* AgentWorkflowStore
+    yield* store.read(runId, session.user.id)
     const body = yield* decodeHitlRequest(request)
     const response = yield* hitlResponse(body)
     const encodedResponse = yield* encodeHitlResponse(response)
@@ -142,6 +155,9 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
     })
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.post'),
+    Effect.catchTag('WorkflowRunForbidden', () =>
+      Effect.succeed(Response.json({ error: 'Not found' }, { status: 404 }))
+    ),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))
     ),
@@ -169,14 +185,21 @@ const hitlResumeProgram = (request: Request, context: RouteContext) =>
 
 const cancelProgram = (context: RouteContext) =>
   Effect.gen(function* () {
-    yield* getSession()
-    const workflows = yield* VercelWorkflows
+    const session = yield* getSession()
     const runId = yield* getRunId(context)
-    yield* workflows.cancel(runId)
+    const store = yield* AgentWorkflowStore
+    yield* store.read(runId, session.user.id)
+    yield* stopAgentWorkflow(runId, session.user.id)
 
     return workflowCancelResponse()
   }).pipe(
     Effect.withSpan('AgentWorkflowRunRoute.delete'),
+    Effect.catchTag('WorkflowStopIncomplete', error =>
+      Effect.succeed(Response.json({ error: error.message }, { status: 503 }))
+    ),
+    Effect.catchTag('WorkflowRunForbidden', () =>
+      Effect.succeed(Response.json({ error: 'Not found' }, { status: 404 }))
+    ),
     Effect.catchTag('UnauthenticatedError', () =>
       Effect.succeed(Response.json({ error: 'Unauthorized' }, { status: 401 }))
     ),

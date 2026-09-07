@@ -50,6 +50,7 @@ export type SubagentToolParams = {
   readonly subagent_type: string
   readonly model?: string
   readonly reasoning_effort?: AgentReasoningEffort
+  readonly background?: boolean
 }
 
 export type SubagentDefinition = {
@@ -68,6 +69,8 @@ export type SubagentReasoningEffortDefinition = {
 }
 
 export type SubagentRuntimeSelectionOptions = {
+  /** Opt-in only: inline hosts do not advertise background execution. */
+  readonly background?: boolean
   readonly models?: ReadonlyArray<SubagentModelDefinition>
   readonly reasoningEfforts?: ReadonlyArray<SubagentReasoningEffortDefinition>
 }
@@ -151,6 +154,17 @@ const optionalRuntimeSelection = <Value extends string>(input: {
   )
 
 const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) => {
+  const fields = {
+    ...SubagentToolBaseFields,
+    background: Schema.optionalKey(
+      Schema.Boolean.pipe(
+        Schema.annotate({
+          description:
+            'Return an accepted handle immediately; use subagent_status or subagent_wait to read the result.'
+        })
+      )
+    )
+  }
   const model =
     options.models === undefined || options.models.length === 0
       ? undefined
@@ -168,42 +182,38 @@ const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) 
         })
 
   if (model !== undefined && reasoningEffort !== undefined) {
-    return Schema.Struct({
-      ...SubagentToolBaseFields,
-      model,
-      reasoning_effort: reasoningEffort
-    })
+    return options.background === true
+      ? Schema.Struct({ ...fields, model, reasoning_effort: reasoningEffort })
+      : Schema.Struct({ ...SubagentToolBaseFields, model, reasoning_effort: reasoningEffort })
   }
 
   if (model !== undefined) {
-    return Schema.Struct({ ...SubagentToolBaseFields, model })
+    return options.background === true
+      ? Schema.Struct({ ...fields, model })
+      : Schema.Struct({ ...SubagentToolBaseFields, model })
   }
 
   if (reasoningEffort !== undefined) {
-    return Schema.Struct({ ...SubagentToolBaseFields, reasoning_effort: reasoningEffort })
+    return options.background === true
+      ? Schema.Struct({ ...fields, reasoning_effort: reasoningEffort })
+      : Schema.Struct({ ...SubagentToolBaseFields, reasoning_effort: reasoningEffort })
   }
 
-  return Schema.Struct(SubagentToolBaseFields)
+  return options.background === true ? Schema.Struct(fields) : Schema.Struct(SubagentToolBaseFields)
 }
 
 const trimmedSubagentParams = (params: SubagentToolParams): SubagentToolParams => ({
   description: params.description.trim(),
   prompt: params.prompt.trim(),
   subagent_type: params.subagent_type.trim(),
+  ...(params.background === undefined ? {} : { background: params.background }),
   ...(params.model === undefined ? {} : { model: params.model }),
   ...(params.reasoning_effort === undefined ? {} : { reasoning_effort: params.reasoning_effort })
 })
 
 const validateSubagentParams = (
   params: SubagentToolParams
-): Effect.Effect<
-  {
-    readonly description: string
-    readonly prompt: string
-    readonly subagent_type: string
-  },
-  ModelVisibleToolError
-> => {
+): Effect.Effect<SubagentToolParams, ModelVisibleToolError> => {
   const trimmed = trimmedSubagentParams(params)
 
   if (trimmed.description.length === 0) {
@@ -499,3 +509,21 @@ export const makeSubagentToolResult = (input: SubagentToolResultInput) => {
     }
   })
 }
+
+/** Acceptance is a tool completion, never a child completion or usage delta. */
+export const makeSubagentAcceptedToolResult = (input: {
+  readonly callId: string
+  readonly workflowRunId: string
+  readonly parentRunId?: string
+}) =>
+  ToolResult.make({
+    toolCallId: input.callId,
+    content: `Subagent accepted. Use subagent_status or subagent_wait with tool_call_id=${input.callId}${input.parentRunId === undefined ? '' : ` and parent_run_id=${input.parentRunId}`}.`,
+    structuredContent: {
+      type: 'subagent_accepted',
+      status: 'accepted',
+      subagent_run_id: makeSubagentRunId(input.callId),
+      workflow_run_id: input.workflowRunId,
+      ...(input.parentRunId === undefined ? {} : { parent_run_id: input.parentRunId })
+    }
+  })

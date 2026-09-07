@@ -29,7 +29,7 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 - `workflow/[runId]/route.ts` uses `VercelWorkflows.getReadable`, `tailIndex`, `resumeHook`, and `cancel` for replay, HITL resume, and cancellation.
 - GET replay accepts optional `startIndex`; HITL resume returns `x-workflow-stream-tail-index` for the stream tail before the returned body.
 - HITL resume body is `{ hitlResponses: [response] }`; route/workflow own hook-token routing, not the SDK client.
-- Current hook token is run-scoped; route auth must authorize run ownership, and loop response matching validates `requestId`/`toolCallId`.
+- Current hook token is run-scoped; persisted registry ownership is enforced on replay/resume/Stop, and loop response matching validates `requestId`/`toolCallId`.
 - HITL resume captures `VercelWorkflows.tailIndex(runId)` before `resumeHook`, then returns replay after that tail index.
 - Workflow routes use route-model helpers for response/header contracts; keep tests beside helpers.
 - Workflow `[runId]` handlers may use `Effect.runPromise` + raw `Response`; start route stays `HttpEffect` + `HttpServerResponse.raw(...)`.
@@ -48,3 +48,11 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 - Route-model tests cover Workflow stream headers/resume/cancel without starting real Workflow runs.
 - Route-handler tests cover schema failures, provider/tool failures, image/PDF validation, and NDJSON errors.
 - Keep transport tests below Playwright unless browser-visible `/agent` behavior is under test.
+
+## Workflow child control
+
+- `GET workflow/:runId/children/:toolCallId` reads a child result after parent completion/failure; auth checks both parent id and user ownership before platform reads. It returns `{ done, workflowRunId, result }` (result is the original plain ToolResult or null).
+- Run start registers ownership before returning a stream; the workflow also idempotently registers before model work. Pre-registry legacy runs are not authorized implicitly.
+- Explicit DELETE persists the Stop tombstone before a bounded registry sweep. A terminal parent does not suppress child cancellation. 503 means Stop was recorded but cancellation needs retry; active work may finish until the platform observes cancellation.
+- Child HITL/recursive delegation and automatic completion callbacks/parent restarts are not exposed.
+- Child lookup routes share the run-route `Effect.runPromise` + web `Response` boundary exception.

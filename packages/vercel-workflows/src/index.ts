@@ -31,3 +31,4 @@ export type {
   WorkflowStepResult,
   WriteDurableAgentEventInput
 } from './workflow.ts'
+export { awaitWorkflowChild, orchestrateWorkflowToolBatch } from './workflow-children.ts'

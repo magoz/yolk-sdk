@@ -157,8 +157,13 @@ const subagentCompletedEvent = (input: {
   readonly endedAtMs: number
 }) => {
   const metadata = subagentCallMetadata(input.call)
+  const accepted =
+    objectField(input.result.structuredContent, 'type') === 'subagent_accepted' &&
+    objectField(input.result.structuredContent, 'status') === 'accepted' &&
+    objectField(input.result.structuredContent, 'subagent_run_id') ===
+      makeSubagentRunId(input.call.id)
 
-  return metadata === undefined
+  return metadata === undefined || accepted
     ? undefined
     : SubagentCompleted.make({
         parentToolCallId: input.call.id,
@@ -511,7 +516,7 @@ type PreparedToolCall =
       readonly events: ReadonlyArray<AgentEvent>
     }
 
-type PreparedToolBatch = {
+export type PreparedToolBatch = {
   readonly callsToExecute: ReadonlyArray<IndexedToolCall>
   readonly resultMessages: ReadonlyArray<IndexedToolResultMessage>
   readonly resultEvents: ReadonlyArray<AgentEvent>
@@ -697,7 +702,8 @@ const prepareToolCall = (input: {
     ? prepareQuestionCall(input.call, input.index, input.responses)
     : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
-const prepareToolBatch = (input: {
+/** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
+export const prepareToolBatch = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly responses: ReadonlyArray<HitlResponse>
   readonly calls: ReadonlyArray<ToolCall>
