@@ -85,6 +85,12 @@ principal-specific fallback or UI message.
 
 Set model capabilities to match the provider/model. The loop rejects unsupported image, document, or audio parts before provider execution.
 
+Capabilities do not resolve private sources or convert unsupported media. Codex/Claude reject
+unresolved image/document refs and audio tool results; their assistant text lowering still rejects
+media even after resolution. Resolve refs in a request-local copy inside each provider attempt,
+including overflow retry. See [Resolve private attachments](./guides/private-attachments) for
+retry composition and provider limitations.
+
 ### Anthropic context is too long
 
 Anthropic prompt-too-long responses become non-retryable `context_overflow` failures. Generic loop
@@ -250,6 +256,23 @@ Sandbox `cwd` is workspace-relative. Absolute paths and `..` escapes are rejecte
 Timeout is owned by Yolk. Long-running commands may be killed and returned as command-result data, not stream failure.
 
 ## Vercel Workflow errors
+
+### Background launch completes but child output is missing
+
+`makeSubagentAcceptedToolResult` acknowledges launch only. It intentionally adds no child usage or
+`SubagentCompleted`. Implement host-owned status/wait tools and authenticated durable lookup;
+observe results with new tool-call ids rather than completing the original launch twice. The SDK
+does not ship the `subagent_status` / `subagent_wait` tools named by the acknowledgement.
+See [Background subagents](./agent/tools-hitl#background-subagents).
+
+### Child steps run inline or waiting never finishes
+
+Do not put an entire child loop inside one parent `'use step'`: nested step calls execute inline.
+Orchestrate an independent Workflow start outside that step. Use `awaitWorkflowChild` with short
+read steps and Workflow `sleep`; treat failed/cancelled children as terminal values. The helper has
+no built-in timeout, and independent children need explicit host Stop policy. Also check
+`orchestrateWorkflowToolBatch` failures even when `ready: true`; it may return partial progress.
+See [Independent child orchestration](./vercel-workflows/step-contracts#independent-child-orchestration).
 
 ### `Missing intrinsic getter: href` at import
 

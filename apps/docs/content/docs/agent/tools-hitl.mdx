@@ -83,3 +83,42 @@ usage, turns, and typed `AgentError` details from child events. Pass that metada
 can call `subagentUsageFromToolResult` on completed tool results and add the returned child usage to
 their cumulative workflow usage. If a host does not implement nested HITL resume, omit approval- and
 question-gated tools from child toolsets rather than returning an unresumable `awaiting_input` result.
+
+### Background subagents
+
+Background execution is opt-in. Set `background: true` in `makeSubagentToolModule` or
+`makeNonRecursiveSubagentToolModule` registration options to advertise the optional `background`
+model parameter. This does not launch work by itself: your executor must handle `params.background`
+and durably start the child. Omitted registration opt-in preserves the inline contract.
+
+After a successful background launch, return `makeSubagentAcceptedToolResult` instead of a final
+child result. Host executor fragment; `hostStartChild` and `hostRunInlineChild` are host-owned
+implementations:
+
+```ts
+import { Effect } from 'effect'
+import { makeSubagentAcceptedToolResult } from '@yolk-sdk/agent/tools'
+
+const execute = input =>
+  Effect.gen(function* () {
+    if (input.params.background !== true) return yield* hostRunInlineChild(input)
+    const child = yield* hostStartChild(input)
+    return makeSubagentAcceptedToolResult({
+      callId: input.call.id,
+      workflowRunId: child.runId
+    })
+  })
+```
+
+Acceptance completes the launch tool call, not the child. It emits no `SubagentCompleted` or child
+usage. Keep logical `subagent:<callId>` identity separate from the physical Workflow run id.
+Observe later results through distinct status/wait tool-call ids, not a second result for the
+original launch call; do not charge the same child usage again.
+
+The acknowledgement names `subagent_status` and `subagent_wait`, but these tools are **host-owned**,
+not included in the SDK. Supply them before exposing background execution. Your host also owns
+authenticated child lookup/routes, durable admission/reservations/results, child HITL handling,
+and explicit Stop/cancellation policy. Do not infer that parent completion or failure cancels an
+independent child.
+
+For durable hosts, see [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
