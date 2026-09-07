@@ -23,6 +23,19 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: private attachment resolution
+
+Use `resolveMessageAttachmentSources` or `resolveMessagesAttachmentSources` from
+`@yolk-sdk/agent/protocol` to resolve media in a request-local transcript copy. These helpers do not
+automatically sign refs or add provider media support. Keep authorization/signing inside each
+provider attempt, including overflow retry, while persisted messages retain refs. See
+[Resolve private attachments](./guides/private-attachments).
+
+Gmail discovery now omits malformed optional attachment sizes; zero remains valid. Public
+`GmailThreadAttachment` schema decoding requires any present `size` to be a nonnegative integer.
+Update stored-metadata decoders and fixtures that previously supplied negative or fractional sizes;
+provider sizes still do not prove actual decoded byte length.
+
 ### Next canary: opt-in durable subagents
 
 Inline subagent registrations remain compatible. Hosts opting into `background: true` must

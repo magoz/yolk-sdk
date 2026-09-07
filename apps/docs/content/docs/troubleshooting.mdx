@@ -85,6 +85,12 @@ principal-specific fallback or UI message.
 
 Set model capabilities to match the provider/model. The loop rejects unsupported image, document, or audio parts before provider execution.
 
+Capabilities do not resolve private sources or convert unsupported media. Codex/Claude reject
+unresolved image/document refs and audio tool results; their assistant text lowering still rejects
+media even after resolution. Resolve refs in a request-local copy inside each provider attempt,
+including overflow retry. See [Resolve private attachments](./guides/private-attachments) for
+retry composition and provider limitations.
+
 ### Anthropic context is too long
 
 Anthropic prompt-too-long responses become non-retryable `context_overflow` failures. Generic loop
