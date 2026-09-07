@@ -7,12 +7,13 @@ Root export is intentionally empty. Import feature APIs from explicit subpaths.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 Add `react` if you use `@yolk-sdk/agent/react` or `@yolk-sdk/agent/voice/react`.
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
 Published package metadata requires Node.js 22+.
 
 ## Subpaths

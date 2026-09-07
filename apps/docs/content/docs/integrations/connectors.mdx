@@ -347,6 +347,16 @@ required `Mail.*` and `Files.*` grants.
 | `outlook.trash`              | move a message to Deleted Items                              |
 | `outlook.untrash`            | move a message from Deleted Items to inbox or another folder |
 
+#### Optional Outlook read inputs
+
+`outlook.list_messages` and `outlook.search_messages` accept omitted, `null`, or blank optional
+strings for `mailbox`, `folderId`, and `nextLink`; list also accepts these placeholders for `filter`
+and `orderBy`. Decoding normalizes them to `undefined`, preserving non-blank strings unchanged.
+`top` accepts omission or `null` for the provider default; explicit values must be integers from
+1 to 1000. Search still requires a string `query`, and application access still requires a
+non-blank `mailbox`. These rules apply to direct connector calls and generated agent tools, not
+other Outlook actions.
+
 List and search outputs expose Graph's complete `@odata.nextLink` as `nextLink`. Pass it back
 unchanged; repeat `mailbox` for explicit-mailbox continuations and `folderId` for folder
 continuations. The connector accepts only global Graph v1.0 links for the selected mailbox and

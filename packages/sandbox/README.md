@@ -5,10 +5,11 @@ Effect-native sandbox execution contracts, an agent tool, testing fakes, and a V
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect
+pnpm add @yolk-sdk/sandbox@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
 Published package metadata requires Node.js 22+; `@yolk-sdk/sandbox/vercel` is server-only.
 
 ## Subpaths
