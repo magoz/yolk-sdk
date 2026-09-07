@@ -8,7 +8,7 @@ Use `@yolk-sdk/agent` when you want to run model turns, execute tools, stream pr
 Install:
 
 ```bash
-pnpm add @yolk-sdk/agent@canary effect
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 Import by subpath:
@@ -23,17 +23,17 @@ import { makeTool } from '@yolk-sdk/agent/tools'
 
 ## Most common jobs
 
-| Job                                 | API                                   |
-| ----------------------------------- | ------------------------------------- |
-| Make a user message                 | `UserMessage.make({ content })`       |
-| Run a model/tool loop               | `run(...)`                            |
-| Run behind an HTTP/session boundary | `runRuntime(...)`                     |
-| Define schema-backed tools          | `makeTool(...)`                       |
+| Job                                 | API                                        |
+| ----------------------------------- | ------------------------------------------ |
+| Make a user message                 | `UserMessage.make({ content })`            |
+| Run a model/tool loop               | `run(...)`                                 |
+| Run behind an HTTP/session boundary | `runRuntime(...)`                          |
+| Define schema-backed tools          | `makeTool(...)`                            |
 | Stream from browser/client          | `streamAgentEventStreamUntilTerminal(...)` |
-| Render headless React chat          | `useAgentChat(...)`                   |
-| Build provider layers               | provider subpaths                     |
-| Plan bounded model context           | `planWindowCompaction(...)`            |
-| Test without provider accounts      | `FauxProvider`, `TestToolExecutor`    |
+| Render headless React chat          | `useAgentChat(...)`                        |
+| Build provider layers               | provider subpaths                          |
+| Plan bounded model context          | `planWindowCompaction(...)`                |
+| Test without provider accounts      | `FauxProvider`, `TestToolExecutor`         |
 
 ## Local test loop
 

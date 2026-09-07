@@ -8,7 +8,7 @@ Use `@yolk-sdk/connectors` when you want reusable, typed actions for external se
 Install:
 
 ```bash
-pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 ## Invoke a connector action
@@ -42,9 +42,22 @@ const result = await Effect.runPromise(program.pipe(Effect.provide(HostConnector
 
 ## Turn connector actions into agent tools
 
+Wiring fragment; provide host HTTP and credential layers for a separate Google integration:
+
 ```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
 import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
-import { GoogleConnector } from '@yolk-sdk/connectors/google'
+import { GoogleConnector, GoogleOAuthCredentialSlot } from '@yolk-sdk/connectors/google'
+
+const googleIntegration = makeIntegration({
+  connectorId: 'google',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: GoogleOAuthCredentialSlot.id,
+      credentialRef: 'host-google-oauth-credential'
+    })
+  ]
+})
 
 const destructiveGoogleActions = new Set([
   'calendar.delete_event',
@@ -66,7 +79,7 @@ const writingGoogleActions = new Set([
 ])
 
 const googleTools = makeConnectorToolModule(GoogleConnector, {
-  integration,
+  integration: googleIntegration,
   layer: HostConnectorLayer,
   access: action =>
     destructiveGoogleActions.has(action)

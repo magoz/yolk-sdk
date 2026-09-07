@@ -34,7 +34,7 @@ active-run guards.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/agent effect
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 ## Design the ledger
@@ -96,9 +96,7 @@ expects rows already filtered to one session's active revision and sorted by asc
 This fragment shows the projection:
 
 ```ts
-import {
-  makeCompactionCheckpointMessage
-} from '@yolk-sdk/agent/compaction'
+import { makeCompactionCheckpointMessage } from '@yolk-sdk/agent/compaction'
 import type { AgentMessage } from '@yolk-sdk/agent/protocol'
 
 const projectMessagesForModel = (

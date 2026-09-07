@@ -7,10 +7,11 @@ The root export is intentionally empty. Import APIs from explicit subpaths.
 ## Install
 
 ```bash
-pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect
+pnpm add @yolk-sdk/mcp@canary @yolk-sdk/agent@canary effect@4.0.0-beta.80
 ```
 
 Canary APIs are unstable. Keep all `@yolk-sdk/*` packages on the same version.
+Use the SDK's matching Effect version (`4.0.0-beta.80`) in host code.
 Published package metadata requires Node.js 22+; `client/node` and `server/node` are Node-only.
 
 ## Subpaths
