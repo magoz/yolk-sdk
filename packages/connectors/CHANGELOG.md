@@ -1,5 +1,17 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.72
+
+### Patch Changes
+
+- 79b6ff8: Align installation examples with the SDK's Effect version, correct Google connector tool wiring, document Outlook optional read inputs, and date previously released canary migrations.
+- 9897531: Add `@yolk-sdk/connectors/fortnox` with nine read-only actions for company information and list/get customers, invoices, suppliers, and supplier invoices. Include typed schemas, pagination, resource-scoped OAuth credential hints, provider failure handling, and agent-tool access metadata. Hosts retain HTTP execution, OAuth lifecycle, credentials, and policy; Fortnox OAuth scopes themselves still grant read and write access.
+- 782092d: Normalize null and blank optional inputs for Outlook message search and listing, including null page sizes, before execution. Direct connector callers and generated agent tools now share the compatibility behavior while preserving real cursors, input validation, application-mailbox guards, and provider failures.
+- Updated dependencies [79b6ff8]
+- Updated dependencies [9897531]
+- Updated dependencies [782092d]
+  - @yolk-sdk/agent@0.1.0-canary.72
+
 ## 0.1.0-canary.71
 
 ### Minor Changes

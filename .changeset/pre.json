@@ -15,6 +15,7 @@
   "changesets": [
     "afloat-connector",
     "agent-steering",
+    "align-canary-install-docs",
     "anthropic-reasoning-effort",
     "brave-hitl-rules",
     "bright-codex-files",
@@ -44,6 +45,7 @@
     "fix-gateway-reasoning",
     "fix-http-stream-cleanup",
     "flexible-task-runtimes",
+    "fortnox-read-connector",
     "fresh-dropbox-files",
     "fresh-email-ports",
     "fresh-grok-allowance",
@@ -86,6 +88,7 @@
     "soft-terminal-barriers",
     "steady-subagent-context",
     "ten-frogs-smile",
+    "tidy-outlook-read-inputs",
     "tidy-subagents-serve",
     "validate-knowledge-search-inputs",
     "vercel-workflows-testing-world",
