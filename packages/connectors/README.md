@@ -274,6 +274,13 @@ Gmail draft compose, update, and reply inputs accept optional `from` values for 
 
 `gmail.get_thread` requires `threadId` and `format: 'full' | 'metadata' | 'minimal'`. It returns `GmailThreadOutput` with normalized messages, selected headers, decoded message text when the provider includes it, and attachment metadata. Plain text is preferred over HTML; text attachments never become message bodies. Raw MIME and attachment content are omitted. Use `gmail.list_attachments` with one `messageId` for metadata-only discovery without fetching a whole thread; its `attachments` field is an Effect `Chunk`, and metadata includes inline/content-ID details when Gmail supplies them. When an attachment has `attachmentId`, fetch it with `gmail.get_attachment`; the typed output preserves Gmail's `size` and base64url `data` fields and adds standard-base64 `contentBase64` plus the input IDs. Gmail inline attachments may omit `attachmentId` and remain discoverable but cannot be retrieved through that action. Use `full` when decoded bodies are required.
 
+Gmail discovery omits invalid optional attachment sizes; present sizes are nonnegative integers.
+Provider size metadata is not a substitute for validating actual bytes. The host `ConnectorHttpClient`
+adapter must cap streamed bytes before returning its string body. Keep ordinary/error limits separate
+from successful attachment retrieval limits, allowing bounded base64 expansion and JSON overhead only
+for trusted attachment routes. Hosts also validate encoded length and actual decoded per-file/aggregate
+size, and own canonical encoding checks, MIME policy, storage, scanning, and extraction.
+
 Calendar create/update boundaries use exactly one non-empty field: `{ date, timeZone? }` for an
 all-day boundary or `{ dateTime, timeZone? }` for a date-time boundary. `start` and `end` reject
 `null`, empty values, missing boundary fields, and objects that provide both `date` and `dateTime`.

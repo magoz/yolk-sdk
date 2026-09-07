@@ -66,7 +66,15 @@ const message = UserMessage.make({
 })
 ```
 
-Hosts own upload, auth, URL durability, retention, and ref hydration policy.
+Hosts own upload, auth, URL durability, retention, and ref hydration policy. Use
+`resolveMessageAttachmentSources` or `resolveMessagesAttachmentSources` to resolve sources throughout
+user, assistant, and tool-result content without changing durable history. These Effect-native helpers
+also traverse nested assistant provider tool results and preserve envelope/part metadata and ordering.
+They do not interpret opaque tool/provider payloads or add provider media capabilities.
+
+For private files, resolve fresh URLs inside each provider attempt, after context projection and
+compaction. See [Resolve private attachments](../guides/private-attachments) for authorization,
+overflow-retry composition, native tool-result content, and bounded connector downloads.
 
 ## Consume events
 

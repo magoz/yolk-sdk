@@ -330,9 +330,18 @@ Gateway support image URLs; OpenAI Codex supports image and document URLs; Anthr
 and PDF URLs. The Grok
 Responses lowerer can encode image URLs/data URLs, but hosts should enable image capability only for
 subscription models they have verified accept image input. Use
-inline base64 for simple apps, durable URLs for app-owned uploads, or persist `Ref` values and call
-`resolveContentAttachmentSources` at your storage boundary before provider execution. Host apps own
-upload, auth, retention, URL durability, and ref hydration policy.
+inline base64 for simple apps, durable URLs for app-owned uploads, or persist opaque `Ref` values and
+resolve them immediately before each provider attempt. `resolveContentAttachmentSources` handles one
+`Content`; `resolveMessageAttachmentSources` and `resolveMessagesAttachmentSources` also walk assistant
+text and nested provider tool results, preserving metadata and ordering without mutating history.
+All accept `AttachmentSourceResolver<E, R>`, preserve typed Effect errors/services, and leave opaque
+tool/provider payloads alone. Resolution does not add provider media capabilities or cache sources.
+
+Host apps own upload, authorization, byte/MIME limits, retention, and fresh signing. Put a host
+resolving provider wrapper inside `makeContextOverflowRetryProvider` so compaction sees refs and each
+retry signs the effective context afresh. Never persist the resolved copy. See the
+[private attachment guide](../../apps/docs/content/docs/guides/private-attachments.mdx) for the
+host-owned composition and bounded connector transport.
 
 OpenAI Codex preserves text, image, and document `ToolResultMessage` parts as native function output
 content. Anthropic Claude preserves text, images, inline text documents, and URL/base64 PDFs as

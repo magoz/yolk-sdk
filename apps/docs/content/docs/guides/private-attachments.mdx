@@ -1,0 +1,215 @@
+---
+title: Resolve private attachments
+description: Keep opaque file references in history and resolve native media for each provider request.
+---
+
+Persist private files as opaque `Ref` sources. Resolve them to fresh, provider-readable URLs only
+in a request-local copy of the transcript. Yolk walks protocol content and lowers supported media;
+your host owns authorization, storage, signing, retention, and file policy.
+
+Install matching canary packages and Effect:
+
+```bash
+pnpm add @yolk-sdk/agent@canary effect@4.0.0-beta.80
+```
+
+## Store refs, not transport payloads
+
+This host integration fragment creates a native tool result after the host has authorized,
+validated, and stored a PDF and image. The IDs are illustrative opaque handles, not URLs or
+credentials. The transcript must also contain the matching assistant host tool call `read-1`.
+
+```ts
+import {
+  DocumentPart,
+  ImagePart,
+  TextPart,
+  ToolResultMessage,
+  refAttachmentSource
+} from '@yolk-sdk/agent/protocol'
+
+const result = ToolResultMessage.make({
+  toolCallId: 'read-1',
+  content: [
+    TextPart.make({ text: 'Retrieved the document and image.' }),
+    DocumentPart.make({
+      source: refAttachmentSource('attachment-pdf'),
+      mimeType: 'application/pdf',
+      filename: 'brief.pdf'
+    }),
+    ImagePart.make({
+      source: refAttachmentSource('attachment-image'),
+      mimeType: 'image/png',
+      filename: 'photo.png'
+    })
+  ]
+})
+```
+
+Return these semantic parts from your host tool rather than JSON-stringifying base64 or a signed
+URL. Keep raw connector bytes and expiring URLs out of durable messages, `structuredContent`,
+annotations, logs, and compaction summaries. Envelope fields are model-visible context, not a
+place for hidden authorization state.
+
+## Resolve immediately before each provider attempt
+
+`resolveMessageAttachmentSources(message, resolver)` walks one `AgentMessage`.
+`resolveMessagesAttachmentSources(messages, resolver)` walks a message list in order. Both build
+new messages without mutating history. They preserve envelope and part metadata, reasoning/tool-call
+order, and nested assistant `ProviderToolResultPart.result.content`.
+
+The existing `resolveContentAttachmentSources` handles a single `Content`. All three accept an
+`AttachmentSourceResolver<E, R>` and preserve its Effect error and environment types. The resolver
+receives every media part, including `Url` and `InlineBase64` sources; it decides which to keep,
+replace, or reject. Calls are sequential, with no SDK deduplication or cache. Opaque tool parameters,
+structured results, annotations, and provider metadata are preserved, not recursively interpreted
+as content. Decode untrusted transcripts with `AgentMessage` before invoking these typed helpers.
+
+This fragment wires host-owned authorization and signing around a provider. Supply the declared
+host functions and provide their Effect services at your application boundary. The signing function
+must check the current caller's ownership/access, trusted stored MIME/size metadata, and applicable
+file policy before issuing a short-lived URL; possession of a ref alone is not authorization.
+
+```ts
+import { Effect, Stream } from 'effect'
+import {
+  LLMError,
+  LLMProvider,
+  type LLMEvent,
+  type LLMProviderError,
+  type LLMRequest
+} from '@yolk-sdk/agent/loop'
+import {
+  resolveMessagesAttachmentSources,
+  type AttachmentContentPart,
+  type AttachmentSourceResolver,
+  type UrlAttachmentSource
+} from '@yolk-sdk/agent/protocol'
+
+declare const hostProvider: {
+  readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
+}
+declare const hostCheckAttachmentBudget: (request: LLMRequest) => Effect.Effect<void, LLMError>
+declare const hostAuthorizeAndSign: (
+  part: AttachmentContentPart
+) => Effect.Effect<UrlAttachmentSource, LLMError>
+
+const resolveSource: AttachmentSourceResolver<LLMError> = part =>
+  part.source._tag === 'Ref' ? hostAuthorizeAndSign(part) : Effect.succeed(part.source)
+
+const resolvingProvider = LLMProvider.of({
+  stream: request =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        // Use the effective model and messages, including the post-compaction retry.
+        yield* hostCheckAttachmentBudget(request)
+        const messages = yield* resolveMessagesAttachmentSources(request.messages, resolveSource)
+        return hostProvider.stream({ ...request, messages })
+      })
+    )
+})
+```
+
+Map expected host failures to a safe `LLMError` before returning from these callbacks; do not include
+private refs, signed URLs, credentials, or raw upstream errors in its message. The pass-through
+branch is appropriate only if the host already validated non-Ref sources. Reject untrusted external
+URLs or inline payloads there when your policy requires it.
+
+This wrapper is a **host integration pattern**, not an automatically installed SDK service. Keep
+budget/cache state request-local. If repeated refs are deduplicated by the host, authorize every
+occurrence's metadata and account for repeated model-visible media according to the chosen model's
+limits; never reuse signed URLs across requests.
+
+## Put resolution inside overflow retry
+
+Compose in this order:
+
+```text
+project/compact refs -> overflow retry -> host budget/auth/signing -> provider transport
+```
+
+Extend the preceding fragment with the existing one-shot retry helper:
+
+```ts
+import {
+  makeContextOverflowRetryProvider,
+  type ContextOverflowRetryCompactor
+} from '@yolk-sdk/agent/compaction'
+
+declare const hostCompact: ContextOverflowRetryCompactor
+
+const providerEffect = makeContextOverflowRetryProvider({
+  provider: resolvingProvider,
+  compact: hostCompact
+})
+```
+
+On overflow, the compactor receives the unresolved request messages. After successful compaction,
+resolution runs again on the retained refs immediately before the second attempt. Later requests
+also sign afresh. Do not wrap the retry provider with a resolver on the outside: that signs only
+once and exposes transient URLs to compaction. A `ContextTransformer` alone does not guarantee
+fresh resolution for retries initiated inside a provider wrapper.
+
+Keep the durable transcript separate from projected context. If you use the retry helper's optional
+`messagesRef`, it receives the compactor's output, which should still contain refs, not signed URLs.
+The wrapper does not write durable history or update runtime state automatically. Place resolution
+inside any other host-owned retry mechanism that reissues a provider request, too. Transport-internal
+retries that do not re-enter this wrapper cannot refresh signing; configure their lifetime/policy
+accordingly.
+
+Use overflow retry only for pre-emission overflow errors. It retries once, does not retract already
+emitted deltas, and does not retry a second overflow. See [durable compaction](./durable-compaction).
+
+## Respect provider and file limits
+
+- Codex lowers image/document tool results to native `input_image`/`input_file` function outputs.
+  Claude lowers images and URL/base64 PDFs to nested tool-result blocks; inline text documents
+  become text blocks. Text and media can be mixed in the same result.
+- Resolution is not capability conversion. Both adapters reject unresolved image/document refs and
+  audio tool results. Claude also rejects non-PDF, non-text documents. Supported MIME types,
+  dimensions, page counts, byte budgets, URL accessibility, and model capabilities remain host checks.
+- Assistant media is traversed for protocol reuse, but Claude/Codex assistant text lowering still
+  rejects media. Nested provider tool results are preserved by the helper, not newly replayed as
+  native vendor tool results by those adapters.
+- Office/text extraction, archive-inflation limits, scanning, private storage, and cleanup stay
+  app-owned. Do not put a whole email materializer or extraction dependency into the agent loop.
+
+### Bound connector downloads before buffering
+
+Gmail and Outlook already expose attachment metadata and base64 retrieval. Gmail's optional discovery
+size is a nonnegative integer; malformed optional sizes are omitted. Outlook file retrieval requires
+Graph's file-attachment discriminator; item/reference attachments remain metadata-only.
+
+`ConnectorHttpClient` is a host-supplied string/JSON port, not a bounded downloader. In the host HTTP
+adapter, enforce an actual streamed-byte ceiling **before** returning `ConnectorHttpResponse.body`.
+Use separate configurable bounds for ordinary/error responses and successful attachment retrieval.
+If selecting a larger allowance by route, match the exact trusted HTTPS origin, method, and attachment
+retrieval path—not any URL containing `attachments`. Do not enlarge list/metadata or error bounds.
+
+For a decoded-byte budget `B`, padded base64 needs up to `4 * ceil(B / 3)` ASCII bytes. The **whole
+encoded JSON body** additionally includes metadata, escaping, and framing: choose a bounded allowance
+for that overhead. Validate both budgets as finite, nonnegative safe integers and ensure their
+arithmetic stays safe. Count actual body bytes (including multibyte metadata), not JS string length
+or just `Content-Length`; abort/cancel when the limit is crossed, including when headers are missing
+or misleading. If transport decompresses responses, bound the decompressed stream as well.
+
+After syntax validation and before decoding, check encoded content length; then validate actual
+decoded bytes, canonical encoding if required by your host, MIME, and per-file/aggregate limits.
+Provider-declared sizes are hints, not proof of actual byte length. Connector schemas validate
+base64 syntax, not canonical pad bits or equality between declared and decoded sizes. Zero-byte
+retrieval is allowed by the connectors; whether empty files are usable is host policy.
+
+## Verify your host wiring
+
+Use a fake provider and signer, with no live storage or mailbox calls:
+
+1. Resolve private PDF/image refs in mixed user, assistant, and tool-result protocol content; compare
+   metadata and ordering before/after, including nested provider tool results.
+2. Script a pre-emission overflow, compact away an old attachment, and verify fresh URLs and budgets
+   only for the retained context on retry. Repeat the request and re-run the same stream.
+3. Confirm stored messages and compactor inputs still contain refs, and authorization failure prevents
+   provider invocation. Verify a second overflow fails without a third attempt.
+4. Test transport at its encoded-byte limit and one byte over, with missing/misleading headers and
+   multibyte metadata. Verify cancellation and unchanged ordinary/error limits.
+
+See [Agent APIs](../api-reference/agent#protocol) and the [connector catalog](../integrations/connectors).

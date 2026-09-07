@@ -1,5 +1,12 @@
+import { Effect } from 'effect'
 import * as Schema from 'effect/Schema'
-import { Content, TextPart, contentParts } from './content.ts'
+import {
+  Content,
+  TextPart,
+  contentParts,
+  resolveContentAttachmentSources,
+  type AttachmentSourceResolver
+} from './content.ts'
 import { ToolCall, ToolResult } from './tool.ts'
 
 export const MessageAuthor = Schema.Struct({
@@ -86,6 +93,65 @@ export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('
 
 export const AgentMessage = Schema.Union([UserMessage, AssistantAgentMessage, ToolResultMessage])
 export type AgentMessage = typeof AgentMessage.Type
+
+const resolveAssistantPartAttachmentSources = <E, R>(
+  part: AssistantPart,
+  resolver: AttachmentSourceResolver<E, R>
+): Effect.Effect<AssistantPart, E, R> => {
+  switch (part._tag) {
+    case 'Text':
+      return resolveContentAttachmentSources(part.content, resolver).pipe(
+        Effect.map(content => AssistantTextPart.make({ ...part, content }))
+      )
+    case 'ProviderToolResult':
+      return resolveContentAttachmentSources(part.result.content, resolver).pipe(
+        Effect.map(content =>
+          ProviderToolResultPart.make({
+            ...part,
+            result: ToolResult.make({ ...part.result, content })
+          })
+        )
+      )
+    case 'Reasoning':
+    case 'HostToolCall':
+    case 'ProviderToolCall':
+      return Effect.succeed(part)
+  }
+}
+
+/**
+ * Resolve every attachment in protocol content, including assistant text and
+ * nested provider tool results. Envelopes, ordering and opaque tool/provider
+ * payloads are preserved; unknown payloads are not traversed. The resolver owns
+ * source policy (it receives Url and InlineBase64 sources as well as Ref).
+ * Returns a request-local copy; never mutates the input or caches resolution.
+ */
+export const resolveMessageAttachmentSources = <E, R>(
+  message: AgentMessage,
+  resolver: AttachmentSourceResolver<E, R>
+): Effect.Effect<AgentMessage, E, R> => {
+  switch (message._tag) {
+    case 'User':
+      return resolveContentAttachmentSources(message.content, resolver).pipe(
+        Effect.map(content => UserMessage.make({ ...message, content }))
+      )
+    case 'ToolResult':
+      return resolveContentAttachmentSources(message.content, resolver).pipe(
+        Effect.map(content => ToolResultMessage.make({ ...message, content }))
+      )
+    case 'Assistant':
+      return Effect.forEach(message.parts, part =>
+        resolveAssistantPartAttachmentSources(part, resolver)
+      ).pipe(Effect.map(parts => AssistantAgentMessage.make({ ...message, parts })))
+  }
+}
+
+/** Resolve messages in order with the same Effect-native resolver; no deduplication or caching. */
+export const resolveMessagesAttachmentSources = <E, R>(
+  messages: ReadonlyArray<AgentMessage>,
+  resolver: AttachmentSourceResolver<E, R>
+): Effect.Effect<ReadonlyArray<AgentMessage>, E, R> =>
+  Effect.forEach(messages, message => resolveMessageAttachmentSources(message, resolver))
 
 export type DanglingHostToolCall = {
   readonly call: ToolCall

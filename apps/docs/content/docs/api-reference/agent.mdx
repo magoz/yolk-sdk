@@ -28,6 +28,19 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 | `CompactionStart`, `CompactionEnd`                                                                                        | compaction lifecycle events    |
 | `validateNoDanglingHostToolCalls`, `repairDanglingHostToolCalls`, `danglingHostToolCalls`                                 | transcript invariant helpers   |
 
+Attachment resolution helpers from `@yolk-sdk/agent/protocol`:
+
+| Export | Purpose |
+| --- | --- |
+| `AttachmentSourceResolver<E, R>` | Host Effect callback from a media part to an attachment source |
+| `resolveContentAttachmentSources` | Resolve media sources in one `Content` |
+| `resolveMessageAttachmentSources` | Resolve one message, including assistant text and nested provider tool results |
+| `resolveMessagesAttachmentSources` | Resolve a message list in order, without mutation or caching |
+
+The helpers preserve typed resolver errors/services and protocol metadata, but do not traverse opaque
+payloads or enforce provider capabilities. See [private attachment integration](../guides/private-attachments)
+for fresh signing inside retries.
+
 ## Loop
 
 `@yolk-sdk/agent/loop`

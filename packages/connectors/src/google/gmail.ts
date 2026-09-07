@@ -137,13 +137,16 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
   raw: Schema.optional(Schema.String)
 }) {}
 
+const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+const isGmailAttachmentSize = Schema.is(GmailAttachmentSize)
+
 export class GmailThreadAttachment extends Schema.Class<GmailThreadAttachment>(
   'GmailThreadAttachment'
 )({
   partId: Schema.optional(Schema.String),
   filename: Schema.optional(Schema.String),
   mimeType: Schema.optional(Schema.String),
-  size: Schema.optional(Schema.Number),
+  size: Schema.optional(GmailAttachmentSize),
   attachmentId: Schema.optional(Schema.String),
   inline: Schema.optional(Schema.Boolean),
   contentId: Schema.optional(Schema.String)
@@ -172,8 +175,6 @@ export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachment
 )({
   attachments: Schema.Chunk(GmailThreadAttachment)
 }) {}
-
-const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
 
 export const GmailAttachmentBase64Url = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/)
@@ -239,11 +240,6 @@ const unknownField = (value: unknown, key: string) =>
 const unknownStringField = (value: unknown, key: string) => {
   const field = unknownField(value, key)
   return typeof field === 'string' ? field : undefined
-}
-
-const unknownNumberField = (value: unknown, key: string) => {
-  const field = unknownField(value, key)
-  return typeof field === 'number' ? field : undefined
 }
 
 const unknownArrayField = (value: unknown, key: string) => {
@@ -353,7 +349,9 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
   const filename = unknownStringField(part, 'filename')
   const mimeType = unknownStringField(part, 'mimeType')
   const body = unknownField(part, 'body')
-  const size = unknownNumberField(body, 'size')
+  // MIME discovery is best-effort; invalid optional sizes must not become byte budgets.
+  const rawSize = unknownField(body, 'size')
+  const size = isGmailAttachmentSize(rawSize) ? rawSize : undefined
   const attachmentId = unknownStringField(body, 'attachmentId')
   const hasFilename = filename !== undefined && filename.trim() !== ''
   const contentDisposition = gmailPartHeader(part, 'content-disposition')?.trim().toLowerCase()
@@ -369,7 +367,7 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
 
   if (isAttachment) {
     collected.attachments.push(
-      new GmailThreadAttachment({
+      GmailThreadAttachment.make({
         ...(partId === undefined ? {} : { partId }),
         ...(hasFilename ? { filename } : {}),
         ...(mimeType === undefined ? {} : { mimeType }),
