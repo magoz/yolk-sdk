@@ -24,6 +24,7 @@ import {
 } from '@yolk-sdk/agent/tools'
 import type { SerializableWorkflowState } from '@yolk-sdk/vercel-workflows'
 import { AppLayer } from '@/lib/layers'
+import { reportError } from '@/lib/services/telemetry/report-error'
 import { AgentRouteRequest } from '@/lib/agents/route-handler'
 import type { AgentToolContext } from '@/lib/agents/tools/tool-context'
 import { AgentWorkflowStore } from '@/lib/services/agent-workflow/live-layer'
@@ -240,10 +241,35 @@ export async function planWorkflowCallStep(input: {
           workflowRunId: child.workflowRunId
         } as const
       }).pipe(
-        Effect.catch(() =>
-          Schema.encodeEffect(ToolResult)(
-            failureResult(call.id, 'Child launch preparation failed')
-          ).pipe(Effect.map(result => ({ type: 'result' as const, result })))
+        Effect.catch(error =>
+          Effect.gen(function* () {
+            const expectedAuthFailure = [
+              'WorkflowRunForbidden',
+              'OpenAiCodexAuthNotFoundError',
+              'OpenAiCodexAuthInvalidError',
+              'AnthropicClaudeAuthNotFoundError',
+              'AnthropicClaudeAuthInvalidError'
+            ].includes(error._tag)
+            if (!expectedAuthFailure) {
+              // Error messages/causes can contain SQL parameters, prompts or credentials.
+              yield* reportError(
+                {
+                  _tag: 'WorkflowChildPreparationError',
+                  message: 'Child launch preparation failed'
+                },
+                {
+                  operation: 'agent.workflow.child.prepare',
+                  runId: parentRunId,
+                  toolCallId: call.id,
+                  cause_type: error._tag
+                }
+              )
+            }
+            const result = yield* Schema.encodeEffect(ToolResult)(
+              failureResult(call.id, 'Child launch preparation failed')
+            )
+            return { type: 'result', result } as const
+          })
         )
       )
     }).pipe(runStore, Effect.provide(AppLayer), Effect.scoped)

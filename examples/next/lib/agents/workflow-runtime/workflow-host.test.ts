@@ -27,6 +27,7 @@ import { AgentWorkflowStore, WorkflowRunForbidden } from '@/lib/services/agent-w
 import {
   emptyWorkflowRegistry,
   transitionWorkflowRegistry,
+  WorkflowRegistryError,
   type WorkflowRegistry
 } from '@/lib/services/agent-workflow/registry'
 import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
@@ -34,12 +35,19 @@ import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import type { makeAgentTextRuntime } from './text-response'
 import { agentWorkflowHitlHookToken, runAgentWorkflow } from './run-agent-workflow'
 
+const reports = vi.hoisted(() => vi.fn())
+
 // Exercise the real host entrypoints, loop, serializers, registry transitions and tool dispatch.
 // Only provider/runtime construction, persistence and the platform transport are behavioral fakes.
 vi.mock('@/lib/layers', async () => ({ AppLayer: (await import('effect')).Layer.empty }))
 vi.mock('@/lib/services/telemetry/report-error', async () => {
   const { Effect } = await import('effect')
-  return { reportError: () => Effect.void }
+  return {
+    reportError: (error: unknown, context?: Record<string, unknown>) =>
+      Effect.sync(() => {
+        reports(error, context)
+      })
+  }
 })
 vi.mock('./text-response', () => ({
   makeAgentTextRuntime: (...args: Parameters<typeof makeAgentTextRuntime>) =>
@@ -83,6 +91,7 @@ let childGate = latch()
 let hitlEntered = latch()
 let sleepers: Array<() => void> = []
 let rejectStart = false
+let preparationFailure: WorkflowRegistryError | WorkflowRunForbidden | undefined
 let background = true
 let childModel: string | undefined
 let gated = false
@@ -228,6 +237,8 @@ beforeEach(() => {
   hitlEntered = latch()
   sleepers = []
   rejectStart = false
+  preparationFailure = undefined
+  reports.mockClear()
   background = true
   childModel = undefined
   gated = false
@@ -253,12 +264,14 @@ beforeEach(() => {
       }),
     read: (runId, userId) => row(runId, userId).pipe(Effect.map(row => row.state)),
     change: (runId, userId, command) =>
-      row(runId, userId).pipe(
-        Effect.map(row => {
-          row.state = transitionWorkflowRegistry(row.state, command)
-          return row.state
-        })
-      )
+      Effect.gen(function* () {
+        const value = yield* row(runId, userId)
+        if (command.type === 'reserve' && preparationFailure !== undefined) {
+          return yield* Effect.fail(preparationFailure)
+        }
+        value.state = transitionWorkflowRegistry(value.state, command)
+        return value.state
+      })
   })
 })
 afterEach(() => {
@@ -374,6 +387,40 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     ).toHaveLength(2)
     childGate.release()
     await world.settled(childId(parent))
+  })
+
+  it('reports recovered preparation failure once without leaking error messages or request data', async () => {
+    preparationFailure = new WorkflowRegistryError({
+      message: 'Sensitive SQL parameters and credentials'
+    })
+    const parent = await launch()
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(reports).toHaveBeenCalledExactlyOnceWith(
+      { _tag: 'WorkflowChildPreparationError', message: 'Child launch preparation failed' },
+      {
+        operation: 'agent.workflow.child.prepare',
+        runId: parent,
+        toolCallId: 'child-call',
+        cause_type: 'WorkflowRegistryError'
+      }
+    )
+    expect(
+      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+    ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
+    expect(registries.get(parent)?.state.children).toHaveLength(0)
+  })
+
+  it('keeps expected preparation authorization failures quiet and model-visible', async () => {
+    preparationFailure = new WorkflowRunForbidden({ message: 'Not found' })
+    const parent = await launch()
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('completed')
+    expect(reports).not.toHaveBeenCalled()
+    expect(
+      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+    ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
+    expect(registries.get(parent)?.state.children).toHaveLength(0)
   })
 
   it('failed start leaves an actionable uncertainty result instead of hanging a subsequent wait', async () => {
