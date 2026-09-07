@@ -50,6 +50,10 @@
       "types": "./src/figma/index.ts",
       "default": "./src/figma/index.ts"
     },
+    "./fortnox": {
+      "types": "./src/fortnox/index.ts",
+      "default": "./src/fortnox/index.ts"
+    },
     "./google": {
       "types": "./src/google/index.ts",
       "default": "./src/google/index.ts"
@@ -120,6 +124,11 @@
         "types": "./dist/figma/index.d.mts",
         "import": "./dist/figma/index.mjs",
         "default": "./dist/figma/index.mjs"
+      },
+      "./fortnox": {
+        "types": "./dist/fortnox/index.d.mts",
+        "import": "./dist/fortnox/index.mjs",
+        "default": "./dist/fortnox/index.mjs"
       },
       "./google": {
         "types": "./dist/google/index.d.mts",

@@ -98,6 +98,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './dropbox',
       './email',
       './figma',
+      './fortnox',
       './google',
       './linkedin-search',
       './microsoft',

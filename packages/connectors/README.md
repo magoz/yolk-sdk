@@ -21,6 +21,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants                     |
 | `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                    |
+| `@yolk-sdk/connectors/fortnox`         | Read-only company information, customers, invoices, suppliers, and supplier invoices with OAuth     |
 | `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                 |
 | `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                            |
 | `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                    |
@@ -282,6 +283,77 @@ Google Drive actions list, search, and get metadata; create folders; move items 
 
 Binary Drive upload/download is intentionally excluded because the connector HTTP port carries string bodies. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
 
+## Fortnox connector
+
+Wiring fragment (host layers and Effect execution omitted):
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { FortnoxConnector, FortnoxOAuthCredentialSlot } from '@yolk-sdk/connectors/fortnox'
+
+const integration = makeIntegration({
+  connectorId: 'fortnox',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: FortnoxOAuthCredentialSlot.id,
+      credentialRef: 'host-fortnox-credential'
+    })
+  ]
+})
+
+const program = FortnoxConnector.invoke({
+  integration,
+  action: 'fortnox.list_invoices',
+  input: { filter: 'unpaid', limit: 25 }
+})
+```
+
+Provide `CredentialResolver` and `ConnectorHttpClient`. The resolver returns a current
+`OAuthCredential` with `provider: 'fortnox'`. No config keys are required. Hosts own OAuth code
+exchange, state validation, serialized refresh-token rotation/persistence, revocation, consent,
+license checks, throttling, and authorization. Exported `fortnoxOAuthAuthorizeUrl` and
+`fortnoxOAuthTokenUrl` point to Fortnox's `apps.fortnox.se/oauth-v1/auth` and `/token` endpoints.
+Use `access_type=offline` for refresh; token exchange uses HTTP Basic client authentication and a
+form-urlencoded body. The connector never stores or refreshes tokens.
+
+**Fortnox has no read-only OAuth scopes.** Action-scoped `FortnoxCompanyInformationOAuthCredentialSlot`,
+`FortnoxCustomerOAuthCredentialSlot`, `FortnoxInvoiceOAuthCredentialSlot`,
+`FortnoxSupplierOAuthCredentialSlot`, and `FortnoxSupplierInvoiceOAuthCredentialSlot` request
+`companyinformation`, `customer`, `invoice`, `supplier`, and `supplierinvoice`, respectively.
+All share `fortnox.oauth`; `FortnoxCombinedOAuthCredentialSlot` requests all five. These consent hints
+do not restrict the underlying token to reads. This connector exposes only GET actions with `read`
+metadata: `fortnox.get_company_information`, `fortnox.list_customers`, `fortnox.get_customer`,
+`fortnox.list_invoices`, `fortnox.get_invoice`, `fortnox.list_suppliers`, `fortnox.get_supplier`,
+`fortnox.list_supplier_invoices`, and `fortnox.get_supplier_invoice`.
+
+List inputs support `page` (at least 1), `limit` (1–500; provider default 100), `lastModified`, and
+one `search: { field, value }` pair with resource-specific fields. Customers accept active/inactive
+`filter`; invoice lists accept status `filter` and `fromDate`/`toDate`. Each list returns one page:
+`{ customers | invoices | suppliers | supplierInvoices, pagination }`. Collections are runtime
+Effect Chunks. `pagination` contains `currentPage`, `totalPages`, `totalResources`, and optional
+`nextPage`; repeat the same selection and limit with `page: nextPage` until it is absent.
+
+Get inputs use string `customerNumber`, `documentNumber`, `supplierNumber`, or numeric-string
+`givenNumber`. The latter is Fortnox's **GivenNumber**, not the supplier's InvoiceNumber. Get outputs
+unwrap the resource. Resource fields retain Fortnox spelling and selected contact, status, reference,
+amount, and row data; they are bounded read models, not lossless accounting exports. Unknown fields
+and supplier bank details are omitted. Optional fields can be absent from list responses; use get
+for available `InvoiceRows` / `SupplierInvoiceRows` Chunks. Customer-invoice `Total` / `Balance` remain
+numbers, supplier-invoice equivalents remain strings. No monetary arithmetic or rounding occurs.
+
+Non-2xx responses are value-level provider failures, with status-specific unauthorized, forbidden,
+not-found, and rate-limit codes. Provider error messages and codes are retained without raw error
+bodies. Valid delta-seconds `Retry-After` becomes `retryAfterMs`; there are no automatic retries.
+Validation, credential, malformed success, and transport failures remain typed Effect errors.
+The HTTP adapter must preserve Bearer authorization and JSON accept headers; hosts own redirect
+safety, response-size limits, and sensitive-data handling. No financial mutations, file downloads,
+app UI, or database integration are included.
+
+See the [official API reference](https://apps.fortnox.se/apidocs),
+[scopes](https://www.fortnox.se/developer/guides-and-good-to-know/scopes),
+[OAuth lifecycle](https://www.fortnox.se/developer/authorization/), and
+[pagination/search](https://www.fortnox.se/developer/guides-and-good-to-know/parameters/).
+
 ## Dropbox connector
 
 Minimal wiring fragment (host layer and Effect execution omitted):
@@ -433,6 +505,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                          |
 | `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                      |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
+| `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, and supplier invoices              |
 | `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions |
 | `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                         |
 | `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                  |

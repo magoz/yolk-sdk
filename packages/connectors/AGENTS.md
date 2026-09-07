@@ -28,6 +28,7 @@
 | `dropbox`         | Dropbox metadata/file-management actions plus OAuth slot constants                                    |
 | `email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email client |
 | `figma`           | Figma remote MCP auth data action and OAuth constants                                                 |
+| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants         |
 | `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                            |
 | `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                             |
 | `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants              |
@@ -45,6 +46,7 @@
 - Use `ActionResult.failure` for expected provider/API failures; use Effect errors for missing config, credential, validation, or transport/runtime failures.
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
 - If a provider failure builder performs Effect decoding, action executors must `yield*` it so non-2xx responses remain `ActionResult.failure` values.
+- Fortnox actions are GET-only and share the `fortnox.oauth` binding; resource scopes (`companyinformation`, `customer`, `invoice`, `supplier`, `supplierinvoice`) grant read AND write at Fortnox, not read-only consent. Hosts own licensing, OAuth lifecycle, and throttling. Keep `GivenNumber` distinct from supplier `InvoiceNumber`, preserve monetary wire types, decode JSON arrays separately from runtime Chunks, and accept both lowercase and PascalCase `ErrorInformation` fields (official guide/OpenAPI differ). Lists require pagination metadata rather than silently assuming a final page.
 - Google action-scoped OAuth slots share the `google.oauth` binding id; `requiredScopes` are consent hints, not separate storage slots.
 - Google Calendar create/update boundaries are exclusive unions: exactly one non-empty `date` or `dateTime`, with optional `timeZone`; reject null, empty, missing, and dual-field boundaries before provider execution.
 - Google Drive metadata reads use `drive.metadata.readonly`; folder creation, trash, and permanent deletion use the least-privilege `drive.file` scope, which only covers files created by or explicitly opened/shared with the app. Hosts that need arbitrary-drive writes own broader restricted-scope consent and verification policy. Drive list/search support shared drives through `driveId`, exclude trashed items by default, use opaque `pageToken` values, and forward optional file/parent resource keys through `X-Goog-Drive-Resource-Keys`. Binary upload/download stays outside the string/JSON HTTP port.
