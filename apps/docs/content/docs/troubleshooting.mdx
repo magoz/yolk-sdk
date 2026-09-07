@@ -251,6 +251,23 @@ Timeout is owned by Yolk. Long-running commands may be killed and returned as co
 
 ## Vercel Workflow errors
 
+### Background launch completes but child output is missing
+
+`makeSubagentAcceptedToolResult` acknowledges launch only. It intentionally adds no child usage or
+`SubagentCompleted`. Implement host-owned status/wait tools and authenticated durable lookup;
+observe results with new tool-call ids rather than completing the original launch twice. The SDK
+does not ship the `subagent_status` / `subagent_wait` tools named by the acknowledgement.
+See [Background subagents](./agent/tools-hitl#background-subagents).
+
+### Child steps run inline or waiting never finishes
+
+Do not put an entire child loop inside one parent `'use step'`: nested step calls execute inline.
+Orchestrate an independent Workflow start outside that step. Use `awaitWorkflowChild` with short
+read steps and Workflow `sleep`; treat failed/cancelled children as terminal values. The helper has
+no built-in timeout, and independent children need explicit host Stop policy. Also check
+`orchestrateWorkflowToolBatch` failures even when `ready: true`; it may return partial progress.
+See [Independent child orchestration](./vercel-workflows/step-contracts#independent-child-orchestration).
+
 ### `Missing intrinsic getter: href` at import
 
 `workflow` 5.x hardens serialization by capturing Node `URL` intrinsics when the module loads and

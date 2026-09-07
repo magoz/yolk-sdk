@@ -28,7 +28,11 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 }
 ```
 
-`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions.
+`runModelStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions.
+`runToolBatchStep` may also be a step, or it may orchestrate separate tool steps and independent
+child Workflow starts. Keep provider calls, tool IO, storage, and Effect work inside steps; do not
+wrap a whole child loop in one parent step. See
+[Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
 
 ## Durable stream rule
 

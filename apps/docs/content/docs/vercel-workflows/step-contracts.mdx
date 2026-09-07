@@ -33,13 +33,13 @@ Keep provider calls, tool execution, persistence, telemetry, and Effect runtimes
 
 ## Callback table
 
-| Callback           | Directive     | Input                                                                                     | Output                                                                                 |
-| ------------------ | ------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `runModelStep`     | `'use step'`  | `{ context, state }`                                                                      | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn`  |
-| `runToolBatchStep` | `'use step'`  | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool results, `awaitingInput`, or a wire-safe partial-progress `failure`               |
-| `awaitInput`       | workflow body | awaiting-input payload                                                                    | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
-| `closeStream`      | `'use step'`  | none                                                                                      | flushes/closes after a successful final model step                                     |
-| `writeError`       | `'use step'`  | unknown error                                                                             | writes safe final error and closes failure stream; best-effort, not retried            |
+| Callback           | Directive                      | Input                                                                                     | Output                                                                                 |
+| ------------------ | ------------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `runModelStep`     | `'use step'`                   | `{ context, state }`                                                                      | model result with `done`, `messages`, `createdMessages`, `toolCalls`, `usage`, `turn`  |
+| `runToolBatchStep` | step or workflow orchestration | `{ context, request, calls, createdMessages, hitlResponses, usage, turn, eventSequence }` | tool results, `awaitingInput`, or a wire-safe partial-progress `failure`               |
+| `awaitInput`       | workflow body                  | awaiting-input payload                                                                    | one host-decoded HITL response that the package appends to accumulated `hitlResponses` |
+| `closeStream`      | `'use step'`                   | none                                                                                      | flushes/closes after a successful final model step                                     |
+| `writeError`       | `'use step'`                   | unknown error                                                                             | writes safe final error and closes failure stream; best-effort, not retried            |
 
 ## Model step
 
@@ -86,6 +86,54 @@ Rules:
 - If the step boundary catches a batch failure after sibling progress, return wire-safe `failure`,
   cumulative `usage`, and the latest `eventSequence`.
 - Return `awaitingInput` when approvals/questions must pause the workflow.
+
+## Independent child orchestration
+
+For independent children, `runToolBatchStep` may be a Workflow-safe orchestration callback instead
+of one `'use step'` function. Use `orchestrateWorkflowToolBatch` to fence the whole batch with a
+durable preflight, then invoke separate tool steps or Workflow 5 `start` calls. Do not wrap a whole
+child loop in one parent step: nested step calls from a step execute inline.
+
+Fragment inside a host `'use workflow'` function; `hostPreflightStep`, `hostReadChildStep`, and
+`hostChildWorkflow` are host-owned placeholders, not SDK exports:
+
+```ts
+import { sleep } from 'workflow'
+import { start } from 'workflow/api'
+import { awaitWorkflowChild, orchestrateWorkflowToolBatch } from '@yolk-sdk/vercel-workflows'
+
+const outcome = await orchestrateWorkflowToolBatch({
+  calls: hostChildCalls,
+  concurrency: 2,
+  preflight: () => hostPreflightStep(hostChildCalls),
+  execute: async call => {
+    const child = await start(hostChildWorkflow, [call])
+    return await awaitWorkflowChild({
+      read: () => hostReadChildStep(child.runId),
+      sleep: async () => {
+        await sleep('1s')
+      }
+    })
+  }
+})
+```
+
+The preflight step returns `{ ready: false, value }` to pause without launching any call, or
+`{ ready: true }` to allow dispatch. When using `prepareToolBatch` inside that step, any
+`pendingRequests` fence **all** launches, including executable siblings. Preserve its synthetic
+results and merge executed results by original call index.
+
+The read step returns `{ done: false }` or `{ done: true, value }`; represent child failure as a
+terminal value rather than polling forever. Keep reads short-lived and use Workflow `sleep`, not a
+long `returnValue` poll inside a step. Effect, storage, and provider work remain inside steps.
+
+Handle `outcome` before returning the loop's tool-batch result: `ready: true` may include
+`failures` and only partial ordered `results`. On rejection, dispatch stops and active siblings
+settle. Hosts map progress/failure into the loop's wire-safe result and never proceed to another
+model turn with unmatched calls.
+
+Hosts own admission, durable reservations/results, ownership checks, child HITL support, and Stop
+policy. Background acceptance is not child completion; see [Background subagents](../agent/tools-hitl#background-subagents).
 
 ## Run result tags
 

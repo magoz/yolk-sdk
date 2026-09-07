@@ -1,6 +1,10 @@
 ---
-'@yolk-sdk/agent': minor
-'@yolk-sdk/vercel-workflows': minor
+'@yolk-sdk/agent': patch
+'@yolk-sdk/connectors': patch
+'@yolk-sdk/knowledge': patch
+'@yolk-sdk/mcp': patch
+'@yolk-sdk/sandbox': patch
+'@yolk-sdk/vercel-workflows': patch
 ---
 
 Add opt-in background subagent acknowledgements without premature child-completion events,

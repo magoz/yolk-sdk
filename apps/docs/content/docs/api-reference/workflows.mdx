@@ -15,6 +15,39 @@ Use `@yolk-sdk/vercel-workflows` or the equivalent `@yolk-sdk/vercel-workflows/w
 | `retryWorkflowStep`       | retry helper for Workflow callback promises         |
 | `settleWorkflowStep`      | convert a promise into `Success` / `Failure` result |
 
+## Independent child helpers
+
+Both helpers are exported from root and `./workflow` and run in Workflow orchestration, not inside
+a single parent tool step. They do not start children or implement storage/authorization themselves.
+
+### `orchestrateWorkflowToolBatch<Call, Result, Pause>`
+
+Inputs:
+
+- `calls: ReadonlyArray<Call>` and `concurrency: number`.
+- `preflight: () => Promise<{ ready: true } | { ready: false; value: Pause }>`: runs once before
+  dispatch; a pause fences every call.
+- `execute: (call: Call, index: number) => Promise<Result>`: invokes host steps or child starts.
+
+Returns a Promise of `{ ready: false, value }` or
+`{ ready: true, results: ReadonlyArray<Result>, failures?: ReadonlyArray<{ index: number, error: unknown }> }`.
+Concurrency is floored/clamped to at least one; non-finite values become one. On rejection, no new
+calls are dispatched; active siblings settle and successful results retain original call order.
+`ready: true` is **not** a success guarantee: inspect `failures`, retain partial progress, and map
+errors to safe wire data before returning the loop callback result. Results omit failed and
+undispatched calls; carry call identity in each result when mapping partial progress.
+
+### `awaitWorkflowChild<A>`
+
+Accepts `read: () => Promise<{ done: false } | { done: true; value: A }>` and
+`sleep: () => Promise<void>`, returning `Promise<A>`. It alternates short durable read steps with
+Workflow `sleep` until `done: true`. Hosts must represent completed, failed, and cancelled child
+states, and own any timeout/Stop policy; the helper has no built-in timeout. Never place a long
+child `returnValue` poll inside one step.
+
+See [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration)
+for a host integration fragment.
+
 ## Durable event exports
 
 | Export                                | Purpose                                            |

@@ -56,6 +56,23 @@ for fresh signing inside retries.
 | `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                   |
 | `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                         |
 
+### Whole-batch preflight
+
+`prepareToolBatch({ tools, responses, calls })` returns `Effect.Effect<PreparedToolBatch>` without
+executing tools. Inputs are readonly arrays of `ToolDef`, `HitlResponse`, and `ToolCall`.
+
+| `PreparedToolBatch` field          | Purpose                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| `callsToExecute`                   | `{ index, call }` entries eligible after preflight                                    |
+| `resultMessages`                   | synthetic `{ index, message }` results, including denied calls and answered questions |
+| `resultEvents`                     | synthetic tool-completion events                                                      |
+| `events`                           | non-pending preflight events                                                          |
+| `pendingRequests`, `pendingEvents` | unresolved HITL requests and their events                                             |
+
+Any `pendingRequests` fence **all** dispatch, even when `callsToExecute` is nonempty. Hosts carry
+HITL state through pause/resume, preserve synthetic results, and merge executed results by original
+index before the next model turn. The helper computes the preflight; the host enforces the fence.
+
 Testing: `@yolk-sdk/agent/loop/testing`
 
 | Export             | Purpose                                                |
@@ -135,6 +152,7 @@ type SubagentReasoningEffortDefinition = {
 }
 
 type SubagentRuntimeSelectionOptions = {
+  readonly background?: boolean
   readonly models?: ReadonlyArray<SubagentModelDefinition>
   readonly reasoningEfforts?: ReadonlyArray<SubagentReasoningEffortDefinition>
 }
@@ -149,6 +167,7 @@ type SubagentToolParams = {
   readonly subagent_type: string
   readonly model?: string
   readonly reasoning_effort?: AgentReasoningEffort
+  readonly background?: boolean
 }
 
 type SubagentExecutionInput<Context> = {
@@ -227,6 +246,23 @@ usage/turns from `AgentEnd` or `AgentAwaitingInput`, preserves awaiting HITL req
 returns typed `AgentError` metadata. `subagentResultText` remains the compatibility text-only helper. Use
 `subagentUsageFromToolResult` to recover child usage from a structured result for cumulative host
 accounting.
+
+### Background acceptance
+
+`makeSubagentAcceptedToolResult({ callId, workflowRunId, parentRunId? })` returns a `ToolResult`;
+all input fields are strings. Enable `background: true` in registration options to advertise the
+optional model parameter. The host handles `params.background` and starts the actual child.
+
+The acknowledgement carries `type: 'subagent_accepted'`, `status: 'accepted'`, logical
+`subagent_run_id` (`subagent:<callId>`), physical `workflow_run_id`, and optional `parent_run_id`.
+It completes the launch tool call, not the child: the loop emits no `SubagentCompleted` or child
+usage for this result. Later status/wait calls use their own tool-call ids; usage extraction requires
+the logical child id to match the result's call id, preventing observation calls from charging the
+original child again.
+
+`subagent_status` and `subagent_wait` mentioned in the acknowledgement are host-owned tools, not
+SDK exports. Hosts own lookup, authorization, persistence, and Stop policy. Existing inline
+registrations remain unchanged. See [Background subagents](../agent/tools-hitl#background-subagents).
 
 ## Client
 

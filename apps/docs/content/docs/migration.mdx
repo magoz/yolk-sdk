@@ -23,7 +23,21 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
-### Next canary: Outlook optional read inputs
+### Next canary: opt-in durable subagents
+
+Inline subagent registrations remain compatible. Hosts opting into `background: true` must
+implement durable child launch and later status/wait observations. Return
+`makeSubagentAcceptedToolResult` for launch acceptance; it is not final child output and adds no
+child usage or `SubagentCompleted`. Status/wait tools, storage, ownership, and Stop policy remain
+host-owned. See [Background subagents](./agent/tools-hitl#background-subagents).
+
+Custom Workflow tool-batch hosts can use `prepareToolBatch` inside a preflight step and
+`orchestrateWorkflowToolBatch` / `awaitWorkflowChild` in orchestration. Pending HITL fences all
+launches. Do not wrap an independent child loop in a parent step, and handle partial results plus
+failures before returning the batch result. See
+[Independent child orchestration](./vercel-workflows/step-contracts#independent-child-orchestration).
+
+### `0.1.0-canary.72`: Outlook optional read inputs
 
 `outlook.list_messages` and `outlook.search_messages` now normalize null/blank optional strings
 and null page sizes to `undefined` for direct calls and generated agent tools. Existing non-blank

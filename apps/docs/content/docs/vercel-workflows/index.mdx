@@ -36,7 +36,13 @@ export async function runAgentWorkflow(input: { request: unknown; context: unkno
 }
 ```
 
-`runModelStep`, `runToolBatchStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions. Keep provider calls, tools, persistence, telemetry, and Effect runtimes in those steps. When a model result is `done: false` with no tool calls, the package continues directly to the next model step without invoking the tool-batch callback.
+`runModelStep`, `closeStream`, and `writeError` are app-owned `'use step'` functions.
+`runToolBatchStep` can be a step for ordinary tools, or a Workflow-safe orchestration callback
+that invokes separate steps and independent child Workflow starts. Keep provider calls, tool IO,
+persistence, telemetry, and Effect runtimes inside concrete steps, not orchestration code.
+See [Independent child orchestration](./step-contracts#independent-child-orchestration).
+When a model result is `done: false` with no tool calls, the package continues directly to the next
+model step without invoking the tool-batch callback.
 
 ## Use Effect at route boundaries
 
