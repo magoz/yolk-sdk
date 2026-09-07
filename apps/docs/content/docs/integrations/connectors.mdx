@@ -231,7 +231,13 @@ preferred when available; otherwise HTML is used. Text and nested-message attach
 the message body. Selected headers are `Bcc`, `Cc`, `Date`, `Delivered-To`, `From`, `In-Reply-To`,
 `Message-ID`, `References`, `Reply-To`, `Subject`, and `To`.
 
-Raw MIME and attachment content are intentionally omitted. Use `gmail.list_attachments` with one
+Raw MIME and attachment content are intentionally omitted. Optional attachment `size` values are
+nonnegative integers; invalid sizes from Gmail MIME discovery are omitted rather than exposed as
+byte counts. Hosts must still validate actual bytes and cannot treat metadata as a download limit.
+See [private attachments](../guides/private-attachments#bound-connector-downloads-before-buffering)
+for separate streamed encoded-body and decoded-file limits in the host HTTP adapter.
+
+Use `gmail.list_attachments` with one
 `messageId` for metadata-only discovery without fetching a whole thread; metadata includes
 inline/content-ID details when Gmail supplies them. `attachmentId` is optional because Gmail may
 return inline attachment data instead. When present, pass the parent message `id`

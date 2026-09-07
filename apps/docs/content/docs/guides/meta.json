@@ -8,6 +8,7 @@
     "persist-session",
     "durable-session-store",
     "durable-compaction",
+    "private-attachments",
     "hitl",
     "testing"
   ]

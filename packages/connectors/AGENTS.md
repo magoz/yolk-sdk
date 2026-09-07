@@ -41,7 +41,7 @@
 
 - Connector = reusable implementation; Integration = host-owned config that makes a connector invokable.
 - Actions declare typed input/output schemas and optional `read`/`write`/`destructive` access metadata; action execution stays Effect-native. Agent adapter host overrides win, otherwise declared access is used.
-- `http.ts` is infrastructure: connectors emit typed requests; hosts provide `ConnectorHttpClient` and preserve headers/body content type.
+- `http.ts` is infrastructure: connectors emit typed requests; hosts provide `ConnectorHttpClient` and preserve headers/body content type. This complete-string port cannot enforce pre-buffer download limits: hosts cap actual streamed bytes, allow bounded base64/JSON expansion only for successful trusted attachment requests, and keep ordinary/error bounds separate. Decoded limits and canonical base64 checks remain host policy; provider sizes are not byte-length proof.
 - Hosts provide credential resolution, storage, OAuth callbacks, refresh, auditing, and authorization.
 - Use `ActionResult.failure` for expected provider/API failures; use Effect errors for missing config, credential, validation, or transport/runtime failures.
 - Best-effort provider error-body detail parsing uses `Schema.decodeUnknownEffect(Schema.UnknownFromJsonString).pipe(Effect.result)`; never `try/catch`, raw `JSON.parse`, or sync Schema option decoders.
@@ -68,6 +68,7 @@
 - Afloat MCP auth actions are server-side connection helpers; never expose returned API keys through model-callable connector modules.
 - Figma MCP `refreshToken`, `clientId`, and `clientSecret` come from the runtime
   `OAuthCredential`; never read them from integration config.
+- Gmail MIME discovery omits malformed optional attachment sizes; present sizes are nonnegative integers, including zero. This best-effort normalization must not throw on bad optional size metadata.
 - Gmail attachment discovery is metadata-only through `gmail.get_thread` or single-message `gmail.list_attachments`; neither exposes MIME-part content. `gmail.get_attachment` requires an `attachmentId`, preserves Gmail's validated base64url `data`, and adds standard-base64 `contentBase64`; inline parts without an attachment ID remain non-retrievable.
 - `gmail.get_thread` is a bounded normalized boundary: require an explicit format, decode message text with plain text preferred over HTML, retain selected headers and attachment metadata, and never expose raw MIME or attachment content. Text/nested attachment parts must not enter the message body.
 - Agent adapters require a host-provided Effect layer for connector dependencies; adapters must not construct HTTP or credential services themselves.

@@ -106,6 +106,8 @@ export {
   messageContextText,
   prependMessageContextToContent,
   repairDanglingHostToolCalls,
+  resolveMessageAttachmentSources,
+  resolveMessagesAttachmentSources,
   validateNoDanglingHostToolCalls
 } from './message.ts'
 export type {

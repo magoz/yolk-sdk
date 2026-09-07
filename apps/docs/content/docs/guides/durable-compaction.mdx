@@ -289,6 +289,10 @@ updates it after successful compaction but does not persist or replace runtime t
 Use this wrapper only when the provider reports context overflow before emitting deltas. It does not
 retract already-emitted text/usage or emit compaction lifecycle events before starting the retry.
 
+For private media, put host authorization/signing **inside** this retry wrapper. The compactor then
+works on refs, and each provider attempt resolves fresh URLs from its effective context. See
+[Resolve private attachments](./private-attachments) for the tested composition and limits.
+
 ## Persist only new messages
 
 When a model or tool step finishes, append only messages created by that step:

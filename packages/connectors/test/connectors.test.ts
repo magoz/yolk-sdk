@@ -49,6 +49,7 @@ import {
   gmailDraftReplyAction,
   gmailGetAttachmentAction,
   gmailGetThreadAction,
+  GmailThreadOutput,
   gmailListAttachmentsAction,
   gmailListDraftsAction,
   gmailListSendAsAction,
@@ -2847,6 +2848,58 @@ describe('@yolk-sdk/connectors', () => {
       })
       expect(requestedScopes.at(0)).toContain(googleGmailReadonlyScope)
       expect(JSON.stringify(result)).not.toContain(inlineData)
+    })
+  )
+
+  it.effect('omits invalid Gmail discovery sizes while retaining zero and valid byte counts', () =>
+    Effect.gen(function* () {
+      const sizes = [-1, 1.5, null, '12', undefined, 0, 12]
+      const message = {
+        id: 'message_1',
+        payload: {
+          mimeType: 'multipart/mixed',
+          parts: sizes.map((size, index) => ({
+            filename: `${index}.pdf`,
+            mimeType: 'application/pdf',
+            body: { size, attachmentId: `attachment_${index}` }
+          }))
+        }
+      }
+      const ConnectorHttpClientTest = makeConnectorHttpClientTest(
+        [],
+        [
+          jsonHttpResponse(JSON.stringify(message)),
+          jsonHttpResponse(JSON.stringify({ id: 'thread_1', messages: [message] }))
+        ]
+      )
+      const TestLayer = Layer.mergeAll(GoogleCredentialResolverTest, ConnectorHttpClientTest)
+      const listed = yield* gmailListAttachmentsAction
+        .execute({ integration: googleIntegration, input: { messageId: message.id } })
+        .pipe(Effect.provide(TestLayer))
+      const thread = yield* gmailGetThreadAction
+        .execute({
+          integration: googleIntegration,
+          input: { threadId: 'thread_1', format: 'full' }
+        })
+        .pipe(Effect.provide(TestLayer))
+      const expected = sizes.map((size, index) => ({
+        filename: `${index}.pdf`,
+        mimeType: 'application/pdf',
+        attachmentId: `attachment_${index}`,
+        ...(size === 0 || size === 12 ? { size } : {})
+      }))
+      expect(listed).toEqual({
+        _tag: 'Success',
+        value: { attachments: Chunk.fromIterable(expected) }
+      })
+      expect(thread).toMatchObject({
+        _tag: 'Success',
+        value: { messages: [{ attachments: expected }] }
+      })
+      if (thread._tag === 'Success') {
+        const output = yield* Schema.decodeUnknownEffect(GmailThreadOutput)(thread.value)
+        expect(output.messages[0]?.attachments).toEqual(expected)
+      }
     })
   )
 
