@@ -13,6 +13,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management actions         |
 | Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state |
 | Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                           |
+| Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice, supplier reads |
 | Google          | `@yolk-sdk/connectors/google`          | Google OAuth slots                           | none                                               | Gmail + Calendar + Drive actions           |
 | LinkedIn search | `@yolk-sdk/connectors/linkedin-search` | `ExaApiKeySlot`, `EnrichLayerApiKeySlot`     | none                                               | search, profile, email                     |
 | Microsoft       | `@yolk-sdk/connectors/microsoft`       | Microsoft OAuth slots                        | `mailboxAccessMode`, `oneDriveAccessMode` optional | Outlook + OneDrive through Graph           |
@@ -42,6 +43,28 @@ Return optional `refreshToken`, `clientId`, and `clientSecret` from the host's r
 | Action id        | What it does                                                             |
 | ---------------- | ------------------------------------------------------------------------ |
 | `figma.mcp_auth` | builds Figma remote MCP server URL, tokens, and optional MCP client info |
+
+## Fortnox
+
+`FortnoxConnector` exposes only GET actions, all with `read` metadata:
+
+| Action id                                                         | What it does                                          |
+| ----------------------------------------------------------------- | ----------------------------------------------------- |
+| `fortnox.get_company_information`                                 | read company information                              |
+| `fortnox.list_customers` / `fortnox.get_customer`                 | list or retrieve customers                            |
+| `fortnox.list_invoices` / `fortnox.get_invoice`                   | list or retrieve customer invoices and available rows |
+| `fortnox.list_suppliers` / `fortnox.get_supplier`                 | list or retrieve suppliers                            |
+| `fortnox.list_supplier_invoices` / `fortnox.get_supplier_invoice` | list or retrieve supplier invoices by GivenNumber     |
+
+All resource-scoped OAuth slots share `fortnox.oauth`. Required scope hints are `companyinformation`,
+`customer`, `invoice`, `supplier`, and `supplierinvoice`. **Fortnox scopes grant read and write**;
+only the SDK action surface is read-only. Hosts provide HTTP and current Fortnox OAuth credentials,
+with no integration config keys.
+
+List actions support page/limit, one resource-specific search pair, and global selection fields.
+They return runtime Chunks and normalized pagination. Resource fields retain provider spelling and
+monetary types. See [Read Fortnox records](../connectors/fortnox) for setup, inputs, selected fields,
+consent limitations, and failure handling.
 
 ## Dropbox
 

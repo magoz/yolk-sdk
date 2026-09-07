@@ -1,0 +1,182 @@
+---
+title: Read Fortnox records
+description: Read company information, customers, invoices, suppliers, and supplier invoices with host-owned OAuth.
+---
+
+Use `@yolk-sdk/connectors/fortnox` to read Fortnox records directly or expose them as agent tools.
+All nine actions declare `read` access and send only GET requests to `https://api.fortnox.se/3`.
+There are no create, update, send, book, cancel, payment, or file-download actions.
+
+## Connect a host credential
+
+Install matching canary versions:
+
+```bash
+pnpm add @yolk-sdk/connectors@canary @yolk-sdk/agent@canary effect
+```
+
+Wiring fragment (host layers and Effect execution omitted):
+
+```ts
+import { makeCredentialBinding, makeIntegration } from '@yolk-sdk/connectors'
+import { FortnoxConnector, FortnoxOAuthCredentialSlot } from '@yolk-sdk/connectors/fortnox'
+
+const integration = makeIntegration({
+  connectorId: 'fortnox',
+  credentialBindings: [
+    makeCredentialBinding({
+      slotId: FortnoxOAuthCredentialSlot.id,
+      credentialRef: 'host-fortnox-credential'
+    })
+  ]
+})
+
+const program = FortnoxConnector.invoke({
+  integration,
+  action: 'fortnox.list_invoices',
+  input: { filter: 'unpaid', limit: 25 }
+})
+```
+
+Provide `CredentialResolver` and `ConnectorHttpClient` Effect layers. The resolver must return an
+`OAuthCredential` with `provider: 'fortnox'` and a current `accessToken`. Resolve or refresh the
+credential before returning it; the connector does not refresh tokens or enforce their expiry.
+Integration config needs no keys and must not contain tokens or client secrets.
+
+The HTTP adapter must preserve `Authorization: Bearer …` and `Accept: application/json`.
+Hosts own network policy, response-size limits, redirect safety, and avoiding credential/body logs.
+
+## Choose consent scopes
+
+**Fortnox has no read-only OAuth scopes.** Each resource scope grants read and write access at the
+provider, even though this connector exposes only reads. Explain this distinction during consent
+and retain host authorization checks. Fortnox also requires a company license for each resource.
+
+All slots bind through `fortnox.oauth`:
+
+| Slot                                           | Required scope       |
+| ---------------------------------------------- | -------------------- |
+| `FortnoxCompanyInformationOAuthCredentialSlot` | `companyinformation` |
+| `FortnoxCustomerOAuthCredentialSlot`           | `customer`           |
+| `FortnoxInvoiceOAuthCredentialSlot`            | `invoice`            |
+| `FortnoxSupplierOAuthCredentialSlot`           | `supplier`           |
+| `FortnoxSupplierInvoiceOAuthCredentialSlot`    | `supplierinvoice`    |
+
+`FortnoxOAuthCredentialSlot` is the generic binding without scope hints.
+`FortnoxCombinedOAuthCredentialSlot` declares all five scopes; use it only when the host needs all
+resources. Action-scoped slots supply consent hints to the resolver, not a token store or permission
+checker.
+
+Host OAuth implementation:
+
+- Use `fortnoxOAuthAuthorizeUrl` (`https://apps.fortnox.se/oauth-v1/auth`) with `response_type=code`,
+  a CSRF-protected `state`, the registered redirect URI, and space-delimited scopes. Request
+  `access_type=offline` when refresh is needed. Service-account selection is host policy.
+- Exchange the code at `fortnoxOAuthTokenUrl` (`https://apps.fortnox.se/oauth-v1/token`) with HTTP
+  Basic client authentication and a form-urlencoded body.
+- Store and refresh tokens server-side. Fortnox rotates refresh tokens; serialize refreshes and
+  persist the replacement safely. Hosts own revocation, reauthorization, and credential identity.
+
+## Actions and outputs
+
+| Action                            | Input                              | Success value                      |
+| --------------------------------- | ---------------------------------- | ---------------------------------- |
+| `fortnox.get_company_information` | `{}`                               | `FortnoxCompanyInformation`        |
+| `fortnox.list_customers`          | `FortnoxListCustomersInput`        | `{ customers, pagination }`        |
+| `fortnox.get_customer`            | `{ customerNumber }`               | `FortnoxCustomer`                  |
+| `fortnox.list_invoices`           | `FortnoxListInvoicesInput`         | `{ invoices, pagination }`         |
+| `fortnox.get_invoice`             | `{ documentNumber }`               | `FortnoxInvoice`                   |
+| `fortnox.list_suppliers`          | `FortnoxListSuppliersInput`        | `{ suppliers, pagination }`        |
+| `fortnox.get_supplier`            | `{ supplierNumber }`               | `FortnoxSupplier`                  |
+| `fortnox.list_supplier_invoices`  | `FortnoxListSupplierInvoicesInput` | `{ supplierInvoices, pagination }` |
+| `fortnox.get_supplier_invoice`    | `{ givenNumber }`                  | `FortnoxSupplierInvoice`           |
+
+Pass identifier strings returned by the provider, preserving leading zeros. `givenNumber` is the
+numeric-string **GivenNumber**, not the supplier's `InvoiceNumber`. Identifiers are validated and
+encoded as path segments; returned provider URLs are never followed.
+
+Resource fields retain Fortnox spelling, including `CustomerNumber`, `DocumentNumber`,
+`GivenNumber`, `CompanyName`, and `OrganisationNumber` (company information uses
+`OrganizationNumber`). These are bounded read models: unknown provider fields are omitted, not a
+lossless accounting export. The exported schemas define the selected contact, status, reference,
+amount, and invoice-row fields. Supplier bank details and unmodeled provider fields are not exposed.
+List responses can contain fewer fields than detail responses; optional omission does not mean zero
+or false. Use a get action to retrieve available rows.
+
+Collections are runtime Effect `Chunk` values, including `InvoiceRows` and `SupplierInvoiceRows`.
+Customer-invoice `Total` and `Balance` remain numbers; supplier-invoice `Total` and `Balance` remain
+strings, preserving their supplied decimal representation. Row amounts retain their provider types
+and nullable `Total`/`CostCenter` values. The connector performs no monetary arithmetic or rounding.
+
+### Pagination and search
+
+Every list action fetches exactly one page. Inputs support `page` (integer, at least 1), `limit`
+(integer, 1–500), and `lastModified` (provider timestamp string). Omitted values use Fortnox defaults
+(page 1, limit 100). Output `pagination` contains `currentPage`, `totalPages`, `totalResources`, and
+optional `nextPage`. Continue with `page: nextPage`, repeating the same limit and selection fields;
+stop when `nextPage` is absent. Missing or malformed pagination metadata is an error, not an assumed
+final page. The connector does not auto-paginate or promise snapshot consistency while records change.
+
+Fortnox's OpenAPI invoice-list wrapper omits the generic `MetaInformation` field that this connector
+expects. Invoice pagination needs confirmation with a sanitized response from your account before
+production use; the connector does not infer completion when metadata is missing.
+
+For resource-specific searches, supply one `search: { field, value }` pair:
+
+| Resource          | Supported `search.field` values                                          |
+| ----------------- | ------------------------------------------------------------------------ |
+| Customers         | `customernumber`, `name`, `organisationnumber`, `email`, `city`, `phone` |
+| Suppliers         | `suppliernumber`, `name`, `organisationnumber`, `email`, `city`, `phone` |
+| Invoices          | `customernumber`, `customername`, `documentnumber`, `ocr`                |
+| Supplier invoices | `suppliernumber`, `suppliername`, `invoicenumber`, `serialnumber`, `ocr` |
+
+Fortnox supports only one resource-specific search field at a time; matching follows provider
+semantics, not guaranteed exact equality. Combine it with global `lastModified`, and for invoice
+lists, `fromDate`/`toDate` date strings. Dates are forwarded unchanged without timezone conversion.
+
+Customers additionally accept `filter: 'active' | 'inactive'`. Both invoice lists accept `cancelled`,
+`fullypaid`, `unpaid`, `unpaidoverdue`, or `unbooked`; supplier invoices also accept `pendingpayment`
+and `authorizepending`. Supplier lists do not expose a status filter. Unsupported sort/offset or
+arbitrary query parameters are not part of this connector.
+
+## Handle failures and rate limits
+
+Non-2xx responses return `ActionResult.failure`, including `fortnox_unauthorized` (401),
+`fortnox_forbidden` (403), `fortnox_not_found` (404), `fortnox_rate_limited` (429), and
+`fortnox_request_failed` for other statuses. Fortnox `ErrorInformation` fields accept both documented casings (`message`/`code` and
+`Message`/`Code`). The message is retained; the code, when present, is available as
+`error.underlying.providerCode`. Raw error bodies are not
+returned. Missing/invalid credentials, input validation, malformed success bodies, and transport
+errors stay in the typed Effect error channel.
+
+Fortnox documents 25 requests per 5 seconds per access token. Hosts own throttling and retry policy;
+the connector never retries automatically. A valid delta-seconds `Retry-After` header is exposed as
+`retryAfterMs`; HTTP-date headers are not interpreted. A 403 may mean missing consent, license, or
+permissions rather than an expired token.
+
+## Expose agent tools
+
+Wiring fragment; `HostConnectorLayer` is the host-provided layer described above:
+
+```ts
+import { makeConnectorToolModule } from '@yolk-sdk/connectors/agent'
+
+const tools = makeConnectorToolModule(FortnoxConnector, {
+  integration,
+  layer: HostConnectorLayer
+})
+```
+
+The adapter inherits each action's `read` metadata; explicit host access overrides still win.
+See [Add connector tools](../integrations/connector-tool) for tool execution and authorization.
+
+## Official Fortnox references
+
+- [API reference](https://apps.fortnox.se/apidocs)
+- [Scopes and required licenses](https://www.fortnox.se/developer/guides-and-good-to-know/scopes)
+- [Authorization code](https://www.fortnox.se/developer/authorization/get-authorization-code)
+- [Access-token exchange](https://www.fortnox.se/developer/authorization/get-access-token)
+- [Authorization and refresh lifecycle](https://www.fortnox.se/developer/authorization/)
+- [API request authentication](https://www.fortnox.se/developer/authorization/make-request)
+- [Parameters and pagination](https://www.fortnox.se/developer/guides-and-good-to-know/parameters/)
+- [Response and error envelopes](https://www.fortnox.se/developer/guides-and-good-to-know/responses)

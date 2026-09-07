@@ -3,7 +3,7 @@ title: Connectors package
 description: Define external API actions and turn them into agent tools.
 ---
 
-Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, generic IMAP/POP3/SMTP email, Google Gmail/Calendar/Drive, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
+Use `@yolk-sdk/connectors` when you want reusable, typed actions for external services such as Afloat, Dropbox, Fortnox, generic IMAP/POP3/SMTP email, Google Gmail/Calendar/Drive, Microsoft Outlook/OneDrive, Notion, Telegram, Todoist, R2, Figma, or custom APIs.
 
 Install:
 
@@ -81,19 +81,24 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 
 ## Provider modules
 
-| Subpath                                | Use for                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------ |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth data                                              |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                            |
-| `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts/message state, POP3 reads, and SMTP submission |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                               |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                               |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email                         |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph                   |
-| `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users           |
-| `@yolk-sdk/connectors/r2-storage`      | R2 upload URL with host presigner                                        |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                               |
-| `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                          |
+| Subpath                                | Use for                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth data                                                          |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                                        |
+| `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts/message state, POP3 reads, and SMTP submission             |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                                           |
+| `@yolk-sdk/connectors/fortnox`         | Read-only company information, customers, invoices, suppliers, and supplier invoices |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive                                                           |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email                                     |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook and OneDrive through Microsoft Graph                               |
+| `@yolk-sdk/connectors/notion`          | Notion pages, blocks, databases, data sources, comments, users                       |
+| `@yolk-sdk/connectors/r2-storage`      | R2 upload URL with host presigner                                                    |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                                           |
+| `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                                      |
+
+[Fortnox](./fortnox) exposes nine GET-only actions and resource-scoped OAuth hints through one
+`fortnox.oauth` binding. Fortnox scopes themselves permit both read and write; the connector's
+read-only surface does not narrow the underlying token. Hosts own consent and token lifecycle.
 
 Microsoft Outlook and OneDrive are exposed from the provider-level `microsoft` subpath because
 Microsoft Graph is their shared API and OAuth resource boundary. Workload action ids remain
