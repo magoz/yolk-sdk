@@ -1,5 +1,22 @@
 # @yolk-sdk/connectors
 
+## 0.1.0-canary.73
+
+### Patch Changes
+
+- 6672571: Add opt-in background subagent acknowledgements without premature child-completion events,
+  public whole-batch HITL preflight, and generic bounded Workflow tool orchestration and durable
+  child read/sleep seams. Preserve inline subagent compatibility and logical usage identity.
+  The Next example wires independent foreground/background child workflows with owned durable
+  reservations/results and tombstone-first explicit Stop cancellation.
+- 2749df0: Add Effect-native `resolveMessageAttachmentSources` and `resolveMessagesAttachmentSources` protocol helpers. Traverse user, assistant, and tool-result media, including nested assistant provider tool results, while preserving metadata and ordering without mutation or caching. Document host-owned fresh signing inside provider retries, native PDF/image tool results, and bounded attachment transport.
+
+  Validate Gmail discovery attachment sizes as nonnegative integers and omit malformed optional size metadata. Keep download limits, decoded-byte validation, authorization, storage, and extraction policy host-owned.
+
+- Updated dependencies [6672571]
+- Updated dependencies [2749df0]
+  - @yolk-sdk/agent@0.1.0-canary.73
+
 ## 0.1.0-canary.72
 
 ### Patch Changes
