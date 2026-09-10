@@ -417,6 +417,69 @@ describe('runVercelAgentWorkflow', () => {
     expect(toolInputs.map(input => input.eventSequence)).toEqual([3, 3])
   })
 
+  it('replays background admission receipts through tool batch retry without completion or usage', async () => {
+    const modelStates: Array<SerializableWorkflowState> = []
+    const receipts = new Map<string, { readonly version: 1; readonly executionId: string }>()
+    let physicalLaunches = 0
+    let toolAttempts = 0
+    // Host-owned idempotent admission: retry recovers the same receipt instead of relaunching.
+    const accept = (callId: string) => {
+      const existing = receipts.get(callId)
+      if (existing !== undefined) return existing
+      physicalLaunches += 1
+      const receipt = { version: 1 as const, executionId: `owner:${callId}` }
+      receipts.set(callId, receipt)
+      return receipt
+    }
+    const acknowledgement = (callId: string) => ({
+      _tag: 'ToolResult',
+      toolCallId: callId,
+      content: 'accepted',
+      acceptance: accept(callId)
+    })
+
+    const result = await runWorkflow({
+      input: { request: 'request-1', context: 'ctx-1' },
+      maxTurns: 2,
+      toolBatchStepRetry: { maxAttempts: 2 },
+      runModelStep: input => step(() => {
+        modelStates.push(input.state)
+        return input.state.turn === 1 ? toolModelResult(input) : terminalModelResult(input)
+      }),
+      runToolBatchStep: input => step(() => {
+        toolAttempts += 1
+        const messages = input.calls.map(call => acknowledgement(String(call)))
+
+        if (toolAttempts === 1) {
+          throw new Error('step response lost after durable admission')
+        }
+
+        return { messages, createdMessages: [...input.createdMessages, ...messages] }
+      }),
+      closeStream: emptyStep,
+      writeError: emptyStep
+    })
+
+    expect(result).toMatchObject({ _tag: 'Completed', turns: 2 })
+    expect(toolAttempts).toBe(2)
+    expect(physicalLaunches).toBe(2)
+    expect(modelStates[1]).toEqual({
+      request: 'request-1',
+      messages: [
+        'request-1',
+        'assistant-1',
+        acknowledgement('tool-1-a'),
+        acknowledgement('tool-1-b')
+      ],
+      createdMessages: ['assistant-1', acknowledgement('tool-1-a'), acknowledgement('tool-1-b')],
+      // Acceptance carries no nested usage; only the model usage is retained.
+      usage: { turns: 1 },
+      turn: 2,
+      eventSequence: 0
+    })
+    expect(JSON.parse(JSON.stringify(modelStates[1]))).toEqual(modelStates[1])
+  })
+
   it('preserves accumulated usage when a resumed tool batch fails', async () => {
     const error = new Error('resumed tools failed')
     const awaitingInput = {

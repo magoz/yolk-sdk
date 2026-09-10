@@ -314,6 +314,7 @@ export const reduceAgentChatState = (
         case 'ToolApprovalDenied':
         case 'ToolApprovalGranted':
         case 'ToolApprovalRequested':
+        case 'ToolExecutionAccepted':
         case 'ToolExecutionCompleted':
         case 'ToolExecutionError':
         case 'ToolExecutionStarted':
@@ -360,6 +361,7 @@ export const hasAgentChatReasoningSummary = (state: AgentChatState) =>
 export const isActiveChatToolPart = (part: AgentChatPart) =>
   part._tag === 'ToolCall' &&
   part.state._tag !== 'Completed' &&
+  part.state._tag !== 'Accepted' &&
   part.state._tag !== 'ProviderCompleted' &&
   part.state._tag !== 'QuestionAnswered' &&
   part.state._tag !== 'QuestionCancelled' &&

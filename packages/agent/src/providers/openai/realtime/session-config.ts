@@ -1,7 +1,8 @@
 import { Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
-import type { VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
 export type OpenAiRealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
@@ -200,12 +201,18 @@ export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
   }
 }
 
-export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool => ({
-  type: 'function',
-  name: tool.name,
-  description: tool.description,
-  parameters: openAiRealtimeToolParameters(tool.parameters)
-})
+/** Throws VoiceToolBridgeError for activated background definitions; voice has no acceptance lifecycle. */
+export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool => {
+  if (tool.execution === 'background-v1') {
+    throw new VoiceToolBridgeError({ message: backgroundVoiceUnsupportedMessage })
+  }
+  return {
+    type: 'function',
+    name: tool.name,
+    description: tool.description,
+    parameters: openAiRealtimeToolParameters(tool.parameters)
+  }
+}
 
 export const makeOpenAiRealtimeSessionConfig = ({
   instructions,

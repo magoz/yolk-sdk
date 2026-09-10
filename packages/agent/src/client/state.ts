@@ -48,6 +48,13 @@ export type AgentToolRun =
       readonly endedAtMs: number
     }
   | {
+      readonly _tag: 'Accepted'
+      readonly call: ToolCall
+      readonly result: ToolResult
+      readonly startedAtMs: number
+      readonly endedAtMs: number
+    }
+  | {
       readonly _tag: 'Errored'
       readonly call: ToolCall
       readonly message: string
@@ -55,7 +62,10 @@ export type AgentToolRun =
     }
   | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
 
-type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Executing' | 'Completed' }>
+type StartedAgentToolRun = Extract<
+  AgentToolRun,
+  { readonly _tag: 'Executing' | 'Accepted' | 'Completed' }
+>
 
 export type AgentClientState = {
   readonly status: AgentRunStatus
@@ -114,6 +124,7 @@ const toolRunId = (run: AgentToolRun) => {
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
+    case 'Accepted':
     case 'Completed':
     case 'Errored':
     case 'ProviderCompleted':
@@ -122,6 +133,7 @@ const toolRunId = (run: AgentToolRun) => {
 }
 
 export const isActiveToolRun = (run: AgentToolRun) =>
+  run._tag !== 'Accepted' &&
   run._tag !== 'Completed' &&
   run._tag !== 'Errored' &&
   run._tag !== 'Denied' &&
@@ -151,6 +163,9 @@ const replaceToolRun = (
   const id = toolRunId(run)
   const replaceIndex = runs.findIndex(current => toolRunId(current) === id)
 
+  // Input/approval/Started replays without event ids cannot reopen an acknowledged call.
+  if (runs[replaceIndex]?._tag === 'Accepted' && isActiveToolRun(run)) return runs
+
   if (replaceIndex === -1) {
     return [...runs, run]
   }
@@ -165,7 +180,7 @@ const replaceToolRun = (
 }
 
 const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun =>
-  run._tag === 'Executing' || run._tag === 'Completed'
+  run._tag === 'Executing' || run._tag === 'Accepted' || run._tag === 'Completed'
 
 const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
   runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
@@ -199,6 +214,7 @@ const questionRequestForToolCall = (
       case 'ApprovalRequested':
       case 'Denied':
       case 'Executing':
+      case 'Accepted':
       case 'Completed':
       case 'Errored':
       case 'ProviderCompleted':
@@ -358,6 +374,7 @@ const applyAgentEventUnchecked = (
           startedAtMs: nowMs
         })
       }
+    case 'ToolExecutionAccepted':
     case 'ToolExecutionCompleted': {
       const endedAtMs = nowMs
       const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
@@ -365,7 +382,7 @@ const applyAgentEventUnchecked = (
       return {
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Completed',
+          _tag: event._tag === 'ToolExecutionAccepted' ? 'Accepted' : 'Completed',
           call: event.call,
           result: event.result,
           startedAtMs,

@@ -433,14 +433,19 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 )
               }
 
-              if (event._tag !== 'ToolExecutionCompleted') {
+              if (
+                event._tag !== 'ToolExecutionCompleted' &&
+                event._tag !== 'ToolExecutionAccepted'
+              ) {
                 return Effect.void
               }
 
               return Effect.gen(function* () {
-                yield* Ref.update(cumulativeUsage, current =>
-                  addWorkflowToolResultUsage(current, event.result)
-                )
+                if (event._tag === 'ToolExecutionCompleted') {
+                  yield* Ref.update(cumulativeUsage, current =>
+                    addWorkflowToolResultUsage(current, event.result)
+                  )
+                }
                 latestUsage = yield* Ref.get(cumulativeUsage)
                 yield* Ref.update(toolResultMessages, messages => {
                   const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
@@ -452,6 +457,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                         toolCallId: event.result.toolCallId,
                         content: event.result.content,
                         isError: event.result.isError,
+                        acceptance: event.result.acceptance,
                         structuredContent: event.result.structuredContent
                       })
                     }

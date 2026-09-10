@@ -103,6 +103,12 @@ export const activityItemFromAgentEvent = (
       }
     case 'ToolExecutionStarted':
       return { title: `Running tool: ${event.call.name}`, detail: event.call.id, tone: 'tool' }
+    case 'ToolExecutionAccepted':
+      return {
+        title: `Background tool accepted: ${event.call.name}`,
+        detail: truncate(contentPreview(event.result.content)),
+        tone: 'tool'
+      }
     case 'ToolExecutionCompleted':
       return {
         title: `Tool result: ${event.call.name}`,

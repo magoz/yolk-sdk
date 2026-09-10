@@ -132,6 +132,8 @@ const toolStateLabel = (state: ToolRunState) => {
       return 'running'
     case 'Called':
       return 'called'
+    case 'Accepted':
+      return 'accepted (background)'
     case 'Completed':
       return state.result.isError === true ? 'error' : formatToolDuration(state.duration)
     case 'Errored':
@@ -143,6 +145,7 @@ const toolStateLabel = (state: ToolRunState) => {
 
 const toolStateHasError = (state: ToolRunState) => {
   switch (state._tag) {
+    case 'Accepted':
     case 'Completed':
     case 'ProviderCompleted':
       return state.result.isError === true
@@ -194,6 +197,7 @@ const questionAnswerPreview = (
 
 const toolStateContent = (state: ToolRunState) => {
   switch (state._tag) {
+    case 'Accepted':
     case 'Completed':
     case 'ProviderCompleted':
       return contentPreview(state.result.content)
@@ -239,6 +243,7 @@ const numberField = (input: unknown, key: string) => {
 
 const resultStructuredContent = (state: ToolRunState) => {
   switch (state._tag) {
+    case 'Accepted':
     case 'Completed':
     case 'ProviderCompleted':
       return state.result.structuredContent

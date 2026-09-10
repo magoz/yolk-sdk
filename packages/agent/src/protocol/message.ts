@@ -7,7 +7,7 @@ import {
   resolveContentAttachmentSources,
   type AttachmentSourceResolver
 } from './content.ts'
-import { ToolCall, ToolResult } from './tool.ts'
+import { BackgroundToolAccepted, ToolCall, ToolResult } from './tool.ts'
 
 export const MessageAuthor = Schema.Struct({
   displayName: Schema.optional(Schema.String)
@@ -88,7 +88,8 @@ export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('
   toolCallId: Schema.String,
   content: Content,
   isError: Schema.optional(Schema.Boolean),
-  structuredContent: Schema.optional(Schema.Unknown)
+  structuredContent: Schema.optional(Schema.Unknown),
+  acceptance: Schema.optional(BackgroundToolAccepted)
 }) {}
 
 export const AgentMessage = Schema.Union([UserMessage, AssistantAgentMessage, ToolResultMessage])

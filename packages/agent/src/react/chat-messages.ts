@@ -54,6 +54,12 @@ export type ChatToolState =
       readonly endedAtMs?: number
     }
   | {
+      readonly _tag: 'Accepted'
+      readonly result: ToolResult
+      readonly startedAtMs?: number
+      readonly endedAtMs?: number
+    }
+  | {
       readonly _tag: 'Errored'
       readonly message: string
       readonly startedAtMs?: number
@@ -87,6 +93,7 @@ export type AgentChatPart =
       readonly name: string
       readonly content: Content
       readonly isError?: boolean
+      readonly acceptance?: ToolResult['acceptance']
       readonly structuredContent?: unknown
     }
   | { readonly _tag: 'Error'; readonly id: string; readonly message: string }
@@ -186,6 +193,7 @@ const toolRunNameEntry = (run: AgentToolRun): ReadonlyArray<readonly [string, st
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
+    case 'Accepted':
     case 'Completed':
     case 'Errored':
     case 'ProviderCompleted':
@@ -219,6 +227,7 @@ const toolResultEntry = (message: AgentMessage): ReadonlyArray<readonly [string,
             toolCallId: message.toolCallId,
             content: message.content,
             isError: message.isError,
+            acceptance: message.acceptance,
             structuredContent: message.structuredContent
           })
         ]
@@ -253,6 +262,7 @@ const toolRunEntry = (run: AgentToolRun): readonly [string, AgentToolRun] => {
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
+    case 'Accepted':
     case 'Completed':
     case 'Errored':
     case 'ProviderCompleted':
@@ -276,6 +286,7 @@ const questionRequestFromToolState = (state: ChatToolState): QuestionRequest | u
     case 'ApprovalRequested':
     case 'Denied':
     case 'Running':
+    case 'Accepted':
     case 'Completed':
     case 'Errored':
     case 'ProviderCompleted':
@@ -332,9 +343,9 @@ const toolStateFor = (
     })
   }
 
-  if (run?._tag === 'Completed') {
+  if (run?._tag === 'Completed' || run?._tag === 'Accepted') {
     return {
-      _tag: 'Completed',
+      _tag: run._tag,
       result: run.result,
       startedAtMs: run.startedAtMs,
       endedAtMs: run.endedAtMs
@@ -350,7 +361,7 @@ const toolStateFor = (
   }
 
   if (result !== undefined) {
-    return { _tag: 'Completed', result }
+    return { _tag: result.acceptance === undefined ? 'Completed' : 'Accepted', result }
   }
 
   return { _tag: 'Called' }
@@ -408,6 +419,7 @@ const assistantPartsFromMessage = ({
             name: part.toolCallId,
             content: part.result.content,
             isError: part.result.isError,
+            acceptance: part.result.acceptance,
             structuredContent: part.result.structuredContent
           }
         ]
@@ -681,7 +693,10 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
       ...next,
       startedAtMs:
         next.startedAtMs ??
-        (existing._tag === 'Running' || existing._tag === 'Completed' || existing._tag === 'Errored'
+        (existing._tag === 'Running' ||
+        existing._tag === 'Completed' ||
+        existing._tag === 'Accepted' ||
+        existing._tag === 'Errored'
           ? existing.startedAtMs
           : undefined),
       endedAtMs: next.endedAtMs ?? (existing._tag === 'Errored' ? existing.endedAtMs : undefined)
@@ -696,19 +711,25 @@ const mergeToolState = (existing: ChatToolState, next: ChatToolState): ChatToolS
     return next
   }
 
-  if (next._tag === 'Completed') {
+  if (next._tag === 'Completed' || next._tag === 'Accepted') {
     return {
       ...next,
       startedAtMs:
         next.startedAtMs ??
-        (existing._tag === 'Running' || existing._tag === 'Completed'
+        (existing._tag === 'Running' ||
+        existing._tag === 'Completed' ||
+        existing._tag === 'Accepted'
           ? existing.startedAtMs
           : undefined),
-      endedAtMs: next.endedAtMs ?? (existing._tag === 'Completed' ? existing.endedAtMs : undefined)
+      endedAtMs:
+        next.endedAtMs ??
+        (existing._tag === 'Completed' || existing._tag === 'Accepted'
+          ? existing.endedAtMs
+          : undefined)
     }
   }
 
-  if (next._tag === 'Running' && existing._tag === 'Completed') {
+  if (next._tag === 'Running' && (existing._tag === 'Completed' || existing._tag === 'Accepted')) {
     return existing
   }
 
@@ -907,6 +928,7 @@ const appendOrphanToolResult = (
           name: result.toolCallId,
           content: result.content,
           isError: result.isError,
+          acceptance: result.acceptance,
           structuredContent: result.structuredContent
         }
       ]
@@ -979,6 +1001,7 @@ export const appendProtocolMessage = (
           toolCallId: message.toolCallId,
           content: message.content,
           isError: message.isError,
+          acceptance: message.acceptance,
           structuredContent: message.structuredContent
         })
       )
@@ -1088,9 +1111,10 @@ export const applyAgentEventToChatMessages = (
       }))
     case 'ToolExecutionStarted':
       return upsertToolCallPart(messages, event.call, { _tag: 'Running', startedAtMs: eventTimeMs })
+    case 'ToolExecutionAccepted':
     case 'ToolExecutionCompleted':
       return upsertToolCallPart(messages, event.call, {
-        _tag: 'Completed',
+        _tag: event._tag === 'ToolExecutionAccepted' ? 'Accepted' : 'Completed',
         result: event.result,
         endedAtMs: eventTimeMs
       })
@@ -1177,6 +1201,7 @@ const chatMessagesFromProtocolMessage = ({
                   name: toolNames.get(message.toolCallId) ?? message.toolCallId,
                   content: message.content,
                   isError: message.isError,
+                  acceptance: message.acceptance,
                   structuredContent: message.structuredContent
                 }
               ]
@@ -1328,12 +1353,13 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
   parts.flatMap(part => {
     switch (part._tag) {
       case 'ToolCall': {
-        if (part.state._tag === 'Completed') {
+        if (part.state._tag === 'Completed' || part.state._tag === 'Accepted') {
           return [
             ToolResultMessage.make({
               toolCallId: part.state.result.toolCallId,
               content: part.state.result.content,
               isError: part.state.result.isError,
+              acceptance: part.state.result.acceptance,
               structuredContent: part.state.result.structuredContent
             })
           ]
@@ -1371,6 +1397,7 @@ const collectToolResultMessages = (parts: ReadonlyArray<AgentChatPart>) =>
             toolCallId: part.toolCallId,
             content: part.content,
             isError: part.isError,
+            acceptance: part.acceptance,
             structuredContent: part.structuredContent
           })
         ]

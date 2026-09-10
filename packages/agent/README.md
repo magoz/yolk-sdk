@@ -570,6 +570,40 @@ listed in `callsToExecute`. Preserve synthetic results and original call orderin
 
 Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
 
+## Background tool calls
+
+Any `makeTool` registration can opt into model-chosen background execution with `background: true`.
+The flag is inert until `resolveTools(modules, context, { backgroundHost })` receives a
+`BackgroundToolHost`, which asserts a real lifecycle owner (durable run, queue, or session) exists.
+Without a host, definitions, approval ids, and inline behavior are unchanged.
+
+- Activated tools advertise a required `{ execution: 'foreground' | 'background', arguments }`
+  envelope; the original parameter schema nests under `arguments` and `$defs` stay at the root.
+  Only document-root `#/$defs/...` references (without percent-encoded fragments) are supported.
+  Other reference forms and resource/anchor keywords (`$id`, legacy `id`, `$anchor`, `$dynamicAnchor`,
+  `$dynamicRef`, `$recursiveAnchor`, `$recursiveRef`) fail activation with
+  `ToolRegistryError.cause: 'background_unsupported_schema'`. Literal defaults/examples/const/enum
+  data are not traversed as schemas.
+- The registry validates the envelope and original parameters without business effects, strips the
+  control fields, then executes inline or calls `host.accept({ call, request, context })`.
+- `accept` returns a versioned `BackgroundToolAccepted` receipt (`{ version: 1, executionId }`),
+  never a closure. Make it idempotent per call id; fail with a `ToolError` to decline. The registry
+  never falls back to inline execution.
+- The result is one acknowledgement `ToolResult` with typed `acceptance` metadata; the loop emits
+  `ToolExecutionAccepted` (no `ToolExecutionCompleted`, no usage). Client state, chat projection,
+  and tool cards treat `Accepted` as settled but not completed; stale client Started/input replay
+  cannot reopen accepted calls.
+- Activated definitions are unsupported in voice/realtime, including foreground envelope calls.
+  Resolve voice toolsets without a background host. Realtime tool/config mappers throw
+  `VoiceToolBridgeError`; voice handlers deny before approval matching, and the low-level bridge
+  rejects activated registry dispatch before validation, inline execution, or admission.
+- Raw `ToolRegistration` objects need a side-effect-free `validate` to activate; the loop-owned
+  `question` and `subagent` tools cannot activate (subagents keep `makeSubagentAcceptedToolResult`).
+- Manual approval fences the whole batch; activated calls bind the approval `requestId` to the tool
+  name, mode, and canonical arguments, and malformed envelopes are rejected before any prompt.
+- Hosts own authorization, status/wait tools, cancellation, terminal storage, usage, and delivery.
+  Never append a second result for the original call.
+
 ## Tool failures
 
 Use `modelVisibleToolError(...)` for expected tool-domain failures the model can recover

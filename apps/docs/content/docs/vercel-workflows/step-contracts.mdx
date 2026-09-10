@@ -86,6 +86,10 @@ Rules:
 - If the step boundary catches a batch failure after sibling progress, return wire-safe `failure`,
   cumulative `usage`, and the latest `eventSequence`.
 - Return `awaitingInput` when approvals/questions must pause the workflow.
+- A background acknowledgement (`ToolResultMessage.acceptance`) is a normal result message for the
+  original call: it carries no nested usage and must not be treated as completion. Make the host
+  `BackgroundToolHost.accept` idempotent per call id so a retried tool step replays the same
+  receipt instead of launching twice.
 
 ## Independent child orchestration
 

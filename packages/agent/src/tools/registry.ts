@@ -1,3 +1,9 @@
+import {
+  backgroundToolDef,
+  executeBackgroundTool,
+  unsupportedBackgroundSchema,
+  type BackgroundToolHost
+} from './background.ts'
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -16,7 +22,13 @@ export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError
   'ToolRegistryError',
   {
     message: Schema.String,
-    cause: Schema.Literals(['duplicate_tool'])
+    cause: Schema.Literals([
+      'duplicate_tool',
+      'background_validation_required',
+      'background_definition_already_active',
+      'background_unsupported_tool',
+      'background_unsupported_schema'
+    ])
   }
 ) {}
 
@@ -88,9 +100,12 @@ export type SchemaToolExecutionInput<Context, Params> = ToolExecutionInput<Conte
 }
 
 export type ToolRegistration<Context> = {
+  /** Required for raw background registrations; must validate without business effects. */
+  readonly validate?: (call: ToolCall) => Effect.Effect<void, ToolError>
   readonly def: ToolDef
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
+  readonly background?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly execute: (input: ToolExecutionInput<Context>) => Effect.Effect<ToolResult, ToolError>
 }
@@ -105,6 +120,7 @@ export type MakeToolOptions<Context, ParamsSchema extends ToolParamsSchema> = {
   readonly parameters: ParamsSchema
   readonly access: ToolAccess
   readonly approval?: ToolApprovalPolicy
+  readonly background?: boolean
   readonly isEnabled?: (context: Context) => Effect.Effect<boolean, ToolRegistryError>
   readonly invalidParamsMessage?: (error: unknown) => string
   readonly execute: (
@@ -237,8 +253,24 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     name: options.name,
     description: options.description,
     parameters: jsonSchemaFromSchema(options.parameters),
-    approval: options.approval
+    approval: options.approval,
+    ...(options.background === undefined ? {} : { background: options.background })
   }),
+  ...(options.background === undefined ? {} : { background: options.background }),
+  validate: call =>
+    Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
+      Effect.asVoid,
+      Effect.mapError(
+        error =>
+          new ToolError({
+            tool: options.name,
+            cause: 'validation',
+            message:
+              options.invalidParamsMessage?.(error) ??
+              `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+          })
+      )
+    ),
   access: options.access,
   approval: options.approval,
   isEnabled: options.isEnabled,
@@ -279,9 +311,13 @@ const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistra
   return Arr.findFirst(names, (name, index) => names.indexOf(name) !== index)
 }
 
+// Names are literals to avoid an import cycle with the question/subagent modules.
+const loopOwnedToolNames: ReadonlySet<string> = new Set(['question', 'subagent'])
+
 export const resolveTools = <Context>(
   modules: ReadonlyArray<ToolModule<Context>>,
-  context: Context
+  context: Context,
+  options: { readonly backgroundHost?: BackgroundToolHost<Context> } = {}
 ): Effect.Effect<ResolvedToolSet, ToolRegistryError> =>
   Effect.gen(function* () {
     const resolvedByModule = yield* Effect.forEach(modules, toolModule =>
@@ -294,7 +330,51 @@ export const resolveTools = <Context>(
       return yield* Effect.fail(duplicateToolError(duplicateName.value))
     }
 
-    const tools = Arr.map(resolved, item => item.tool.def)
+    const activated = (tool: ToolRegistration<Context>) =>
+      options.backgroundHost !== undefined && (tool.background ?? tool.def.background) === true
+    for (const { tool } of resolved) {
+      // Resolved definitions are advertisements, not reusable business registrations.
+      if (tool.def.execution !== undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'background_definition_already_active',
+            message: `Register the original business definition, not an activated definition: ${tool.def.name}`
+          })
+        )
+      }
+      // Loop-owned tool names keep their own lifecycle: `question` is intercepted before dispatch
+      // and `subagent` already owns an explicit acknowledgement helper keyed on its top-level params.
+      if (activated(tool) && loopOwnedToolNames.has(tool.def.name)) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'background_unsupported_tool',
+            message: `The loop-owned ${tool.def.name} tool cannot activate envelope background execution.`
+          })
+        )
+      }
+      const unsupportedSchema = activated(tool)
+        ? unsupportedBackgroundSchema(tool.def.parameters)
+        : undefined
+      if (unsupportedSchema !== undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'background_unsupported_schema',
+            message: `Background tool ${tool.def.name} has unsupported schema keyword: ${unsupportedSchema}`
+          })
+        )
+      }
+      if (activated(tool) && tool.validate === undefined) {
+        return yield* Effect.fail(
+          new ToolRegistryError({
+            cause: 'background_validation_required',
+            message: `Background tool requires side-effect-free validation: ${tool.def.name}`
+          })
+        )
+      }
+    }
+    const tools = Arr.map(resolved, item =>
+      activated(item.tool) ? backgroundToolDef(item.tool.def) : item.tool.def
+    )
     const metadata = Arr.map(resolved, item => ({
       moduleId: item.moduleId,
       name: item.tool.def.name,
@@ -306,7 +386,19 @@ export const resolveTools = <Context>(
         Arr.findFirst(resolved, item => item.tool.def.name === call.name),
         {
           onNone: () => Effect.fail(missingToolError(call.name)),
-          onSome: match => match.tool.execute({ call, context })
+          onSome: match => {
+            const host = options.backgroundHost
+            const validate = match.tool.validate
+            return activated(match.tool) && host !== undefined && validate !== undefined
+              ? executeBackgroundTool({
+                  request: call,
+                  context,
+                  host,
+                  validate,
+                  execute: businessCall => match.tool.execute({ call: businessCall, context })
+                })
+              : match.tool.execute({ call, context })
+          }
         }
       )
 

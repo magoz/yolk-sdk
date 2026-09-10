@@ -84,6 +84,7 @@ Streams emit `AgentEvent` values such as:
 - `TurnStart`, `TurnEnd`
 - `LLMStreamStart`, `LLMTextDelta`, `LLMReasoningDelta`, `LLMStreamEnd`
 - `ToolExecutionStarted`, `ToolExecutionCompleted`, `ToolExecutionError`
+- `ToolExecutionAccepted` (a host admitted a background tool call; not completion, no usage)
 - `UserMessageEvent`, `AssistantMessageEvent`
 - `AgentAwaitingInput`, `QuestionRequested`, approval events
 

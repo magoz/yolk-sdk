@@ -72,6 +72,7 @@ export {
   ToolApprovalDenied,
   ToolApprovalGranted,
   ToolApprovalRequested,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
@@ -148,6 +149,11 @@ export {
   ToolApprovalRequest,
   ToolApprovalResponse,
   ToolCall,
+  BackgroundToolAccepted,
+  BackgroundToolExecution,
+  BackgroundToolInput,
+  decodeBackgroundToolInput,
+  makeBackgroundToolAcceptedResult,
   ToolDef,
   ToolResult
 } from './tool.ts'

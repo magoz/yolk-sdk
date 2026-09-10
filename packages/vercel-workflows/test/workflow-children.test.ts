@@ -96,6 +96,53 @@ describe('workflow child orchestration', () => {
     expect(calls).toEqual([0, 1])
   })
 
+  it('preserves serializable admission receipts across partial failure and idempotent step replay', async () => {
+    const receipts = new Map<string, { readonly version: 1; readonly executionId: string }>()
+    let launches = 0
+    const accept = async (id: string) => {
+      const existing = receipts.get(id)
+      if (existing !== undefined) return existing
+      launches++
+      const receipt: { readonly version: 1; readonly executionId: string } = {
+        version: 1,
+        executionId: `owner:${id}`
+      }
+      receipts.set(id, receipt)
+      return receipt
+    }
+    const batch = await orchestrateWorkflowToolBatch({
+      calls: ['background', 'failure'],
+      concurrency: 2,
+      preflight: async () => ({ ready: true }),
+      execute: async id => {
+        if (id === 'failure') throw new Error('step failure')
+        return { callId: id, acceptance: await accept(id) }
+      }
+    })
+    expect(batch).toMatchObject({
+      ready: true,
+      results: [
+        { callId: 'background', acceptance: { version: 1, executionId: 'owner:background' } }
+      ],
+      failures: [{ index: 1 }]
+    })
+    const replay = await orchestrateWorkflowToolBatch({
+      calls: ['background'],
+      concurrency: 1,
+      preflight: async () => ({ ready: true }),
+      execute: async id => ({ callId: id, acceptance: await accept(id) })
+    })
+    expect(replay).toEqual({
+      ready: true,
+      results: [
+        { callId: 'background', acceptance: { version: 1, executionId: 'owner:background' } }
+      ]
+    })
+    expect(launches).toBe(1)
+    // The generic batch does not await a terminal result or invent completion for admission.
+    expect(JSON.parse(JSON.stringify(replay))).toEqual(replay)
+  })
+
   it('uses short reads separated by the host durable sleep and preserves terminal failures', async () => {
     const operations: string[] = []
     let reads = 0

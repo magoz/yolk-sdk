@@ -57,6 +57,7 @@ export type ToolRunState =
       readonly response: QuestionResponse
       readonly request?: QuestionRequest
     } & ToolRunNoTiming)
+  | ({ readonly _tag: 'Accepted'; readonly result: ToolResult } & ToolRunTerminalTiming)
   | ({ readonly _tag: 'Completed'; readonly result: ToolResult } & ToolRunTerminalTiming)
   | ({ readonly _tag: 'Errored'; readonly message: string } & ToolRunTerminalTiming)
   | ({
@@ -174,7 +175,7 @@ const knownTiming = (startedAtMs: number, endedAtMs: number): ToolRunTiming => (
 })
 
 const terminalTimingFromState = (
-  state: Extract<ChatToolState, { readonly _tag: 'Completed' | 'Errored' }>
+  state: Extract<ChatToolState, { readonly _tag: 'Completed' | 'Accepted' | 'Errored' }>
 ): ToolRunTerminalTiming => {
   if (state.startedAtMs !== undefined && state.endedAtMs !== undefined) {
     return knownTiming(state.startedAtMs, state.endedAtMs)
@@ -188,8 +189,8 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
     return { _tag: 'Running', ...startedTiming(state.startedAtMs) }
   }
 
-  if (state._tag === 'Completed') {
-    return { _tag: 'Completed', ...terminalTimingFromState(state), result: state.result }
+  if (state._tag === 'Completed' || state._tag === 'Accepted') {
+    return { _tag: state._tag, ...terminalTimingFromState(state), result: state.result }
   }
 
   if (state._tag === 'InputStreaming') {
