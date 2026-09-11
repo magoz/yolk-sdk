@@ -13,29 +13,29 @@
 
 ## Public model
 
-| Export area       | Purpose                                                                                               |
-| ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `connector`       | connector definition and action dispatch                                                              |
-| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                            |
-| `integration`     | configured invokable connector instance data                                                          |
-| `action`          | typed action definitions over Effect Schema                                                           |
-| `config`          | required/optional string config helpers for integration config                                        |
-| `credential`      | slots, bindings, host resolver service, runtime credential values                                     |
-| `http`            | host-provided HTTP request/response port; not a connector                                             |
-| `result`          | value-level success/failure results for expected upstream failures                                    |
-| `error`           | typed package/runtime failures                                                                        |
-| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                      |
-| `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only file download           |
-| `email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email client |
-| `figma`           | Figma remote MCP auth data action and OAuth constants                                                 |
-| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants         |
-| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                            |
-| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                             |
-| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants              |
-| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants      |
-| `r2-storage`      | Cloudflare R2 upload URL action plus separate host conditional object port                            |
-| `telegram`        | Telegram bot send/validate actions and hosted file byte helper                                        |
-| `todoist`         | Todoist project/task/label/comment actions plus API token slot constants                              |
+| Export area       | Purpose                                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `connector`       | connector definition and action dispatch                                                                  |
+| `agent`           | optional adapter from connector actions to `@yolk-sdk/agent/tools` modules                                |
+| `integration`     | configured invokable connector instance data                                                              |
+| `action`          | typed action definitions over Effect Schema                                                               |
+| `config`          | required/optional string config helpers for integration config                                            |
+| `credential`      | slots, bindings, host resolver service, runtime credential values                                         |
+| `http`            | host-provided HTTP request/response port; not a connector                                                 |
+| `result`          | value-level success/failure results for expected upstream failures                                        |
+| `error`           | typed package/runtime failures                                                                            |
+| `afloat`          | Afloat remote MCP auth data action, API-key slot, endpoint, and protocol version                          |
+| `dropbox`         | Dropbox metadata/file-management actions, OAuth slot constants, and host-only download plus create/update |
+| `email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email client     |
+| `figma`           | Figma remote MCP auth data action and OAuth constants                                                     |
+| `fortnox`         | Read-only company/customer/invoice/supplier actions plus resource-scoped OAuth slot constants             |
+| `google`          | Gmail, Calendar, and Drive actions plus shared Google OAuth slot constants                                |
+| `linkedin-search` | Exa people search plus Enrich Layer profile/email actions                                                 |
+| `microsoft`       | Microsoft Outlook and OneDrive actions through Microsoft Graph plus OAuth slot constants                  |
+| `notion`          | Notion search/page/block/database/data-source/comment/user actions plus API token slot constants          |
+| `r2-storage`      | Cloudflare R2 upload URL action plus separate host conditional object port                                |
+| `telegram`        | Telegram bot send/validate actions and hosted file byte helper                                            |
+| `todoist`         | Todoist project/task/label/comment actions plus API token slot constants                                  |
 
 ## Design rules
 

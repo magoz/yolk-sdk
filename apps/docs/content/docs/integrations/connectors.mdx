@@ -55,9 +55,12 @@ Return optional `refreshToken`, `clientId`, and `clientSecret` from the host's r
 | `fortnox.list_invoices` / `fortnox.get_invoice`                   | list or retrieve customer invoices and available rows |
 | `fortnox.list_suppliers` / `fortnox.get_supplier`                 | list or retrieve suppliers                            |
 | `fortnox.list_supplier_invoices` / `fortnox.get_supplier_invoice` | list or retrieve supplier invoices by GivenNumber     |
+| `fortnox.list_supplier_invoice_files`                             | list archive file IDs connected to a supplier invoice |
 
-All resource-scoped OAuth slots share `fortnox.oauth`. Required scope hints are `companyinformation`,
-`customer`, `invoice`, `supplier`, and `supplierinvoice`. **Fortnox scopes grant read and write**;
+All resource-scoped OAuth slots share `fortnox.oauth`. Required record scope hints are `companyinformation`,
+`customer`, `invoice`, `supplier`, and `supplierinvoice`. Opt-in file slots are
+`FortnoxConnectFileOAuthCredentialSlot` (`connectfile`) and `FortnoxArchiveOAuthCredentialSlot`
+(`archive`); they are **not** included in `FortnoxCombinedOAuthCredentialSlot`. **Fortnox scopes grant read and write**;
 only the SDK action surface is read-only. Hosts provide HTTP and current Fortnox OAuth credentials,
 with no integration config keys.
 
@@ -218,16 +221,19 @@ consent includes those scopes.
 
 Drive-specific slots use least-privilege consent hints:
 
-| Slot                                             | Scope                                 |
-| ------------------------------------------------ | ------------------------------------- |
-| `GoogleDriveMetadataReadonlyOAuthCredentialSlot` | `drive.metadata.readonly`             |
-| `GoogleDriveFileOAuthCredentialSlot`             | `drive.file`                          |
-| `GoogleCombinedOAuthCredentialSlot`              | all Gmail, Calendar, and Drive scopes |
-| `GoogleOAuthCredentialSlot`                      | none declared                         |
+| Slot                                             | Scope                                     |
+| ------------------------------------------------ | ----------------------------------------- |
+| `GoogleDriveMetadataReadonlyOAuthCredentialSlot` | `drive.metadata.readonly`                 |
+| `GoogleDriveFileOAuthCredentialSlot`             | `drive.file`                              |
+| `GoogleDriveReadonlyOAuthCredentialSlot`         | `drive.readonly`                          |
+| `GoogleCombinedOAuthCredentialSlot`              | Gmail, Calendar, and default Drive scopes |
+| `GoogleOAuthCredentialSlot`                      | none declared                             |
 
 `drive.metadata.readonly` is a restricted scope that can read metadata across the authorized
 Drive. `drive.file` is non-sensitive and permits create/update/delete only for files the app created
-or that a user explicitly opened/shared with the app. Hosts that need mutations across arbitrary
+or that a user explicitly opened/shared with the app. `GoogleDriveReadonlyOAuthCredentialSlot` is
+host-only content consent for Drive byte helpers (`contentAccess: 'readonly'`) and is **not** part
+of `GoogleCombinedOAuthCredentialSlot`. Hosts that need mutations across arbitrary
 existing files own broader restricted-scope consent, verification, and authorization policy. The
 connector never manages OAuth callbacks, token refresh, storage, or consent UI.
 

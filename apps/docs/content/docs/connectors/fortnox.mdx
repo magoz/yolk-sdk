@@ -88,17 +88,18 @@ supplier InvoiceNumber. The new file scopes grant both reads and writes like oth
 
 ## Actions and outputs
 
-| Action                            | Input                              | Success value                      |
-| --------------------------------- | ---------------------------------- | ---------------------------------- |
-| `fortnox.get_company_information` | `{}`                               | `FortnoxCompanyInformation`        |
-| `fortnox.list_customers`          | `FortnoxListCustomersInput`        | `{ customers, pagination }`        |
-| `fortnox.get_customer`            | `{ customerNumber }`               | `FortnoxCustomer`                  |
-| `fortnox.list_invoices`           | `FortnoxListInvoicesInput`         | `{ invoices, pagination }`         |
-| `fortnox.get_invoice`             | `{ documentNumber }`               | `FortnoxInvoice`                   |
-| `fortnox.list_suppliers`          | `FortnoxListSuppliersInput`        | `{ suppliers, pagination }`        |
-| `fortnox.get_supplier`            | `{ supplierNumber }`               | `FortnoxSupplier`                  |
-| `fortnox.list_supplier_invoices`  | `FortnoxListSupplierInvoicesInput` | `{ supplierInvoices, pagination }` |
-| `fortnox.get_supplier_invoice`    | `{ givenNumber }`                  | `FortnoxSupplierInvoice`           |
+| Action                                | Input                                  | Success value                      |
+| ------------------------------------- | -------------------------------------- | ---------------------------------- |
+| `fortnox.get_company_information`     | `{}`                                   | `FortnoxCompanyInformation`        |
+| `fortnox.list_customers`              | `FortnoxListCustomersInput`            | `{ customers, pagination }`        |
+| `fortnox.get_customer`                | `{ customerNumber }`                   | `FortnoxCustomer`                  |
+| `fortnox.list_invoices`               | `FortnoxListInvoicesInput`             | `{ invoices, pagination }`         |
+| `fortnox.get_invoice`                 | `{ documentNumber }`                   | `FortnoxInvoice`                   |
+| `fortnox.list_suppliers`              | `FortnoxListSuppliersInput`            | `{ suppliers, pagination }`        |
+| `fortnox.get_supplier`                | `{ supplierNumber }`                   | `FortnoxSupplier`                  |
+| `fortnox.list_supplier_invoices`      | `FortnoxListSupplierInvoicesInput`     | `{ supplierInvoices, pagination }` |
+| `fortnox.get_supplier_invoice`        | `{ givenNumber }`                      | `FortnoxSupplierInvoice`           |
+| `fortnox.list_supplier_invoice_files` | `FortnoxListSupplierInvoiceFilesInput` | `{ files, pagination }`            |
 
 Pass identifier strings returned by the provider, preserving leading zeros. `givenNumber` is the
 numeric-string **GivenNumber**, not the supplier's `InvoiceNumber`. Identifiers are validated and
