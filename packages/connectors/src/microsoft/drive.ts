@@ -196,7 +196,8 @@ const requireDriveForApplicationAccess = (
         })
       )
 
-const oneDriveReadSlot = (integration: ConnectorIntegration, driveId: string | undefined) =>
+// Internal shared permission selection for metadata actions and host-only downloads.
+export const oneDriveReadSlot = (integration: ConnectorIntegration, driveId: string | undefined) =>
   Effect.gen(function* () {
     const accessMode = yield* oneDriveAccessMode(integration)
     yield* requireDriveForApplicationAccess(integration, driveId, accessMode)

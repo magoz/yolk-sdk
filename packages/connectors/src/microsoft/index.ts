@@ -1,4 +1,15 @@
 export {
+  downloadOneDriveItem,
+  OneDriveDownloadError,
+  OneDriveDownloadErrorCode,
+  OneDriveDownloadSource
+} from './download.ts'
+export type {
+  OneDriveDownloadBudget,
+  OneDriveDownloadInput,
+  OneDriveDownloadResult
+} from './download.ts'
+export {
   MicrosoftMailboxAccessMode,
   microsoftMailboxAccessModeConfigKey,
   OutlookAttachment,

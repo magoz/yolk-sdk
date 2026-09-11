@@ -1,6 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
+import {
+  ConnectorBinaryHttpClient,
+  ConnectorBinaryHttpError
+} from '../packages/connectors/src/index.ts'
+import {
+  downloadOneDriveItem,
+  OneDriveDownloadError,
+  OneDriveDownloadErrorCode,
+  OneDriveDownloadSource
+} from '../packages/connectors/src/microsoft/index.ts'
 
 type PackageExportShape = {
   readonly packageDir: string
@@ -200,6 +210,19 @@ const failures = packageExportShapes.flatMap(shape => {
 
   return packageFailures
 })
+
+// These additive APIs intentionally reuse the existing root and microsoft exports in both
+// exports and publishConfig.exports; no new package subpath is needed.
+if (
+  typeof ConnectorBinaryHttpClient !== 'function' ||
+  typeof ConnectorBinaryHttpError !== 'function' ||
+  typeof downloadOneDriveItem !== 'function' ||
+  typeof OneDriveDownloadError !== 'function' ||
+  typeof OneDriveDownloadSource !== 'function' ||
+  OneDriveDownloadErrorCode === undefined
+) {
+  failures.push('Connector host-only binary download runtime exports are missing')
+}
 
 if (failures.length > 0) {
   console.error('Package export/tree-shake smoke failures:')

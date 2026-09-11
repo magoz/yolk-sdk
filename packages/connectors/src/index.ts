@@ -1,3 +1,9 @@
+export { ConnectorBinaryHttpClient, ConnectorBinaryHttpError } from './binary-http.ts'
+export type {
+  ConnectorBinaryHttpClientApi,
+  ConnectorBinaryHttpRequest,
+  ConnectorBinaryHttpResponse
+} from './binary-http.ts'
 export { defineAction } from './action.ts'
 export type {
   ActionExecutionInput,
