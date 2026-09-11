@@ -1,9 +1,13 @@
 // @vitest-environment node
 import { Effect, Layer, Stream } from 'effect'
+import { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
+import { getWorkflowMetadata } from 'workflow'
+import { WorkflowRunNotFoundError } from 'workflow/errors'
 import * as Schema from 'effect/Schema'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AgentEvent,
+  AgentUsage,
   ToolCall,
   ToolResult,
   UserMessage,
@@ -12,6 +16,8 @@ import {
 import {
   ContextTransformer,
   LLMDone,
+  LLMError,
+  LLMUsage,
   LLMProvider,
   LLMTextDelta,
   LLMToolCall,
@@ -34,6 +40,7 @@ import { stopAgentWorkflow } from '@/lib/services/agent-workflow/stop'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import type { makeAgentTextRuntime } from './text-response'
 import { agentWorkflowHitlHookToken, runAgentWorkflow } from './run-agent-workflow'
+import { readChildWorkflowStep } from './workflow-child-steps'
 
 const reports = vi.hoisted(() => vi.fn())
 
@@ -62,7 +69,15 @@ vi.mock('workflow', async () => {
       hitlEntered.release()
       return hook
     },
-    sleep: async () => {
+    sleep: async (duration: unknown) => {
+      sleepDurations.push(duration)
+      // Test-harness runaway guard, not a claim about platform quotas.
+      if (autoSleep) {
+        if (advanceSleepClock && typeof duration === 'number')
+          vi.setSystemTime(Date.now() + duration)
+        if (sleepDurations.length > 40) throw new Error('Unbounded observation')
+        return
+      }
       sleeping.release()
       await new Promise<void>(resolve => sleepers.push(resolve))
     }
@@ -71,9 +86,29 @@ vi.mock('workflow', async () => {
 vi.mock('workflow/api', () => ({
   start: async <A extends unknown[], R>(fn: (...args: A) => Promise<R>, args: A) => {
     if (rejectStart) throw new Error('launch transport failed')
-    return await world.sdk.start(fn, args)
+    const run = await world.sdk.start(fn, args)
+    if (loseStartResponse) throw new Error('start response lost')
+    return run
   },
-  getRun: <R>(runId: string) => world.sdk.getRun<R>(runId),
+  getRun: <R>(runId: string) => {
+    const run = world.sdk.getRun<R>(runId)
+    return {
+      runId,
+      getReadable: run.getReadable,
+      cancel: run.cancel,
+      get returnValue() {
+        return run.returnValue
+      },
+      get status() {
+        statusReads++
+        return missingStatus
+          ? Promise.reject(new WorkflowRunNotFoundError(runId))
+          : failStatus
+            ? Promise.reject(new Error('platform unavailable'))
+            : run.status
+      }
+    }
+  },
   resumeHook: async (token: string, payload: unknown) => await world.sdk.resumeHook(token, payload)
 }))
 
@@ -90,7 +125,21 @@ let childEntered = latch()
 let childGate = latch()
 let hitlEntered = latch()
 let sleepers: Array<() => void> = []
+let sleepDurations: unknown[] = []
+let autoSleep = false
+let advanceSleepClock = false
+let missingStatus = false
 let rejectStart = false
+let loseStartResponse = false
+let retryChild = false
+let childQuestion = false
+let failStatus = false
+let failAttachment = false
+let loseReservationResponse = false
+let failRead = false
+let failReadArmed = false
+let failChild = false
+let statusReads = 0
 let preparationFailure: WorkflowRegistryError | WorkflowRunForbidden | undefined
 let background = true
 let childModel: string | undefined
@@ -119,8 +168,13 @@ const reply = (calls: ToolCall[]) =>
     ...calls.map(call => LLMToolCall.make({ call })),
     LLMDone.make({ stopReason: 'tool_use' })
   ])
+const childUsage = AgentUsage.make({ input: { total: 12 }, output: { total: 4 } })
 const finished = (text: string) =>
-  Stream.fromIterable([LLMTextDelta.make({ text }), LLMDone.make({ stopReason: 'stop' })])
+  Stream.fromIterable([
+    LLMTextDelta.make({ text }),
+    ...(text === 'Child final answer' ? [LLMUsage.make({ usage: childUsage })] : []),
+    LLMDone.make({ stopReason: 'stop' })
+  ])
 
 const provider = (child: boolean) =>
   Layer.succeed(LLMProvider, {
@@ -130,9 +184,30 @@ const provider = (child: boolean) =>
       if (child) {
         if (results.length > 0) return finished('Child final answer')
         childEntered.release()
+        if (retryChild || failChild)
+          return Stream.fail(
+            new LLMError({ cause: 'rate_limit', message: 'Retry later', retryable: retryChild })
+          )
         return Stream.fromEffect(Effect.promise(() => childGate.promise)).pipe(
           Stream.flatMap(() =>
-            reply([ToolCall.make({ id: 'child-read', name: 'read', params: {} })])
+            reply([
+              childQuestion
+                ? ToolCall.make({
+                    id: 'child-question',
+                    name: 'question',
+                    params: {
+                      questions: [
+                        {
+                          id: 'choice',
+                          prompt: 'Pick one',
+                          options: [{ id: 'a', label: 'A' }],
+                          allowCustom: true
+                        }
+                      ]
+                    }
+                  })
+                : ToolCall.make({ id: 'child-read', name: 'read', params: {} })
+            ])
           )
         )
       }
@@ -236,7 +311,21 @@ beforeEach(() => {
   childGate = latch()
   hitlEntered = latch()
   sleepers = []
+  sleepDurations = []
+  autoSleep = false
+  advanceSleepClock = false
+  missingStatus = false
   rejectStart = false
+  loseStartResponse = false
+  retryChild = false
+  childQuestion = false
+  failStatus = false
+  failAttachment = false
+  loseReservationResponse = false
+  failRead = false
+  failReadArmed = false
+  failChild = false
+  statusReads = 0
   preparationFailure = undefined
   reports.mockClear()
   background = true
@@ -262,23 +351,51 @@ beforeEach(() => {
           registries.set(runId, { userId, state: emptyWorkflowRegistry() })
         return undefined
       }),
-    read: (runId, userId) => row(runId, userId).pipe(Effect.map(row => row.state)),
+    read: (runId, userId) =>
+      row(runId, userId).pipe(
+        Effect.flatMap(row => {
+          if (failReadArmed && getWorkflowMetadata().workflowRunId === runId) {
+            failReadArmed = false
+            return Effect.fail(
+              new EffectDrizzleQueryError({
+                query: 'read owned registry',
+                params: [],
+                cause: 'Storage unavailable'
+              })
+            )
+          }
+          return Effect.succeed(row.state)
+        })
+      ),
     change: (runId, userId, command) =>
       Effect.gen(function* () {
         const value = yield* row(runId, userId)
+        if (
+          command.type === 'admit' &&
+          failAttachment &&
+          getWorkflowMetadata().workflowRunId === runId
+        )
+          return yield* Effect.fail(
+            new WorkflowRegistryError({ message: 'Attachment response unavailable' })
+          )
         if (command.type === 'reserve' && preparationFailure !== undefined) {
           return yield* Effect.fail(preparationFailure)
         }
         value.state = transitionWorkflowRegistry(value.state, command)
+        if (command.type === 'reserve' && loseReservationResponse)
+          return yield* Effect.fail(new WorkflowRegistryError({ message: 'Commit response lost' }))
+        if (command.type === 'admit' && failRead && getWorkflowMetadata().workflowRunId === runId)
+          failReadArmed = true
         return value.state
       })
   })
 })
 afterEach(() => {
+  vi.useRealTimers()
   AgentWorkflowStore.layer = originalStoreLayer
 })
 
-const launch = async (model: string | null = 'parent') => {
+const launch = async (model: string | null = 'parent', userId = 'owner') => {
   const request = await Effect.runPromise(
     Schema.encodeEffect(AgentRouteRequest)(
       AgentRouteRequest.make({
@@ -288,7 +405,7 @@ const launch = async (model: string | null = 'parent') => {
       })
     )
   )
-  return world.start(runAgentWorkflow, [{ userId: 'owner', request }]).runId
+  return world.start(runAgentWorkflow, [{ userId, request }]).runId
 }
 const childId = (parent: string) => {
   const id = registries.get(parent)?.state.children[0]?.workflowRunId
@@ -316,6 +433,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const parentEvents = await events(parent)
     expect(parentEvents.filter(event => event._tag === 'SubagentStarted')).toHaveLength(1)
     expect(parentEvents.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(parentEvents.find(event => event._tag === 'AgentEnd')).toMatchObject({
+      usage: { input: { total: 0 }, output: { total: 0 } }
+    })
     expect(requests.find(request => request.systemPrompt === 'Child')?.messages).toEqual([
       UserMessage.make({ content: 'Only child context' })
     ])
@@ -362,6 +482,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const after = await events(parent)
     expect(after.filter(event => event._tag === 'SubagentStarted')).toHaveLength(1)
     expect(after.filter(event => event._tag === 'SubagentCompleted')).toHaveLength(1)
+    expect(after.find(event => event._tag === 'AgentEnd')).toMatchObject({ usage: childUsage })
     expect(world.inspect(parent).status).toBe('completed')
   })
 
@@ -389,6 +510,45 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await world.settled(childId(parent))
   })
 
+  it('keeps a lost reservation response recoverably uncertain without releasing the logical slot', async () => {
+    loseReservationResponse = true
+    waitAfterFailure = true
+    autoSleep = true
+    const parent = await launch()
+    await world.settled(parent)
+    const output = await events(parent)
+    expect(registries.get(parent)?.state.children).toHaveLength(1)
+    expect(registries.get(parent)?.state.children[0]).toMatchObject({
+      launchUncertain: true,
+      workflowRunId: null,
+      result: null
+    })
+    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(
+      output.find(
+        event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === 'wait'
+      )
+    ).toMatchObject({
+      result: {
+        content: expect.stringContaining('unconfirmed'),
+        structuredContent: { done: false }
+      }
+    })
+    expect(sleepDurations).toHaveLength(0)
+    expect(requests.some(request => request.systemPrompt === 'Child')).toBe(false)
+  })
+
+  it('rejects invalid child preparation before committing any reservation', async () => {
+    childModel = 'not-enabled'
+    const parent = await launch()
+    await world.settled(parent)
+    expect(registries.get(parent)?.state.children).toHaveLength(0)
+    expect(requests.some(request => request.systemPrompt === 'Child')).toBe(false)
+    expect(
+      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+    ).toMatchObject({ result: { isError: true } })
+  })
+
   it('reports recovered preparation failure once without leaking error messages or request data', async () => {
     preparationFailure = new WorkflowRegistryError({
       message: 'Sensitive SQL parameters and credentials'
@@ -407,7 +567,13 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     )
     expect(
       (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
-    ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
+    ).toMatchObject({
+      result: {
+        isError: true,
+        content: expect.stringContaining('Child launch preparation failed'),
+        structuredContent: { type: 'subagent_observation', done: false }
+      }
+    })
     expect(registries.get(parent)?.state.children).toHaveLength(0)
   })
 
@@ -422,6 +588,93 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
     expect(registries.get(parent)?.state.children).toHaveLength(0)
   })
+
+  it("makes another owner's handle unavailable without leaking the child identity", async () => {
+    const parent = await launch()
+    await childEntered.promise
+    await world.settled(parent)
+    previousParent = parent
+    const other = await launch('follow-up', 'intruder')
+    await world.settled(other)
+    const output = await events(other)
+    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      result: {
+        isError: true,
+        content: 'Child handle not found',
+        structuredContent: { workflow_run_id: null }
+      }
+    })
+    expect(JSON.stringify(output)).not.toContain(childId(parent))
+    expect(reports).not.toHaveBeenCalled()
+    const probe = world.start(
+      async () =>
+        world.runStep(readChildWorkflowStep, [
+          { parentRunId: parent, userId: 'intruder', callId: 'child-call' }
+        ]),
+      []
+    )
+    await world.settled(probe.runId)
+    expect(world.inspect(probe.runId).status).toBe('completed')
+    expect(world.inspect(probe.runId).stepAttempts.get('readChildWorkflowStep')).toBe(1)
+    expect(await world.sdk.getRun(probe.runId).returnValue).toMatchObject({
+      done: true,
+      workflowRunId: null,
+      result: { content: 'Child handle not found' }
+    })
+    childGate.release()
+    await world.settled(childId(parent))
+  })
+
+  it('acknowledges confirmed background attachment without a platform status read', async () => {
+    failStatus = true
+    const parent = await launch()
+    await childEntered.promise
+    await world.settled(parent)
+    const output = await events(parent)
+    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      result: { structuredContent: { type: 'subagent_accepted', workflow_run_id: childId(parent) } }
+    })
+    expect(statusReads).toBe(0)
+    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    childGate.release()
+    await world.settled(childId(parent))
+  })
+
+  it.each(['lost-start', 'attachment', 'status', 'read'])(
+    'does not declare a child terminal after %s uncertainty and recovers its result',
+    async failure => {
+      loseStartResponse = failure === 'lost-start'
+      failAttachment = failure === 'attachment'
+      failStatus = failure === 'status'
+      failRead = failure === 'read'
+      background = failure === 'lost-start' || failure === 'attachment'
+      const parent = await launch()
+      await childEntered.promise
+      await world.settled(parent)
+      const output = await events(parent)
+      expect(output.filter(event => event._tag === 'SubagentCompleted')).toHaveLength(0)
+      expect(output.find(event => event._tag === 'AgentEnd')).toMatchObject({
+        usage: { input: { total: 0 }, output: { total: 0 } }
+      })
+      expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        result: {
+          structuredContent: { type: 'subagent_observation', done: false, parent_run_id: parent }
+        }
+      })
+      childGate.release()
+      await world.settled(childId(parent))
+      failStatus = false
+      failRead = false
+      previousParent = parent
+      const followup = await launch('follow-up')
+      await world.settled(followup)
+      expect(
+        (await events(followup)).find(event => event._tag === 'ToolExecutionCompleted')
+      ).toMatchObject({
+        result: { content: expect.stringContaining('Child final answer') }
+      })
+    }
+  )
 
   it('failed start leaves an actionable uncertainty result instead of hanging a subsequent wait', async () => {
     rejectStart = true
@@ -438,6 +691,182 @@ describe('actual Next Workflow host with fake external boundaries', () => {
         event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === 'wait'
       )
     ).toMatchObject({ result: { isError: true, content: expect.stringContaining('unconfirmed') } })
+  })
+
+  it('ends a resilient-start grace as nonterminal uncertainty and still recovers the child outcome', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(10_000)
+    background = false
+    autoSleep = true
+    advanceSleepClock = true
+    missingStatus = true
+    const parent = await launch()
+    await childEntered.promise
+    await world.settled(parent)
+    const output = await events(parent)
+    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      result: {
+        content: expect.stringContaining('unconfirmed'),
+        structuredContent: { done: false, workflow_run_id: childId(parent) }
+      }
+    })
+    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(sleepDurations).toEqual([1000, 5000, 15000, 30000, 30000])
+    expect(registries.get(parent)?.state.children[0]?.result).toBeNull()
+    missingStatus = false
+    childGate.release()
+    await world.settled(childId(parent))
+    previousParent = parent
+    const followup = await launch('follow-up')
+    await world.settled(followup)
+    expect(
+      (await events(followup)).find(event => event._tag === 'ToolExecutionCompleted')
+    ).toMatchObject({ result: { content: expect.stringContaining('Child final answer') } })
+  })
+
+  it.each([false, true])(
+    'bounds %s background/foreground waiting and preserves later retrieval',
+    async backgroundMode => {
+      background = backgroundMode
+      waitAfterFailure = backgroundMode
+      autoSleep = true
+      const parent = await launch()
+      await childEntered.promise
+      await world.settled(parent)
+      const output = await events(parent)
+      const callId = backgroundMode ? 'wait' : 'child-call'
+      expect(
+        output.find(
+          event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === callId
+        )
+      ).toMatchObject({
+        result: {
+          content: expect.stringContaining(`tool_call_id=child-call parent_run_id=${parent}`),
+          structuredContent: {
+            type: 'subagent_observation',
+            done: false,
+            workflow_run_id: childId(parent),
+            parent_run_id: parent,
+            tool_call_id: 'child-call'
+          }
+        }
+      })
+      expect(output.find(event => event._tag === 'AgentEnd')).toMatchObject({
+        usage: { input: { total: 0 }, output: { total: 0 } }
+      })
+      expect(
+        requests.filter(request => request.systemPrompt === 'Parent').at(-1)?.messages
+      ).toContainEqual(
+        expect.objectContaining({
+          _tag: 'ToolResult',
+          toolCallId: callId,
+          content: expect.stringContaining(`tool_call_id=child-call parent_run_id=${parent}`)
+        })
+      )
+      expect(sleepDurations).toHaveLength(31)
+      expect(sleepDurations.slice(0, 5)).toEqual([1000, 5000, 15000, 30000, 30000])
+      expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+      childGate.release()
+      await world.settled(childId(parent))
+      previousParent = parent
+      waitAfterFailure = false
+      const followup = await launch('follow-up')
+      await world.settled(followup)
+      const followupEvents = await events(followup)
+      expect(followupEvents.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+        result: { content: expect.stringContaining('Child final answer') }
+      })
+      expect(followupEvents.find(event => event._tag === 'AgentEnd')).toMatchObject({
+        usage: { input: { total: 0 }, output: { total: 0 } }
+      })
+    }
+  )
+
+  it('rejects an unadvertised child question without HITL and continues the model', async () => {
+    childQuestion = true
+    childGate.release()
+    const parent = await launch()
+    await world.settled(parent)
+    const id = childId(parent)
+    await world.settled(id)
+    const output = await events(id)
+    expect(
+      output.some(
+        event => event._tag === 'QuestionRequested' || event._tag === 'AgentAwaitingInput'
+      )
+    ).toBe(false)
+    expect(world.inspect(id).status).toBe('completed')
+    expect(
+      requests.filter(request => request.systemPrompt === 'Child').at(-1)?.messages
+    ).toContainEqual(
+      expect.objectContaining({
+        _tag: 'ToolResult',
+        toolCallId: 'child-question',
+        isError: true,
+        content: 'Question tool is unavailable'
+      })
+    )
+    expect(childToolCalls).toBe(0)
+  })
+
+  it('retains a real failed child boundary and emits one truthful foreground failure', async () => {
+    background = false
+    failChild = true
+    const parent = await launch()
+    await childEntered.promise
+    const id = childId(parent)
+    await world.settled(id)
+    sleepers.forEach(resume => resume())
+    await world.settled(parent)
+    expect(world.inspect(id).status).toBe('failed')
+    const output = await events(parent)
+    expect(output.filter(event => event._tag === 'SubagentCompleted')).toMatchObject([
+      { status: 'error' }
+    ])
+    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      result: { isError: true, content: expect.stringContaining('Child workflow failed') }
+    })
+  })
+
+  it('Stop while foreground waiting fences both later provider and child tool work', async () => {
+    background = false
+    const parent = await launch()
+    await childEntered.promise
+    await sleeping.promise
+    await Effect.runPromise(
+      stopAgentWorkflow(parent, 'owner').pipe(
+        Effect.provide(Layer.merge(AgentWorkflowStore.layer, VercelWorkflows.layer))
+      )
+    )
+    childGate.release()
+    sleepers.forEach(resume => resume())
+    await world.settled(childId(parent))
+    await world.settled(parent)
+    expect(world.inspect(parent).status).toBe('cancelled')
+    expect(world.inspect(childId(parent)).status).toBe('cancelled')
+    expect(requests.filter(request => request.systemPrompt === 'Parent')).toHaveLength(1)
+    expect(childToolCalls).toBe(0)
+  })
+
+  it('fences provider retries when Stop lands during the retry delay', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    retryChild = true
+    const parent = await launch()
+    await childEntered.promise
+    await world.settled(parent)
+    const id = childId(parent)
+    await vi.waitFor(async () => {
+      expect((await events(id)).some(event => event._tag === 'AgentRetry')).toBe(true)
+    })
+    await Effect.runPromise(
+      stopAgentWorkflow(parent, 'owner').pipe(
+        Effect.provide(Layer.merge(AgentWorkflowStore.layer, VercelWorkflows.layer))
+      )
+    )
+    await vi.advanceTimersByTimeAsync(20_000)
+    await world.settled(id)
+    expect(requests.filter(request => request.systemPrompt === 'Child')).toHaveLength(1)
+    expect((await events(id)).filter(event => event._tag === 'AgentRetry')).toHaveLength(1)
   })
 
   it('Stop after parent completion cancels and fences the live child before further tools', async () => {

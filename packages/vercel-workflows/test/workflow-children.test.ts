@@ -143,6 +143,25 @@ describe('workflow child orchestration', () => {
     expect(JSON.parse(JSON.stringify(replay))).toEqual(replay)
   })
 
+  it('supplies deterministic zero-based attempts for host-bounded reads and backoff', async () => {
+    const reads: number[] = []
+    const sleeps: number[] = []
+    const result = await awaitWorkflowChild({
+      read: async attempt => {
+        reads.push(attempt)
+        return attempt === 2
+          ? { done: true as const, value: { status: 'still-running', handle: 'owned-child' } }
+          : { done: false as const }
+      },
+      sleep: async attempt => {
+        sleeps.push(attempt)
+      }
+    })
+    expect(reads).toEqual([0, 1, 2])
+    expect(sleeps).toEqual([0, 1])
+    expect(result).toEqual({ status: 'still-running', handle: 'owned-child' })
+  })
+
   it('uses short reads separated by the host durable sleep and preserves terminal failures', async () => {
     const operations: string[] = []
     let reads = 0

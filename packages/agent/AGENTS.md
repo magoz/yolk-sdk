@@ -29,7 +29,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Tool lifecycle events use deterministic per-call ids (`voiceToolEventId`); `storedVoiceToolEvents` splits requested batches per call and `storedToolEventsFromOutcome` lets tool endpoints log server-witnessed activity that dedupes against client outbox replays.
 - `makeVoiceEventOutbox` (and the `useYolkVoice` `eventLog` option) is client transport mechanics only: at-least-once batching with boundary flushes and a scope-close drain; hosts own the flush endpoint, auth, and storage, and should flush with keepalive-capable transport.
 - `@yolk-sdk/agent/tools` owns the domain-free `subagent` tool contract for subagents; host apps provide subagent execution, available model/reasoning choices, prompts, provider layers, and tool policy. Optional subagent runtime selections inherit host settings when omitted.
-- `@yolk-sdk/agent/tools` owns the domain-free `question` HITL tool contract; loop intercepts it before executor dispatch.
+- `@yolk-sdk/agent/tools` owns the domain-free `question` HITL tool contract; loop intercepts enabled questions before executor dispatch. If omitted from `tools`, even provider-emitted/replayed questions return unavailable results without HITL or executor dispatch.
 - `@yolk-sdk/agent/tools` exposes `makeTool` for Effect-Schema-backed registrations; avoid hand-written JSON Schema when validation schema can be the source of truth.
 - `ModelVisibleToolError` is for recoverable, model-visible tool failures; `makeTool` returns `ToolResult.isError` with structured `{ type, tool, reason, message, details? }` content.
 - Tool approval is host-enforced policy on normal tools, not a model-callable permission tool; v1 approvals are per-call, no persistent allow-always rules.
@@ -94,7 +94,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 
 - `prepareToolBatch` is public via `./loop`; `pendingRequests` fences **all** launches, including otherwise executable sibling calls. Hosts preserve synthetic results and original order.
 - `makeSubagentAcceptedToolResult` is an opt-in background acknowledgement (`background: true` registration option); it must never emit `SubagentCompleted` or contribute child usage.
-- Keep logical `subagent:<callId>` identity independent of physical run ids. Status/wait observations use their own tool-call ids and must not duplicate original usage accounting.
+- Keep logical `subagent:<callId>` identity independent of physical run ids. Status/wait observations use their own tool-call ids and must not duplicate original usage accounting. Host results marked `type: 'subagent_observation'` with the matching logical `subagent_run_id` suppress child completion (not tool completion); uncertainty/budget exhaustion must not claim a terminal outcome.
 - Existing inline registrations do not advertise background execution and retain final-result compatibility.
 
 ## Background tool calls

@@ -164,7 +164,12 @@ const subagentCompletedEvent = (input: {
     objectField(input.result.structuredContent, 'subagent_run_id') ===
       makeSubagentRunId(input.call.id)
 
-  return metadata === undefined || accepted
+  const observation =
+    objectField(input.result.structuredContent, 'type') === 'subagent_observation' &&
+    objectField(input.result.structuredContent, 'subagent_run_id') ===
+      makeSubagentRunId(input.call.id)
+
+  return metadata === undefined || accepted || observation
     ? undefined
     : SubagentCompleted.make({
         parentToolCallId: input.call.id,
@@ -757,7 +762,19 @@ const prepareToolCall = (input: {
   readonly index: number
 }): Effect.Effect<PreparedToolCall> =>
   input.call.name === questionToolName
-    ? prepareQuestionCall(input.call, input.index, input.responses)
+    ? input.tools.some(tool => tool.name === questionToolName)
+      ? prepareQuestionCall(input.call, input.index, input.responses)
+      : Effect.succeed({
+          _tag: 'Result',
+          index: input.index,
+          call: input.call,
+          events: [],
+          result: ToolResult.make({
+            toolCallId: input.call.id,
+            content: 'Question tool is unavailable',
+            isError: true
+          })
+        })
     : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */

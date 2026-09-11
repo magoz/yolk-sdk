@@ -152,7 +152,13 @@ application outcome; platform `completed` alone does not prove application succe
 hosts await that child outcome; background hosts return an accepted handle and continue.
 
 `awaitWorkflowChild({ read, sleep })` polls short durable read steps with a host-provided Workflow
-`sleep` between reads. Do not hold a step open awaiting a long `run.returnValue` poll.
+`sleep` between reads. Both callbacks receive the same zero-based attempt index, so hosts can
+apply capped backoff and end an observation after a bounded number of reads. At that ceiling,
+`read` should return `{ done: true, value: stillRunningObservation }`; this ends polling, not the
+child lifecycle. Preserve an owned handle for eventual result lookup. Existing zero-argument
+callbacks remain supported and the helper has no implicit budget. Hosts must explicitly bound
+long waits to avoid unbounded durable event accumulation. Do not hold a step open awaiting a long
+`run.returnValue` poll.
 
 Hosts own immutable logical reservations, admission/CAS, ownership checks, storage, bounded
 fanout, safe errors, credentials, and cancellation policy. Parent completion/failure must not

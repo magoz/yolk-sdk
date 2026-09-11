@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { Effect, Layer } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { WorkflowRunNotFoundError } from 'workflow/errors'
 import {
   VercelWorkflows,
   VercelWorkflowsSdk,
@@ -49,6 +50,8 @@ const fakeStore = () => {
   })
   return { layer, change, read: () => state }
 }
+
+afterEach(() => vi.useRealTimers())
 
 describe('durable host registry (transactional behavioral fake)', () => {
   it('reserves once, admits one physical run, and never steals slow claims', () => {
@@ -175,6 +178,78 @@ describe('durable host registry (transactional behavioral fake)', () => {
     expect((await run())._tag).toBe('Success')
     expect(cancelled).toContain('a')
   })
+  it.each(['getRun', 'status'])(
+    'keeps resilient-start %s absence pending for a bounded grace and recovers',
+    async failureAt => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(10_000)
+      const store = fakeStore()
+      store.change({
+        type: 'reserve',
+        child: WorkflowChildRecord.make({ ...child(), startedAtMs: Date.now() })
+      })
+      store.change({ type: 'admit', callId: 'call', workflowRunId: 'physical' })
+      let missing = true
+      let failure: unknown = new WorkflowRunNotFoundError('physical')
+      const sdk: VercelWorkflowsSdkClient = {
+        start: async () => {
+          throw new Error('not used')
+        },
+        resumeHook: async () => {},
+        getRun: <TResult>() => {
+          if (missing && failureAt === 'getRun') throw failure
+          return {
+            runId: 'physical',
+            get status() {
+              return missing ? Promise.reject(failure) : Promise.resolve('running' as const)
+            },
+            get returnValue(): Promise<TResult> {
+              throw new Error('not used')
+            },
+            getReadable: () => {
+              throw new Error('not used')
+            },
+            cancel: async () => {}
+          }
+        }
+      }
+      const workflows = VercelWorkflows.layerFromSdk.pipe(
+        Layer.provide(Layer.succeed(VercelWorkflowsSdk, sdk))
+      )
+      const read = () =>
+        Effect.runPromise(
+          readWorkflowChild({ parentRunId: 'parent', userId: 'owner', callId: 'call' }).pipe(
+            Effect.provide(Layer.merge(store.layer, workflows))
+          )
+        )
+      expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
+      vi.setSystemTime(69_999)
+      expect(await read()).toMatchObject({ done: false })
+      vi.setSystemTime(70_000)
+      expect(await read()).toMatchObject({
+        done: true,
+        uncertain: true,
+        workflowRunId: 'physical',
+        result: { content: expect.stringContaining('unconfirmed') }
+      })
+      expect(store.read().children[0]).toMatchObject({ workflowRunId: 'physical', result: null })
+      failure = new Error('Workflow run not found')
+      await expect(read()).rejects.toMatchObject({
+        _tag: 'VercelWorkflowsError',
+        operation: failureAt
+      })
+      missing = false
+      expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
+      store.change({
+        type: 'complete',
+        callId: 'call',
+        workflowRunId: 'physical',
+        result: { final: 'recovered' }
+      })
+      expect(await read()).toMatchObject({ done: true, result: { final: 'recovered' } })
+    }
+  )
+
   it('reads killed-child status briefly, enforces lookup ownership, and never infers app success', async () => {
     const store = fakeStore()
     store.change({ type: 'reserve', child: child() })

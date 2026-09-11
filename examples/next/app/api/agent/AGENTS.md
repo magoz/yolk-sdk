@@ -51,7 +51,7 @@ Route-local contracts for text, Workflow, commands, Realtime, and one-shot voice
 
 ## Workflow child control
 
-- `GET workflow/:runId/children/:toolCallId` reads a child result after parent completion/failure; auth checks both parent id and user ownership before platform reads. It returns `{ done, workflowRunId, result }` (result is the original plain ToolResult or null).
+- `GET workflow/:runId/children/:toolCallId` reads a child result after parent completion/failure; auth checks both parent id and user ownership before platform reads. It returns `{ done, workflowRunId, result, uncertain? }` (result is a plain ToolResult or null). `done` ends observation polling, not necessarily the child lifecycle: `uncertain: true` means no terminal execution outcome is known, even with `done: true`; retry the owned lookup later.
 - Run start registers ownership before returning a stream; the workflow also idempotently registers before model work. Pre-registry legacy runs are not authorized implicitly.
 - Explicit DELETE persists the Stop tombstone before a bounded registry sweep. A terminal parent does not suppress child cancellation. 503 means Stop was recorded but cancellation needs retry; active work may finish until the platform observes cancellation.
 - Child HITL/recursive delegation and automatic completion callbacks/parent restarts are not exposed.

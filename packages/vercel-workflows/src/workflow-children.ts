@@ -1,17 +1,19 @@
 /** Workflow orchestration only. Callbacks must be durable steps (sleep must be Workflow sleep).
  * A read is short-lived; never put a long returnValue poll inside a step.
+ * Both callbacks receive a deterministic zero-based attempt for host budgets/backoff.
+ * Defaults remain unbounded: hosts end observation at their ceiling by returning done + value.
  */
 export async function awaitWorkflowChild<A>(input: {
-  readonly read: () => Promise<
-    { readonly done: false } | { readonly done: true; readonly value: A }
-  >
-  readonly sleep: () => Promise<void>
+  readonly read: (
+    attempt: number
+  ) => Promise<{ readonly done: false } | { readonly done: true; readonly value: A }>
+  readonly sleep: (attempt: number) => Promise<void>
 }): Promise<A> {
   const { read, sleep } = input
-  for (;;) {
-    const state = await read()
+  for (let attempt = 0; ; attempt++) {
+    const state = await read(attempt)
     if (state.done) return state.value
-    await sleep()
+    await sleep(attempt)
   }
 }
 

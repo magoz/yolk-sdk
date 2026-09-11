@@ -44,6 +44,41 @@ describe('background subagent contract', () => {
     })
   )
 
+  it.effect(
+    'treats matching child observations as nonterminal and never charges nested usage',
+    () =>
+      Effect.gen(function* () {
+        for (const runId of ['subagent:child-call', 'subagent:unrelated']) {
+          const result = ToolResult.make({
+            toolCallId: child.id,
+            content: 'Execution outcome is not known',
+            isError: true,
+            structuredContent: {
+              type: 'subagent_observation',
+              subagent_run_id: runId,
+              done: false,
+              result: { usage: { input: { total: 12 }, output: { total: 4 } } }
+            }
+          })
+          const events = yield* runToolBatch({ calls: [child] }).pipe(
+            Stream.runCollect,
+            Effect.provide(
+              Layer.merge(
+                LoopConfig.defaultLayer,
+                Layer.succeed(ToolExecutor, { execute: () => Effect.succeed(result) })
+              )
+            )
+          )
+          expect(events.filter(event => event._tag === 'SubagentCompleted')).toHaveLength(
+            runId === 'subagent:child-call' ? 0 : 1
+          )
+          expect(events.filter(event => event._tag === 'ToolExecutionCompleted')).toHaveLength(1)
+          expect(events.filter(event => event._tag === 'UsageUpdate')).toHaveLength(0)
+          expect(subagentUsageFromToolResult(result)).toBeUndefined()
+        }
+      })
+  )
+
   it.effect('advertises background only for opted-in hosts and preserves normalized params', () =>
     Effect.gen(function* () {
       const subagents = [{ name: 'general', description: 'Work' }]

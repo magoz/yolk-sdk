@@ -463,7 +463,7 @@ HITL is protocol-level, not UI-level:
   `submitToolApprovalResponse` / `submitQuestionResponse`, or using client stream helpers like
   `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
-- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
+- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
 - Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON.
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
 - Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive.
@@ -563,6 +563,13 @@ It emits normal tool completion but **not** `SubagentCompleted`, and carries no 
 logical `subagent:<toolCallId>` identity separate from the physical Workflow id. Never append a
 second tool result for the original launch; expose host-owned status/wait tools whose observations
 do not masquerade as fresh child usage. Host-owned storage must remain readable after parent end.
+
+A lost control response or exhausted observation budget is not a terminal child failure. Hosts
+can return a `ToolResult` with `structuredContent.type: 'subagent_observation'` and a matching
+`subagent_run_id: makeSubagentRunId(call.id)`. The loop completes the tool observation but suppresses
+`SubagentCompleted`; nested results do not contribute child usage. Include truthful status and an
+owned recovery handle in the observation. Use normal final results for genuine terminal outcomes,
+not this marker. These child observations are separate from generic background tool `acceptance`.
 
 `prepareToolBatch` from `@yolk-sdk/agent/loop` exposes the same HITL preflight used by the loop.
 Durable orchestration must check `pendingRequests` before dispatching **any** tool, even calls
