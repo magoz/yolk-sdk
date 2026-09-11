@@ -139,6 +139,23 @@ model turn with unmatched calls.
 Hosts own admission, durable reservations/results, ownership checks, child HITL support, and Stop
 policy. Background acceptance is not child completion; see [Background subagents](../agent/tools-hitl#background-subagents).
 
+### Bounded child observations
+
+The fragment above polls without a ceiling. `awaitWorkflowChild` passes deterministic zero-based
+indices to `read(attempt)` and `sleep(attempt)`: read zero, sleep zero if pending, read one, and so
+on. Existing zero-argument callbacks remain valid; no timeout or backoff is added automatically.
+
+Pass `attempt` into the host read step to enforce an observation budget, and use it in the sleep
+callback for host-chosen capped backoff. At the ceiling, the read step returns
+`{ done: true, value }` with the latest truthful still-running or unknown status and a recovery
+handle. Here `done` means observation ended, not that the child completed or was cancelled.
+Durable storage, authorization, terminal-state detection, and Stop policy remain host-owned.
+
+When mapping that value into a nonterminal `subagent` tool result, use the matching logical ID and
+[observation marker](../agent/tools-hitl#nonterminal-child-observations), rather than fabricating a
+terminal child result or charging nested usage. The physical Workflow run id is a separate
+host-owned recovery handle. See the [callback signatures](../api-reference/workflows#awaitworkflowchilda).
+
 ## Run result tags
 
 | Tag                   | Meaning                                                   |

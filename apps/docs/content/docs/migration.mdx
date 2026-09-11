@@ -23,6 +23,30 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: background tool admission and bounded child observations
+
+Tools with `background: true` remain unchanged without a `BackgroundToolHost`. When a host is
+supplied to `resolveTools`, activated tools require `{ execution, arguments }` rather than raw
+business parameters. Update exhaustive event/state consumers for `ToolExecutionAccepted` and
+`Accepted`: admission settles the call but does not complete the work. Preserve the full call and
+`acceptance` receipt through persistence, replay, hydration, and next-turn cleanup.
+
+Store and return activated approval request IDs unchanged as opaque, potentially long values;
+they bind the exact tool, execution mode, and arguments. Resolve voice/realtime toolsets without a
+background host, even for foreground calls. Custom voice decision consumers must handle `Deny`;
+Effect hosts can use the typed realtime config builders to recover from `VoiceToolBridgeError`.
+See [Model-chosen background execution](./agent/tools-hitl#let-the-model-choose-background-execution).
+
+Explicitly include the `question` definition in the loop's enabled tools to allow question HITL.
+Omitting it now returns an unavailable-tool result without pausing, even with a replayed answer.
+
+`awaitWorkflowChild` read/sleep callbacks now receive zero-based attempt indices; existing
+zero-argument callbacks remain valid. Hosts can stop observation at their own ceiling without
+claiming the child terminated. For a nonterminal `subagent` result, use the matching
+`subagent_observation` marker and logical child ID to avoid a false `SubagentCompleted` event.
+See [Nonterminal child observations](./agent/tools-hitl#nonterminal-child-observations) and
+[Bounded child observations](./vercel-workflows/step-contracts#bounded-child-observations).
+
 ### Next canary: private attachment resolution
 
 Use `resolveMessageAttachmentSources` or `resolveMessagesAttachmentSources` from

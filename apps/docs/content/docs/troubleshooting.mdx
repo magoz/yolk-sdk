@@ -270,9 +270,13 @@ See [Background subagents](./agent/tools-hitl#background-subagents).
 Do not put an entire child loop inside one parent `'use step'`: nested step calls execute inline.
 Orchestrate an independent Workflow start outside that step. Use `awaitWorkflowChild` with short
 read steps and Workflow `sleep`; treat failed/cancelled children as terminal values. The helper has
-no built-in timeout, and independent children need explicit host Stop policy. Also check
-`orchestrateWorkflowToolBatch` failures even when `ready: true`; it may return partial progress.
-See [Independent child orchestration](./vercel-workflows/step-contracts#independent-child-orchestration).
+no built-in timeout, and independent children need explicit host Stop policy. Use the zero-based
+read/sleep `attempt` indices for host observation budgets and capped backoff. At the ceiling,
+return a truthful still-running or unknown value with a recovery handle; ending observation does
+not terminate the child. Map nonterminal `subagent` results with the matching
+[observation marker](./agent/tools-hitl#nonterminal-child-observations) to avoid false completion.
+Also check `orchestrateWorkflowToolBatch` failures even when `ready: true`; it may return partial
+progress. See [Bounded child observations](./vercel-workflows/step-contracts#bounded-child-observations).
 
 ### `Missing intrinsic getter: href` at import
 
