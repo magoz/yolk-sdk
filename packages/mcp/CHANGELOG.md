@@ -1,5 +1,15 @@
 # @yolk-sdk/mcp
 
+## 0.1.0-canary.74
+
+### Patch Changes
+
+- 20588d9: Keep package versions aligned with the agent's opt-in background tool execution and the
+  Workflow child-observation updates. No additional implementation changes in these packages.
+- Updated dependencies [79fe70b]
+- Updated dependencies [79fe70b]
+  - @yolk-sdk/agent@0.1.0-canary.74
+
 ## 0.1.0-canary.73
 
 ### Patch Changes

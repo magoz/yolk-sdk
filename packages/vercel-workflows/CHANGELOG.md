@@ -1,5 +1,14 @@
 # @yolk-sdk/vercel-workflows
 
+## 0.1.0-canary.74
+
+### Patch Changes
+
+- 79fe70b: Reject disabled question calls without entering HITL, and distinguish matching subagent
+  observations from terminal child completion without charging nested usage. Supply deterministic
+  zero-based read/sleep attempt indices to `awaitWorkflowChild` so durable hosts can bound
+  observation polling and apply capped backoff while preserving existing zero-argument callbacks.
+
 ## 0.1.0-canary.73
 
 ### Patch Changes
