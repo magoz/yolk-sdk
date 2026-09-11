@@ -238,8 +238,14 @@ to limit the app's accessible drives. Reusing an Outlook credential works only w
 includes the required `Files.*` permission.
 
 If OneDrive pagination is rejected, pass the full Graph `nextLink` unchanged and repeat `driveId`.
-For `onedrive.list_items`, also repeat the original `parentItemId`. Binary download/upload is not
-part of the current connector action set; the host owns file-content transfer.
+For `onedrive.list_items`, also repeat the original `parentItemId`. Binary download is not a
+connector action and is never serialized by `makeConnectorToolModule`; a missing download tool is
+expected. Use host-only `downloadOneDriveItem` with a compliant `ConnectorBinaryHttpClient` — do not
+reuse string `ConnectorHttpClient`. `invalid_input` covers bad or dot-only IDs and application mode
+without `driveId`. `credential_failed` means missing `microsoft.oauth` or the `Files.Read` /
+`Files.Read.All` slot. Size and partial failures include `response_too_large` and `partial_content`;
+do not trust metadata `size`. The adapter must disable auto-redirects; the helper strips headers
+after the first content request. Upload remains unimplemented.
 
 ## Sandbox errors
 

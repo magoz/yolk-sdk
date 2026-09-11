@@ -38,22 +38,22 @@ description: Public MCP, knowledge, connector, and sandbox APIs.
 `ConnectorActionAccess`. `makeConnectorToolModule` uses it unless the host supplies an access
 override.
 
-| Subpath                                | Main exports                                                                                                               |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient` |
-| `@yolk-sdk/connectors/agent`           | `makeConnectorToolModule`                                                                                                  |
-| `@yolk-sdk/connectors/afloat`          | `AfloatConnector`, `AfloatApiKeyCredentialSlot`, MCP endpoint and protocol constants                                       |
-| `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, and file actions                                                |
-| `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                            |
-| `@yolk-sdk/connectors/fortnox`         | `FortnoxConnector`, shared/resource-scoped OAuth slots, read actions, resource/input/output schemas                        |
-| `@yolk-sdk/connectors/google`          | `GoogleConnector`, shared Google OAuth slots, Gmail/Calendar/Drive actions and schemas                                     |
-| `@yolk-sdk/connectors/notion`          | `NotionConnector`, `NotionApiTokenSlot`                                                                                    |
-| `@yolk-sdk/connectors/todoist`         | `TodoistConnector`, `TodoistApiTokenSlot`                                                                                  |
-| `@yolk-sdk/connectors/telegram`        | `TelegramConnector`, `TelegramBotTokenSlot`                                                                                |
-| `@yolk-sdk/connectors/figma`           | `FigmaConnector`, `FigmaOAuthCredentialSlot`                                                                               |
-| `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots                                                                  |
-| `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas                                        |
-| `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots                                                                   |
+| Subpath                                | Main exports                                                                                                                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient`, `ConnectorBinaryHttpClient`, `ConnectorBinaryHttpError` |
+| `@yolk-sdk/connectors/agent`           | `makeConnectorToolModule`                                                                                                                                                           |
+| `@yolk-sdk/connectors/afloat`          | `AfloatConnector`, `AfloatApiKeyCredentialSlot`, MCP endpoint and protocol constants                                                                                                |
+| `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, and file actions                                                                                                         |
+| `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                                                                                     |
+| `@yolk-sdk/connectors/fortnox`         | `FortnoxConnector`, shared/resource-scoped OAuth slots, read actions, resource/input/output schemas                                                                                 |
+| `@yolk-sdk/connectors/google`          | `GoogleConnector`, shared Google OAuth slots, Gmail/Calendar/Drive actions and schemas                                                                                              |
+| `@yolk-sdk/connectors/notion`          | `NotionConnector`, `NotionApiTokenSlot`                                                                                                                                             |
+| `@yolk-sdk/connectors/todoist`         | `TodoistConnector`, `TodoistApiTokenSlot`                                                                                                                                           |
+| `@yolk-sdk/connectors/telegram`        | `TelegramConnector`, `TelegramBotTokenSlot`                                                                                                                                         |
+| `@yolk-sdk/connectors/figma`           | `FigmaConnector`, `FigmaOAuthCredentialSlot`                                                                                                                                        |
+| `@yolk-sdk/connectors/linkedin-search` | LinkedIn search/profile/email connector and API key slots                                                                                                                           |
+| `@yolk-sdk/connectors/microsoft`       | `MicrosoftConnector`, shared OAuth slots, Outlook mail and OneDrive actions/schemas, host-only `downloadOneDriveItem`                                                               |
+| `@yolk-sdk/connectors/r2-storage`      | `R2StorageConnector`, `R2Presigner`, R2 credential slots                                                                                                                            |
 
 Fortnox exports `FortnoxCompanyInformation`, `FortnoxCustomer`, `FortnoxInvoice`,
 `FortnoxSupplier`, `FortnoxSupplierInvoice`, row schemas, `FortnoxPagination`, and matching
@@ -119,6 +119,16 @@ to `/me/drive`; explicit `driveId` targets `/drives/{driveId}`. Set
 slots or `application` for application-token access; application mode requires `driveId`. Microsoft
 actions use Graph v1.0 with `outlook.*` and `onedrive.*`
 ids, and all scoped slots share `microsoft.oauth`.
+
+Host-only original-byte download is `downloadOneDriveItem`, with `OneDriveDownloadError`,
+`OneDriveDownloadErrorCode`, `OneDriveDownloadSource`, `OneDriveDownloadBudget`,
+`OneDriveDownloadInput`, and `OneDriveDownloadResult`. It is not an action output. Bytes are
+untouched `Uint8Array`. Errors expose only `code`. `source` metadata is observed before download
+and is not a verified snapshot. Provide `ConnectorBinaryHttpClient` in addition to the existing
+`CredentialResolver`; the optional GET-only port is independent of `ConnectorHttpClient` and must
+not auto-follow redirects, attach cookies, or add ambient auth. Hosts enforce streamed limits and
+connection-time public DNS/IP policy. Root types include `ConnectorBinaryHttpRequest`,
+`ConnectorBinaryHttpResponse`, and `ConnectorBinaryHttpClientApi`.
 
 `GoogleCalendarEventDateTime` is the exclusive union `{ date, timeZone? } | { dateTime,
 timeZone? }`. Create/update boundaries require exactly one non-empty `date` or `dateTime` and reject
