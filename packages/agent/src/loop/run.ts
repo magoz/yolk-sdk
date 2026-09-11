@@ -1,4 +1,4 @@
-import { Clock, Effect, Ref, Stream } from 'effect'
+import { Clock, Effect, Option, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentAwaitingInput,
@@ -10,10 +10,12 @@ import {
   addAgentUsage,
   contentParts,
   contentPreview,
+  decodeBackgroundToolInput,
   LLMReasoningDelta as AgentLLMReasoningDelta,
   LLMStreamEnd,
   LLMStreamStart,
   LLMTextDelta as AgentLLMTextDelta,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionError,
   ToolExecutionStarted,
@@ -30,7 +32,7 @@ import {
   questionResponseStructuredContent,
   makeSubagentRunId,
   ToolApprovalRequest,
-  ToolResultMessage,
+  toolResultMessageFromResult,
   SubagentCompleted,
   SubagentStarted,
   assistantHostToolCalls,
@@ -52,6 +54,7 @@ import {
   type AgentModelCapabilities,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
+import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -92,8 +95,6 @@ export type ToolBatchConfig = {
   readonly usage?: AgentUsage
 }
 
-const questionToolName = 'question'
-
 type SubagentCallMetadata = {
   readonly subagentRunId: string
   readonly subagentType: string
@@ -112,7 +113,7 @@ const nonEmptyStringField = (input: unknown, key: string) => {
 }
 
 const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
-  if (call.name !== 'subagent') {
+  if (call.name !== subagentToolName) {
     return undefined
   }
 
@@ -163,7 +164,12 @@ const subagentCompletedEvent = (input: {
     objectField(input.result.structuredContent, 'subagent_run_id') ===
       makeSubagentRunId(input.call.id)
 
-  return metadata === undefined || accepted
+  const observation =
+    objectField(input.result.structuredContent, 'type') === 'subagent_observation' &&
+    objectField(input.result.structuredContent, 'subagent_run_id') ===
+      makeSubagentRunId(input.call.id)
+
+  return metadata === undefined || accepted || observation
     ? undefined
     : SubagentCompleted.make({
         parentToolCallId: input.call.id,
@@ -185,6 +191,15 @@ const toolCompletionEvents = (input: {
   readonly startedAtMs: number
   readonly endedAtMs: number
 }): ReadonlyArray<AgentEvent> => {
+  if (input.result.acceptance !== undefined) {
+    return [
+      ToolExecutionAccepted.make({
+        call: input.call,
+        result: input.result,
+        createdAtMs: input.endedAtMs
+      })
+    ]
+  }
   const completed = subagentCompletedEvent(input)
   const toolCompleted = ToolExecutionCompleted.make({
     call: input.call,
@@ -530,33 +545,64 @@ type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
 const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
   Math.max(1, loopConfig.toolConcurrency)
 
-const toolResultMessageFromResult = (result: ToolResult) =>
-  ToolResultMessage.make({
-    toolCallId: result.toolCallId,
-    content: result.content,
-    isError: result.isError,
-    structuredContent: result.structuredContent
-  })
-
 const toolDefFor = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
   tools.find(tool => tool.name === call.name)
 
 const approvalRequired = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
   toolDefFor(tools, call)?.approval?.mode === 'manual'
 
-const approvalRequestId = (call: ToolCall) => `approval:${call.id}`
+// Lossless canonical binding (not a collision-prone hash). Hosts must echo the opaque ID.
+const canonicalJson = (value: Schema.Json): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  return `{${Object.keys(value)
+    .sort()
+    .map(
+      key =>
+        `${JSON.stringify(key)}:${canonicalJson(Object.getOwnPropertyDescriptor(value, key)?.value)}`
+    )
+    .join(',')}}`
+}
+
+/** Activated calls carry a model-chosen execution envelope; invalid envelopes decode to `None`. */
+const backgroundEnvelope = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
+  toolDefFor(tools, call)?.execution === 'background-v1'
+    ? decodeBackgroundToolInput(call.params)
+    : undefined
+
+/** Legacy foreground ids are unchanged; activated calls bind name, mode, and exact arguments. */
+const approvalRequestId = (call: ToolCall, tools: ReadonlyArray<ToolDef>) => {
+  const envelope = backgroundEnvelope(tools, call)
+
+  return envelope === undefined || Option.isNone(envelope)
+    ? `approval:${call.id}`
+    : `approval:${call.id}:background-v1:${canonicalJson({
+        name: call.name,
+        execution: envelope.value.execution,
+        arguments: envelope.value.arguments
+      })}`
+}
 
 const questionRequestId = (call: ToolCall) => `question:${call.id}`
 
-const matchesApproval = (response: ToolApprovalResponse, call: ToolCall) =>
-  response.toolCallId === call.id && response.requestId === approvalRequestId(call)
+const matchesApproval = (
+  response: ToolApprovalResponse,
+  call: ToolCall,
+  tools: ReadonlyArray<ToolDef>
+) => response.toolCallId === call.id && response.requestId === approvalRequestId(call, tools)
 
 const matchesQuestion = (response: QuestionResponse, call: ToolCall) =>
   response.toolCallId === call.id && response.requestId === questionRequestId(call)
 
-const approvalResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
+const approvalResponseFor = (
+  responses: ReadonlyArray<HitlResponse>,
+  call: ToolCall,
+  tools: ReadonlyArray<ToolDef>
+) =>
   responses.flatMap(response =>
-    response._tag === 'ToolApprovalResponse' && matchesApproval(response, call) ? [response] : []
+    response._tag === 'ToolApprovalResponse' && matchesApproval(response, call, tools)
+      ? [response]
+      : []
   )[0]
 
 const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
@@ -566,7 +612,7 @@ const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolC
 
 const toolApprovalRequest = (tools: ReadonlyArray<ToolDef>, call: ToolCall): ToolApprovalRequest =>
   ToolApprovalRequest.make({
-    requestId: approvalRequestId(call),
+    requestId: approvalRequestId(call, tools),
     toolCallId: call.id,
     call,
     policy: toolDefFor(tools, call)?.approval
@@ -659,12 +705,29 @@ const prepareApprovalCall = (
   index: number,
   responses: ReadonlyArray<HitlResponse>
 ): PreparedToolCall => {
+  const envelope = backgroundEnvelope(tools, call)
+
+  // Never ask a human to approve, or launch, an activated call whose envelope is malformed.
+  if (envelope !== undefined && Option.isNone(envelope)) {
+    return {
+      _tag: 'Result',
+      index,
+      call,
+      events: [],
+      result: ToolResult.make({
+        toolCallId: call.id,
+        isError: true,
+        content: 'Expected exactly execution (foreground or background) and arguments.'
+      })
+    }
+  }
+
   if (!approvalRequired(tools, call)) {
     return { _tag: 'Execute', index, call, events: [] }
   }
 
   const request = toolApprovalRequest(tools, call)
-  const response = approvalResponseFor(responses, call)
+  const response = approvalResponseFor(responses, call, tools)
 
   if (response === undefined) {
     return {
@@ -699,7 +762,19 @@ const prepareToolCall = (input: {
   readonly index: number
 }): Effect.Effect<PreparedToolCall> =>
   input.call.name === questionToolName
-    ? prepareQuestionCall(input.call, input.index, input.responses)
+    ? input.tools.some(tool => tool.name === questionToolName)
+      ? prepareQuestionCall(input.call, input.index, input.responses)
+      : Effect.succeed({
+          _tag: 'Result',
+          index: input.index,
+          call: input.call,
+          events: [],
+          result: ToolResult.make({
+            toolCallId: input.call.id,
+            content: 'Question tool is unavailable',
+            isError: true
+          })
+        })
     : Effect.succeed(prepareApprovalCall(input.tools, input.call, input.index, input.responses))
 
 /** Preflight the entire batch before dispatching ANY call. Pending requests fence all execution. */
@@ -773,7 +848,7 @@ const parallelToolExecutionStream = (input: {
     input.calls.map(({ call, index }) =>
       makeToolExecutionStream(input.executor, call, input.model).pipe(
         Stream.tap(event => {
-          if (event._tag !== 'ToolExecutionCompleted') {
+          if (event._tag !== 'ToolExecutionCompleted' && event._tag !== 'ToolExecutionAccepted') {
             return Effect.void
           }
 

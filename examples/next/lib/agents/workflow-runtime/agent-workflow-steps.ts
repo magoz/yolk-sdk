@@ -24,6 +24,7 @@ import {
   HitlResponse,
   ToolInputEnd,
   ToolResultMessage,
+  toolResultMessageFromResult,
   ToolExecutionStarted,
   SubagentStarted,
   SubagentCompleted,
@@ -36,6 +37,9 @@ import {
 
 import {
   runModelTurn,
+  LLMProvider,
+  LLMError,
+  AbortError,
   runToolBatch,
   prepareToolBatch,
   ToolExecutor,
@@ -222,36 +226,60 @@ export async function runAgentWorkflowModelStep(input: {
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
       const runtime = yield* workflowRuntime(request, context)
+      const store = yield* AgentWorkflowStore
       const assistantMessage = yield* Ref.make<AgentMessage | undefined>(undefined)
       const toolCalls = yield* Ref.make<ReadonlyArray<ToolCall>>([])
       const usage = yield* Ref.make(initialUsage)
       const reason = yield* Ref.make<'stop' | 'tool_use'>('stop')
       const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
 
-      yield* runModelTurn({
-        messages: runtime.input.messages,
-        systemPrompt: runtime.config.systemPrompt,
-        tools: runtime.config.tools,
-        reasoningEffort: runtime.input.reasoningEffort ?? runtime.config.reasoningEffort,
-        capabilities: runtime.config.capabilities,
-        model: runtime.config.model,
-        turn: input.state.turn
-      }).pipe(
-        Stream.runForEach(event =>
-          collectModelEvent({
-            event,
-            workflowRunId,
-            writer,
-            assistantMessage,
-            toolCalls,
-            usage,
-            reason,
-            eventSequence,
-            turn: input.state.turn
-          })
-        ),
-        Effect.provide(runtime.layer)
-      )
+      yield* Effect.gen(function* () {
+        const provider = yield* LLMProvider
+        // Stream construction can happen eagerly during retry setup. Admission belongs at
+        // subscription, after the retry delay, before every provider attempt's effects.
+        const fencedProvider: typeof LLMProvider.Service = {
+          stream: request =>
+            Stream.unwrap(
+              assertChildAdmission(context, workflowRunId).pipe(
+                Effect.mapError(error =>
+                  error._tag === 'WorkflowRegistryError' || error._tag === 'WorkflowRunForbidden'
+                    ? new AbortError({ reason: 'user' })
+                    : new LLMError({
+                        cause: 'provider_error',
+                        message: 'Workflow admission unavailable',
+                        retryable: false
+                      })
+                ),
+                Effect.map(() => provider.stream(request)),
+                Effect.provideService(AgentWorkflowStore, store)
+              )
+            )
+        }
+        yield* runModelTurn({
+          messages: runtime.input.messages,
+          systemPrompt: runtime.config.systemPrompt,
+          tools: runtime.config.tools,
+          reasoningEffort: runtime.input.reasoningEffort ?? runtime.config.reasoningEffort,
+          capabilities: runtime.config.capabilities,
+          model: runtime.config.model,
+          turn: input.state.turn
+        }).pipe(
+          Stream.runForEach(event =>
+            collectModelEvent({
+              event,
+              workflowRunId,
+              writer,
+              assistantMessage,
+              toolCalls,
+              usage,
+              reason,
+              eventSequence,
+              turn: input.state.turn
+            })
+          ),
+          Effect.provideService(LLMProvider, fencedProvider)
+        )
+      }).pipe(Effect.provide(runtime.layer))
 
       const currentAssistantMessage = yield* Ref.get(assistantMessage)
       const currentToolCalls = yield* Ref.get(toolCalls)
@@ -433,14 +461,19 @@ export async function runAgentWorkflowToolBatchStep(input: {
                 )
               }
 
-              if (event._tag !== 'ToolExecutionCompleted') {
+              if (
+                event._tag !== 'ToolExecutionCompleted' &&
+                event._tag !== 'ToolExecutionAccepted'
+              ) {
                 return Effect.void
               }
 
               return Effect.gen(function* () {
-                yield* Ref.update(cumulativeUsage, current =>
-                  addWorkflowToolResultUsage(current, event.result)
-                )
+                if (event._tag === 'ToolExecutionCompleted') {
+                  yield* Ref.update(cumulativeUsage, current =>
+                    addWorkflowToolResultUsage(current, event.result)
+                  )
+                }
                 latestUsage = yield* Ref.get(cumulativeUsage)
                 yield* Ref.update(toolResultMessages, messages => {
                   const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
@@ -448,12 +481,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                     ...messages,
                     {
                       index: callIndex < 0 ? calls.length : callIndex,
-                      message: ToolResultMessage.make({
-                        toolCallId: event.result.toolCallId,
-                        content: event.result.content,
-                        isError: event.result.isError,
-                        structuredContent: event.result.structuredContent
-                      })
+                      message: toolResultMessageFromResult(event.result)
                     }
                   ]
                   latestToolResultMessages = orderedToolResultMessages(nextMessages)

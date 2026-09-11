@@ -1,3 +1,4 @@
+export type { BackgroundToolHost } from './background.ts'
 export {
   EmptyToolParams,
   makeTool,

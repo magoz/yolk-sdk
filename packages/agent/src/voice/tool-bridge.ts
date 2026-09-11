@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { VoiceToolDispatch } from '../background-execution-internal.ts'
 import * as Schema from 'effect/Schema'
 import { ToolExecutor, type ToolError } from '@yolk-sdk/agent/loop'
 import { ToolCall, type Content } from '@yolk-sdk/agent/protocol'
@@ -75,13 +76,15 @@ export const executeVoiceToolCall = (input: VoiceToolCallRequest) =>
   Effect.gen(function* () {
     const executor = yield* ToolExecutor
     const params = yield* parseToolArguments(input.arguments)
-    const result = yield* executor.execute(
-      ToolCall.make({
-        id: input.callId,
-        name: input.name,
-        params
-      })
-    )
+    const result = yield* Effect.suspend(() =>
+      executor.execute(
+        ToolCall.make({
+          id: input.callId,
+          name: input.name,
+          params
+        })
+      )
+    ).pipe(Effect.provideService(VoiceToolDispatch, true))
     const output = yield* stringifyToolOutput({ result: contentToSerializable(result.content) })
 
     return makeVoiceToolExecutionResult(input.callId, output)

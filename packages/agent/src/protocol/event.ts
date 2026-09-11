@@ -241,6 +241,16 @@ export class ToolExecutionStarted extends Schema.TaggedClass<ToolExecutionStarte
   }
 ) {}
 
+/** The host owns outstanding execution; this event only settles admission. */
+export class ToolExecutionAccepted extends Schema.TaggedClass<ToolExecutionAccepted>()(
+  'ToolExecutionAccepted',
+  {
+    ...EventIdentity,
+    call: ToolCall,
+    result: ToolResult
+  }
+) {}
+
 export class ToolExecutionCompleted extends Schema.TaggedClass<ToolExecutionCompleted>()(
   'ToolExecutionCompleted',
   {
@@ -373,6 +383,7 @@ export const AgentEvent = Schema.Union([
   QuestionAnswered,
   QuestionCancelled,
   ToolExecutionStarted,
+  ToolExecutionAccepted,
   ToolExecutionCompleted,
   ToolExecutionError,
   ProviderToolResult,

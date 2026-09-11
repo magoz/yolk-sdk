@@ -88,7 +88,7 @@ describe('Next child control steps without DB', () => {
     })
     metadata.workflowRunId = 'child-b'
     expect(await admitChildWorkflowStep(launch)).toBeNull()
-    await attachChildWorkflowStep(launch, 'child-b')
+    expect(await attachChildWorkflowStep(launch, 'child-b')).toBe('child-a')
     expect(state.children[0]?.workflowRunId).toBe('child-a')
     const check = await Effect.runPromise(
       assertChildAdmission(
@@ -101,7 +101,7 @@ describe('Next child control steps without DB', () => {
 
   it('fences start-response attachment and the next child step after Stop', async () => {
     state = transitionWorkflowRegistry(state, { type: 'stop' })
-    await attachChildWorkflowStep(launch, 'child-a')
+    expect(await attachChildWorkflowStep(launch, 'child-a')).toBeNull()
     expect(await admitChildWorkflowStep(launch)).toBeNull()
     expect(state.children[0]?.workflowRunId).toBeNull()
   })

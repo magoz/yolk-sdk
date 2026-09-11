@@ -9,6 +9,8 @@ import {
 } from '@yolk-sdk/vercel-workflows'
 import {
   maxChildWorkflowTurns,
+  maxChildObservationReads,
+  childObservationDelayMs,
   workflowToolConcurrency
 } from '@/lib/services/agent-workflow/policy'
 import type { ChildLaunch, ChildRead } from './child-control'
@@ -142,30 +144,39 @@ async function orchestrateAgentWorkflowTools(
       let result: unknown
       try {
         let attemptedRunId: string | undefined
+        let confirmedRunId = plan.type === 'launch' ? plan.workflowRunId : null
         if (plan.type === 'launch' && plan.workflowRunId === null) {
           try {
             const attempt = await start(runChildAgentWorkflow, [plan.child])
             attemptedRunId = attempt.runId
-            await attachChildWorkflowStep(plan.child, attempt.runId)
+            confirmedRunId = await attachChildWorkflowStep(plan.child, attempt.runId)
           } catch (error) {
             await uncertainChildLaunchStep(plan.child)
             throw error
           }
         }
-        const child = await awaitWorkflowChild<ChildRead>({
-          read: async () => {
-            const value = await readChildWorkflowStep(plan.child, attemptedRunId)
-            const wait = plan.type === 'lookup' ? plan.wait : !plan.background
-            return value.done || (!wait && (plan.type === 'lookup' || value.workflowRunId !== null))
-              ? { done: true as const, value }
-              : { done: false as const }
-          },
-          sleep: async () => {
-            await sleep('1s')
-          }
-        })
+        // Reservation + attachment is the acknowledgement. Resilient starts need not
+        // exist in platform status storage yet, and status availability is irrelevant.
+        const child =
+          plan.type === 'launch' && plan.background && confirmedRunId !== null
+            ? { done: false, workflowRunId: confirmedRunId, result: null }
+            : await awaitWorkflowChild<ChildRead>({
+                read: async attempt => {
+                  const value = await readChildWorkflowStep(plan.child, attemptedRunId)
+                  const wait = plan.type === 'lookup' ? plan.wait : !plan.background
+                  return value.done ||
+                    attempt + 1 >= maxChildObservationReads ||
+                    (!wait && (plan.type === 'lookup' || value.workflowRunId !== null))
+                    ? { done: true as const, value }
+                    : { done: false as const }
+                },
+                sleep: async attempt => {
+                  await sleep(childObservationDelayMs(attempt))
+                }
+              })
         result = await childToolResultStep({
           callId: eligible,
+          childCallId: plan.child.callId,
           child,
           lookup: plan.type === 'lookup',
           background: plan.type === 'launch' && plan.background,
@@ -173,7 +184,7 @@ async function orchestrateAgentWorkflowTools(
         })
       } catch {
         // Isolate transport/launch failure here, not inside the child execution boundary.
-        result = await childControlFailureStep(eligible)
+        result = await childControlFailureStep(eligible, plan.child.parentRunId, plan.child.callId)
       }
       return await runAgentWorkflowToolBatchStep({ ...completion, result })
     }

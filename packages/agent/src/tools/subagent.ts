@@ -18,6 +18,7 @@ import {
   type ToolCall,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
+import { subagentToolName } from '../protocol/tool.ts'
 import {
   makeTool,
   modelVisibleToolError,
@@ -27,7 +28,7 @@ import {
   type ToolRegistryError
 } from './registry.ts'
 
-export const subagentToolName = 'subagent'
+export { subagentToolName }
 
 const SubagentToolBaseFields = {
   description: Schema.String.pipe(
@@ -325,7 +326,7 @@ export const makeSubagentToolDef = (
 export const makeSubagentToolModule = <Context>(
   options: SubagentToolOptions<Context>
 ): ToolModule<Context> => ({
-  id: 'subagent',
+  id: subagentToolName,
   tools: [makeSubagentToolRegistration(options)]
 })
 

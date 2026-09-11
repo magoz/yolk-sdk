@@ -1,7 +1,8 @@
-import { Option } from 'effect'
+import { Effect, Option, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import type { ToolDef } from '@yolk-sdk/agent/protocol'
-import type { VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
 export type OpenAiRealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
@@ -200,21 +201,43 @@ export const openAiRealtimeToolParameters = (parameters: unknown): unknown => {
   }
 }
 
-export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool => ({
-  type: 'function',
-  name: tool.name,
-  description: tool.description,
-  parameters: openAiRealtimeToolParameters(tool.parameters)
-})
+const realtimeToolResult = (
+  tool: ToolDef
+): Result.Result<OpenAiRealtimeFunctionTool, VoiceToolBridgeError> =>
+  tool.execution === 'background-v1'
+    ? Result.fail(new VoiceToolBridgeError({ message: backgroundVoiceUnsupportedMessage }))
+    : Result.succeed({
+        type: 'function',
+        name: tool.name,
+        description: tool.description,
+        parameters: openAiRealtimeToolParameters(tool.parameters)
+      })
 
-export const makeOpenAiRealtimeSessionConfig = ({
+/** Throws VoiceToolBridgeError for activated background definitions; prefer the Effect variant in Effect programs. */
+export const toOpenAiRealtimeTool = (tool: ToolDef): OpenAiRealtimeFunctionTool =>
+  Result.match(realtimeToolResult(tool), {
+    onFailure: error => {
+      throw error
+    },
+    onSuccess: mapped => mapped
+  })
+
+/** Typed advertisement validation; unexpected mapper defects remain defects. */
+export const toOpenAiRealtimeToolEffect = (
+  tool: ToolDef
+): Effect.Effect<OpenAiRealtimeFunctionTool, VoiceToolBridgeError> =>
+  Effect.suspend(() => Effect.fromResult(realtimeToolResult(tool)))
+
+const sessionConfigFromTools = ({
   instructions,
   tools,
   model = openAiRealtimeModel,
   voice = defaultOpenAiRealtimeVoice,
   reasoningEffort = defaultOpenAiRealtimeReasoningEffort,
   transcriptionModel = defaultOpenAiRealtimeTranscriptionModel
-}: OpenAiRealtimeSessionConfigInput): OpenAiRealtimeSessionConfig => ({
+}: Omit<OpenAiRealtimeSessionConfigInput, 'tools'> & {
+  readonly tools: ReadonlyArray<OpenAiRealtimeFunctionTool>
+}): OpenAiRealtimeSessionConfig => ({
   type: 'realtime',
   model,
   output_modalities: ['audio'],
@@ -233,12 +256,26 @@ export const makeOpenAiRealtimeSessionConfig = ({
     }
   },
   instructions,
-  tools: tools.map(toOpenAiRealtimeTool),
+  tools,
   tool_choice: 'auto',
   reasoning: {
     effort: reasoningEffort
   }
 })
+
+/** Synchronous compatibility builder; throws VoiceToolBridgeError for activated tools. */
+export const makeOpenAiRealtimeSessionConfig = (
+  input: OpenAiRealtimeSessionConfigInput
+): OpenAiRealtimeSessionConfig =>
+  sessionConfigFromTools({ ...input, tools: input.tools.map(toOpenAiRealtimeTool) })
+
+/** Build before transport effects; catchTag('VoiceToolBridgeError') handles unsupported activation. */
+export const makeOpenAiRealtimeSessionConfigEffect = (
+  input: OpenAiRealtimeSessionConfigInput
+): Effect.Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError> =>
+  Effect.forEach(input.tools, toOpenAiRealtimeToolEffect).pipe(
+    Effect.map(tools => sessionConfigFromTools({ ...input, tools }))
+  )
 
 const isOpenAiRealtimeVoice = (value: string): value is OpenAiRealtimeVoice =>
   value === 'marin' || value === 'cedar'
@@ -250,21 +287,37 @@ const decodeTranscriptionModel = Schema.decodeUnknownOption(OpenAiRealtimeTransc
  * session payload. Unsupported values fall back to OpenAI defaults; tools are
  * passed separately because host toolset resolution owns them.
  */
-export const openAiRealtimeSessionConfigFromVoice = (
+const sessionConfigInputFromVoice = (
   config: VoiceSessionConfig,
   tools: ReadonlyArray<ToolDef>
-): OpenAiRealtimeSessionConfig => {
+): OpenAiRealtimeSessionConfigInput => {
   const transcriptionModel =
     config.inputTranscription === undefined
       ? Option.none<OpenAiRealtimeTranscriptionModel>()
       : decodeTranscriptionModel(config.inputTranscription.model)
 
-  return makeOpenAiRealtimeSessionConfig({
+  return {
     instructions: config.instructions,
     tools,
     model: config.model,
     voice:
       config.voice !== undefined && isOpenAiRealtimeVoice(config.voice) ? config.voice : undefined,
     transcriptionModel: Option.getOrUndefined(transcriptionModel)
-  })
+  }
 }
+
+/** Synchronous compatibility lowering; throws VoiceToolBridgeError for activated tools. */
+export const openAiRealtimeSessionConfigFromVoice = (
+  config: VoiceSessionConfig,
+  tools: ReadonlyArray<ToolDef>
+): OpenAiRealtimeSessionConfig =>
+  makeOpenAiRealtimeSessionConfig(sessionConfigInputFromVoice(config, tools))
+
+/** Effect-native provider-neutral config lowering with typed advertisement failures. */
+export const openAiRealtimeSessionConfigFromVoiceEffect = (
+  config: VoiceSessionConfig,
+  tools: ReadonlyArray<ToolDef>
+): Effect.Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError> =>
+  Effect.suspend(() =>
+    makeOpenAiRealtimeSessionConfigEffect(sessionConfigInputFromVoice(config, tools))
+  )

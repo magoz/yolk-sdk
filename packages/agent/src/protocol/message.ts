@@ -7,7 +7,7 @@ import {
   resolveContentAttachmentSources,
   type AttachmentSourceResolver
 } from './content.ts'
-import { ToolCall, ToolResult } from './tool.ts'
+import { BackgroundToolAccepted, ToolCall, ToolResult } from './tool.ts'
 
 export const MessageAuthor = Schema.Struct({
   displayName: Schema.optional(Schema.String)
@@ -88,8 +88,26 @@ export class ToolResultMessage extends Schema.TaggedClass<ToolResultMessage>()('
   toolCallId: Schema.String,
   content: Content,
   isError: Schema.optional(Schema.Boolean),
-  structuredContent: Schema.optional(Schema.Unknown)
+  structuredContent: Schema.optional(Schema.Unknown),
+  acceptance: Schema.optional(BackgroundToolAccepted)
 }) {}
+
+/** Copy result payload/receipt without inventing a timestamp, author or other message context. */
+export const toolResultMessageFromResult = (
+  result: Pick<
+    ToolResult,
+    'toolCallId' | 'content' | 'isError' | 'structuredContent' | 'acceptance'
+  >,
+  envelope: MessageEnvelope = {}
+): ToolResultMessage =>
+  ToolResultMessage.make({
+    ...envelope,
+    toolCallId: result.toolCallId,
+    content: result.content,
+    isError: result.isError,
+    structuredContent: result.structuredContent,
+    acceptance: result.acceptance
+  })
 
 export const AgentMessage = Schema.Union([UserMessage, AssistantAgentMessage, ToolResultMessage])
 export type AgentMessage = typeof AgentMessage.Type

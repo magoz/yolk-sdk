@@ -27,15 +27,58 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
   name: NonEmptyTrimmedString,
   description: Schema.String,
   parameters: Schema.Unknown,
-  approval: Schema.optional(ToolApprovalPolicy)
+  approval: Schema.optional(ToolApprovalPolicy),
+  background: Schema.optional(Schema.Boolean),
+  execution: Schema.optional(Schema.Literal('background-v1'))
+}) {}
+
+export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
+export type BackgroundToolExecution = typeof BackgroundToolExecution.Type
+
+/** Model-facing envelope of an activated (`execution: 'background-v1'`) tool call. Control fields
+ * never reach business params; `arguments` carries the original tool parameters unchanged.
+ */
+export class BackgroundToolInput extends Schema.Class<BackgroundToolInput>('BackgroundToolInput')({
+  execution: BackgroundToolExecution,
+  arguments: Schema.Json
+}) {}
+
+/** Exact envelope decode: omitted, unknown, or extra control fields are rejected. */
+export const decodeBackgroundToolInput = Schema.decodeUnknownOption(BackgroundToolInput, {
+  onExcessProperty: 'error'
+})
+
+/** Admission receipt, not a terminal execution result. Handles are opaque and host-scoped. */
+export class BackgroundToolAccepted extends Schema.Class<BackgroundToolAccepted>(
+  'BackgroundToolAccepted'
+)({
+  version: Schema.Literal(1),
+  executionId: NonEmptyTrimmedString
 }) {}
 
 export class ToolResult extends Schema.Class<ToolResult>('ToolResult')({
   toolCallId: NonEmptyTrimmedString,
   content: Content,
   isError: Schema.optional(Schema.Boolean),
-  structuredContent: Schema.optional(Schema.Unknown)
+  structuredContent: Schema.optional(Schema.Unknown),
+  acceptance: Schema.optional(BackgroundToolAccepted)
 }) {}
+
+/** One provider-facing acknowledgement for the original call; never append its terminal result again. */
+export const makeBackgroundToolAcceptedResult = (input: {
+  readonly toolCallId: string
+  readonly acceptance: BackgroundToolAccepted
+}) =>
+  ToolResult.make({
+    toolCallId: input.toolCallId,
+    acceptance: input.acceptance,
+    content: `Background execution accepted: ${input.acceptance.executionId}. This is not completion. Use host-provided status/wait tools or await host delivery.`,
+    structuredContent: {
+      type: 'background_tool_accepted',
+      version: input.acceptance.version,
+      executionId: input.acceptance.executionId
+    }
+  })
 
 export type ErrorToolResultInput = {
   readonly toolCallId: string
@@ -245,3 +288,7 @@ export type HitlRequest = typeof HitlRequest.Type
 
 export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse])
 export type HitlResponse = typeof HitlResponse.Type
+
+// Canonical loop-owned names. Public compatibility exports remain on /tools.
+export const questionToolName = 'question'
+export const subagentToolName = 'subagent'

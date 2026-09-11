@@ -12,7 +12,7 @@ import * as Schema from 'effect/Schema'
 import { AppLayer } from '@/lib/layers'
 import {
   defaultOpenAiRealtimeTranscriptionModel,
-  makeOpenAiRealtimeSessionConfig,
+  makeOpenAiRealtimeSessionConfigEffect,
   OpenAiRealtimeTranscriptionModelSchema,
   type OpenAiRealtimeTranscriptionModel
 } from '@/lib/agents/realtime/openai-realtime'
@@ -75,21 +75,22 @@ const makeSessionConfigJson = (input: {
   readonly tools: ReadonlyArray<ToolDef>
   readonly transcriptionModel: OpenAiRealtimeTranscriptionModel
 }) =>
-  Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(
-    makeOpenAiRealtimeSessionConfig({
+  Effect.gen(function* () {
+    const config = yield* makeOpenAiRealtimeSessionConfigEffect({
       instructions: realtimeInstructions,
       tools: input.tools,
       transcriptionModel: input.transcriptionModel
     })
-  ).pipe(
-    Effect.mapError(
-      error =>
-        new OpenAiRealtimeCallError({
-          message: 'Could not serialize Realtime session config',
-          cause: error
-        })
+    return yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(config).pipe(
+      Effect.mapError(
+        error =>
+          new OpenAiRealtimeCallError({
+            message: 'Could not serialize Realtime session config',
+            cause: error
+          })
+      )
     )
-  )
+  })
 
 const requestOpenAiRealtimeAnswer = (input: {
   readonly apiKey: Redacted.Redacted<string>

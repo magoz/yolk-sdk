@@ -1,4 +1,5 @@
 import { Effect, Option } from 'effect'
+import { backgroundVoiceUnsupportedMessage } from '../background-execution-internal.ts'
 import * as Schema from 'effect/Schema'
 import type { ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
@@ -19,6 +20,7 @@ import { executeVoiceToolCall, VoiceToolCallRequest } from './tool-bridge.ts'
 /** Pure approval decision for one voice tool call against a resolved toolset. */
 export type VoiceToolCallDecision =
   | { readonly _tag: 'Execute' }
+  | { readonly _tag: 'Deny'; readonly reason: string }
   | { readonly _tag: 'RequireApproval'; readonly request: ToolApprovalRequest }
 
 /** Matches the loop's deterministic approval request id convention. */
@@ -41,6 +43,11 @@ export const decideVoiceToolCall = (
   call: VoiceToolCall
 ): VoiceToolCallDecision => {
   const def = tools.find(tool => tool.name === call.name)
+
+  // Voice cannot bind activated approvals or represent background acceptance yet.
+  if (def?.execution === 'background-v1') {
+    return { _tag: 'Deny', reason: backgroundVoiceUnsupportedMessage }
+  }
 
   if (def?.approval?.mode !== 'manual') {
     return { _tag: 'Execute' }
@@ -108,6 +115,16 @@ export const handleVoiceToolCall = (input: {
     const decision = decideVoiceToolCall(input.tools, input.call)
 
     switch (decision._tag) {
+      case 'Deny':
+        return voiceToolDenialOutput(input.call, decision.reason).pipe(
+          Effect.map(output =>
+            VoiceToolCallDeniedOutcome.make({
+              callId: input.call.callId,
+              output,
+              reason: decision.reason
+            })
+          )
+        )
       case 'Execute':
         return executeCall(input.call)
       case 'RequireApproval': {

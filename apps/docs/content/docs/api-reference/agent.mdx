@@ -15,6 +15,8 @@ Import feature APIs from explicit subpaths. The root package is intentionally ti
 | `AgentEvent`                                                                                                              | stream event union             |
 | `UserMessageEvent`, `AssistantMessageEvent`                                                                               | replay-safe transcript events  |
 | `ToolDef`, `ToolCall`, `ToolResult`                                                                                       | tool protocol                  |
+| `BackgroundToolAccepted`, `BackgroundToolInput`, `decodeBackgroundToolInput`, `makeBackgroundToolAcceptedResult`          | background tool acceptance     |
+| `ToolExecutionAccepted`                                                                                                   | background admission event     |
 | `ToolApprovalRequest`, `ToolApprovalResponse`                                                                             | approval HITL                  |
 | `QuestionRequest`, `QuestionResponse`                                                                                     | question HITL                  |
 | `plainHitlResponse`, `hitlResponseEvent`, `questionResponseStructuredContent`                                             | durable/client HITL helpers    |
@@ -112,6 +114,7 @@ Runtime request tags:
 | ------------------------------------ | --------------------------------------------------------- |
 | `makeTool`                           | schema-backed tool registration                           |
 | `resolveTools`                       | filter/merge modules into model-visible defs and executor |
+| `BackgroundToolHost`                 | host seam that admits model-chosen background calls       |
 | `makeToolExecutorLayer`              | provide resolved executor as `ToolExecutor`               |
 | `EmptyToolParams`                    | no-arg tool schema                                        |
 | `ToolAccess`                         | `read`, `write`, `destructive`                            |
@@ -123,6 +126,19 @@ Runtime request tags:
 | `modelVisibleToolError`              | recoverable error visible to model                        |
 
 Subagent/question helpers: `makeSubagentToolModule`, `makeSubagentToolDef`, `makeSubagentToolResult`, `subagentToolName`, `makeQuestionToolDef`, `questionToolName`.
+
+Background tool calls: `makeTool({ background: true })` (or `ToolRegistration.background` with a
+side-effect-free `validate`) opts a tool in; `resolveTools(modules, context, { backgroundHost })`
+activates opted-in tools with a required `{ execution: 'foreground' | 'background', arguments }`
+envelope. `BackgroundToolHost.accept({ call, request, context })` returns a versioned
+`BackgroundToolAccepted` receipt; the registry returns one acknowledgement `ToolResult` with
+`acceptance` metadata and the loop emits `ToolExecutionAccepted`. Without a host, definitions and
+behavior are unchanged. Activation supports only document-root `#/$defs/...` pointers, with
+unsupported references/resource keywords rejected as `ToolRegistryError.cause:
+'background_unsupported_schema'`. Activated definitions are unsupported in voice/realtime:
+synchronous realtime tool/config mappers throw `VoiceToolBridgeError`; their `Effect` counterparts
+return it in the typed error channel. Voice dispatch fails closed even
+with replayed approvals. See [Tools and HITL](../agent/tools-hitl#let-the-model-choose-background-execution).
 
 Configure `models` and `reasoningEfforts` on a subagent tool module to expose validated optional
 `model` and `reasoning_effort` parameters to the parent agent. Omission means the host should
@@ -440,3 +456,15 @@ sends no output limit. Yolk does not infer limits from model ids. Generic OpenAI
 select `OpenAiProviderConfig.completionTokenField`, add endpoint extensions through `extraBody`, and
 set `providerIdentity` for accurate safe error metadata; canonical request fields and required HTTP
 headers take precedence.
+
+## Result conversion and typed realtime builders
+
+| Subpath                                     | Export                                                      | Contract                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                  | `toolResultMessageFromResult(result, envelope?)`            | Preserve all result payload fields and acceptance; optional explicit message envelope |
+| `@yolk-sdk/agent/providers/openai/realtime` | `toOpenAiRealtimeToolEffect(tool)`                          | `Effect<OpenAiRealtimeFunctionTool, VoiceToolBridgeError>`                            |
+| `@yolk-sdk/agent/providers/openai/realtime` | `makeOpenAiRealtimeSessionConfigEffect(input)`              | `Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError>`                           |
+| `@yolk-sdk/agent/providers/openai/realtime` | `openAiRealtimeSessionConfigFromVoiceEffect(config, tools)` | `Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError>`                           |
+
+The synchronous realtime exports remain available; use the Effect variants inside Effect programs
+so unsupported background activation is catchable before host transport effects.

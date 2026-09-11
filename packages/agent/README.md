@@ -463,7 +463,7 @@ HITL is protocol-level, not UI-level:
   `submitToolApprovalResponse` / `submitQuestionResponse`, or using client stream helpers like
   `streamToolApprovalResponseEventStream`.
 - Denials become model-visible `ToolResult` messages with `isError = true`.
-- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels.
+- Use `makeQuestionToolModule` to expose the package-owned `question` tool; answers resume as structured tool results and model-visible text with selected labels. The loop intercepts questions only when the tool is enabled in `tools`; omitted questions return an unavailable result without HITL or executor dispatch, even if a provider emits one.
 - Use `questionResponseStructuredContent` / `plainHitlResponse` before storing durable HITL payloads that must be plain JSON.
 - Use `toolRunsFromHitlRequests` to hydrate paused UI state from `AgentAwaitingInput.requests`.
 - Use `hitlResponseEvent` when a client needs optimistic approval/question UI updates before resumed stream events arrive.
@@ -564,11 +564,60 @@ logical `subagent:<toolCallId>` identity separate from the physical Workflow id.
 second tool result for the original launch; expose host-owned status/wait tools whose observations
 do not masquerade as fresh child usage. Host-owned storage must remain readable after parent end.
 
+A lost control response or exhausted observation budget is not a terminal child failure. Hosts
+can return a `ToolResult` with `structuredContent.type: 'subagent_observation'` and a matching
+`subagent_run_id: makeSubagentRunId(call.id)`. The loop completes the tool observation but suppresses
+`SubagentCompleted`; nested results do not contribute child usage. Include truthful status and an
+owned recovery handle in the observation. Use normal final results for genuine terminal outcomes,
+not this marker. These child observations are separate from generic background tool `acceptance`.
+
 `prepareToolBatch` from `@yolk-sdk/agent/loop` exposes the same HITL preflight used by the loop.
 Durable orchestration must check `pendingRequests` before dispatching **any** tool, even calls
 listed in `callsToExecute`. Preserve synthetic results and original call ordering when committing.
 
 Keep host-owned subagent execution wiring outside this package; pass only the package subagent contract across the boundary.
+
+## Background tool calls
+
+Any `makeTool` registration can opt into model-chosen background execution with `background: true`.
+The flag is inert until `resolveTools(modules, context, { backgroundHost })` receives a
+`BackgroundToolHost`, which asserts a real lifecycle owner (durable run, queue, or session) exists.
+Without a host, definitions, approval ids, and inline behavior are unchanged.
+
+- Activated tools advertise a required `{ execution: 'foreground' | 'background', arguments }`
+  envelope; the original parameter schema nests under `arguments` and `$defs` stay at the root.
+  Only document-root `#/$defs/...` references (without percent-encoded fragments) are supported.
+  Other reference forms and resource/anchor keywords (`$id`, legacy `id`, `$anchor`, `$dynamicAnchor`,
+  `$dynamicRef`, `$recursiveAnchor`, `$recursiveRef`) fail activation with
+  `ToolRegistryError.cause: 'background_unsupported_schema'`. Literal defaults/examples/const/enum
+  data are not traversed as schemas.
+- The registry validates the envelope and original parameters without business effects, strips the
+  control fields, then executes inline or calls `host.accept({ call, request, context })`.
+  `makeTool` invalid business arguments still return structured model-visible errors in either
+  mode, without business/admission effects. Raw validator and host errors remain typed failures.
+- `accept` returns a versioned `BackgroundToolAccepted` receipt (`{ version: 1, executionId }`),
+  never a closure. Make it idempotent per call id; fail with a `ToolError` to decline. The registry
+  never falls back to inline execution.
+- Use protocol `toolResultMessageFromResult(result, envelope?)` to preserve every result field and
+  receipt when creating transcript messages; timestamps/authors remain explicit host inputs.
+- The result is one acknowledgement `ToolResult` with typed `acceptance` metadata; the loop emits
+  `ToolExecutionAccepted` (no `ToolExecutionCompleted`, no usage). Client state, chat projection,
+  and tool cards treat `Accepted` as settled but not completed; active input/approval/Started
+  replays cannot replace accepted calls or receipts, including across turn cleanup and hydration.
+- Activated definitions are unsupported in voice/realtime, including foreground envelope calls.
+  Resolve voice toolsets without a background host. Synchronous realtime tool/config mappers throw
+  `VoiceToolBridgeError`; use `toOpenAiRealtimeToolEffect`, `makeOpenAiRealtimeSessionConfigEffect`,
+  or `openAiRealtimeSessionConfigFromVoiceEffect` inside Effect programs to catch that typed error.
+  Voice handlers deny before approval matching, and the low-level bridge
+  rejects activated registry dispatch before validation, inline execution, or admission.
+- Raw `ToolRegistration` objects need a side-effect-free `validate` to activate; the loop-owned
+  `question` and `subagent` tools cannot activate (subagents keep `makeSubagentAcceptedToolResult`).
+- Manual approval fences the whole batch; activated calls bind the approval `requestId` to the tool
+  name, mode, and canonical arguments, and malformed envelopes are rejected before any prompt.
+  IDs intentionally contain the full canonical payload: hosts must accommodate opaque, potentially
+  long IDs or enforce input bounds before admission; never truncate or rebuild them.
+- Hosts own authorization, status/wait tools, cancellation, terminal storage, usage, and delivery.
+  Never append a second result for the original call.
 
 ## Tool failures
 

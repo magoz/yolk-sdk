@@ -63,5 +63,6 @@ Vercel Workflow-backed agent loop primitives. Package stays Vercel-specific but 
 
 - `orchestrateWorkflowToolBatch` and `awaitWorkflowChild` are Workflow-safe generic callback seams, exported from root and `./workflow`; no new subpath.
 - Tool-batch callbacks may orchestrate separate steps/independent Workflow 5 `start` calls. Never wrap a complete child in one step; nested step calls from a step execute inline.
+- `awaitWorkflowChild` supplies zero-based attempts to `read`/`sleep` for host-owned observation ceilings and capped backoff. Zero-argument callbacks/default unbounded behavior remain source-compatible; hosts must explicitly end long waits with a truthful still-running value at their ceiling.
 - Hosts supply durable preflight/read/sleep callbacks, reservations/admission, ownership and tombstones. Child failures are values to the parent but must remain visible failures within the child boundary.
 - `test/child-directives.integration.test.ts` covers independent physical child runs, internal model/tool steps, background parent completion/failure survival, and foreground defect isolation.

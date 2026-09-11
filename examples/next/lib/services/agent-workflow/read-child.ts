@@ -1,4 +1,5 @@
 import { Clock, Effect } from 'effect'
+import { WorkflowRunNotFoundError } from 'workflow/errors'
 import * as Schema from 'effect/Schema'
 import { ToolResult } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
@@ -9,12 +10,20 @@ export type WorkflowChildRead = {
   readonly done: boolean
   readonly workflowRunId: string | null
   readonly result: unknown
+  /** done ends this observation's polling; uncertainty is never a terminal child outcome. */
+  readonly uncertain?: boolean
 }
 
 const failed = (callId: string, message: string) =>
   Schema.encodeEffect(ToolResult)(
     ToolResult.make({ toolCallId: callId, content: message, isError: true })
   )
+
+const unconfirmed = (callId: string, workflowRunId: string | null) =>
+  failed(
+    callId,
+    'Child launch is unconfirmed. Check subagent_status later; no execution outcome is known.'
+  ).pipe(Effect.map(result => ({ done: true, uncertain: true, workflowRunId, result })))
 
 /** Shared by Workflow short steps and the owned HTTP lookup after the parent has ended. */
 export const readWorkflowChild = (
@@ -45,21 +54,27 @@ export const readWorkflowChild = (
       if (child.launchUncertain === true || now - child.startedAtMs >= childAdmissionWaitMs) {
         // This ends this wait, not the child's lifecycle. A lost start response may still
         // self-admit later; do not commit a false terminal outcome or steal its reservation.
-        return {
-          done: true,
-          workflowRunId: null,
-          result: yield* failed(
-            input.callId,
-            'Child launch is unconfirmed. Check subagent_status later; no execution outcome is known.'
-          )
-        }
+        return yield* unconfirmed(input.callId, null)
       }
     }
     const observedRunId = child.workflowRunId ?? attemptedRunId
     if (observedRunId === undefined) return { done: false, workflowRunId: null, result: null }
     const workflows = yield* VercelWorkflows
-    const run = yield* workflows.getRun(observedRunId)
-    const status = yield* run.status
+    const status = yield* workflows.getRun(observedRunId).pipe(
+      Effect.flatMap(run => run.status),
+      Effect.catchTag('VercelWorkflowsError', error =>
+        (error.operation === 'getRun' || error.operation === 'status') &&
+        WorkflowRunNotFoundError.is(error.cause)
+          ? Effect.succeed(null)
+          : Effect.fail(error)
+      )
+    )
+    if (status === null) {
+      const now = yield* Clock.currentTimeMillis
+      return now - child.startedAtMs < childAdmissionWaitMs
+        ? { done: false, workflowRunId: child.workflowRunId, result: null }
+        : yield* unconfirmed(input.callId, child.workflowRunId)
+    }
     if (status === 'failed' || status === 'cancelled' || status === 'completed') {
       // Terminal persistence precedes platform completion; reread to avoid racing that commit.
       const latest = yield* store.read(input.parentRunId, input.userId)

@@ -48,6 +48,13 @@ export type AgentToolRun =
       readonly endedAtMs: number
     }
   | {
+      readonly _tag: 'Accepted'
+      readonly call: ToolCall
+      readonly result: ToolResult
+      readonly startedAtMs: number
+      readonly endedAtMs: number
+    }
+  | {
       readonly _tag: 'Errored'
       readonly call: ToolCall
       readonly message: string
@@ -55,7 +62,10 @@ export type AgentToolRun =
     }
   | { readonly _tag: 'ProviderCompleted'; readonly call: ToolCall; readonly result: ToolResult }
 
-type StartedAgentToolRun = Extract<AgentToolRun, { readonly _tag: 'Executing' | 'Completed' }>
+type StartedAgentToolRun = Extract<
+  AgentToolRun,
+  { readonly _tag: 'Executing' | 'Accepted' | 'Completed' }
+>
 
 export type AgentClientState = {
   readonly status: AgentRunStatus
@@ -114,6 +124,7 @@ const toolRunId = (run: AgentToolRun) => {
     case 'InputReady':
     case 'ApprovalRequested':
     case 'Executing':
+    case 'Accepted':
     case 'Completed':
     case 'Errored':
     case 'ProviderCompleted':
@@ -122,6 +133,7 @@ const toolRunId = (run: AgentToolRun) => {
 }
 
 export const isActiveToolRun = (run: AgentToolRun) =>
+  run._tag !== 'Accepted' &&
   run._tag !== 'Completed' &&
   run._tag !== 'Errored' &&
   run._tag !== 'Denied' &&
@@ -131,6 +143,10 @@ export const isActiveToolRun = (run: AgentToolRun) =>
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => run._tag === 'Completed')
+
+// Retention is not completion: an acknowledgement remains replay-fenced between turns.
+const retainedSettledToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
+  runs.filter(run => run._tag === 'Completed' || run._tag === 'Accepted')
 
 export const toolRunsFromHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
@@ -151,6 +167,9 @@ const replaceToolRun = (
   const id = toolRunId(run)
   const replaceIndex = runs.findIndex(current => toolRunId(current) === id)
 
+  // Input/approval/Started replays without event ids cannot reopen an acknowledged call.
+  if (runs[replaceIndex]?._tag === 'Accepted' && isActiveToolRun(run)) return runs
+
   if (replaceIndex === -1) {
     return [...runs, run]
   }
@@ -165,7 +184,7 @@ const replaceToolRun = (
 }
 
 const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun =>
-  run._tag === 'Executing' || run._tag === 'Completed'
+  run._tag === 'Executing' || run._tag === 'Accepted' || run._tag === 'Completed'
 
 const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
   runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
@@ -199,6 +218,7 @@ const questionRequestForToolCall = (
       case 'ApprovalRequested':
       case 'Denied':
       case 'Executing':
+      case 'Accepted':
       case 'Completed':
       case 'Errored':
       case 'ProviderCompleted':
@@ -255,11 +275,45 @@ export const applyAgentEventWithOptions = (
   return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
 }
 
+const activeEventToolCallId = (event: AgentEvent): string | undefined => {
+  switch (event._tag) {
+    case 'ToolInputStart':
+    case 'ToolInputDelta':
+      return event.id
+    case 'ToolInputEnd':
+    case 'ToolExecutionStarted':
+    case 'ToolApprovalRequested':
+      return event.call.id
+    case 'QuestionRequested':
+      return event.request.toolCallId
+    default:
+      return undefined
+  }
+}
+
 const applyAgentEventUnchecked = (
   state: AgentClientState,
   event: AgentEvent,
   nowMs: number
 ): AgentClientState => {
+  const activeCallId = activeEventToolCallId(event)
+  const acknowledgesActiveCall = (message: AgentMessage) =>
+    message._tag === 'ToolResult' &&
+    message.toolCallId === activeCallId &&
+    message.acceptance !== undefined
+  if (
+    activeCallId !== undefined &&
+    (state.messages.some(acknowledgesActiveCall) || state.liveMessages.some(acknowledgesActiveCall))
+  ) {
+    // Hydration need not restore transient runs; the transcript itself is a replay fence.
+    return {
+      ...state,
+      toolRuns: state.toolRuns.filter(
+        run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
+      )
+    }
+  }
+
   switch (event._tag) {
     case 'AgentStart':
       return {
@@ -268,7 +322,7 @@ const applyAgentEventUnchecked = (
         text: '',
         reasoning: '',
         liveMessages: [],
-        toolRuns: completedToolRuns(state.toolRuns),
+        toolRuns: retainedSettledToolRuns(state.toolRuns),
         error: null,
         errorInfo: null,
         retryInfo: null
@@ -358,6 +412,7 @@ const applyAgentEventUnchecked = (
           startedAtMs: nowMs
         })
       }
+    case 'ToolExecutionAccepted':
     case 'ToolExecutionCompleted': {
       const endedAtMs = nowMs
       const startedAtMs = startedAtMsFor(state.toolRuns, event.call.id) ?? endedAtMs
@@ -365,7 +420,7 @@ const applyAgentEventUnchecked = (
       return {
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: 'Completed',
+          _tag: event._tag === 'ToolExecutionAccepted' ? 'Accepted' : 'Completed',
           call: event.call,
           result: event.result,
           startedAtMs,
@@ -408,7 +463,7 @@ const applyAgentEventUnchecked = (
         liveMessages: [],
         text: '',
         reasoning: '',
-        toolRuns: completedToolRuns(state.toolRuns),
+        toolRuns: retainedSettledToolRuns(state.toolRuns),
         retryInfo: null
       }
     case 'AgentAwaitingInput':
@@ -448,7 +503,7 @@ export const submitAgentUserMessage = (
   liveMessages: [],
   text: '',
   reasoning: '',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: null,
   errorInfo: null,
   retryInfo: null,
@@ -462,7 +517,7 @@ export const markAgentError = (
 ): AgentClientState => ({
   ...state,
   status: 'error',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: message,
   errorInfo,
   retryInfo: null
@@ -471,7 +526,7 @@ export const markAgentError = (
 export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
   ...state,
   status: 'aborted',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: null,
   errorInfo: null,
   retryInfo: null
