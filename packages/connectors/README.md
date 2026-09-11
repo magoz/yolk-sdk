@@ -494,12 +494,94 @@ and always provide `driveId`; application mode also uses the `Files.*.All` slots
 continuations must repeat the same drive target; list continuations must also repeat `parentItemId`.
 
 The OneDrive action set lists, searches, and gets file/folder metadata, creates folders, and moves
-items to the recycle bin. Binary content download/upload and resumable upload sessions are not part
-of the connector's current string/JSON HTTP boundary; hosts own file-content transfer. The built-in
+items to the recycle bin. Binary download is available only through the separate host helper below,
+not the connector action inventory or string/JSON HTTP boundary. Upload and resumable upload
+sessions remain unimplemented. The built-in
 Microsoft endpoint targets the global cloud; national-cloud hosts need a cloud-specific connector
 until the API base is configurable.
 
 See Microsoft's [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folder guide](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive DriveItem overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), and [DriveItem addressing guide](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems).
+
+### Host integration: download OneDrive/SharePoint file bytes
+
+`downloadOneDriveItem` from `@yolk-sdk/connectors/microsoft` downloads **bytes only**. It is not a
+connector action and is never automatically serialized by `makeConnectorToolModule`. A host must
+supply an **app-owned materialization/read tool** to store/scan/extract the bytes and expose bounded,
+provenance-bearing reader output. A skill can help select drive/item IDs; it cannot itself download
+or read a file. Search matches/snippets and `get_item` metadata are not full-file contents.
+
+```ts
+import { downloadOneDriveItem } from '@yolk-sdk/connectors/microsoft'
+
+// Host code: provide existing CredentialResolver and a compliant ConnectorBinaryHttpClient layer.
+// IDs come from discovery. This example assumes host-owned integration and selectedItem values.
+const download = downloadOneDriveItem(
+  integration,
+  { itemId: selectedItem.id, driveId: selectedItem.parentReference?.driveId },
+  { maxBytes: 20 * 1024 * 1024, maxMetadataBytes: 1024 * 1024, maxErrorBodyBytes: 16 * 1024 }
+)
+```
+
+The third argument is trusted **host configuration**, separate from tool parameters. All three
+nonnegative safe-integer budgets are required; `maxBytes: 0` permits valid empty files. The root
+exports the additive `ConnectorBinaryHttpClient` port and its request/response/error types; the
+existing `ConnectorHttpClient` and default `MicrosoftConnector` dependencies are unchanged. The
+helper uses the binary port for bounded metadata JSON too; only metadata goes through UTF-8 decoding.
+Office/PDF/content bytes are untouched `Uint8Array`, not text or base64 model content.
+
+The helper reuses the existing `microsoft.oauth` binding and read-slot selection (`Files.Read`, or
+`Files.Read.All` for `delegated_all`/`application`). Application access requires an explicit drive.
+Scopes are permission hints to the existing resolver, not local proof of consent or access; hosts
+still enforce authorization and token permissions. No new OAuth flow, consent, discovery, workbook
+API, PDF conversion, native provider document support, or extractor is included.
+
+Only stable `itemId` and optional `driveId` are accepted. Opaque IDs are encoded once (never decoded
+as paths); empty/control/space-containing and dot-only IDs are rejected to avoid URL normalization.
+Metadata `remoteItem` targets require both IDs, with a loop guard and at most four target transitions.
+Folders/non-files and unresolved remote references fail explicitly. SharePoint files work with a
+known document-library drive ID; this does not discover SharePoint sites or grant access to them.
+
+Metadata redirects are rejected. The authenticated Graph `/content` request may follow at most
+five absolute HTTPS redirects. Every redirected request has **empty headers**, even back to Graph.
+There is no bearer transfer to `webUrl`, `web_fetch`, or another tool. Userinfo, fragments, unusual
+ports, malformed/relative URLs, IP literals and obvious local names are rejected syntactically.
+Preauthenticated URLs and all response headers/bodies are omitted from helper success/error fields.
+Errors expose only the typed `OneDriveDownloadError.code` (including distinct `unauthorized`,
+`forbidden`, `not_found`, `rate_limited`, `response_too_large`, and `partial_content`); wrapped
+credential/transport/provider detail is discarded. Hosts must also avoid logging secrets at the
+transport boundary. Programmer defects are not converted into safe typed failures.
+
+**A compliant host adapter is required; the SDK does not implement network I/O.** For _every_ request:
+
+- Disable automatic redirects, cookie jars and ambient authentication. Honor only explicit headers.
+  Reject duplicate/ambiguous redirect headers instead of silently selecting a destination.
+- Enforce public-network policy at connection time: resolve/validate all DNS addresses, reject
+  loopback/private/link-local/reserved destinations, and pin/verify the address actually connected
+  to (including redirects, proxies and DNS rebinding). Verify TLS. A hostname syntax check is not
+  SSRF protection; allowed-looking names can resolve to private addresses.
+- Apply timeouts, Effect interruption/cancellation, connection cleanup, response-header limits,
+  and actual streamed byte limits **before buffering**, including any decompression. Do not trust
+  `Content-Length` or metadata size. These limits are per response, not aggregate transfer quotas.
+  Hosts may impose stricter aggregate/time budgets across the bounded request sequence.
+- For status 200, cap `maxBytes` and fail with `ConnectorBinaryHttpError` code `response_too_large`
+  on overflow. Return only complete bytes with `bodyComplete: true`. For **every non-200** response,
+  including redirects/206/errors, use the separate `maxErrorBodyBytes` cap; bounded/truncated bodies
+  may use `bodyComplete: false`. Always cancel/close the remainder. The helper checks returned byte
+  length too, rejects incomplete/range-bearing 200 and all 206 responses, and never consumes an
+  error body as a file.
+
+The result includes `bytes`, actual `byteLength`, the original requested IDs, and allowlisted target
+`source` fields: available filename/MIME, drive/item identity, HTTPS public-looking browser `webUrl`,
+provider size, eTag/cTag, and creation/modification timestamps. Missing values remain missing.
+Metadata size is a hint, not measured length. Metadata was observed **before** downloading; these
+fields do **not** establish a consistent source snapshot or prove the bytes match a version tag.
+The helper does not verify hashes, detect file type, parse documents, or prove extraction completeness.
+Treat filenames/MIME/links as untrusted metadata; use safe host artifact names and validate formats.
+
+Offline fake-port tests cover protocol flow, byte identity, bounds, status handling and redaction.
+They do **not** test socket DNS enforcement, streaming cancellation or timeouts. Those adapter tests,
+app materialization/read tools, extraction/provenance coverage and any live tenant validation remain
+host work. Do not route the raw result into generic model tool JSON.
 
 Notion and Todoist actions decode provider wire pagination and expose SDK outputs with camelCase fields such as `nextCursor`. Inputs accept documented camelCase fields and common provider-native snake_case aliases where useful, such as Notion `data_source_id` / `rich_text` and Todoist `project_id` / `task_id` / `filter_lang`.
 

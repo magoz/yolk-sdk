@@ -187,7 +187,16 @@ const main = async () => {
           (specifier, index) =>
             `await import(${JSON.stringify(specifier)}); console.log(${JSON.stringify(index)}, ${JSON.stringify(specifier)})`
         )
-        .join('\n')
+        .join('\n') +
+        '\n' +
+        [
+          'const binary = await import("@yolk-sdk/connectors")',
+          'const microsoft = await import("@yolk-sdk/connectors/microsoft")',
+          'for (const symbol of ["ConnectorBinaryHttpClient", "ConnectorBinaryHttpError"]) { if (typeof binary[symbol] !== "function") throw new Error(`Missing binary export: ${symbol}`) }',
+          'for (const symbol of ["downloadOneDriveItem", "OneDriveDownloadError", "OneDriveDownloadSource"]) { if (typeof microsoft[symbol] !== "function") throw new Error(`Missing Microsoft export: ${symbol}`) }',
+          'if (microsoft.OneDriveDownloadErrorCode === undefined) throw new Error("Missing download error codes")',
+          'if (microsoft.MicrosoftConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host download leaked into default actions")'
+        ].join('\n')
     )
 
     await import(pathToFileURL(smokeFile).href)
