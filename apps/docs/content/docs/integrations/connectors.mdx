@@ -417,9 +417,36 @@ Pass list/search `nextLink` values back unchanged. Repeat `driveId` for explicit
 continuations and `parentItemId` for folder-list continuations. The connector validates the global
 Graph origin and selected OneDrive collection before replaying a link.
 
-The current connector intentionally excludes binary download/upload and resumable upload sessions:
-its HTTP port is string/JSON-oriented, and hosts own file-content transport. The built-in endpoint
-targets the global Microsoft cloud; it does not currently configure national-cloud Graph hosts.
+The current OneDrive **action set** still excludes binary download, upload, and resumable upload
+sessions: its HTTP port is string/JSON-oriented. Original-byte download is a separate host helper,
+not an action. Upload and resumable sessions remain unimplemented.
+
+### Host-only OneDrive original-byte download
+
+`downloadOneDriveItem` from `@yolk-sdk/connectors/microsoft` returns original file bytes. It is not
+registered on `MicrosoftConnector` and is never serialized by `makeConnectorToolModule`.
+
+```ts
+import { downloadOneDriveItem } from '@yolk-sdk/connectors/microsoft'
+
+// Fragment: host-owned integration and selected item IDs from discovery.
+const download = downloadOneDriveItem(
+  integration,
+  { itemId: selectedItem.id, driveId: selectedItem.parentReference?.driveId },
+  { maxBytes: 20 * 1024 * 1024, maxMetadataBytes: 1024 * 1024, maxErrorBodyBytes: 16 * 1024 }
+)
+```
+
+The budgets are trusted host configuration, not tool parameters. Provide the existing
+`CredentialResolver` and a compliant `ConnectorBinaryHttpClient` layer; default Microsoft actions
+still use only `ConnectorHttpClient`. IDs come from discovery (`itemId`, optional `driveId`).
+SharePoint files need a known document-library drive ID; this helper does not discover sites.
+Hosts must materialize, scan, and extract the `Uint8Array`; do not put raw bytes into generic
+model tool JSON. See [Integration APIs](../api-reference/integrations#connectors) and
+[Troubleshooting](../troubleshooting) for adapter and error details.
+
+The built-in endpoint targets the global Microsoft cloud; it does not currently configure
+national-cloud Graph hosts.
 
 Microsoft references: [Outlook mail API overview](https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview), [shared/delegated folders](https://learn.microsoft.com/en-us/graph/outlook-share-messages-folders), [OneDrive overview](https://learn.microsoft.com/en-us/graph/onedrive-concept-overview), [DriveItem addressing](https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems), [list children](https://learn.microsoft.com/en-us/graph/api/driveitem-list-children?view=graph-rest-1.0), and [search DriveItems](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
 

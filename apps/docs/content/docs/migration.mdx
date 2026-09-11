@@ -23,6 +23,14 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: host-only OneDrive original-byte download
+
+`downloadOneDriveItem` from `@yolk-sdk/connectors/microsoft` is an optional host helper plus the
+root `ConnectorBinaryHttpClient` port. Default Microsoft actions and `makeConnectorToolModule`
+serialization are unchanged. Hosts that want original bytes provide the binary port, keep
+connection-time network policy, and own file materialization. See
+[Host-only OneDrive original-byte download](./integrations/connectors#host-only-onedrive-original-byte-download).
+
 ### Next canary: background tool admission and bounded child observations
 
 Tools with `background: true` remain unchanged without a `BackgroundToolHost`. When a host is

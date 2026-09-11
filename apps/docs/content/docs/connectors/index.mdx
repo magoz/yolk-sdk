@@ -122,9 +122,12 @@ permissions.
 Outlook inputs use `/me` by default; set `mailbox` for Exchange Online shared/delegated access.
 Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/me/drive` by default;
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
-permissions, or `oneDriveAccessMode: 'application'` for application tokens. The host still owns
+permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery and metadata
+stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriveItem` with
+`ConnectorBinaryHttpClient`; upload and resumable sessions remain unimplemented. Default Microsoft
+tools still need `CredentialResolver` and `ConnectorHttpClient`. The host still owns
 Entra tenant policy, OAuth callbacks, refresh, storage, consent,
-application resource scoping, Exchange grants, and OneDrive binary file-content transport.
+application resource scoping, Exchange grants, network policy, and file materialization.
 
 Google's `gmail.get_thread` action returns normalized messages with decoded message text and
 attachment metadata, without raw MIME or attachment content. See the
