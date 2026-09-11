@@ -140,14 +140,16 @@ const main = async () => {
         'gpt-tokenizer': '^3.4.0',
         react: '>=19',
         workflow: '5.0.0-beta.42'
-      },
-      // Match the workspace's tested platform graph rather than a newer prerelease.
-      pnpm: {
-        overrides: { '@effect/platform-node-shared': '4.0.0-beta.80' }
       }
     }
 
     writeFileSync(join(fixtureDir, 'package.json'), JSON.stringify(packageJson, null, 2))
+    // pnpm 11 reads overrides from workspace config, not package.json's pnpm field.
+    // Match the workspace's tested platform graph rather than a newer prerelease.
+    writeFileSync(
+      join(fixtureDir, 'pnpm-workspace.yaml'),
+      "overrides:\n  '@effect/platform-node-shared': 4.0.0-beta.80\n"
+    )
     execFileSync('pnpm', ['install', '--ignore-scripts'], {
       cwd: fixtureDir,
       stdio: 'inherit'
