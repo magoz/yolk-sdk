@@ -201,6 +201,19 @@ describe('host-only Dropbox download', () => {
     })
   )
 
+  it.effect('downloads folder-ID-relative paths using the returned child identity', () =>
+    Effect.gen(function* () {
+      for (const path of ['id:folder/hello.txt', 'id:folder/Källa – résumé.xlsx']) {
+        const h = host([download()])
+        const result = yield* h.run({ path })
+        expect(result.bytes).toBe(original)
+        expect(result.source.id).toBe(file.id)
+        expect(result.requested).toEqual({ path })
+        expect(JSON.parse(h.requests[0]?.headers['dropbox-api-arg'] ?? '')).toEqual({ path })
+      }
+    })
+  )
+
   it.effect('supports empty files and omits null paths without inventing them', () =>
     Effect.gen(function* () {
       const h = host([
@@ -338,6 +351,9 @@ describe('host-only Dropbox download', () => {
           'relative/path.txt',
           'id:',
           'id:with space',
+          'id:/child.txt',
+          'id:folder/',
+          'id:folder/file.txt\n',
           'rev:short',
           'rev:XYZ123456789',
           'ns:abc/x',

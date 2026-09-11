@@ -7,7 +7,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 
 ## Summary
 
-| Connector       | Import                                 | Credential slots                             | Config keys                                        | Actions                                    |
+| Connector       | Import                                 | Credential slots                             | Config keys                                        | Capabilities                               |
 | --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------ |
 | Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                          |
 | Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management + host download |
@@ -116,13 +116,17 @@ const download = downloadDropboxFile(
 
 The budgets are trusted host configuration, not tool parameters. Provide the existing
 `CredentialResolver` and a compliant `ConnectorBinaryHttpClient` layer; default Dropbox actions
-still use only `ConnectorHttpClient`. `path` is one Dropbox `/path`, `id:`, `rev:`, or `ns:` value
-from discovery, never a share link. The helper sends a single `GET` to the Dropbox content endpoint,
+still use only `ConnectorHttpClient`. `path` is one Dropbox `/path`, bare `id:`, folder-ID-relative
+path (`id:folder-id/child.txt`), `rev:`, or `ns:` value from discovery, never a share link.
+Folder-ID-relative downloads return the child's own file ID. The helper sends a single `GET` to the Dropbox content endpoint,
 rejects every redirect, takes served metadata from the `Dropbox-API-Result` header, and fails
 non-downloadable entries such as Paper docs with `not_downloadable`. Hosts must materialize, scan,
 and extract the `Uint8Array`; do not put raw bytes into generic model tool JSON. See
 [Integration APIs](../api-reference/integrations#connectors) and
-[Troubleshooting](../troubleshooting) for adapter and error details.
+[Troubleshooting](../troubleshooting) for adapter and error details. Dropbox's official
+[content-download protocol](https://www.dropbox.com/developers/documentation/http/documentation#content-download-endpoints)
+and [path formats](https://www.dropbox.com/developers/documentation/http/documentation#path-formats)
+describe GET support, argument/result headers, and folder-ID-relative addressing.
 
 ## Generic email
 

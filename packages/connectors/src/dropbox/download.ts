@@ -37,7 +37,7 @@ export class DropboxDownloadError extends Schema.TaggedErrorClass<DropboxDownloa
   { code: DropboxDownloadErrorCode }
 ) {}
 
-/** A Dropbox `/path`, `id:` file identifier, or `rev:` revision from discovery, never a share link. */
+/** A Dropbox `/path`, `id:` identifier/relative path, `rev:` revision, or `ns:` path; never a share link. */
 export interface DropboxDownloadInput {
   readonly path: string
 }
@@ -76,7 +76,7 @@ const fail = (code: DropboxDownloadErrorCode) => Effect.fail(new DropboxDownload
 // Dropbox path, id, rev, or namespace addressing. Control characters never belong in a header arg.
 const DropboxPath = Schema.String.check(
   Schema.isPattern(
-    /^(?:\/[^\u0000-\u001f\u007f]+|id:[^\u0000-\u001f\u007f\s]+|rev:[0-9a-f]{9,}|ns:[0-9]+\/[^\u0000-\u001f\u007f]+)(?![\s\S])/
+    /^(?:\/[^\u0000-\u001f\u007f]+|id:[^\u0000-\u001f\u007f\s/]+(?:\/[^\u0000-\u001f\u007f]+)?|rev:[0-9a-f]{9,}|ns:[0-9]+\/[^\u0000-\u001f\u007f]+)(?![\s\S])/
   )
 )
 const Input = Schema.Struct({ path: DropboxPath })
@@ -237,7 +237,9 @@ export const downloadDropboxFile = (
       Effect.mapError(() => new DropboxDownloadError({ code: 'invalid_metadata' }))
     )
     if (
-      (requested.path.startsWith('id:') && metadata.id !== requested.path) ||
+      (requested.path.startsWith('id:') &&
+        !requested.path.includes('/') &&
+        metadata.id !== requested.path) ||
       (requested.path.startsWith('rev:') && metadata.rev !== requested.path.slice('rev:'.length))
     )
       return yield* fail('invalid_metadata')

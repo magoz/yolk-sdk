@@ -420,16 +420,18 @@ needs the root `ConnectorBinaryHttpClient` port plus `CredentialResolver`; the e
 `ConnectorHttpClient` and default `DropboxConnector` dependencies are unchanged. File bytes are an
 untouched `Uint8Array`, not text or base64 model content.
 
-`path` accepts one Dropbox `/path`, `id:` file identifier, `rev:` revision, or `ns:` namespace
-path; share links, relative paths, blank values, and control characters are rejected before any
+`path` accepts one Dropbox `/path`, bare `id:` file identifier, folder-ID-relative path
+(`id:folder-id/child.txt`), `rev:` revision, or `ns:` namespace path; share links, unrooted
+relative paths, blank values, and control characters are rejected before any
 credential or network use. The value is sent as ASCII-escaped `Dropbox-API-Arg` JSON, so non-ASCII
 names are preserved exactly. No `Dropbox-API-Path-Root` or `Dropbox-API-Select-User` header is sent.
 
 The helper issues a single `GET` to `content.dropboxapi.com/2/files/download`. Dropbox serves
 bytes directly; every 3xx fails with `unexpected_redirect` and is never followed. Metadata comes
 from the `Dropbox-API-Result` header of that same response, so it describes the served revision,
-but the helper does not verify `contentHash`. Exactly one result header is required; `id:` and
-`rev:` requests must match the returned identity; body length must equal metadata `size`; Paper
+but the helper does not verify `contentHash`. Exactly one result header is required; bare `id:`
+and `rev:` requests must match the returned identity. Folder-ID-relative paths return the child's
+own ID, not the folder address. Body length must equal metadata `size`; Paper
 and other non-downloadable entries fail with `not_downloadable` (use Dropbox export flows instead).
 
 Errors expose only the typed `DropboxDownloadError.code`: `invalid_input`, `credential_failed`,
@@ -640,7 +642,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 
 ## Provider actions
 
-| Subpath                                | Actions                                                                                              |
+| Subpath                                | Capabilities                                                                                         |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
 | `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download      |
