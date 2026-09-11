@@ -10,7 +10,7 @@ Connectors are typed external API actions. Use them directly or adapt them into 
 | Connector       | Import                                 | Credential slots                             | Config keys                                        | Actions                                    |
 | --------------- | -------------------------------------- | -------------------------------------------- | -------------------------------------------------- | ------------------------------------------ |
 | Afloat          | `@yolk-sdk/connectors/afloat`          | `AfloatApiKeyCredentialSlot`                 | none                                               | `afloat.mcp_auth`                          |
-| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management actions         |
+| Dropbox         | `@yolk-sdk/connectors/dropbox`         | Dropbox OAuth slots                          | none                                               | metadata + file-management + host download |
 | Generic email   | `@yolk-sdk/connectors/email`           | incoming and SMTP credential slots           | incoming/SMTP protocol, host, port, security       | list, get, draft, send, IMAP message state |
 | Figma           | `@yolk-sdk/connectors/figma`           | `FigmaOAuthCredentialSlot`                   | none                                               | `figma.mcp_auth`                           |
 | Fortnox         | `@yolk-sdk/connectors/fortnox`         | Fortnox OAuth slots                          | none                                               | company, customer, invoice, supplier reads |
@@ -69,10 +69,11 @@ consent limitations, and failure handling.
 ## Dropbox
 
 Dropbox exports `DropboxOAuthCredentialSlot`, action-scoped
-`DropboxMetadataReadOAuthCredentialSlot` and `DropboxContentWriteOAuthCredentialSlot`, plus
-`DropboxCombinedOAuthCredentialSlot`. Every slot uses the same `dropbox.oauth` binding id.
-Metadata actions request `files.metadata.read`; file-management actions request
-`files.content.write`.
+`DropboxMetadataReadOAuthCredentialSlot`, `DropboxContentReadOAuthCredentialSlot`, and
+`DropboxContentWriteOAuthCredentialSlot`, plus `DropboxCombinedOAuthCredentialSlot`. Every slot
+uses the same `dropbox.oauth` binding id. Metadata actions request `files.metadata.read`;
+file-management actions request `files.content.write`; the host-only download helper requests
+`files.content.read`. The combined slot hints all three.
 
 | Action id                      | What it does                                |
 | ------------------------------ | ------------------------------------------- |
@@ -91,9 +92,37 @@ while `hasMore` is true. File metadata outputs use camelCase fields and a normal
 `type: 'file' | 'folder' | 'deleted'` discriminant.
 
 The host owns OAuth code exchange, refresh, credential storage, consent, and Dropbox App Folder
-versus Full Dropbox configuration. Binary upload and download are not part of this module because
-the portable connector HTTP port carries string bodies; implement binary transfer in a host-owned
-adapter instead of base64-encoding it through these actions.
+versus Full Dropbox configuration. Binary upload and download **actions** are not part of this
+module because the portable connector HTTP port carries string bodies; do not base64-encode file
+content through these actions. Original-byte download is a separate host helper, not an action.
+Upload remains host work.
+
+### Host-only Dropbox original-byte download
+
+`downloadDropboxFile` from `@yolk-sdk/connectors/dropbox` returns original file bytes. It is not
+registered on `DropboxConnector` and is never serialized by `makeConnectorToolModule`. It mirrors
+[`downloadOneDriveItem`](#host-only-onedrive-original-byte-download).
+
+```ts
+import { downloadDropboxFile } from '@yolk-sdk/connectors/dropbox'
+
+// Fragment: host-owned integration and a file id or path from discovery.
+const download = downloadDropboxFile(
+  integration,
+  { path: selectedFile.id },
+  { maxBytes: 20 * 1024 * 1024, maxErrorBodyBytes: 16 * 1024 }
+)
+```
+
+The budgets are trusted host configuration, not tool parameters. Provide the existing
+`CredentialResolver` and a compliant `ConnectorBinaryHttpClient` layer; default Dropbox actions
+still use only `ConnectorHttpClient`. `path` is one Dropbox `/path`, `id:`, `rev:`, or `ns:` value
+from discovery, never a share link. The helper sends a single `GET` to the Dropbox content endpoint,
+rejects every redirect, takes served metadata from the `Dropbox-API-Result` header, and fails
+non-downloadable entries such as Paper docs with `not_downloadable`. Hosts must materialize, scan,
+and extract the `Uint8Array`; do not put raw bytes into generic model tool JSON. See
+[Integration APIs](../api-reference/integrations#connectors) and
+[Troubleshooting](../troubleshooting) for adapter and error details.
 
 ## Generic email
 

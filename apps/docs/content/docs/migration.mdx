@@ -23,6 +23,16 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: host-only Dropbox original-byte download
+
+`downloadDropboxFile` from `@yolk-sdk/connectors/dropbox` is an optional host helper that reuses
+the root `ConnectorBinaryHttpClient` port. Default Dropbox actions and `makeConnectorToolModule`
+serialization are unchanged. `DropboxCombinedOAuthCredentialSlot` now also hints
+`files.content.read`; hosts that consent with the combined slot will request that scope on the
+next authorization, and hosts that want original bytes should use the new
+`DropboxContentReadOAuthCredentialSlot`. See
+[Host-only Dropbox original-byte download](./integrations/connectors#host-only-dropbox-original-byte-download).
+
 ### Next canary: host-only OneDrive original-byte download
 
 `downloadOneDriveItem` from `@yolk-sdk/connectors/microsoft` is an optional host helper plus the

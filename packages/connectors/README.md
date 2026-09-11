@@ -19,7 +19,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                             |
 | `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                   |
 | `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                         |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file-management actions plus OAuth slot constants                     |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only file download         |
 | `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                    |
 | `@yolk-sdk/connectors/fortnox`         | Read-only company information, customers, invoices, suppliers, and supplier invoices with OAuth     |
@@ -387,11 +387,62 @@ const program = DropboxConnector.invoke({
 })
 ```
 
-Provide host-owned `CredentialResolver` and `ConnectorHttpClient` layers. Dropbox action-scoped slots share the `dropbox.oauth` binding id: metadata reads request `files.metadata.read`, while create/move/copy/delete actions request `files.content.write`. The host owns OAuth code exchange, refresh, storage, consent, and App Folder versus Full Dropbox configuration.
+Provide host-owned `CredentialResolver` and `ConnectorHttpClient` layers. Dropbox action-scoped slots share the `dropbox.oauth` binding id: metadata reads request `files.metadata.read`, create/move/copy/delete actions request `files.content.write`, and the host-only download helper below requests `files.content.read` through `DropboxContentReadOAuthCredentialSlot`. `DropboxCombinedOAuthCredentialSlot` now hints all three. The host owns OAuth code exchange, refresh, storage, consent, and App Folder versus Full Dropbox configuration.
 
 Use `path: ''` or omit `path` to list the Dropbox API root. Continue folder listings with `dropbox.list_folder_continue` while `hasMore` is true, and continue searches with `dropbox.search_continue`. Outputs normalize Dropbox `.tag` metadata into `type: 'file' | 'folder' | 'deleted'` and camelCase fields.
 
-Upload and download actions are intentionally not included: Dropbox content routes are binary, while the portable connector HTTP port currently carries string bodies. Hosts can implement binary transfer outside this connector without lossy encoding.
+Upload and download **actions** are intentionally not included: Dropbox content routes are binary, while the portable connector HTTP port carries string bodies. Original-byte download is available only through the separate host helper below; upload remains host work outside this connector.
+
+### Host integration: download Dropbox file bytes
+
+`downloadDropboxFile` from `@yolk-sdk/connectors/dropbox` downloads **bytes only**, mirroring
+`downloadOneDriveItem`. It is not a connector action and is never automatically serialized by
+`makeConnectorToolModule`. A host must supply an **app-owned materialization/read tool** to
+store/scan/extract the bytes and expose bounded, provenance-bearing reader output. A skill can help
+select paths or IDs; it cannot itself download or read a file. Search highlights and
+`get_metadata` output are not file contents.
+
+```ts
+import { downloadDropboxFile } from '@yolk-sdk/connectors/dropbox'
+
+// Host code: provide existing CredentialResolver and a compliant ConnectorBinaryHttpClient layer.
+// The path comes from discovery. This example assumes host-owned integration and selectedFile values.
+const download = downloadDropboxFile(
+  integration,
+  { path: selectedFile.id },
+  { maxBytes: 20 * 1024 * 1024, maxErrorBodyBytes: 16 * 1024 }
+)
+```
+
+The third argument is trusted **host configuration**, separate from tool parameters. Both
+nonnegative safe-integer budgets are required; `maxBytes: 0` permits valid empty files. The helper
+needs the root `ConnectorBinaryHttpClient` port plus `CredentialResolver`; the existing
+`ConnectorHttpClient` and default `DropboxConnector` dependencies are unchanged. File bytes are an
+untouched `Uint8Array`, not text or base64 model content.
+
+`path` accepts one Dropbox `/path`, `id:` file identifier, `rev:` revision, or `ns:` namespace
+path; share links, relative paths, blank values, and control characters are rejected before any
+credential or network use. The value is sent as ASCII-escaped `Dropbox-API-Arg` JSON, so non-ASCII
+names are preserved exactly. No `Dropbox-API-Path-Root` or `Dropbox-API-Select-User` header is sent.
+
+The helper issues a single `GET` to `content.dropboxapi.com/2/files/download`. Dropbox serves
+bytes directly; every 3xx fails with `unexpected_redirect` and is never followed. Metadata comes
+from the `Dropbox-API-Result` header of that same response, so it describes the served revision,
+but the helper does not verify `contentHash`. Exactly one result header is required; `id:` and
+`rev:` requests must match the returned identity; body length must equal metadata `size`; Paper
+and other non-downloadable entries fail with `not_downloadable` (use Dropbox export flows instead).
+
+Errors expose only the typed `DropboxDownloadError.code`: `invalid_input`, `credential_failed`,
+`transport_failed`, `network_policy_rejected`, `response_too_large`, `unauthorized`, `forbidden`,
+`not_found`, `rate_limited`, `upstream_failed`, `invalid_metadata`, `not_a_file`,
+`not_downloadable`, `unexpected_redirect`, and `partial_content`. Dropbox 409 bodies are parsed
+only to classify `error_summary`; bodies, URLs, headers, and wrapped causes are discarded.
+
+The host adapter contract is identical to the Microsoft helper's (see below): no automatic
+redirects, cookies, or ambient auth; connection-time public DNS/IP policy; TLS; timeouts and
+cancellation; and actual streamed byte limits with `response_too_large` on overflow and
+`bodyComplete: false` only for bounded non-200 bodies. Offline fake-port tests cover protocol flow,
+byte identity, bounds, status handling, and redaction, not socket enforcement.
 
 ## Microsoft connector
 
@@ -592,7 +643,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | Subpath                                | Actions                                                                                              |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
-| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete                          |
+| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download      |
 | `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                      |
 | `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
 | `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, and supplier invoices              |

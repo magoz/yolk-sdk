@@ -6,6 +6,12 @@ import {
   ConnectorBinaryHttpError
 } from '../packages/connectors/src/index.ts'
 import {
+  downloadDropboxFile,
+  DropboxDownloadError,
+  DropboxDownloadErrorCode,
+  DropboxDownloadSource
+} from '../packages/connectors/src/dropbox/index.ts'
+import {
   downloadOneDriveItem,
   OneDriveDownloadError,
   OneDriveDownloadErrorCode,
@@ -211,15 +217,19 @@ const failures = packageExportShapes.flatMap(shape => {
   return packageFailures
 })
 
-// These additive APIs intentionally reuse the existing root and microsoft exports in both
-// exports and publishConfig.exports; no new package subpath is needed.
+// These additive APIs intentionally reuse the existing root, microsoft, and dropbox exports in
+// both exports and publishConfig.exports; no new package subpath is needed.
 if (
   typeof ConnectorBinaryHttpClient !== 'function' ||
   typeof ConnectorBinaryHttpError !== 'function' ||
   typeof downloadOneDriveItem !== 'function' ||
   typeof OneDriveDownloadError !== 'function' ||
   typeof OneDriveDownloadSource !== 'function' ||
-  OneDriveDownloadErrorCode === undefined
+  OneDriveDownloadErrorCode === undefined ||
+  typeof downloadDropboxFile !== 'function' ||
+  typeof DropboxDownloadError !== 'function' ||
+  typeof DropboxDownloadSource !== 'function' ||
+  DropboxDownloadErrorCode === undefined
 ) {
   failures.push('Connector host-only binary download runtime exports are missing')
 }

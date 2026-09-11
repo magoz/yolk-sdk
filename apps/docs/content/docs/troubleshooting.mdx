@@ -208,6 +208,19 @@ The connector excludes trashed files unless `includeTrashed` is true. Prefer `dr
 reversible removal; `drive.delete_file` permanently bypasses trash. Upload/download is not in the
 string/JSON HTTP port, so the host must transfer binary content separately.
 
+### Dropbox download fails
+
+Binary download is not a `dropbox.*` action and is never serialized by `makeConnectorToolModule`;
+a missing download tool is expected. Use host-only `downloadDropboxFile` with a compliant
+`ConnectorBinaryHttpClient` — do not reuse string `ConnectorHttpClient`. `credential_failed` means
+the `dropbox.oauth` binding or its `files.content.read` slot could not be resolved; `unauthorized`
+usually means the token lacks that scope (Dropbox reports `missing_scope`). `invalid_input` covers
+share links, relative paths, control characters, and Dropbox `malformed_path`. `not_a_file` is a
+folder; `not_downloadable` is a Paper or other export-only entry; `unexpected_redirect` means the
+adapter returned a 3xx that the helper refuses to follow. `partial_content` covers incomplete or
+ranged 200 responses and a body whose length differs from the served metadata `size`. Upload
+remains unimplemented.
+
 ### Microsoft action is unauthorized
 
 Microsoft Outlook and OneDrive actions call Microsoft Graph, so the token audience and consent must be for

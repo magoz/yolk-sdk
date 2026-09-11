@@ -2,55 +2,52 @@ import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
-import { CredentialSlot, resolveCredential } from '../credential.ts'
 import type { CredentialSlot as CredentialSlotType } from '../credential.ts'
-import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import type { ConnectorHttpResponse } from '../http.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 import { ActionResult, ProviderFailure } from '../result.ts'
+import {
+  DropboxContentWriteOAuthCredentialSlot,
+  DropboxMetadataReadOAuthCredentialSlot,
+  dropboxApiBaseUrl,
+  dropboxAuthorizationHeaders,
+  dropboxConnectorId,
+  resolveDropboxAccessToken
+} from './shared.ts'
 
-export const dropboxConnectorId = 'dropbox'
-export const dropboxOAuthSlotId = 'dropbox.oauth'
-export const dropboxOAuthAuthorizeUrl = 'https://www.dropbox.com/oauth2/authorize'
-export const dropboxOAuthTokenUrl = 'https://api.dropboxapi.com/oauth2/token'
-export const dropboxApiBaseUrl = 'https://api.dropboxapi.com/2'
-
-export const dropboxFilesMetadataReadScope = 'files.metadata.read'
-export const dropboxFilesContentWriteScope = 'files.content.write'
-export const dropboxMetadataReadScopes = Object.freeze([dropboxFilesMetadataReadScope])
-export const dropboxContentWriteScopes = Object.freeze([dropboxFilesContentWriteScope])
-export const dropboxCombinedScopes = Object.freeze([
+export {
+  downloadDropboxFile,
+  DropboxDownloadError,
+  DropboxDownloadErrorCode,
+  DropboxDownloadSource
+} from './download.ts'
+export type {
+  DropboxDownloadBudget,
+  DropboxDownloadInput,
+  DropboxDownloadResult
+} from './download.ts'
+export {
+  DropboxCombinedOAuthCredentialSlot,
+  DropboxContentReadOAuthCredentialSlot,
+  DropboxContentWriteOAuthCredentialSlot,
+  DropboxMetadataReadOAuthCredentialSlot,
+  DropboxOAuthCredentialSlot,
+  dropboxApiBaseUrl,
+  dropboxAuthorizationHeaders,
+  dropboxCombinedScopes,
+  dropboxConnectorId,
+  dropboxContentApiBaseUrl,
+  dropboxContentReadScopes,
+  dropboxContentWriteScopes,
+  dropboxFilesContentReadScope,
+  dropboxFilesContentWriteScope,
   dropboxFilesMetadataReadScope,
-  dropboxFilesContentWriteScope
-])
-
-export const DropboxOAuthCredentialSlot = CredentialSlot.make({
-  id: dropboxOAuthSlotId,
-  kind: 'oauth'
-})
-
-export const DropboxMetadataReadOAuthCredentialSlot = CredentialSlot.make({
-  id: dropboxOAuthSlotId,
-  kind: 'oauth',
-  requiredScopes: [...dropboxMetadataReadScopes]
-})
-
-export const DropboxContentWriteOAuthCredentialSlot = CredentialSlot.make({
-  id: dropboxOAuthSlotId,
-  kind: 'oauth',
-  requiredScopes: [...dropboxContentWriteScopes]
-})
-
-export const DropboxCombinedOAuthCredentialSlot = CredentialSlot.make({
-  id: dropboxOAuthSlotId,
-  kind: 'oauth',
-  requiredScopes: [...dropboxCombinedScopes]
-})
-
-export const dropboxAuthorizationHeaders = (accessToken: string) => ({
-  authorization: `Bearer ${accessToken}`
-})
+  dropboxMetadataReadScopes,
+  dropboxOAuthAuthorizeUrl,
+  dropboxOAuthSlotId,
+  dropboxOAuthTokenUrl
+} from './shared.ts'
 
 const NonEmptyString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 const DropboxSearchQuery = NonEmptyString.pipe(Schema.check(Schema.isMaxLength(1000)))
@@ -268,28 +265,6 @@ const DropboxDeleteApiOutput = Schema.Struct({
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
 const isJsonObject = Schema.is(JsonObject)
-
-const resolveDropboxAccessToken = (integration: ConnectorIntegration, slot: CredentialSlotType) =>
-  Effect.gen(function* () {
-    const credential = yield* resolveCredential(integration, slot)
-
-    switch (credential._tag) {
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'ApiKeyCredential':
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Dropbox connector requires an OAuth or bearer token credential',
-            connectorId: integration.connectorId,
-            slotId: slot.id
-          })
-        )
-    }
-  })
 
 const decodeJsonObject = (body: string) =>
   Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(body).pipe(

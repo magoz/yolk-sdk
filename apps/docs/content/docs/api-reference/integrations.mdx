@@ -43,7 +43,7 @@ override.
 | `@yolk-sdk/connectors`                 | `defineConnector`, `defineAction`, `makeIntegration`, `makeCredentialBinding`, `CredentialResolver`, `ConnectorHttpClient`, `ConnectorBinaryHttpClient`, `ConnectorBinaryHttpError` |
 | `@yolk-sdk/connectors/agent`           | `makeConnectorToolModule`                                                                                                                                                           |
 | `@yolk-sdk/connectors/afloat`          | `AfloatConnector`, `AfloatApiKeyCredentialSlot`, MCP endpoint and protocol constants                                                                                                |
-| `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, and file actions                                                                                                         |
+| `@yolk-sdk/connectors/dropbox`         | `DropboxConnector`, Dropbox OAuth slots, metadata schemas, file actions, host-only `downloadDropboxFile`                                                                            |
 | `@yolk-sdk/connectors/email`           | `EmailConnector`, `EmailClient`, connection/message schemas, incoming and SMTP credential slots                                                                                     |
 | `@yolk-sdk/connectors/fortnox`         | `FortnoxConnector`, shared/resource-scoped OAuth slots, read actions, resource/input/output schemas                                                                                 |
 | `@yolk-sdk/connectors/google`          | `GoogleConnector`, shared Google OAuth slots, Gmail/Calendar/Drive actions and schemas                                                                                              |
@@ -129,6 +129,15 @@ and is not a verified snapshot. Provide `ConnectorBinaryHttpClient` in addition 
 not auto-follow redirects, attach cookies, or add ambient auth. Hosts enforce streamed limits and
 connection-time public DNS/IP policy. Root types include `ConnectorBinaryHttpRequest`,
 `ConnectorBinaryHttpResponse`, and `ConnectorBinaryHttpClientApi`.
+
+The Dropbox equivalent is `downloadDropboxFile`, with `DropboxDownloadError`,
+`DropboxDownloadErrorCode`, `DropboxDownloadSource`, `DropboxDownloadBudget` (`maxBytes`,
+`maxErrorBodyBytes`), `DropboxDownloadInput` (`path`), and `DropboxDownloadResult`. It uses the
+same `ConnectorBinaryHttpClient` port and `CredentialResolver`, requests the
+`DropboxContentReadOAuthCredentialSlot` (`files.content.read`), issues one `GET`, never follows
+redirects, and returns `source` metadata taken from the `Dropbox-API-Result` header of the served
+response. The content hash is not verified. Dropbox scope exports now include
+`dropboxFilesContentReadScope`, `dropboxContentReadScopes`, and `dropboxContentApiBaseUrl`.
 
 `GoogleCalendarEventDateTime` is the exclusive union `{ date, timeZone? } | { dateTime,
 timeZone? }`. Create/update boundaries require exactly one non-empty `date` or `dateTime` and reject
