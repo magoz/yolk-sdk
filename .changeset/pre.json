@@ -66,6 +66,7 @@
     "grok-client-version",
     "harden-lone-surrogates",
     "honest-transports-reflect",
+    "microsoft-host-file-download",
     "microsoft-outlook-connector",
     "model-chosen-background-tools",
     "modern-mcp-core",
