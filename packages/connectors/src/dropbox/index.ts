@@ -686,3 +686,5 @@ export const DropboxConnector = defineConnector({
   description: 'Dropbox file metadata and file-management connector actions.',
   actions: dropboxActions
 })
+export { createDropboxFile, updateDropboxFile, dropboxSingleUploadMaxBytes } from './write.ts'
+export type { DropboxCreateFileInput, DropboxUpdateFileInput } from './write.ts'

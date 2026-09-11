@@ -29,7 +29,7 @@ Published package metadata requires Node.js 22+.
 | `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot               |
 | `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                                        |
 | `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                  |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label actions and API token slot constants                                     |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                             |
 
 ## Imports
 
@@ -289,7 +289,7 @@ Google Drive actions list, search, and get metadata; create folders; move items 
 
 `drive.list_files` and `drive.search_files` return `GoogleDriveListFilesOutput` with a `Chunk` of files and an opaque `nextPageToken`; pass the token back through `pageToken`. Repeated file metadata such as parents and owners also decodes to `Chunk`. Trashed items are excluded unless `includeTrashed` is true. Optional `driveId` targets one shared drive using `corpora=drive`; requests include current shared-drive support parameters. Pass a returned link-shared file `resourceKey` with get/trash/delete, or `parentResourceKey` with parent-scoped list/search/create, so the connector sends `X-Goog-Drive-Resource-Keys`; `parentResourceKey` requires `parentId`. `drive.trash_file` is reversible until Google removes the item, while `drive.delete_file` permanently deletes it without moving it to trash. Hosts should authorize both as destructive and may inspect returned `capabilities` first.
 
-Binary Drive upload/download is intentionally excluded because the connector HTTP port carries string bodies. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
+Binary Drive download/export uses the host-only helpers below; uploads remain outside this SDK surface. Hosts own file-content transfer, OAuth code exchange, refresh, storage, consent UX, Google Picker integration, and restricted-scope compliance.
 
 ## Fortnox connector
 
@@ -332,7 +332,7 @@ All share `fortnox.oauth`; `FortnoxCombinedOAuthCredentialSlot` requests all fiv
 do not restrict the underlying token to reads. This connector exposes only GET actions with `read`
 metadata: `fortnox.get_company_information`, `fortnox.list_customers`, `fortnox.get_customer`,
 `fortnox.list_invoices`, `fortnox.get_invoice`, `fortnox.list_suppliers`, `fortnox.get_supplier`,
-`fortnox.list_supplier_invoices`, and `fortnox.get_supplier_invoice`.
+`fortnox.list_supplier_invoices`, `fortnox.get_supplier_invoice`, and `fortnox.list_supplier_invoice_files` (described below).
 
 List inputs support `page` (at least 1), `limit` (1–500; provider default 100), `lastModified`, and
 one `search: { field, value }` pair with resource-specific fields. Customers accept active/inactive
@@ -354,8 +354,7 @@ not-found, and rate-limit codes. Provider error messages and codes are retained 
 bodies. Valid delta-seconds `Retry-After` becomes `retryAfterMs`; there are no automatic retries.
 Validation, credential, malformed success, and transport failures remain typed Effect errors.
 The HTTP adapter must preserve Bearer authorization and JSON accept headers; hosts own redirect
-safety, response-size limits, and sensitive-data handling. No financial mutations, file downloads,
-app UI, or database integration are included.
+safety, response-size limits, and sensitive-data handling. No financial mutations, app UI, or database integration are included. Host-only preview/archive downloads are described below.
 
 See the [official API reference](https://apps.fortnox.se/apidocs),
 [scopes](https://www.fortnox.se/developer/guides-and-good-to-know/scopes),
@@ -391,7 +390,7 @@ Provide host-owned `CredentialResolver` and `ConnectorHttpClient` layers. Dropbo
 
 Use `path: ''` or omit `path` to list the Dropbox API root. Continue folder listings with `dropbox.list_folder_continue` while `hasMore` is true, and continue searches with `dropbox.search_continue`. Outputs normalize Dropbox `.tag` metadata into `type: 'file' | 'folder' | 'deleted'` and camelCase fields.
 
-Upload and download **actions** are intentionally not included: Dropbox content routes are binary, while the portable connector HTTP port carries string bodies. Original-byte download is available only through the separate host helper below; upload remains host work outside this connector.
+Upload and download **actions** are intentionally not included: Dropbox content routes are binary, while the portable connector HTTP port carries string bodies. Original-byte download and create/update are available only through separate host helpers below.
 
 ### Host integration: download Dropbox file bytes
 
@@ -548,8 +547,7 @@ continuations must repeat the same drive target; list continuations must also re
 
 The OneDrive action set lists, searches, and gets file/folder metadata, creates folders, and moves
 items to the recycle bin. Binary download is available only through the separate host helper below,
-not the connector action inventory or string/JSON HTTP boundary. Upload and resumable upload
-sessions remain unimplemented. The built-in
+not the connector action inventory or string/JSON HTTP boundary. Host-only bounded create/update helpers are available below; resumable upload sessions remain unimplemented. The built-in
 Microsoft endpoint targets the global cloud; national-cloud hosts need a cloud-specific connector
 until the API base is configurable.
 
@@ -640,6 +638,134 @@ Notion and Todoist actions decode provider wire pagination and expose SDK output
 
 LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich Layer accepts the lookup asynchronously.
 
+## Host-only file capabilities
+
+New byte helpers are separate from connector actions and generic agent serialization. They use
+root `ConnectorFileTransferBudget` (`maxBytes`, `maxMetadataBytes`, `maxErrorBodyBytes`) and fail
+with code-only `ConnectorFileTransferError`. Existing Dropbox/OneDrive download APIs and all
+base64 attachment actions remain unchanged. Full API/policy reference:
+[Transfer connector files](../../apps/docs/content/docs/connectors/files.mdx).
+
+| Subpath      | Retrieval helpers                                                             | Create/update helpers                      |
+| ------------ | ----------------------------------------------------------------------------- | ------------------------------------------ |
+| `dropbox`    | `downloadDropboxFile`                                                         | `createDropboxFile`, `updateDropboxFile`   |
+| `microsoft`  | `downloadOneDriveItem`, `downloadOutlookAttachment`                           | `createOneDriveFile`, `updateOneDriveFile` |
+| `r2-storage` | `getR2Object`                                                                 | `createR2Object`, `updateR2Object`         |
+| `google`     | `downloadGoogleDriveFile`, `exportGoogleDriveFile`, `downloadGmailAttachment` | Not added                                  |
+| `fortnox`    | `downloadFortnoxInvoicePreview`, `downloadFortnoxArchiveFile`                 | Not added                                  |
+| `notion`     | `downloadNotionFile`                                                          | Not added                                  |
+| `email`      | `downloadEmailAttachment`                                                     | Not added                                  |
+| `telegram`   | `downloadTelegramFile`                                                        | Not added                                  |
+| `todoist`    | `downloadTodoistAttachment`                                                   | Not added                                  |
+
+Host integration fragment (approval, integration, transport layers and runtime omitted):
+
+```ts
+import { createDropboxFile, updateDropboxFile } from '@yolk-sdk/connectors/dropbox'
+import { updateOneDriveFile } from '@yolk-sdk/connectors/microsoft'
+import { downloadGoogleDriveFile } from '@yolk-sdk/connectors/google'
+
+const budget = { maxBytes: 20_000_000, maxMetadataBytes: 1_000_000, maxErrorBodyBytes: 16_384 }
+const create = createDropboxFile(dropboxIntegration, { path: '/new.pdf', bytes }, budget)
+const update = updateDropboxFile(dropboxIntegration, { fileId, expectedRev, bytes }, budget)
+const replace = updateOneDriveFile(
+  microsoftIntegration,
+  { itemId, driveId, bytes, acknowledgeOverwrite: true },
+  budget
+)
+const download = downloadGoogleDriveFile(googleIntegration, { fileId: driveFileId }, budget)
+// Provide host services, run the Effect, then store/scan/extract bytes outside model/tool JSON.
+```
+
+### Write guarantees and limits
+
+`ConnectorBinaryWriteHttpClient` is a new optional root service, independent of the unchanged
+GET-only `ConnectorBinaryHttpClient`. Requests carry `Uint8Array`, `maxUploadBytes`, successful
+metadata `maxBytes`, `maxErrorBodyBytes`, `successStatuses: [200, 201]`, `redirect: 'manual'` and
+`credentials: 'omit'`. Only complete HTTP 200/201 metadata is accepted; redirects never replay writes.
+
+- Dropbox uses `files.content.write`. Create is strict `add`; update requires stable `id:` and
+  a concrete revision with `mode: update`. Both enforce `strict_conflict: true`, `autorename: false`;
+  stale or deleted updates cannot become creates. Single-upload cap: **150,000,000 bytes**.
+- OneDrive create takes `{ parentItemId, name, driveId?, bytes }` and sends conflict behavior `fail`.
+  Update takes `{ itemId, driveId?, bytes, acknowledgeOverwrite: true }` and replaces unconditionally.
+  **Acknowledgement is not CAS: concurrent edits can be overwritten.** No simple-upload `If-Match`
+  guarantee is invented. Require informed host overwrite approval or decline when CAS is required.
+  Write permission/application-drive guards match metadata writes. Cap: **250,000,000 bytes**.
+- R2's separate `R2ObjectClient` host port supports binding or signed transport, not an AWS dependency.
+  Get takes `{ bucket, key, expectedEtag? }`; create takes `{ bucket, key, bytes }`; update requires
+  `expectedEtag`. Hosts atomically implement `condition: { kind: 'absent' }` as `If-None-Match: *`,
+  or `{ kind: 'etag', etag }` as concrete `If-Match`; never HEAD-then-PUT or weaken conditions.
+  Preserve HTTP ETag quoting; translate explicitly for bindings. Missing GET fails `not_found`,
+  conditional GET without body/conditional PUT returning null fails `conflict`, not empty success.
+  Host owns credentials, authorized integration/bucket/key selection, signing and bounded I/O.
+  ETags cannot distinguish all identical-content rewrites. Cap: **100,000,000 bytes**.
+  `R2Presigner`/`r2_storage.upload_url` stay unchanged and do not inherit these conditions.
+
+Single-request bounded uploads only: larger files fail `upload_session_required` before transport;
+smaller host budgets fail `response_too_large`. No sessions, resume or multipart implementation,
+including no claim of conditional R2 multipart completion. No automatic write retry. A timeout,
+cancellation or malformed success response may follow a committed write; hosts reconcile provider
+state rather than dropping conditions or silently changing modes.
+
+### Retrieval contracts
+
+- Drive blob input: `{ fileId, resourceKey? }`; export additionally needs `mimeType`. Metadata checks
+  caller-specific `capabilities.canDownload`, not role flags in isolation. Shared drives and resource
+  keys are supported; no abuse acknowledgement, shortcut chasing or Vids long-running download.
+  Default consent is `drive.file`; trusted budget `contentAccess: 'readonly'` selects the opt-in
+  `GoogleDriveReadonlyOAuthCredentialSlot` (`drive.readonly`, restricted broad consent).
+  Metadata-only consent is insufficient. Compatible native exports cap at **10,000,000 bytes**:
+  Docs PDF/DOCX/ODT/RTF/text/HTML/ZIP/EPUB/Markdown; Sheets XLSX/ODS/PDF/CSV/TSV/ZIP;
+  Slides PPTX/ODP/PDF/text; Drawings PDF/JPEG/PNG/SVG; Apps Script JSON. CSV/TSV is first-sheet only.
+- Fortnox preview `{ documentNumber }` uses `/preview`, not `/print`, and does not mark Sent true.
+  It is a generated PDF, not an immutable original. Archive `{ fileId }` uses `/3/archive/{id}`.
+  New `fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, limit? }`, filters internal
+  GivenNumber, and returns `{ files, pagination }`. `FortnoxConnectFileOAuthCredentialSlot` requests
+  `connectfile`; `FortnoxArchiveOAuthCredentialSlot` requests `archive`; preview uses `invoice`.
+  These scopes grant provider **read and write** and are not added to the existing combined slot.
+  Provider archive/list OpenAPI modeling is imperfect; validate sanitized responses before production.
+- Notion accepts hosted/external provider file objects from page/property/block reads. Fourth argument
+  `NotionFileDownloadPolicy` requires `allowHostedUrl`; external files additionally require
+  `allowExternalUrl`. Never forward Notion credentials. Refresh expired grants by rereading the owning
+  object; `file_upload.id` is not a download URL. No arbitrary authenticated URL-fetch API is added.
+- Gmail `{ messageId, attachmentId }` decodes canonical base64url internally, validates decoded size
+  and budgets (including JSON expansion). Inline parts without attachment IDs are not modeled.
+  Outlook adds optional `mailbox`, checks the file discriminator and uses raw `/$value`; item/reference
+  attachments fail. Existing shared/application-mailbox and immutable-ID guards remain. Graph's
+  metadata size is not treated as exact raw-byte length.
+- IMAP/POP3 use `{ messageId, attachmentId, folder? }` through optional `EmailClient.getAttachmentBytes`.
+  Hosts return raw decoded MIME bytes, matching IDs/byteLength and optional filename/contentType.
+  Preserve IMAP flags, bound/release MIME streams; POP3 rejects folders and may fetch the whole message.
+- Telegram `{ fileId }` uses hosted `getFile` and validated `api.telegram.org/file/botTOKEN/path`.
+  Cap **20,000,000 bytes**; no local Bot API filesystem paths or `getUpdates` calls. Token-bearing
+  URLs never leave the host. Do not infer filename/MIME from path. Reissue getFile after grant expiry.
+- Todoist `todoist.list_comments` takes exactly one taskId/projectId and cursor/limit, returning
+  metadata-only comments (Chunk) and nextCursor. Download `{ commentId }` rereads bounded metadata.
+  Only initial `files.todoist.com` receives bearer auth; `todoist.b-cdn.net` and
+  `d1ysz50cxb9zwl.cloudfront.net` are unauthenticated. At most five safe HTTPS redirects, no reauth.
+
+### MCP reuse and host enforcement
+
+Afloat's canonical `https://useafloat.com/mcp` metadata discovery confirms invoice/quote PDF and
+receipt/logo/tax-return download grants (one hour), plus receipt/logo upload-intent completion
+operations. Receipt completion attaches or replaces atomically; inspected upload inputs allow
+JPEG/PNG/WebP/GIF/PDF, 1–2,147,483,647 bytes, optional SHA-256. Figma discovery confirms
+`download_assets`, `upload_assets` (including SVG, 10 MB/asset), `use_figma` and `create_new_file`.
+Use dynamic MCP contracts and structured/multipart results, not duplicated SDK wrappers. Deployed
+Figma node-selection parameters can differ from docs. No whole `.fig` download claim. Keep grants
+and bytes in bounded host pipelines; approve write-capable tools as writes, not read-only tools.
+Evidence is metadata-only discovery and provider documentation, not live writes.
+
+Hosts enforce streamed upload/response/error limits (including decompression), independent header
+limits, timeouts, cancellation, TLS, public DNS/socket IP policy, no ambient credentials/cookies,
+no automatic redirects/retries, and no URL/header/body logging. New downloads reject redirects
+except the bounded Todoist flow; existing OneDrive behavior is unchanged. Syntax/post-buffer checks
+are defense in depth, not proof of pre-buffer bounds or network isolation. Keep bytes outside agent
+serialization; own authorization/consent, storage, scanning, retention, format readers and safe
+telemetry. No app wiring or provider snapshot consistency is supplied. Fake-port tests prove SDK
+orchestration only.
+
 ## Provider actions
 
 | Subpath                                | Capabilities                                                                                         |
@@ -655,7 +781,7 @@ LinkedIn email lookup may return `{ status: 'queued', email: null }` when Enrich
 | `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                         |
 | `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                              |
 | `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                         |
-| `@yolk-sdk/connectors/todoist`         | Todoist project, task, and label actions                                                             |
+| `@yolk-sdk/connectors/todoist`         | Todoist project, task, label, and comment actions                                                    |
 
 R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled. `r2_storage.upload_url` includes `publicUrl` only when integration config provides `publicUrl`.
 

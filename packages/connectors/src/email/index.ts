@@ -1,3 +1,15 @@
+import { ConnectorFileTransferError } from '../file-transfer.ts'
+import type { ConnectorFileTransferBudget, ConnectorFileBytes } from '../file-transfer.ts'
+import {
+  ByteLimit,
+  SafeText,
+  credentialFailure,
+  decodeInput,
+  failTransfer,
+  fileBytes,
+  isBytes,
+  validateTransfer
+} from '../transfer-internal.ts'
 import { Context, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
@@ -330,7 +342,20 @@ export class EmailSendMessageRequest extends Schema.Class<EmailSendMessageReques
   message: EmailComposeMessage
 }) {}
 
+export interface EmailAttachmentBytesResult extends ConnectorFileBytes {
+  readonly messageId: string
+  readonly attachmentId: string
+  readonly filename?: string
+  readonly contentType?: string
+}
+
 export type EmailClientApi = {
+  /** Optional host-only raw MIME attachment path. Bound actual decoded bytes while streaming,
+   * preserve read flags (IMAP BODY.PEEK), cancel/release MIME streams, never base64 roundtrip.
+   * POP3 may need a bounded full-message fetch. Host errors must contain codes only. */
+  readonly getAttachmentBytes?: (
+    input: EmailGetAttachmentRequest & { readonly maxBytes: number }
+  ) => Effect.Effect<EmailAttachmentBytesResult, ConnectorFileTransferError>
   readonly listMessages: (
     input: EmailListMessagesRequest
   ) => Effect.Effect<ActionResult<EmailListMessagesOutput>, ConnectorError>
@@ -473,7 +498,7 @@ const usableCredential = (
   integration: ConnectorIntegration,
   credential: RuntimeCredential,
   slot: CredentialSlot
-) => {
+): Effect.Effect<UsernamePasswordCredential, ConnectorError> => {
   if (credential._tag === 'UsernamePasswordCredential') return Effect.succeed(credential)
   return Effect.fail(
     new ConnectorError({
@@ -494,7 +519,7 @@ const rejectPop3Folder = (
   integration: ConnectorIntegration,
   connection: EmailIncomingConnection,
   folder: string | undefined
-) =>
+): Effect.Effect<void, ConnectorError> =>
   connection.protocol === 'pop3' && folder !== undefined
     ? Effect.fail(
         validationError(
@@ -783,3 +808,59 @@ export const EmailConnector = defineConnector({
   description: 'Portable IMAP, POP3, and SMTP email connector actions.',
   actions: emailActions
 })
+
+/** Host-only attachment retrieval; old EmailClient adapters and base64 action remain unchanged. */
+export const downloadEmailAttachment = (
+  integration: ConnectorIntegration,
+  input: { readonly messageId: string; readonly attachmentId: string; readonly folder?: string },
+  budget: ConnectorFileTransferBudget
+) =>
+  Effect.gen(function* () {
+    const limits = yield* validateTransfer(integration, emailConnectorId, budget)
+    const target = yield* decodeInput(
+      Schema.Struct({
+        messageId: SafeText,
+        attachmentId: SafeText,
+        folder: Schema.optional(EmailFolderName)
+      }),
+      input
+    )
+    const connection = yield* incomingConnection(integration).pipe(
+      Effect.catch(() => failTransfer('invalid_input'))
+    )
+    yield* rejectPop3Folder(integration, connection, target.folder).pipe(
+      Effect.catch(() => failTransfer('invalid_input'))
+    )
+    const resolved = yield* resolveCredential(integration, EmailIncomingCredentialSlot).pipe(
+      Effect.mapError(credentialFailure)
+    )
+    const credential = yield* usableCredential(
+      integration,
+      resolved,
+      EmailIncomingCredentialSlot
+    ).pipe(Effect.mapError(credentialFailure))
+    const client = yield* EmailClient
+    if (client.getAttachmentBytes === undefined) return yield* failTransfer('not_downloadable')
+    const request = EmailGetAttachmentRequest.make({ connection, credential, ...target })
+    const result = yield* client
+      .getAttachmentBytes({ ...request, maxBytes: limits.maxBytes })
+      .pipe(Effect.mapError(e => new ConnectorFileTransferError({ code: e.code })))
+    const metadata = yield* Schema.decodeUnknownEffect(
+      Schema.Struct({
+        messageId: SafeText,
+        attachmentId: SafeText,
+        byteLength: ByteLimit,
+        filename: Schema.optional(SafeText),
+        contentType: Schema.optional(SafeText)
+      })
+    )(result).pipe(Effect.catch(() => failTransfer('invalid_metadata')))
+    if (!isBytes(result.bytes) || result.bytes.byteLength > limits.maxBytes)
+      return yield* failTransfer('response_too_large')
+    if (
+      metadata.byteLength !== result.bytes.byteLength ||
+      metadata.messageId !== target.messageId ||
+      metadata.attachmentId !== target.attachmentId
+    )
+      return yield* failTransfer('invalid_metadata')
+    return { ...metadata, ...fileBytes(result.bytes) }
+  })

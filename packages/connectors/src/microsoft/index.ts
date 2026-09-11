@@ -124,3 +124,7 @@ export const MicrosoftConnector = defineConnector({
   description: 'Microsoft Outlook and OneDrive actions through Microsoft Graph.',
   actions: [...outlookMailActions, ...oneDriveActions]
 })
+export { createOneDriveFile, updateOneDriveFile, oneDriveSingleUploadMaxBytes } from './write.ts'
+export type { OneDriveCreateFileInput, OneDriveUpdateFileInput } from './write.ts'
+export { downloadOutlookAttachment } from './mail-download.ts'
+export type { OutlookDownloadAttachmentInput } from './mail-download.ts'

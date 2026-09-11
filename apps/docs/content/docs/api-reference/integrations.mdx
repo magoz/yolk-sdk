@@ -195,3 +195,18 @@ See [Connectors catalog](../integrations/connectors) for action ids.
 | `@yolk-sdk/sandbox/agent`   | `makeSandboxToolModule`, `makeSandboxToolModuleFromApi`, `sandboxToolName` |
 | `@yolk-sdk/sandbox/vercel`  | `makeVercelSandboxLayer`, `makeVercelSandboxLayerWithClient`               |
 | `@yolk-sdk/sandbox/testing` | `makeFakeSandboxLayer`, `makeInMemorySandboxStateStoreLayer`               |
+
+## Connector file APIs
+
+The root additionally exports `ConnectorBinaryWriteHttpClient`, `ConnectorBinaryWriteHttpClientApi`,
+`ConnectorBinaryWriteHttpRequest`, `ConnectorFileTransferError`, `ConnectorFileTransferBudget` and
+`ConnectorFileBytes`. Existing GET-only binary ports remain unchanged.
+
+See [Transfer connector files](../connectors/files) for all helper signatures and the complete
+provider matrix, including `R2ObjectClient`/`R2ObjectClientApi`, Drive's
+`GoogleDriveReadonlyOAuthCredentialSlot` and `GoogleDriveDownloadBudget`, Notion's
+`NotionFileDownloadPolicy`, and optional `EmailClient.getAttachmentBytes` returning
+`EmailAttachmentBytesResult`. Provider input/result types are exported from their existing subpaths;
+new helpers return host-only bytes or allowlisted write metadata and code-only transfer errors.
+New metadata actions are `fortnoxListSupplierInvoiceFilesAction` and `todoistListCommentsAction`,
+with their provider-named input/output schemas. No new package subpaths or generic agent file actions.

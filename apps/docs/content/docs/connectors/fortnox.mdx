@@ -4,8 +4,11 @@ description: Read company information, customers, invoices, suppliers, and suppl
 ---
 
 Use `@yolk-sdk/connectors/fortnox` to read Fortnox records directly or expose them as agent tools.
-All nine actions declare `read` access and send only GET requests to `https://api.fortnox.se/3`.
+All ten actions declare `read` access and send only GET requests to `https://api.fortnox.se/3`.
 There are no create, update, send, book, cancel, payment, or file-download actions.
+
+Host-only invoice preview PDF and archive downloads plus supplier-file discovery are described in
+[Transfer connector files](./files#fortnox-and-notion). Preview does not mark an invoice Sent.
 
 ## Connect a host credential
 
@@ -61,9 +64,11 @@ All slots bind through `fortnox.oauth`:
 | `FortnoxInvoiceOAuthCredentialSlot`            | `invoice`            |
 | `FortnoxSupplierOAuthCredentialSlot`           | `supplier`           |
 | `FortnoxSupplierInvoiceOAuthCredentialSlot`    | `supplierinvoice`    |
+| `FortnoxConnectFileOAuthCredentialSlot`        | `connectfile`        |
+| `FortnoxArchiveOAuthCredentialSlot`            | `archive`            |
 
 `FortnoxOAuthCredentialSlot` is the generic binding without scope hints.
-`FortnoxCombinedOAuthCredentialSlot` declares all five scopes; use it only when the host needs all
+`FortnoxCombinedOAuthCredentialSlot` declares the original five record scopes (not connectfile/archive); use it only when the host needs all
 resources. Action-scoped slots supply consent hints to the resolver, not a token store or permission
 checker.
 
@@ -76,6 +81,10 @@ Host OAuth implementation:
   Basic client authentication and a form-urlencoded body.
 - Store and refresh tokens server-side. Fortnox rotates refresh tokens; serialize refreshes and
   persist the replacement safely. Hosts own revocation, reauthorization, and credential identity.
+
+`fortnox.list_supplier_invoice_files` takes `{ givenNumber, page?, limit? }`, returns
+`{ files, pagination }`, and uses `connectfile` consent. Its filter is internal GivenNumber, not
+supplier InvoiceNumber. The new file scopes grant both reads and writes like other Fortnox scopes.
 
 ## Actions and outputs
 
@@ -110,7 +119,7 @@ and nullable `Total`/`CostCenter` values. The connector performs no monetary ari
 
 ### Pagination and search
 
-Every list action fetches exactly one page. Inputs support `page` (integer, at least 1), `limit`
+Every list action fetches exactly one page. Record-list inputs support `page` (integer, at least 1), `limit`
 (integer, 1–500), and `lastModified` (provider timestamp string). Omitted values use Fortnox defaults
 (page 1, limit 100). Output `pagination` contains `currentPage`, `totalPages`, `totalResources`, and
 optional `nextPage`. Continue with `page: nextPage`, repeating the same limit and selection fields;

@@ -192,12 +192,13 @@ const main = async () => {
         [
           'const binary = await import("@yolk-sdk/connectors")',
           'const microsoft = await import("@yolk-sdk/connectors/microsoft")',
-          'for (const symbol of ["ConnectorBinaryHttpClient", "ConnectorBinaryHttpError"]) { if (typeof binary[symbol] !== "function") throw new Error(`Missing binary export: ${symbol}`) }',
-          'for (const symbol of ["downloadOneDriveItem", "OneDriveDownloadError", "OneDriveDownloadSource"]) { if (typeof microsoft[symbol] !== "function") throw new Error(`Missing Microsoft export: ${symbol}`) }',
+          'for (const symbol of ["ConnectorBinaryHttpClient", "ConnectorBinaryHttpError", "ConnectorBinaryWriteHttpClient", "ConnectorFileTransferError"]) { if (typeof binary[symbol] !== "function") throw new Error(`Missing binary export: ${symbol}`) }',
+          'for (const symbol of ["downloadOneDriveItem", "OneDriveDownloadError", "OneDriveDownloadSource", "createOneDriveFile", "updateOneDriveFile", "downloadOutlookAttachment"]) { if (typeof microsoft[symbol] !== "function") throw new Error(`Missing Microsoft export: ${symbol}`) }',
           'if (microsoft.OneDriveDownloadErrorCode === undefined) throw new Error("Missing download error codes")',
           'if (microsoft.MicrosoftConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host download leaked into default actions")',
+          'for (const [subpath, symbols] of Object.entries({ google: ["downloadGoogleDriveFile", "exportGoogleDriveFile", "downloadGmailAttachment"], fortnox: ["downloadFortnoxInvoicePreview", "downloadFortnoxArchiveFile"], notion: ["downloadNotionFile"], email: ["downloadEmailAttachment"], telegram: ["downloadTelegramFile"], todoist: ["downloadTodoistAttachment"], "r2-storage": ["R2ObjectClient", "getR2Object", "createR2Object", "updateR2Object"] })) { const module = await import(`@yolk-sdk/connectors/${subpath}`); for (const symbol of symbols) if (typeof module[symbol] !== "function") throw new Error(`Missing file export: ${symbol}`); for (const value of Object.values(module)) if (value && Array.isArray(value.actions) && value.actions.some(action => /download|upload_bytes|create_file|update_file/.test(action.id))) throw new Error("Host bytes leaked into actions") }',
           'const dropbox = await import("@yolk-sdk/connectors/dropbox")',
-          'for (const symbol of ["downloadDropboxFile", "DropboxDownloadError", "DropboxDownloadSource"]) { if (typeof dropbox[symbol] !== "function") throw new Error(`Missing Dropbox export: ${symbol}`) }',
+          'for (const symbol of ["downloadDropboxFile", "DropboxDownloadError", "DropboxDownloadSource", "createDropboxFile", "updateDropboxFile"]) { if (typeof dropbox[symbol] !== "function") throw new Error(`Missing Dropbox export: ${symbol}`) }',
           'if (dropbox.DropboxDownloadErrorCode === undefined) throw new Error("Missing Dropbox download error codes")',
           'if (dropbox.DropboxConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host Dropbox download leaked into default actions")'
         ].join('\n')

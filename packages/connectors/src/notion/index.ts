@@ -1054,3 +1054,5 @@ export const NotionConnector = defineConnector({
   description: 'Notion page and search connector actions.',
   actions: notionActions
 })
+export { downloadNotionFile } from './download.ts'
+export type { NotionDownloadFile, NotionFileDownloadPolicy } from './download.ts'

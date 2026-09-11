@@ -24,6 +24,7 @@ import {
   FortnoxListInvoicesOutput,
   FortnoxListSuppliersOutput,
   FortnoxListSupplierInvoicesOutput,
+  FortnoxListSupplierInvoiceFilesOutput,
   fortnoxOAuthAuthorizeUrl,
   fortnoxOAuthTokenUrl
 } from '@yolk-sdk/connectors/fortnox'
@@ -194,10 +195,14 @@ const decodeListItems = (value: unknown) =>
   )
 
 describe('Fortnox connector', () => {
-  it('exports only nine reads and shared resource-scoped OAuth bindings', () => {
+  it('exports only ten reads and shared resource-scoped OAuth bindings', () => {
     expect(FortnoxConnector.id).toBe('fortnox')
     expect(FortnoxConnector.actions.map(action => action.id).sort()).toEqual(
-      [...reads, ...lists].map(item => item.action).sort()
+      [
+        ...reads.map(item => item.action),
+        ...lists.map(item => item.action),
+        'fortnox.list_supplier_invoice_files'
+      ].sort()
     )
     expect(FortnoxConnector.actions.every(action => action.access === 'read')).toBe(true)
     expect(FortnoxOAuthCredentialSlot).toMatchObject({ id: 'fortnox.oauth', kind: 'oauth' })
@@ -219,7 +224,7 @@ describe('Fortnox connector', () => {
         [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
         {}
       )
-      expect(toolSet.tools).toHaveLength(9)
+      expect(toolSet.tools).toHaveLength(10)
       for (const tool of toolSet.tools) {
         expect(tool.parameters).toMatchObject({ type: 'object' })
         expect(toolSet.metadata.find(item => item.name === tool.name)?.access).toBe('read')
@@ -573,3 +578,41 @@ describe('Fortnox connector', () => {
     })
   )
 })
+
+it.effect(
+  'discovers supplier files by internal GivenNumber with explicit pagination and connectfile consent',
+  () =>
+    Effect.gen(function* () {
+      const h = makeHarness([
+        response({
+          SupplierInvoiceFileConnections: [
+            {
+              FileId: 'file-id',
+              Name: 'invoice.pdf',
+              SupplierInvoiceNumber: '42',
+              '@url': 'https://secret.example/'
+            }
+          ],
+          MetaInformation: meta(2, 3, 11)
+        })
+      ])
+      const result = yield* invoke('fortnox.list_supplier_invoice_files', {
+        givenNumber: '42',
+        page: 2,
+        limit: 5
+      }).pipe(Effect.provide(h.layer))
+      expect(h.requests[0]?.url).toBe(
+        'https://api.fortnox.se/3/supplierinvoicefileconnections?supplierinvoicenumber=42&page=2&limit=5'
+      )
+      expect(h.scopes).toEqual([['connectfile']])
+      if (result._tag !== 'Success') return yield* Effect.die('Expected metadata')
+      const value = yield* Schema.decodeUnknownEffect(FortnoxListSupplierInvoiceFilesOutput)(
+        result.value
+      )
+      expect(value.pagination.nextPage).toBe(3)
+      expect(Chunk.toReadonlyArray(value.files)).toMatchObject([
+        { fileId: 'file-id', givenNumber: '42' }
+      ])
+      expect(JSON.stringify(value)).not.toContain('secret.example')
+    })
+)

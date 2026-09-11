@@ -127,3 +127,19 @@ export const R2StorageConnector = defineConnector({
   description: 'Cloudflare R2 storage connector actions.',
   actions: r2StorageActions
 })
+export {
+  R2ObjectClient,
+  getR2Object,
+  createR2Object,
+  updateR2Object,
+  r2SingleUploadMaxBytes
+} from './files.ts'
+export type {
+  R2ObjectClientApi,
+  R2ObjectCondition,
+  R2ObjectTarget,
+  R2ObjectMetadata,
+  R2GetObjectInput,
+  R2CreateObjectInput,
+  R2UpdateObjectInput
+} from './files.ts'

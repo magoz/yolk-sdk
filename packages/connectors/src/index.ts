@@ -42,3 +42,10 @@ export type { ConnectorHttpClientApi } from './http.ts'
 export { ConnectorIntegration, IntegrationConfig, makeIntegration } from './integration.ts'
 export { ActionResult, ProviderFailure } from './result.ts'
 export type { ActionResult as ActionResultType } from './result.ts'
+export { ConnectorBinaryWriteHttpClient } from './binary-write-http.ts'
+export type {
+  ConnectorBinaryWriteHttpClientApi,
+  ConnectorBinaryWriteHttpRequest
+} from './binary-write-http.ts'
+export { ConnectorFileTransferError } from './file-transfer.ts'
+export type { ConnectorFileTransferBudget, ConnectorFileBytes } from './file-transfer.ts'

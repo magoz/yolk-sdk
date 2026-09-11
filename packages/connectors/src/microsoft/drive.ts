@@ -206,7 +206,7 @@ export const oneDriveReadSlot = (integration: ConnectorIntegration, driveId: str
       : MicrosoftOneDriveReadAllOAuthCredentialSlot
   })
 
-const oneDriveWriteSlot = (integration: ConnectorIntegration, driveId: string | undefined) =>
+export const oneDriveWriteSlot = (integration: ConnectorIntegration, driveId: string | undefined) =>
   Effect.gen(function* () {
     const accessMode = yield* oneDriveAccessMode(integration)
     yield* requireDriveForApplicationAccess(integration, driveId, accessMode)

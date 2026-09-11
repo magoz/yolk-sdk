@@ -1,3 +1,5 @@
+import { fortnoxListSupplierInvoiceFilesAction } from './files.ts'
+export * from './files.ts'
 import { Chunk } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
@@ -224,6 +226,7 @@ export const FortnoxConnector = defineConnector({
   description:
     'Read-only Fortnox company, customer, invoice, supplier, and supplier-invoice actions.',
   actions: [
+    fortnoxListSupplierInvoiceFilesAction,
     fortnoxGetCompanyInformationAction,
     fortnoxListCustomersAction,
     fortnoxGetCustomerAction,

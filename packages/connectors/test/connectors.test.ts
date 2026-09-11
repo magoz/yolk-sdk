@@ -699,6 +699,7 @@ describe('@yolk-sdk/connectors', () => {
       'telegram.validate'
     ])
     expect(TodoistConnector.actions.map(action => action.id)).toEqual([
+      'todoist.list_comments',
       'todoist.list_projects',
       'todoist.create_project',
       'todoist.get_project',
