@@ -207,6 +207,39 @@ independent child.
 
 For durable hosts, see [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
 
+### Nonterminal child observations
+
+If a host finishes observing a `subagent` call while the child's outcome is still running or
+unknown, return a nonterminal observation rather than inventing a final child result. Host
+executor fragment; `hostChildRunId` is the authorized physical recovery handle:
+
+```ts
+import { ToolResult } from '@yolk-sdk/agent/protocol'
+
+const observation = ToolResult.make({
+  toolCallId: input.call.id,
+  content: 'Child is still running; use the recovery handle to observe it later.',
+  structuredContent: {
+    type: 'subagent_observation',
+    subagent_run_id: `subagent:${input.call.id}`,
+    workflow_run_id: hostChildRunId,
+    status: 'running',
+    done: false
+  }
+})
+```
+
+Use `running` only when known; report uncertainty truthfully otherwise. The loop suppresses
+`SubagentCompleted` only when the marker is `subagent_observation` and `subagent_run_id` matches
+`subagent:<originalCallId>` for that `subagent` call. A mismatched ID does not suppress completion.
+The observation still emits `ToolExecutionCompleted` for the call, not child completion, and adds
+no nested usage. Return a recovery handle only after host ownership checks.
+
+This differs from launch acceptance (`makeSubagentAcceptedToolResult`) and from generic background
+`ToolResult.acceptance`, which produces `ToolExecutionAccepted`. Do not append another result to
+the original call later; observe through distinct status/wait calls. See
+[Bounded child observations](../vercel-workflows/step-contracts#bounded-child-observations).
+
 ### Effect-native realtime validation
 
 Use `toOpenAiRealtimeToolEffect`, `makeOpenAiRealtimeSessionConfigEffect`, or

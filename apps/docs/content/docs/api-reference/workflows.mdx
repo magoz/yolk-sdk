@@ -39,14 +39,20 @@ undispatched calls; carry call identity in each result when mapping partial prog
 
 ### `awaitWorkflowChild<A>`
 
-Accepts `read: () => Promise<{ done: false } | { done: true; value: A }>` and
-`sleep: () => Promise<void>`, returning `Promise<A>`. It alternates short durable read steps with
-Workflow `sleep` until `done: true`. Hosts must represent completed, failed, and cancelled child
-states, and own any timeout/Stop policy; the helper has no built-in timeout. Never place a long
-child `returnValue` poll inside one step.
+Accepts `read: (attempt: number) => Promise<{ done: false } | { done: true; value: A }>` and
+`sleep: (attempt: number) => Promise<void>`, returning `Promise<A>`. Attempts start at zero. Each
+read returning `done: false` is followed by a sleep with the same index, then the next read.
+Existing zero-argument callbacks remain compatible.
 
-See [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration)
-for a host integration fragment.
+It alternates short durable read steps with Workflow `sleep` until `done: true`. There is no
+built-in timeout or observation ceiling. Hosts can use the index for budgets/backoff and return
+`{ done: true, value }` at their ceiling with a truthful still-running or unknown value; this ends
+observation, not the child. Represent completed, failed, and cancelled states explicitly and keep
+Stop policy host-owned. Never place a long child `returnValue` poll inside one step.
+
+See [Bounded child observations](../vercel-workflows/step-contracts#bounded-child-observations)
+for host budgeting and [Nonterminal child observations](../agent/tools-hitl#nonterminal-child-observations)
+for the subagent result marker.
 
 ## Durable event exports
 
