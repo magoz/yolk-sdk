@@ -514,7 +514,7 @@ const requireMailboxForApplicationAccess = (
         })
       )
 
-const outlookReadSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
+export const outlookReadSlot = (integration: ConnectorIntegration, mailbox: string | undefined) =>
   Effect.gen(function* () {
     const accessMode = yield* mailboxAccessMode(integration)
     yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)

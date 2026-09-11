@@ -2,21 +2,53 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
 import {
+  ConnectorBinaryWriteHttpClient,
+  ConnectorFileTransferError,
   ConnectorBinaryHttpClient,
   ConnectorBinaryHttpError
 } from '../packages/connectors/src/index.ts'
 import {
+  createDropboxFile,
+  updateDropboxFile,
   downloadDropboxFile,
   DropboxDownloadError,
   DropboxDownloadErrorCode,
   DropboxDownloadSource
 } from '../packages/connectors/src/dropbox/index.ts'
 import {
+  createOneDriveFile,
+  updateOneDriveFile,
+  downloadOutlookAttachment,
   downloadOneDriveItem,
   OneDriveDownloadError,
   OneDriveDownloadErrorCode,
   OneDriveDownloadSource
 } from '../packages/connectors/src/microsoft/index.ts'
+
+import {
+  downloadGoogleDriveFile,
+  exportGoogleDriveFile,
+  downloadGmailAttachment,
+  GoogleDriveReadonlyOAuthCredentialSlot
+} from '../packages/connectors/src/google/index.ts'
+import {
+  downloadFortnoxInvoicePreview,
+  downloadFortnoxArchiveFile,
+  fortnoxListSupplierInvoiceFilesAction
+} from '../packages/connectors/src/fortnox/index.ts'
+import { downloadNotionFile } from '../packages/connectors/src/notion/index.ts'
+import { downloadEmailAttachment } from '../packages/connectors/src/email/index.ts'
+import { downloadTelegramFile } from '../packages/connectors/src/telegram/index.ts'
+import {
+  downloadTodoistAttachment,
+  todoistListCommentsAction
+} from '../packages/connectors/src/todoist/index.ts'
+import {
+  R2ObjectClient,
+  getR2Object,
+  createR2Object,
+  updateR2Object
+} from '../packages/connectors/src/r2-storage/index.ts'
 
 type PackageExportShape = {
   readonly packageDir: string
@@ -232,6 +264,37 @@ if (
   DropboxDownloadErrorCode === undefined
 ) {
   failures.push('Connector host-only binary download runtime exports are missing')
+}
+
+// New file APIs also reuse existing explicit source/publish subpaths; manifests are unchanged.
+if (
+  [
+    ConnectorBinaryWriteHttpClient,
+    ConnectorFileTransferError,
+    createDropboxFile,
+    updateDropboxFile,
+    createOneDriveFile,
+    updateOneDriveFile,
+    downloadOutlookAttachment,
+    downloadGoogleDriveFile,
+    exportGoogleDriveFile,
+    downloadGmailAttachment,
+    downloadFortnoxInvoicePreview,
+    downloadFortnoxArchiveFile,
+    downloadNotionFile,
+    downloadEmailAttachment,
+    downloadTelegramFile,
+    downloadTodoistAttachment,
+    R2ObjectClient,
+    getR2Object,
+    createR2Object,
+    updateR2Object
+  ].some(value => typeof value !== 'function') ||
+  GoogleDriveReadonlyOAuthCredentialSlot.id !== 'google.oauth' ||
+  fortnoxListSupplierInvoiceFilesAction.access !== 'read' ||
+  todoistListCommentsAction.access !== 'read'
+) {
+  failures.push('Connector file capabilities runtime exports are missing')
 }
 
 if (failures.length > 0) {

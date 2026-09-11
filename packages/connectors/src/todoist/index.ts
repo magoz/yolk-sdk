@@ -1,21 +1,27 @@
+import { todoistListCommentsAction } from './files.ts'
+export {
+  todoistListCommentsAction,
+  downloadTodoistAttachment,
+  TodoistCommentMetadata,
+  TodoistListCommentsInput,
+  TodoistListCommentsOutput
+} from './files.ts'
 import { Effect, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
-import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest, decodeJsonResponse } from '../http.ts'
 import { ActionResult, ProviderFailure } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
-export const todoistConnectorId = 'todoist'
-export const todoistApiTokenSlotId = 'todoist.api_token'
-export const todoistApiBaseUrl = 'https://api.todoist.com/api/v1'
-
-export const TodoistApiTokenSlot = CredentialSlot.make({
-  id: todoistApiTokenSlotId,
-  kind: 'api_key'
-})
+export {
+  todoistConnectorId,
+  todoistApiTokenSlotId,
+  todoistApiBaseUrl,
+  TodoistApiTokenSlot
+} from './shared.ts'
+import { todoistConnectorId, todoistApiBaseUrl, resolveTodoistToken } from './shared.ts'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
 const isJsonObject = Schema.is(JsonObject)
@@ -84,29 +90,6 @@ const todoistProviderFailure = (input: {
       )
     )
   )
-
-const resolveTodoistToken = (integration: ConnectorIntegration) =>
-  Effect.gen(function* () {
-    const credential = yield* resolveCredential(integration, TodoistApiTokenSlot)
-
-    switch (credential._tag) {
-      case 'ApiKeyCredential':
-        return credential.key
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Todoist connector does not accept username/password credentials',
-            connectorId: integration.connectorId,
-            slotId: TodoistApiTokenSlot.id
-          })
-        )
-    }
-  })
 
 export class TodoistTask extends Schema.Class<TodoistTask>('TodoistTask')({
   id: Schema.String,
@@ -846,6 +829,7 @@ export const todoistListLabelsAction = defineAction({
 })
 
 export const todoistActions = [
+  todoistListCommentsAction,
   todoistListProjectsAction,
   todoistCreateProjectAction,
   todoistGetProjectAction,

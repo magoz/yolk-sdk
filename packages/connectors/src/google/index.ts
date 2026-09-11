@@ -137,3 +137,17 @@ export const GoogleConnector = defineConnector({
   description: 'Google Gmail, Calendar, and Drive connector actions.',
   actions: [...gmailActions, ...googleCalendarActions, ...googleDriveActions]
 })
+export {
+  downloadGoogleDriveFile,
+  exportGoogleDriveFile,
+  GoogleDriveReadonlyOAuthCredentialSlot,
+  googleDriveReadonlyScope,
+  googleDriveExportMaxBytes
+} from './drive-download.ts'
+export type {
+  GoogleDriveDownloadInput,
+  GoogleDriveExportInput,
+  GoogleDriveDownloadBudget
+} from './drive-download.ts'
+export { downloadGmailAttachment } from './gmail-download.ts'
+export type { GmailDownloadAttachmentInput } from './gmail-download.ts'

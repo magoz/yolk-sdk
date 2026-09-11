@@ -95,7 +95,7 @@ The host owns OAuth code exchange, refresh, credential storage, consent, and Dro
 versus Full Dropbox configuration. Binary upload and download **actions** are not part of this
 module because the portable connector HTTP port carries string bodies; do not base64-encode file
 content through these actions. Original-byte download is a separate host helper, not an action.
-Upload remains host work.
+Host-only create/update are documented in [Transfer connector files](../connectors/files).
 
 ### Host-only Dropbox original-byte download
 
@@ -320,8 +320,8 @@ capabilities before destructive calls; Google still applies ownership, shared-dr
 administrator, and per-file rules.
 
 `drive.trash_file` is the reversible default. `drive.delete_file` bypasses trash and permanently
-removes the item; deleting a folder can also remove owned descendants. Binary upload/download is
-outside the connector because its HTTP port carries string bodies. Hosts own content transfer and
+removes the item; deleting a folder can also remove owned descendants. Binary downloads and exports use separate host-only helpers; uploads are not added. See
+[Transfer connector files](../connectors/files) for content consent and host transport. Hosts own
 Google Picker or equivalent per-file authorization.
 
 Google references: [files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list), [search syntax](https://developers.google.com/workspace/drive/api/guides/search-files), [create folders](https://developers.google.com/workspace/drive/api/guides/folder), [trash and delete](https://developers.google.com/workspace/drive/api/guides/delete), [shared drives](https://developers.google.com/workspace/drive/api/guides/enable-shareddrives), [resource keys](https://developers.google.com/workspace/drive/api/guides/resource-keys), and [OAuth scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
@@ -452,7 +452,7 @@ Graph origin and selected OneDrive collection before replaying a link.
 
 The current OneDrive **action set** still excludes binary download, upload, and resumable upload
 sessions: its HTTP port is string/JSON-oriented. Original-byte download is a separate host helper,
-not an action. Upload and resumable sessions remain unimplemented.
+not an action. Host-only create/update use a separate write port; resumable sessions remain unimplemented.
 
 ### Host-only OneDrive original-byte download
 
@@ -524,7 +524,15 @@ R2 presigning is host-provided. The connector does not bundle an AWS SDK.
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Tasks         | `todoist.list_tasks`, `todoist.create_task`, `todoist.close_task`, `todoist.get_task`, `todoist.update_task`, `todoist.delete_task` |
 | Projects      | `todoist.list_projects`, `todoist.create_project`, `todoist.get_project`, `todoist.update_project`, `todoist.delete_project`        |
+| Comments      | `todoist.list_comments`                                                                                                             |
 | Labels        | `todoist.list_labels`                                                                                                               |
+
+## Host-only file transfers
+
+See [Transfer connector files](../connectors/files) for all download/export and create/update APIs,
+provider-specific concurrency and limits, consent and network enforcement. Raw bytes do not enter
+action arrays. New metadata actions are `fortnox.list_supplier_invoice_files` and
+`todoist.list_comments`; both declare read access.
 
 ## Custom connectors
 

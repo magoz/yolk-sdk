@@ -218,8 +218,7 @@ usually means the token lacks that scope (Dropbox reports `missing_scope`). `inv
 share links, relative paths, control characters, and Dropbox `malformed_path`. `not_a_file` is a
 folder; `not_downloadable` is a Paper or other export-only entry; `unexpected_redirect` means the
 adapter returned a 3xx that the helper refuses to follow. `partial_content` covers incomplete or
-ranged 200 responses and a body whose length differs from the served metadata `size`. Upload
-remains unimplemented.
+ranged 200 responses and a body whose length differs from the served metadata `size`. Host-only writes use a separate port; see [Transfer connector files](./connectors/files).
 
 ### Microsoft action is unauthorized
 
@@ -258,7 +257,22 @@ reuse string `ConnectorHttpClient`. `invalid_input` covers bad or dot-only IDs a
 without `driveId`. `credential_failed` means missing `microsoft.oauth` or the `Files.Read` /
 `Files.Read.All` slot. Size and partial failures include `response_too_large` and `partial_content`;
 do not trust metadata `size`. The adapter must disable auto-redirects; the helper strips headers
-after the first content request. Upload remains unimplemented.
+after the first content request. Host-only create/update are supported; see [Transfer connector files](./connectors/files).
+
+### New file helper fails or a write outcome is uncertain
+
+New helpers use `ConnectorFileTransferError`, with code-only failures. `invalid_input` fails before
+credentials/network; `response_too_large` means a host/provider byte bound was exceeded;
+`upload_session_required` means the single-upload cap requires a session flow not implemented here.
+Never increase limits using model input. `not_downloadable` includes unsupported native exports,
+folders, and item/reference mail attachments. Drive content needs drive.file or explicitly authorized
+drive.readonly, not metadata-only consent. Notion external files require host URL policy.
+
+`conflict` is not permission to retry without a revision/ETag. OneDrive simple replacement is
+unconditional and requires explicit overwrite acknowledgement; decline when atomic CAS is required.
+A transport timeout, cancellation or invalid success can follow a committed write: inspect provider
+state and reconcile before another attempt. No helper retries writes automatically. Hosts must still
+enforce streamed bounds, cancellation, DNS/socket policy, TLS and secret-safe telemetry.
 
 ## Sandbox errors
 

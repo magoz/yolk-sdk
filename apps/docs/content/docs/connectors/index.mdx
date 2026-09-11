@@ -109,7 +109,7 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 | `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate                                                           |
 | `@yolk-sdk/connectors/todoist`         | Todoist projects, tasks, labels                                                      |
 
-[Fortnox](./fortnox) exposes nine GET-only actions and resource-scoped OAuth hints through one
+[Fortnox](./fortnox) exposes ten GET-only actions and resource-scoped OAuth hints through one
 `fortnox.oauth` binding. Fortnox scopes themselves permit both read and write; the connector's
 read-only surface does not narrow the underlying token. Hosts own consent and token lifecycle.
 
@@ -124,14 +124,14 @@ Application hosts use `mailboxAccessMode: 'application'`. OneDrive inputs use `/
 set `driveId` for an explicit drive, `oneDriveAccessMode: 'delegated_all'` for broader delegated
 permissions, or `oneDriveAccessMode: 'application'` for application tokens. Discovery and metadata
 stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriveItem` with
-`ConnectorBinaryHttpClient`; upload and resumable sessions remain unimplemented. Default Microsoft
+`ConnectorBinaryHttpClient`; create/update use the separate binary-write port. Resumable sessions remain unimplemented. Default Microsoft
 tools still need `CredentialResolver` and `ConnectorHttpClient`. The host still owns
 Entra tenant policy, OAuth callbacks, refresh, storage, consent,
 application resource scoping, Exchange grants, network policy, and file materialization.
 
 Dropbox follows the same split: `dropbox.*` actions cover discovery, metadata, and file management,
 while original file bytes use host-only `downloadDropboxFile` with `ConnectorBinaryHttpClient` and
-the `files.content.read` scope. Upload remains unimplemented.
+the `files.content.read` scope. Host-only create/update require `files.content.write`.
 
 Google's `gmail.get_thread` action returns normalized messages with decoded message text and
 attachment metadata, without raw MIME or attachment content. See the
@@ -151,6 +151,13 @@ generic email requires optional host `EmailClient.setRead`, `trash`, and `untras
 POP3/SMTP do not support these mailbox-state actions. Restore defaults to the inbox rather than
 remembering the original folder. See the [Connectors catalog](../integrations/connectors) for
 inputs, permissions, and safe IMAP adapter requirements.
+
+## Transfer files
+
+See [Transfer connector files](./files) for the full capability matrix, raw-byte download/export and
+create/update helpers, consent, provider limits, concurrency guarantees and host transport duties.
+This also covers R2, Drive, Fortnox, Notion, email, Telegram, Todoist and reuse of Afloat/Figma MCP.
+Bytes and write helpers are never added to generic connector action serialization.
 
 ## What the host provides
 

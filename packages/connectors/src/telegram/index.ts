@@ -3,43 +3,16 @@ import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { requiredStringConfig } from '../config.ts'
 import { defineConnector } from '../connector.ts'
-import { CredentialSlot, resolveCredential } from '../credential.ts'
-import { ConnectorError } from '../error.ts'
 import { ConnectorHttpClient, ConnectorHttpRequest } from '../http.ts'
 import { ActionResult, ProviderFailure } from '../result.ts'
-import type { ConnectorIntegration } from '../integration.ts'
 
-export const telegramConnectorId = 'telegram'
-export const telegramBotTokenSlotId = 'telegram.bot_token'
-export const telegramApiBaseUrl = 'https://api.telegram.org'
-
-export const TelegramBotTokenSlot = CredentialSlot.make({
-  id: telegramBotTokenSlotId,
-  kind: 'api_key'
-})
-
-const resolveTelegramBotToken = (integration: ConnectorIntegration) =>
-  Effect.gen(function* () {
-    const credential = yield* resolveCredential(integration, TelegramBotTokenSlot)
-
-    switch (credential._tag) {
-      case 'ApiKeyCredential':
-        return credential.key
-      case 'BearerTokenCredential':
-        return credential.token
-      case 'OAuthCredential':
-        return credential.accessToken
-      case 'UsernamePasswordCredential':
-        return yield* Effect.fail(
-          new ConnectorError({
-            cause: 'credential_invalid',
-            message: 'Telegram connector does not accept username/password credentials',
-            connectorId: integration.connectorId,
-            slotId: TelegramBotTokenSlot.id
-          })
-        )
-    }
-  })
+export {
+  telegramConnectorId,
+  telegramBotTokenSlotId,
+  telegramApiBaseUrl,
+  TelegramBotTokenSlot
+} from './shared.ts'
+import { telegramConnectorId, telegramApiBaseUrl, resolveTelegramBotToken } from './shared.ts'
 
 const isSuccessStatus = (status: number) => status >= 200 && status < 300
 
@@ -154,3 +127,4 @@ export const TelegramConnector = defineConnector({
   description: 'Telegram bot connector actions.',
   actions: telegramActions
 })
+export { downloadTelegramFile, telegramHostedDownloadMaxBytes } from './download.ts'

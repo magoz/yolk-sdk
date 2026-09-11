@@ -195,9 +195,16 @@ or misleading. If transport decompresses responses, bound the decompressed strea
 
 After syntax validation and before decoding, check encoded content length; then validate actual
 decoded bytes, canonical encoding if required by your host, MIME, and per-file/aggregate limits.
-Provider-declared sizes are hints, not proof of actual byte length. Connector schemas validate
+Provider-declared sizes are hints, not proof of actual byte length. Legacy base64 action schemas validate
 base64 syntax, not canonical pad bits or equality between declared and decoded sizes. Zero-byte
 retrieval is allowed by the connectors; whether empty files are usable is host policy.
+
+Prefer the new [host-only connector byte helpers](../connectors/files) when materializing files.
+They leave existing base64 actions unchanged. `downloadGmailAttachment` validates canonical
+base64url and actual decoded size; Outlook uses raw `/$value` after a bounded discriminator read;
+IMAP/POP3 can implement optional `EmailClient.getAttachmentBytes` without base64 roundtrips.
+`ConnectorBinaryHttpClient` budgets must still be enforced while streaming by the host. None of
+these helpers performs app storage, authorizes model access, or adds raw bytes to tool JSON.
 
 ## Verify your host wiring
 
