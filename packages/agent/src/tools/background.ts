@@ -121,7 +121,7 @@ export const executeBackgroundTool = <Context>(input: {
   readonly request: ToolCall
   readonly context: Context
   readonly host: BackgroundToolHost<Context>
-  readonly validate: (call: ToolCall) => Effect.Effect<void, ToolError>
+  readonly validate: (call: ToolCall) => Effect.Effect<void | ToolResult, ToolError>
   readonly execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>
 }): Effect.Effect<ToolResult, ToolError> =>
   Effect.gen(function* () {
@@ -147,7 +147,8 @@ export const executeBackgroundTool = <Context>(input: {
     })
     const call = ToolCall.make({ ...input.request, params: envelope.arguments })
     // Decode business arguments before admission, without running business effects.
-    yield* input.validate(call)
+    const invalidResult = yield* input.validate(call)
+    if (invalidResult !== undefined) return invalidResult
     if (envelope.execution === 'foreground') return yield* input.execute(call)
     const receipt = yield* input.host.accept({
       call,

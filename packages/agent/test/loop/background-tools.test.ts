@@ -315,3 +315,33 @@ describe('background loop admission', () => {
     })
   )
 })
+
+it.effect(
+  'keeps long approval IDs lossless and binds differences beyond a common large prefix',
+  () =>
+    Effect.gen(function* () {
+      const set = yield* setFor({ accept: () => Effect.succeed(receipt) }, true)
+      const value = 'long payload 🔐'.repeat(1000)
+      const original = call('bg', 'background', value)
+      const pending = yield* prepareToolBatch({
+        calls: [original],
+        tools: set.tools,
+        responses: []
+      })
+      const id = pending.pendingRequests[0]?.requestId
+      expect(id).toBe(
+        `approval:bg:background-v1:${JSON.stringify({ arguments: { value }, execution: 'background', name: 'work' })}`
+      )
+      expect(id?.length).toBeGreaterThan(10000)
+      const approved = response(id ?? '')
+      expect(
+        (yield* prepareToolBatch({ calls: [original], tools: set.tools, responses: [approved] }))
+          .callsToExecute
+      ).toEqual([{ index: 0, call: original }])
+      const changed = call('bg', 'background', `${value}!`)
+      expect(
+        (yield* prepareToolBatch({ calls: [changed], tools: set.tools, responses: [approved] }))
+          .pendingRequests
+      ).toHaveLength(1)
+    })
+)

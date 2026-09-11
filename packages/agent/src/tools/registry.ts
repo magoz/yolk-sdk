@@ -1,9 +1,3 @@
-import {
-  backgroundToolDef,
-  executeBackgroundTool,
-  unsupportedBackgroundSchema,
-  type BackgroundToolHost
-} from './background.ts'
 import { Array as Arr, Effect, Layer, Option } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError, ToolExecutor } from '@yolk-sdk/agent/loop'
@@ -14,6 +8,13 @@ import {
   type ToolCall,
   type ToolResult
 } from '@yolk-sdk/agent/protocol'
+import { questionToolName, subagentToolName } from '../protocol/tool.ts'
+import {
+  backgroundToolDef,
+  executeBackgroundTool,
+  unsupportedBackgroundSchema,
+  type BackgroundToolHost
+} from './background.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
 export type ToolAccess = typeof ToolAccess.Type
@@ -246,6 +247,16 @@ const jsonSchemaFromSchema = (schema: Schema.Top) => {
     : jsonSchema
 }
 
+// Distinguishes makeTool's model-visible schema failures from raw/host ToolErrors.
+class InvalidToolParamsError extends ToolError {}
+
+const invalidParamsMessage = (
+  options: { readonly name: string; readonly invalidParamsMessage?: (error: unknown) => string },
+  error: unknown
+) =>
+  options.invalidParamsMessage?.(error) ??
+  `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+
 export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
   options: MakeToolOptions<Context, ParamsSchema>
 ): ToolRegistration<Context> => ({
@@ -262,12 +273,10 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
       Effect.asVoid,
       Effect.mapError(
         error =>
-          new ToolError({
+          new InvalidToolParamsError({
             tool: options.name,
             cause: 'validation',
-            message:
-              options.invalidParamsMessage?.(error) ??
-              `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+            message: invalidParamsMessage(options, error)
           })
       )
     ),
@@ -278,9 +287,7 @@ export const makeTool = <Context, ParamsSchema extends ToolParamsSchema>(
     Schema.decodeUnknownEffect(options.parameters)(call.params).pipe(
       Effect.matchEffect({
         onFailure: error => {
-          const message =
-            options.invalidParamsMessage?.(error) ??
-            `Invalid ${options.name} arguments: ${unknownToMessage(error)}`
+          const message = invalidParamsMessage(options, error)
 
           return Effect.succeed(
             modelVisibleToolErrorResult(
@@ -311,8 +318,8 @@ const findDuplicateToolName = <Context>(resolved: ReadonlyArray<ResolvedRegistra
   return Arr.findFirst(names, (name, index) => names.indexOf(name) !== index)
 }
 
-// Names are literals to avoid an import cycle with the question/subagent modules.
-const loopOwnedToolNames: ReadonlySet<string> = new Set(['question', 'subagent'])
+// Protocol owns names without importing registrations back into this module.
+const loopOwnedToolNames: ReadonlySet<string> = new Set([questionToolName, subagentToolName])
 
 export const resolveTools = <Context>(
   modules: ReadonlyArray<ToolModule<Context>>,
@@ -394,7 +401,24 @@ export const resolveTools = <Context>(
                   request: call,
                   context,
                   host,
-                  validate,
+                  validate: businessCall =>
+                    validate(businessCall).pipe(
+                      Effect.catchIf(
+                        (error): error is InvalidToolParamsError =>
+                          error instanceof InvalidToolParamsError,
+                        error =>
+                          Effect.succeed(
+                            modelVisibleToolErrorResult(
+                              businessCall,
+                              modelVisibleToolError({
+                                tool: error.tool,
+                                message: error.message,
+                                reason: 'validation'
+                              })
+                            )
+                          )
+                      )
+                    ),
                   execute: businessCall => match.tool.execute({ call: businessCall, context })
                 })
               : match.tool.execute({ call, context })

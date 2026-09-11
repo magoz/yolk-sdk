@@ -99,6 +99,7 @@ export {
   ProviderToolCallPart,
   ProviderToolResultPart,
   ToolResultMessage,
+  toolResultMessageFromResult,
   UserMessage,
   assistantContent,
   assistantHostToolCalls,

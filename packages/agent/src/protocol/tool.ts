@@ -288,3 +288,7 @@ export type HitlRequest = typeof HitlRequest.Type
 
 export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse])
 export type HitlResponse = typeof HitlResponse.Type
+
+// Canonical loop-owned names. Public compatibility exports remain on /tools.
+export const questionToolName = 'question'
+export const subagentToolName = 'subagent'

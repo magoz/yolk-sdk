@@ -30,7 +30,7 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 - Same-turn sibling tools may yield multiple pending requests; submit responses one at a time unless a runtime adds batching later.
 - Voice sessions support tool approvals only in v1; the `question` tool is deferred for voice and voice `submitHitlResponse` ignores question responses.
 - Voice approvals never execute server-side without a matching approved response (`requestId` = `approval:<callId>`, matching `toolCallId`); denials return model-visible denial output.
-- Background-activated tool calls (`ToolDef.execution === 'background-v1'`) bind approval identity to the exact name, execution mode, and canonical arguments (`approval:<callId>:background-v1:<canonical JSON>`); a changed payload or mode needs a fresh approval, malformed envelopes are rejected before any prompt, and non-activated tools keep `approval:<callId>`. Hosts echo `requestId` opaquely and never rebuild it.
+- Background-activated tool calls (`ToolDef.execution === 'background-v1'`) bind approval identity to the exact name, execution mode, and canonical arguments (`approval:<callId>:background-v1:<canonical JSON>`); a changed payload or mode needs a fresh approval, malformed envelopes are rejected before any prompt, and non-activated tools keep `approval:<callId>`. Hosts echo `requestId` opaquely and never rebuild it. IDs intentionally retain the full canonical payload for lossless exact binding; hosts must accommodate potentially long opaque IDs or enforce input bounds before admission (no truncation/hashing).
 
 ## Runtime adapters
 

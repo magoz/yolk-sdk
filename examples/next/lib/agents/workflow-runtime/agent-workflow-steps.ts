@@ -24,6 +24,7 @@ import {
   HitlResponse,
   ToolInputEnd,
   ToolResultMessage,
+  toolResultMessageFromResult,
   ToolExecutionStarted,
   SubagentStarted,
   SubagentCompleted,
@@ -453,13 +454,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                     ...messages,
                     {
                       index: callIndex < 0 ? calls.length : callIndex,
-                      message: ToolResultMessage.make({
-                        toolCallId: event.result.toolCallId,
-                        content: event.result.content,
-                        isError: event.result.isError,
-                        acceptance: event.result.acceptance,
-                        structuredContent: event.result.structuredContent
-                      })
+                      message: toolResultMessageFromResult(event.result)
                     }
                   ]
                   latestToolResultMessages = orderedToolResultMessages(nextMessages)

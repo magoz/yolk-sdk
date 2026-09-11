@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Cause, Effect } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -21,6 +21,9 @@ import {
 } from '@yolk-sdk/agent/voice'
 import {
   makeOpenAiRealtimeSessionConfig,
+  makeOpenAiRealtimeSessionConfigEffect,
+  openAiRealtimeSessionConfigFromVoiceEffect,
+  toOpenAiRealtimeToolEffect,
   openAiRealtimeSessionConfigFromVoice,
   toOpenAiRealtimeTool
 } from '@yolk-sdk/agent/providers/openai/realtime'
@@ -192,3 +195,65 @@ describe('activated background tools fail closed in voice', () => {
       })
   )
 })
+
+it.effect(
+  'catches activated advertisement with catchTag in actual Effect config composition before host effects',
+  () =>
+    Effect.gen(function* () {
+      const { set, counts } = yield* setup(false)
+      const def = set.tools[0]
+      expect(def).toBeDefined()
+      if (def === undefined) return
+      const config = VoiceSessionConfig.make({ model: 'test', instructions: 'Help' })
+      let hostEffects = 0
+      for (const build of [
+        () => toOpenAiRealtimeToolEffect(def),
+        () => makeOpenAiRealtimeSessionConfigEffect({ instructions: 'Help', tools: set.tools }),
+        () => openAiRealtimeSessionConfigFromVoiceEffect(config, set.tools)
+      ]) {
+        const caught = yield* Effect.gen(function* () {
+          yield* build()
+          hostEffects++ // represents SDP exchange or callback transport, not just validation
+          return 'unexpected'
+        }).pipe(Effect.catchTag('VoiceToolBridgeError', error => Effect.succeed(error.message)))
+        expect(caught).toContain('not supported in voice/realtime')
+      }
+      expect(hostEffects).toBe(0)
+      expect(counts).toEqual({ validate: 0, inline: 0, admissions: 0 })
+      const plain = yield* setup(false, false)
+      const input = { instructions: 'Help', tools: plain.set.tools }
+      expect(yield* makeOpenAiRealtimeSessionConfigEffect(input)).toEqual(
+        makeOpenAiRealtimeSessionConfig(input)
+      )
+      expect(yield* openAiRealtimeSessionConfigFromVoiceEffect(config, plain.set.tools)).toEqual(
+        openAiRealtimeSessionConfigFromVoice(config, plain.set.tools)
+      )
+    })
+)
+
+it.effect('does not disguise unexpected mapper defects as VoiceToolBridgeError', () =>
+  Effect.gen(function* () {
+    const { tool } = yield* setup(false, false)
+    const defect = new Error('unexpected schema getter defect')
+    Object.defineProperty(tool.def, 'parameters', {
+      get: () => {
+        throw defect
+      }
+    })
+    let caught = false
+    const exit = yield* makeOpenAiRealtimeSessionConfigEffect({
+      instructions: '',
+      tools: [tool.def]
+    }).pipe(
+      Effect.catchTag('VoiceToolBridgeError', () => {
+        caught = true
+        return Effect.void
+      }),
+      Effect.exit
+    )
+    expect(caught).toBe(false)
+    expect(exit._tag).toBe('Failure')
+    if (exit._tag === 'Failure')
+      expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
+  })
+)

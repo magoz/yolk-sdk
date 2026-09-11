@@ -206,3 +206,20 @@ and explicit Stop/cancellation policy. Do not infer that parent completion or fa
 independent child.
 
 For durable hosts, see [Independent child orchestration](../vercel-workflows/step-contracts#independent-child-orchestration).
+
+### Effect-native realtime validation
+
+Use `toOpenAiRealtimeToolEffect`, `makeOpenAiRealtimeSessionConfigEffect`, or
+`openAiRealtimeSessionConfigFromVoiceEffect` from `@yolk-sdk/agent/providers/openai/realtime`
+in Effect programs. They fail with typed `VoiceToolBridgeError` for activated definitions, so
+`Effect.catchTag('VoiceToolBridgeError', ...)` can recover before SDP exchange or other host effects.
+The synchronous counterparts remain compatible and throw that error; unexpected defects are not
+converted into host-correctable failures.
+
+`makeTool` returns the same structured `model_visible_tool_error` for invalid business arguments
+with or without activation, in either execution mode, before business execution or admission.
+Malformed envelopes and raw-registration/host `ToolError`s retain their typed failure semantics.
+
+Activated approval IDs intentionally contain the full canonical payload for lossless exact binding.
+Hosts must accommodate opaque, potentially long IDs or enforce input bounds before admission.
+Never truncate, hash, or rebuild these IDs when storing or returning approvals.

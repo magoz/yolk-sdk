@@ -119,3 +119,13 @@ for (const event of events) {
 ## Validate transcripts before provider calls
 
 Every assistant host tool call must have a matching `ToolResultMessage` before the next provider request. Use `validateNoDanglingHostToolCalls` before lowering transcripts to providers.
+
+### Preserving tool acknowledgements
+
+Use `toolResultMessageFromResult(result, envelope?)` to copy `toolCallId`, `content`, `isError`,
+`structuredContent`, and background `acceptance` into a `ToolResultMessage`. It invents no timestamp,
+author, or annotations; pass those optional message-envelope fields explicitly.
+
+An accepted call is settled, not completed. Client and React projections preserve its original call
+and receipt across active-event replays (even without event IDs), turn cleanup, and transcript
+hydration. Persisted acceptance takes precedence over stale active client runs.

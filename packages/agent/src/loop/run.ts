@@ -32,7 +32,7 @@ import {
   questionResponseStructuredContent,
   makeSubagentRunId,
   ToolApprovalRequest,
-  ToolResultMessage,
+  toolResultMessageFromResult,
   SubagentCompleted,
   SubagentStarted,
   assistantHostToolCalls,
@@ -54,6 +54,7 @@ import {
   type AgentModelCapabilities,
   type ToolDef
 } from '@yolk-sdk/agent/protocol'
+import { questionToolName, subagentToolName } from '../protocol/tool.ts'
 import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
@@ -94,8 +95,6 @@ export type ToolBatchConfig = {
   readonly usage?: AgentUsage
 }
 
-const questionToolName = 'question'
-
 type SubagentCallMetadata = {
   readonly subagentRunId: string
   readonly subagentType: string
@@ -114,7 +113,7 @@ const nonEmptyStringField = (input: unknown, key: string) => {
 }
 
 const subagentCallMetadata = (call: ToolCall): SubagentCallMetadata | undefined => {
-  if (call.name !== 'subagent') {
+  if (call.name !== subagentToolName) {
     return undefined
   }
 
@@ -540,15 +539,6 @@ type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
 
 const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
   Math.max(1, loopConfig.toolConcurrency)
-
-const toolResultMessageFromResult = (result: ToolResult) =>
-  ToolResultMessage.make({
-    toolCallId: result.toolCallId,
-    content: result.content,
-    isError: result.isError,
-    structuredContent: result.structuredContent,
-    acceptance: result.acceptance
-  })
 
 const toolDefFor = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
   tools.find(tool => tool.name === call.name)

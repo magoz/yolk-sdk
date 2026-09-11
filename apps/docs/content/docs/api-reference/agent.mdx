@@ -136,7 +136,8 @@ envelope. `BackgroundToolHost.accept({ call, request, context })` returns a vers
 behavior are unchanged. Activation supports only document-root `#/$defs/...` pointers, with
 unsupported references/resource keywords rejected as `ToolRegistryError.cause:
 'background_unsupported_schema'`. Activated definitions are unsupported in voice/realtime:
-realtime tool/config mappers throw `VoiceToolBridgeError`, and voice dispatch fails closed even
+synchronous realtime tool/config mappers throw `VoiceToolBridgeError`; their `Effect` counterparts
+return it in the typed error channel. Voice dispatch fails closed even
 with replayed approvals. See [Tools and HITL](../agent/tools-hitl#let-the-model-choose-background-execution).
 
 Configure `models` and `reasoningEfforts` on a subagent tool module to expose validated optional
@@ -455,3 +456,15 @@ sends no output limit. Yolk does not infer limits from model ids. Generic OpenAI
 select `OpenAiProviderConfig.completionTokenField`, add endpoint extensions through `extraBody`, and
 set `providerIdentity` for accurate safe error metadata; canonical request fields and required HTTP
 headers take precedence.
+
+## Result conversion and typed realtime builders
+
+| Subpath                                     | Export                                                      | Contract                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `@yolk-sdk/agent/protocol`                  | `toolResultMessageFromResult(result, envelope?)`            | Preserve all result payload fields and acceptance; optional explicit message envelope |
+| `@yolk-sdk/agent/providers/openai/realtime` | `toOpenAiRealtimeToolEffect(tool)`                          | `Effect<OpenAiRealtimeFunctionTool, VoiceToolBridgeError>`                            |
+| `@yolk-sdk/agent/providers/openai/realtime` | `makeOpenAiRealtimeSessionConfigEffect(input)`              | `Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError>`                           |
+| `@yolk-sdk/agent/providers/openai/realtime` | `openAiRealtimeSessionConfigFromVoiceEffect(config, tools)` | `Effect<OpenAiRealtimeSessionConfig, VoiceToolBridgeError>`                           |
+
+The synchronous realtime exports remain available; use the Effect variants inside Effect programs
+so unsupported background activation is catchable before host transport effects.

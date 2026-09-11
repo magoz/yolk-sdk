@@ -5,6 +5,7 @@ export {
   defaultOpenAiRealtimeTranscriptionModel,
   defaultOpenAiRealtimeVoice,
   makeOpenAiRealtimeSessionConfig,
+  makeOpenAiRealtimeSessionConfigEffect,
   openAiRealtimeModel,
   openAiRealtimeTranscriptionPrompt,
   OpenAiRealtimeTranscriptionModelSchema,

@@ -1,9 +1,10 @@
 import { Effect } from 'effect'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { QuestionToolParams, ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
+import { questionToolName } from '../protocol/tool.ts'
 import { makeTool, type ToolModule, type ToolRegistration } from './registry.ts'
 
-export const questionToolName = 'question'
+export { questionToolName }
 
 export type QuestionExecutionInput<Context> = {
   readonly call: ToolCall
@@ -53,6 +54,6 @@ export const makeQuestionToolDef = () =>
 export const makeQuestionToolModule = <Context>(
   options: QuestionToolOptions<Context>
 ): ToolModule<Context> => ({
-  id: 'question',
+  id: questionToolName,
   tools: [makeQuestionToolRegistration(options)]
 })

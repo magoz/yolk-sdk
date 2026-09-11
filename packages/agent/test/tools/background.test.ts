@@ -5,6 +5,8 @@ import { BackgroundToolAccepted, ToolCall, ToolDef, ToolResult } from '@yolk-sdk
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
   makeTool,
+  questionToolName,
+  subagentToolName,
   resolveTools,
   type BackgroundToolHost,
   type ToolRegistration
@@ -139,8 +141,7 @@ describe('native background tools', () => {
           {},
           { execution: 'background' },
           { execution: 'later', arguments: params },
-          { execution: 'background', arguments: params, extra: true },
-          { execution: 'background', arguments: { ...params, arguments: 'invalid' } }
+          { execution: 'background', arguments: params, extra: true }
         ]) {
           const result = yield* set
             .execute(ToolCall.make({ id: 'invalid', name: 'work', params: input }))
@@ -249,6 +250,7 @@ describe('native background tools', () => {
 
   it.effect('rejects re-registration of activated definitions and loop-owned tool activation', () =>
     Effect.gen(function* () {
+      expect([questionToolName, subagentToolName]).toEqual(['question', 'subagent'])
       const tool = registration(inline)
       const host = { accept: () => Effect.succeed(receipt) }
       const activated = yield* resolve(tool, host)
@@ -258,7 +260,7 @@ describe('native background tools', () => {
         _tag: 'Failure',
         failure: { cause: 'background_definition_already_active' }
       })
-      for (const name of ['question', 'subagent']) {
+      for (const name of [questionToolName, subagentToolName]) {
         const loopOwned = { ...tool, def: ToolDef.make({ ...tool.def, name }) }
         expect(yield* resolve(loopOwned, host).pipe(Effect.result)).toMatchObject({
           _tag: 'Failure',
@@ -458,3 +460,121 @@ describe('native background tools', () => {
       })
   )
 })
+
+it.effect(
+  'preserves makeTool structured invalid arguments with or without activation and custom messages',
+  () =>
+    Effect.gen(function* () {
+      let effects = 0
+      for (const custom of [false, true]) {
+        const messages: unknown[] = []
+        const tool = makeTool({
+          name: 'work',
+          description: '',
+          access: 'write',
+          background: true,
+          parameters: paramsSchema,
+          ...(custom
+            ? {
+                invalidParamsMessage: (error: unknown) => {
+                  messages.push(error)
+                  return 'Please fix business input'
+                }
+              }
+            : {}),
+          execute: ({ call }) => {
+            effects++
+            return inline(call)
+          }
+        })
+        const plain = yield* resolve(tool)
+        const activated = yield* resolve(tool, {
+          accept: () => {
+            effects++
+            return Effect.succeed(receipt)
+          }
+        })
+        const invalid = { ...params, arguments: 'wrong' }
+        const expected = yield* plain.execute(
+          ToolCall.make({ id: 'call-1', name: 'work', params: invalid })
+        )
+        expect(expected).toMatchObject({
+          isError: true,
+          structuredContent: {
+            type: 'model_visible_tool_error',
+            tool: 'work',
+            reason: 'validation',
+            message: expected.content
+          }
+        })
+        for (const mode of ['foreground', 'background']) {
+          const actual = yield* activated.execute(request(mode, invalid)).pipe(Effect.result)
+          expect(actual).toMatchObject({ _tag: 'Success', success: expected })
+        }
+        if (custom) {
+          expect(expected.content).toBe('Please fix business input')
+          expect(messages).toHaveLength(3)
+        }
+      }
+      expect(effects).toBe(0)
+    })
+)
+
+it.effect(
+  'does not convert raw validation or host admission ToolErrors into makeTool structured errors',
+  () =>
+    Effect.gen(function* () {
+      let business = 0
+      let admissions = 0
+      const rawError = new ToolError({
+        tool: 'work',
+        cause: 'validation',
+        message: 'raw policy validation'
+      })
+      const hostError = new ToolError({
+        tool: 'work',
+        cause: 'validation',
+        message: 'host admission validation'
+      })
+      const raw: ToolRegistration<unknown> = {
+        def: ToolDef.make({ name: 'work', description: '', parameters: {}, background: true }),
+        access: 'write',
+        validate: () => Effect.fail(rawError),
+        execute: ({ call }) => {
+          business++
+          return inline(call)
+        }
+      }
+      const rawSet = yield* resolve(raw, {
+        accept: () => {
+          admissions++
+          return Effect.succeed(receipt)
+        }
+      })
+      for (const mode of ['foreground', 'background']) {
+        expect(yield* rawSet.execute(request(mode)).pipe(Effect.result)).toMatchObject({
+          _tag: 'Failure',
+          failure: rawError
+        })
+      }
+      expect(admissions).toBe(0)
+      const set = yield* resolve(
+        registration(call => {
+          business++
+          return inline(call)
+        }),
+        {
+          accept: () => {
+            admissions++
+            return Effect.fail(hostError)
+          }
+        }
+      )
+      expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
+        _tag: 'Failure',
+        failure: hostError
+      })
+      expect(admissions).toBe(1)
+      expect(business).toBe(0)
+    })
+)

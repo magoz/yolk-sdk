@@ -144,6 +144,10 @@ export const isActiveToolRun = (run: AgentToolRun) =>
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
   runs.filter(run => run._tag === 'Completed')
 
+// Retention is not completion: an acknowledgement remains replay-fenced between turns.
+const retainedSettledToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
+  runs.filter(run => run._tag === 'Completed' || run._tag === 'Accepted')
+
 export const toolRunsFromHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
 ): ReadonlyArray<AgentToolRun> =>
@@ -271,11 +275,45 @@ export const applyAgentEventWithOptions = (
   return rememberEvent(applyAgentEventUnchecked(state, event, nowMs), event)
 }
 
+const activeEventToolCallId = (event: AgentEvent): string | undefined => {
+  switch (event._tag) {
+    case 'ToolInputStart':
+    case 'ToolInputDelta':
+      return event.id
+    case 'ToolInputEnd':
+    case 'ToolExecutionStarted':
+    case 'ToolApprovalRequested':
+      return event.call.id
+    case 'QuestionRequested':
+      return event.request.toolCallId
+    default:
+      return undefined
+  }
+}
+
 const applyAgentEventUnchecked = (
   state: AgentClientState,
   event: AgentEvent,
   nowMs: number
 ): AgentClientState => {
+  const activeCallId = activeEventToolCallId(event)
+  const acknowledgesActiveCall = (message: AgentMessage) =>
+    message._tag === 'ToolResult' &&
+    message.toolCallId === activeCallId &&
+    message.acceptance !== undefined
+  if (
+    activeCallId !== undefined &&
+    (state.messages.some(acknowledgesActiveCall) || state.liveMessages.some(acknowledgesActiveCall))
+  ) {
+    // Hydration need not restore transient runs; the transcript itself is a replay fence.
+    return {
+      ...state,
+      toolRuns: state.toolRuns.filter(
+        run => toolRunId(run) !== activeCallId || !isActiveToolRun(run)
+      )
+    }
+  }
+
   switch (event._tag) {
     case 'AgentStart':
       return {
@@ -284,7 +322,7 @@ const applyAgentEventUnchecked = (
         text: '',
         reasoning: '',
         liveMessages: [],
-        toolRuns: completedToolRuns(state.toolRuns),
+        toolRuns: retainedSettledToolRuns(state.toolRuns),
         error: null,
         errorInfo: null,
         retryInfo: null
@@ -425,7 +463,7 @@ const applyAgentEventUnchecked = (
         liveMessages: [],
         text: '',
         reasoning: '',
-        toolRuns: completedToolRuns(state.toolRuns),
+        toolRuns: retainedSettledToolRuns(state.toolRuns),
         retryInfo: null
       }
     case 'AgentAwaitingInput':
@@ -465,7 +503,7 @@ export const submitAgentUserMessage = (
   liveMessages: [],
   text: '',
   reasoning: '',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: null,
   errorInfo: null,
   retryInfo: null,
@@ -479,7 +517,7 @@ export const markAgentError = (
 ): AgentClientState => ({
   ...state,
   status: 'error',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: message,
   errorInfo,
   retryInfo: null
@@ -488,7 +526,7 @@ export const markAgentError = (
 export const markAgentAborted = (state: AgentClientState): AgentClientState => ({
   ...state,
   status: 'aborted',
-  toolRuns: completedToolRuns(state.toolRuns),
+  toolRuns: retainedSettledToolRuns(state.toolRuns),
   error: null,
   errorInfo: null,
   retryInfo: null
