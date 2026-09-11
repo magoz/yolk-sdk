@@ -195,7 +195,11 @@ const main = async () => {
           'for (const symbol of ["ConnectorBinaryHttpClient", "ConnectorBinaryHttpError"]) { if (typeof binary[symbol] !== "function") throw new Error(`Missing binary export: ${symbol}`) }',
           'for (const symbol of ["downloadOneDriveItem", "OneDriveDownloadError", "OneDriveDownloadSource"]) { if (typeof microsoft[symbol] !== "function") throw new Error(`Missing Microsoft export: ${symbol}`) }',
           'if (microsoft.OneDriveDownloadErrorCode === undefined) throw new Error("Missing download error codes")',
-          'if (microsoft.MicrosoftConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host download leaked into default actions")'
+          'if (microsoft.MicrosoftConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host download leaked into default actions")',
+          'const dropbox = await import("@yolk-sdk/connectors/dropbox")',
+          'for (const symbol of ["downloadDropboxFile", "DropboxDownloadError", "DropboxDownloadSource"]) { if (typeof dropbox[symbol] !== "function") throw new Error(`Missing Dropbox export: ${symbol}`) }',
+          'if (dropbox.DropboxDownloadErrorCode === undefined) throw new Error("Missing Dropbox download error codes")',
+          'if (dropbox.DropboxConnector.actions.some(action => /download|content/.test(action.id))) throw new Error("Host Dropbox download leaked into default actions")'
         ].join('\n')
     )
 

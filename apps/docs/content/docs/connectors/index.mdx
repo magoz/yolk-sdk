@@ -97,7 +97,7 @@ Resolve the module with `@yolk-sdk/agent/tools`, pass the tool definitions into 
 | Subpath                                | Use for                                                                              |
 | -------------------------------------- | ------------------------------------------------------------------------------------ |
 | `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth data                                                          |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, and file management                                        |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file management, and host-only file download               |
 | `@yolk-sdk/connectors/email`           | Generic IMAP reads/drafts/message state, POP3 reads, and SMTP submission             |
 | `@yolk-sdk/connectors/figma`           | Figma remote MCP auth data                                                           |
 | `@yolk-sdk/connectors/fortnox`         | Read-only company information, customers, invoices, suppliers, and supplier invoices |
@@ -128,6 +128,10 @@ stay on `onedrive.*` actions. Original file bytes use host-only `downloadOneDriv
 tools still need `CredentialResolver` and `ConnectorHttpClient`. The host still owns
 Entra tenant policy, OAuth callbacks, refresh, storage, consent,
 application resource scoping, Exchange grants, network policy, and file materialization.
+
+Dropbox follows the same split: `dropbox.*` actions cover discovery, metadata, and file management,
+while original file bytes use host-only `downloadDropboxFile` with `ConnectorBinaryHttpClient` and
+the `files.content.read` scope. Upload remains unimplemented.
 
 Google's `gmail.get_thread` action returns normalized messages with decoded message text and
 attachment metadata, without raw MIME or attachment content. See the
