@@ -28,6 +28,11 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 ## Env
 
 - App env files live under `examples/next`: `.env.local`, `.env.test`, `.env.example`.
+- Keep `.vercel` linking files here. Root `package.json` sets `provisionEnv.appDir` to `examples/next`.
+- Preferred worktree setup: `provision-env --repo <worktree> --database` from any directory. It pulls Vercel Development into `.env.local` and the custom `test` environment into `.env.test`, then overlays isolated Neon branches. Do not assign `PORT`; Portless owns it.
+- Follow [the provisioning runbook](README.md) for prerequisites, the owner-approved testing-only Neon parent named `production`, lease verification/renewal/release, and shared-service boundaries. Reconfirm clone approval if the app gains real production data or the configured parent changes.
+- Provisioning does not prepare schemas. Verify the disposable lease and obtain DB-operation approval first; `pnpm test:db:push`, `pnpm test:run`, and `pnpm test:e2e*` can drop the test public schema. Do not use them as read-only provisioning checks.
+- Manual fallback: `cp examples/next/.env.example examples/next/.env.local`.
 - DB-backed app tests load `.env.test`; root `pnpm test:run` pushes the test schema first, and DB-dependent tests skip when `DATABASE_URL` is absent.
 - Effect app/services use `Config.*`; map config errors around the owning `Effect.gen` block.
 - Direct `process.env` is limited to app config, `lib/dotenv.ts`, Playwright setup/fixtures/spec skips, property-test helpers, DB scripts, and synchronous SDK callbacks such as `TelemetryLayer`.
@@ -35,6 +40,7 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 
 ## App Notes
 
+- Auth and Next dev-origin checks use validated `PORTLESS_URL` only in `NODE_ENV=development`; see [Portless origins](README.md#portless-origins). Keep deployed/static fallback and fixed-port E2E behavior intact; never trust arbitrary request origins.
 - React Compiler is enabled.
 - PostHog is proxied through `/ph/*`.
 - Drizzle v1 RC uses the Effect-native driver.

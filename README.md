@@ -50,6 +50,19 @@ Release note: GitHub Actions publishes through npm trusted publishing. Provenanc
 
 ## Setup
 
+Preferred worktree setup uses the operator-installed provisioner. Root `package.json` sets `provisionEnv.appDir` to `examples/next`, so env files and the Vercel link land in the Next example:
+
+```bash
+provision-env --repo "$PWD" --database
+```
+
+See the [Next example provisioning runbook](examples/next/README.md) for Vercel prerequisites,
+the approved testing-only baseline, seven-day dev/test leases, verification and cleanup.
+Schema preparation is separate and requires checking the target database first; provisioning
+alone does not prove the app is ready to run. Start with `pnpm dev` after setup.
+
+Manual fallback:
+
 ```bash
 pnpm install
 cp examples/next/.env.example examples/next/.env.local

@@ -39,6 +39,7 @@ unique accessible name instead of using positional selectors.
 
 1. `pnpm test:e2e*` delegates to `@yolk-example/next`.
 2. `examples/next/playwright.config.ts` loads only `.env.test` via `examples/next/lib/dotenv`.
+   `provision-env --database` writes that file from Vercel's custom `test` environment and overlays a disposable database.
 3. The app starts on fixed `E2E_PORT`/default `41773`; portless is intentionally not used.
 4. `global-setup.ts` resets DB, creates deterministic test user/session, and sets `TEST_SESSION_TOKEN`.
 5. `fixtures.ts` creates test-scoped authenticated contexts.

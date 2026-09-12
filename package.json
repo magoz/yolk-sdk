@@ -4,6 +4,9 @@
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.0.9",
+  "provisionEnv": {
+    "appDir": "examples/next"
+  },
   "scripts": {
     "dev": "portless",
     "dev:app": "pnpm --filter @yolk-example/next dev",
