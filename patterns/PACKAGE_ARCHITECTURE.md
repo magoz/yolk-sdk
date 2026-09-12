@@ -79,7 +79,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
-@yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop}; no app/auth/UI/product policy
+@yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop,compaction}; no app/auth/UI/product policy
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect
@@ -118,7 +118,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents agent core subpaths from importing knowledge, MCP, retired package names, `@yolk-sdk/agent/react`, Next, React, or Node builtins. `@yolk-sdk/agent/react` and `@yolk-sdk/agent/voice/react` are the only React-using subpaths.
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
-- Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node except `packages/harness/src/outcome.ts`, which may import `@yolk-sdk/agent/{loop,protocol}`.
+- Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node except `packages/harness/src/outcome.ts`, which may import `@yolk-sdk/agent/{loop,protocol,compaction}`.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 

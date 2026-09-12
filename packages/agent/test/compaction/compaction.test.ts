@@ -249,14 +249,17 @@ describe('agent compaction', () => {
         AssistantTextPart.make({ content: 'done' })
       ]
     })
-    const formatted = formatAgentMessagesForCompaction([
-      user('hello'),
-      assistantMessage,
-      ToolResultMessage.make({
-        toolCallId: 'call_1',
-        content: 'result text that will truncate'
-      })
-    ], { maxToolOutputCharacters: 16 })
+    const formatted = formatAgentMessagesForCompaction(
+      [
+        user('hello'),
+        assistantMessage,
+        ToolResultMessage.make({
+          toolCallId: 'call_1',
+          content: 'result text that will truncate'
+        })
+      ],
+      { maxToolOutputCharacters: 16 }
+    )
 
     expect(formatAgentMessageForCompaction(user('hello'))).toBe('[User]: hello')
     expect(formatted).toContain('[Assistant]: I will look')
@@ -372,6 +375,33 @@ describe('agent compaction', () => {
 
       expect(error).toBe(overflow)
       expect(requests).toEqual([original, compacted])
+    })
+  )
+
+  it.effect('does not compact after provider output has started', () =>
+    Effect.gen(function* () {
+      const original = [user('original')]
+      const overflow = contextOverflowError()
+      let compactCalls = 0
+      const retryProvider = yield* makeContextOverflowRetryProvider({
+        provider: {
+          stream: () =>
+            Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(
+              Stream.concat(Stream.fail(overflow))
+            )
+        },
+        compact: () => {
+          compactCalls += 1
+          return Effect.succeed({ _tag: 'Compacted', messages: [user('checkpoint')] })
+        }
+      })
+
+      const error = yield* retryProvider
+        .stream({ messages: original, tools: [], model: 'test', systemPrompt: 'test' })
+        .pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toBe(overflow)
+      expect(compactCalls).toBe(0)
     })
   )
 })

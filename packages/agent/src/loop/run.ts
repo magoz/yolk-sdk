@@ -891,6 +891,17 @@ const validateTurnCompletion = (
   const toolCalls = collectToolCalls(events)
   const stopReason: TurnCompletion['stopReason'] = toolCalls.length === 0 ? 'stop' : 'tool_use'
 
+  if (doneEvents.length === 0) {
+    return Effect.fail(
+      new LLMError({
+        cause: 'invalid_response',
+        message: 'Expected exactly one LLM done event, received 0',
+        retryable: false,
+        responseIssue: 'missing_done'
+      })
+    )
+  }
+
   if (doneEvents.length !== 1) {
     return Effect.fail(
       new LLMError({

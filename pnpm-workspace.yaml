@@ -29,5 +29,3 @@ allowBuilds:
   workerd: true
 overrides:
   '@effect/platform-node-shared': 4.0.0-beta.80
-patchedDependencies:
-  alchemy@2.0.0-beta.36: patches/alchemy@2.0.0-beta.36.patch

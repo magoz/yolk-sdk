@@ -33,14 +33,15 @@ import {
 
 import {
   AbortError,
+  collectModelTurn,
   decorateLLMProvider,
   LLMError,
   prepareToolBatch,
+  runModelTurn,
   runToolBatch,
   ToolError,
   ToolExecutor
 } from '@yolk-sdk/agent/loop'
-import { attemptModelTurn } from '@yolk-sdk/harness/outcome'
 
 import { AppLayer } from '@/lib/layers'
 
@@ -186,9 +187,9 @@ export async function runAgentWorkflowModelStep(input: {
         assistantMessage: currentAssistantMessage,
         toolCalls: currentToolCalls,
         usage: currentUsage,
-        needsContinuation
-      } = yield* attemptModelTurn(
-        {
+        stopReason
+      } = yield* collectModelTurn(
+        runModelTurn({
           messages: runtime.input.messages,
           systemPrompt: runtime.config.systemPrompt,
           tools: runtime.config.tools,
@@ -196,7 +197,7 @@ export async function runAgentWorkflowModelStep(input: {
           capabilities: runtime.config.capabilities,
           model: runtime.config.model,
           turn: input.state.turn
-        },
+        }),
         {
           initialUsage,
           onEvent: event =>
@@ -230,6 +231,7 @@ export async function runAgentWorkflowModelStep(input: {
           })).pipe(Layer.provideMerge(runtime.layer))
         )
       )
+      const needsContinuation = stopReason === 'tool_use'
       const nextCreatedMessages =
         currentAssistantMessage === undefined
           ? createdMessages

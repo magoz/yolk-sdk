@@ -43,11 +43,19 @@ export {
   truncateSummaryPreview
 } from './summary.ts'
 export type { CompactionMessageFormatOptions, PreviewSummaryMessageOptions } from './summary.ts'
-export { makeContextOverflowRetryProvider } from './retry.ts'
+export {
+  applyOverflowCompaction,
+  isOverflowCompactionAttemptCount,
+  makeContextOverflowRetryProvider,
+  overflowCompactionAttemptAllowed,
+  overflowCompactionMayRun,
+  overflowCompactionMaxAttempts
+} from './retry.ts'
 export type {
   ContextOverflowRetryCompactionResult,
   ContextOverflowRetryCompactor,
-  ContextOverflowRetryProviderInput
+  ContextOverflowRetryProviderInput,
+  OverflowCompactionDecision
 } from './retry.ts'
 export {
   applyCompactionPlan,
