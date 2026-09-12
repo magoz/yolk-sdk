@@ -20,11 +20,11 @@ decoration, not hooks. There is no `World`.
 ## Boundaries
 
 - Core (coordinator/store/inbox/driver) is Effect only. No Next, React, Node builtins, DB, or auth.
-- Only `src/outcome.ts` may import `@yolk-sdk/agent/{loop,protocol}`.
+- Only `src/outcome.ts` may import `@yolk-sdk/agent/{loop,protocol,compaction}`.
 - Do not model users, teams, orgs, billing, or product permissions. Run ids are opaque strings.
 - Hosts own tool catalogs, prompts, auth, concrete Store/Inbox adapters, and `'use workflow'` files.
 - `@yolk-sdk/vercel-workflows` stays protocol-free; a Vercel driver (later) wraps it, it does not import harness protocol types.
-- Durable compaction is a host/harness _step_, not `ContextTransformer`. Do not persist transformer checkpoints. Overflow before output may return `Compacted` when the host supplies `compact`; overflow after output is terminal. In-process silent retry still uses `makeContextOverflowRetryProvider` on the provider Layer.
+- Durable compaction is a host/harness _step_, not `ContextTransformer`. Do not persist transformer checkpoints. Overflow before published output may return `Compacted` when the host supplies `compact` and `overflowCompactionAttempt` is still under budget (`0` by default, compact once). `Compacted` returns the incremented count for the host to persist with the compacted messages and pass on the next attempt; omitting or resetting the count has no cross-invocation guarantee. Overflow after output, or after the budget is spent, is terminal. In-process silent retry still uses `makeContextOverflowRetryProvider` on the provider Layer. Do not install both on one path.
 
 ## Design rules
 
@@ -35,3 +35,5 @@ decoration, not hooks. There is no `World`.
 - `makeHarness` only merges driver + store + inbox Layers. It is not a compiler.
 - `admit` records an inbox item then wakes the driver. Drain/step execution stays host-provided.
 - `resumeSuspended` increments a durable per-run counter; past `maxResumeAttempts` the claim is released. At-least-once.
+- `attemptModelTurn` classifies one `runModelTurn` invocation after that stream's `LoopConfig.maxRetries` / provider retries. It does not add another retry loop. Hosts that own physical-attempt scheduling should use `maxRetries: 0` and no retry decorator. Incomplete streams (`LLMError.responseIssue === 'missing_done'`) recover as `RecoverFull` / `Continue` without fabricating `retryable: true`. Content-filter and other nonretryable terminals stay failed. `onEvent` sink errors, compact errors (including Abort), and admission Abort are never classified as provider `Retry`/`Continue`. `Continue` keeps partial text/reasoning/completed calls without new message IDs and does not execute tools.
+- `attemptToolBatch` `Completed` continues when tools executed. Pending HITL fences the whole batch; `AwaitingInput` does not invent mixed executed siblings.

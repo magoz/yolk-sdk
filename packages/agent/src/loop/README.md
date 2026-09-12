@@ -7,7 +7,7 @@ Stateless provider-neutral LLM/tool loop.
 - `run` for executing model turns over a protocol transcript.
 - `runModelTurn` / `runToolBatch` for durable hosts that own the step boundary.
 - `LLMProvider`, `ToolExecutor`, `LoopConfig`, and `ContextTransformer` Effect service contracts.
-- `makeAgentLoopLayer` to merge those four services, `decorateLLMProvider` to intercept the provider, and `collectModelTurn` to fold a model-turn stream.
+- `makeAgentLoopLayer` to merge those four services, `decorateLLMProvider` to intercept the provider, and `collectModelTurn` / `collectModelTurnAttempt` to fold a model-turn stream.
 - Assistant text/reasoning/tool-call accumulation helpers.
 - HITL pauses for manual tool approvals and structured questions.
 - Typed loop errors.
@@ -25,7 +25,8 @@ The loop is four Effect Layers plus the stateless run functions:
 - Provide `LLMProvider`, `ToolExecutor`, `ContextTransformer`, and `LoopConfig` with `makeAgentLoopLayer`.
 - Run `run`, `runModelTurn`, or `runToolBatch` against that layer.
 - Intercept by decorating a service (`decorateLLMProvider`), not by registering hooks.
-- Durable hosts fold each `runModelTurn` stream with `collectModelTurn` instead of embedding host I/O in the kernel.
+- Durable hosts fold each `runModelTurn` stream with `collectModelTurn` instead of embedding host I/O in the kernel. `collectModelTurn` success still only finalizes `assistantMessage` from `AssistantMessage` events. Use `collectModelTurnAttempt` when a failed stream must still yield partial text/reasoning/completed calls (`partialAssistantMessage`) and distinguish `onEvent` sink errors from provider failures.
+- A provider stream that ends with zero `Done` events fails as `LLMError` `invalid_response` / `retryable: false` with `responseIssue: 'missing_done'`. Multiple or mismatched `Done` events and provider terminals (content-filter, length, max_tokens) do not set `responseIssue`.
 
 Defaults: identity transformer, `LoopConfig.defaultLayer`, and `ToolExecutor.unavailable` when tools are omitted.
 

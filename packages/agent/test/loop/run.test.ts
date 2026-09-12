@@ -1046,6 +1046,41 @@ describe('run', () => {
     })
   )
 
+  it.effect('fails an empty provider stream as missing_done', () =>
+    Effect.gen(function* () {
+      const provider = Layer.succeed(
+        LLMProvider,
+        LLMProvider.of({
+          stream: () => Stream.empty
+        })
+      )
+
+      const result = yield* run({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux'
+      }).pipe(
+        Stream.runCollect,
+        Effect.provide(
+          Layer.mergeAll(provider, TestToolExecutor.layer({})).pipe(Layer.provideMerge(BaseLayer))
+        ),
+        Effect.result
+      )
+
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: {
+          _tag: 'LLMError',
+          cause: 'invalid_response',
+          retryable: false,
+          responseIssue: 'missing_done',
+          message: 'Expected exactly one LLM done event, received 0'
+        }
+      })
+    })
+  )
+
   it.effect('fails invalid provider stream without done event', () =>
     Effect.gen(function* () {
       const provider = Layer.succeed(
@@ -1073,6 +1108,8 @@ describe('run', () => {
         failure: {
           _tag: 'LLMError',
           cause: 'invalid_response',
+          retryable: false,
+          responseIssue: 'missing_done',
           message: 'Expected exactly one LLM done event, received 0'
         }
       })
@@ -1117,6 +1154,11 @@ describe('run', () => {
           message: 'LLM done reason must be tool_use'
         }
       })
+      if (result._tag === 'Failure') {
+        expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
+          undefined
+        )
+      }
     })
   )
 

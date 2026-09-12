@@ -8,6 +8,8 @@ import {
   type HitlRequest
 } from '@yolk-sdk/agent/protocol'
 import {
+  collectModelTurnAttempt,
+  LLMError,
   runModelTurn,
   runToolBatch,
   type AgentLoopError,
@@ -19,6 +21,10 @@ import {
   type ToolBatchConfig,
   type ToolExecutor
 } from '@yolk-sdk/agent/loop'
+import {
+  applyOverflowCompaction,
+  isOverflowCompactionAttemptCount
+} from '@yolk-sdk/agent/compaction'
 
 export type OverflowCompactionResult =
   | {
@@ -29,56 +35,54 @@ export type OverflowCompactionResult =
       readonly _tag: 'Skipped'
     }
 
-export type StepOutcome =
-  | ({ readonly _tag: 'Completed'; readonly needsContinuation: boolean } & ModelTurnResult)
-  | {
-      readonly _tag: 'AwaitingInput'
-      readonly requests: ReadonlyArray<HitlRequest>
-      readonly usage: AgentUsage
-    }
+export type CompletedTurn = {
+  readonly _tag: 'Completed'
+  readonly needsContinuation: boolean
+} & ModelTurnResult
+
+export type ModelTurnOutcome =
+  | CompletedTurn
   | { readonly _tag: 'Retry'; readonly error: AgentLoopError }
   | ({ readonly _tag: 'Continue'; readonly error: AgentLoopError } & ModelTurnResult)
   | { readonly _tag: 'RecoverFull'; readonly error: AgentLoopError }
   | {
       readonly _tag: 'Compacted'
       readonly messages: ReadonlyArray<AgentMessage>
+      readonly overflowCompactionAttempt: number
     }
 
-const completedOutcome = (
-  result: ModelTurnResult
-): Extract<StepOutcome, { readonly _tag: 'Completed' }> => ({
+export type ToolBatchOutcome =
+  | CompletedTurn
+  | {
+      readonly _tag: 'AwaitingInput'
+      readonly requests: ReadonlyArray<HitlRequest>
+      readonly usage: AgentUsage
+    }
+
+export type StepOutcome = ModelTurnOutcome | ToolBatchOutcome
+
+const completedOutcome = (result: ModelTurnResult): CompletedTurn => ({
   _tag: 'Completed',
   needsContinuation: result.stopReason === 'tool_use',
-  ...result
+  assistantMessage: result.assistantMessage,
+  toolCalls: result.toolCalls,
+  usage: result.usage,
+  stopReason: result.stopReason
 })
 
-const emptyTurn = (initialUsage?: AgentUsage): ModelTurnResult => ({
-  assistantMessage: undefined,
-  toolCalls: [],
-  usage: initialUsage ?? zeroAgentUsage,
-  stopReason: 'stop'
+const modelTurnResult = (result: ModelTurnResult): ModelTurnResult => ({
+  assistantMessage: result.assistantMessage,
+  toolCalls: result.toolCalls,
+  usage: result.usage,
+  stopReason: result.stopReason
 })
 
-const applyModelTurnEvent = (acc: ModelTurnResult, event: AgentEvent): ModelTurnResult => {
-  switch (event._tag) {
-    case 'AssistantMessage':
-      return { ...acc, assistantMessage: event.message }
-    case 'ToolInputEnd':
-      return { ...acc, toolCalls: [...acc.toolCalls, event.call] }
-    case 'TurnEnd':
-      return { ...acc, stopReason: event.reason }
-    case 'UsageUpdate':
-      return { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
-    default:
-      return acc
-  }
-}
-
-const eventStartsOutput = (event: AgentEvent) =>
-  event._tag === 'LLMTextDelta' ||
-  event._tag === 'AssistantMessage' ||
-  event._tag === 'ToolInputStart' ||
-  event._tag === 'ToolInputEnd'
+const invalidOverflowCompactionAttemptError = () =>
+  new LLMError({
+    cause: 'validation_error',
+    message: 'overflowCompactionAttempt must be a finite integer >= 0',
+    retryable: false
+  })
 
 const isAgentLoopError = (error: unknown): error is AgentLoopError => {
   if (typeof error !== 'object' || error === null || !('_tag' in error)) {
@@ -98,6 +102,9 @@ const isOverflow = (error: AgentLoopError) =>
   (error._tag === 'LLMError' || error._tag === 'ContextTransformError') &&
   error.cause === 'context_overflow'
 
+const isMissingDone = (error: AgentLoopError) =>
+  error._tag === 'LLMError' && error.responseIssue === 'missing_done'
+
 const isRetryableLlm = (
   error: AgentLoopError
 ): error is Extract<AgentLoopError, { _tag: 'LLMError' }> =>
@@ -108,24 +115,44 @@ const classifyModelTurnFailure = <E2, R2>(input: {
   readonly collected: ModelTurnResult
   readonly outputStarted: boolean
   readonly messages: ReadonlyArray<AgentMessage>
+  readonly overflowCompactionAttempt: number
   readonly compact?: (
     messages: ReadonlyArray<AgentMessage>
   ) => Effect.Effect<OverflowCompactionResult, E2, R2>
-}): Effect.Effect<StepOutcome, AgentLoopError | E2, R2> => {
+}): Effect.Effect<ModelTurnOutcome, AgentLoopError | E2, R2> => {
   if (isOverflow(input.error)) {
-    if (input.outputStarted || input.compact === undefined) {
+    if (input.compact === undefined) {
       return Effect.fail(input.error)
     }
 
-    return input.compact(input.messages).pipe(
-      Effect.matchEffect({
-        onFailure: () => Effect.fail(input.error),
-        onSuccess: result =>
-          result._tag === 'Compacted'
-            ? Effect.succeed({ _tag: 'Compacted', messages: result.messages })
-            : Effect.fail(input.error)
-      })
+    return applyOverflowCompaction({
+      compact: input.compact,
+      messages: input.messages,
+      attempt: input.overflowCompactionAttempt,
+      outputStarted: input.outputStarted
+    }).pipe(
+      Effect.flatMap(result =>
+        result._tag === 'Compacted'
+          ? Effect.succeed({
+              _tag: 'Compacted' as const,
+              messages: result.messages,
+              overflowCompactionAttempt: input.overflowCompactionAttempt + 1
+            })
+          : Effect.fail(input.error)
+      )
     )
+  }
+
+  if (isMissingDone(input.error) && !input.outputStarted) {
+    return Effect.succeed({ _tag: 'RecoverFull', error: input.error })
+  }
+
+  if (isMissingDone(input.error) && input.outputStarted) {
+    return Effect.succeed({
+      _tag: 'Continue',
+      error: input.error,
+      ...modelTurnResult(input.collected)
+    })
   }
 
   if (isRetryableLlm(input.error) && !input.outputStarted) {
@@ -136,7 +163,11 @@ const classifyModelTurnFailure = <E2, R2>(input: {
   }
 
   if (isRetryableLlm(input.error) && input.outputStarted) {
-    return Effect.succeed({ _tag: 'Continue', error: input.error, ...input.collected })
+    return Effect.succeed({
+      _tag: 'Continue',
+      error: input.error,
+      ...modelTurnResult(input.collected)
+    })
   }
 
   return Effect.fail(input.error)
@@ -147,49 +178,60 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
   options?: {
     readonly onEvent?: (event: AgentEvent) => Effect.Effect<void, E2, R2>
     readonly initialUsage?: AgentUsage
+    readonly overflowCompactionAttempt?: number
     readonly compact?: (
       messages: ReadonlyArray<AgentMessage>
     ) => Effect.Effect<OverflowCompactionResult, E2, R2>
   }
 ): Effect.Effect<
-  StepOutcome,
+  ModelTurnOutcome,
   AgentLoopError | E2,
   ContextTransformer | LLMProvider | LoopConfig | R2
-> => {
-  const onEvent = options?.onEvent
-  let collected = emptyTurn(options?.initialUsage)
-  let outputStarted = false
+> =>
+  Effect.gen(function* () {
+    const overflowCompactionAttempt = options?.overflowCompactionAttempt ?? 0
+    if (!isOverflowCompactionAttemptCount(overflowCompactionAttempt)) {
+      return yield* Effect.fail(invalidOverflowCompactionAttemptError())
+    }
 
-  return runModelTurn(config).pipe(
-    Stream.runFoldEffect((): ModelTurnResult => emptyTurn(options?.initialUsage), (acc, event) => {
-      const next = applyModelTurnEvent(acc, event)
-      collected = next
-      if (eventStartsOutput(event)) {
-        outputStarted = true
-      }
-      return onEvent === undefined ? Effect.succeed(next) : onEvent(event).pipe(Effect.as(next))
-    }),
-    Effect.map(completedOutcome),
-    Effect.catch((error: AgentLoopError | E2) =>
-      isAgentLoopError(error)
-        ? classifyModelTurnFailure({
-            error,
-            collected,
-            outputStarted,
-            messages: config.messages,
-            compact: options?.compact
-          })
-        : Effect.fail(error)
-    )
-  )
-}
+    const outcome = yield* collectModelTurnAttempt(runModelTurn(config), {
+      onEvent: options?.onEvent,
+      initialUsage: options?.initialUsage
+    })
+
+    switch (outcome._tag) {
+      case 'Collected':
+        return completedOutcome(outcome.collection)
+      case 'SinkFailed':
+        return yield* Effect.fail(outcome.error)
+      case 'StreamFailed':
+        if (!isAgentLoopError(outcome.error)) {
+          return yield* Effect.fail(outcome.error)
+        }
+        return yield* classifyModelTurnFailure({
+          error: outcome.error,
+          collected: {
+            assistantMessage:
+              outcome.collection.assistantMessage ??
+              outcome.collection.partialAssistantMessage,
+            toolCalls: outcome.collection.toolCalls,
+            usage: outcome.collection.usage,
+            stopReason: outcome.collection.stopReason
+          },
+          outputStarted: outcome.collection.outputStarted,
+          messages: config.messages,
+          overflowCompactionAttempt,
+          compact: options?.compact
+        })
+    }
+  })
 
 export const attemptToolBatch = <E2 = never, R2 = never>(
   config: ToolBatchConfig,
   options?: {
     readonly onEvent?: (event: AgentEvent) => Effect.Effect<void, E2, R2>
   }
-): Effect.Effect<StepOutcome, AgentLoopError | E2, LoopConfig | ToolExecutor | R2> => {
+): Effect.Effect<ToolBatchOutcome, AgentLoopError | E2, LoopConfig | ToolExecutor | R2> => {
   const onEvent = options?.onEvent
 
   return runToolBatch(config).pipe(
@@ -215,15 +257,16 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
         return onEvent === undefined ? Effect.succeed(next) : onEvent(event).pipe(Effect.as(next))
       }
     ),
-    Effect.map((result): StepOutcome => {
+    Effect.map((result): ToolBatchOutcome => {
       if (result.requests.length === 0) {
+        const needsContinuation = result.toolCalls.length > 0
         return {
           _tag: 'Completed',
-          needsContinuation: false,
+          needsContinuation,
           assistantMessage: undefined,
           toolCalls: result.toolCalls,
           usage: result.usage,
-          stopReason: 'stop'
+          stopReason: needsContinuation ? 'tool_use' : 'stop'
         }
       }
       return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }

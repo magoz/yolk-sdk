@@ -89,13 +89,11 @@ test('voice mode waits for connected WebRTC transport before live', async ({ aut
   await authedPage.goto('/agent/next')
   await expect(authedPage.getByLabel('Agent prompt')).toHaveCount(1, { timeout: 15_000 })
   await authedPage.getByRole('button', { name: 'Activity' }).click()
-  await authedPage.getByRole('button', { name: 'Start voice mode' }).click()
+  await authedPage.getByRole('button', { name: 'Start realtime voice' }).click()
 
-  await expect(authedPage.getByText('Voice session opened')).toBeVisible({ timeout: 15_000 })
-  await expect(authedPage.getByText('voice connecting')).toHaveCount(2)
+  await expect(authedPage.getByText('voice connecting')).toHaveCount(2, { timeout: 15_000 })
 
   await authedPage.evaluate(() => window.dispatchEvent(new Event('yolk-voice-test-connect')))
 
-  await expect(authedPage.getByText('Voice transport ready')).toBeVisible({ timeout: 15_000 })
-  await expect(authedPage.getByText('voice live')).toHaveCount(2)
+  await expect(authedPage.getByText('voice live')).toHaveCount(2, { timeout: 15_000 })
 })

@@ -10,6 +10,7 @@ export {
   ContextTransformError,
   FauxExhaustedError,
   LLMError,
+  LLMResponseIssue,
   ToolError
 } from './error.ts'
 export type { AgentLoopError, LLMProviderError } from './error.ts'
@@ -24,8 +25,12 @@ export {
   LLMToolInputStart,
   LLMUsage
 } from './llm-event.ts'
-export { collectModelTurn } from './collect.ts'
-export type { ModelTurnResult } from './collect.ts'
+export { collectModelTurn, collectModelTurnAttempt } from './collect.ts'
+export type {
+  CollectModelTurnAttemptResult,
+  ModelTurnCollection,
+  ModelTurnResult
+} from './collect.ts'
 export { decorateLLMProvider, makeAgentLoopLayer } from './layer.ts'
 export { run, runModelTurn, runToolBatch, prepareToolBatch } from './run.ts'
 export type {

@@ -87,6 +87,87 @@ describe('durable object driver', () => {
     })
   )
 
+  it.effect('does not publish in-memory claims when save fails', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+      const layer = makeDurableObjectDriverLayer({
+        load: Ref.get(snapshot),
+        save: () => Effect.die('save failed')
+      })
+
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore
+        const exit = yield* store.claim('run_1').pipe(Effect.exit)
+        expect(exit._tag).toBe('Failure')
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+        expect(yield* Ref.get(snapshot)).toBeUndefined()
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('finishes delayed save+publish before interruption settles', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+      const started = yield* Deferred.make<void>()
+      const cont = yield* Deferred.make<void>()
+      const layer = makeDurableObjectDriverLayer({
+        load: Ref.get(snapshot),
+        save: next =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(cont)),
+            Effect.andThen(Ref.set(snapshot, next))
+          )
+      })
+
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore
+        const fiber = yield* store.claim('run_1').pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+        const interrupting = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
+        expect(yield* store.isClaimed('run_1')).toBe(false)
+        yield* Deferred.succeed(cont, undefined)
+        yield* Fiber.join(interrupting)
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+        yield* store.claim('run_2')
+        expect([...(yield* store.claimed)].sort()).toEqual(['run_1', 'run_2'])
+        expect([...((yield* Ref.get(snapshot))?.claimed ?? [])].sort()).toEqual(['run_1', 'run_2'])
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.effect('cancels a claim waiting for the lock without dropping a committed claim', () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+      const started = yield* Deferred.make<void>()
+      const cont = yield* Deferred.make<void>()
+      const layer = makeDurableObjectDriverLayer({
+        load: Ref.get(snapshot),
+        save: next =>
+          next.claimed.length === 1
+            ? Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Deferred.await(cont)),
+                Effect.andThen(Ref.set(snapshot, next))
+              )
+            : Ref.set(snapshot, next)
+      })
+
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore
+        const first = yield* store.claim('run_1').pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        const waiting = yield* store.claim('run_2').pipe(Effect.forkChild)
+        yield* Fiber.interrupt(waiting)
+        yield* Deferred.succeed(cont, undefined)
+        yield* Fiber.join(first)
+        expect(yield* store.isClaimed('run_1')).toBe(true)
+        expect(yield* store.isClaimed('run_2')).toBe(false)
+        yield* store.claim('run_3')
+        expect([...(yield* store.claimed)].sort()).toEqual(['run_1', 'run_3'])
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
   it.effect('keeps the persisted claim after the driver scope closes', () =>
     Effect.gen(function* () {
       const backing = yield* makeBacking()

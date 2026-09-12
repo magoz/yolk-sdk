@@ -37,7 +37,7 @@ test('uploads image prompt and shows provider capabilities', async ({ authedPage
   await authedPage.getByRole('button', { name: 'Close agent console' }).click()
 
   const fileChooser = authedPage.waitForEvent('filechooser')
-  await authedPage.getByRole('button', { name: 'Attach image' }).click()
+  await authedPage.getByRole('button', { name: 'Attach files' }).click()
   await (await fileChooser).setFiles({ name: 'tiny.png', mimeType: 'image/png', buffer: tinyPng })
 
   await expect(authedPage.getByRole('img', { name: 'Attached image preview' })).toBeVisible()

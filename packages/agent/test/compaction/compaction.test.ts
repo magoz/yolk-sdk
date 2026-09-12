@@ -374,4 +374,29 @@ describe('agent compaction', () => {
       expect(requests).toEqual([original, compacted])
     })
   )
+
+  it.effect('does not compact after provider output has started', () =>
+    Effect.gen(function* () {
+      const original = [user('original')]
+      const overflow = contextOverflowError()
+      let compactCalls = 0
+      const retryProvider = yield* makeContextOverflowRetryProvider({
+        provider: {
+          stream: () =>
+            Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(Stream.concat(Stream.fail(overflow)))
+        },
+        compact: () => {
+          compactCalls += 1
+          return Effect.succeed({ _tag: 'Compacted', messages: [user('checkpoint')] })
+        }
+      })
+
+      const error = yield* retryProvider
+        .stream({ messages: original, tools: [], model: 'test', systemPrompt: 'test' })
+        .pipe(Stream.runCollect, Effect.flip)
+
+      expect(error).toBe(overflow)
+      expect(compactCalls).toBe(0)
+    })
+  )
 })

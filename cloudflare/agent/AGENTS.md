@@ -18,7 +18,7 @@ Cloudflare app for the Yolk durable agent runtime.
 - Keep agent/MCP packages provider-neutral; provider subpaths stay host-runtime agnostic.
 - Route/runtime adapters choose tool modules explicitly.
 - Compose the DO agent loop with `makeAgentLoopLayer({ provider, tools })` plus the Durable Object session event store.
-- Serialize live runs with `@yolk-sdk/harness/driver/durable-object` (`makeDurableObjectDriverLayer`) over DO storage claims. Keep reconnect interrupt of incomplete logs.
+- Own one Driver/RunStore for the DO isolate lifetime via `Layer.buildWithScope` into a manually owned `Scope.make()`. That scope does **not** auto-dispose on hibernation/eviction; closing it would interrupt the coordinator. Keep occupancy Held through driver settlement and CAS-release only the matching admission token. Reconnect bumps epoch, token/socket-matches, and `interrupt({ reason: 'user', awaitSettlement: true })` under the lifecycle gate, then finalizes the incomplete log. Coordinator `settled` callbacks must not take that gate. Live user/HITL overlap stays conflict/409. Close cancels only the admission token whose `socketId` owns the live run.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Bootstrapped Anthropic construction must use `agentTextModelMaxOutputTokens(model)` for required Claude `maxTokens`, with no Worker-owned fallback. ChatGPT Codex rejects `max_output_tokens`, so direct/proxied Codex construction does not accept or send an output-token limit.
 - Centralize provider refresh in Next; DO caches `TokenBrokerResponse` (`provider`, `accessToken`, `expiresAt`, optional `accountId`) only and never stores refresh tokens.

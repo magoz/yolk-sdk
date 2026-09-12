@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && node --experimental-strip-types scripts/alchemy-compat.ts",
+    "compat": "node --experimental-strip-types scripts/alchemy-compat.ts",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "dev": "alchemy dev",
@@ -16,7 +17,7 @@
     "@yolk-sdk/agent": "workspace:^",
     "@yolk-sdk/harness": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",
-    "alchemy": "2.0.0-beta.36",
+    "alchemy": "2.0.0-beta.56",
     "effect": "catalog:"
   },
   "devDependencies": {

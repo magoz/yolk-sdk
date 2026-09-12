@@ -1,5 +1,6 @@
 import * as Cloudflare from 'alchemy/Cloudflare'
-import { Clock, Effect } from 'effect'
+import { Clock, Context, Effect } from 'effect'
+import * as Scope from 'effect/Scope'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -42,7 +43,7 @@ import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-o
 import type { DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
 import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
-import { makeDrainOccupancy } from './drain-occupancy.ts'
+import { makeLiveDrain } from './drain-lifecycle.ts'
 import {
   agentTextModel,
   agentTextModelMaxOutputTokens,
@@ -185,8 +186,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
         put: log => state.storage.put(runtimeEventsStorageKey, log)
       }
-      const occupancy = yield* makeDrainOccupancy()
-      const occupyDrain = occupancy.occupy
+      const instanceScope = yield* Scope.make()
+      const live = yield* Scope.provide(makeLiveDrain(), instanceScope)
       const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
         sendEvent(
           socket,
@@ -196,11 +197,15 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             retryable: false
           })
         )
-      const harnessLayer = makeDurableObjectDriverLayer({
-        load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
-        save: snapshot => state.storage.put(harnessStoreKey, snapshot),
-        drain: () => occupancy.drain
-      })
+      const harnessContext = yield* Layer.buildWithScope(
+        makeDurableObjectDriverLayer({
+          load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
+          save: snapshot => state.storage.put(harnessStoreKey, snapshot),
+          drain: () => live.runHeld
+        }),
+        instanceScope
+      )
+      const driver = Context.get(harnessContext, Driver)
 
       const loadLogOrEmpty = (sessionId: string) =>
         loadRuntimeEventLogOrEmpty(sessionId, runtimeEventLogStorage)
@@ -449,6 +454,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const handleRuntimeAppend = Effect.fnUntraced(function* (
         socket: Cloudflare.DurableWebSocket,
         sessionId: string,
+        socketId: string,
         input: {
           readonly model?: string
           readonly reasoningEffort?: AgentReasoningEffort
@@ -457,15 +463,14 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           | Omit<AppendInputRuntimeRequest, 'runId'>
           | Omit<AppendHitlResponseRuntimeRequest, 'runId'>
       ) {
+        const prepareEpoch = yield* live.beginPrepare()
         const log = yield* loadLogOrEmpty(sessionId)
         const activeRun = latestIncompleteRuntimeRun(log.events)
 
-        const driver = yield* Driver
         if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
           yield* sendConflict(socket)
           return
         }
-
         const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
 
         if (resolvedToolSet._tag === 'Failure') {
@@ -479,39 +484,35 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
-        const accepted = yield* occupyDrain(
-          runRuntime(
-            { ...request, runId: crypto.randomUUID() },
-            {
-              ...runtimeBaseConfig,
-              model,
-              systemPrompt: systemPromptWithSkills(skillset),
-              tools: toolSet.tools,
-              reasoningEffort: input.reasoningEffort
-            }
-          ).pipe(
-            Stream.runForEach(event =>
-              sendEvent(socket, event).pipe(Effect.catch(() => Effect.void))
-            ),
-            Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
-            Effect.catch(error =>
-              sendEvent(socket, toAgentError(error)).pipe(Effect.catch(() => Effect.void))
-            )
-          )
+        const work = runRuntime(
+          { ...request, runId: crypto.randomUUID() },
+          {
+            ...runtimeBaseConfig,
+            model,
+            systemPrompt: systemPromptWithSkills(skillset),
+            tools: toolSet.tools,
+            reasoningEffort: input.reasoningEffort
+          }
+        ).pipe(
+          Stream.runForEach(event => sendEvent(socket, event)),
+          Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
+          Effect.catch(error => sendEvent(socket, toAgentError(error))),
+          Effect.catch(() => Effect.void)
         )
-        if (!accepted) {
+        const started = yield* live.runOwned(prepareEpoch, socketId, work, driver, sessionId)
+        if (started._tag === 'Conflict') {
           yield* sendConflict(socket)
           return
         }
-        yield* driver.run(sessionId)
       })
 
       const handleUserInput = (
         socket: Cloudflare.DurableWebSocket,
         sessionId: string,
+        socketId: string,
         input: UserInput
       ) =>
-        handleRuntimeAppend(socket, sessionId, input, {
+        handleRuntimeAppend(socket, sessionId, socketId, input, {
           _tag: 'AppendInput',
           sessionId,
           input: input.message,
@@ -521,6 +522,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const handleHitlResponse = (
         socket: Cloudflare.DurableWebSocket,
         sessionId: string,
+        socketId: string,
         input: {
           readonly response: HitlResponse
           readonly expectedRevision?: number
@@ -528,7 +530,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           readonly reasoningEffort?: AgentReasoningEffort
         }
       ) =>
-        handleRuntimeAppend(socket, sessionId, input, {
+        handleRuntimeAppend(socket, sessionId, socketId, input, {
           _tag: 'AppendHitlResponse',
           sessionId,
           response: input.response,
@@ -559,7 +561,11 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           const [response, socket] = yield* Cloudflare.upgrade()
           const socketId = crypto.randomUUID()
           const sessionId = state.id.toString()
-          yield* interruptLatestIncompleteRun(sessionId, runtimeEventLogStorage)
+          yield* live.reconnect(
+            driver,
+            sessionId,
+            interruptLatestIncompleteRun(sessionId, runtimeEventLogStorage)
+          )
           const log = yield* loadLogOrEmpty(sessionId)
           const messages = yield* replayHydratedMessages(log)
 
@@ -599,27 +605,25 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             return yield* handleUserInput(
               socket,
               attachment.sessionId,
+              attachment.socketId,
               UserInput.make({ message: UserMessage.make({ content: messageText(message) }) })
-            ).pipe(Effect.provide(harnessLayer))
+            )
           }
 
           const input = decodedInput.success
           if (input._tag === 'UserInput') {
-            yield* handleUserInput(socket, attachment.sessionId, input).pipe(
-              Effect.provide(harnessLayer)
-            )
+            yield* handleUserInput(socket, attachment.sessionId, attachment.socketId, input)
             return
           }
 
-          yield* handleHitlResponse(socket, attachment.sessionId, input).pipe(
-            Effect.provide(harnessLayer)
-          )
+          yield* handleHitlResponse(socket, attachment.sessionId, attachment.socketId, input)
         }),
         webSocketClose: Effect.fnUntraced(function* (socket: Cloudflare.DurableWebSocket) {
           const attachment = socket.deserializeAttachment<SocketAttachment>()
 
           if (attachment !== null) {
             sockets.delete(attachment.socketId)
+            yield* live.closeOwner(attachment.socketId, driver, attachment.sessionId)
           }
         })
       }

@@ -1,3 +1,5 @@
+import { Effect } from 'effect'
+import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AbortError,
@@ -88,4 +90,62 @@ describe('agentLoopErrorToAgentError', () => {
       retryable: false
     })
   })
+})
+
+describe('LLMError', () => {
+  it.effect('round-trips without responseIssue for existing payloads', () =>
+    Effect.gen(function* () {
+      const decoded = yield* Schema.decodeUnknownEffect(LLMError)({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        message: 'truncated',
+        retryable: false
+      })
+      expect(decoded.responseIssue).toBeUndefined()
+
+      const encoded = yield* Schema.encodeUnknownEffect(LLMError)(
+        new LLMError({
+          cause: 'invalid_response',
+          message: 'truncated',
+          retryable: false
+        })
+      )
+      expect(encoded).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false
+      })
+      expect(
+        encoded !== null && typeof encoded === 'object' && 'responseIssue' in encoded
+          ? encoded.responseIssue
+          : undefined
+      ).toBeUndefined()
+    })
+  )
+
+  it.effect('round-trips missing_done responseIssue', () =>
+    Effect.gen(function* () {
+      const error = new LLMError({
+        cause: 'invalid_response',
+        message: 'Expected exactly one LLM done event, received 0',
+        retryable: false,
+        responseIssue: 'missing_done'
+      })
+      const encoded = yield* Schema.encodeUnknownEffect(LLMError)(error)
+      const decoded = yield* Schema.decodeUnknownEffect(LLMError)(encoded)
+      expect(decoded).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false,
+        responseIssue: 'missing_done'
+      })
+      expect(
+        agentLoopErrorToAgentError(decoded)
+      ).toMatchObject({
+        code: 'invalid_response',
+        retryable: false
+      })
+      expect('responseIssue' in agentLoopErrorToAgentError(decoded)).toBe(false)
+    })
+  )
 })

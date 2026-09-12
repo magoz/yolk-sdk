@@ -22,6 +22,32 @@ export const collectReasoning = (events: ReadonlyArray<LLMEvent>) =>
 export const collectToolCalls = (events: ReadonlyArray<LLMEvent>) =>
   events.flatMap(event => (event._tag === 'ToolCall' ? [event.call] : []))
 
+/** Incremental assistant-part reducer. Shared with collect; not a public loop export. */
+export const applyAssistantLlmEvent = (
+  parts: ReadonlyArray<AssistantPart>,
+  event: LLMEvent
+): ReadonlyArray<AssistantPart> => {
+  switch (event._tag) {
+    case 'TextDelta':
+      return appendTextPart(parts, event.text)
+    case 'ReasoningDelta':
+      return appendReasoningPart(parts, event.text)
+    case 'ToolCall':
+      return [...parts, HostToolCallPart.make({ call: event.call })]
+    case 'ProviderToolResult':
+      return [
+        ...parts,
+        ProviderToolCallPart.make({ call: event.call }),
+        ProviderToolResultPart.make({ toolCallId: event.call.id, result: event.result })
+      ]
+    case 'Done':
+    case 'ToolInputDelta':
+    case 'ToolInputStart':
+    case 'Usage':
+      return parts
+  }
+}
+
 const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
@@ -42,27 +68,7 @@ const appendReasoningPart = (parts: ReadonlyArray<AssistantPart>, text: string) 
 }
 
 const accumulateAssistantParts = (events: ReadonlyArray<LLMEvent>) =>
-  events.reduce<ReadonlyArray<AssistantPart>>((parts, event) => {
-    switch (event._tag) {
-      case 'TextDelta':
-        return appendTextPart(parts, event.text)
-      case 'ReasoningDelta':
-        return appendReasoningPart(parts, event.text)
-      case 'ToolCall':
-        return [...parts, HostToolCallPart.make({ call: event.call })]
-      case 'ProviderToolResult':
-        return [
-          ...parts,
-          ProviderToolCallPart.make({ call: event.call }),
-          ProviderToolResultPart.make({ toolCallId: event.call.id, result: event.result })
-        ]
-      case 'Done':
-      case 'ToolInputDelta':
-      case 'ToolInputStart':
-      case 'Usage':
-        return parts
-    }
-  }, [])
+  events.reduce<ReadonlyArray<AssistantPart>>(applyAssistantLlmEvent, [])
 
 export const accumulateAssistantMessage = (events: ReadonlyArray<LLMEvent>) => {
   const parts = accumulateAssistantParts(events)

@@ -131,7 +131,7 @@ const program = run({
 
 Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
 Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
-Durable hosts fold model-turn steps with `collectModelTurn`.
+Durable hosts fold model-turn steps with `collectModelTurn`. Use `collectModelTurnAttempt` when the fold must retain partial output after a failed stream. Kernel incomplete streams (zero `Done` events) set optional `LLMError.responseIssue: 'missing_done'` and stay `invalid_response` / `retryable: false`.
 
 ## OAuth credentials
 
