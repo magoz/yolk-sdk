@@ -129,6 +129,10 @@ const program = run({
 // Provide LLM provider, loop config, context transformer, and tool executor layers in the host app.
 ```
 
+Loop composition is those four Layers plus `run` / `runModelTurn` / `runToolBatch`.
+Intercept by decorating a service (`decorateLLMProvider`), not with hooks.
+Durable hosts fold model-turn steps with `collectModelTurn`.
+
 ## OAuth credentials
 
 `@yolk-sdk/agent/oauth` defines provider-neutral access-token, broker, freshness, and credential-source

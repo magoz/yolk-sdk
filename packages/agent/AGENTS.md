@@ -50,6 +50,7 @@ subpath catalog, dependency direction, physical layout, and tree-shaking constra
 - Keep semantic `ImagePart`/`DocumentPart`/`AudioPart` over generic file parts; capability checks, provider lowering, validation, and UI rendering branch by media kind. Add generic file content only when arbitrary non-media files become first-class.
 - `AgentModelCapabilities` is protocol-only; app/provider config chooses input media support, and loop rejects unsupported input before provider calls.
 - Loop stays stateless: no persistence, sessions, WebSockets/SSE, compaction policy, app context, or provider SDKs.
+- Loop composition is four Layers (`LLMProvider`, `ToolExecutor`, `ContextTransformer`, `LoopConfig`) plus `run` / `runModelTurn` / `runToolBatch`. Interception is decorating a service (`decorateLLMProvider`), not hooks. Durable hosts fold model-turn streams with `collectModelTurn`.
 - Model-produced text is untrusted input: `replaceLoneSurrogates` / `replaceLoneSurrogatesDeep` in protocol harden lone UTF-16 surrogates (unencodable UTF-8); provider request lowering and the realtime client codec apply them to outbound payloads. Storage-specific constraints (e.g. Postgres rejecting NUL) remain host sanitization policy.
 - Provider adapters classify retryable failures, attach safe provider metadata, and normalize raw
   usage. `LLMUsage` events are additive deltas; convert vendor cumulative snapshots before emitting.

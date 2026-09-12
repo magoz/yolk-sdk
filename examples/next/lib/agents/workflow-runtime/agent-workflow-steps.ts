@@ -1,5 +1,5 @@
 import { getWorkflowMetadata, getWritable } from 'workflow'
-import { Cause, Clock, Effect, Ref, Result, Stream } from 'effect'
+import { Cause, Clock, Effect, Layer, Ref, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   makeDurableAgentEventSequencerState,
@@ -15,35 +15,32 @@ import {
   AgentEnd,
   AgentError,
   AgentUsage,
-  AssistantMessageEvent,
   AgentMessage,
   AgentAwaitingInput,
   ToolCall,
   ToolResult,
   HitlRequest,
   HitlResponse,
-  ToolInputEnd,
   ToolResultMessage,
   toolResultMessageFromResult,
   ToolExecutionStarted,
   SubagentStarted,
   SubagentCompleted,
   makeSubagentRunId,
-  TurnEnd,
-  UsageUpdate,
   type AgentEvent,
   zeroAgentUsage
 } from '@yolk-sdk/agent/protocol'
 
 import {
-  runModelTurn,
-  LLMProvider,
-  LLMError,
   AbortError,
-  runToolBatch,
+  collectModelTurn,
+  decorateLLMProvider,
+  LLMError,
   prepareToolBatch,
-  ToolExecutor,
-  ToolError
+  runModelTurn,
+  runToolBatch,
+  ToolError,
+  ToolExecutor
 } from '@yolk-sdk/agent/loop'
 
 import { AppLayer } from '@/lib/layers'
@@ -135,50 +132,6 @@ const decodeStepRequest = (state: SerializableWorkflowState) =>
     return new AgentRouteRequest({ ...request, messages })
   })
 
-const collectModelEvent = (input: {
-  readonly event: AgentEvent
-  readonly workflowRunId: string
-  readonly writer: WritableStreamDefaultWriter<Uint8Array>
-  readonly assistantMessage: Ref.Ref<AgentMessage | undefined>
-  readonly toolCalls: Ref.Ref<ReadonlyArray<ToolCall>>
-  readonly usage: Ref.Ref<AgentUsage>
-  readonly reason: Ref.Ref<'stop' | 'tool_use'>
-  readonly eventSequence: Ref.Ref<number>
-  readonly turn: number
-}) => {
-  const collect = Schema.is(AssistantMessageEvent)(input.event)
-    ? Schema.decodeUnknownEffect(AssistantMessageEvent)(input.event).pipe(
-        Effect.flatMap(event => Ref.set(input.assistantMessage, event.message))
-      )
-    : Schema.is(ToolInputEnd)(input.event)
-      ? Schema.decodeUnknownEffect(ToolInputEnd)(input.event).pipe(
-          Effect.flatMap(event => Ref.update(input.toolCalls, calls => [...calls, event.call]))
-        )
-      : Schema.is(TurnEnd)(input.event)
-        ? Schema.decodeUnknownEffect(TurnEnd)(input.event).pipe(
-            Effect.flatMap(event => Ref.set(input.reason, event.reason))
-          )
-        : Schema.is(UsageUpdate)(input.event)
-          ? Schema.decodeUnknownEffect(UsageUpdate)(input.event).pipe(
-              Effect.flatMap(event =>
-                Ref.update(input.usage, usage => addAgentUsage(usage, event.usage))
-              )
-            )
-          : Effect.void
-
-  return collect.pipe(
-    Effect.andThen(
-      writeSequencedWorkflowEvent({
-        writer: input.writer,
-        event: input.event,
-        workflowRunId: input.workflowRunId,
-        turn: input.turn,
-        eventSequence: input.eventSequence
-      })
-    )
-  )
-}
-
 const orderedToolResultMessages = (results: ReadonlyArray<IndexedToolResultMessage>) =>
   [...results].sort((left, right) => left.index - right.index).map(result => result.message)
 
@@ -227,35 +180,16 @@ export async function runAgentWorkflowModelStep(input: {
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
       const runtime = yield* workflowRuntime(request, context)
       const store = yield* AgentWorkflowStore
-      const assistantMessage = yield* Ref.make<AgentMessage | undefined>(undefined)
-      const toolCalls = yield* Ref.make<ReadonlyArray<ToolCall>>([])
-      const usage = yield* Ref.make(initialUsage)
-      const reason = yield* Ref.make<'stop' | 'tool_use'>('stop')
       const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
-
-      yield* Effect.gen(function* () {
-        const provider = yield* LLMProvider
-        // Stream construction can happen eagerly during retry setup. Admission belongs at
-        // subscription, after the retry delay, before every provider attempt's effects.
-        const fencedProvider: typeof LLMProvider.Service = {
-          stream: request =>
-            Stream.unwrap(
-              assertChildAdmission(context, workflowRunId).pipe(
-                Effect.mapError(error =>
-                  error._tag === 'WorkflowRegistryError' || error._tag === 'WorkflowRunForbidden'
-                    ? new AbortError({ reason: 'user' })
-                    : new LLMError({
-                        cause: 'provider_error',
-                        message: 'Workflow admission unavailable',
-                        retryable: false
-                      })
-                ),
-                Effect.map(() => provider.stream(request)),
-                Effect.provideService(AgentWorkflowStore, store)
-              )
-            )
-        }
-        yield* runModelTurn({
+      // Stream construction can happen eagerly during retry setup. Admission belongs at
+      // subscription, after the retry delay, before every provider attempt's effects.
+      const {
+        assistantMessage: currentAssistantMessage,
+        toolCalls: currentToolCalls,
+        usage: currentUsage,
+        stopReason: currentReason
+      } = yield* collectModelTurn(
+        runModelTurn({
           messages: runtime.input.messages,
           systemPrompt: runtime.config.systemPrompt,
           tools: runtime.config.tools,
@@ -263,28 +197,40 @@ export async function runAgentWorkflowModelStep(input: {
           capabilities: runtime.config.capabilities,
           model: runtime.config.model,
           turn: input.state.turn
-        }).pipe(
-          Stream.runForEach(event =>
-            collectModelEvent({
+        }),
+        {
+          initialUsage,
+          onEvent: event =>
+            writeSequencedWorkflowEvent({
+              writer,
               event,
               workflowRunId,
-              writer,
-              assistantMessage,
-              toolCalls,
-              usage,
-              reason,
-              eventSequence,
-              turn: input.state.turn
+              turn: input.state.turn,
+              eventSequence
             })
-          ),
-          Effect.provideService(LLMProvider, fencedProvider)
+        }
+      ).pipe(
+        Effect.provide(
+          decorateLLMProvider(provider => ({
+            stream: request =>
+              Stream.unwrap(
+                assertChildAdmission(context, workflowRunId).pipe(
+                  Effect.mapError(error =>
+                    error._tag === 'WorkflowRegistryError' || error._tag === 'WorkflowRunForbidden'
+                      ? new AbortError({ reason: 'user' })
+                      : new LLMError({
+                          cause: 'provider_error',
+                          message: 'Workflow admission unavailable',
+                          retryable: false
+                        })
+                  ),
+                  Effect.map(() => provider.stream(request)),
+                  Effect.provideService(AgentWorkflowStore, store)
+                )
+              )
+          })).pipe(Layer.provideMerge(runtime.layer))
         )
-      }).pipe(Effect.provide(runtime.layer))
-
-      const currentAssistantMessage = yield* Ref.get(assistantMessage)
-      const currentToolCalls = yield* Ref.get(toolCalls)
-      const currentUsage = yield* Ref.get(usage)
-      const currentReason = yield* Ref.get(reason)
+      )
       const nextCreatedMessages =
         currentAssistantMessage === undefined
           ? createdMessages

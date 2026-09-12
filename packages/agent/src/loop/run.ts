@@ -59,15 +59,15 @@ import { accumulateAssistantMessage, collectToolCalls } from './accumulator.ts'
 import {
   AbortError,
   LLMError,
-  ToolError,
   type AgentLoopError,
-  type LLMProviderError
+  type LLMProviderError,
+  type ToolError
 } from './error.ts'
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
 import { LoopConfig, type LoopConfigShape } from './services/loop-config.ts'
-import { ToolExecutor } from './services/tool-executor.ts'
+import { ToolExecutor, unavailableToolExecutor } from './services/tool-executor.ts'
 
 export type AgentLoopRunId = string
 
@@ -1241,17 +1241,6 @@ const makePendingToolResumeStream = (
       )
     })
   )
-
-const unavailableToolExecutor: TurnStreamInput['executor'] = {
-  execute: call =>
-    Effect.fail(
-      new ToolError({
-        tool: call.name,
-        message: 'Tool execution is not available in model turn step',
-        cause: 'execution'
-      })
-    )
-}
 
 const makeModelOnlyTurnStream = (
   input: TurnStreamInput

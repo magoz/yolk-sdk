@@ -12,13 +12,7 @@ import {
 } from 'effect/unstable/http'
 import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
 import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
-import {
-  ContextTransformer,
-  LLMDone,
-  LLMProvider,
-  LLMTextDelta,
-  LoopConfig
-} from '@yolk-sdk/agent/loop'
+import { LLMDone, LLMProvider, LLMTextDelta, makeAgentLoopLayer } from '@yolk-sdk/agent/loop'
 import type { ToolExecutor } from '@yolk-sdk/agent/loop'
 import {
   latestIncompleteRuntimeRun,
@@ -422,10 +416,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             ),
             Effect.map(providerLayer =>
               Layer.mergeAll(
-                ContextTransformer.identity,
-                LoopConfig.defaultLayer,
-                providerLayer,
-                toolExecutorLayer,
+                makeAgentLoopLayer({ provider: providerLayer, tools: toolExecutorLayer }),
                 makeDurableObjectSessionEventStoreLayer(sessionId, runtimeEventLogStorage)
               )
             )
