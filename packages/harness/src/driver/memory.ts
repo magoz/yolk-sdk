@@ -1,25 +1,18 @@
 import { Layer } from 'effect'
-import type { Effect } from 'effect'
-import { makeDriverLayer, type Driver } from '../driver.ts'
-import { makeInMemoryInboxLayer } from '../inbox.ts'
-import type { Inbox } from '../inbox.ts'
-import { makeInMemoryRunStoreLayer } from '../store.ts'
-import type { RunStore } from '../store.ts'
-import type { Promotable } from '../coordinator.ts'
+import { makeDriverLayer, type Drain, type Driver } from '../driver.ts'
+import { makeInMemoryInboxLayer, type Inbox } from '../inbox.ts'
+import { makeInMemoryRunStoreLayer, type RunStore } from '../store.ts'
 
 export const makeInMemoryDriverLayer = (options?: {
-  readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+  readonly drain?: Drain
   readonly maxResumeAttempts?: number
-}): Layer.Layer<Driver, never, RunStore> => makeDriverLayer(options)
+}): Layer.Layer<Driver, never, RunStore | Inbox> => makeDriverLayer(options)
 
 export const makeInMemoryHarnessLayer = (options?: {
-  readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+  readonly drain?: Drain
   readonly maxResumeAttempts?: number
-}): Layer.Layer<Driver | RunStore | Inbox> => {
-  const store = makeInMemoryRunStoreLayer()
-  return Layer.mergeAll(
-    makeInMemoryDriverLayer(options).pipe(Layer.provide(store)),
-    store,
-    makeInMemoryInboxLayer()
+}): Layer.Layer<Driver | RunStore | Inbox> =>
+  makeDriverLayer(options).pipe(
+    Layer.provideMerge(makeInMemoryRunStoreLayer()),
+    Layer.provideMerge(makeInMemoryInboxLayer())
   )
-}

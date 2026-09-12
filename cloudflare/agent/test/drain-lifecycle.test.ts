@@ -10,10 +10,9 @@ const makeHarnessLayer = (
   live: { readonly runHeld: Effect.Effect<void> },
   storeLayer: Layer.Layer<RunStore>
 ) =>
-  Layer.mergeAll(
-    makeDriverLayer({ drain: () => live.runHeld }).pipe(Layer.provide(storeLayer)),
-    storeLayer,
-    makeInMemoryInboxLayer()
+  makeDriverLayer({ drain: () => live.runHeld }).pipe(
+    Layer.provide(storeLayer),
+    Layer.provideMerge(makeInMemoryInboxLayer())
   )
 
 const makeDelayedReleaseStoreLayer = (

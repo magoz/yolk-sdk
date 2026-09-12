@@ -18,7 +18,7 @@ pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
 | `@yolk-sdk/harness`                       | Tiny root                                                                                               |
 | `@yolk-sdk/harness/coordinator`           | Process-local doorbell coordinator                                                                      |
 | `@yolk-sdk/harness/store`                 | `RunStore` claim/release                                                                                |
-| `@yolk-sdk/harness/inbox`                 | Admission / steer / queue items                                                                         |
+| `@yolk-sdk/harness/inbox`                 | Admission / steer / queue items; in-memory HITL park tokens (not durable)                               |
 | `@yolk-sdk/harness/driver`                | `Driver` + `makeHarness`                                                                                |
 | `@yolk-sdk/harness/driver/memory`         | In-memory driver for tests                                                                              |
 | `@yolk-sdk/harness/driver/durable-object` | Durable Object storage-backed claims + driver                                                           |
@@ -40,7 +40,18 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
 ```
 
-Hosts still own tools, prompts, auth, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`. There is no Vercel Workflow driver in this package and no hook registry or `World`.
+Hosts still own tools, prompts, auth, HITL payload persistence, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`; that factory's Inbox is still in-memory. There is no Vercel Workflow driver in this package and no hook registry or `World`.
+
+`Driver.pause` / `resumeHitl` / `stop` compose HITL onto the existing coordinator. Inbox items have no payload. Protocol match helpers live in `@yolk-sdk/harness/outcome`. Parked waits are not durable and are not shutdown claims.
+
+### HITL contract
+
+- Hosts persist typed HITL payloads by `itemId`. Inbox stores only opaque generation, request ids, and response item ids.
+- Resume requires the current park generation plus `outcome.matchHitlResponse` / `resumeHitlIfMatched` kind/request/tool-call identity. Mismatch never wakes.
+- All sibling request ids must be answered before continuation. Partial accepts do not start a tool drain.
+- Host drain receives `DrainContext.drainToken` and `readyResponses`. Pause with that token; do not park from a stale token.
+- A successful drain that leased a Ready generation acknowledges and clears those refs. Failure or interruption keeps them (at-least-once). Host side effects must be idempotent.
+- Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
 
 ## Step outcomes
 

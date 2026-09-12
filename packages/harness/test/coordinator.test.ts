@@ -175,4 +175,137 @@ describe('makeCoordinator', () => {
       })
     )
   )
+
+  it.effect('captureRun during stopping waits without starting a successor', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const drains = yield* Ref.make(0)
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const coordinator = yield* makeCoordinator<string, never>({
+          drain: () =>
+            Ref.update(drains, count => count + 1).pipe(
+              Effect.andThen(Ref.get(drains)),
+              Effect.flatMap(count =>
+                count === 1
+                  ? Effect.uninterruptible(
+                      Deferred.succeed(started, undefined).pipe(
+                        Effect.andThen(Deferred.await(release))
+                      )
+                    )
+                  : Effect.void
+              )
+            )
+        })
+
+        yield* coordinator.wake('a')
+        yield* Deferred.await(started)
+        yield* coordinator.interrupt('a')
+        const captured = yield* coordinator.captureRun('a')
+        expect(captured._tag).toBe('Stopping')
+        if (captured._tag !== 'Stopping') return
+        const waiter = yield* captured.awaitSettlement.pipe(Effect.forkChild)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(waiter)
+        yield* coordinator.awaitIdle('a')
+
+        expect(yield* Ref.get(drains)).toBe(1)
+      })
+    )
+  )
+
+  it.effect('captureRun during a blocked natural settled hook joins one execution', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const drains = yield* Ref.make(0)
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const settledEntered = yield* Deferred.make<void>()
+        const settledHold = yield* Deferred.make<void>()
+        const coordinator = yield* makeCoordinator<string, never>({
+          drain: () =>
+            Ref.update(drains, count => count + 1).pipe(
+              Effect.andThen(Deferred.succeed(started, undefined)),
+              Effect.andThen(Deferred.await(release))
+            ),
+          settled: () =>
+            Deferred.succeed(settledEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(settledHold))
+            )
+        })
+
+        yield* coordinator.wake('a')
+        yield* Deferred.await(started)
+        const runner = yield* coordinator.run('a').pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(release, undefined)
+        yield* Deferred.await(settledEntered)
+        const captured = yield* coordinator.captureRun('a')
+        expect(captured._tag).toBe('Joined')
+        expect(yield* Ref.get(drains)).toBe(1)
+        yield* Deferred.succeed(settledHold, undefined)
+        yield* Fiber.join(runner)
+        expect(yield* Ref.get(drains)).toBe(1)
+      })
+    )
+  )
+
+  it.effect('settled callback defect still completes the run waiter', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const coordinator = yield* makeCoordinator<string, never>({
+          drain: () =>
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          settled: () => Effect.die('settled-boom')
+        })
+
+        yield* coordinator.wake('a')
+        yield* Deferred.await(started)
+        yield* Deferred.succeed(release, undefined)
+        yield* coordinator.awaitIdle('a')
+        expect(yield* coordinator.isActive('a')).toBe(false)
+      })
+    )
+  )
+
+  it.effect('run during stopping waits then starts a force=true successor', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const drains = yield* Ref.make(0)
+        const forces = yield* Ref.make<ReadonlyArray<boolean>>([])
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const coordinator = yield* makeCoordinator<string, never>({
+          drain: (_key, force) =>
+            Ref.update(drains, count => count + 1).pipe(
+              Effect.andThen(Ref.update(forces, current => [...current, force])),
+              Effect.andThen(Ref.get(drains)),
+              Effect.flatMap(count =>
+                count === 1
+                  ? Effect.uninterruptible(
+                      Deferred.succeed(started, undefined).pipe(
+                        Effect.andThen(Deferred.await(release))
+                      )
+                    )
+                  : Effect.void
+              )
+            )
+        })
+
+        yield* coordinator.wake('a')
+        yield* Deferred.await(started)
+        yield* coordinator.interrupt('a')
+        const waiter = yield* coordinator.run('a').pipe(Effect.forkChild)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(waiter)
+        yield* coordinator.awaitIdle('a')
+
+        expect(yield* Ref.get(drains)).toBe(2)
+        expect(yield* Ref.get(forces)).toEqual([false, true])
+      })
+    )
+  )
 })

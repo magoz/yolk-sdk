@@ -13,7 +13,8 @@ Repo-wide contract for human-in-the-loop agent pauses. Package owns protocol sem
 | `@yolk-sdk/agent/tools`    | Domain-free `question` tool contract                                                                 |
 | `@yolk-sdk/agent/react`    | Headless waiting/tool/question render state                                                          |
 | `@yolk-sdk/agent/voice`    | Voice approval gating (`handleVoiceToolCall`), controller pause/resume, `AwaitingInput` voice events |
-| App adapters               | Storage, auth, concrete routes, hooks, buttons/forms                                                 |
+| `@yolk-sdk/harness`        | Payload-free park generation, sibling readiness, pause/resume/stop admission                         |
+| App adapters               | Typed HITL payload persistence, auth, concrete routes, hooks, buttons/forms                          |
 
 ## Semantics
 

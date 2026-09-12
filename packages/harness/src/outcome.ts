@@ -5,7 +5,8 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AgentUsage,
-  type HitlRequest
+  type HitlRequest,
+  type HitlResponse
 } from '@yolk-sdk/agent/protocol'
 import {
   collectModelTurnAttempt,
@@ -271,4 +272,45 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
       return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }
     })
   )
+}
+
+export type HitlMatch =
+  | { readonly _tag: 'Match'; readonly requestId: string }
+  | { readonly _tag: 'Mismatch' }
+
+const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) => {
+  switch (response._tag) {
+    case 'ToolApprovalResponse':
+      return (
+        request._tag === 'ToolApprovalRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+    case 'QuestionResponse':
+      return (
+        request._tag === 'QuestionRequest' &&
+        response.requestId === request.requestId &&
+        response.toolCallId === request.toolCallId
+      )
+  }
+}
+
+export const matchHitlResponse = (
+  pending: ReadonlyArray<HitlRequest>,
+  response: HitlResponse
+): HitlMatch => {
+  const matched = pending.find(request => hitlResponseMatchesRequest(response, request))
+  return matched === undefined
+    ? { _tag: 'Mismatch' }
+    : { _tag: 'Match', requestId: matched.requestId }
+}
+
+export const resumeHitlIfMatched = <A, E, R>(input: {
+  readonly pending: ReadonlyArray<HitlRequest>
+  readonly response: HitlResponse
+  readonly resume: (requestId: string) => Effect.Effect<A, E, R>
+}): Effect.Effect<A | { readonly _tag: 'Mismatch' }, E, R> => {
+  const matched = matchHitlResponse(input.pending, input.response)
+  if (matched._tag === 'Mismatch') return Effect.succeed(matched)
+  return input.resume(matched.requestId)
 }
