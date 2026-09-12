@@ -184,6 +184,9 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
+      '@yolk-sdk/harness':
+        specifier: workspace:^
+        version: link:../../packages/harness
       '@yolk-sdk/mcp':
         specifier: workspace:^
         version: link:../../packages/mcp

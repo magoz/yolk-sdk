@@ -49,6 +49,10 @@
       "types": "./src/driver/memory.ts",
       "default": "./src/driver/memory.ts"
     },
+    "./driver/durable-object": {
+      "types": "./src/driver/durable-object.ts",
+      "default": "./src/driver/durable-object.ts"
+    },
     "./outcome": {
       "types": "./src/outcome.ts",
       "default": "./src/outcome.ts"
@@ -95,6 +99,11 @@
         "types": "./dist/driver/memory.d.mts",
         "import": "./dist/driver/memory.mjs",
         "default": "./dist/driver/memory.mjs"
+      },
+      "./driver/durable-object": {
+        "types": "./dist/driver/durable-object.d.mts",
+        "import": "./dist/driver/durable-object.mjs",
+        "default": "./dist/driver/durable-object.mjs"
       },
       "./outcome": {
         "types": "./dist/outcome.d.mts",

@@ -180,6 +180,7 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
       './inbox',
       './driver',
       './driver/memory',
+      './driver/durable-object',
       './outcome'
     ],
     tinyRoot: true

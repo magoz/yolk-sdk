@@ -99,6 +99,7 @@ const packages: ReadonlyArray<PackageShape> = [
       './inbox',
       './driver',
       './driver/memory',
+      './driver/durable-object',
       './outcome'
     ]
   }
