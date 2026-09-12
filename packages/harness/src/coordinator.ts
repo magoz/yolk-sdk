@@ -13,22 +13,47 @@ import type { Exit, Scope } from 'effect'
 /** `"input"` subsumes `"steer"` when coalescing wakes. */
 export type Promotable = 'input' | 'steer'
 
+export type CapturedRun<E> =
+  | { readonly _tag: 'Started'; readonly join: Effect.Effect<void, E> }
+  | { readonly _tag: 'Joined'; readonly join: Effect.Effect<void, E> }
+  | { readonly _tag: 'Stopping'; readonly awaitSettlement: Effect.Effect<void> }
+
+export type StopReceipt =
+  | { readonly _tag: 'Idle' }
+  | { readonly _tag: 'Interrupted' }
+  | { readonly _tag: 'LiveStopping' }
+  | { readonly _tag: 'Settling' }
+
 export type Coordinator<Key, E, Reason = never> = {
   readonly active: Effect.Effect<ReadonlySet<Key>>
   readonly isActive: (key: Key) => Effect.Effect<boolean>
   /** Starts an execution while idle, or joins the active execution. */
   readonly run: (key: Key) => Effect.Effect<void, E>
+  /**
+   * Captures a run waiter without awaiting settlement.
+   * Idle starts force=true (`Started`); an active owner is joined (`Joined`);
+   * a stopping/settling owner yields `Stopping` with a settlement waiter and no start.
+   */
+  readonly captureRun: (key: Key) => Effect.Effect<CapturedRun<E>>
   /** Rings the doorbell: idle starts; active drains again before settling. */
   readonly wake: (key: Key, scope?: Promotable) => Effect.Effect<void>
   /**
    * Stops the active execution and clears its doorbell. No-op when idle.
    * Resolves once interruption is accepted, not when cleanup settles.
+   * First accepted `reason` is kept; use `terminalStop` to escalate.
    */
   readonly interrupt: (
     key: Key,
     reason?: Reason,
     options?: { readonly awaitSettlement?: boolean }
   ) => Effect.Effect<boolean>
+  /**
+   * Terminal stop receipt. Always clears pendingWake. Settling means the owner
+   * is already gone and the settled callback is chosen; Driver may release the
+   * claim under the Inbox gate. LiveStopping/Interrupted leave release to that
+   * owner's future settled callback.
+   */
+  readonly terminalStop: (key: Key, reason: Reason) => Effect.Effect<StopReceipt>
   /** Resolves once no execution is active. Never starts work. */
   readonly awaitIdle: (key: Key) => Effect.Effect<void>
 }
@@ -88,13 +113,10 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           Effect.andThen(Effect.uninterruptible(options.started?.(key) ?? Effect.void)),
           Effect.andThen(loop(key, execution, force)),
           Effect.onExit(exit =>
-            Effect.sync(() => {
+            Effect.suspend(() => {
               execution.owner = undefined
-            }).pipe(
-              Effect.andThen(
-                options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void
-              )
-            )
+              return options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void
+            })
           ),
           Effect.onExit(exit => settle(key, execution, exit)),
           Effect.exit,
@@ -149,6 +171,21 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
             )
           )
         }),
+      captureRun: key =>
+        Effect.sync(() => {
+          const execution = executions.get(key)
+          if (execution === undefined) {
+            const started = start(key, true, 'input')
+            return { _tag: 'Started' as const, join: Deferred.await(started.done) }
+          }
+          if (!execution.stopping) {
+            return { _tag: 'Joined' as const, join: Deferred.await(execution.done) }
+          }
+          return {
+            _tag: 'Stopping' as const,
+            awaitSettlement: Deferred.await(execution.done).pipe(Effect.ignoreCause)
+          }
+        }),
       wake: (key, scope = 'input') =>
         Effect.sync(() => {
           const execution = executions.get(key)
@@ -168,6 +205,21 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
                 : Effect.void
             )
           )
+        }),
+      terminalStop: (key, reason) =>
+        Effect.sync(() => {
+          const execution = executions.get(key)
+          if (execution === undefined) return { _tag: 'Idle' } as const
+          execution.pendingWake = undefined
+          if (execution.owner === undefined) {
+            execution.stopping = true
+            return { _tag: 'Settling' } as const
+          }
+          execution.interruptionReason = reason
+          if (execution.stopping) return { _tag: 'LiveStopping' } as const
+          execution.stopping = true
+          fork(Fiber.interrupt(execution.owner))
+          return { _tag: 'Interrupted' } as const
         }),
       awaitIdle
     }

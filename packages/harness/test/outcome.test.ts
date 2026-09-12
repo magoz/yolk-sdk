@@ -5,6 +5,10 @@ import {
   assistantContent,
   assistantReasoningText,
   ProviderErrorInfo,
+  QuestionAnswer,
+  QuestionResponse,
+  ToolApprovalPolicy,
+  ToolApprovalResponse,
   ToolCall,
   ToolDef,
   ToolResult,
@@ -26,7 +30,12 @@ import {
 } from '@yolk-sdk/agent/loop'
 import { makeContextOverflowRetryProvider } from '@yolk-sdk/agent/compaction'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
-import { attemptModelTurn, attemptToolBatch } from '../src/outcome.ts'
+import {
+  attemptModelTurn,
+  attemptToolBatch,
+  matchHitlResponse,
+  resumeHitlIfMatched
+} from '../src/outcome.ts'
 
 const loopLayer = Layer.mergeAll(ContextTransformer.identity, LoopConfig.defaultLayer)
 const noRetryLoopLayer = Layer.mergeAll(
@@ -770,5 +779,171 @@ describe('attemptToolBatch', () => {
         Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
       )
     )
+  )
+
+  it.effect('matchHitlResponse requires kind, request, and tool-call identity', () =>
+    Effect.gen(function* () {
+      const outcome = yield* attemptToolBatch({
+        calls: [
+          ToolCall.make({
+            id: 'call_1',
+            name: 'weather',
+            params: {}
+          }),
+          ToolCall.make({
+            id: 'question-call',
+            name: 'question',
+            params: {
+              questions: [{ id: 'choice', prompt: 'Pick one', options: [{ id: 'a', label: 'A' }] }]
+            }
+          })
+        ],
+        tools: [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Get weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual' })
+          }),
+          ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
+        ]
+      })
+      expect(outcome._tag).toBe('AwaitingInput')
+      if (outcome._tag !== 'AwaitingInput') return
+      const approval = outcome.requests.find(request => request._tag === 'ToolApprovalRequest')
+      const question = outcome.requests.find(request => request._tag === 'QuestionRequest')
+      expect(approval !== undefined && question !== undefined).toBe(true)
+      if (approval === undefined || question === undefined) return
+
+      expect(
+        matchHitlResponse(
+          outcome.requests,
+          ToolApprovalResponse.make({
+            requestId: approval.requestId,
+            toolCallId: approval.toolCallId,
+            decision: 'approved',
+            source: 'user'
+          })
+        )
+      ).toEqual({ _tag: 'Match', requestId: approval.requestId })
+
+      expect(
+        matchHitlResponse(
+          outcome.requests,
+          ToolApprovalResponse.make({
+            requestId: approval.requestId,
+            toolCallId: 'other-call',
+            decision: 'approved',
+            source: 'user'
+          })
+        )._tag
+      ).toBe('Mismatch')
+
+      expect(
+        matchHitlResponse(
+          outcome.requests,
+          QuestionResponse.make({
+            requestId: question.requestId,
+            toolCallId: question.toolCallId,
+            outcome: 'answered',
+            source: 'user',
+            answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+          })
+        )
+      ).toEqual({ _tag: 'Match', requestId: question.requestId })
+
+      const resumed = yield* Ref.make(false)
+      const skipped = yield* resumeHitlIfMatched({
+        pending: outcome.requests,
+        response: ToolApprovalResponse.make({
+          requestId: 'missing',
+          toolCallId: approval.toolCallId,
+          decision: 'approved',
+          source: 'user'
+        }),
+        resume: () => Ref.set(resumed, true).pipe(Effect.as({ _tag: 'Resumed' as const }))
+      })
+      expect(skipped).toEqual({ _tag: 'Mismatch' })
+      expect(yield* Ref.get(resumed)).toBe(false)
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
+      )
+    )
+  )
+
+  it.effect(
+    'resumes approval and question through matching hitlResponses without mixed execution',
+    () =>
+      Effect.gen(function* () {
+        const calls = [
+          ToolCall.make({ id: 'call_1', name: 'weather', params: {} }),
+          ToolCall.make({
+            id: 'question-call',
+            name: 'question',
+            params: {
+              questions: [{ id: 'choice', prompt: 'Pick one', options: [{ id: 'a', label: 'A' }] }]
+            }
+          })
+        ]
+        const tools = [
+          ToolDef.make({
+            name: 'weather',
+            description: 'Get weather.',
+            parameters: {},
+            approval: ToolApprovalPolicy.make({ mode: 'manual' })
+          }),
+          ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })
+        ]
+        const paused = yield* attemptToolBatch({ calls, tools })
+        expect(paused._tag).toBe('AwaitingInput')
+        if (paused._tag !== 'AwaitingInput') return
+        const approval = paused.requests.find(request => request._tag === 'ToolApprovalRequest')
+        const question = paused.requests.find(request => request._tag === 'QuestionRequest')
+        if (approval === undefined || question === undefined) return
+
+        const partial = yield* attemptToolBatch({
+          calls,
+          tools,
+          hitlResponses: [
+            ToolApprovalResponse.make({
+              requestId: approval.requestId,
+              toolCallId: approval.toolCallId,
+              decision: 'approved',
+              source: 'user'
+            })
+          ]
+        })
+        expect(partial._tag).toBe('AwaitingInput')
+        if (partial._tag !== 'AwaitingInput') return
+        expect('toolCalls' in partial).toBe(false)
+
+        const completed = yield* attemptToolBatch({
+          calls,
+          tools,
+          hitlResponses: [
+            ToolApprovalResponse.make({
+              requestId: approval.requestId,
+              toolCallId: approval.toolCallId,
+              decision: 'approved',
+              source: 'user'
+            }),
+            QuestionResponse.make({
+              requestId: question.requestId,
+              toolCallId: question.toolCallId,
+              outcome: 'answered',
+              source: 'user',
+              answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
+            })
+          ]
+        })
+        expect(completed._tag).toBe('Completed')
+        if (completed._tag !== 'Completed') return
+        expect(completed.toolCalls.some(call => call.id === 'call_1')).toBe(true)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
+        )
+      )
   )
 })
