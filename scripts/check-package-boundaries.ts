@@ -130,6 +130,21 @@ const rules: ReadonlyArray<BoundaryRule> = [
     packageDir: 'packages/sandbox/src',
     forbiddenImports: ['@yolk-sdk/agent'],
     excludedDirs: ['packages/sandbox/src/agent.ts']
+  },
+  {
+    packageDir: 'packages/harness/src',
+    forbiddenImports: [
+      ...retiredImports,
+      '@yolk-sdk/agent',
+      '@yolk-sdk/knowledge',
+      '@yolk-sdk/mcp',
+      '@yolk-sdk/sandbox',
+      '@yolk-sdk/vercel-workflows',
+      'next',
+      'react',
+      'node:'
+    ],
+    excludedDirs: ['packages/harness/src/outcome.ts']
   }
 ]
 

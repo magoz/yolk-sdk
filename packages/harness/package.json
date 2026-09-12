@@ -1,0 +1,116 @@
+{
+  "name": "@yolk-sdk/harness",
+  "version": "0.1.0-canary.76",
+  "description": "Domain-free agent run lifecycle: coordinator, store, inbox, and pluggable drivers.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magoz/yolk-sdk.git",
+    "directory": "packages/harness"
+  },
+  "bugs": {
+    "url": "https://github.com/magoz/yolk-sdk/issues"
+  },
+  "homepage": "https://github.com/magoz/yolk-sdk#readme",
+  "keywords": [
+    "agent",
+    "harness",
+    "lifecycle",
+    "effect"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./coordinator": {
+      "types": "./src/coordinator.ts",
+      "default": "./src/coordinator.ts"
+    },
+    "./store": {
+      "types": "./src/store.ts",
+      "default": "./src/store.ts"
+    },
+    "./inbox": {
+      "types": "./src/inbox.ts",
+      "default": "./src/inbox.ts"
+    },
+    "./driver": {
+      "types": "./src/driver.ts",
+      "default": "./src/driver.ts"
+    },
+    "./driver/memory": {
+      "types": "./src/driver/memory.ts",
+      "default": "./src/driver/memory.ts"
+    },
+    "./outcome": {
+      "types": "./src/outcome.ts",
+      "default": "./src/outcome.ts"
+    }
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "dist/**/*",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./coordinator": {
+        "types": "./dist/coordinator.d.mts",
+        "import": "./dist/coordinator.mjs",
+        "default": "./dist/coordinator.mjs"
+      },
+      "./store": {
+        "types": "./dist/store.d.mts",
+        "import": "./dist/store.mjs",
+        "default": "./dist/store.mjs"
+      },
+      "./inbox": {
+        "types": "./dist/inbox.d.mts",
+        "import": "./dist/inbox.mjs",
+        "default": "./dist/inbox.mjs"
+      },
+      "./driver": {
+        "types": "./dist/driver.d.mts",
+        "import": "./dist/driver.mjs",
+        "default": "./dist/driver.mjs"
+      },
+      "./driver/memory": {
+        "types": "./dist/driver/memory.d.mts",
+        "import": "./dist/driver/memory.mjs",
+        "default": "./dist/driver/memory.mjs"
+      },
+      "./outcome": {
+        "types": "./dist/outcome.d.mts",
+        "import": "./dist/outcome.mjs",
+        "default": "./dist/outcome.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:run": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@yolk-sdk/agent": "workspace:^",
+    "effect": "catalog:"
+  }
+}

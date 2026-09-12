@@ -168,6 +168,21 @@ const packageExportShapes: ReadonlyArray<PackageExportShape> = [
     packageName: '@yolk-sdk/vercel-workflows',
     expectedExports: ['./package.json', '.', './effect', './testing', './workflow'],
     tinyRoot: false
+  },
+  {
+    packageDir: 'packages/harness',
+    packageName: '@yolk-sdk/harness',
+    expectedExports: [
+      './package.json',
+      '.',
+      './coordinator',
+      './store',
+      './inbox',
+      './driver',
+      './driver/memory',
+      './outcome'
+    ],
+    tinyRoot: true
   }
 ]
 

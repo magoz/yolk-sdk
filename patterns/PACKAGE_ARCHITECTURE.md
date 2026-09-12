@@ -51,6 +51,7 @@ metadata.
 - `@yolk-sdk/connectors` is a sibling connector package. Public subpaths: `./agent`, `./afloat`, `./dropbox`, `./email`, `./figma`, `./fortnox`, `./google`, `./linkedin-search`, `./microsoft`, `./notion`, `./r2-storage`, `./telegram`, and `./todoist`.
 - `@yolk-sdk/sandbox` owns sandbox execution plane contracts; `./agent` exports the agent tool, `./vercel` exports Vercel provider code, and `./testing` exports fakes/state-store layers.
 - `@yolk-sdk/vercel-workflows` owns Vercel Workflow orchestration contracts; root and `./workflow` export orchestration APIs, `./effect` exports host-side Effect wrappers, `./testing` exports the `TestWorkflowWorld` behavioral emulator, and hosts own concrete Workflow directives.
+- `@yolk-sdk/harness` owns run lifecycle (coordinator, store, inbox, driver, outcome). Public subpaths: `./coordinator`, `./store`, `./inbox`, `./driver`, `./driver/memory`, and `./outcome`. It does not replace `@yolk-sdk/agent/loop`.
 - OpenAI/Codex, Vercel AI Gateway, Anthropic/Claude, and xAI/Grok provider mechanics live under `@yolk-sdk/agent/providers/*`; Codex, Claude, and Grok also expose best-effort subscription-allowance snapshots from private provider endpoints.
 - Package roots stay tiny; prefer subpath imports for feature APIs.
 
@@ -61,11 +62,13 @@ metadata.
 - MCP internals live under `packages/mcp/src/*`, not separate workspace packages.
 - Sandbox internals live under `packages/sandbox/src/*`, not separate workspace packages.
 - Vercel Workflow internals live under `packages/vercel-workflows/src/*`, not app code.
+- Harness internals live under `packages/harness/src/*`, not app code.
 - Area tests mirror source layout:
   - `packages/agent/test/{protocol,loop,runtime,client,compaction,tools,react,oauth,providers,skillset,voice,property}`
   - `packages/mcp/test/{client,server}`
   - `packages/sandbox/test/{core,agent,vercel}.test.ts`
   - `packages/vercel-workflows/test`
+  - `packages/harness/test`
 
 ## Dependency Direction
 
@@ -76,6 +79,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 @yolk-sdk/connectors -> @yolk-sdk/agent/{protocol,loop,tools} only in ./agent; no app/storage/auth/UI policy
 @yolk-sdk/sandbox root -> Effect only; ./agent -> sandbox core + @yolk-sdk/agent/{tools,protocol,loop}; ./vercel -> sandbox core/state + Effect + @vercel/sandbox via VercelSandboxClient/layer
 @yolk-sdk/vercel-workflows -> workflow runtime APIs + generic durable stream helpers + Effect Workflow client/layer; no @yolk-sdk/agent/protocol or app/auth/provider/tool/storage policy
+@yolk-sdk/harness core -> Effect only; ./outcome -> @yolk-sdk/agent/{protocol,loop}; no app/auth/UI/product policy
 @yolk-sdk/agent/client -> @yolk-sdk/agent/protocol + Effect HTTP/Stream + runtime-only browser WebSocket/Blob/File/FileReader APIs
 @yolk-sdk/agent/react -> @yolk-sdk/agent/client + @yolk-sdk/agent/protocol + Effect + React peer
 @yolk-sdk/agent/compaction -> @yolk-sdk/agent/{loop,protocol} + Effect
@@ -114,6 +118,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents agent core subpaths from importing knowledge, MCP, retired package names, `@yolk-sdk/agent/react`, Next, React, or Node builtins. `@yolk-sdk/agent/react` and `@yolk-sdk/agent/voice/react` are the only React-using subpaths.
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
+- Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node in Phase 1.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 
