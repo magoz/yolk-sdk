@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -85,14 +85,18 @@ const decodeTranscription = Schema.decodeUnknownEffect(VoiceTranscriptionResult)
 const transcribeAudio = (audio: Uint8Array, mimeType: string) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.post('/api/agent/voice/transcribe').pipe(
       HttpClientRequest.setHeaders({ accept: 'application/json', 'content-type': mimeType }),
       HttpClientRequest.bodyUint8Array(audio, mimeType)
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toRequestError('Transcription request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
+
     const payload = yield* okResponse.json.pipe(
       Effect.mapError(toRequestError('Could not parse transcription response'))
     )
@@ -107,20 +111,26 @@ const encodeSpeakBody = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
 const requestSpeech = (text: string): Effect.Effect<SpeechAudio, HoldToSpeakError> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const body = yield* encodeSpeakBody({ text }).pipe(
       Effect.mapError(() => new HoldToSpeakError('Could not encode speech request'))
     )
+
     const request = HttpClientRequest.post('/api/agent/voice/speak').pipe(
       HttpClientRequest.setHeaders({ accept: 'audio/*', 'content-type': 'application/json' }),
       HttpClientRequest.bodyText(body, 'application/json')
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toRequestError('Speech request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
+
     const audio = yield* okResponse.arrayBuffer.pipe(
       Effect.mapError(toRequestError('Could not read speech audio'))
     )
+
     const contentType = okResponse.headers['content-type'] ?? 'audio/mpeg'
 
     return { audio, contentType }
@@ -230,6 +240,7 @@ export const useHoldToSpeak = ({
 
         if (element === null || speechRunIdRef.current !== runId) {
           resolve()
+
           return
         }
 
@@ -238,6 +249,7 @@ export const useHoldToSpeak = ({
         const url = URL.createObjectURL(new Blob([speech.audio], { type: speech.contentType }))
         let settled = false
         const playback: PlaybackCancel = { cancel: () => undefined }
+
         const settle = (error: Error | null) => {
           if (settled) {
             return
@@ -259,6 +271,7 @@ export const useHoldToSpeak = ({
 
           if (error === null) {
             resolve()
+
             return
           }
 
@@ -317,7 +330,7 @@ export const useHoldToSpeak = ({
 
           const outcome = await speechPromise
 
-          if (outcome._tag === 'Failure') {
+          if (Predicate.isTagged(outcome, 'Failure')) {
             throw outcome.error
           }
 
@@ -380,6 +393,7 @@ export const useHoldToSpeak = ({
       navigator.mediaDevices === undefined
     ) {
       callbacksRef.current.onError('This browser cannot record audio.')
+
       return
     }
 
@@ -402,10 +416,12 @@ export const useHoldToSpeak = ({
           }
 
           setStatus('idle')
+
           return
         }
 
         const recorder = new MediaRecorder(stream, { mimeType })
+
         const recording: ActiveRecording = {
           recorder,
           stream,
@@ -434,6 +450,7 @@ export const useHoldToSpeak = ({
 
     if (pending !== null) {
       pending.cancelled = true
+
       return
     }
 
@@ -451,6 +468,7 @@ export const useHoldToSpeak = ({
 
       if (heldForMs < minRecordingMs || recording.chunks.length === 0) {
         setStatus('idle')
+
         return
       }
 

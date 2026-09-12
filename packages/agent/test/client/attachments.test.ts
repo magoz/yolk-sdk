@@ -45,5 +45,6 @@ describe('client attachment helpers', () => {
           filename: 'notes.txt'
         })
       )
-    }))
+    })
+  )
 })

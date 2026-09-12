@@ -11,6 +11,7 @@ import {
 } from '../../src/protocol'
 
 const searchCall = ToolCall.make({ id: 'call_search', name: 'search', params: { query: 'yolk' } })
+
 const fetchCall = ToolCall.make({
   id: 'call_fetch',
   name: 'fetch',
@@ -45,6 +46,7 @@ describe('message transcript helpers', () => {
       ToolResultMessage.make({ toolCallId: searchCall.id, content: 'ok' }),
       UserMessage.make({ content: 'continue' })
     ])
+
     const repairedResult = repaired[2]
 
     expect(repaired.map(message => message._tag)).toEqual([
@@ -53,12 +55,15 @@ describe('message transcript helpers', () => {
       'ToolResult',
       'User'
     ])
-    expect(repairedResult).toMatchObject({
-      _tag: 'ToolResult',
+
+    const expectedRepairedResultFields = {
       toolCallId: fetchCall.id,
       isError: true,
       content: 'Tool fetch did not return a result before the transcript continued.'
-    })
+    }
+
+    expect(repairedResult._tag).toBe('ToolResult')
+    expect(repairedResult).toMatchObject(expectedRepairedResultFields)
     expect(validateNoDanglingHostToolCalls(repaired)).toEqual({ _tag: 'Valid' })
   })
 
@@ -69,20 +74,18 @@ describe('message transcript helpers', () => {
     })
 
     expect(repaired.slice(1)).toMatchObject([
-      {
-        _tag: 'ToolResult',
+      ToolResultMessage.make({
         toolCallId: searchCall.id,
         content: 'failed: search',
         isError: true,
         structuredContent: { type: 'missing_tool_result', tool: 'search' }
-      },
-      {
-        _tag: 'ToolResult',
+      }),
+      ToolResultMessage.make({
         toolCallId: fetchCall.id,
         content: 'failed: fetch',
         isError: true,
         structuredContent: { type: 'missing_tool_result', tool: 'fetch' }
-      }
+      })
     ])
   })
 })

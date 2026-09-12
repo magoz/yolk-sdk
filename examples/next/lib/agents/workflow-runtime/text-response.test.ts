@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { Effect, Stream } from 'effect'
+import { Effect, Predicate, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMError, ToolError } from '@yolk-sdk/agent/loop'
 import { TurnStart, UsageUpdate, AgentUsage, ProviderErrorInfo } from '@yolk-sdk/agent/protocol'
@@ -15,6 +15,7 @@ const source = readFileSync('examples/next/lib/agents/workflow-runtime/text-resp
 const subagentToolStart = source.indexOf(
   'const subagentToolModule = makeNonRecursiveSubagentToolModule'
 )
+
 const subagentExecuteSource = source.slice(
   subagentToolStart,
   source.indexOf('const toolModules', subagentToolStart)
@@ -99,6 +100,7 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
         model: 'test-model',
         reasoningEffort: 'high' as const
       }
+
       const toolFailure = yield* recoverSubagentToolFailure(
         Effect.fail(
           new ToolError({
@@ -109,6 +111,7 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
         ),
         common
       )
+
       expect(toolFailure).toMatchObject({
         isError: true,
         structuredContent: {
@@ -146,7 +149,8 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
       ).pipe(Effect.exit)
 
       expect(defect._tag).toBe('Failure')
-      if (defect._tag === 'Failure') {
+
+      if (Predicate.isTagged(defect, 'Failure')) {
         expect(String(defect.cause)).toContain('Unexpected child defect.')
       }
     })
@@ -157,6 +161,7 @@ describe('makeAgentTextRuntime subagent tool wiring', () => {
       provider: 'openai_codex',
       kind: 'context_overflow'
     })
+
     const result = makeCompletedSubagentToolResult({
       callId: 'call_2',
       subagentType: 'general',

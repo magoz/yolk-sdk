@@ -84,6 +84,7 @@ const previewText = (text: string | null) => {
   }
 
   const trimmed = text.trim()
+
   if (trimmed.length === 0) {
     return undefined
   }

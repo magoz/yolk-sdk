@@ -1,4 +1,4 @@
-import { Array as Arr, Option } from 'effect'
+import { Array as Arr, Option, Predicate } from 'effect'
 import {
   contentText,
   type AgentRetry,
@@ -120,13 +120,14 @@ export const dedupeAgentChatToolRunItems = (
   const latestIndexByToolCallId = new Map<string, number>()
 
   for (const [index, item] of items.entries()) {
-    if (item._tag === 'ToolRun') {
+    if (Predicate.isTagged(item, 'ToolRun')) {
       latestIndexByToolCallId.set(item.call.id, index)
     }
   }
 
   return items.filter(
-    (item, index) => item._tag !== 'ToolRun' || latestIndexByToolCallId.get(item.call.id) === index
+    (item, index) =>
+      !Predicate.isTagged(item, 'ToolRun') || latestIndexByToolCallId.get(item.call.id) === index
   )
 }
 
@@ -145,13 +146,17 @@ const activeStatusLabel = ({
   if (
     parts.some(
       ({ messageRole, part }) =>
-        part._tag === 'Text' && part.state === 'streaming' && messageRole === 'assistant'
+        Predicate.isTagged(part, 'Text') &&
+        part.state === 'streaming' &&
+        messageRole === 'assistant'
     )
   ) {
     return 'Responding'
   }
 
-  if (parts.some(({ part }) => part._tag === 'Reasoning' && part.state === 'streaming')) {
+  if (
+    parts.some(({ part }) => Predicate.isTagged(part, 'Reasoning') && part.state === 'streaming')
+  ) {
     return 'Thinking'
   }
 
@@ -185,31 +190,31 @@ const terminalTimingFromState = (
 }
 
 const toolRunStateFor = (state: ChatToolState): ToolRunState => {
-  if (state._tag === 'Running') {
+  if (Predicate.isTagged(state, 'Running')) {
     return { _tag: 'Running', ...startedTiming(state.startedAtMs) }
   }
 
-  if (state._tag === 'Completed' || state._tag === 'Accepted') {
+  if (Predicate.isTagged(state, 'Completed') || Predicate.isTagged(state, 'Accepted')) {
     return { _tag: state._tag, ...terminalTimingFromState(state), result: state.result }
   }
 
-  if (state._tag === 'InputStreaming') {
+  if (Predicate.isTagged(state, 'InputStreaming')) {
     return { _tag: 'InputStreaming', ...noTiming(), input: state.input }
   }
 
-  if (state._tag === 'ApprovalRequested') {
+  if (Predicate.isTagged(state, 'ApprovalRequested')) {
     return { _tag: 'ApprovalRequested', ...noTiming(), request: state.request }
   }
 
-  if (state._tag === 'Denied') {
+  if (Predicate.isTagged(state, 'Denied')) {
     return { _tag: 'Denied', ...noTiming(), reason: state.reason }
   }
 
-  if (state._tag === 'QuestionRequested') {
+  if (Predicate.isTagged(state, 'QuestionRequested')) {
     return { _tag: 'QuestionRequested', ...noTiming(), request: state.request }
   }
 
-  if (state._tag === 'QuestionAnswered') {
+  if (Predicate.isTagged(state, 'QuestionAnswered')) {
     return {
       _tag: 'QuestionAnswered',
       ...noTiming(),
@@ -218,7 +223,7 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
     }
   }
 
-  if (state._tag === 'QuestionCancelled') {
+  if (Predicate.isTagged(state, 'QuestionCancelled')) {
     return {
       _tag: 'QuestionCancelled',
       ...noTiming(),
@@ -227,11 +232,11 @@ const toolRunStateFor = (state: ChatToolState): ToolRunState => {
     }
   }
 
-  if (state._tag === 'Errored') {
+  if (Predicate.isTagged(state, 'Errored')) {
     return { _tag: 'Errored', ...terminalTimingFromState(state), message: state.message }
   }
 
-  if (state._tag === 'ProviderCompleted') {
+  if (Predicate.isTagged(state, 'ProviderCompleted')) {
     return { _tag: 'ProviderCompleted', ...noTiming(), result: state.result }
   }
 

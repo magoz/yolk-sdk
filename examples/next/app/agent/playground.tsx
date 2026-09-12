@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Array as Arr, Effect, Option, Stream } from 'effect'
+import { Array as Arr, Effect, Option, Predicate, Stream } from 'effect'
 import {
   UserMessage,
   addAgentUsage,
@@ -88,11 +88,17 @@ type AgentPlaygroundProps = {
 }
 
 const maxImageAttachments = 4
+
 const maxDocumentAttachments = 4
+
 const maxSourceImageBytes = 15 * 1024 * 1024
+
 const maxEncodedImageBytes = 5 * 1024 * 1024
+
 const maxSourceDocumentBytes = 10 * 1024 * 1024
+
 const maxEncodedDocumentBytes = 14 * 1024 * 1024
+
 const maxImageEdgePixels = 1600
 
 const imageOutputType = (mimeType: string) =>
@@ -111,6 +117,7 @@ const blobToDataUrl = (blob: Blob) =>
     reader.addEventListener('load', () => {
       if (typeof reader.result === 'string') {
         resolve(reader.result)
+
         return
       }
 
@@ -126,6 +133,7 @@ const canvasBlob = (canvas: HTMLCanvasElement, mimeType: string) =>
       blob => {
         if (blob === null) {
           reject(new Error('Could not compress image'))
+
           return
         }
 
@@ -254,11 +262,11 @@ const processImageFile = async (
   try {
     const attachment = await readyImageAttachmentFromFile(file)
 
-    if (attachment._tag === 'Ready' && attachment.data.length === 0) {
+    if (Predicate.isTagged(attachment, 'Ready') && attachment.data.length === 0) {
       return failedAttachmentFromFile(file, 'Could not decode image.')
     }
 
-    if (attachment._tag === 'Ready' && attachment.data.length > maxEncodedImageBytes) {
+    if (Predicate.isTagged(attachment, 'Ready') && attachment.data.length > maxEncodedImageBytes) {
       return failedAttachmentFromFile(file, 'Compressed image is still too large.')
     }
 
@@ -287,11 +295,14 @@ const processDocumentFile = async (
   try {
     const attachment = await readyDocumentAttachmentFromFile(file)
 
-    if (attachment._tag === 'Ready' && attachment.data.length === 0) {
+    if (Predicate.isTagged(attachment, 'Ready') && attachment.data.length === 0) {
       return failedAttachmentFromFile(file, 'Could not decode PDF.')
     }
 
-    if (attachment._tag === 'Ready' && attachment.data.length > maxEncodedDocumentBytes) {
+    if (
+      Predicate.isTagged(attachment, 'Ready') &&
+      attachment.data.length > maxEncodedDocumentBytes
+    ) {
       return failedAttachmentFromFile(file, 'PDF is too large.')
     }
 
@@ -309,9 +320,11 @@ const processAttachmentFile = (
 ) => {
   const currentReadyImageCount = readyImageAttachmentCount(currentAttachments)
   const currentReadyDocumentCount = readyDocumentAttachmentCount(currentAttachments)
+
   const readyImageSlotAvailable =
     sourceImageCanBeReady(file) &&
     currentReadyImageCount + readyImageCandidateCountBefore(files, index) < maxImageAttachments
+
   const readyDocumentSlotAvailable =
     sourceDocumentCanBeReady(file) &&
     currentReadyDocumentCount + readyDocumentCandidateCountBefore(files, index) <
@@ -347,9 +360,11 @@ export function AgentPlayground({
   const [showReasoning, setShowReasoning] = useState(true)
   const [textModel, setTextModel] = useState<AgentTextModel>(agentTextModel)
   const [reasoningEffort, setReasoningEffort] = useState(agentTextReasoningEffort)
+
   const [transcriptionModel, setTranscriptionModel] = useState(
     defaultOpenAiRealtimeTranscriptionModel
   )
+
   const [usage, setUsage] = useState(zeroAgentUsage)
   const [hasUsage, setHasUsage] = useState(false)
   const [contextTokens, setContextTokens] = useState<number | null>(null)
@@ -490,6 +505,7 @@ export function AgentPlayground({
             ].join(' · '),
             tone: 'neutral'
           })
+
           return
         case 'InputTranscript':
           recordActivity({
@@ -497,6 +513,7 @@ export function AgentPlayground({
             detail: truncate(event.transcript),
             tone: 'neutral'
           })
+
           return
         case 'OutputTranscript':
           recordActivity({
@@ -504,13 +521,15 @@ export function AgentPlayground({
             detail: truncate(event.transcript),
             tone: 'neutral'
           })
+
           return
       }
     },
     [recordActivity]
   )
+
   const cloudflareTransport = useMemo<AgentChatTransport | undefined>(() => {
-    if (runtime._tag !== 'Cloudflare') {
+    if (!Predicate.isTagged(runtime, 'Cloudflare')) {
       return undefined
     }
 
@@ -526,8 +545,9 @@ export function AgentPlayground({
         })
       )
   }, [runtime])
+
   const workflowTransport = useMemo<AgentChatTransport | undefined>(() => {
-    if (runtime._tag !== 'Workflow') {
+    if (!Predicate.isTagged(runtime, 'Workflow')) {
       return undefined
     }
 
@@ -569,6 +589,7 @@ export function AgentPlayground({
       )
     }
   }, [recordActivity, runtime, workflowRunId])
+
   const agentTransport = cloudflareTransport ?? workflowTransport
 
   const [ttsEnabled, setTtsEnabled] = useState(false)
@@ -579,6 +600,7 @@ export function AgentPlayground({
   const isVoiceModeRef = useRef(false)
   const speechChunkerStateRef = useRef(emptySpeechChunkerState)
   const appendTranscriptRef = useRef<(text: string) => void>(() => {})
+
   const holdToSpeak = useHoldToSpeak({
     onTranscript: text => appendTranscriptRef.current(text),
     onError: message => {
@@ -589,8 +611,10 @@ export function AgentPlayground({
     // blip when the mic is actually hot.
     onRecordingStarted: playRecordingStartEarcon
   })
+
   const enqueueTtsSpeech = holdToSpeak.enqueueSpeech
   const resetTtsSpeech = holdToSpeak.resetSpeech
+
   const flushTtsSpeech = useCallback(() => {
     const result = flushSpeechText(speechChunkerStateRef.current)
     speechChunkerStateRef.current = result.state
@@ -599,6 +623,7 @@ export function AgentPlayground({
       enqueueTtsSpeech(result.chunks)
     }
   }, [enqueueTtsSpeech])
+
   const handleAgentEvent = useCallback(
     (event: AgentEvent) => {
       recordAgentEvent(event)
@@ -607,11 +632,13 @@ export function AgentPlayground({
         case 'AgentStart':
           speechChunkerStateRef.current = emptySpeechChunkerState
           resetTtsSpeech()
+
           return
         case 'AgentError':
         case 'AgentRetry':
           speechChunkerStateRef.current = emptySpeechChunkerState
           resetTtsSpeech()
+
           return
         case 'AgentAwaitingInput':
         case 'AgentEnd':
@@ -620,6 +647,7 @@ export function AgentPlayground({
           } else {
             speechChunkerStateRef.current = emptySpeechChunkerState
           }
+
           return
         case 'LLMTextDelta': {
           if (!ttsEnabledRef.current || isVoiceModeRef.current) {
@@ -635,6 +663,7 @@ export function AgentPlayground({
 
           return
         }
+
         case 'AssistantMessage':
         case 'UserMessage':
         case 'CompactionEnd':
@@ -673,6 +702,7 @@ export function AgentPlayground({
     onError: recordAgentError,
     onAbort: recordAgentAbort
   })
+
   const {
     state,
     isRunning,
@@ -706,6 +736,7 @@ export function AgentPlayground({
     onError: fail,
     onDebug: recordVoiceDebug
   })
+
   const isVoiceMode = isVoiceConnecting || isVoiceLive
 
   useEffect(() => {
@@ -742,6 +773,7 @@ export function AgentPlayground({
   }, [isVoiceMode, resetTtsSpeech, toggleVoice])
 
   const startHoldRecording = holdToSpeak.startRecording
+
   const handleHoldStart = useCallback(() => {
     // Pointer down is the user gesture; prime so the recording blip can play
     // when the recorder actually starts after the permission/setup delay.
@@ -777,27 +809,33 @@ export function AgentPlayground({
       return next
     })
   }, [resetTtsSpeech])
+
   const isTextBusy = isAgentTextBusy({ isRunning, isWaiting, isWorkflowResuming })
   const imageInputSupported = agentTextCapabilities.input.image
   const documentInputSupported = agentTextCapabilities.input.document
   const submitDisabled = isTextBusy || isVoiceMode
   const messageActionsDisabled = isTextBusy || isVoiceMode
   const hitlActionsDisabled = isRunning || isWorkflowResuming || isVoiceMode
+
   const activeToolParts = useMemo(
     () => getActiveChatToolParts(state.chatMessages),
     [state.chatMessages]
   )
+
   const completedToolParts = useMemo(
     () => getCompletedChatToolParts(state.chatMessages),
     [state.chatMessages]
   )
+
   const activeToolRunCount = activeToolParts.length
   const completedToolRunCount = completedToolParts.length
+
   const liveActivityCount = getAgentChatLiveActivityCount({
     isTextRunning: isTextBusy,
     activeToolCallCount: activeToolRunCount,
     isVoiceActive: isVoiceMode
   })
+
   const activeToolLabel = useMemo(() => {
     const firstRun = activeToolParts[0]
 
@@ -815,6 +853,7 @@ export function AgentPlayground({
           : `Running ${activeToolParts.length} tools`
     )
   }, [activeToolParts, isWaiting])
+
   const chatItems = useMemo(
     () =>
       buildAgentChatItems({
@@ -848,9 +887,10 @@ export function AgentPlayground({
     const completedManageSkillRuns = Arr.filter(
       chatItems,
       item =>
-        item._tag === 'ToolRun' &&
+        Predicate.isTagged(item, 'ToolRun') &&
         item.call.name === 'manage_skills' &&
-        (item.state._tag === 'Completed' || item.state._tag === 'ProviderCompleted') &&
+        (Predicate.isTagged(item.state, 'Completed') ||
+          Predicate.isTagged(item.state, 'ProviderCompleted')) &&
         !refreshedCommandToolRunIdsRef.current.has(item.id)
     )
 
@@ -878,7 +918,7 @@ export function AgentPlayground({
     })
     const result = submitMessage(UserMessage.make({ content }))
 
-    if (result._tag === 'Submitted') {
+    if (Predicate.isTagged(result, 'Submitted')) {
       setInput('')
       setAttachments([])
     }
@@ -895,6 +935,7 @@ export function AgentPlayground({
         .then(renderedContent => {
           if (!canSubmitContent(renderedContent)) {
             recordActivity({ title: 'Command empty', detail: `/${command}`, tone: 'error' })
+
             return
           }
 
@@ -905,7 +946,7 @@ export function AgentPlayground({
           })
           const result = submitMessage(UserMessage.make({ content: renderedContent }))
 
-          if (result._tag === 'Submitted') {
+          if (Predicate.isTagged(result, 'Submitted')) {
             setInput('')
             setAttachments([])
           }
@@ -928,7 +969,7 @@ export function AgentPlayground({
 
       const result = deleteTurn(messageId)
 
-      if (result._tag === 'Deleted') {
+      if (Predicate.isTagged(result, 'Deleted')) {
         recordActivity({
           title: 'Turn deleted',
           detail: result.turnStartMessageId,
@@ -947,7 +988,7 @@ export function AgentPlayground({
 
       const result = regenerateFrom(messageId)
 
-      if (result._tag === 'Regenerated') {
+      if (Predicate.isTagged(result, 'Regenerated')) {
         recordActivity({
           title: 'Response regenerated',
           detail: result.messageId,
@@ -960,7 +1001,7 @@ export function AgentPlayground({
 
   const handleResumeWorkflowRun = useCallback(() => {
     if (
-      runtime._tag !== 'Workflow' ||
+      !Predicate.isTagged(runtime, 'Workflow') ||
       workflowRunId === null ||
       state.status === 'done' ||
       isRunning ||
@@ -1005,6 +1046,7 @@ export function AgentPlayground({
         if (workflowResumeAbortRef.current === abortController) {
           workflowResumeAbortRef.current = null
         }
+
         setIsWorkflowResuming(false)
       })
   }, [
@@ -1027,7 +1069,7 @@ export function AgentPlayground({
     resetTtsSpeech()
     stop()
 
-    if (runtime._tag !== 'Workflow' || runId === null) {
+    if (!Predicate.isTagged(runtime, 'Workflow') || runId === null) {
       return
     }
 
@@ -1052,7 +1094,7 @@ export function AgentPlayground({
 
       const result = editUserMessage(messageId, content)
 
-      if (result._tag === 'Edited') {
+      if (Predicate.isTagged(result, 'Edited')) {
         recordActivity({
           title: 'Message edited',
           detail: result.messageId,
@@ -1071,7 +1113,7 @@ export function AgentPlayground({
 
       const result = submitToolApprovalResponse(response)
 
-      if (result._tag === 'Submitted') {
+      if (Predicate.isTagged(result, 'Submitted')) {
         recordActivity({
           title: response.decision === 'approved' ? 'Tool approved' : 'Tool denied',
           detail: response.toolCallId,
@@ -1090,7 +1132,7 @@ export function AgentPlayground({
 
       const result = submitQuestionResponse(response)
 
-      if (result._tag === 'Submitted') {
+      if (Predicate.isTagged(result, 'Submitted')) {
         recordActivity({
           title: response.outcome === 'answered' ? 'Question answered' : 'Question cancelled',
           detail: response.toolCallId,
@@ -1151,7 +1193,7 @@ export function AgentPlayground({
         {
           onNone: () => undefined,
           onSome: attachment => {
-            if (attachment._tag !== 'Failed') {
+            if (!Predicate.isTagged(attachment, 'Failed')) {
               return
             }
 
@@ -1159,6 +1201,7 @@ export function AgentPlayground({
               attachments,
               currentAttachment => currentAttachment.id !== id
             )
+
             setAttachments(remainingAttachments)
             processAttachmentFiles([attachment.file], remainingAttachments).then(
               processedAttachments => {

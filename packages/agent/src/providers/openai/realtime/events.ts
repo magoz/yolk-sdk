@@ -27,6 +27,7 @@ export const OpenAiRealtimeConversationMessageItem = Schema.Union([
   OpenAiRealtimeUserMessageItem,
   OpenAiRealtimeAssistantMessageItem
 ])
+
 export type OpenAiRealtimeConversationMessageItem =
   typeof OpenAiRealtimeConversationMessageItem.Type
 
@@ -75,6 +76,7 @@ export const OpenAiRealtimeClientEvent = Schema.Union([
   OpenAiRealtimeConversationItemCreateEvent,
   OpenAiRealtimeResponseCreateEvent
 ])
+
 export type OpenAiRealtimeClientEvent = typeof OpenAiRealtimeClientEvent.Type
 
 const OpenAiRealtimeResponseDoneEvent = Schema.Struct({
@@ -160,6 +162,7 @@ const OpenAiRealtimeErrorEvent = Schema.Struct({
 export const OpenAiRealtimeToolExecutionResponse = Schema.Struct({
   event: OpenAiRealtimeConversationItemCreateEvent
 })
+
 export type OpenAiRealtimeToolExecutionResponse = typeof OpenAiRealtimeToolExecutionResponse.Type
 
 export class OpenAiRealtimeInputAudioTranscriptionDelta extends Schema.TaggedClass<OpenAiRealtimeInputAudioTranscriptionDelta>()(
@@ -233,6 +236,7 @@ export const OpenAiRealtimeServerEvent = Schema.Union([
   OpenAiRealtimeError,
   OpenAiRealtimeIgnored
 ])
+
 export type OpenAiRealtimeServerEvent = typeof OpenAiRealtimeServerEvent.Type
 
 export const makeOpenAiRealtimeUserMessageItem = (

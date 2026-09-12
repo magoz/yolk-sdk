@@ -22,6 +22,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -48,6 +49,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)))
@@ -87,6 +89,7 @@ describe('in-memory harness', () => {
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeInMemoryHarnessLayer({
         drain: () =>
           Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release))),

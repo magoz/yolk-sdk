@@ -84,10 +84,15 @@ import {
 } from '../../src/protocol'
 
 const encodeJson = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+
 const decodeAgentEvent = Schema.decodeUnknownEffect(AgentEvent)
+
 const decodeAgentMessage = Schema.decodeUnknownEffect(AgentMessage)
+
 const decodeClientMessage = Schema.decodeUnknownEffect(AgentWebSocketClientMessage)
+
 const decodeServerMessage = Schema.decodeUnknownEffect(AgentWebSocketServerMessage)
 
 const roundTripEvent = (event: AgentEventType) =>
@@ -114,6 +119,7 @@ describe('protocol wire schemas', () => {
         name: 'web_fetch',
         params: { url: 'https://e.com' }
       })
+
       const messages: ReadonlyArray<AgentMessageType> = [
         UserMessage.make({
           createdAtMs: 1781260200000,
@@ -176,25 +182,30 @@ describe('protocol wire schemas', () => {
         name: 'web_fetch',
         params: { url: 'https://e.com' }
       })
+
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'Example Domain',
         isError: true,
         structuredContent: { title: 'Example Domain' }
       })
+
       const approvalPolicy = ToolApprovalPolicy.make({ mode: 'manual', reason: 'write access' })
+
       const approvalRequest = ToolApprovalRequest.make({
         requestId: 'approval:call_1',
         toolCallId: call.id,
         call,
         policy: approvalPolicy
       })
+
       const approvalResponse = ToolApprovalResponse.make({
         requestId: approvalRequest.requestId,
         toolCallId: call.id,
         decision: 'approved',
         source: 'user'
       })
+
       const denialResponse = ToolApprovalResponse.make({
         requestId: approvalRequest.requestId,
         toolCallId: call.id,
@@ -202,6 +213,7 @@ describe('protocol wire schemas', () => {
         source: 'user',
         reason: 'not now'
       })
+
       const questionRequest = QuestionRequest.make({
         requestId: 'question:call_1',
         toolCallId: call.id,
@@ -215,6 +227,7 @@ describe('protocol wire schemas', () => {
           })
         ]
       })
+
       const questionResponse = QuestionResponse.make({
         requestId: questionRequest.requestId,
         toolCallId: call.id,
@@ -222,6 +235,7 @@ describe('protocol wire schemas', () => {
         source: 'user',
         answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
       })
+
       const questionCancelled = QuestionResponse.make({
         requestId: questionRequest.requestId,
         toolCallId: call.id,
@@ -229,14 +243,17 @@ describe('protocol wire schemas', () => {
         source: 'user',
         reason: 'skip'
       })
+
       const user = UserMessage.make({
         content: 'steer toward the durable queue',
         createdAtMs: 1781260200000,
         author: { displayName: 'Magoz' }
       })
+
       const assistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'done' }), HostToolCallPart.make({ call })]
       })
+
       const events: ReadonlyArray<AgentEventType> = [
         AgentStart.make({}),
         AgentError.make({ code: 'provider_error', message: 'slow down', retryable: true }),
@@ -323,6 +340,7 @@ describe('protocol wire schemas', () => {
       source: 'user',
       answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
     })
+
     const cancelled = QuestionResponse.make({
       requestId: 'question:call_2',
       toolCallId: 'call_2',
@@ -330,6 +348,7 @@ describe('protocol wire schemas', () => {
       source: 'user',
       reason: 'skip'
     })
+
     const denied = ToolApprovalResponse.make({
       requestId: 'approval:call_3',
       toolCallId: 'call_3',
@@ -362,12 +381,14 @@ describe('protocol wire schemas', () => {
   it.effect('round-trips session websocket envelope variants', () =>
     Effect.gen(function* () {
       const user = UserMessage.make({ content: 'hello' })
+
       const approval = ToolApprovalResponse.make({
         requestId: 'approval:call_1',
         toolCallId: 'call_1',
         decision: 'approved',
         source: 'user'
       })
+
       const question = QuestionResponse.make({
         requestId: 'question:call_1',
         toolCallId: 'call_1',
@@ -375,6 +396,7 @@ describe('protocol wire schemas', () => {
         source: 'user',
         answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
       })
+
       const clientMessages = [
         UserInput.make({ message: user }),
         UserInput.make({
@@ -386,6 +408,7 @@ describe('protocol wire schemas', () => {
         ToolApprovalResponseInput.make({ response: approval, expectedRevision: 4 }),
         QuestionResponseInput.make({ response: question, expectedRevision: 5 })
       ]
+
       const serverMessages = [
         SessionSnapshot.make({ revision: 3, messages: [user] }),
         LLMTextDelta.make({ eventId: 'evt_1', text: 'hi' })
@@ -399,6 +422,7 @@ describe('protocol wire schemas', () => {
           return yield* decodeClientMessage(value)
         })
       )
+
       const decodedServerMessages = yield* Effect.forEach(serverMessages, message =>
         Effect.gen(function* () {
           const json = yield* encodeJson(message)
@@ -420,18 +444,21 @@ describe('protocol wire schemas', () => {
         name: 'web_fetch',
         params: { url: 'https://e.com' }
       })
+
       const def = ToolDef.make({
         name: 'web_fetch',
         description: 'Fetch URL',
         parameters: { type: 'object' },
         approval: ToolApprovalPolicy.make({ mode: 'manual', reason: 'network write' })
       })
+
       const result = ToolResult.make({
         toolCallId: call.id,
         content: 'ok',
         isError: true,
         structuredContent: { ok: true }
       })
+
       const content = [
         TextPart.make({ text: 'hi' }),
         DocumentPart.make({
@@ -441,6 +468,7 @@ describe('protocol wire schemas', () => {
         }),
         AudioPart.make({ source: inlineBase64Source('abc'), mimeType: 'audio/mpeg' })
       ]
+
       const capabilities = AgentModelCapabilities.make({
         input: AgentContentCapabilities.make({
           text: true,
@@ -451,6 +479,7 @@ describe('protocol wire schemas', () => {
         tools: true,
         reasoning: true
       })
+
       const usage = addAgentUsage(
         AgentUsage.make({
           input: { total: 10, uncached: 4, cacheRead: 3, cacheWrite: 3 },
@@ -478,36 +507,44 @@ describe('protocol wire schemas', () => {
   it.effect('rejects invalid wire payloads at protocol boundaries', () =>
     Effect.gen(function* () {
       const invalidEvent = yield* decodeAgentEvent({ _tag: 'Nope' }).pipe(Effect.result)
+
       const emptyToolName = yield* Schema.decodeUnknownEffect(ToolCall)({
         id: 'call_1',
         name: '   ',
         params: {}
       }).pipe(Effect.result)
+
       const invalidAudio = yield* Schema.decodeUnknownEffect(ContentPart)({
         _tag: 'Audio',
         mimeType: 'audio/flac'
       }).pipe(Effect.result)
+
       const invalidUsage = yield* Schema.decodeUnknownEffect(AgentUsage)({
         input: { total: '10' },
         output: { total: 0 }
       }).pipe(Effect.result)
+
       const invalidReasoning = yield* Schema.decodeUnknownEffect(AgentReasoningEffort)(
         'extreme'
       ).pipe(Effect.result)
+
       const invalidClientEnvelope = yield* decodeClientMessage({
         _tag: 'UserInput',
         message: { _tag: 'Assistant', parts: [] }
       }).pipe(Effect.result)
+
       const invalidServerEnvelope = yield* decodeServerMessage({
         _tag: 'SessionSnapshot',
         revision: 1,
         messages: [{ _tag: 'Nope' }]
       }).pipe(Effect.result)
+
       const invalidNestedToolResult = yield* decodeAgentEvent({
         _tag: 'ToolExecutionCompleted',
         call: { id: 'call_1', name: 'web_fetch', params: {} },
         result: { toolCallId: '   ', content: 'ok' }
       }).pipe(Effect.result)
+
       const invalidSubagentStatus = yield* decodeAgentEvent({
         _tag: 'SubagentCompleted',
         parentToolCallId: 'call_1',

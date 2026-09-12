@@ -6,7 +6,9 @@ import { type MergedSkillset, type SkillsetManifest } from '@yolk-sdk/agent/skil
 import { loadProjectSkillset } from '../examples/next/lib/agents/skillset/project-source'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
+
 const rootDirectory = resolve(scriptDirectory, '..')
+
 const outputPath = resolve(scriptDirectory, '../cloudflare/agent/src/generated/skillset.ts')
 
 const portableLocation = (location: string | undefined) => {

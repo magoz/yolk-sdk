@@ -38,6 +38,7 @@ import {
   toAgentMessages,
   type AgentChatMessage
 } from '../../src/react/chat-messages.ts'
+import { Predicate } from 'effect'
 
 describe('agent chat messages', () => {
   it('preserves multipart user content for protocol replay', () => {
@@ -67,8 +68,7 @@ describe('agent chat messages', () => {
     ]
 
     expect(toAgentMessages(chatMessages)).toEqual([
-      {
-        _tag: 'User',
+      UserMessage.make({
         content: [
           TextPart.make({ text: 'describe this' }),
           ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
@@ -78,7 +78,7 @@ describe('agent chat messages', () => {
             filename: 'brief.pdf'
           })
         ]
-      }
+      })
     ])
   })
 
@@ -88,6 +88,7 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'hi' }),
@@ -123,12 +124,14 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const result = ToolResult.make({
       toolCallId: call.id,
       content: 'Example Domain',
       isError: true,
       structuredContent: { title: 'Example Domain' }
     })
+
     const messages = buildAgentChatMessages({
       messages: [
         AssistantAgentMessage.make({
@@ -174,12 +177,15 @@ describe('agent chat messages', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const streamingCall = ToolCall.make({ id: call.id, name: call.name, params: {} })
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const inputStarted = applyAgentEventToChatMessages(
       [],
       ToolInputStart.make({ id: call.id, name: call.name })
     )
+
     const inputUpdated = applyAgentEventToChatMessages(
       inputStarted,
       ToolInputDelta.make({ id: call.id, delta: '{"url":"https://e.com"}' })
@@ -219,11 +225,13 @@ describe('agent chat messages', () => {
     const firstCall = ToolCall.make({ id: 'call_1', name: 'sleep', params: { seconds: 1 } })
     const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
     const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+
     const firstRunning = applyAgentEventToChatMessages(
       firstReady,
       ToolExecutionStarted.make({ call: firstCall }),
       { nowMs: 1000 }
     )
+
     const secondReady = applyAgentEventToChatMessages(
       firstRunning,
       ToolInputEnd.make({ call: secondCall })
@@ -258,14 +266,17 @@ describe('agent chat messages', () => {
     const secondCall = ToolCall.make({ id: 'call_2', name: 'sleep', params: { seconds: 1 } })
     const result = ToolResult.make({ toolCallId: firstCall.id, content: 'done' })
     const firstReady = applyAgentEventToChatMessages([], ToolInputEnd.make({ call: firstCall }))
+
     const firstRunning = applyAgentEventToChatMessages(
       firstReady,
       ToolExecutionStarted.make({ call: firstCall, createdAtMs: 1000 })
     )
+
     const firstCompleted = applyAgentEventToChatMessages(
       firstRunning,
       ToolExecutionCompleted.make({ call: firstCall, result, createdAtMs: 1500 })
     )
+
     const secondReady = applyAgentEventToChatMessages(
       firstCompleted,
       ToolInputEnd.make({ call: secondCall })
@@ -291,6 +302,7 @@ describe('agent chat messages', () => {
 
   it('renders pending and answered question tool states', () => {
     const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_question',
       toolCallId: call.id,
@@ -303,6 +315,7 @@ describe('agent chat messages', () => {
         })
       ]
     })
+
     const response = QuestionResponse.make({
       requestId: request.requestId,
       toolCallId: call.id,
@@ -310,6 +323,7 @@ describe('agent chat messages', () => {
       source: 'user',
       answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
     })
+
     const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
     const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
 
@@ -346,18 +360,21 @@ describe('agent chat messages', () => {
 
   it('preserves question request after repeated answer events', () => {
     const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_question',
       toolCallId: call.id,
       call,
       questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
     })
+
     const response = QuestionResponse.make({
       requestId: request.requestId,
       toolCallId: call.id,
       outcome: 'answered',
       source: 'user'
     })
+
     const requested = applyAgentEventToChatMessages([], QuestionRequested.make({ request }))
     const answered = applyAgentEventToChatMessages(requested, QuestionAnswered.make({ response }))
     const repeated = applyAgentEventToChatMessages(answered, QuestionAnswered.make({ response }))
@@ -374,6 +391,7 @@ describe('agent chat messages', () => {
     const assistant = AssistantAgentMessage.make({
       parts: [AssistantTextPart.make({ content: 'ok' })]
     })
+
     const messages = applyAgentEventToChatMessages(
       [],
       AgentAwaitingInput.make({
@@ -494,9 +512,10 @@ describe('agent chat messages', () => {
       toolRuns: [],
       error: null
     })
+
     const deleted = deleteChatTurn(messages, 'message-0-user')
 
-    if (deleted._tag !== 'Deleted') {
+    if (!Predicate.isTagged(deleted, 'Deleted')) {
       throw new Error('Expected deleted turn')
     }
 

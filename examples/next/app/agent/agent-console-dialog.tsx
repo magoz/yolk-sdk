@@ -95,6 +95,7 @@ export function AgentConsoleDialog({
 
     if (open && !dialog.open) {
       dialog.showModal()
+
       return
     }
 

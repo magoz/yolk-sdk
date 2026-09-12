@@ -136,12 +136,14 @@ class DependencyNotFoundError extends Data.TaggedError('DependencyNotFoundError'
 // ---------------------------------------------------------------------------
 
 const ROOT = resolve(import.meta.dirname, '..')
+
 const REPOS_DIR = resolve(ROOT, '.repos')
 
 const exec = (cmd: string, cwd?: string) =>
   Effect.tryPromise({
     try: async () => {
       const { execSync } = await import('node:child_process')
+
       return execSync(cmd, { cwd, stdio: 'pipe', encoding: 'utf-8' })
     },
     catch: error =>
@@ -203,6 +205,7 @@ const cloneRepo = (spec: RepoSpec) =>
                 console.log(`  Tag "${tag}" not found, falling back to default branch...`)
               )
               yield* exec(`git clone --depth 1 "${spec.repo}" "${dest}"`)
+
               return ''
             })
           )
@@ -222,6 +225,7 @@ const cloneRepo = (spec: RepoSpec) =>
 
     // Remove .git to save space
     const gitDir = resolve(dest, '.git')
+
     if (existsSync(gitDir)) {
       rmSync(gitDir, { recursive: true, force: true })
     }

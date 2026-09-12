@@ -32,6 +32,7 @@ export const GoogleCalendarEventDateTime = Schema.Union([
   GoogleCalendarEventDate,
   GoogleCalendarEventTime
 ])
+
 export type GoogleCalendarEventDateTime = typeof GoogleCalendarEventDateTime.Type
 
 export class GoogleCalendarEvent extends Schema.Class<GoogleCalendarEvent>('GoogleCalendarEvent')({
@@ -154,6 +155,7 @@ export const googleCalendarListEventsAction = defineAction({
         integration,
         GoogleCalendarReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'timeMin', input.timeMin)
@@ -169,6 +171,7 @@ export const googleCalendarListEventsAction = defineAction({
       appendSearchParam(params, 'orderBy', input.orderBy)
       const query = params.toString()
       const url = `${googleCalendarApiBaseUrl}/calendars/${encodeURIComponent(calendarIdOrPrimary(input.calendarId))}/events${query === '' ? '' : `?${query}`}`
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -187,6 +190,7 @@ export const googleCalendarListEventsAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleCalendarListEventsOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -202,7 +206,9 @@ export const googleCalendarCreateEventAction = defineAction({
         integration,
         GoogleCalendarEventsOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -232,6 +238,7 @@ export const googleCalendarCreateEventAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleCalendarEvent, response)
+
       return ActionResult.success(output)
     })
 })
@@ -247,11 +254,13 @@ export const googleCalendarListCalendarsAction = defineAction({
         integration,
         GoogleCalendarReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendNumberSearchParam(params, 'maxResults', input.maxResults)
       appendSearchParam(params, 'pageToken', input.pageToken)
       const query = params.toString()
+
       const response = yield* http.request(
         calendarRequest({
           token,
@@ -270,6 +279,7 @@ export const googleCalendarListCalendarsAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleCalendarListCalendarsOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -285,7 +295,9 @@ export const googleCalendarGetEventAction = defineAction({
         integration,
         GoogleCalendarReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         calendarRequest({
           token,
@@ -304,6 +316,7 @@ export const googleCalendarGetEventAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleCalendarEvent, response)
+
       return ActionResult.success(output)
     })
 })
@@ -319,7 +332,9 @@ export const googleCalendarUpdateEventAction = defineAction({
         integration,
         GoogleCalendarEventsOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         calendarRequest({
           token,
@@ -346,6 +361,7 @@ export const googleCalendarUpdateEventAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleCalendarEvent, response)
+
       return ActionResult.success(output)
     })
 })
@@ -361,7 +377,9 @@ export const googleCalendarDeleteEventAction = defineAction({
         integration,
         GoogleCalendarEventsOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         calendarRequest({
           token,

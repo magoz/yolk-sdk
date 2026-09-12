@@ -38,8 +38,10 @@ export const readWorkflowChild = (
     const store = yield* AgentWorkflowStore
     const registry = yield* store.read(input.parentRunId, input.userId)
     const child = registry.children.find(child => child.callId === input.callId)
+
     if (child !== undefined && child.result !== null)
       return { done: true, workflowRunId: child.workflowRunId, result: child.result }
+
     if (child === undefined || registry.stopped)
       return {
         done: true,
@@ -49,17 +51,22 @@ export const readWorkflowChild = (
           child === undefined ? 'Child handle not found' : 'Child cancelled'
         )
       }
+
     if (child.workflowRunId === null) {
       const now = yield* Clock.currentTimeMillis
+
       if (child.launchUncertain === true || now - child.startedAtMs >= childAdmissionWaitMs) {
         // This ends this wait, not the child's lifecycle. A lost start response may still
         // self-admit later; do not commit a false terminal outcome or steal its reservation.
         return yield* unconfirmed(input.callId, null)
       }
     }
+
     const observedRunId = child.workflowRunId ?? attemptedRunId
+
     if (observedRunId === undefined) return { done: false, workflowRunId: null, result: null }
     const workflows = yield* VercelWorkflows
+
     const status = yield* workflows.getRun(observedRunId).pipe(
       Effect.flatMap(run => run.status),
       Effect.catchTag('VercelWorkflowsError', error =>
@@ -69,16 +76,20 @@ export const readWorkflowChild = (
           : Effect.fail(error)
       )
     )
+
     if (status === null) {
       const now = yield* Clock.currentTimeMillis
+
       return now - child.startedAtMs < childAdmissionWaitMs
         ? { done: false, workflowRunId: child.workflowRunId, result: null }
         : yield* unconfirmed(input.callId, child.workflowRunId)
     }
+
     if (status === 'failed' || status === 'cancelled' || status === 'completed') {
       // Terminal persistence precedes platform completion; reread to avoid racing that commit.
       const latest = yield* store.read(input.parentRunId, input.userId)
       const result = latest.children.find(child => child.callId === input.callId)?.result
+
       return {
         done: true,
         workflowRunId: child.workflowRunId,
@@ -90,5 +101,6 @@ export const readWorkflowChild = (
           ))
       }
     }
+
     return { done: false, workflowRunId: child.workflowRunId, result: null }
   }).pipe(Effect.withSpan('AgentWorkflow.readChild'))

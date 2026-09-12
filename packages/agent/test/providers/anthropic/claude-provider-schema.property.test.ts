@@ -6,13 +6,17 @@ import { EmptyToolParams, makeTool } from '@yolk-sdk/agent/tools'
 import { toAnthropicClaudeRequestBody } from '../../../src/providers/anthropic/claude-provider.ts'
 
 const defaultPropertyRuns = 50
+
 const propertyRunsEnv = process.env.PROPERTY_RUNS
+
 const parsedPropertyRuns =
   propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+
 const propertyRuns =
   Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
     ? parsedPropertyRuns
     : defaultPropertyRuns
+
 const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
@@ -67,6 +71,7 @@ const collectLocalRefs = (input: unknown): ReadonlyArray<string> => {
 
 const collectKeywordValues = (input: unknown, keyword: string): ReadonlyArray<unknown> => {
   if (Array.isArray(input)) return input.flatMap(value => collectKeywordValues(value, keyword))
+
   if (!isJsonObject(input)) return []
 
   return [
@@ -162,6 +167,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   for (const keyword of ['anyOf', 'oneOf', 'allOf', 'prefixItems']) {
     expect(collectKeywordValues(parameters, keyword)).toEqual([])
   }
+
   for (const maxLength of collectKeywordValues(parameters, 'maxLength')) {
     expect(maxLength).toEqual(expect.any(Number))
     expect(Number.isInteger(maxLength)).toBe(true)
@@ -169,6 +175,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   }
 
   const definitions = field(parameters, '$defs')
+
   for (const ref of collectLocalRefs(parameters)) {
     expect(field(definitions, ref)).toBeDefined()
   }
@@ -189,6 +196,7 @@ describe('Anthropic Claude provider schema properties', () => {
           },
           { maxTokens: 123 }
         )
+
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
         assertProviderSafeParameters(field(tool, 'input_schema'))

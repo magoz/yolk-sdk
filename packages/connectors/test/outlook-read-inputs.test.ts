@@ -27,6 +27,7 @@ const integration = makeIntegration({
 
 const makeHost = (body = '{"value":[{"id":"message-1","subject":"Car offer"}]}', status = 200) => {
   const requests: Array<ConnectorHttpRequest> = []
+
   const layer = Layer.mergeAll(
     Layer.succeed(CredentialResolver, {
       resolve: () =>
@@ -42,10 +43,12 @@ const makeHost = (body = '{"value":[{"id":"message-1","subject":"Car offer"}]}',
     Layer.succeed(ConnectorHttpClient, {
       request: request => {
         requests.push(request)
+
         return Effect.succeed(ConnectorHttpResponse.make({ status, headers: {}, body }))
       }
     })
   )
+
   return { layer, requests }
 }
 
@@ -55,7 +58,9 @@ const execute = (name: string, params: Record<string, unknown>, host = makeHost(
       [makeConnectorToolModule(MicrosoftConnector, { integration, layer: host.layer })],
       {}
     )
+
     const result = yield* tools.execute({ id: 'call-1', name, params })
+
     return { result, requests: host.requests }
   })
 
@@ -65,10 +70,12 @@ describe('Outlook read input compatibility', () => {
   it.effect('registers provider-facing object schemas', () =>
     Effect.gen(function* () {
       const host = makeHost()
+
       const tools = yield* resolveTools(
         [makeConnectorToolModule(MicrosoftConnector, { integration, layer: host.layer })],
         {}
       )
+
       for (const name of names) {
         expect(tools.tools.find(tool => tool.name === name)?.parameters).toMatchObject({
           type: 'object'
@@ -90,6 +97,7 @@ describe('Outlook read input compatibility', () => {
                 : { mailbox: absent, folderId: absent, nextLink: absent }),
               top: null
             })
+
             expect(result.isError).not.toBe(true)
             expect(result.structuredContent).toMatchObject({ messages: [{ id: 'message-1' }] })
             expect(requests).toHaveLength(1)
@@ -103,15 +111,15 @@ describe('Outlook read input compatibility', () => {
     it.effect(`${name} also normalizes placeholders for direct connector callers`, () =>
       Effect.gen(function* () {
         const host = makeHost()
+
         const result = yield* MicrosoftConnector.invoke({
           integration,
           action: name,
           input: { query: 'car', mailbox: null, folderId: '', top: null, nextLink: null }
         }).pipe(Effect.provide(host.layer))
-        expect(result).toMatchObject({
-          _tag: 'Success',
-          value: { messages: [{ id: 'message-1' }] }
-        })
+
+        expect(result._tag).toBe('Success')
+        expect(result).toMatchObject({ value: { messages: [{ id: 'message-1' }] } })
         expect(host.requests).toHaveLength(1)
         expect(new URL(host.requests[0]?.url ?? '').pathname).toBe('/v1.0/me/messages')
       })
@@ -126,6 +134,7 @@ describe('Outlook read input compatibility', () => {
           top: 50,
           nextLink: null
         })
+
         expect(result.isError).not.toBe(true)
         expect(requests).toHaveLength(1)
         const url = new URL(requests[0]?.url ?? '')
@@ -133,6 +142,7 @@ describe('Outlook read input compatibility', () => {
           '/v1.0/users/shared%40example.com/mailFolders/folder%2Fid%2B1/messages'
         )
         expect(url.searchParams.get('$top')).toBe('50')
+
         if (name === 'outlook.search_messages') {
           expect(url.searchParams.get('$search')).toBe('"car offer"')
         }
@@ -143,12 +153,15 @@ describe('Outlook read input compatibility', () => {
       Effect.gen(function* () {
         const nextLink =
           'https://graph.microsoft.com/v1.0/users/shared%40example.com/mailFolders/inbox/messages?$skiptoken=opaque%2B%2F%3D&$top=25'
+
         const params = { query: 'car', mailbox: 'shared@example.com', folderId: 'inbox' }
+
         const first = yield* execute(
           name,
           params,
           makeHost(JSON.stringify({ value: [], '@odata.nextLink': nextLink }))
         )
+
         expect(first.result.structuredContent).toMatchObject({ nextLink })
         const second = yield* execute(name, { ...params, nextLink })
         expect(second.result.isError).not.toBe(true)
@@ -169,12 +182,15 @@ describe('Outlook read input compatibility', () => {
       it.effect(`${name} rejects invalid or mismatched cursors: ${nextLink}`, () =>
         Effect.gen(function* () {
           const host = makeHost()
+
           const result = yield* MicrosoftConnector.invoke({
             integration,
             action: name,
             input: { query: 'car', nextLink }
           }).pipe(Effect.provide(host.layer), Effect.result)
-          expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
+
+          expect(result._tag).toBe('Failure')
+          expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
           expect(host.requests).toEqual([])
         })
       )
@@ -205,6 +221,7 @@ describe('Outlook read input compatibility', () => {
         () =>
           Effect.gen(function* () {
             const host = makeHost()
+
             const result = yield* MicrosoftConnector.invoke({
               integration: makeIntegration({
                 connectorId: 'microsoft',
@@ -214,10 +231,9 @@ describe('Outlook read input compatibility', () => {
               action: name,
               input: { query: 'car', mailbox }
             }).pipe(Effect.provide(host.layer), Effect.result)
-            expect(result).toMatchObject({
-              _tag: 'Failure',
-              failure: { cause: 'validation_failed' }
-            })
+
+            expect(result._tag).toBe('Failure')
+            expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
             expect(host.requests).toEqual([])
           })
       )
@@ -230,6 +246,7 @@ describe('Outlook read input compatibility', () => {
           { query: 'car', nextLink: null },
           makeHost('{"error":{"code":"ErrorAccessDenied","message":"Denied"}}', 403)
         )
+
         expect(requests).toHaveLength(1)
         expect(result.isError).toBe(true)
         expect(result.structuredContent).toMatchObject({
@@ -247,6 +264,7 @@ describe('Outlook read input compatibility', () => {
           filter: absent,
           orderBy: absent
         })
+
         expect(result.isError).not.toBe(true)
         const url = new URL(requests[0]?.url ?? '')
         expect(url.searchParams.has('$filter')).toBe(false)
@@ -262,6 +280,7 @@ describe('Outlook read input compatibility', () => {
         orderBy: ' receivedDateTime desc ',
         top: 25
       })
+
       expect(result.isError).not.toBe(true)
       const url = new URL(requests[0]?.url ?? '')
       expect(url.searchParams.get('$filter')).toBe(' isRead eq false ')
@@ -276,6 +295,7 @@ describe('Outlook read input compatibility', () => {
           ...params,
           nextLink: null
         })
+
         expect(result.isError).toBe(true)
         expect(requests).toEqual([])
       })
@@ -295,6 +315,7 @@ describe('Outlook read input compatibility', () => {
           top: null,
           nextLink: null
         })
+
         expect(decoded.mailbox).toBeUndefined()
         expect(decoded.folderId).toBeUndefined()
         expect(decoded.top).toBeUndefined()

@@ -9,10 +9,13 @@ import { ActionResult } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const r2StorageConnectorId = 'r2-storage'
+
 export const r2AccessKeyIdSlotId = 'r2-storage.access_key_id'
+
 export const r2SecretAccessKeySlotId = 'r2-storage.secret_access_key'
 
 export const R2AccessKeyIdSlot = CredentialSlot.make({ id: r2AccessKeyIdSlotId, kind: 'api_key' })
+
 export const R2SecretAccessKeySlot = CredentialSlot.make({
   id: r2SecretAccessKeySlotId,
   kind: 'api_key'
@@ -66,11 +69,13 @@ const resolveApiToken = (integration: ConnectorIntegration, slot: CredentialSlot
 
 const joinPublicUrl = (publicUrl: string, key: string) => {
   const base = publicUrl.endsWith('/') ? publicUrl.slice(0, -1) : publicUrl
+
   return `${base}/${key}`
 }
 
 const safeObjectKey = (filename: string) => {
   const trimmed = filename.trim().replace(/^\/+/, '')
+
   return trimmed === '' ? `uploads/${Date.now()}` : trimmed
 }
 
@@ -99,6 +104,7 @@ export const r2StorageUploadUrlAction = defineAction({
       const secretAccessKey = yield* resolveApiToken(integration, R2SecretAccessKeySlot)
       const presigner = yield* R2Presigner
       const key = safeObjectKey(input.filename)
+
       const presigned = yield* presigner.presignPutObject(
         R2PresignInput.make({
           endpoint,
@@ -127,6 +133,7 @@ export const R2StorageConnector = defineConnector({
   description: 'Cloudflare R2 storage connector actions.',
   actions: r2StorageActions
 })
+
 export {
   R2ObjectClient,
   getR2Object,
@@ -134,6 +141,7 @@ export {
   updateR2Object,
   r2SingleUploadMaxBytes
 } from './files.ts'
+
 export type {
   R2ObjectClientApi,
   R2ObjectCondition,

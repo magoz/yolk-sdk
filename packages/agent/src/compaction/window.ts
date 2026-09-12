@@ -5,8 +5,10 @@ import {
   type AgentMessage
 } from '@yolk-sdk/agent/protocol'
 import { estimateAgentMessagesTokens, type TranscriptTokenEstimator } from './estimator.ts'
+import { Predicate } from 'effect'
 
 export const defaultCompactionTailMessageCount = 16
+
 export const defaultMinimumCompactionMessages = 2
 
 export type CompactionSkipReason =
@@ -118,6 +120,7 @@ export const planWindowCompaction = (
     messages,
     options.tailMessageCount ?? defaultCompactionTailMessageCount
   )
+
   const compactedMessages = messages.slice(0, tailStart)
   const recentMessages = messages.slice(tailStart)
 
@@ -139,7 +142,7 @@ export const applyCompactionPlan = (
   plan: WindowCompactionPlan,
   options: ApplyCompactionPlanOptions
 ): CompactionResult => {
-  if (plan._tag === 'Skip') {
+  if (Predicate.isTagged(plan, 'Skip')) {
     return skippedCompactionResult(plan.reason, plan.messages, plan.beforeTokens)
   }
 

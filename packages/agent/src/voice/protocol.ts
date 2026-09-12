@@ -25,6 +25,7 @@ export class VoiceNoTurnDetection extends Schema.TaggedClass<VoiceNoTurnDetectio
 ) {}
 
 export const VoiceTurnDetection = Schema.Union([VoiceServerVadTurnDetection, VoiceNoTurnDetection])
+
 export type VoiceTurnDetection = typeof VoiceTurnDetection.Type
 
 export class VoiceInputTranscription extends Schema.Class<VoiceInputTranscription>(
@@ -60,6 +61,7 @@ export const VoiceSessionErrorCode = Schema.Literals([
   'protocol_error',
   'unknown'
 ])
+
 export type VoiceSessionErrorCode = typeof VoiceSessionErrorCode.Type
 
 /**
@@ -122,6 +124,7 @@ export const VoiceCommand = Schema.Union([
   VoiceSubmitToolOutput,
   VoiceSubmitHitlResponse
 ])
+
 export type VoiceCommand = typeof VoiceCommand.Type
 
 // --- Events ---------------------------------------------------------------
@@ -286,6 +289,7 @@ export const VoiceEvent = Schema.Union([
   VoiceAwaitingInput,
   VoiceErrorEvent
 ])
+
 export type VoiceEvent = typeof VoiceEvent.Type
 
 // --- Tool call outcomes ------------------------------------------------------
@@ -327,6 +331,7 @@ export const VoiceToolCallOutcome = Schema.Union([
   VoiceToolCallApprovalRequiredOutcome,
   VoiceToolCallDeniedOutcome
 ])
+
 export type VoiceToolCallOutcome = typeof VoiceToolCallOutcome.Type
 
 /**

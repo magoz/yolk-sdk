@@ -70,6 +70,7 @@ const requestLine = (value: unknown) => JSON.stringify(value)
 const handleJson = (value: unknown) =>
   Effect.gen(function* () {
     const response = yield* server.handleLine(requestLine(value))
+
     if (Option.isNone(response)) {
       return yield* Effect.fail(new Error('Expected MCP response'))
     }
@@ -82,6 +83,7 @@ const handleHttpJson = (value: unknown) =>
     const response = yield* server.handleHttpRequest(
       new Request('https://example.com/mcp', { method: 'POST', body: requestLine(value) })
     )
+
     const body = yield* Effect.promise(() => response.text())
 
     return yield* decodeJson(body)
@@ -207,9 +209,11 @@ describe('MCP tool server', () => {
   it.effect('returns JSON-RPC errors for malformed JSON', () =>
     Effect.gen(function* () {
       const responseOption = yield* server.handleLine('{')
+
       if (Option.isNone(responseOption)) {
         return yield* Effect.fail(new Error('Expected MCP response'))
       }
+
       const response = yield* decodeJson(responseOption.value)
 
       expect(response).toMatchObject({
@@ -225,9 +229,11 @@ describe('MCP tool server', () => {
       const responseOption = yield* failingServer.handleLine(
         requestLine({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'fail' } })
       )
+
       if (Option.isNone(responseOption)) {
         return yield* Effect.fail(new Error('Expected MCP response'))
       }
+
       const response = yield* decodeJson(responseOption.value)
 
       expect(response).toMatchObject({
@@ -243,9 +249,11 @@ describe('MCP tool server', () => {
       const responseOption = yield* richResultServer.handleLine(
         requestLine({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'rich' } })
       )
+
       if (Option.isNone(responseOption)) {
         return yield* Effect.fail(new Error('Expected MCP response'))
       }
+
       const response = yield* decodeJson(responseOption.value)
 
       expect(response).toMatchObject({
@@ -290,6 +298,7 @@ describe('MCP tool server', () => {
       const response = yield* server.handleHttpRequest(
         modernHttpRequest({ method: 'tools/list', id: 10 })
       )
+
       const json = yield* Effect.promise(() => response.text()).pipe(Effect.flatMap(decodeJson))
 
       expect(response.status).toBe(200)
@@ -316,6 +325,7 @@ describe('MCP tool server', () => {
           headers: { 'mcp-name': 'different' }
         })
       )
+
       const json = yield* Effect.promise(() => response.text()).pipe(Effect.flatMap(decodeJson))
 
       expect(response.status).toBe(400)

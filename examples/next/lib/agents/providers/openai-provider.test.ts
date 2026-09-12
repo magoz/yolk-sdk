@@ -52,12 +52,14 @@ describe('OpenAiProviderLayer', () => {
   it.effect('maps a text-only request to OpenAI chat completions', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ choices: [{ message: { content: 'ok' } }] }, requests)
       )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -86,6 +88,7 @@ describe('OpenAiProviderLayer', () => {
   it.effect('maps OpenAI function calls to tool call events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -110,6 +113,7 @@ describe('OpenAiProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
@@ -142,6 +146,7 @@ describe('OpenAiProviderLayer', () => {
   it.effect('maps OpenAI usage to canonical usage events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -159,6 +164,7 @@ describe('OpenAiProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -183,12 +189,14 @@ describe('OpenAiProviderLayer', () => {
   it.effect('maps non-OK OpenAI responses to LLM errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ error: { message: 'too many requests' } }, requests, 429)
       )
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -215,6 +223,7 @@ describe('OpenAiProviderLayer', () => {
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],

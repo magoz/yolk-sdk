@@ -22,9 +22,11 @@ const handler = Effect.gen(function* () {
   const workflows = yield* VercelWorkflows
   const request = yield* HttpServerRequest.schemaBodyJson(AgentRouteRequest)
   const workflowRequest = yield* Schema.encodeUnknownEffect(AgentRouteRequest)(request)
+
   const run = yield* workflows.start(runAgentWorkflow, [
     { userId: session.user.id, request: workflowRequest }
   ])
+
   const store = yield* AgentWorkflowStore
   yield* store.register(run.runId, session.user.id)
   const readable = yield* run.getReadable<Uint8Array>()

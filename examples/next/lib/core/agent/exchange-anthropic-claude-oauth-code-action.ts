@@ -50,6 +50,7 @@ export const exchangeAnthropicClaudeOAuthCodeAction = async (input: {
         codeVerifier,
         expectedState
       })
+
       yield* saveAnthropicClaudeToken({ userId: session.user.id, token })
       yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthVerifierCookieName))
       yield* Effect.sync(() => cookieStore.delete(anthropicClaudeOAuthStateCookieName))

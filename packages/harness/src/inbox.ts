@@ -58,7 +58,7 @@ export type DrainBegin =
       readonly readyResponses: ReadonlyArray<ParkedResponse>
     }
 
-export type InboxShape = {
+export type InboxApi = {
   readonly enqueue: (item: InboxItem) => Effect.Effect<void>
   readonly takePromotable: (
     runId: string,
@@ -105,8 +105,6 @@ export type InboxShape = {
     wake: Effect.Effect<void>
   ) => Effect.Effect<RecoveryAdmission, E, R>
 }
-
-export class Inbox extends Context.Service<Inbox, InboxShape>()('@yolk-sdk/harness/Inbox') {}
 
 const isPromotableAt = (item: InboxItem, scope: Promotable) => {
   if (scope === 'steer') return item.delivery === 'steer'
@@ -162,293 +160,301 @@ const isPrunable = (control: RunControl) =>
   control.park === undefined &&
   control.leasedGeneration === undefined
 
-export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> =>
-  Layer.effect(
-    Inbox,
-    Effect.gen(function* () {
-      const items = yield* Ref.make<ReadonlyArray<InboxItem>>([])
-      const controls = yield* Ref.make<ReadonlyMap<string, RunControl>>(new Map())
-      const gate = yield* Semaphore.make(1)
-      let generationSeq = 0
-      let drainSeq = 0
+export class Inbox extends Context.Service<Inbox, InboxApi>()('@yolk-sdk/harness/Inbox') {
+  /** Fresh queue, admission gate and HITL generations per layer acquisition. */
+  static layer = (): Layer.Layer<Inbox> =>
+    Layer.effect(
+      this,
+      Effect.gen(function* () {
+        const items = yield* Ref.make<ReadonlyArray<InboxItem>>([])
+        const controls = yield* Ref.make<ReadonlyMap<string, RunControl>>(new Map())
+        const gate = yield* Semaphore.make(1)
+        let generationSeq = 0
+        let drainSeq = 0
 
-      const withGate = <A, E, R>(body: Effect.Effect<A, E, R>) => gate.withPermits(1)(body)
+        const withGate = <A, E, R>(body: Effect.Effect<A, E, R>) => gate.withPermits(1)(body)
 
-      const getControl = (runId: string) =>
-        Ref.get(controls).pipe(Effect.map(current => current.get(runId) ?? emptyControl))
+        const getControl = (runId: string) =>
+          Ref.get(controls).pipe(Effect.map(current => current.get(runId) ?? emptyControl))
 
-      const writeControl = (runId: string, next: RunControl) =>
-        Ref.update(controls, current => {
-          const copy = new Map(current)
-          if (isPrunable(next)) copy.delete(runId)
-          else copy.set(runId, next)
-          return copy
-        })
+        const writeControl = (runId: string, next: RunControl) =>
+          Ref.update(controls, current => {
+            const copy = new Map(current)
+            if (isPrunable(next)) copy.delete(runId)
+            else copy.set(runId, next)
+            return copy
+          })
 
-      const dropQueued = (runId: string) =>
-        Ref.update(items, current => current.filter(item => item.runId !== runId))
+        const dropQueued = (runId: string) =>
+          Ref.update(items, current => current.filter(item => item.runId !== runId))
 
-      const acceptHitlPure = (control: RunControl, admission: HitlAdmission): HitlDecision => {
-        const park = control.park
-        if (park === undefined) return { _tag: 'NotParked' }
-        if (park.generation !== admission.generation) return { _tag: 'Stale' }
-        if (!park.requestIds.includes(admission.requestId)) return { _tag: 'UnknownRequest' }
-        if (
-          park.responses.some(
-            response =>
-              response.itemId === admission.itemId || response.requestId === admission.requestId
-          )
-        ) {
-          return { _tag: 'Duplicate' }
+        const acceptHitlPure = (control: RunControl, admission: HitlAdmission): HitlDecision => {
+          const park = control.park
+          if (park === undefined) return { _tag: 'NotParked' }
+          if (park.generation !== admission.generation) return { _tag: 'Stale' }
+          if (!park.requestIds.includes(admission.requestId)) return { _tag: 'UnknownRequest' }
+          if (
+            park.responses.some(
+              response =>
+                response.itemId === admission.itemId || response.requestId === admission.requestId
+            )
+          ) {
+            return { _tag: 'Duplicate' }
+          }
+          if (park.readyWoken) return { _tag: 'Duplicate' }
+          const responses = [
+            ...park.responses,
+            { itemId: admission.itemId, requestId: admission.requestId }
+          ]
+          return parkComplete({ ...park, responses }) ? { _tag: 'Ready' } : { _tag: 'Accepted' }
         }
-        if (park.readyWoken) return { _tag: 'Duplicate' }
-        const responses = [
-          ...park.responses,
-          { itemId: admission.itemId, requestId: admission.requestId }
-        ]
-        return parkComplete({ ...park, responses }) ? { _tag: 'Ready' } : { _tag: 'Accepted' }
-      }
 
-      return Inbox.of({
-        enqueue: item => Ref.update(items, current => [...current, item]),
-        takePromotable: (runId, scope, drainToken) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (control.liveToken === undefined || control.liveToken !== drainToken) {
-                  return undefined
-                }
-                return yield* Ref.modify(items, current => {
-                  const index = current.findIndex(
-                    item => item.runId === runId && isPromotableAt(item, scope)
-                  )
-                  if (index < 0) return [undefined, current] as const
-                  const taken = current[index]
-                  return [taken, current.filter((_, itemIndex) => itemIndex !== index)] as const
-                })
-              })
-            )
-          ),
-        pending: runId =>
-          Ref.get(items).pipe(Effect.map(current => current.filter(item => item.runId === runId))),
-        parked: runId =>
-          getControl(runId).pipe(
-            Effect.map(control =>
-              control.park === undefined ? undefined : parkedState(control.park)
-            )
-          ),
-        park: (runId, requestIds, drainToken) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (control.liveToken !== drainToken) return { _tag: 'Stale' } as const
-                generationSeq += 1
-                const generation = String(generationSeq)
-                yield* writeControl(runId, {
-                  pending: control.pending,
-                  liveToken: control.liveToken,
-                  leasedGeneration: control.leasedGeneration,
-                  park: {
-                    generation,
-                    requestIds: [...requestIds],
-                    responses: [],
-                    readyWoken: false
-                  }
-                })
-                return { _tag: 'Parked', generation } as const
-              })
-            )
-          ),
-        acceptHitl: (runId, admission, onReady) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                const decision = acceptHitlPure(control, admission)
-                if (decision._tag !== 'Accepted' && decision._tag !== 'Ready') {
-                  return decision
-                }
-                const park = control.park
-                if (park === undefined) return { _tag: 'NotParked' } as const
-                const nextPark: Park = {
-                  ...park,
-                  responses: [
-                    ...park.responses,
-                    { itemId: admission.itemId, requestId: admission.requestId }
-                  ],
-                  readyWoken: decision._tag === 'Ready'
-                }
-                yield* writeControl(runId, {
-                  pending:
-                    decision._tag === 'Ready'
-                      ? widerPending(control.pending, 'input')
-                      : control.pending,
-                  liveToken: control.liveToken,
-                  leasedGeneration: control.leasedGeneration,
-                  park: nextPark
-                })
-                if (decision._tag === 'Ready') yield* onReady
-                return decision
-              })
-            )
-          ),
-        clearPark: (runId, generation) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (control.park === undefined || control.park.generation !== generation) {
-                  return false
-                }
-                yield* writeControl(runId, {
-                  pending: control.pending,
-                  liveToken: control.liveToken,
-                  leasedGeneration: control.leasedGeneration,
-                  park: undefined
-                })
-                return true
-              })
-            )
-          ),
-        beginDrain: (runId, scope) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                const pending = control.pending
-                if (parkBlocked(control.park) || pending === undefined) {
-                  return { _tag: 'Skip' } as const
-                }
-                drainSeq += 1
-                const drainToken = `d${drainSeq}`
-                const park = control.park
-                const ready = park !== undefined && parkComplete(park) ? park : undefined
-                yield* writeControl(runId, {
-                  pending: remainingPending(pending, scope),
-                  liveToken: drainToken,
-                  park,
-                  leasedGeneration: ready?.generation
-                })
-                return {
-                  _tag: 'Run',
-                  drainToken,
-                  readyResponses: ready === undefined ? [] : ready.responses
-                } as const
-              })
-            )
-          ),
-        endDrain: (runId, drainToken, acknowledged) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (control.liveToken !== drainToken) return
-                const leased = control.leasedGeneration
-                const park = control.park
-                const clearPark =
-                  acknowledged &&
-                  leased !== undefined &&
-                  park !== undefined &&
-                  park.generation === leased
-                yield* writeControl(runId, {
-                  pending: control.pending,
-                  liveToken: undefined,
-                  leasedGeneration: undefined,
-                  park: clearPark ? undefined : park
-                })
-              })
-            )
-          ),
-        invalidate: (runId, interrupt, releaseIdleClaim) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                const hadPark = control.park !== undefined
-                yield* dropQueued(runId)
-                yield* writeControl(runId, emptyControl)
-                const interrupted = yield* interrupt
-                if (!interrupted) yield* releaseIdleClaim
-                return { hadPark, interrupted }
-              })
-            )
-          ),
-        enqueueAndWake: (item, wake) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                yield* Ref.update(items, current => [...current, item])
-                const control = yield* getControl(item.runId)
-                if (parkBlocked(control.park)) return
-                yield* writeControl(item.runId, {
-                  pending: widerPending(control.pending, itemScope(item)),
-                  liveToken: control.liveToken,
-                  leasedGeneration: control.leasedGeneration,
-                  park: control.park
-                })
-                yield* wake
-              })
-            )
-          ),
-        wakeIfUnblocked: (runId, scope, wake) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (parkBlocked(control.park)) return false
-                yield* writeControl(runId, {
-                  pending: widerPending(control.pending, scope),
-                  liveToken: control.liveToken,
-                  leasedGeneration: control.leasedGeneration,
-                  park: control.park
-                })
-                yield* wake
-                return true
-              })
-            )
-          ),
-        startIfUnblocked: (runId, start) =>
-          withGate(
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                const control = yield* getControl(runId)
-                if (parkBlocked(control.park)) return undefined
-                const ticket = yield* start
-                if (ticket._tag === 'Started') {
-                  yield* writeControl(runId, {
-                    pending: widerPending(control.pending, 'input'),
-                    liveToken: control.liveToken,
-                    leasedGeneration: control.leasedGeneration,
-                    park: control.park
-                  })
-                }
-                return ticket
-              })
-            )
-          ),
-        admitRecovery: (runId, attempt, wake) =>
-          Effect.uninterruptibleMask(restore =>
-            restore(gate.take(1)).pipe(
-              Effect.flatMap(() =>
+        return Inbox.of({
+          enqueue: item => Ref.update(items, current => [...current, item]),
+          takePromotable: (runId, scope, drainToken) =>
+            withGate(
+              Effect.uninterruptible(
                 Effect.gen(function* () {
                   const control = yield* getControl(runId)
-                  if (parkBlocked(control.park)) return { _tag: 'Skip' } as const
-                  const decision = yield* attempt
-                  if (decision._tag !== 'Resume') return decision
+                  if (control.liveToken === undefined || control.liveToken !== drainToken) {
+                    return undefined
+                  }
+                  return yield* Ref.modify(items, current => {
+                    const index = current.findIndex(
+                      item => item.runId === runId && isPromotableAt(item, scope)
+                    )
+                    if (index < 0) return [undefined, current] as const
+                    const taken = current[index]
+                    return [taken, current.filter((_, itemIndex) => itemIndex !== index)] as const
+                  })
+                })
+              )
+            ),
+          pending: runId =>
+            Ref.get(items).pipe(
+              Effect.map(current => current.filter(item => item.runId === runId))
+            ),
+          parked: runId =>
+            getControl(runId).pipe(
+              Effect.map(control =>
+                control.park === undefined ? undefined : parkedState(control.park)
+              )
+            ),
+          park: (runId, requestIds, drainToken) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (control.liveToken !== drainToken) return { _tag: 'Stale' } as const
+                  generationSeq += 1
+                  const generation = String(generationSeq)
                   yield* writeControl(runId, {
-                    pending: widerPending(control.pending, 'input'),
+                    pending: control.pending,
+                    liveToken: control.liveToken,
+                    leasedGeneration: control.leasedGeneration,
+                    park: {
+                      generation,
+                      requestIds: [...requestIds],
+                      responses: [],
+                      readyWoken: false
+                    }
+                  })
+                  return { _tag: 'Parked', generation } as const
+                })
+              )
+            ),
+          acceptHitl: (runId, admission, onReady) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  const decision = acceptHitlPure(control, admission)
+                  if (decision._tag !== 'Accepted' && decision._tag !== 'Ready') {
+                    return decision
+                  }
+                  const park = control.park
+                  if (park === undefined) return { _tag: 'NotParked' } as const
+                  const nextPark: Park = {
+                    ...park,
+                    responses: [
+                      ...park.responses,
+                      { itemId: admission.itemId, requestId: admission.requestId }
+                    ],
+                    readyWoken: decision._tag === 'Ready'
+                  }
+                  yield* writeControl(runId, {
+                    pending:
+                      decision._tag === 'Ready'
+                        ? widerPending(control.pending, 'input')
+                        : control.pending,
+                    liveToken: control.liveToken,
+                    leasedGeneration: control.leasedGeneration,
+                    park: nextPark
+                  })
+                  if (decision._tag === 'Ready') yield* onReady
+                  return decision
+                })
+              )
+            ),
+          clearPark: (runId, generation) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (control.park === undefined || control.park.generation !== generation) {
+                    return false
+                  }
+                  yield* writeControl(runId, {
+                    pending: control.pending,
+                    liveToken: control.liveToken,
+                    leasedGeneration: control.leasedGeneration,
+                    park: undefined
+                  })
+                  return true
+                })
+              )
+            ),
+          beginDrain: (runId, scope) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  const pending = control.pending
+                  if (parkBlocked(control.park) || pending === undefined) {
+                    return { _tag: 'Skip' } as const
+                  }
+                  drainSeq += 1
+                  const drainToken = `d${drainSeq}`
+                  const park = control.park
+                  const ready = park !== undefined && parkComplete(park) ? park : undefined
+                  yield* writeControl(runId, {
+                    pending: remainingPending(pending, scope),
+                    liveToken: drainToken,
+                    park,
+                    leasedGeneration: ready?.generation
+                  })
+                  return {
+                    _tag: 'Run',
+                    drainToken,
+                    readyResponses: ready === undefined ? [] : ready.responses
+                  } as const
+                })
+              )
+            ),
+          endDrain: (runId, drainToken, acknowledged) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (control.liveToken !== drainToken) return
+                  const leased = control.leasedGeneration
+                  const park = control.park
+                  const clearPark =
+                    acknowledged &&
+                    leased !== undefined &&
+                    park !== undefined &&
+                    park.generation === leased
+                  yield* writeControl(runId, {
+                    pending: control.pending,
+                    liveToken: undefined,
+                    leasedGeneration: undefined,
+                    park: clearPark ? undefined : park
+                  })
+                })
+              )
+            ),
+          invalidate: (runId, interrupt, releaseIdleClaim) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  const hadPark = control.park !== undefined
+                  yield* dropQueued(runId)
+                  yield* writeControl(runId, emptyControl)
+                  const interrupted = yield* interrupt
+                  if (!interrupted) yield* releaseIdleClaim
+                  return { hadPark, interrupted }
+                })
+              )
+            ),
+          enqueueAndWake: (item, wake) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  yield* Ref.update(items, current => [...current, item])
+                  const control = yield* getControl(item.runId)
+                  if (parkBlocked(control.park)) return
+                  yield* writeControl(item.runId, {
+                    pending: widerPending(control.pending, itemScope(item)),
                     liveToken: control.liveToken,
                     leasedGeneration: control.leasedGeneration,
                     park: control.park
                   })
                   yield* wake
-                  return { _tag: 'Resumed' } as const
-                }).pipe(Effect.ensuring(gate.release(1)))
+                })
+              )
+            ),
+          wakeIfUnblocked: (runId, scope, wake) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (parkBlocked(control.park)) return false
+                  yield* writeControl(runId, {
+                    pending: widerPending(control.pending, scope),
+                    liveToken: control.liveToken,
+                    leasedGeneration: control.leasedGeneration,
+                    park: control.park
+                  })
+                  yield* wake
+                  return true
+                })
+              )
+            ),
+          startIfUnblocked: (runId, start) =>
+            withGate(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  const control = yield* getControl(runId)
+                  if (parkBlocked(control.park)) return undefined
+                  const ticket = yield* start
+                  if (ticket._tag === 'Started') {
+                    yield* writeControl(runId, {
+                      pending: widerPending(control.pending, 'input'),
+                      liveToken: control.liveToken,
+                      leasedGeneration: control.leasedGeneration,
+                      park: control.park
+                    })
+                  }
+                  return ticket
+                })
+              )
+            ),
+          admitRecovery: (runId, attempt, wake) =>
+            Effect.uninterruptibleMask(restore =>
+              restore(gate.take(1)).pipe(
+                Effect.flatMap(() =>
+                  Effect.gen(function* () {
+                    const control = yield* getControl(runId)
+                    if (parkBlocked(control.park)) return { _tag: 'Skip' } as const
+                    const decision = yield* attempt
+                    if (decision._tag !== 'Resume') return decision
+                    yield* writeControl(runId, {
+                      pending: widerPending(control.pending, 'input'),
+                      liveToken: control.liveToken,
+                      leasedGeneration: control.leasedGeneration,
+                      park: control.park
+                    })
+                    yield* wake
+                    return { _tag: 'Resumed' } as const
+                  }).pipe(Effect.ensuring(gate.release(1)))
+                )
               )
             )
-          )
+        })
       })
-    })
-  )
+    )
+}
+
+/** Backward-compatible delegation to the owning inbox layer. */
+export const makeInMemoryInboxLayer = (): Layer.Layer<Inbox> => Inbox.layer()

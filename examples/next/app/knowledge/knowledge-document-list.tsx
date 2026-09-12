@@ -32,9 +32,11 @@ const formatDate = (date: Date) =>
 
 const previewText = (item: KnowledgeDocumentListItem) => {
   const text = item.document.content ?? item.document.summary
+
   if (text === null || text === undefined) return undefined
 
   const trimmed = text.trim()
+
   if (trimmed.length === 0) return undefined
 
   return trimmed.length <= 500 ? trimmed : `${trimmed.slice(0, 500)}…`
@@ -53,8 +55,11 @@ const availabilityClassName = (availability: KnowledgeAvailability) => {
 
 const formatBytes = (bytes: number | null | undefined) => {
   if (bytes === null || bytes === undefined) return undefined
+
   if (bytes < 1024) return `${bytes} B`
+
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 

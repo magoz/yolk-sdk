@@ -17,6 +17,7 @@ import {
 } from './background.ts'
 
 export const ToolAccess = Schema.Literals(['read', 'write', 'destructive'])
+
 export type ToolAccess = typeof ToolAccess.Type
 
 export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError>()(
@@ -42,6 +43,7 @@ export const ModelVisibleToolErrorReason = Schema.Literals([
   'unavailable',
   'timeout'
 ])
+
 export type ModelVisibleToolErrorReason = typeof ModelVisibleToolErrorReason.Type
 
 export class ModelVisibleToolError extends Schema.TaggedErrorClass<ModelVisibleToolError>()(
@@ -61,6 +63,7 @@ export const ModelVisibleToolErrorStructuredContentSchema = Schema.Struct({
   message: Schema.String,
   details: Schema.optional(Schema.Unknown)
 })
+
 export type ModelVisibleToolErrorStructuredContent =
   typeof ModelVisibleToolErrorStructuredContentSchema.Type
 
@@ -226,17 +229,21 @@ const emptyObjectJsonSchema = {
 const jsonSchemaFromSchema = (schema: Schema.Top) => {
   const document = Schema.toJsonSchemaDocument(schema)
   const definitionName = localDefinitionName(objectField(document.schema, '$ref'))
+
   const localDefinition =
     definitionName === undefined
       ? undefined
       : Object.getOwnPropertyDescriptor(document.definitions, definitionName)?.value
+
   const rootSchema = isObjectRecord(localDefinition) ? localDefinition : document.schema
+
   const remainingDefinitions =
     definitionName === undefined
       ? document.definitions
       : Object.fromEntries(
           Object.entries(document.definitions).filter(([name]) => name !== definitionName)
         )
+
   const jsonSchema =
     isEmptyStructJsonSchema(rootSchema) || isEmptyRecordJsonSchema(rootSchema)
       ? emptyObjectJsonSchema
@@ -330,6 +337,7 @@ export const resolveTools = <Context>(
     const resolvedByModule = yield* Effect.forEach(modules, toolModule =>
       resolveModuleTools(toolModule, context)
     )
+
     const resolved = Arr.flatten(resolvedByModule)
     const duplicateName = findDuplicateToolName(resolved)
 
@@ -339,6 +347,7 @@ export const resolveTools = <Context>(
 
     const activated = (tool: ToolRegistration<Context>) =>
       options.backgroundHost !== undefined && (tool.background ?? tool.def.background) === true
+
     for (const { tool } of resolved) {
       // Resolved definitions are advertisements, not reusable business registrations.
       if (tool.def.execution !== undefined) {
@@ -349,6 +358,7 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       // Loop-owned tool names keep their own lifecycle: `question` is intercepted before dispatch
       // and `subagent` already owns an explicit acknowledgement helper keyed on its top-level params.
       if (activated(tool) && loopOwnedToolNames.has(tool.def.name)) {
@@ -359,9 +369,11 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       const unsupportedSchema = activated(tool)
         ? unsupportedBackgroundSchema(tool.def.parameters)
         : undefined
+
       if (unsupportedSchema !== undefined) {
         return yield* Effect.fail(
           new ToolRegistryError({
@@ -370,6 +382,7 @@ export const resolveTools = <Context>(
           })
         )
       }
+
       if (activated(tool) && tool.validate === undefined) {
         return yield* Effect.fail(
           new ToolRegistryError({
@@ -379,9 +392,11 @@ export const resolveTools = <Context>(
         )
       }
     }
+
     const tools = Arr.map(resolved, item =>
       activated(item.tool) ? backgroundToolDef(item.tool.def) : item.tool.def
     )
+
     const metadata = Arr.map(resolved, item => ({
       moduleId: item.moduleId,
       name: item.tool.def.name,
@@ -396,6 +411,7 @@ export const resolveTools = <Context>(
           onSome: match => {
             const host = options.backgroundHost
             const validate = match.tool.validate
+
             return activated(match.tool) && host !== undefined && validate !== undefined
               ? executeBackgroundTool({
                   request: call,

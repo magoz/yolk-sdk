@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import {
@@ -128,6 +128,101 @@ export type SubagentToolResultInput = {
   readonly isError?: boolean
 }
 
+type SubagentToolParamsFields = {
+  readonly description: string
+  readonly prompt: string
+  readonly subagent_type: string
+  model?: string
+  reasoning_effort?: AgentReasoningEffort
+  background?: boolean
+}
+
+type SubagentProviderMetadataFields = {
+  readonly provider: string
+  readonly kind: ProviderErrorInfo['kind']
+  status?: number
+  provider_code?: string
+  retry_after_ms?: number
+}
+
+type SubagentUsageInputMetadataFields = {
+  readonly total: number
+  uncached?: number
+  cache_read?: number
+  cache_write?: number
+}
+
+type SubagentUsageOutputMetadataFields = {
+  readonly total: number
+  text?: number
+  reasoning?: number
+}
+
+type SubagentUsageMetadataFields = {
+  readonly input: SubagentUsageInputMetadataFields
+  readonly output: SubagentUsageOutputMetadataFields
+}
+
+type SubagentErrorMetadataFields = {
+  readonly code: AgentErrorCode
+  readonly message: string
+  readonly retryable: boolean
+  provider?: SubagentProviderMetadataFields
+}
+
+type SubagentRunErrorFields = {
+  readonly code: AgentErrorCode
+  readonly message: string
+  readonly retryable: boolean
+  provider?: ProviderErrorInfo
+}
+
+type SubagentRunResultFields = {
+  readonly status: SubagentRunStatus
+  readonly text: string
+  usage?: AgentUsage
+  turns?: number
+  requests?: ReadonlyArray<HitlRequest>
+  error?: SubagentRunErrorFields
+}
+
+type SubagentToolResultStructuredContentFields = {
+  readonly subagent_run_id: string
+  readonly subagent_type: string
+  readonly description: string
+  readonly started_at_ms: number
+  readonly ended_at_ms: number
+  readonly duration_ms: number
+  readonly status: SubagentRunStatus
+  readonly model: string
+  reasoning_effort?: AgentReasoningEffort
+  usage?: SubagentUsageMetadataFields
+  turns?: number
+  hitl_requests?: ReadonlyArray<HitlRequest>
+  error?: SubagentErrorMetadataFields
+}
+
+type SubagentAcceptedStructuredContentFields = {
+  readonly type: 'subagent_accepted'
+  readonly status: 'accepted'
+  readonly subagent_run_id: string
+  readonly workflow_run_id: string
+  parent_run_id?: string
+}
+
+type SubagentAgentInputUsageFields = {
+  readonly total: number
+  uncached?: number
+  cacheRead?: number
+  cacheWrite?: number
+}
+
+type SubagentAgentOutputUsageFields = {
+  readonly total: number
+  text?: number
+  reasoning?: number
+}
+
 const subagentToolError = (message: string, cause: ToolError['cause']) =>
   new ToolError({
     tool: subagentToolName,
@@ -166,6 +261,7 @@ const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) 
       )
     )
   }
+
   const model =
     options.models === undefined || options.models.length === 0
       ? undefined
@@ -173,6 +269,7 @@ const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) 
           values: options.models.map(item => item.id),
           description: 'Model for this subagent. Omit to inherit the host runtime model.'
         })
+
   const reasoningEffort =
     options.reasoningEfforts === undefined || options.reasoningEfforts.length === 0
       ? undefined
@@ -203,14 +300,27 @@ const configuredSubagentToolParams = (options: SubagentRuntimeSelectionOptions) 
   return options.background === true ? Schema.Struct(fields) : Schema.Struct(SubagentToolBaseFields)
 }
 
-const trimmedSubagentParams = (params: SubagentToolParams): SubagentToolParams => ({
-  description: params.description.trim(),
-  prompt: params.prompt.trim(),
-  subagent_type: params.subagent_type.trim(),
-  ...(params.background === undefined ? {} : { background: params.background }),
-  ...(params.model === undefined ? {} : { model: params.model }),
-  ...(params.reasoning_effort === undefined ? {} : { reasoning_effort: params.reasoning_effort })
-})
+const trimmedSubagentParams = (params: SubagentToolParams): SubagentToolParams => {
+  const trimmed: SubagentToolParamsFields = {
+    description: params.description.trim(),
+    prompt: params.prompt.trim(),
+    subagent_type: params.subagent_type.trim()
+  }
+
+  if (params.background !== undefined) {
+    trimmed.background = params.background
+  }
+
+  if (params.model !== undefined) {
+    trimmed.model = params.model
+  }
+
+  if (params.reasoning_effort !== undefined) {
+    trimmed.reasoning_effort = params.reasoning_effort
+  }
+
+  return trimmed
+}
 
 const validateSubagentParams = (
   params: SubagentToolParams
@@ -349,39 +459,88 @@ export const formatSubagentResult = (output: string) =>
 export const subagentToolRunId = makeSubagentRunId
 
 const latestAssistantText = (messages: ReadonlyArray<AgentMessage>) => {
-  const assistant = [...messages].reverse().find(message => message._tag === 'Assistant')
+  const assistant = [...messages]
+    .reverse()
+    .find(message => Predicate.isTagged(message, 'Assistant'))
 
   return assistant === undefined ? '' : contentText(assistantContent(assistant))
 }
 
-const subagentProviderMetadata = (provider: ProviderErrorInfo) => ({
-  provider: provider.provider,
-  kind: provider.kind,
-  ...(provider.status === undefined ? {} : { status: provider.status }),
-  ...(provider.providerCode === undefined ? {} : { provider_code: provider.providerCode }),
-  ...(provider.retryAfterMs === undefined ? {} : { retry_after_ms: provider.retryAfterMs })
-})
-
-const subagentUsageMetadata = (usage: AgentUsage) => ({
-  input: {
-    total: usage.input.total,
-    ...(usage.input.uncached === undefined ? {} : { uncached: usage.input.uncached }),
-    ...(usage.input.cacheRead === undefined ? {} : { cache_read: usage.input.cacheRead }),
-    ...(usage.input.cacheWrite === undefined ? {} : { cache_write: usage.input.cacheWrite })
-  },
-  output: {
-    total: usage.output.total,
-    ...(usage.output.text === undefined ? {} : { text: usage.output.text }),
-    ...(usage.output.reasoning === undefined ? {} : { reasoning: usage.output.reasoning })
+const subagentProviderMetadata = (provider: ProviderErrorInfo): SubagentProviderMetadataFields => {
+  const metadata: SubagentProviderMetadataFields = {
+    provider: provider.provider,
+    kind: provider.kind
   }
+
+  if (provider.status !== undefined) {
+    metadata.status = provider.status
+  }
+
+  if (provider.providerCode !== undefined) {
+    metadata.provider_code = provider.providerCode
+  }
+
+  if (provider.retryAfterMs !== undefined) {
+    metadata.retry_after_ms = provider.retryAfterMs
+  }
+
+  return metadata
+}
+
+const subagentUsageInputMetadata = (usage: AgentUsage): SubagentUsageInputMetadataFields => {
+  const input: SubagentUsageInputMetadataFields = {
+    total: usage.input.total
+  }
+
+  if (usage.input.uncached !== undefined) {
+    input.uncached = usage.input.uncached
+  }
+
+  if (usage.input.cacheRead !== undefined) {
+    input.cache_read = usage.input.cacheRead
+  }
+
+  if (usage.input.cacheWrite !== undefined) {
+    input.cache_write = usage.input.cacheWrite
+  }
+
+  return input
+}
+
+const subagentUsageOutputMetadata = (usage: AgentUsage): SubagentUsageOutputMetadataFields => {
+  const output: SubagentUsageOutputMetadataFields = {
+    total: usage.output.total
+  }
+
+  if (usage.output.text !== undefined) {
+    output.text = usage.output.text
+  }
+
+  if (usage.output.reasoning !== undefined) {
+    output.reasoning = usage.output.reasoning
+  }
+
+  return output
+}
+
+const subagentUsageMetadata = (usage: AgentUsage): SubagentUsageMetadataFields => ({
+  input: subagentUsageInputMetadata(usage),
+  output: subagentUsageOutputMetadata(usage)
 })
 
-const subagentErrorMetadata = (error: SubagentRunError) => ({
-  code: error.code,
-  message: error.message,
-  retryable: error.retryable,
-  ...(error.provider === undefined ? {} : { provider: subagentProviderMetadata(error.provider) })
-})
+const subagentErrorMetadata = (error: SubagentRunError): SubagentErrorMetadataFields => {
+  const metadata: SubagentErrorMetadataFields = {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable
+  }
+
+  if (error.provider !== undefined) {
+    metadata.provider = subagentProviderMetadata(error.provider)
+  }
+
+  return metadata
+}
 
 const SubagentUsageMetadata = Schema.Struct({
   input: Schema.Struct({
@@ -403,6 +562,46 @@ const SubagentStructuredUsage = Schema.Struct({
   usage: SubagentUsageMetadata
 })
 
+const subagentAgentInputUsageFromMetadata = (
+  usage: SubagentUsageMetadataFields
+): SubagentAgentInputUsageFields => {
+  const input: SubagentAgentInputUsageFields = {
+    total: usage.input.total
+  }
+
+  if (usage.input.uncached !== undefined) {
+    input.uncached = usage.input.uncached
+  }
+
+  if (usage.input.cache_read !== undefined) {
+    input.cacheRead = usage.input.cache_read
+  }
+
+  if (usage.input.cache_write !== undefined) {
+    input.cacheWrite = usage.input.cache_write
+  }
+
+  return input
+}
+
+const subagentAgentOutputUsageFromMetadata = (
+  usage: SubagentUsageMetadataFields
+): SubagentAgentOutputUsageFields => {
+  const output: SubagentAgentOutputUsageFields = {
+    total: usage.output.total
+  }
+
+  if (usage.output.text !== undefined) {
+    output.text = usage.output.text
+  }
+
+  if (usage.output.reasoning !== undefined) {
+    output.reasoning = usage.output.reasoning
+  }
+
+  return output
+}
+
 export const subagentUsageFromToolResult = (result: ToolResult): AgentUsage | undefined => {
   if (
     !Schema.is(SubagentStructuredUsage)(result.structuredContent) ||
@@ -414,76 +613,140 @@ export const subagentUsageFromToolResult = (result: ToolResult): AgentUsage | un
   const usage = result.structuredContent.usage
 
   return AgentUsage.make({
-    input: {
-      total: usage.input.total,
-      ...(usage.input.uncached === undefined ? {} : { uncached: usage.input.uncached }),
-      ...(usage.input.cache_read === undefined ? {} : { cacheRead: usage.input.cache_read }),
-      ...(usage.input.cache_write === undefined ? {} : { cacheWrite: usage.input.cache_write })
-    },
-    output: {
-      total: usage.output.total,
-      ...(usage.output.text === undefined ? {} : { text: usage.output.text }),
-      ...(usage.output.reasoning === undefined ? {} : { reasoning: usage.output.reasoning })
-    }
+    input: subagentAgentInputUsageFromMetadata(usage),
+    output: subagentAgentOutputUsageFromMetadata(usage)
   })
+}
+
+const subagentRunErrorFromAgentError = (error: SubagentRunError): SubagentRunErrorFields => {
+  const result: SubagentRunErrorFields = {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable
+  }
+
+  if (error.provider !== undefined) {
+    result.provider = error.provider
+  }
+
+  return result
 }
 
 export const subagentResultFromEvents = (events: ReadonlyArray<AgentEvent>): SubagentRunResult => {
   const terminal = [...events].reverse().find(isTerminalAgentEvent)
-  const usageUpdates = events.filter(event => event._tag === 'UsageUpdate')
+  const usageUpdates = events.filter(event => Predicate.isTagged(event, 'UsageUpdate'))
+
   const usage = usageUpdates.reduce(
     (total, event) => addAgentUsage(total, event.usage),
     zeroAgentUsage
   )
+
   const turns = events.reduce(
-    (latest, event) => (event._tag === 'TurnStart' ? Math.max(latest, event.turn) : latest),
+    (latest, event) =>
+      Predicate.isTagged(event, 'TurnStart') ? Math.max(latest, event.turn) : latest,
     0
   )
 
   if (terminal === undefined) {
     const message = 'Subagent stream ended without a terminal event.'
 
-    return {
+    const result: SubagentRunResultFields = {
       status: 'error',
-      text: `Subagent failed: ${message}`,
-      ...(usageUpdates.length === 0 ? {} : { usage }),
-      ...(turns === 0 ? {} : { turns }),
-      error: {
-        code: 'invalid_response',
-        message,
-        retryable: false
-      }
+      text: `Subagent failed: ${message}`
     }
+
+    if (usageUpdates.length !== 0) {
+      result.usage = usage
+    }
+
+    if (turns !== 0) {
+      result.turns = turns
+    }
+
+    result.error = {
+      code: 'invalid_response',
+      message,
+      retryable: false
+    }
+
+    return result
   }
 
-  if (terminal._tag === 'AgentError') {
-    return {
+  if (Predicate.isTagged(terminal, 'AgentError')) {
+    const result: SubagentRunResultFields = {
       status: 'error',
-      text: `Subagent failed: ${terminal.message}`,
-      ...(usageUpdates.length === 0 ? {} : { usage }),
-      ...(turns === 0 ? {} : { turns }),
-      error: {
-        code: terminal.code,
-        message: terminal.message,
-        retryable: terminal.retryable,
-        ...(terminal.provider === undefined ? {} : { provider: terminal.provider })
-      }
+      text: `Subagent failed: ${terminal.message}`
     }
+
+    if (usageUpdates.length !== 0) {
+      result.usage = usage
+    }
+
+    if (turns !== 0) {
+      result.turns = turns
+    }
+
+    result.error = subagentRunErrorFromAgentError(terminal)
+
+    return result
   }
 
   const text = latestAssistantText(terminal.messages).trim()
 
-  return {
-    status: terminal._tag === 'AgentAwaitingInput' ? 'awaiting_input' : 'completed',
+  const result: SubagentRunResultFields = {
+    status: Predicate.isTagged(terminal, 'AgentAwaitingInput') ? 'awaiting_input' : 'completed',
     text: text.length === 0 ? 'Subagent completed without a final text response.' : text,
     usage: terminal.usage,
-    turns: terminal.turns,
-    ...(terminal._tag === 'AgentAwaitingInput' ? { requests: terminal.requests } : {})
+    turns: terminal.turns
   }
+
+  if (Predicate.isTagged(terminal, 'AgentAwaitingInput')) {
+    result.requests = terminal.requests
+  }
+
+  return result
 }
 
 export const subagentResultText = (events: ReadonlyArray<AgentEvent>) =>
   subagentResultFromEvents(events).text
+
+const subagentToolResultStructuredContent = (
+  input: SubagentToolResultInput,
+  status: SubagentRunStatus
+): SubagentToolResultStructuredContentFields => {
+  const structuredContent: SubagentToolResultStructuredContentFields = {
+    subagent_run_id: input.subagentRunId,
+    subagent_type: input.subagentType,
+    description: input.description,
+    started_at_ms: input.startedAtMs,
+    ended_at_ms: input.endedAtMs,
+    duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
+    status,
+    model: input.model
+  }
+
+  if (input.reasoningEffort !== undefined) {
+    structuredContent.reasoning_effort = input.reasoningEffort
+  }
+
+  if (input.usage !== undefined) {
+    structuredContent.usage = subagentUsageMetadata(input.usage)
+  }
+
+  if (input.turns !== undefined) {
+    structuredContent.turns = input.turns
+  }
+
+  if (input.requests !== undefined) {
+    structuredContent.hitl_requests = input.requests
+  }
+
+  if (input.error !== undefined) {
+    structuredContent.error = subagentErrorMetadata(input.error)
+  }
+
+  return structuredContent
+}
 
 export const makeSubagentToolResult = (input: SubagentToolResultInput) => {
   const isError = input.isError === true || input.error !== undefined || input.status === 'error'
@@ -493,22 +756,27 @@ export const makeSubagentToolResult = (input: SubagentToolResultInput) => {
     toolCallId: input.callId,
     content: formatSubagentResult(input.output),
     isError: isError ? true : undefined,
-    structuredContent: {
-      subagent_run_id: input.subagentRunId,
-      subagent_type: input.subagentType,
-      description: input.description,
-      started_at_ms: input.startedAtMs,
-      ended_at_ms: input.endedAtMs,
-      duration_ms: Math.max(0, input.endedAtMs - input.startedAtMs),
-      status,
-      model: input.model,
-      ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }),
-      ...(input.usage === undefined ? {} : { usage: subagentUsageMetadata(input.usage) }),
-      ...(input.turns === undefined ? {} : { turns: input.turns }),
-      ...(input.requests === undefined ? {} : { hitl_requests: input.requests }),
-      ...(input.error === undefined ? {} : { error: subagentErrorMetadata(input.error) })
-    }
+    structuredContent: subagentToolResultStructuredContent(input, status)
   })
+}
+
+const subagentAcceptedStructuredContent = (input: {
+  readonly callId: string
+  readonly workflowRunId: string
+  readonly parentRunId?: string
+}): SubagentAcceptedStructuredContentFields => {
+  const structuredContent: SubagentAcceptedStructuredContentFields = {
+    type: 'subagent_accepted',
+    status: 'accepted',
+    subagent_run_id: makeSubagentRunId(input.callId),
+    workflow_run_id: input.workflowRunId
+  }
+
+  if (input.parentRunId !== undefined) {
+    structuredContent.parent_run_id = input.parentRunId
+  }
+
+  return structuredContent
 }
 
 /** Acceptance is a tool completion, never a child completion or usage delta. */
@@ -520,11 +788,5 @@ export const makeSubagentAcceptedToolResult = (input: {
   ToolResult.make({
     toolCallId: input.callId,
     content: `Subagent accepted. Use subagent_status or subagent_wait with tool_call_id=${input.callId}${input.parentRunId === undefined ? '' : ` and parent_run_id=${input.parentRunId}`}.`,
-    structuredContent: {
-      type: 'subagent_accepted',
-      status: 'accepted',
-      subagent_run_id: makeSubagentRunId(input.callId),
-      workflow_run_id: input.workflowRunId,
-      ...(input.parentRunId === undefined ? {} : { parent_run_id: input.parentRunId })
-    }
+    structuredContent: subagentAcceptedStructuredContent(input)
   })

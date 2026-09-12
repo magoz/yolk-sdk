@@ -26,7 +26,7 @@ const FROM_SELF_SCHEMAS = [
   'RedactedFromSelf'
 ]
 
-/** @type {import('eslint').Rule.RuleModule} */
+/** @type {import('@oxlint/plugins').Rule} */
 export const noSchemaFromSelf = {
   meta: {
     type: 'problem',

@@ -36,6 +36,7 @@ describe('durable object driver', () => {
       const backing = yield* makeBacking()
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         ...backing,
         drain: () =>
@@ -60,6 +61,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const firstStarted = yield* Deferred.make<void>()
       const firstRelease = yield* Deferred.make<void>()
+
       const backing = {
         load: Ref.get(snapshot),
         save: (next: DurableRunStoreSnapshot) =>
@@ -70,6 +72,7 @@ describe('durable object driver', () => {
               )
             : Ref.set(snapshot, next)
       }
+
       const layer = makeDurableObjectDriverLayer(backing)
 
       yield* Effect.gen(function* () {
@@ -173,6 +176,7 @@ describe('durable object driver', () => {
       const backing = yield* makeBacking()
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         ...backing,
         drain: () =>

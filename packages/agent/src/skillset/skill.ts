@@ -11,6 +11,7 @@ export const SkillInfo = Schema.Struct({
   content: Schema.String,
   source: Schema.optional(Schema.String)
 })
+
 export type SkillInfo = typeof SkillInfo.Type
 
 export type ParseSkillInput = {
@@ -36,9 +37,11 @@ const requiredField = (data: Readonly<Record<string, string>>, field: string) =>
 export const parseSkillMarkdown = (input: ParseSkillInput) =>
   Effect.gen(function* () {
     const document = yield* parseMarkdownDocument(input.markdown)
+
     const name = yield* requiredField(document.data, 'name').pipe(
       Effect.flatMap(validateSkillsetName)
     )
+
     const description = yield* requiredField(document.data, 'description')
 
     if (input.directoryName !== undefined) {

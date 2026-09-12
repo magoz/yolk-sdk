@@ -23,6 +23,7 @@ export const defaultPreviewSummaryHeader =
   'Earlier conversation compacted. Preserve these facts and continue from the recent messages.'
 
 export const defaultSummaryPreviewMaxCharacters = 180
+
 export const defaultCompactionToolOutputMaxCharacters = 2_000
 
 const compactionToolOutputMaxCharacters = (options: CompactionMessageFormatOptions) =>
@@ -83,11 +84,13 @@ const formatAssistantPartForCompaction = (
 
       return text.length === 0 ? '' : `[Assistant]: ${text}`
     }
+
     case 'Reasoning': {
       const reasoning = part.text.trim()
 
       return includeReasoning && reasoning.length > 0 ? `[Assistant reasoning]: ${reasoning}` : ''
     }
+
     case 'HostToolCall':
       return includeToolCalls
         ? formatToolCallForCompaction('[Assistant tool call]', part, options)

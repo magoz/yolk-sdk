@@ -16,6 +16,7 @@ import {
   zeroAgentUsage,
   type AgentEvent
 } from '@yolk-sdk/agent/protocol'
+import { TurnDeleted, UserMessageEdited } from '../../src/react/chat-session-events.ts'
 import {
   useAgentChat,
   type AgentChatTransport,
@@ -96,12 +97,14 @@ describe('useAgentChat', () => {
   it('submits text through an injected transport and applies streamed events', async () => {
     const requests: Array<AgentChatTransportRequest> = []
     const events: Array<AgentEvent> = []
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
       yield AgentStart.make({})
       yield LLMTextDelta.make({ text: 'hello' })
       yield agentEnd('hello')
     }
+
     const hook = renderUseAgentChat({
       sessionId: 'session-1',
       transport,
@@ -130,9 +133,11 @@ describe('useAgentChat', () => {
 
   it('ignores blank submits', () => {
     const requests: Array<AgentChatTransportRequest> = []
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
     }
+
     const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
 
     act(() => {
@@ -155,6 +160,7 @@ describe('useAgentChat', () => {
       Object.defineProperty(error, 'name', { value: 'AbortError' })
       throw error
     }
+
     const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
 
     await act(async () => {
@@ -178,17 +184,20 @@ describe('useAgentChat', () => {
     const requests: Array<AgentChatTransportRequest> = []
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
     const assistant = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
+
     const approvalRequest = ToolApprovalRequest.make({
       requestId: 'approval:call_1',
       toolCallId: call.id,
       call
     })
+
     const approvalResponse = ToolApprovalResponse.make({
       requestId: approvalRequest.requestId,
       toolCallId: call.id,
       decision: 'approved',
       source: 'user'
     })
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
 
@@ -200,12 +209,14 @@ describe('useAgentChat', () => {
           turns: 1,
           usage: zeroAgentUsage
         })
+
         return
       }
 
       yield AgentStart.make({})
       yield agentEnd('approved')
     }
+
     const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
 
     await act(async () => {
@@ -232,6 +243,7 @@ describe('useAgentChat', () => {
     const transport: AgentChatTransport = async function* () {
       yield AgentStart.make({})
     }
+
     const hook = renderUseAgentChat({ sessionId: 'session-1', transport })
 
     await act(async () => {
@@ -253,9 +265,11 @@ describe('useAgentChat', () => {
 
   it('deletes a persisted turn without sending transport requests', () => {
     const requests: Array<AgentChatTransportRequest> = []
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
     }
+
     const hook = renderUseAgentChat({
       sessionId: 'session-1',
       transport,
@@ -278,22 +292,25 @@ describe('useAgentChat', () => {
 
     expect(requests).toEqual([])
     expect(hook.value.messages).toEqual([UserMessage.make({ content: 'two' })])
-    expect(hook.value.state.sessionEvents.at(-1)).toEqual({
-      _tag: 'TurnDeleted',
-      turnStartMessageId: 'message-0-user',
-      deletedMessageIds: ['message-0-user', 'message-1-assistant']
-    })
+    expect(hook.value.state.sessionEvents.at(-1)).toEqual(
+      TurnDeleted.make({
+        turnStartMessageId: 'message-0-user',
+        deletedMessageIds: ['message-0-user', 'message-1-assistant']
+      })
+    )
 
     hook.unmount()
   })
 
   it('regenerates from a selected assistant message', async () => {
     const requests: Array<AgentChatTransportRequest> = []
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
       yield AgentStart.make({})
       yield agentEnd('again')
     }
+
     const hook = renderUseAgentChat({
       sessionId: 'session-1',
       transport,
@@ -322,11 +339,13 @@ describe('useAgentChat', () => {
 
   it('edits a user message and reruns from the edited transcript', async () => {
     const requests: Array<AgentChatTransportRequest> = []
+
     const transport: AgentChatTransport = async function* (request) {
       requests.push(request)
       yield AgentStart.make({})
       yield agentEnd('edited reply')
     }
+
     const hook = renderUseAgentChat({
       sessionId: 'session-1',
       transport,
@@ -357,12 +376,13 @@ describe('useAgentChat', () => {
       UserMessage.make({ content: 'updated' }),
       AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'edited reply' })] })
     ])
-    expect(hook.value.state.sessionEvents.at(-1)).toEqual({
-      _tag: 'UserMessageEdited',
-      messageId: 'message-2-user',
-      content: 'updated',
-      keptMessageIds: ['message-0-user', 'message-1-assistant', 'message-2-user']
-    })
+    expect(hook.value.state.sessionEvents.at(-1)).toEqual(
+      UserMessageEdited.make({
+        messageId: 'message-2-user',
+        content: 'updated',
+        keptMessageIds: ['message-0-user', 'message-1-assistant', 'message-2-user']
+      })
+    )
 
     hook.unmount()
   })

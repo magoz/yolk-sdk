@@ -25,5 +25,6 @@ export async function createAuthedContext(
       sameSite: 'Lax'
     }
   ])
+
   return context
 }

@@ -39,6 +39,7 @@ describe('command client', () => {
   it.effect('loads command summaries', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const commands = yield* loadAgentCommands({
         httpClientLayer: makeHttpClientLayer(
           new Response(
@@ -77,6 +78,7 @@ describe('command client', () => {
   it.effect('renders a command prompt', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const content = yield* renderAgentCommand('review', 'app/agent', {
         httpClientLayer: makeHttpClientLayer(
           new Response(JSON.stringify({ content: 'Review app/agent' })),

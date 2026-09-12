@@ -18,6 +18,7 @@ export const cleanupTestData = Effect.gen(function* () {
   const tablesToTruncate = pgTables.map(table => {
     const config = getTableConfig(table)
     const schemaName = config.schema ?? 'public'
+
     return `"${schemaName}"."${config.name}"`
   })
 

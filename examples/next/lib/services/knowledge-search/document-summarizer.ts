@@ -13,8 +13,11 @@ import { KnowledgeSummarizer } from '@yolk-sdk/knowledge/summarization'
 import { AppKnowledgeSummarizerError } from './errors'
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'
+
 const DEFAULT_MODEL = 'gpt-4.1-mini'
+
 const maxSummaryCharacters = 2_000
+
 const maxDocumentCharacters = 80_000
 
 export const SummarizeKnowledgeDocumentInputSchema = Schema.Struct({
@@ -41,6 +44,7 @@ const OpenAiChatCompletionResponseSchema = Schema.Struct({
 export type SummarizeKnowledgeDocumentInput = Schema.Schema.Type<
   typeof SummarizeKnowledgeDocumentInputSchema
 >
+
 export type KnowledgeDocumentSummary = Schema.Schema.Type<typeof KnowledgeDocumentSummarySchema>
 
 type SummarizerConfig = {
@@ -60,6 +64,7 @@ const KnowledgeDocumentSummarizerConfigLayer = Layer.effect(
   KnowledgeDocumentSummarizerConfig,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+
     const model = optionString(
       yield* Config.option(Config.string('KNOWLEDGE_SEARCH_SUMMARIZATION_MODEL'))
     )
@@ -141,6 +146,7 @@ const readErrorBody = (response: HttpClientResponse.HttpClientResponse) =>
 const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
   Effect.gen(function* () {
     const body = yield* readErrorBody(response)
+
     return yield* Effect.fail(
       new AppKnowledgeSummarizerError({
         message: `OpenAI summarization failed: ${response.status} ${body}`,
@@ -215,6 +221,7 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
               })
           )
         )
+
         const response = yield* client.execute(request).pipe(Effect.mapError(toRequestError))
 
         if (!isOkStatus(response.status)) {
@@ -223,6 +230,7 @@ export const OpenAiKnowledgeDocumentSummarizerLayer = Layer.effect(
 
         const parsed = yield* parseOpenAiResponse(response)
         const content = firstChoiceContent(parsed)
+
         if (content === null || content === undefined) {
           return yield* Effect.fail(
             new AppKnowledgeSummarizerError({ message: 'OpenAI summarization returned no content' })

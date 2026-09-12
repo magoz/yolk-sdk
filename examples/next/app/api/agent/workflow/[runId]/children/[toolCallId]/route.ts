@@ -17,11 +17,13 @@ export const GET = (
     Effect.gen(function* () {
       const session = yield* getSession()
       const params = yield* Effect.promise(() => context.params)
+
       const result = yield* readWorkflowChild({
         parentRunId: params.runId,
         callId: params.toolCallId,
         userId: session.user.id
       })
+
       return Response.json(result)
     }).pipe(
       Effect.withSpan('AgentWorkflowChildRoute.get'),

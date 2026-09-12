@@ -7,6 +7,7 @@ export const SkillsetManifest = Schema.Struct({
   skills: Schema.Array(SkillInfo),
   commands: Schema.Array(CommandInfo)
 })
+
 export type SkillsetManifest = typeof SkillsetManifest.Type
 
 export const emptySkillsetManifest: SkillsetManifest = {

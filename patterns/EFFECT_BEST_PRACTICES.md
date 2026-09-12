@@ -476,6 +476,10 @@ export class JournalEntry extends Schema.Class<JournalEntry>('JournalEntry')({
 const entry = JournalEntry.make({ id, description: '...' })
 ```
 
+**Constructor vs encoded key order:** In currently pinned Effect 4.0.0-beta.80, `Schema.Class` / `Schema.TaggedClass` constructors merge `{ ...input, ...validated }`.
+Dropping an explicit constructor `_tag` can append the default tag and change `Object.keys` / raw `JSON.stringify`, even when `Schema.encodeSync` still yields equal schema-order encoded data.
+Hold constructor migrations that change protected raw/wire key order until a compatible owner or explicit contract decision exists; this is not a lint exemption. Do not assume every Schema struct constructor behaves the same.
+
 ### Schema Decoding/Encoding - Use Effect Variants
 
 **NEVER** use `decodeUnknownSync` or `encodeUnknownSync` - they throw exceptions. Always use the Effect variants that return `Effect<A, ParseError>`:
@@ -649,6 +653,12 @@ const handleError = Match.type<AccountError>().pipe(
 )
 ```
 
+**Do not blindly replace `_tag` switches with `Match.tagsExhaustive`.**
+
+- In currently pinned Effect 4.0.0-beta.80, `Match.tagsExhaustive` / `Match.discriminators` read the discriminator twice: predicate (`arg[field] in fields`) then dispatch (`fields[data[field]]`).
+- That extra read can change valid structural SDK getter input. Review before/after property-read sequences (including copies of `_tag` into returned fields).
+- Not every Match API double-reads object fields. Two-case `when`/`orElse` or matching a scalar (`Match.value(state._tag)`) can differ from `tagsExhaustive` on the object.
+
 ---
 
 ## Config Pattern
@@ -713,9 +723,7 @@ export class AccountService extends Context.Service<AccountService>()('@app/Acco
 // Simple service
 export class MyService extends Context.Service<MyService>()('@app/MyService', {
   make: Effect.gen(function* () {
-    return {
-      /* service shape */
-    } as const
+    return {/* service shape */} as const
   })
 }) {
   static layer = Layer.effect(this, this.make)
@@ -725,9 +733,7 @@ export class MyService extends Context.Service<MyService>()('@app/MyService', {
 export class AccountService extends Context.Service<AccountService>()('@app/AccountService', {
   make: Effect.gen(function* () {
     const db = yield* Db
-    return {
-      /* service shape */
-    } as const
+    return {/* service shape */} as const
   })
 }) {
   static layer = Layer.effect(this, this.make).pipe(Layer.provide(Db.layer))

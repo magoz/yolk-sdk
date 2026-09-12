@@ -160,12 +160,10 @@ describe('OpenAI provider', () => {
       )
 
       expect(errors).toHaveLength(2)
+
       for (const error of errors) {
-        expect(error).toMatchObject({
-          _tag: 'LLMError',
-          cause: 'provider_error',
-          retryable: false
-        })
+        expect(error._tag).toBe('LLMError')
+        expect(error).toMatchObject({ cause: 'provider_error', retryable: false })
         expect(error.message).toBe('Document content is not supported by the OpenAI provider yet')
       }
     })
@@ -189,11 +187,8 @@ describe('OpenAI provider', () => {
         tools: []
       }).pipe(Effect.flip)
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'validation_error',
-        retryable: false
-      })
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'validation_error', retryable: false })
       expect(error.message).toContain('search (call-1)')
     })
   )
@@ -201,6 +196,7 @@ describe('OpenAI provider', () => {
   it.effect('classifies rate limits with retry-after metadata', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           new Response(JSON.stringify({ error: { message: 'too many requests' } }), {
@@ -225,8 +221,8 @@ describe('OpenAI provider', () => {
       }).pipe(Effect.provide(layer), Effect.flip)
 
       expect(requests).toHaveLength(1)
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'rate_limit',
         retryable: true,
         provider: {

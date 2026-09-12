@@ -54,6 +54,7 @@ const renderHandler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(AgentCommandRenderRequest)
   const skillset = yield* loadRuntimeSkillset({ userId: session.user.id })
+
   const command = yield* Option.match(
     Arr.findFirst(skillset.commands, item => item.name === input.command),
     {
@@ -101,7 +102,9 @@ const renderHandler = Effect.gen(function* () {
 )
 
 const { handler: listEffectHandler } = HttpEffect.toWebHandlerLayer(listHandler, AppLayer)
+
 const { handler: renderEffectHandler } = HttpEffect.toWebHandlerLayer(renderHandler, AppLayer)
 
 export const GET = (request: Request) => listEffectHandler(request)
+
 export const POST = (request: Request) => renderEffectHandler(request)

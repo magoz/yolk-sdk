@@ -465,6 +465,14 @@ it.effect('exits with expected error', () =>
 )
 ```
 
+Currently pinned Vitest 4.0.17 `toEqual` does **not** compare `Error` values by message alone. It checks prototype,
+`name`, `message`, `cause` (when the expected value supplies it), `AggregateError.errors`, then
+own enumerable fields. `toMatchObject` subset equality excludes `Error`s. Replacing a plain
+partial expectation with an `Error` constructor can change matcher semantics — require a
+positive match **and** wrong-tag / payload / missing / extra negatives; do not assume generic
+object equality. Non-Error domain constructors are a separate `toEqual` / `toMatchObject`
+contract.
+
 ### Testing Error Recovery
 
 ```typescript

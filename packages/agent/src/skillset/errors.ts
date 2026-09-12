@@ -8,6 +8,7 @@ export const SkillsetErrorCause = Schema.Literals([
   'invalid_name',
   'name_mismatch'
 ])
+
 export type SkillsetErrorCause = typeof SkillsetErrorCause.Type
 
 export class SkillsetError extends Schema.TaggedErrorClass<SkillsetError>()('SkillsetError', {

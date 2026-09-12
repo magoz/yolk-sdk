@@ -1,3 +1,5 @@
+import { Predicate } from 'effect'
+
 export type VercelAgentWorkflowInput = {
   readonly request: unknown
   readonly context: unknown
@@ -139,6 +141,7 @@ export type VercelAgentWorkflowLoopConfig = {
 }
 
 export const defaultMaxWorkflowTurns = 500
+
 export const noWorkflowStepRetry: VercelAgentWorkflowStepRetryPolicy = { maxAttempts: 1 }
 
 export const settleWorkflowStep = <A>(promise: Promise<A>): Promise<WorkflowStepResult<A>> =>
@@ -209,12 +212,14 @@ export async function runVercelAgentWorkflow(
     awaitInputRetry,
     closeStreamRetry
   } = config
+
   let state: SerializableWorkflowState = {
     request: input.request,
     createdMessages: [],
     turn: 1,
     eventSequence: 0
   }
+
   const maxTurns = maxWorkflowTurns(configuredMaxTurns)
 
   for (let step = 0; step < maxTurns; step++) {
@@ -222,8 +227,9 @@ export async function runVercelAgentWorkflow(
       retryWorkflowStep(() => runModelStep({ context: input.context, state }), modelStepRetry)
     )
 
-    if (modelResult._tag === 'Failure') {
+    if (Predicate.isTagged(modelResult, 'Failure')) {
       await writeErrorSafely(writeError, modelResult.error)
+
       return {
         _tag: 'ModelStepFailed',
         turn: state.turn,
@@ -241,9 +247,10 @@ export async function runVercelAgentWorkflow(
         turn: modelResult.value.turn,
         eventSequence: modelResult.value.eventSequence ?? state.eventSequence
       }
+
       const closeResult = await settleWorkflowStep(retryWorkflowStep(closeStream, closeStreamRetry))
 
-      if (closeResult._tag === 'Failure') {
+      if (Predicate.isTagged(closeResult, 'Failure')) {
         await writeErrorSafely(writeError, closeResult.error)
 
         return {
@@ -277,6 +284,7 @@ export async function runVercelAgentWorkflow(
     let toolHitlResponses: ReadonlyArray<unknown> = []
     let cumulativeUsage = modelResult.value.usage
     let toolEventSequence = modelResult.value.eventSequence ?? state.eventSequence
+
     const currentTurnState = (
       toolResult?: VercelAgentWorkflowToolBatchStepResult
     ): SerializableWorkflowState => ({
@@ -309,7 +317,7 @@ export async function runVercelAgentWorkflow(
         )
       )
 
-      if (toolsResult._tag === 'Failure') {
+      if (Predicate.isTagged(toolsResult, 'Failure')) {
         await writeErrorSafely(writeError, toolsResult.error)
 
         return {
@@ -353,7 +361,7 @@ export async function runVercelAgentWorkflow(
         }, awaitInputRetry)
       )
 
-      if (hitlResponse._tag === 'Failure') {
+      if (Predicate.isTagged(hitlResponse, 'Failure')) {
         await writeErrorSafely(writeError, hitlResponse.error)
 
         return {

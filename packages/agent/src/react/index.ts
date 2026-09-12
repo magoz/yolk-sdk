@@ -11,6 +11,7 @@ export {
   makeAgentChatEventProjectionState,
   reduceAgentChatState
 } from './chat-core.ts'
+
 export type {
   ActiveChatToolPart,
   AgentChatAction,
@@ -19,6 +20,7 @@ export type {
   AgentRunStatus,
   CompletedChatToolPart
 } from './chat-core.ts'
+
 export {
   AgentChatSessionEvent,
   MessagesRegenerated,
@@ -27,7 +29,9 @@ export {
   UserMessageEdited,
   UserMessageSubmitted
 } from './chat-session-events.ts'
+
 export { buildAgentChatItems, dedupeAgentChatToolRunItems } from './chat-items.ts'
+
 export type {
   AgentChatItem,
   BuildAgentChatItemsInput,
@@ -35,6 +39,7 @@ export type {
   ToolRunTiming,
   ToolRunState
 } from './chat-items.ts'
+
 export {
   appendProtocolMessage,
   applyAgentEventToChatMessages,
@@ -45,6 +50,7 @@ export {
   regenerateChatMessagesFrom,
   toAgentMessages
 } from './chat-messages.ts'
+
 export type {
   AgentChatMessage,
   AgentChatPart,
@@ -56,7 +62,9 @@ export type {
   EditChatUserMessageResult,
   RegenerateChatMessagesResult
 } from './chat-messages.ts'
+
 export { useAgentChat } from './use-agent-chat.ts'
+
 export type {
   AgentChatDeleteTurnResult,
   AgentChatEditUserMessageResult,

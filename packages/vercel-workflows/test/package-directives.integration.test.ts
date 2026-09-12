@@ -90,6 +90,7 @@ describe('package-owned workflow directives', () => {
     const run = await startWorkflow(packageHitlDirectiveWorkflow, [
       { request: 'request-1', context: 'context-1' }
     ])
+
     const hook = await waitForHook(getRun(run.runId), { token: 'package-hitl-hook' })
 
     await workflowsEffect(api => api.resumeHook(hook.token, 'approved'))
@@ -97,12 +98,7 @@ describe('package-owned workflow directives', () => {
     await expect(Effect.runPromise(run.returnValue)).resolves.toMatchObject({
       _tag: 'Completed',
       state: {
-        messages: [
-          'request-1',
-          'assistant-1',
-          'result-approval-tool-approved',
-          'assistant-2'
-        ],
+        messages: ['request-1', 'assistant-1', 'result-approval-tool-approved', 'assistant-2'],
         eventSequence: 9
       }
     })

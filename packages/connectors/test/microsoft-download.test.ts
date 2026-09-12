@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer, Schema } from 'effect'
+import { Effect, Layer, Predicate, Schema } from 'effect'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ConnectorBinaryHttpClient,
@@ -33,12 +33,15 @@ const integration = makeIntegration({
     makeCredentialBinding({ slotId: microsoftOAuthSlotId, credentialRef: 'existing' })
   ]
 })
+
 const budget: OneDriveDownloadBudget = {
   maxBytes: 32,
   maxMetadataBytes: 4096,
   maxErrorBodyBytes: 64
 }
+
 const original = new Uint8Array([0x50, 0x4b, 3, 4, 0xff, 0xfe, 0x80, 0, 0xc0])
+
 const file = {
   id: 'item/id%2F',
   name: 'source.xlsx',
@@ -51,27 +54,34 @@ const file = {
   createdDateTime: '2025-01-01T00:00:00Z',
   lastModifiedDateTime: '2025-02-01T00:00:00Z'
 }
+
 const response = (
   bytes = original,
   status = 200,
   headers: Readonly<Record<string, string>> = {},
   bodyComplete = true
 ): ConnectorBinaryHttpResponse => ({ bytes, status, headers, bodyComplete })
+
 const metadata = (value: unknown = file) =>
   response(new TextEncoder().encode(JSON.stringify(value)))
+
 const redirect = (location: string, status = 302) =>
   response(new Uint8Array(), status, { Location: location })
+
 const host = (
   responses: ReadonlyArray<ConnectorBinaryHttpResponse | ConnectorBinaryHttpError>,
   credentialError?: ConnectorError
 ) => {
   const requests: Array<ConnectorBinaryHttpRequest> = []
+
   const slots: Array<{ readonly id: string; readonly scopes: ReadonlyArray<string> | undefined }> =
     []
+
   const layer = Layer.mergeAll(
     Layer.succeed(CredentialResolver, {
       resolve: request => {
         slots.push({ id: request.slot.id, scopes: request.slot.requiredScopes })
+
         return credentialError === undefined
           ? Effect.succeed(
               OAuthCredential.make({
@@ -88,17 +98,21 @@ const host = (
       request: request => {
         const next = responses[requests.length]
         requests.push(request)
+
         if (next === undefined)
           return Effect.fail(new ConnectorBinaryHttpError({ code: 'transport_failed' }))
+
         return next instanceof ConnectorBinaryHttpError ? Effect.fail(next) : Effect.succeed(next)
       }
     })
   )
+
   const run = (
     input: OneDriveDownloadInput = { itemId: file.id },
     limits = budget,
     configured: ConnectorIntegration = integration
   ) => downloadOneDriveItem(configured, input, limits).pipe(Effect.provide(layer))
+
   return { layer, requests, slots, run }
 }
 
@@ -120,25 +134,32 @@ describe('host-only OneDrive download', () => {
           }),
           host([]).layer
         )
+
         const search = yield* MicrosoftConnector.invoke({
           integration,
           action: 'onedrive.search_items',
           input: { query: 'source' }
         }).pipe(Effect.provide(searchLayer))
+
         expect(search._tag).toBe('Success')
-        if (search._tag !== 'Success') return
+
+        if (!Predicate.isTagged(search, 'Success')) return
         const found = yield* Schema.decodeUnknownEffect(OneDriveListItemsOutput)(search.value)
         const candidate = found.items[0]
         expect(candidate).toBeDefined()
+
         if (candidate === undefined) return
+
         const h = host([
           metadata({ ...file, '@microsoft.graph.downloadUrl': 'SIGNED-SECRET', raw: 'RAW-SECRET' }),
           response()
         ])
+
         const result = yield* h.run({
           itemId: candidate.id,
           driveId: candidate.parentReference?.driveId
         })
+
         expect(result.bytes).toBe(original)
         expect(result.byteLength).toBe(original.byteLength)
         expect(result.source).toEqual({
@@ -170,6 +191,7 @@ describe('host-only OneDrive download', () => {
         metadata({ id: 'id', name: 'empty', size: 0, file: {} }),
         response(new Uint8Array())
       ])
+
       const result = yield* h.run({ itemId: 'id' }, { ...budget, maxBytes: 0 })
       expect(h.requests[0]?.url).toContain('/me/drive/items/id?')
       expect(h.requests[1]?.url).toContain('/me/drive/items/id/content')
@@ -189,6 +211,7 @@ describe('host-only OneDrive download', () => {
         metadata(),
         response()
       ])
+
       const result = yield* h.run({ itemId: 'shortcut' })
       expect(h.requests[1]?.url).toContain('/drives/drive%2Fid/items/item%2Fid%252F?')
       expect(result.requested).toEqual({ itemId: 'shortcut' })
@@ -205,16 +228,20 @@ describe('host-only OneDrive download', () => {
           remoteItem: { id: 'id', parentReference: { driveId: 'drive' } }
         })
       ])
+
       expect(yield* loop.run({ itemId: 'id', driveId: 'drive' }).pipe(Effect.flip)).toMatchObject({
         code: 'remote_item_limit'
       })
       expect(loop.requests).toHaveLength(1)
+
       const incomplete = host([
         metadata({ id: file.id, name: 'remote', remoteItem: { id: 'target' } })
       ])
+
       expect(yield* incomplete.run().pipe(Effect.flip)).toMatchObject({
         code: 'remote_item_unresolved'
       })
+
       const chain = host(
         Array.from({ length: 5 }, (_, i) =>
           metadata({
@@ -224,6 +251,7 @@ describe('host-only OneDrive download', () => {
           })
         )
       )
+
       expect(yield* chain.run({ itemId: 'id0', driveId: 'drive' }).pipe(Effect.flip)).toMatchObject(
         { code: 'remote_item_limit' }
       )
@@ -246,6 +274,7 @@ describe('host-only OneDrive download', () => {
       })
     )
   }
+
   it.effect('guards application /me and invalid config before credentials or HTTP', () =>
     Effect.gen(function* () {
       for (const mode of ['application', 'bad']) {
@@ -277,6 +306,7 @@ describe('host-only OneDrive download', () => {
           redirect('https://graph.microsoft.com/v1.0/signed?sig=SIGNED-SECRET'),
           response()
         ])
+
         const result = yield* h.run()
         expect(
           h.requests.slice(0, 2).every(r => r.headers.authorization === 'Bearer FAKE-BEARER-SECRET')
@@ -330,6 +360,7 @@ describe('host-only OneDrive download', () => {
       })
     )
   }
+
   it.effect(
     'rejects missing/ambiguous Location, metadata redirects, and bounded redirect overflow',
     () =>
@@ -338,17 +369,21 @@ describe('host-only OneDrive download', () => {
           {},
           { Location: 'https://a.sharepoint.com/x', location: 'https://b.sharepoint.com/x' }
         ]
+
         for (const headers of headerCases) {
           const h = host([metadata(), response(new Uint8Array(), 302, headers)])
           expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code: 'invalid_redirect' })
         }
+
         const meta = host([redirect('https://tenant.sharepoint.com/x')])
         expect(yield* meta.run().pipe(Effect.flip)).toMatchObject({ code: 'upstream_failed' })
         expect(meta.requests).toHaveLength(1)
+
         const h = host([
           metadata(),
           ...Array.from({ length: 6 }, () => redirect('https://tenant.sharepoint.com/x'))
         ])
+
         expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code: 'redirect_limit' })
         expect(h.requests).toHaveLength(7)
       })
@@ -385,6 +420,7 @@ describe('host-only OneDrive download', () => {
     [429, 'rate_limited'],
     [206, 'partial_content']
   ]
+
   for (const [status, code] of statusCases) {
     it.effect(`sanitizes metadata and content HTTP ${status}`, () =>
       Effect.gen(function* () {
@@ -393,6 +429,7 @@ describe('host-only OneDrive download', () => {
             ...prefix,
             response(new TextEncoder().encode('RAW-SECRET sig=SIGNED-SECRET'), status, {}, false)
           ])
+
           const error = yield* h.run().pipe(Effect.flip)
           expect(error).toMatchObject({ code })
           expect(JSON.stringify(error)).not.toContain('SECRET')
@@ -411,9 +448,11 @@ describe('host-only OneDrive download', () => {
           underlying: { secret: 'SECRET' }
         })
       )
+
       const credentialFailure = yield* credential.run().pipe(Effect.flip)
       expect(credentialFailure).toMatchObject({ code: 'credential_failed' })
       expect(JSON.stringify(credentialFailure)).not.toContain('SECRET')
+
       for (const prefix of [[], [metadata()]]) {
         const transportError = Object.assign(
           new ConnectorBinaryHttpError({ code: 'transport_failed' }),
@@ -425,11 +464,13 @@ describe('host-only OneDrive download', () => {
             }
           }
         )
+
         const h = host([...prefix, transportError])
         const failure = yield* h.run().pipe(Effect.flip)
         expect(failure).toMatchObject({ code: 'transport_failed' })
         expect(JSON.stringify(failure)).not.toContain('SECRET')
       }
+
       const malformed = host([response(new TextEncoder().encode('{"secret":"SECRET"}'))])
       const failure = yield* malformed.run().pipe(Effect.flip)
       expect(failure).toMatchObject({ code: 'invalid_metadata' })
@@ -448,8 +489,10 @@ describe('host-only OneDrive download', () => {
         expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code: 'not_a_file' })
         expect(h.requests).toHaveLength(1)
       }
+
       const partial = host([metadata(), response(original, 200, {}, false)])
       expect(yield* partial.run().pipe(Effect.flip)).toMatchObject({ code: 'partial_content' })
+
       for (const id of ['', '.', '..', '...', 'bad\r\nid', '\ud800']) {
         const h = host([])
         expect(yield* h.run({ itemId: id }).pipe(Effect.flip)).toMatchObject({
@@ -457,6 +500,7 @@ describe('host-only OneDrive download', () => {
         })
         expect(h.requests).toHaveLength(0)
       }
+
       const invalid = host([])
       expect(
         yield* invalid.run(undefined, { ...budget, maxBytes: -1 }).pipe(Effect.flip)
@@ -470,6 +514,7 @@ describe('host-only OneDrive download', () => {
         const h = host([metadata(), new ConnectorBinaryHttpError({ code })])
         expect(yield* h.run().pipe(Effect.flip)).toMatchObject({ code })
       }
+
       const missing = host([])
       expect(
         yield* missing
@@ -486,7 +531,9 @@ describe('host-only OneDrive download', () => {
         metadata(),
         response(original, 200, { 'CoNtEnT-RaNgE': 'bytes 0-8/100' })
       ])
+
       expect(yield* partial.run().pipe(Effect.flip)).toMatchObject({ code: 'partial_content' })
+
       for (const invalid of [original, new TextEncoder().encode('{"secret":"SECRET"')]) {
         const h = host([response(invalid)])
         const error = yield* h.run().pipe(Effect.flip)
@@ -518,6 +565,7 @@ describe('host-only OneDrive download', () => {
         ),
         response()
       ])
+
       expect((yield* h.run()).bytes).toBe(original)
       expect(h.requests).toHaveLength(7)
       expect(h.requests.slice(2).every(request => Object.keys(request.headers).length === 0)).toBe(
@@ -538,6 +586,7 @@ describe('host-only OneDrive download', () => {
         'onedrive.create_folder',
         'onedrive.delete_item'
       ])
+
       const layer = Layer.mergeAll(
         Layer.succeed(CredentialResolver, {
           resolve: () =>
@@ -548,10 +597,12 @@ describe('host-only OneDrive download', () => {
             Effect.succeed(ConnectorHttpResponse.make({ status: 200, headers: {}, body: '{}' }))
         })
       )
+
       const tools = yield* resolveTools(
         [makeConnectorToolModule(MicrosoftConnector, { integration, layer })],
         {}
       )
+
       expect(tools.tools.map(t => t.name)).toEqual(MicrosoftConnector.actions.map(a => a.id))
       expect(tools.tools.some(t => /download|content/.test(t.name))).toBe(false)
     })

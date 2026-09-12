@@ -11,6 +11,7 @@ describe('makeOpenAiRealtimeSessionConfig', () => {
         route: '/agent',
         userId: 'user_1'
       })
+
       const config = makeOpenAiRealtimeSessionConfig({
         instructions: 'Be brief.',
         tools: toolSet.tools

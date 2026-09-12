@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import { HttpClient, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -42,6 +42,7 @@ const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest
     HttpClient.make(request =>
       Effect.sync(() => {
         requests.push({ request })
+
         return HttpClientResponse.fromWeb(request, response)
       })
     )
@@ -127,8 +128,8 @@ describe('xAI Grok subscription provider', () => {
         { maxOutputTokens: 0 }
       ).pipe(Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'validation_error',
         message: 'xAI Grok subscription maxOutputTokens must be a positive safe integer',
         retryable: false
@@ -156,11 +157,13 @@ describe('xAI Grok subscription provider', () => {
   it.effect('uses the fixed subscription proxy and required headers', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const completedResponse = [
         'data: {"type":"response.output_text.delta","delta":"Hello"}',
         'data: {"type":"response.completed","response":{"output":[]}}',
         ''
       ].join('\n\n')
+
       const layer = makeXAiGrokProviderLayer({
         token: grokToken,
         maxOutputTokens: 30_000,
@@ -179,6 +182,7 @@ describe('xAI Grok subscription provider', () => {
 
       const events = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             model: 'grok-build',
@@ -211,13 +215,16 @@ describe('xAI Grok subscription provider', () => {
   it.effect('rejects mismatched OAuth tokens before sending a request', () =>
     Effect.gen(function* () {
       let called = false
+
       const httpLayer = Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make(request => {
           called = true
+
           return Effect.succeed(HttpClientResponse.fromWeb(request, new Response()))
         })
       )
+
       const layer = makeXAiGrokProviderLayer({
         token: new OAuthAccessToken({
           provider: 'openai-codex',
@@ -230,6 +237,7 @@ describe('xAI Grok subscription provider', () => {
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             model: 'grok-build',
@@ -309,10 +317,10 @@ describe('xAI Grok subscription provider', () => {
         'Done',
         'Usage'
       ])
-      expect(Array.from(events).find(event => event._tag === 'Done')).toMatchObject({
+      expect(Array.from(events).find(event => Predicate.isTagged(event, 'Done'))).toMatchObject({
         stopReason: 'tool_use'
       })
-      expect(Array.from(events).find(event => event._tag === 'Usage')).toMatchObject({
+      expect(Array.from(events).find(event => Predicate.isTagged(event, 'Usage'))).toMatchObject({
         usage: {
           input: { total: 10, uncached: 8, cacheRead: 2 },
           output: { total: 5, reasoning: 3, text: 2 }
@@ -330,12 +338,13 @@ describe('xAI Grok subscription provider', () => {
           usage: { input_tokens: 10, output_tokens: 5 }
         }
       }
+
       const events = yield* streamXAiGrokResponse(
         responseFromSseEvents([completed, completed])
       ).pipe(Stream.runCollect)
 
-      expect(Array.from(events).filter(event => event._tag === 'Done')).toHaveLength(1)
-      expect(Array.from(events).filter(event => event._tag === 'Usage')).toHaveLength(1)
+      expect(Array.from(events).filter(event => Predicate.isTagged(event, 'Done'))).toHaveLength(1)
+      expect(Array.from(events).filter(event => Predicate.isTagged(event, 'Usage'))).toHaveLength(1)
     })
   )
 
@@ -348,6 +357,7 @@ describe('xAI Grok subscription provider', () => {
           usage: { input_tokens: 10, output_tokens: 5 }
         }
       }
+
       const events = yield* streamXAiGrokResponse(
         responseFromSseEvents([
           completed,
@@ -416,8 +426,8 @@ describe('xAI Grok subscription provider', () => {
 
       const error = yield* streamXAiGrokResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         retryable: false,
         provider: {
@@ -445,8 +455,8 @@ describe('xAI Grok subscription provider', () => {
 
       const error = yield* streamXAiGrokResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'context_overflow',
         retryable: false,
         provider: {

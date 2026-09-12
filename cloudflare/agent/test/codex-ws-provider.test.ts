@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import {
   LLMDone,
@@ -31,12 +31,16 @@ const token = new TokenBrokerResponse({
 })
 
 const events = (result: WsResult) =>
-  result._tag === 'Events' || result._tag === 'Done' ? result.events : []
+  Predicate.isTagged(result, 'Events') || Predicate.isTagged(result, 'Done') ? result.events : []
+
 const errorMessage = (result: WsResult) =>
-  result._tag === 'Error' ? result.error.message : undefined
-const errorCause = (result: WsResult) => (result._tag === 'Error' ? result.error.cause : undefined)
+  Predicate.isTagged(result, 'Error') ? result.error.message : undefined
+
+const errorCause = (result: WsResult) =>
+  Predicate.isTagged(result, 'Error') ? result.error.cause : undefined
+
 const errorRetryable = (result: WsResult) =>
-  result._tag === 'Error' ? result.error.retryable : undefined
+  Predicate.isTagged(result, 'Error') ? result.error.retryable : undefined
 
 const request = {
   model: 'gpt-5.4',
@@ -107,6 +111,7 @@ describe('Codex WS headers', () => {
       accessToken: 'access',
       expiresAt: Date.now() + 60_000
     })
+
     const headers = codexWsHeaders({ token: noAccount })
 
     expect(headers['ChatGPT-Account-Id']).toBeUndefined()
@@ -138,6 +143,7 @@ describe('Codex WS request body', () => {
 describe('Codex WS proxy fallback', () => {
   it('uses proxy first when fallback is configured', async () => {
     const requests: Array<CapturedRequest> = []
+
     const layer = makeCodexWsProviderLayer({
       token,
       sessionId: 'session_1',
@@ -150,6 +156,7 @@ describe('Codex WS proxy fallback', () => {
     const chunk = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider.stream(request).pipe(Stream.runCollect)
       }).pipe(Effect.provide(layer))
     )
@@ -165,15 +172,19 @@ describe('Codex WS proxy fallback', () => {
   it('uses fallback when direct fails before events', async () => {
     let fallbackCalls = 0
     const fallbackErrors: Array<LLMError> = []
+
     const direct = LLMProvider.of({
       stream: () => Stream.fail(directError)
     })
+
     const fallback = LLMProvider.of({
       stream: () => {
         fallbackCalls += 1
+
         return Stream.make(LLMTextDelta.make({ text: 'ok' }), LLMDone.make({ stopReason: 'stop' }))
       }
     })
+
     const provider = makePreStreamFallbackProvider(direct, fallback, error => {
       fallbackErrors.push(error)
     })
@@ -188,18 +199,22 @@ describe('Codex WS proxy fallback', () => {
 
   it('does not fallback after direct emitted events', async () => {
     let fallbackCalls = 0
+
     const direct = LLMProvider.of({
       stream: () =>
         Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(
           Stream.concat(Stream.fail(directError))
         )
     })
+
     const fallback = LLMProvider.of({
       stream: () => {
         fallbackCalls += 1
+
         return Stream.make(LLMDone.make({ stopReason: 'stop' }))
       }
     })
+
     const provider = makePreStreamFallbackProvider(direct, fallback, () => {})
 
     const result = await Effect.runPromise(

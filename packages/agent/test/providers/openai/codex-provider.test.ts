@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientError,
@@ -114,6 +114,7 @@ const sseWebResponseFromChunks = (chunks: ReadonlyArray<ReadonlyArray<unknown>>)
             encoder.encode(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
           )
         }
+
         controller.close()
       }
     }),
@@ -131,6 +132,7 @@ const defaultCodexRequest: LLMRequest = {
 const collectCodexProviderEvents = (response: Response) =>
   Effect.gen(function* () {
     const provider = yield* LLMProvider
+
     return yield* provider.stream(defaultCodexRequest).pipe(Stream.runCollect)
   }).pipe(
     Effect.provide(
@@ -369,11 +371,8 @@ describe('OpenAI Codex provider', () => {
         tools: []
       }).pipe(Effect.flip)
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'validation_error',
-        retryable: false
-      })
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'validation_error', retryable: false })
       expect(error.message).toContain('search (call-1)')
     })
   )
@@ -575,8 +574,9 @@ describe('OpenAI Codex provider', () => {
       ])
 
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
       const reasoning = Array.from(events)
-        .flatMap(event => (event._tag === 'ReasoningDelta' ? [event.text] : []))
+        .flatMap(event => (Predicate.isTagged(event, 'ReasoningDelta') ? [event.text] : []))
         .join('')
 
       expect(reasoning).toBe(
@@ -601,8 +601,9 @@ describe('OpenAI Codex provider', () => {
       ])
 
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
+
       const reasoning = Array.from(events).flatMap(event =>
-        event._tag === 'ReasoningDelta' ? [event.text] : []
+        Predicate.isTagged(event, 'ReasoningDelta') ? [event.text] : []
       )
 
       expect(reasoning).toEqual([
@@ -615,6 +616,7 @@ describe('OpenAI Codex provider', () => {
     Effect.gen(function* () {
       const firstCall = codexFunctionCall('call-1', 'search_one')
       const secondCall = codexFunctionCall('call-2', 'search_two')
+
       const response = responseFromSseEvents([
         { type: 'response.output_item.done', item: firstCall },
         { type: 'response.output_item.done', item: secondCall },
@@ -625,7 +627,7 @@ describe('OpenAI Codex provider', () => {
 
       expect(
         Array.from(events).flatMap(event =>
-          event._tag === 'ToolCall'
+          Predicate.isTagged(event, 'ToolCall')
             ? [{ id: event.call.id, name: event.call.name, params: event.call.params }]
             : []
         )
@@ -634,7 +636,9 @@ describe('OpenAI Codex provider', () => {
         { id: 'call-2', name: 'search_two', params: {} }
       ])
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+        )
       ).toEqual(['tool_use'])
     })
   )
@@ -643,6 +647,7 @@ describe('OpenAI Codex provider', () => {
     Effect.gen(function* () {
       const firstCall = codexFunctionCall('call-1', 'search_one')
       const secondCall = codexFunctionCall('call-2', 'search_two')
+
       const response = responseFromSseEvents([
         { type: 'response.output_item.done', item: firstCall },
         completedCodexResponse(firstCall, secondCall)
@@ -651,10 +656,14 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []
+        )
       ).toEqual(['call-1', 'call-2'])
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+        )
       ).toEqual(['tool_use'])
     })
   )
@@ -664,6 +673,7 @@ describe('OpenAI Codex provider', () => {
       const firstCall = codexFunctionCall('call-1', 'search_one')
       const malformedFirstCallReplay = codexFunctionCall('call-1', 'search_one', '{broken')
       const secondCall = codexFunctionCall('call-2', 'search_two')
+
       const response = responseFromSseEvents([
         { type: 'response.output_item.done', item: firstCall },
         completedCodexResponse(malformedFirstCallReplay, secondCall)
@@ -672,7 +682,9 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []
+        )
       ).toEqual(['call-1', 'call-2'])
     })
   )
@@ -693,10 +705,14 @@ describe('OpenAI Codex provider', () => {
       const events = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect)
 
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []
+        )
       ).toEqual(['call-1', 'call-2'])
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+        )
       ).toEqual(['tool_use'])
     })
   )
@@ -709,8 +725,8 @@ describe('OpenAI Codex provider', () => {
 
       const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'overloaded',
         retryable: true,
         provider: {
@@ -738,8 +754,8 @@ describe('OpenAI Codex provider', () => {
 
       const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'context_overflow',
         retryable: false,
         provider: {
@@ -763,8 +779,8 @@ describe('OpenAI Codex provider', () => {
 
       const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'context_overflow',
         retryable: false,
         provider: { provider: 'openai_codex', kind: 'context_overflow' }
@@ -784,8 +800,8 @@ describe('OpenAI Codex provider', () => {
 
       const error = yield* streamOpenAiCodexResponse(response).pipe(Stream.runCollect, Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'provider_error',
         provider: { provider: 'openai_codex', kind: 'unknown' }
       })
@@ -799,8 +815,8 @@ describe('OpenAI Codex provider', () => {
         Effect.flip
       )
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'provider_error',
         retryable: true,
         provider: { provider: 'openai_codex', kind: 'stream' }
@@ -823,10 +839,14 @@ describe('OpenAI Codex provider', () => {
       )
 
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []
+        )
       ).toEqual(['call-1'])
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+        )
       ).toEqual(['tool_use'])
     })
   )
@@ -839,7 +859,9 @@ describe('OpenAI Codex provider', () => {
 
       expect(Array.from(events).map(event => event._tag)).toEqual(['Done'])
       expect(
-        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+        Array.from(events).flatMap(event =>
+          Predicate.isTagged(event, 'Done') ? [event.stopReason] : []
+        )
       ).toEqual(['stop'])
     })
   )
@@ -850,11 +872,8 @@ describe('OpenAI Codex provider', () => {
         sseWebResponse([completedCodexResponse()])
       ).pipe(Effect.flip)
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'invalid_response',
-        retryable: false
-      })
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'invalid_response', retryable: false })
       expect(error.message).toContain('did not include text or tool calls')
     })
   )
@@ -870,11 +889,8 @@ describe('OpenAI Codex provider', () => {
         ])
       ).pipe(Effect.flip)
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'context_overflow',
-        retryable: false
-      })
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'context_overflow', retryable: false })
     })
   )
 })

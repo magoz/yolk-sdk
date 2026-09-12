@@ -60,7 +60,11 @@ export class AppKnowledgeSummarizerError extends Schema.TaggedErrorClass<AppKnow
 ) {}
 
 export const isAppSearchIndexStoreError = Schema.is(AppSearchIndexStoreError)
+
 export const isAppKnowledgeDocumentNotFoundError = Schema.is(AppKnowledgeDocumentNotFoundError)
+
 export const isAppKnowledgeCollectionNotFoundError = Schema.is(AppKnowledgeCollectionNotFoundError)
+
 export const isAppKnowledgeSearchError = Schema.is(AppKnowledgeSearchError)
+
 export const isAppKnowledgeSummarizerError = Schema.is(AppKnowledgeSummarizerError)

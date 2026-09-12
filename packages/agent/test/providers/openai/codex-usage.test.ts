@@ -10,7 +10,9 @@ import {
 } from '../../../src/providers/openai/codex-usage.ts'
 
 const fetchedAt = '2026-08-11T08:00:00.000Z'
+
 const tokenExpiresAt = 1_800_000_000_000
+
 const token = OAuthAccessToken.make({
   provider: 'openai-codex',
   accessToken: 'codex-secret',
@@ -65,6 +67,7 @@ describe('OpenAI Codex subscription usage', () => {
 
   it.effect('uses the fixed endpoint and required account header', () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
     const client = HttpClient.make(request => {
       requests.push(request)
 
@@ -95,8 +98,10 @@ describe('OpenAI Codex subscription usage', () => {
 
   it.effect('fails before HTTP when the account id is missing or blank', () => {
     let called = false
+
     const client = HttpClient.make(request => {
       called = true
+
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
     })
 
@@ -128,8 +133,10 @@ describe('OpenAI Codex subscription usage', () => {
 
   it.effect('rejects invalid request timeouts before HTTP', () => {
     let called = false
+
     const client = HttpClient.make(request => {
       called = true
+
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
     })
 
@@ -156,7 +163,9 @@ describe('OpenAI Codex subscription usage', () => {
         headers: { 'Content-Type': 'application/json' }
       })
     ]
+
     let call = 0
+
     const client = HttpClient.make(request =>
       Effect.succeed(HttpClientResponse.fromWeb(request, responses[call++] ?? new Response()))
     )

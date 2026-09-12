@@ -17,19 +17,33 @@ import type { AgentToolContext } from './tool-context.ts'
 type KnowledgeToolError = ToolError | ModelVisibleToolError
 
 const knowledgeListToolName = 'list_knowledge_documents'
+
 const knowledgeSearchToolName = 'search_knowledge'
+
 const knowledgeContextToolName = 'get_knowledge_context'
+
 const defaultLimit = 8
+
 const maxLimit = 20
+
 const defaultContextChunks = 1
+
 const maxContextChunks = 5
+
 const maxQueries = 5
+
 const defaultListLimit = 20
+
 const maxListLimit = 50
+
 const defaultBefore = 3
+
 const defaultAfter = 6
+
 const maxTraversalChunks = 20
+
 const defaultMaxChars = 20_000
+
 const maxMaxChars = 60_000
 
 const KnowledgeAvailabilitySchema = Schema.Union([
@@ -101,7 +115,9 @@ const KnowledgeContextParams = Schema.Struct({
 })
 
 type KnowledgeListParams = typeof KnowledgeListParams.Type
+
 type KnowledgeSearchParams = typeof KnowledgeSearchParams.Type
+
 type KnowledgeContextParams = typeof KnowledgeContextParams.Type
 
 export type KnowledgeListHandler = (input: {
@@ -156,6 +172,7 @@ const makeModelVisibleError = (tool: string, message: string) =>
 
 const optionalText = (value: string | null | undefined) => {
   const trimmed = value?.trim()
+
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed
 }
 
@@ -167,6 +184,7 @@ const normalizeInteger = (input: {
   readonly name: string
 }) => {
   const value = input.value ?? input.defaultValue
+
   if (!Number.isInteger(value) || value < input.minimum) {
     return Effect.fail(
       makeModelVisibleError(
@@ -175,6 +193,7 @@ const normalizeInteger = (input: {
       )
     )
   }
+
   return Effect.succeed(Math.min(value, input.maxValue))
 }
 
@@ -187,6 +206,7 @@ const normalizeNamedInteger = (input: {
   readonly tool: string
 }) => {
   const value = input.value ?? input.defaultValue
+
   if (!Number.isInteger(value) || value < input.minimum) {
     return Effect.fail(
       makeModelVisibleError(input.tool, `${input.name} must be an integer >= ${input.minimum}`)
@@ -200,22 +220,26 @@ const normalizeMinScore = (value: number | null | undefined) => {
   if (value === null || value === undefined) {
     return Effect.succeed(undefined)
   }
+
   if (!Number.isFinite(value) || value < 0 || value > 1) {
     return Effect.fail(
       makeModelVisibleError(knowledgeSearchToolName, 'minScore must be a finite number from 0 to 1')
     )
   }
+
   return Effect.succeed(value)
 }
 
 const normalizeParams = (params: KnowledgeSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
+
     if (queries.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError(knowledgeSearchToolName, 'queries must not be empty')
       )
     }
+
     if (queries.length > maxQueries) {
       return yield* Effect.fail(
         makeModelVisibleError(
@@ -224,6 +248,7 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
         )
       )
     }
+
     const limit = yield* normalizeInteger({
       value: params.limit,
       defaultValue: defaultLimit,
@@ -231,6 +256,7 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
       minimum: 1,
       name: 'limit'
     })
+
     const contextChunks = yield* normalizeInteger({
       value: params.contextChunks,
       defaultValue: defaultContextChunks,
@@ -238,7 +264,9 @@ const normalizeParams = (params: KnowledgeSearchParams) =>
       minimum: 0,
       name: 'contextChunks'
     })
+
     const minScore = yield* normalizeMinScore(params.minScore)
+
     return { queries, limit, contextChunks, minScore }
   })
 
@@ -252,6 +280,7 @@ const normalizeListParams = (params: KnowledgeListParams) =>
       name: 'limit',
       tool: knowledgeListToolName
     })
+
     return {
       query: optionalText(params.query),
       availability: params.availability ?? undefined,
@@ -262,18 +291,23 @@ const normalizeListParams = (params: KnowledgeListParams) =>
 const normalizeContextParams = (params: KnowledgeContextParams) =>
   Effect.gen(function* () {
     const documentId = params.documentId.trim()
+
     if (documentId.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError(knowledgeContextToolName, 'documentId must not be empty')
       )
     }
+
     const chunkId = params.chunkId?.trim()
+
     if (chunkId !== undefined && chunkId.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError(knowledgeContextToolName, 'chunkId must not be empty')
       )
     }
+
     const position = params.position ?? undefined
+
     if (chunkId !== undefined && position !== undefined) {
       return yield* Effect.fail(
         makeModelVisibleError(knowledgeContextToolName, 'Use chunkId or position, not both')
@@ -288,6 +322,7 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
       name: 'before',
       tool: knowledgeContextToolName
     })
+
     const after = yield* normalizeNamedInteger({
       value: params.after,
       defaultValue: defaultAfter,
@@ -296,6 +331,7 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
       name: 'after',
       tool: knowledgeContextToolName
     })
+
     const maxChars = yield* normalizeNamedInteger({
       value: params.maxChars,
       defaultValue: defaultMaxChars,
@@ -304,6 +340,7 @@ const normalizeContextParams = (params: KnowledgeContextParams) =>
       name: 'maxChars',
       tool: knowledgeContextToolName
     })
+
     return { documentId, chunkId, position, before, after, maxChars }
   })
 
@@ -314,6 +351,7 @@ const formatResults = (query: string, results: ReadonlyArray<KnowledgeSearchResu
   if (results.length === 0) {
     return `No knowledge results found for: ${query}`
   }
+
   return [
     `Knowledge search results for: ${query}`,
     '',
@@ -442,6 +480,7 @@ const searchTool = (
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalized = yield* normalizeParams(params)
+
         const items = yield* Effect.forEach(
           normalized.queries,
           query =>
@@ -554,5 +593,6 @@ export const makeKnowledgeToolModule = (
 ): ToolModule<AgentToolContext> => {
   const handlers =
     typeof searchOrHandlers === 'function' ? { search: searchOrHandlers } : searchOrHandlers
+
   return { id: 'knowledge', tools: knowledgeTools(handlers) }
 }

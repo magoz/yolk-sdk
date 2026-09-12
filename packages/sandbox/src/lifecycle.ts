@@ -1,4 +1,5 @@
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
+import * as Schema from 'effect/Schema'
 import { SandboxInputError } from './errors.ts'
 import {
   DisposableSandboxLifecycle,
@@ -10,12 +11,19 @@ import {
 } from './model.ts'
 
 export const defaultSandboxIdleTtlMs = 30 * 60_000
+
 export const defaultSandboxMaxLifetimeMs = 45 * 60_000
+
 export const defaultSandboxCommandTimeoutMs = 120_000
+
 export const maxSandboxCommandTimeoutMs = 600_000
+
 export const backgroundSandboxProbeMs = 2_000
+
 export const sandboxToolOutputLimit = 50_000
+
 export const defaultSandboxPorts: ReadonlyArray<number> = [3000, 5173, 4321, 8000]
+
 export const defaultSandboxWorkspaceRoot = '/vercel/sandbox'
 
 export const defaultSandboxLifecycle = DisposableSandboxLifecycle.make({
@@ -37,6 +45,11 @@ export type SandboxStateDecision =
       readonly workspaceReset: boolean
       readonly reason?: SandboxRecreateReason
     }
+
+const SandboxCreateDecision = Schema.TaggedStruct('Create', {
+  workspaceReset: Schema.Boolean,
+  reason: Schema.optionalKey(Schema.Literals(['idle_expired', 'max_expired', 'name_mismatch']))
+})
 
 const positiveOr = (value: number | undefined, fallback: number) =>
   value === undefined || !Number.isFinite(value) || value <= 0 ? fallback : Math.floor(value)
@@ -90,6 +103,7 @@ export const normalizeWorkspaceCwd = (
 
     if (segment === '..') {
       const previous = parts.pop()
+
       if (previous === undefined) {
         return Effect.fail(
           new SandboxInputError({
@@ -98,6 +112,7 @@ export const normalizeWorkspaceCwd = (
           })
         )
       }
+
       continue
     }
 
@@ -168,25 +183,25 @@ export const sandboxStateDecision = (input: {
   readonly lifecycle: SandboxLifecycle
 }): SandboxStateDecision => {
   if (Option.isNone(input.state)) {
-    return { _tag: 'Create', workspaceReset: false }
+    return SandboxCreateDecision.make({ workspaceReset: false })
   }
 
   const state = input.state.value
 
   if (state.name !== input.name) {
-    return { _tag: 'Create', workspaceReset: true, reason: 'name_mismatch' }
+    return SandboxCreateDecision.make({ workspaceReset: true, reason: 'name_mismatch' })
   }
 
-  if (input.lifecycle._tag === 'Persistent') {
+  if (Predicate.isTagged(input.lifecycle, 'Persistent')) {
     return { _tag: 'UseExisting', state }
   }
 
   if (input.nowMs >= state.maxExpiresAtMs) {
-    return { _tag: 'Create', workspaceReset: true, reason: 'max_expired' }
+    return SandboxCreateDecision.make({ workspaceReset: true, reason: 'max_expired' })
   }
 
   if (input.nowMs >= state.expiresAtMs) {
-    return { _tag: 'Create', workspaceReset: true, reason: 'idle_expired' }
+    return SandboxCreateDecision.make({ workspaceReset: true, reason: 'idle_expired' })
   }
 
   return { _tag: 'UseExisting', state }

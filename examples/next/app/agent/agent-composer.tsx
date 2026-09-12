@@ -11,7 +11,7 @@ import {
   type KeyboardEvent
 } from 'react'
 import Image from 'next/image'
-import { Array as Arr, Option } from 'effect'
+import { Array as Arr, Option, Predicate } from 'effect'
 import {
   ArrowUpIcon,
   AudioLinesIcon,
@@ -164,19 +164,24 @@ export function AgentComposer({
   const dropDisabled = isRunning || isVoiceMode || !attachmentInputSupported
   const isDropActive = dragDepth > 0 && !dropDisabled
   const hasAttachments = attachments.length > 0
+
   const hasReadyAttachments = Option.isSome(
-    Arr.findFirst(attachments, attachment => attachment._tag === 'Ready')
+    Arr.findFirst(attachments, attachment => Predicate.isTagged(attachment, 'Ready'))
   )
+
   const commandMatches = matchingSlashCommands(input, commands)
   const hasSlashInput = Option.isSome(slashCommandInput(input))
   const slashCommandsDisabled = isRunning || isVoiceMode || hasAttachments || isCommandRendering
   const slashMenuOpen = hasSlashInput && !slashCommandsDisabled && dismissedSlashInput !== input
+
   const normalizedActiveCommandIndex = normalizeSlashSelectionIndex(
     activeCommandIndex,
     commandMatches.length
   )
+
   const selectedCommand = commandMatches[normalizedActiveCommandIndex]
   const selectedTextModel = agentTextModelOptions.find(option => option.model === textModel)
+
   const acceptedFileTypes = [
     imageInputSupported ? 'image/png,image/jpeg,image/webp,image/gif' : '',
     documentInputSupported ? 'application/pdf' : ''
@@ -227,6 +232,7 @@ export function AgentComposer({
       setActiveCommandIndex(current =>
         normalizeSlashSelectionIndex(current + 1, commandMatches.length)
       )
+
       return
     }
 
@@ -235,12 +241,14 @@ export function AgentComposer({
       setActiveCommandIndex(current =>
         normalizeSlashSelectionIndex(current - 1, commandMatches.length)
       )
+
       return
     }
 
     if (slashMenuOpen && event.key === 'Escape') {
       event.preventDefault()
       setDismissedSlashInput(input)
+
       return
     }
 
@@ -251,6 +259,7 @@ export function AgentComposer({
         if (selectedCommand !== undefined) {
           submitSlashCommand(selectedCommand)
         }
+
         return
       }
 
@@ -376,12 +385,12 @@ export function AgentComposer({
                 key={attachment.id}
                 className={cn(
                   'inline-flex max-w-full items-center gap-2 rounded-2xl border p-1.5 pr-2 text-xs text-muted-foreground',
-                  attachment._tag === 'Failed'
+                  Predicate.isTagged(attachment, 'Failed')
                     ? 'border-destructive/25 bg-destructive/5'
                     : 'border-foreground/10 bg-muted/50'
                 )}
               >
-                {attachment._tag === 'Ready' && attachment.kind === 'image' ? (
+                {Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'image' ? (
                   <Image
                     src={attachment.previewUrl}
                     alt="Attached image preview"
@@ -390,7 +399,7 @@ export function AgentComposer({
                     unoptimized
                     className="size-12 rounded-xl object-cover"
                   />
-                ) : attachment._tag === 'Ready' && attachment.kind === 'document' ? (
+                ) : Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'document' ? (
                   <div className="grid size-12 place-items-center rounded-xl bg-primary/10 text-primary">
                     <FileTextIcon className="size-5" aria-hidden />
                   </div>
@@ -410,13 +419,15 @@ export function AgentComposer({
                   <div
                     className={cn(
                       'max-w-48 truncate',
-                      attachment._tag === 'Failed' ? 'text-destructive' : undefined
+                      Predicate.isTagged(attachment, 'Failed') ? 'text-destructive' : undefined
                     )}
                   >
-                    {attachment._tag === 'Failed' ? attachment.reason : attachment.mimeType}
+                    {Predicate.isTagged(attachment, 'Failed')
+                      ? attachment.reason
+                      : attachment.mimeType}
                   </div>
                 </div>
-                {attachment._tag === 'Failed' ? (
+                {Predicate.isTagged(attachment, 'Failed') ? (
                   <Button
                     type="button"
                     size="sm"

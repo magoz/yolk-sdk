@@ -61,6 +61,7 @@ describe('just_bash tool', () => {
         route: '/agent',
         userId: 'user_1'
       })
+
       const voiceTools = yield* resolveAgentTools({
         surface: 'voice',
         route: '/agent',

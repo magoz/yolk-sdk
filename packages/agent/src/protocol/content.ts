@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 
 export class TextPart extends Schema.TaggedClass<TextPart>()('Text', {
@@ -25,6 +25,7 @@ export const AttachmentSource = Schema.Union([
   UrlAttachmentSource,
   RefAttachmentSource
 ])
+
 export type AttachmentSource = typeof AttachmentSource.Type
 
 export class ImagePart extends Schema.TaggedClass<ImagePart>()('Image', {
@@ -51,9 +52,11 @@ export class AudioPart extends Schema.TaggedClass<AudioPart>()('Audio', {
 }) {}
 
 export const ContentPart = Schema.Union([TextPart, ImagePart, DocumentPart, AudioPart])
+
 export type ContentPart = typeof ContentPart.Type
 
 export const Content = Schema.Union([Schema.String, Schema.Array(ContentPart)])
+
 export type Content = typeof Content.Type
 
 export type AttachmentContentPart = ImagePart | DocumentPart | AudioPart
@@ -156,7 +159,9 @@ export const replaceLoneSurrogates = (text: string) => text.replace(loneSurrogat
  */
 export const replaceLoneSurrogatesDeep = (value: unknown): unknown => {
   if (typeof value === 'string') return replaceLoneSurrogates(value)
+
   if (Array.isArray(value)) return value.map(replaceLoneSurrogatesDeep)
+
   if (typeof value === 'object' && value !== null) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
@@ -182,7 +187,7 @@ export const isContentEmpty = (content: Content) =>
   typeof content === 'string'
     ? content.length === 0
     : content.length === 0 ||
-      Arr.every(content, part => part._tag === 'Text' && part.text.length === 0)
+      Arr.every(content, part => Predicate.isTagged(part, 'Text') && part.text.length === 0)
 
 export const appendTextToContent = (content: Content, text: string): Content => {
   if (typeof content === 'string') {
@@ -192,10 +197,10 @@ export const appendTextToContent = (content: Content, text: string): Content => 
   return Option.match(Arr.last(content), {
     onNone: () => [TextPart.make({ text })],
     onSome: last =>
-      last._tag !== 'Text'
+      !Predicate.isTagged(last, 'Text')
         ? [...content, TextPart.make({ text })]
         : Arr.map(content, (part, index) =>
-            index === content.length - 1 && part._tag === 'Text'
+            index === content.length - 1 && Predicate.isTagged(part, 'Text')
               ? TextPart.make({ text: `${part.text}${text}` })
               : part
           )
@@ -300,6 +305,7 @@ export const isTextDocumentMimeType = (mimeType: string) => {
 
 export const textDocumentMimeTypeFromFilename = (filename: string) => {
   const normalized = filename.trim().toLowerCase()
+
   const entry = Object.entries(textDocumentMimeTypeByExtension).find(([extension]) =>
     normalized.endsWith(extension)
   )
@@ -314,6 +320,7 @@ export const inferTextDocumentMimeType = (input: {
   const normalized = normalizeMimeType(input.mimeType)
 
   if (isTextDocumentMimeType(normalized)) return normalized
+
   if (!isUnknownDocumentMimeType(normalized)) return undefined
 
   return textDocumentMimeTypeFromFilename(input.filename)
@@ -337,6 +344,7 @@ export const documentPartFromText = (input: {
   readonly title?: string
 }) => {
   const normalized = normalizeMimeType(input.mimeType)
+
   const mimeType =
     inferTextDocumentMimeType({
       filename: input.filename,

@@ -1,4 +1,5 @@
 export { OAuthError, OAuthErrorCause } from './error.ts'
+
 export {
   OAuthAccessToken,
   TokenBrokerRequest,
@@ -7,5 +8,7 @@ export {
   shouldRefreshToken,
   tokenRemainingTtlMs
 } from './token.ts'
+
 export { credentialSourceFromBroker } from './source.ts'
+
 export type { OAuthCredentialRequest, OAuthCredentialSource, TokenBrokerClient } from './source.ts'

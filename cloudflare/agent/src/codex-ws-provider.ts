@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer, Queue, Ref, Stream } from 'effect'
+import { Cause, Effect, Layer, Predicate, Queue, Ref, Stream } from 'effect'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import {
@@ -34,7 +34,9 @@ import {
 import type { TokenBrokerResponse } from '@yolk-sdk/agent/oauth'
 
 export const codexWsUrl = 'https://chatgpt.com/backend-api/codex/responses'
+
 const codexWsBetaHeader = 'responses_websockets=2026-02-06'
+
 const codexInstallationId = 'yolk-cloudflare-agent'
 
 export type CodexWsConfig = {
@@ -59,11 +61,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const getString = (obj: Record<string, unknown>, key: string): string | undefined => {
   const v = obj[key]
+
   return typeof v === 'string' ? v : undefined
 }
 
 const getNumber = (obj: Record<string, unknown>, key: string): number | undefined => {
   const v = obj[key]
+
   return typeof v === 'number' ? v : undefined
 }
 
@@ -72,6 +76,7 @@ const getRecord = (
   key: string
 ): Record<string, unknown> | undefined => {
   const v = obj[key]
+
   return isRecord(v) ? v : undefined
 }
 
@@ -102,9 +107,11 @@ const parseRetryAfter = (value: string | undefined) => {
 
   const trimmed = value.trim()
   const secondsDelay = numericDelayMs(Number(trimmed) * 1000)
+
   if (secondsDelay !== undefined) return secondsDelay
 
   const timestamp = Date.parse(trimmed)
+
   return Number.isNaN(timestamp) ? undefined : numericDelayMs(timestamp - Date.now())
 }
 
@@ -148,9 +155,13 @@ const codexFailureKind = (input: {
   }
 
   if (input.status === 429) return 'rate_limit'
+
   if (input.status === 529) return 'overloaded'
+
   if (input.status === 413) return 'context_overflow'
+
   if (input.status === 401 || input.status === 403) return 'auth'
+
   if (input.status !== undefined && input.status >= 500) return 'server_error'
 
   return input.fallbackKind ?? 'unknown'
@@ -205,6 +216,7 @@ const codexProviderError = (input: {
   readonly fallbackKind?: ProviderFailureKind
 }) => {
   const kind = codexFailureKind(input)
+
   const provider = codexProviderInfo({
     kind,
     ...(input.status === undefined ? {} : { status: input.status }),
@@ -224,6 +236,7 @@ const parseWsJson = (text: string): Record<string, unknown> | undefined => {
   const parsed = Option.getOrUndefined(
     Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(text)
   )
+
   return isRecord(parsed) ? parsed : undefined
 }
 
@@ -287,11 +300,13 @@ const parseToolCall = (item: Record<string, unknown>): LLMToolCall | undefined =
   const callId = getString(item, 'call_id')
   const name = getString(item, 'name')
   const args = getString(item, 'arguments')
+
   if (callId === undefined || name === undefined || args === undefined) return undefined
 
   const decoded = Option.getOrUndefined(
     Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(args)
   )
+
   return LLMToolCall.make({
     call: ToolCall.make({ id: callId, name, params: decoded ?? args })
   })
@@ -299,6 +314,7 @@ const parseToolCall = (item: Record<string, unknown>): LLMToolCall | undefined =
 
 const parseUsage = (response: Record<string, unknown>): LLMUsage | undefined => {
   const usage = getRecord(response, 'usage')
+
   if (usage === undefined) return undefined
 
   const inputTokens = getNumber(usage, 'input_tokens') ?? 0
@@ -334,6 +350,7 @@ const stopReasonFromCompleted = (
   if (streamedToolCalls > 0) return 'tool_use'
 
   const output = response.output
+
   if (!Array.isArray(output)) return 'stop'
 
   for (const item of output) {
@@ -355,27 +372,35 @@ export const mapWsMessage = (
     case 'response.output_text.delta':
     case 'response.content_part.delta': {
       const delta = getString(msg, 'delta')
+
       if (delta === undefined) return { _tag: 'Skip' }
+
       return { _tag: 'Events', events: [LLMTextDelta.make({ text: delta })] }
     }
 
     case 'response.reasoning_summary_text.delta':
     case 'response.reasoning_text.delta': {
       const delta = getString(msg, 'delta')
+
       if (delta === undefined) return { _tag: 'Skip' }
+
       return { _tag: 'Events', events: [LLMReasoningDelta.make({ text: delta })] }
     }
 
     case 'response.output_item.done': {
       const item = getRecord(msg, 'item')
+
       if (item === undefined) return { _tag: 'Skip' }
       const toolCall = parseToolCall(item)
+
       if (toolCall === undefined) return { _tag: 'Skip' }
+
       return { _tag: 'Events', events: [toolCall] }
     }
 
     case 'response.completed': {
       const response = getRecord(msg, 'response')
+
       if (response === undefined) {
         return { _tag: 'Done', events: [LLMDone.make({ stopReason: 'stop' })] }
       }
@@ -383,17 +408,21 @@ export const mapWsMessage = (
       const stopReason = stopReasonFromCompleted(response, streamedToolCallCount)
       const events: Array<LLMEvent> = [LLMDone.make({ stopReason })]
       const usage = parseUsage(response)
+
       if (usage !== undefined) events.push(usage)
+
       return { _tag: 'Done', events }
     }
 
     case 'response.failed': {
       const response = getRecord(msg, 'response')
       const error = response !== undefined ? getRecord(response, 'error') : undefined
+
       const message =
         error !== undefined
           ? (getString(error, 'message') ?? 'Codex response failed')
           : 'Codex response failed'
+
       const providerCode =
         error !== undefined ? (getString(error, 'code') ?? getString(error, 'type')) : undefined
 
@@ -408,10 +437,12 @@ export const mapWsMessage = (
 
     case 'error': {
       const error = getRecord(msg, 'error')
+
       const message =
         error !== undefined
           ? (getString(error, 'message') ?? 'Codex WebSocket error')
           : 'Codex WebSocket error'
+
       const code = error !== undefined ? getString(error, 'code') : undefined
 
       return {
@@ -450,7 +481,9 @@ const getWorkersWebSocket = (response: Response): WebSocket | undefined => {
   if (!('webSocket' in response)) return undefined
 
   const ws: unknown = Reflect.get(response, 'webSocket')
+
   if (ws === null || ws === undefined) return undefined
+
   return isWebSocketLike(ws) ? ws : undefined
 }
 
@@ -534,6 +567,7 @@ const acquireCodexWebSocket = (config: CodexWsConfig) =>
       if ('accept' in ws && typeof ws.accept === 'function') {
         ws.accept()
       }
+
       return ws
     },
     catch: error =>
@@ -606,6 +640,7 @@ const sendCodexProxyRequest = (
   Effect.gen(function* () {
     const body = yield* toOpenAiCodexRequestBody(request, {})
     const serializedBody = yield* encodeJson(body)
+
     const response = yield* client
       .execute(
         HttpClientRequest.post(config.fallback.endpoint).pipe(
@@ -677,6 +712,7 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
           const handleMessage = (data: string) =>
             Effect.gen(function* () {
               const msg = parseWsJson(data)
+
               if (msg === undefined) return
 
               const count = yield* Ref.get(toolCallCount)
@@ -684,15 +720,20 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
 
               switch (result._tag) {
                 case 'Events': {
-                  const nextToolCalls = result.events.filter(e => e._tag === 'ToolCall').length
+                  const nextToolCalls = result.events.filter(e =>
+                    Predicate.isTagged(e, 'ToolCall')
+                  ).length
+
                   if (nextToolCalls > 0) {
                     yield* Ref.update(toolCallCount, current => current + nextToolCalls)
                   }
+
                   yield* Effect.forEach(result.events, event => Queue.offer(queue, event), {
                     discard: true
                   })
                   break
                 }
+
                 case 'Done': {
                   yield* Effect.forEach(result.events, event => Queue.offer(queue, event), {
                     discard: true
@@ -700,6 +741,7 @@ const makeDirectCodexWsProvider = (config: CodexWsConfig) =>
                   yield* Queue.shutdown(queue)
                   break
                 }
+
                 case 'Error':
                   yield* Queue.failCause(queue, Cause.fail(result.error))
                   break
@@ -752,6 +794,7 @@ export const makePreStreamFallbackProvider = (
                     Effect.map(hasEmitted => {
                       if (hasEmitted) return Stream.fail(error)
                       onFallback(error)
+
                       return fallback.stream(request)
                     })
                   )
@@ -769,6 +812,7 @@ export const makeCodexWsProviderLayer = (config: CodexWsConfig) =>
         LLMProvider,
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
+
           return makeCodexProxyProvider(config, client)
         })
       )

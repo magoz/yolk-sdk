@@ -16,20 +16,25 @@ import { toAnthropicClaudeRequestBody } from '../../src/providers/anthropic/clau
 import { toOpenAiCodexRequestBody } from '../../src/providers/openai/codex-provider.ts'
 
 class Nested extends Schema.Class<Nested>('Nested')({ value: Schema.String }) {}
+
 const paramsSchema = Schema.Struct({
   execution: Schema.String,
   arguments: Schema.Number.pipe(Schema.check(Schema.isFinite())),
   background: Schema.Boolean,
   nested: Nested
 })
+
 const params = { execution: 'business', arguments: 42, background: false, nested: { value: 'yes' } }
+
 const request = (execution: string, args: unknown = params) =>
   ToolCall.make({
     id: 'call-1',
     name: 'work',
     params: { execution, arguments: args }
   })
+
 const receipt = BackgroundToolAccepted.make({ version: 1, executionId: 'owner:call-1' })
+
 const registration = (execute: (call: ToolCall) => Effect.Effect<ToolResult, ToolError>) =>
   makeTool({
     name: 'work',
@@ -39,6 +44,7 @@ const registration = (execute: (call: ToolCall) => Effect.Effect<ToolResult, Too
     parameters: paramsSchema,
     execute: ({ call }) => execute(call)
   })
+
 const resolve = (tool: ToolRegistration<unknown>, host?: BackgroundToolHost<unknown>) =>
   resolveTools(
     [{ id: 'test', tools: [tool] }],
@@ -66,6 +72,7 @@ describe('native background tools', () => {
   it.effect('does not activate non-opted tools even with a host', () =>
     Effect.gen(function* () {
       let admissions = 0
+
       const tool = makeTool({
         name: 'work',
         description: '',
@@ -73,12 +80,15 @@ describe('native background tools', () => {
         parameters: paramsSchema,
         execute: ({ call }) => inline(call)
       })
+
       const set = yield* resolve(tool, {
         accept: () => {
           admissions++
+
           return Effect.succeed(receipt)
         }
       })
+
       expect(set.tools[0]).toBe(tool.def)
       yield* set.execute(ToolCall.make({ id: 'plain', name: 'work', params }))
       expect(admissions).toBe(0)
@@ -92,19 +102,23 @@ describe('native background tools', () => {
         const inlineCalls: ToolCall[] = []
         const admitted: ToolCall[] = []
         const requests: ToolCall[] = []
+
         const set = yield* resolve(
           registration(call => {
             inlineCalls.push(call)
+
             return inline(call)
           }),
           {
             accept: input => {
               admitted.push(input.call)
               requests.push(input.request)
+
               return Effect.succeed(receipt)
             }
           }
         )
+
         const accepted = yield* set.execute(request('background'))
         expect(accepted.acceptance).toEqual(receipt)
         expect(accepted.isError).toBeUndefined()
@@ -124,18 +138,22 @@ describe('native background tools', () => {
     () =>
       Effect.gen(function* () {
         let effects = 0
+
         const set = yield* resolve(
           registration(call => {
             effects++
+
             return inline(call)
           }),
           {
             accept: () => {
               effects++
+
               return Effect.succeed(receipt)
             }
           }
         )
+
         for (const input of [
           params,
           {},
@@ -146,8 +164,11 @@ describe('native background tools', () => {
           const result = yield* set
             .execute(ToolCall.make({ id: 'invalid', name: 'work', params: input }))
             .pipe(Effect.result)
-          expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation' } })
+
+          expect(result._tag).toBe('Failure')
+          expect(result).toMatchObject({ failure: { cause: 'validation' } })
         }
+
         expect(effects).toBe(0)
       })
   )
@@ -155,9 +176,11 @@ describe('native background tools', () => {
   it.effect('fails closed on host rejection without falling back to inline execution', () =>
     Effect.gen(function* () {
       let effects = 0
+
       const set = yield* resolve(
         registration(call => {
           effects++
+
           return inline(call)
         }),
         {
@@ -165,6 +188,7 @@ describe('native background tools', () => {
             Effect.fail(new ToolError({ tool: 'work', cause: 'denied', message: 'Owner stopped' }))
         }
       )
+
       expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
         _tag: 'Failure',
         failure: { cause: 'denied' }
@@ -180,6 +204,7 @@ describe('native background tools', () => {
         access: 'write',
         execute: ({ call }) => inline(call)
       }
+
       expect(
         yield* resolve(tool, { accept: () => Effect.succeed(receipt) }).pipe(Effect.result)
       ).toMatchObject({ _tag: 'Failure', failure: { cause: 'background_validation_required' } })
@@ -193,16 +218,20 @@ describe('native background tools', () => {
       Effect.gen(function* () {
         const reservations = new Map<string, BackgroundToolAccepted>()
         let physicalStarts = 0
+
         const set = yield* resolve(registration(inline), {
           accept: ({ call }) =>
             Effect.sync(() => {
               const existing = reservations.get(call.id)
+
               if (existing !== undefined) return existing
               physicalStarts++
               reservations.set(call.id, receipt)
+
               return receipt
             })
         })
+
         const first = yield* set.execute(request('background'))
         const replay = yield* set.execute(request('background'))
         expect(replay).toEqual(first)
@@ -218,12 +247,14 @@ describe('native background tools', () => {
     Effect.gen(function* () {
       let reserved = false
       let launches = 0
+
       const set = yield* resolve(registration(inline), {
         accept: () =>
           Effect.suspend(() => {
             if (reserved) return Effect.succeed(receipt)
             reserved = true
             launches++
+
             return Effect.fail(
               new ToolError({
                 tool: 'work',
@@ -233,14 +264,17 @@ describe('native background tools', () => {
             )
           })
       })
+
       expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
         _tag: 'Failure'
       })
       expect((yield* set.execute(request('background'))).acceptance).toEqual(receipt)
       expect(launches).toBe(1)
+
       const invalid = yield* resolve(registration(inline), {
         accept: () => Effect.succeed<BackgroundToolAccepted>({ version: 1, executionId: '' })
       })
+
       expect(yield* invalid.execute(request('background')).pipe(Effect.result)).toMatchObject({
         _tag: 'Failure',
         failure: { cause: 'execution' }
@@ -255,11 +289,13 @@ describe('native background tools', () => {
       const host = { accept: () => Effect.succeed(receipt) }
       const activated = yield* resolve(tool, host)
       const def = activated.tools[0]
+
       if (def === undefined) return
       expect(yield* resolve({ ...tool, def }).pipe(Effect.result)).toMatchObject({
         _tag: 'Failure',
         failure: { cause: 'background_definition_already_active' }
       })
+
       for (const name of [questionToolName, subagentToolName]) {
         const loopOwned = { ...tool, def: ToolDef.make({ ...tool.def, name }) }
         expect(yield* resolve(loopOwned, host).pipe(Effect.result)).toMatchObject({
@@ -277,6 +313,7 @@ describe('native background tools', () => {
     () =>
       Effect.gen(function* () {
         let effects = 0
+
         const unsupportedNodes = [
           ...[
             '#/properties/value',
@@ -296,6 +333,7 @@ describe('native background tools', () => {
           { $recursiveRef: '#' },
           { $recursiveAnchor: true }
         ]
+
         const positions = (node: Readonly<Record<string, unknown>>) => [
           node,
           { properties: { value: node } },
@@ -322,9 +360,11 @@ describe('native background tools', () => {
           { unevaluatedItems: node },
           { additionalItems: node }
         ]
+
         for (const node of unsupportedNodes) {
           for (const position of positions(node)) {
             const parameters = { type: 'object', ...position }
+
             const tool: ToolRegistration<unknown> = {
               def: ToolDef.make({ name: 'work', description: '', parameters, background: true }),
               access: 'write',
@@ -334,15 +374,19 @@ describe('native background tools', () => {
                 }),
               execute: ({ call }) => {
                 effects++
+
                 return inline(call)
               }
             }
+
             const host = {
               accept: () => {
                 effects++
+
                 return Effect.succeed(receipt)
               }
             }
+
             expect(yield* resolve(tool, host).pipe(Effect.result)).toMatchObject({
               _tag: 'Failure',
               failure: { _tag: 'ToolRegistryError', cause: 'background_unsupported_schema' }
@@ -355,6 +399,7 @@ describe('native background tools', () => {
             expect((yield* resolve(disabled, host)).tools[0]).toBe(tool.def)
           }
         }
+
         expect(effects).toBe(0)
       })
   )
@@ -369,6 +414,7 @@ describe('native background tools', () => {
           $dynamicRef: '#data',
           properties: { value: { $anchor: 'data' } }
         }
+
         const parameters = {
           type: 'object',
           properties: {
@@ -384,17 +430,20 @@ describe('native background tools', () => {
           default: literal,
           examples: [literal]
         }
+
         const tool: ToolRegistration<unknown> = {
           def: ToolDef.make({ name: 'work', description: '', parameters, background: true }),
           access: 'read',
           validate: () => Effect.void,
           execute: ({ call }) => inline(call)
         }
+
         const set = yield* resolve(tool, { accept: () => Effect.succeed(receipt) })
         const input = { model: 'test', systemPrompt: '', messages: [], tools: set.tools }
         const openai = yield* toOpenAiRequestBody(input, { maxCompletionTokens: 100 })
         const anthropic = yield* toAnthropicClaudeRequestBody(input, { maxTokens: 100 })
         const codex = yield* toOpenAiCodexRequestBody(input)
+
         for (const output of [
           openai.tools?.[0]?.function.parameters,
           anthropic.tools?.[0]?.input_schema,
@@ -431,6 +480,7 @@ describe('native background tools', () => {
         const openai = yield* toOpenAiRequestBody(input, { maxCompletionTokens: 100 })
         const anthropic = yield* toAnthropicClaudeRequestBody(input, { maxTokens: 100 })
         const codex = yield* toOpenAiCodexRequestBody(input)
+
         for (const parameters of [
           openai.tools?.[0]?.function.parameters,
           anthropic.tools?.[0]?.input_schema,
@@ -466,8 +516,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       let effects = 0
+
       for (const custom of [false, true]) {
         const messages: unknown[] = []
+
         const tool = makeTool({
           name: 'work',
           description: '',
@@ -478,26 +530,34 @@ it.effect(
             ? {
                 invalidParamsMessage: (error: unknown) => {
                   messages.push(error)
+
                   return 'Please fix business input'
                 }
               }
             : {}),
           execute: ({ call }) => {
             effects++
+
             return inline(call)
           }
         })
+
         const plain = yield* resolve(tool)
+
         const activated = yield* resolve(tool, {
           accept: () => {
             effects++
+
             return Effect.succeed(receipt)
           }
         })
+
         const invalid = { ...params, arguments: 'wrong' }
+
         const expected = yield* plain.execute(
           ToolCall.make({ id: 'call-1', name: 'work', params: invalid })
         )
+
         expect(expected).toMatchObject({
           isError: true,
           structuredContent: {
@@ -507,15 +567,20 @@ it.effect(
             message: expected.content
           }
         })
+
         for (const mode of ['foreground', 'background']) {
           const actual = yield* activated.execute(request(mode, invalid)).pipe(Effect.result)
-          expect(actual).toMatchObject({ _tag: 'Success', success: expected })
+          const expectedActualFields = { success: expected }
+          expect(actual._tag).toBe('Success')
+          expect(actual).toMatchObject(expectedActualFields)
         }
+
         if (custom) {
           expect(expected.content).toBe('Please fix business input')
           expect(messages).toHaveLength(3)
         }
       }
+
       expect(effects).toBe(0)
     })
 )
@@ -526,50 +591,62 @@ it.effect(
     Effect.gen(function* () {
       let business = 0
       let admissions = 0
+
       const rawError = new ToolError({
         tool: 'work',
         cause: 'validation',
         message: 'raw policy validation'
       })
+
       const hostError = new ToolError({
         tool: 'work',
         cause: 'validation',
         message: 'host admission validation'
       })
+
       const raw: ToolRegistration<unknown> = {
         def: ToolDef.make({ name: 'work', description: '', parameters: {}, background: true }),
         access: 'write',
         validate: () => Effect.fail(rawError),
         execute: ({ call }) => {
           business++
+
           return inline(call)
         }
       }
+
       const rawSet = yield* resolve(raw, {
         accept: () => {
           admissions++
+
           return Effect.succeed(receipt)
         }
       })
+
       for (const mode of ['foreground', 'background']) {
         expect(yield* rawSet.execute(request(mode)).pipe(Effect.result)).toMatchObject({
           _tag: 'Failure',
           failure: rawError
         })
       }
+
       expect(admissions).toBe(0)
+
       const set = yield* resolve(
         registration(call => {
           business++
+
           return inline(call)
         }),
         {
           accept: () => {
             admissions++
+
             return Effect.fail(hostError)
           }
         }
       )
+
       expect(yield* set.execute(request('background')).pipe(Effect.result)).toMatchObject({
         _tag: 'Failure',
         failure: hostError

@@ -15,12 +15,17 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const webFetchToolName = 'web_fetch'
+
 const maxResponseSizeBytes = 5 * 1024 * 1024
+
 const defaultTimeoutSeconds = 30
+
 const maxTimeoutSeconds = 120
+
 const maxRedirects = 5
 
 const WebFetchFormat = Schema.Literals(['markdown', 'text', 'html'])
+
 const WebFetchParams = Schema.Struct({
   url: Schema.String.pipe(
     Schema.annotate({ description: 'Fully-qualified public http(s) URL to fetch.' })
@@ -34,7 +39,9 @@ const WebFetchParams = Schema.Struct({
 })
 
 type WebFetchFormat = typeof WebFetchFormat.Type
+
 type WebFetchParams = typeof WebFetchParams.Type
+
 type WebFetchToolError = ToolError | ModelVisibleToolError
 
 export type WebFetchHttpResponse = {
@@ -96,9 +103,11 @@ const parsePublicHttpUrl = (rawUrl: string) => {
   }
 
   const url = new URL(trimmed)
+
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return Effect.fail(makeModelVisibleError('URL must use http or https', 'validation'))
   }
+
   if (url.username.length > 0 || url.password.length > 0) {
     return Effect.fail(makeModelVisibleError('URL credentials are not allowed', 'validation'))
   }
@@ -125,6 +134,7 @@ export const parseIpv4Parts = (address: string) => {
 
 export const isBlockedIpv4 = (address: string) => {
   const parts = parseIpv4Parts(address)
+
   if (parts.length !== 4) {
     return false
   }
@@ -178,6 +188,7 @@ export const isBlockedAddress = (address: string) =>
 
 export const ensurePublicUrlWithoutDns = (url: URL) => {
   const hostname = normalizeHostname(url.hostname)
+
   if (hostname.length === 0 || isLocalHostname(hostname)) {
     return Effect.fail(makeModelVisibleError('URL host is not public', 'permission'))
   }
@@ -212,9 +223,11 @@ const manualRedirectRequestInit: RequestInit = { redirect: 'manual' }
 export const requestWithHttpClient = (url: URL, timeoutMs: number) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(url.toString()).pipe(
       HttpClientRequest.setHeaders(requestHeaders)
     )
+
     const response = yield* http.execute(request).pipe(
       Effect.mapError(error =>
         makeModelVisibleError(`Request failed: ${unknownToMessage(error)}`, 'unavailable')
@@ -277,6 +290,7 @@ const fetchWithRedirects = (
     }
 
     const location = headerValue(response.headers, 'location')
+
     if (location === undefined || location.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError(`Redirect ${response.status} missing Location header`, 'unavailable')
@@ -295,6 +309,7 @@ const ensureSuccessfulStatus = (status: number) =>
 
 const ensureContentLength = (headers: Readonly<Record<string, string | undefined>>) => {
   const rawContentLength = headerValue(headers, 'content-length')
+
   if (rawContentLength === undefined) {
     return Effect.void
   }
@@ -334,11 +349,17 @@ const normalizeWhitespace = (input: string) =>
 const decodeHtmlEntities = (input: string) =>
   input.replace(/&(#\d+|#x[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);/gi, (entity, value) => {
     const normalized = value.toLowerCase()
+
     if (normalized === 'amp') return '&'
+
     if (normalized === 'lt') return '<'
+
     if (normalized === 'gt') return '>'
+
     if (normalized === 'quot') return '"'
+
     if (normalized === 'apos') return "'"
+
     if (normalized === 'nbsp') return ' '
 
     const codePoint = normalized.startsWith('#x')
@@ -383,6 +404,7 @@ const htmlToMarkdown = (html: string) =>
         )
         .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, text) => {
           const label = inlineMarkdown(text)
+
           return label.length > 0 ? `${label} (${href})` : href
         })
         .replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_match, text) => `\n- ${inlineMarkdown(text)}`)
@@ -430,17 +452,20 @@ export const fetchWebPage = (params: WebFetchParams, deps: WebFetchToolDependenc
     const url = yield* parsePublicHttpUrl(params.url)
     const timeoutMs = yield* resolveTimeoutMs(params.timeoutSeconds)
     const format = normalizeFormat(params.format)
+
     const { url: finalUrl, response } = yield* fetchWithRedirects(
       deps,
       url,
       timeoutMs,
       maxRedirects
     )
+
     yield* ensureSuccessfulStatus(response.status)
     yield* ensureContentLength(response.headers)
 
     const contentType = headerValue(response.headers, 'content-type')
     const mime = contentTypeMime(contentType)
+
     if (!isTextLikeMime(mime)) {
       return yield* Effect.fail(
         makeModelVisibleError(`Unsupported content type: ${mime}`, 'unavailable')

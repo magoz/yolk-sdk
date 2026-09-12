@@ -82,6 +82,7 @@ const makeHttpClientLayer = (response: Response, requests: Array<CapturedRequest
 
 const settleTransport = async <A>(promise: Promise<A>): Promise<A> => {
   let timer: ReturnType<typeof setTimeout> | undefined
+
   try {
     return await Promise.race([
       promise,
@@ -181,6 +182,7 @@ describe('collectAgentEvents', () => {
     async (_, streamRun) => {
       const requests: Array<CapturedRequest> = []
       let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
+
       const response = new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -189,12 +191,14 @@ describe('collectAgentEvents', () => {
           }
         })
       )
+
       const events = Stream.toAsyncIterable(
         streamRun({
           endpoint: '/api/agent/run_1',
           httpClientLayer: makeHttpClientLayer(response, requests)
         })
       )[Symbol.asyncIterator]()
+
       expect((await events.next()).value?._tag).toBe('AgentStart')
       bodyController?.error(new TypeError('Response body terminated'))
 
@@ -208,6 +212,7 @@ describe('collectAgentEvents', () => {
     'propagates a host callback defect from %s without hanging or wrapping it',
     async mode => {
       const defect = new Error('Host callback defect')
+
       const request = {
         endpoint: '/api/agent/run_1',
         httpClientLayer: makeHttpClientLayer(new Response(encodeEvents([AgentStart.make({})])), []),
@@ -215,6 +220,7 @@ describe('collectAgentEvents', () => {
           throw defect
         }
       }
+
       const stream =
         mode === 'start'
           ? streamAgentEventStreamUntilTerminal({
@@ -225,12 +231,15 @@ describe('collectAgentEvents', () => {
           : mode === 'hitl'
             ? streamAgentRunHitlResponseEventStreamUntilTerminal({ ...request, hitlResponses: [] })
             : streamAgentRunEventStreamUntilTerminal(request)
+
       const exit = await settleTransport(Effect.runPromiseExit(Stream.runDrain(stream)))
       expect(Exit.isFailure(exit)).toBe(true)
+
       if (Exit.isFailure(exit)) {
         expect(exit.cause.reasons).toHaveLength(1)
         const reason = exit.cause.reasons[0]
         expect(reason?._tag).toBe('Die')
+
         if (reason?._tag === 'Die') expect(reason.defect).toBe(defect)
       }
     }
@@ -240,6 +249,7 @@ describe('collectAgentEvents', () => {
     const responseEvents = [
       AgentError.make({ code: 'provider_error', message: 'Provider failed', retryable: true })
     ]
+
     const requests: Array<CapturedRequest> = []
 
     const events = await Effect.runPromise(
@@ -317,6 +327,7 @@ describe('collectAgentEvents', () => {
     const requests: Array<CapturedRequest> = []
     const runIds: Array<string> = []
     const seen: Array<string> = []
+
     const events = await collectEventStream(
       streamAgentEventStreamUntilTerminal({
         endpoint: '/api/agent',
@@ -350,6 +361,7 @@ describe('collectAgentEvents', () => {
 
   it('continues existing durable runs from the requested start index', async () => {
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -476,7 +488,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStream({
         endpoint: '/api/agent/run_1',
@@ -501,7 +515,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -536,7 +552,9 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
+
     const events = await collectEventStream(
       streamAgentRunHitlResponseEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -570,6 +588,7 @@ describe('collectAgentEvents', () => {
   it('aborts empty continuation waits before polling again', async () => {
     const controller = new AbortController()
     const requests: Array<CapturedRequest> = []
+
     const eventsPromise = collectEventStream(
       streamAgentRunEventStreamUntilTerminal({
         endpoint: '/api/agent/run_1',
@@ -673,6 +692,7 @@ describe('collectAgentEvents', () => {
       decision: 'approved',
       source: 'user'
     })
+
     const requests: Array<CapturedRequest> = []
 
     await expect(
@@ -725,6 +745,7 @@ describe('collectAgentEvents', () => {
   it('cancels the response body when event consumption stops', async () => {
     let cancelled = false
     const requests: Array<CapturedRequest> = []
+
     const response = new Response(
       new ReadableStream<Uint8Array>({
         start: controller => {
@@ -735,6 +756,7 @@ describe('collectAgentEvents', () => {
         }
       })
     )
+
     const events = Stream.toAsyncIterable(
       streamAgentEventStream({
         sessionId: 'session_1',
@@ -742,11 +764,13 @@ describe('collectAgentEvents', () => {
         httpClientLayer: makeHttpClientLayer(response, requests)
       })
     )[Symbol.asyncIterator]()
+
     const firstEvent = await events.next()
 
     expect(firstEvent).toMatchObject({ done: false, value: { _tag: 'AgentStart' } })
 
     const returnEvents = events.return
+
     if (returnEvents === undefined) {
       throw new Error('Expected async iterator return')
     }
@@ -761,6 +785,7 @@ describe('collectAgentEvents', () => {
     let closed = false
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined
     const requests: Array<CapturedRequest> = []
+
     const awaitingInput = AgentAwaitingInput.make({
       requests: [
         ToolApprovalRequest.make({
@@ -773,6 +798,7 @@ describe('collectAgentEvents', () => {
       turns: 1,
       usage: zeroAgentUsage
     })
+
     const response = new Response(
       new ReadableStream<Uint8Array>({
         start: streamController => {
@@ -787,12 +813,14 @@ describe('collectAgentEvents', () => {
         }
       })
     )
+
     const closeResponseBody = () => {
       if (controller === undefined || closed) return
 
       closed = true
       controller.close()
     }
+
     const eventsPromise = Effect.runPromise(
       collectAgentEvents({
         sessionId: 'session_1',
@@ -830,6 +858,7 @@ describe('collectAgentEvents', () => {
 
     try {
       const messages = appendAgentMessage([], UserMessage.make({ content: 'hello' }))
+
       const eventsPromise = collectEventStream(
         streamCloudflareAgentEventStream({
           webSocketUrl: 'wss://worker.example/connect/session_1',
@@ -946,9 +975,11 @@ const waitForRequestCount = async (requests: ReadonlyArray<CapturedRequest>, cou
 const waitForSocket = async () => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const socket = FakeWebSocket.instances[0]
+
     if (socket !== undefined) {
       return socket
     }
+
     await wait()
   }
 
@@ -957,6 +988,7 @@ const waitForSocket = async () => {
 
 const firstSocket = () => {
   const socket = FakeWebSocket.instances[0]
+
   if (socket === undefined) {
     throw new Error('Expected WebSocket instance')
   }
@@ -969,6 +1001,7 @@ const waitForSent = async (socket: FakeWebSocket) => {
     if (socket.sent.length > 0) {
       return
     }
+
     await wait()
   }
 

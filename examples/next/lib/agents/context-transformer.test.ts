@@ -17,6 +17,7 @@ import {
 const longText = 'context '.repeat(6_000)
 
 const user = (content: string) => UserMessage.make({ content })
+
 const assistant = (content: string) =>
   AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content })] })
 
@@ -40,9 +41,11 @@ describe('agent context transformer', () => {
 
   it('compacts old transcript messages and emits lifecycle events', () => {
     const recent = [user('recent question'), assistant('recent answer')]
+
     const oldMessages = Array.from({ length: 18 }, (_, index) =>
       index % 2 === 0 ? user(longText) : assistant(longText)
     )
+
     const messages: ReadonlyArray<AgentMessage> = [...oldMessages, ...recent]
     const result = compactAgentMessages(messages)
 
@@ -67,6 +70,7 @@ describe('agent context transformer', () => {
       toolCallingAssistant(),
       toolResult()
     ]
+
     const result = compactAgentMessages(messages)
 
     expect(result.messages.slice(-3)).toEqual(messages.slice(-3))

@@ -53,7 +53,9 @@ describe('sandbox core', () => {
         username: 'git-user',
         password: 'git-password'
       })
+
       const retention = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({ count: 10 })
+
       const tooMany = yield* Schema.decodeUnknownEffect(SandboxSnapshotRetention)({
         count: 11
       }).pipe(Effect.result)
@@ -115,6 +117,7 @@ describe('sandbox core', () => {
       expiresAtMs: 100,
       maxExpiresAtMs: Number.MAX_SAFE_INTEGER
     })
+
     const lifecycle = PersistentSandboxLifecycle.make({ idleTtlMs: 100 })
 
     expect(
@@ -135,6 +138,7 @@ describe('sandbox core', () => {
       expiresAtMs: 100,
       maxExpiresAtMs: 250
     })
+
     const touched = touchSandboxState({ state, nowMs: 200, lifecycle: defaultSandboxLifecycle })
 
     expect(touched.lastUsedAtMs).toBe(200)

@@ -34,6 +34,7 @@ describe('Cloudflare Codex responses proxy', () => {
       const forwardedNames = Object.keys(forwarded)
 
       expect(forwardedNames.every(name => forwardHeaderNames.includes(name))).toBe(true)
+
       for (const name of forwardHeaderNames) {
         if (headers[name] === undefined) {
           expect(forwarded[name]).toBeUndefined()

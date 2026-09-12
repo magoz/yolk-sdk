@@ -16,6 +16,7 @@ export type AgentActivityItem = {
 }
 
 export const maxActivityItems = 80
+
 export const activityPanelId = 'agent-activity-panel'
 
 const formatRetryDelay = (delayMs: number) =>

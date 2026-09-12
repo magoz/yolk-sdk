@@ -29,6 +29,7 @@ const DownloadLayer = Layer.mergeAll(
 
 const safeFilename = (value: string) => {
   const normalized = value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-')
+
   return normalized.length === 0 ? 'knowledge-file' : normalized
 }
 
@@ -42,6 +43,7 @@ const responseHeaders = (input: { readonly filename: string; readonly mediaType:
 const arrayBufferFromBytes = (bytes: Uint8Array) => {
   const buffer = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(buffer).set(bytes)
+
   return buffer
 }
 
@@ -70,6 +72,7 @@ const downloadFile = Effect.gen(function* () {
   const store = yield* KnowledgeStore
   const fileStore = yield* KnowledgeFileBlobStore
   const files = yield* store.listFiles({ scope: { id: session.user.id }, id: documentId })
+
   const file = yield* Option.match(
     Arr.findFirst(files, item => item.id === fileId),
     {
@@ -77,6 +80,7 @@ const downloadFile = Effect.gen(function* () {
       onSome: item => Effect.succeed(item)
     }
   )
+
   const bytes = yield* fileStore.getFile({ storageKey: file.storageKey })
   const mediaType = file.mediaType ?? 'application/octet-stream'
 

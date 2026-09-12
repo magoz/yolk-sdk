@@ -2,6 +2,7 @@ import { Effect } from 'effect'
 import { SkillsetError } from './errors.ts'
 
 const skillsetNamePattern = /^[a-z0-9]+(-[a-z0-9]+)*$/
+
 const maxSkillsetNameLength = 64
 
 export const isValidSkillsetName = (name: string) =>

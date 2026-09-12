@@ -115,6 +115,40 @@ Startup is explicit: build the shared Driver/Inbox/Store, restore host-owned wai
 - Human pause releases the busy claim. User `stop` is terminal at the captured owner's settlement (including shutdown then user-stop). Shutdown interrupt keeps the claim. The Durable Object snapshot claim store does not make Inbox durable.
 - After process restart, hosts enumerate their own persisted waiting checkpoints and rebuild a fresh park with the current drain token. Do not import old Inbox parks, drain tokens, or generation strings. Correlate later responses to the new park and host identity policy. Persisted partial responses may be re-admitted only after protocol/host validation against that fresh park.
 
+## Type imports (breaking)
+
+Runtime/wire is unchanged. These public type exports were renamed; there are no `Shape` aliases.
+
+```ts
+import type { RunStoreApi } from '@yolk-sdk/harness/store'
+import type { InboxApi } from '@yolk-sdk/harness/inbox'
+import type { DriverApi } from '@yolk-sdk/harness/driver'
+```
+
+| Old type import                                | New type import |
+| ---------------------------------------------- | --------------- |
+| `RunStoreShape` from `@yolk-sdk/harness/store` | `RunStoreApi`   |
+| `InboxShape` from `@yolk-sdk/harness/inbox`    | `InboxApi`      |
+| `DriverShape` from `@yolk-sdk/harness/driver`  | `DriverApi`     |
+
+## Owner layers
+
+Each service is acquired through its owning static layer factory, which holds the real
+construction logic. The historical `make*` factories keep their signatures and behavior
+and delegate to these canonical owners:
+
+| Canonical owner layer                                                                                                                 | Backward-compatible factory                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `RunStore.inMemoryLayer()` / `snapshotLayer()`                                                                                        | `makeInMemoryRunStoreLayer` / `makeSnapshotRunStoreLayer`                                       |
+| `Inbox.layer()`                                                                                                                       | `makeInMemoryInboxLayer`                                                                        |
+| `RunCoordinator.layer()` (claims via `RunStore`)                                                                                      | `makeCoordinator` stays as the scoped doorbell factory                                          |
+| `Driver.layer()` (requires `RunStore` + `Inbox` + `RunCoordinator`) + `Driver.coordinatedLayer()` (default coordinator, lazy options) | `makeDriverLayer` delegates to `coordinatedLayer`, keeping the `RunStore` + `Inbox` requirement |
+
+Every factory call builds fresh layers, so composed harnesses never share `Ref` state.
+Within one composed harness, the driver and the merged output share a single store
+instance. `InterruptReason` is owned by `@yolk-sdk/harness/coordinator` and re-exported
+from `@yolk-sdk/harness/driver`.
+
 ## Step outcomes
 
 `attemptModelTurn` classifies **one `runModelTurn` invocation** after that stream's configured loop/provider retries. It does not add another retry loop or persist. Hosts that schedule physical attempts themselves should pass `LoopConfig.maxRetries: 0` and skip retry decorators.

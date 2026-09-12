@@ -31,6 +31,7 @@ const child = (callId = 'call') =>
 
 const fakeStore = () => {
   let state = emptyWorkflowRegistry()
+
   const authorize = (
     runId: string,
     userId: string
@@ -38,16 +39,20 @@ const fakeStore = () => {
     runId === 'parent' && userId === 'owner'
       ? Effect.succeed(undefined)
       : Effect.fail(new WorkflowRunForbidden({ message: 'Workflow run not found' }))
+
   const change = (command: RegistryCommand) => {
     state = transitionWorkflowRegistry(state, command)
+
     return state
   }
+
   const layer = Layer.succeed(AgentWorkflowStore, {
     register: authorize,
     read: (runId, userId) => authorize(runId, userId).pipe(Effect.map(() => state)),
     change: (runId, userId, command) =>
       authorize(runId, userId).pipe(Effect.map(() => change(command)))
   })
+
   return { layer, change, read: () => state }
 }
 
@@ -91,6 +96,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
     for (const admitted of [true, false]) {
       const store = fakeStore()
       store.change({ type: 'reserve', child: child() })
+
       if (admitted) store.change({ type: 'admit', callId: 'call', workflowRunId: 'child-a' })
       store.change({ type: 'stop' })
       store.change({ type: 'reserve', child: child('late') })
@@ -109,12 +115,14 @@ describe('durable host registry (transactional behavioral fake)', () => {
 
   it('enforces the bounded lifetime fanout including pending reservations', () => {
     const store = fakeStore()
+
     for (let i = 0; i < 100; i++) store.change({ type: 'reserve', child: child(String(i)) })
     expect(store.read().children).toHaveLength(maxWorkflowChildren)
   })
 
   it('authorizes lookup and wait against both parent and owner', async () => {
     const store = fakeStore()
+
     for (const [runId, userId] of [
       ['parent', 'intruder'],
       ['other-parent', 'owner']
@@ -122,21 +130,26 @@ describe('durable host registry (transactional behavioral fake)', () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const service = yield* AgentWorkflowStore
+
           return yield* service.read(runId ?? '', userId ?? '')
         }).pipe(Effect.provide(store.layer), Effect.result)
       )
+
       expect(result._tag).toBe('Failure')
     }
   })
 
   it('sweeps children even if parent is completed; partial cancellation is observable and retryable', async () => {
     const store = fakeStore()
+
     for (const id of ['a', 'b']) {
       store.change({ type: 'reserve', child: child(id) })
       store.change({ type: 'admit', callId: id, workflowRunId: id })
     }
+
     let fail = true
     const cancelled: string[] = []
+
     const sdk: VercelWorkflowsSdkClient = {
       start: async () => {
         throw new Error('not used')
@@ -153,14 +166,17 @@ describe('durable host registry (transactional behavioral fake)', () => {
         },
         cancel: async () => {
           expect(store.read().stopped).toBe(true)
+
           if (id === 'a' && fail) throw new Error('transient cancel failure')
           cancelled.push(id)
         }
       })
     }
+
     const workflows = VercelWorkflows.layerFromSdk.pipe(
       Layer.provide(Layer.succeed(VercelWorkflowsSdk, sdk))
     )
+
     const run = () =>
       Effect.runPromise(
         stopAgentWorkflow('parent', 'owner').pipe(
@@ -168,6 +184,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
           Effect.result
         )
       )
+
     const first = await run()
     expect(first).toMatchObject({
       _tag: 'Failure',
@@ -191,6 +208,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
       store.change({ type: 'admit', callId: 'call', workflowRunId: 'physical' })
       let missing = true
       let failure: unknown = new WorkflowRunNotFoundError('physical')
+
       const sdk: VercelWorkflowsSdkClient = {
         start: async () => {
           throw new Error('not used')
@@ -198,6 +216,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
         resumeHook: async () => {},
         getRun: <TResult>() => {
           if (missing && failureAt === 'getRun') throw failure
+
           return {
             runId: 'physical',
             get status() {
@@ -213,15 +232,18 @@ describe('durable host registry (transactional behavioral fake)', () => {
           }
         }
       }
+
       const workflows = VercelWorkflows.layerFromSdk.pipe(
         Layer.provide(Layer.succeed(VercelWorkflowsSdk, sdk))
       )
+
       const read = () =>
         Effect.runPromise(
           readWorkflowChild({ parentRunId: 'parent', userId: 'owner', callId: 'call' }).pipe(
             Effect.provide(Layer.merge(store.layer, workflows))
           )
         )
+
       expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
       vi.setSystemTime(69_999)
       expect(await read()).toMatchObject({ done: false })
@@ -256,6 +278,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
     store.change({ type: 'admit', callId: 'call', workflowRunId: 'physical' })
     let status: 'running' | 'failed' | 'completed' = 'running'
     let statusReads = 0
+
     const sdk: VercelWorkflowsSdkClient = {
       start: async () => {
         throw new Error('not used')
@@ -265,6 +288,7 @@ describe('durable host registry (transactional behavioral fake)', () => {
         runId: 'physical',
         get status() {
           statusReads++
+
           return Promise.resolve(status)
         },
         get returnValue(): Promise<TResult> {
@@ -276,15 +300,18 @@ describe('durable host registry (transactional behavioral fake)', () => {
         cancel: async () => {}
       })
     }
+
     const workflows = VercelWorkflows.layerFromSdk.pipe(
       Layer.provide(Layer.succeed(VercelWorkflowsSdk, sdk))
     )
+
     const read = (userId = 'owner') =>
       Effect.runPromise(
         readWorkflowChild({ parentRunId: 'parent', userId, callId: 'call' }).pipe(
           Effect.provide(Layer.merge(store.layer, workflows))
         )
       )
+
     expect(await read()).toEqual({ done: false, workflowRunId: 'physical', result: null })
     expect(statusReads).toBe(1)
     await expect(read('intruder')).rejects.toMatchObject({ _tag: 'WorkflowRunForbidden' })
@@ -328,12 +355,14 @@ describe('durable host registry (transactional behavioral fake)', () => {
       type: 'reserve',
       child: WorkflowChildRecord.make({ ...child(), startedAtMs: Date.now() })
     })
+
     const readUncertain = () =>
       Effect.runPromise(
         readWorkflowChild({ parentRunId: 'parent', userId: 'owner', callId: 'call' }).pipe(
           Effect.provide(Layer.merge(uncertainStore.layer, workflows))
         )
       )
+
     expect(await readUncertain()).toMatchObject({ done: false, workflowRunId: null })
     uncertainStore.change({ type: 'launch-uncertain', callId: 'call' })
     expect(await readUncertain()).toMatchObject({

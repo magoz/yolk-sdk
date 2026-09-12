@@ -67,6 +67,7 @@ export const makeWebSocketVoiceTransport = (
       openTimeout: Duration.millis(options.readyTimeoutMs ?? defaultReadyTimeoutMs),
       closeCodeIsError: code => code !== 1000 && code !== 1005
     })
+
     const write = yield* socket.writer
     const ready = yield* Deferred.make<void, VoiceSessionError>()
 

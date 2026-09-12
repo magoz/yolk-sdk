@@ -5,8 +5,11 @@ export {
   SessionNotFoundError,
   SessionSaveError
 } from './error.ts'
+
 export type { RuntimeError } from './error.ts'
+
 export { runRuntime } from './run-runtime.ts'
+
 export type {
   AppendInputRuntimeRequest,
   AppendHitlResponseRuntimeRequest,
@@ -15,6 +18,7 @@ export type {
   RuntimeTranscript,
   TranscriptRuntimeRequest
 } from './run-runtime.ts'
+
 export {
   appendRuntimeSessionEventsToLog,
   HitlResponseAppended,
@@ -31,6 +35,7 @@ export {
   RuntimeSessionEvent,
   SessionEventStore
 } from './session-event-store.ts'
+
 export type {
   AppendRuntimeSessionEventsInput,
   IncompleteRuntimeRun,

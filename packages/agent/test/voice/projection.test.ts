@@ -143,6 +143,7 @@ describe('projectVoiceEvent', () => {
         VoiceToolCall.make({ callId: 'call_2', name: 'web_fetch', argumentsJson: '{broken' })
       ]
     })
+
     const { messages } = project([
       calls,
       VoiceToolCallCompleted.make({ callId: 'call_1', output: '{"result":1}' }),

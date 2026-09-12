@@ -15,14 +15,23 @@ import type { AgentToolContext } from './tool-context.ts'
 type StorageToolError = ToolError | ModelVisibleToolError
 
 const storageSearchToolName = 'search_storage'
+
 const storageListSourcesToolName = 'list_storage_sources'
+
 const storageGetSourceToolName = 'get_storage_source'
+
 const defaultLimit = 8
+
 const maxLimit = 20
+
 const defaultContextChunks = 1
+
 const maxContextChunks = 5
+
 const maxQueries = 5
+
 const defaultSourceMaxChars = 12_000
+
 const maxSourceMaxChars = 40_000
 
 const StorageSearchParams = Schema.Struct({
@@ -65,6 +74,7 @@ const StorageGetSourceParams = Schema.Struct({
 })
 
 type StorageSearchParams = typeof StorageSearchParams.Type
+
 type StorageGetSourceParams = typeof StorageGetSourceParams.Type
 
 export type StorageSourceSummary = {
@@ -181,9 +191,11 @@ const normalizeMinScore = (value: number | undefined) => {
 const normalizeStorageSearchParams = (params: StorageSearchParams) =>
   Effect.gen(function* () {
     const queries = params.queries.map(query => query.trim()).filter(query => query.length > 0)
+
     if (queries.length === 0) {
       return yield* Effect.fail(makeModelVisibleError('queries must not be empty'))
     }
+
     if (queries.length > maxQueries) {
       return yield* Effect.fail(
         makeModelVisibleError(`queries must include at most ${maxQueries} items`)
@@ -197,6 +209,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
       minimum: 1,
       name: 'limit'
     })
+
     const contextChunks = yield* normalizeInteger({
       value: params.contextChunks,
       defaultValue: defaultContextChunks,
@@ -204,6 +217,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
       minimum: 0,
       name: 'contextChunks'
     })
+
     const minScore = yield* normalizeMinScore(params.minScore)
 
     return { queries, limit, minScore, contextChunks }
@@ -212,6 +226,7 @@ const normalizeStorageSearchParams = (params: StorageSearchParams) =>
 const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
   Effect.gen(function* () {
     const id = params.id.trim()
+
     if (id.length === 0) {
       return yield* Effect.fail(
         makeModelVisibleError('id must not be empty', storageGetSourceToolName)
@@ -231,6 +246,7 @@ const normalizeStorageGetSourceParams = (params: StorageGetSourceParams) =>
 
 const sourceLabel = (result: KnowledgeSearchResult) => {
   const title = result.document.title
+
   if (title !== undefined && title.length > 0) {
     return title
   }
@@ -370,6 +386,7 @@ const searchTool = (search: StorageSearchHandler): ToolModule<AgentToolContext>[
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageSearchParams(params)
+
         const items = yield* Effect.forEach(
           normalizedParams.queries,
           query =>
@@ -443,6 +460,7 @@ const getSourceTool = (
     execute: ({ call, context, params }) =>
       Effect.gen(function* () {
         const normalizedParams = yield* normalizeStorageGetSourceParams(params)
+
         const source = yield* getSource({
           userId: context.userId,
           id: normalizedParams.id,
@@ -473,6 +491,7 @@ const storageTools = (
   handlers: StorageKnowledgeSearchToolHandlers
 ): ToolModule<AgentToolContext>['tools'] => {
   const requiredTools = [searchTool(handlers.search)]
+
   const sourceTools = [
     ...(handlers.listSources === undefined ? [] : [listSourcesTool(handlers.listSources)]),
     ...(handlers.getSource === undefined ? [] : [getSourceTool(handlers.getSource)])

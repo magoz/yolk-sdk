@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { LLMError } from '@yolk-sdk/agent/loop'
@@ -24,7 +24,7 @@ describe('cloudflareRuntimeErrorToAgentError', () => {
     Effect.gen(function* () {
       const result = yield* Schema.decodeUnknownEffect(Schema.String)(123).pipe(Effect.result)
 
-      if (result._tag === 'Success') {
+      if (Predicate.isTagged(result, 'Success')) {
         expect.fail('Expected schema decode failure')
       }
 

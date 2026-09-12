@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { resolveTools } from '@yolk-sdk/agent/tools'
 import {
   ActionResult,
@@ -31,12 +31,15 @@ const integration = makeIntegration({
     makeCredentialBinding({ slotId: EmailIncomingCredentialSlot.id, credentialRef: 'incoming' })
   ]
 })
+
 const credential = UsernamePasswordCredential.make({
   _tag: 'UsernamePasswordCredential',
   username: 'alice@example.com',
   password: 'password'
 })
+
 const unused = () => Effect.die(new Error('Unexpected legacy email operation'))
+
 const legacyClient: EmailClientApi = {
   listMessages: unused,
   getMessage: unused,
@@ -46,28 +49,35 @@ const legacyClient: EmailClientApi = {
 
 const makeHost = (methods: Partial<EmailClientApi> = {}) => {
   const refs: Array<string> = []
+
   const layer = Layer.mergeAll(
     Layer.succeed(EmailClient, { ...legacyClient, ...methods }),
     Layer.succeed(CredentialResolver, {
       resolve: request => {
         refs.push(request.binding.credentialRef)
+
         return Effect.succeed(credential)
       }
     })
   )
+
   return { refs, layer }
 }
+
 const actions = [emailSetReadAction, emailTrashAction, emailUntrashAction]
 
 describe('generic email message actions', () => {
   it.effect('registers provider-safe tools with write/destructive access', () =>
     Effect.gen(function* () {
       const host = makeHost()
+
       const tools = yield* resolveTools(
         [makeConnectorToolModule(EmailConnector, { integration, layer: host.layer })],
         {}
       )
+
       expect(actions.map(action => action.access)).toEqual(['write', 'destructive', 'write'])
+
       for (const action of actions) {
         expect(EmailConnector.actions).toContain(action)
         expect(tools.tools.find(tool => tool.name === action.id)?.parameters).toMatchObject({
@@ -82,9 +92,11 @@ describe('generic email message actions', () => {
       it.effect(`sets read=${isRead} in ${folder ?? 'INBOX'} using incoming credentials`, () =>
         Effect.gen(function* () {
           const requests: Array<EmailSetReadRequest> = []
+
           const host = makeHost({
             setRead: request => {
               requests.push(request)
+
               return Effect.succeed(
                 ActionResult.success({
                   messageId: request.messageId,
@@ -93,12 +105,16 @@ describe('generic email message actions', () => {
               )
             }
           })
+
           const result = yield* EmailConnector.invoke({
             integration,
             action: 'email.set_read',
             input: { messageId: 'uid-1', folder, isRead }
           }).pipe(Effect.provide(host.layer))
-          expect(result).toMatchObject({ _tag: 'Success', value: { messageId: 'uid-1', isRead } })
+
+          const expectedResultFields = { value: { messageId: 'uid-1', isRead } }
+          expect(result._tag).toBe('Success')
+          expect(result).toMatchObject(expectedResultFields)
           expect(requests).toMatchObject([
             {
               connection: {
@@ -123,9 +139,11 @@ describe('generic email message actions', () => {
     it.effect(`trashes with ${explicitFolders ? 'explicit folders' : 'host trash discovery'}`, () =>
       Effect.gen(function* () {
         const requests: Array<EmailTrashRequest> = []
+
         const host = makeHost({
           trash: request => {
             requests.push(request)
+
             return Effect.succeed(
               ActionResult.success({
                 moved: true,
@@ -135,6 +153,7 @@ describe('generic email message actions', () => {
             )
           }
         })
+
         const result = yield* emailTrashAction
           .execute({
             integration,
@@ -144,8 +163,9 @@ describe('generic email message actions', () => {
             }
           })
           .pipe(Effect.provide(host.layer))
+
+        expect(result._tag).toBe('Success')
         expect(result).toMatchObject({
-          _tag: 'Success',
           value: { moved: true, folder: 'Deleted', messageId: 'imap:456:789' }
         })
         expect(requests).toMatchObject([
@@ -166,14 +186,17 @@ describe('generic email message actions', () => {
       () =>
         Effect.gen(function* () {
           const requests: Array<EmailUntrashRequest> = []
+
           const host = makeHost({
             untrash: request => {
               requests.push(request)
+
               return Effect.succeed(
                 ActionResult.success({ moved: true, folder: request.destinationFolder })
               )
             }
           })
+
           const result = yield* emailUntrashAction
             .execute({
               integration,
@@ -183,11 +206,16 @@ describe('generic email message actions', () => {
               }
             })
             .pipe(Effect.provide(host.layer))
-          expect(result).toMatchObject({
-            _tag: 'Success',
+
+          const expectedResultFields = {
             value: { moved: true, folder: explicitFolders ? 'Archive' : 'INBOX' }
-          })
-          if (result._tag === 'Success') expect(result.value).not.toHaveProperty('messageId')
+          }
+
+          expect(result._tag).toBe('Success')
+          expect(result).toMatchObject(expectedResultFields)
+
+          if (Predicate.isTagged(result, 'Success'))
+            expect(result.value).not.toHaveProperty('messageId')
           expect(requests).toMatchObject([
             {
               connection: { protocol: 'imap' },
@@ -206,25 +234,30 @@ describe('generic email message actions', () => {
     it.effect(`${action.id} fails clearly for old adapters without mutation methods`, () =>
       Effect.gen(function* () {
         const host = makeHost()
+
         const result = yield* action
           .execute({
             integration,
             input: { messageId: 'id', isRead: true }
           })
           .pipe(Effect.provide(host.layer), Effect.result)
-        expect(result).toMatchObject({
-          _tag: 'Failure',
+
+        const expectedResultFields = {
           failure: {
             cause: 'validation_failed',
             message: expect.stringContaining('EmailClient does not support')
           }
-        })
+        }
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject(expectedResultFields)
       })
     )
 
     it.effect(`${action.id} rejects POP3 before credential resolution or adapter calls`, () =>
       Effect.gen(function* () {
         const host = makeHost({ setRead: unused, trash: unused, untrash: unused })
+
         const result = yield* action
           .execute({
             integration: makeIntegration({
@@ -235,13 +268,16 @@ describe('generic email message actions', () => {
             input: { messageId: 'id', isRead: true }
           })
           .pipe(Effect.provide(host.layer), Effect.result)
-        expect(result).toMatchObject({
-          _tag: 'Failure',
+
+        const expectedResultFields = {
           failure: {
             cause: 'validation_failed',
             message: expect.stringContaining('requires IMAP')
           }
-        })
+        }
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject(expectedResultFields)
         expect(host.refs).toEqual([])
       })
     )
@@ -249,17 +285,20 @@ describe('generic email message actions', () => {
     it.effect(`${action.id} preserves expected host failures`, () =>
       Effect.gen(function* () {
         const failure = ActionResult.failure({ code: 'not_found', message: 'Missing UID' })
+
         const host = makeHost({
           setRead: () => Effect.succeed(failure),
           trash: () => Effect.succeed(failure),
           untrash: () => Effect.succeed(failure)
         })
+
         const result = yield* action
           .execute({
             integration,
             input: { messageId: 'id', isRead: true }
           })
           .pipe(Effect.provide(host.layer))
+
         expect(result).toEqual(failure)
       })
     )
@@ -269,13 +308,17 @@ describe('generic email message actions', () => {
         const error = new ConnectorError({ cause: 'transport_failed', message: 'Disconnected' })
         const fail = () => Effect.fail(error)
         const host = makeHost({ setRead: fail, trash: fail, untrash: fail })
+
         const result = yield* action
           .execute({
             integration,
             input: { messageId: 'id', isRead: true }
           })
           .pipe(Effect.provide(host.layer), Effect.result)
-        expect(result).toMatchObject({ _tag: 'Failure', failure: error })
+
+        const expectedResultFields = { failure: error }
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject(expectedResultFields)
       })
     )
 
@@ -289,24 +332,29 @@ describe('generic email message actions', () => {
               messageId: ''
             })
           )
+
         const host = makeHost({
           setRead: () => Effect.succeed(ActionResult.success({ messageId: '', isRead: true })),
           trash: invalidMove,
           untrash: invalidMove
         })
+
         const result = yield* action
           .execute({
             integration,
             input: { messageId: 'id', isRead: true }
           })
           .pipe(Effect.provide(host.layer), Effect.result)
-        expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
       })
     )
 
     it.effect(`${action.id} rejects empty identifiers and folders before IO`, () =>
       Effect.gen(function* () {
         const host = makeHost({ setRead: unused, trash: unused, untrash: unused })
+
         for (const input of [
           { messageId: '', isRead: true },
           { messageId: 'id', folder: '', isRead: true }
@@ -314,8 +362,11 @@ describe('generic email message actions', () => {
           const result = yield* action
             .execute({ integration, input })
             .pipe(Effect.provide(host.layer), Effect.result)
-          expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
+
+          expect(result._tag).toBe('Failure')
+          expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
         }
+
         expect(host.refs).toEqual([])
       })
     )
@@ -324,6 +375,7 @@ describe('generic email message actions', () => {
   it.effect('rejects invalid read state and destination folders', () =>
     Effect.gen(function* () {
       const host = makeHost({ setRead: unused, trash: unused, untrash: unused })
+
       for (const [action, input] of [
         [emailSetReadAction, { messageId: 'id' }],
         [emailSetReadAction, { messageId: 'id', isRead: 'false' }],
@@ -333,8 +385,10 @@ describe('generic email message actions', () => {
         const result = yield* action
           .execute({ integration, input })
           .pipe(Effect.provide(host.layer), Effect.result)
+
         expect(result._tag).toBe('Failure')
       }
+
       expect(host.refs).toEqual([])
     })
   )

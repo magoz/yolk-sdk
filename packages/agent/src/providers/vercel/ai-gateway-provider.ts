@@ -4,6 +4,7 @@ import { LLMError } from '@yolk-sdk/agent/loop'
 import { makeOpenAiProviderLayer } from '../openai/provider.ts'
 
 export const vercelAiGatewayProviderId = 'vercel_ai_gateway'
+
 export const vercelAiGatewayChatCompletionsUrl = 'https://ai-gateway.vercel.sh/v1/chat/completions'
 
 export type VercelAiGatewayProviderSort = 'cost' | 'ttft' | 'tps'
@@ -51,6 +52,7 @@ const vercelAiGatewayEnvironmentConfig = Effect.gen(function* () {
   const apiKey = yield* Config.redacted('AI_GATEWAY_API_KEY').pipe(
     Config.orElse(() => Config.redacted('VERCEL_OIDC_TOKEN'))
   )
+
   const maxCompletionTokens = yield* Config.int('AI_GATEWAY_MAX_COMPLETION_TOKENS')
 
   return { apiKey, maxCompletionTokens }

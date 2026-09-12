@@ -1,4 +1,4 @@
-import { Data, Effect, Layer } from 'effect'
+import { Data, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { HitlResponse } from '@yolk-sdk/agent/protocol'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
@@ -76,7 +76,7 @@ const encodeHitlResponse = (response: HitlResponse) =>
 const parseStartIndex = (request: Request) => {
   const result = workflowResumeStartIndexFromUrl(request.url)
 
-  if (result._tag === 'ValidStartIndex') {
+  if (Predicate.isTagged(result, 'ValidStartIndex')) {
     return Effect.succeed(result.startIndex)
   }
 
@@ -96,6 +96,7 @@ const resumeProgram = (request: Request, context: RouteContext) =>
     const store = yield* AgentWorkflowStore
     yield* store.read(runId, session.user.id)
     const startIndex = yield* parseStartIndex(request)
+
     const readable = yield* workflows.getReadable<Uint8Array>(
       runId,
       startIndex === undefined ? undefined : { startIndex }
@@ -219,7 +220,9 @@ const cancelProgram = (context: RouteContext) =>
 
 export const GET = (request: Request, context: RouteContext) =>
   Effect.runPromise(resumeProgram(request, context))
+
 export const POST = (request: Request, context: RouteContext) =>
   Effect.runPromise(hitlResumeProgram(request, context))
+
 export const DELETE = (_request: Request, context: RouteContext) =>
   Effect.runPromise(cancelProgram(context))

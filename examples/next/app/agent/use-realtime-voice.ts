@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, type Ref } from 'react'
-import { Effect, Option } from 'effect'
+import { Effect, Option, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   FetchHttpClient,
@@ -126,6 +126,7 @@ const negotiateRealtimeSdp = (
 ) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.post(realtimeCallUrl(transcriptionModel)).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/sdp',
@@ -133,9 +134,11 @@ const negotiateRealtimeSdp = (
       }),
       HttpClientRequest.bodyText(offerSdp, 'application/sdp')
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toBrowserHttpError('Realtime call request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
 
     return yield* okResponse.text.pipe(
@@ -144,6 +147,7 @@ const negotiateRealtimeSdp = (
   }).pipe(Effect.provide(FetchHttpClient.layer))
 
 const encodeToolCallBody = Schema.encodeEffect(Schema.fromJsonString(VoiceSessionToolCallRequest))
+
 const decodeToolCallOutcome = Schema.decodeUnknownEffect(VoiceToolCallOutcome)
 
 const executeVoiceToolCallOnServer = (
@@ -153,6 +157,7 @@ const executeVoiceToolCallOnServer = (
 ) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const body = yield* encodeToolCallBody(
       VoiceSessionToolCallRequest.make({
         sessionId,
@@ -162,6 +167,7 @@ const executeVoiceToolCallOnServer = (
         ...(approval === undefined ? {} : { approval })
       })
     )
+
     const request = HttpClientRequest.post('/api/agent/realtime/tool').pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
@@ -169,10 +175,13 @@ const executeVoiceToolCallOnServer = (
       }),
       HttpClientRequest.bodyText(body, 'application/json')
     )
+
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(toBrowserHttpError('Realtime tool request failed')))
+
     const okResponse = yield* ensureOkResponse(response)
+
     const payload = yield* okResponse.json.pipe(
       Effect.mapError(toBrowserHttpError('Could not parse Realtime tool response'))
     )
@@ -229,6 +238,7 @@ export const useRealtimeVoice = ({
   const emitAgentEvent = useCallback((event: AgentEvent) => {
     if (!inputPendingRef.current) {
       callbacksRef.current.onAgentEvent(event)
+
       return
     }
 
@@ -259,7 +269,7 @@ export const useRealtimeVoice = ({
   const emitProjectedAssistantMessages = useCallback(
     (projected: ReadonlyArray<AgentMessage>) => {
       for (const message of projected) {
-        if (message._tag === 'Assistant') {
+        if (Predicate.isTagged(message, 'Assistant')) {
           emitAgentEvent(AssistantMessageEvent.make({ message }))
         }
       }
@@ -278,9 +288,11 @@ export const useRealtimeVoice = ({
             transcriptionModel: event.transcriptionModel ?? null,
             transcriptionLanguage: event.transcriptionLanguage ?? null
           })
+
           return
         case 'UserTranscriptDelta':
           inputPendingRef.current = true
+
           return
         case 'UserTranscriptFinal':
           inputPendingRef.current = false
@@ -291,6 +303,7 @@ export const useRealtimeVoice = ({
           })
           callbacksRef.current.onUserMessage(UserMessage.make({ content: event.text }))
           flushBufferedEvents()
+
           return
         case 'AssistantTranscriptDelta': {
           // A delta for a new response id flushes the previous response's
@@ -299,8 +312,10 @@ export const useRealtimeVoice = ({
           const projected = project(event)
           emitProjectedAssistantMessages(projected)
           emitAgentEvent(LLMTextDelta.make({ text: event.delta }))
+
           return
         }
+
         case 'AssistantTranscriptFinal': {
           callbacksRef.current.onDebug({
             _tag: 'OutputTranscript',
@@ -317,6 +332,7 @@ export const useRealtimeVoice = ({
 
           return
         }
+
         case 'Interrupted':
         case 'SessionClosed': {
           const projected = project(event)
@@ -328,6 +344,7 @@ export const useRealtimeVoice = ({
 
           return
         }
+
         case 'ToolCallsRequested': {
           project(event)
 
@@ -344,6 +361,7 @@ export const useRealtimeVoice = ({
 
           return
         }
+
         case 'ToolCallCompleted': {
           project(event)
 
@@ -360,6 +378,7 @@ export const useRealtimeVoice = ({
 
           return
         }
+
         case 'ToolCallFailed': {
           project(event)
 
@@ -380,6 +399,7 @@ export const useRealtimeVoice = ({
 
           return
         }
+
         case 'SessionOpening':
         case 'AudioInputStarted':
         case 'AudioInputStopped':
@@ -406,6 +426,7 @@ export const useRealtimeVoice = ({
   })
 
   const startSession = voice.start
+
   const stopSession = useCallback(() => {
     projectionRef.current = emptyVoiceProjectionState
     toolCallsRef.current = new Map()
@@ -417,6 +438,7 @@ export const useRealtimeVoice = ({
   const toggleSession = useCallback(() => {
     if (voice.isConnecting || voice.isLive) {
       stopSession()
+
       return
     }
 

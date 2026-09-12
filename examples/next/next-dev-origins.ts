@@ -6,5 +6,6 @@ export const getAllowedDevOrigins = (portlessUrl?: string): string[] => {
   if (portlessUrl === undefined) return [...localDevOrigins]
 
   const hostname = new URL(getPortlessOrigin(portlessUrl)).hostname
+
   return [...new Set([...localDevOrigins, hostname])]
 }

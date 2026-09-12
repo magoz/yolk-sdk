@@ -27,6 +27,7 @@ const makeDependencies = (responses: ReadonlyArray<WebFetchHttpResponse>) => {
   const requested: Array<string> = []
   let index = 0
   const fallback = makeResponse({ status: 500, body: 'unexpected request' })
+
   const deps: WebFetchToolDependencies = {
     ensurePublicUrl: ensurePublicUrlWithoutDns,
     request: url => {
@@ -51,6 +52,7 @@ describe('web_fetch tool', () => {
           body: '<html><body><h1>Hello &amp; goodbye</h1><p>Read <a href="https://example.com/docs">docs</a>.</p><script>ignored()</script></body></html>'
         })
       ])
+
       const result = yield* executeWebFetchTool(
         ToolCall.make({
           id: 'call_1',
@@ -74,6 +76,7 @@ describe('web_fetch tool', () => {
         makeResponse({ status: 302, body: '', headers: { location: '/final' } }),
         makeResponse({ status: 200, body: 'done', headers: { 'content-type': 'text/plain' } })
       ])
+
       const result = yield* executeWebFetchTool(
         ToolCall.make({
           id: 'call_1',
@@ -92,6 +95,7 @@ describe('web_fetch tool', () => {
   it.effect('blocks private hosts before requesting', () =>
     Effect.gen(function* () {
       const { deps, requested } = makeDependencies([])
+
       const result = yield* executeWebFetchTool(
         ToolCall.make({
           id: 'call_1',
@@ -115,6 +119,7 @@ describe('web_fetch tool', () => {
       const { deps, requested } = makeDependencies([
         makeResponse({ status: 302, body: '', headers: { location: 'http://127.0.0.1:3000/' } })
       ])
+
       const result = yield* executeWebFetchTool(
         ToolCall.make({
           id: 'call_1',
@@ -138,7 +143,9 @@ describe('web_fetch tool', () => {
       const redirects = Array.from({ length: 6 }, (_value, index) =>
         makeResponse({ status: 302, body: '', headers: { location: `/step-${index}` } })
       )
+
       const { deps } = makeDependencies(redirects)
+
       const result = yield* executeWebFetchTool(
         ToolCall.make({
           id: 'call_1',
@@ -163,6 +170,7 @@ describe('web_fetch tool', () => {
         route: '/agent',
         userId: 'user_1'
       })
+
       const voiceTools = yield* resolveAgentTools({
         surface: 'voice',
         route: '/agent',

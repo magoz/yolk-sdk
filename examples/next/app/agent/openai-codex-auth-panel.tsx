@@ -59,6 +59,7 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
         setConnected(true)
         setDeviceFlow(null)
         toast.success('OpenAI Codex connected')
+
         return
       }
 
@@ -73,6 +74,7 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
 
       if (result._tag === 'Error') {
         toast.error(result.message)
+
         return
       }
 
@@ -100,6 +102,7 @@ export function OpenAiCodexAuthPanel({ initialConnected }: OpenAiCodexAuthPanelP
 
       if (result._tag === 'Error') {
         toast.error(result.message)
+
         return
       }
 

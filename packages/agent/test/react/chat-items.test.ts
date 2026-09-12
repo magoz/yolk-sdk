@@ -47,7 +47,9 @@ describe('buildAgentChatMessages', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
@@ -78,7 +80,9 @@ describe('buildAgentChatMessages', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
@@ -115,6 +119,7 @@ describe('buildAgentChatItems', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
@@ -139,6 +144,7 @@ describe('buildAgentChatItems', () => {
       ],
       error: 'boom'
     })
+
     const items = buildAgentChatItems({
       messages,
       isRunning: false,
@@ -179,6 +185,7 @@ describe('buildAgentChatItems', () => {
       toolRuns: [],
       error: null
     })
+
     const items = buildAgentChatItems({
       messages,
       isRunning: false,
@@ -203,6 +210,7 @@ describe('buildAgentChatItems', () => {
       name: 'web_search',
       params: { query: 'latest news' }
     })
+
     const thinkingMessages = buildAgentChatMessages({
       messages: [UserMessage.make({ content: 'hello' })],
       userDraft: '',
@@ -211,11 +219,13 @@ describe('buildAgentChatItems', () => {
       toolRuns: [],
       error: null
     })
+
     const thinkingItems = buildAgentChatItems({
       messages: thinkingMessages,
       isRunning: true,
       activeToolLabel: Option.none()
     })
+
     const toolMessages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
@@ -227,6 +237,7 @@ describe('buildAgentChatItems', () => {
       toolRuns: [{ _tag: 'Executing', call, startedAtMs: 1000 }],
       error: null
     })
+
     const toolItems = buildAgentChatItems({
       messages: toolMessages,
       isRunning: true,
@@ -260,6 +271,7 @@ describe('buildAgentChatItems', () => {
       message: 'Provider is overloaded',
       provider: ProviderErrorInfo.make({ provider: 'anthropic', kind: 'overloaded', status: 529 })
     })
+
     const messages = buildAgentChatMessages({
       messages: [UserMessage.make({ content: 'hello' })],
       userDraft: '',
@@ -281,6 +293,7 @@ describe('buildAgentChatItems', () => {
 
   it('keeps the latest tool run item for duplicate tool call ids', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+
     const items = [
       {
         _tag: 'ToolRun',
@@ -307,6 +320,7 @@ describe('buildAgentChatItems', () => {
 
   it('dedupes duplicate tool runs even when item ids match', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+
     const items = [
       {
         _tag: 'ToolRun',
@@ -333,7 +347,9 @@ describe('buildAgentChatItems', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'summarize https://example.com' }),
@@ -346,6 +362,7 @@ describe('buildAgentChatItems', () => {
       toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1800 }],
       error: null
     })
+
     const items = buildAgentChatItems({ messages, isRunning: true, activeToolLabel: Option.none() })
 
     expect(items.at(-2)).toEqual({
@@ -370,10 +387,12 @@ describe('buildAgentChatItems', () => {
 
   it('preserves errored tool run timing', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'web_fetch', params: {} })
+
     const running = applyAgentEventToChatMessages(
       [],
       ToolExecutionStarted.make({ call, createdAtMs: 1000 })
     )
+
     const errored = applyAgentEventToChatMessages(
       running,
       ToolExecutionError.make({
@@ -383,6 +402,7 @@ describe('buildAgentChatItems', () => {
         createdAtMs: 1750
       })
     )
+
     const items = buildAgentChatItems({
       messages: errored,
       isRunning: false,
@@ -412,7 +432,9 @@ describe('buildAgentChatItems', () => {
       name: 'web_search',
       params: { query: 'latest news' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Search result' })
+
     const messages = buildAgentChatMessages({
       messages: [
         UserMessage.make({ content: 'latest news?' }),
@@ -425,6 +447,7 @@ describe('buildAgentChatItems', () => {
       toolRuns: [{ _tag: 'Completed', call, result, startedAtMs: 1000, endedAtMs: 1300 }],
       error: null
     })
+
     const items = buildAgentChatItems({ messages, isRunning: true, activeToolLabel: Option.none() })
 
     expect(items.map(item => item._tag)).toEqual([

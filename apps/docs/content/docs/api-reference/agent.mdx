@@ -65,6 +65,15 @@ for fresh signing inside retries.
 | `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                                                     |
 | `LLMResponseIssue`                                                                  | kernel-only `'missing_done'` literal                                                 |
 | `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                                                           |
+| `LoopConfigSettings` | settings object for `LoopConfig.layer` (renamed from `LoopConfigShape`) |
+
+Breaking type import (runtime/wire unchanged, no `Shape` alias):
+
+```ts
+import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
+```
+
+`LoopConfigShape` is removed. Update `import type { LoopConfigShape }` to `LoopConfigSettings`.
 
 ### Whole-batch preflight
 

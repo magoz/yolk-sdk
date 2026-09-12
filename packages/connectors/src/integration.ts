@@ -2,6 +2,7 @@ import * as Schema from 'effect/Schema'
 import { CredentialBinding } from './credential.ts'
 
 export const IntegrationConfig = Schema.Record(Schema.String, Schema.Unknown)
+
 export type IntegrationConfig = typeof IntegrationConfig.Type
 
 export class ConnectorIntegration extends Schema.Class<ConnectorIntegration>(

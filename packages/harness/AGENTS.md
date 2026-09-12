@@ -35,6 +35,17 @@ decoration, not hooks. There is no `World`.
 - Ownership is per shared Driver instance. Hosts/platforms supply cross-process exclusivity and quiesce producers before close. Raw administrative Store mutations must be quiesced with Driver.
 - `resumeSuspended` is an explicit finite boot pass over a current claimed-id snapshot, not a Layer boot loop. Concurrent sweeps serialize. Candidate IDs are hints, not durable incarnation IDs: under the Inbox admission gate, check `isActive` first, then current `isClaimed`, skip blocked parks, and charge or exhaust before granting pending input and waking. Stop with no newer intent skips; a later idle claimed run with the same id may recover the current host checkpoint only. Do not await drain settlement while holding that gate.
 - `makeHarness` only merges driver + store + inbox Layers. It is not a compiler.
+- Service ownership: `RunStore.inMemoryLayer()/snapshotLayer()`, `Inbox.layer()`,
+  `RunCoordinator.layer()` (claims via the contextual `RunStore`), and `Driver.layer()`
+  (requires `RunStore` + `RunCoordinator`) hold the real construction logic. The public
+  `make*` factories keep their signatures and delegate to these owners; composition roots
+  (`driver/memory`, `driver/durable-object`) wire owners consciously and share one store
+  instance per composed harness. Every factory call builds fresh layers.
+- Compatibility factories defer option reads until acquisition. `Driver.coordinatedLayer`
+  captures drain/max settings in order; pass original snapshot options through so `load`
+  stays deferred and `save` retains its receiver.
+- Test factory isolation with one shared `Layer` memo map, not only separate
+  `Effect.provide` calls (which rebuild even a shared layer). See `test/laziness.test.ts`.
 - `admit` records an inbox item then wakes the driver. Drain/step execution stays host-provided.
 - HITL pause/resume/stop live on Driver (`pause` / `resumeHitl` / `stop`) with payload-free Inbox metadata. Hosts persist typed HITL payloads by item id. `outcome.matchHitlResponse` / `resumeHitlIfMatched` validate protocol identity before resume. Memory Inbox park state is process-lifetime only, including when claims use the Durable Object snapshot store. Factory layers share one Inbox instance.
 - A human pause ends the busy drain successfully and releases the claim. User `stop` invalidates the current park generation, drops that run's queued items, and captures `terminalStop` under that same Inbox admission gate, joining the outstanding interruption-request fiber before the gate opens and without awaiting owner settlement. Generic `interrupt` keeps the first accepted reason; `terminalStop` may escalate a live owner and must acknowledge the same outstanding request. Idle/Settling leftover claims release under the Inbox admission gate so a successor cannot start until that store action finishes; live owners release at their settled callback. Shutdown interrupt still keeps the claim. Ready HITL item ids stay parked if that continuation drain is interrupted; they are not exactly-once.

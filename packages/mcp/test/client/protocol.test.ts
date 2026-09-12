@@ -1,5 +1,6 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
+import { AudioPart, ImagePart, TextPart, inlineBase64Source } from '@yolk-sdk/agent/protocol'
 import {
   defaultMcpSecurityPolicy,
   mcpToolToToolDef,
@@ -41,6 +42,7 @@ describe('MCP protocol helpers', () => {
 
   it('preserves structured content and maps supported media blocks', () => {
     const structuredContent = { answer: 42 }
+
     const result = toolCallResultToToolResult({
       toolCallId: 'call_1',
       result: {
@@ -59,11 +61,11 @@ describe('MCP protocol helpers', () => {
     expect(result.structuredContent).toEqual(structuredContent)
     expect(result.isError).toBe(true)
     expect(result.content).toEqual([
-      { _tag: 'Text', text: 'hello' },
-      { _tag: 'Image', source: { _tag: 'InlineBase64', data: 'abc' }, mimeType: 'image/png' },
-      { _tag: 'Audio', source: { _tag: 'InlineBase64', data: 'def' }, mimeType: 'audio/mpeg' },
-      { _tag: 'Text', text: 'file text' },
-      { _tag: 'Text', text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' }
+      TextPart.make({ text: 'hello' }),
+      ImagePart.make({ source: inlineBase64Source('abc'), mimeType: 'image/png' }),
+      AudioPart.make({ source: inlineBase64Source('def'), mimeType: 'audio/mpeg' }),
+      TextPart.make({ text: 'file text' }),
+      TextPart.make({ text: 'MCP resource link: linked.txt (file:///tmp/linked.txt)' })
     ])
   })
 
@@ -81,7 +83,7 @@ describe('MCP protocol helpers', () => {
     })
 
     expect(result.content).toEqual([
-      { _tag: 'Text', text: 'MCP resource: file:///tmp/out.bin\nYm9keQ==' }
+      TextPart.make({ text: 'MCP resource: file:///tmp/out.bin\nYm9keQ==' })
     ])
   })
 
@@ -110,7 +112,8 @@ describe('MCP protocol helpers', () => {
       }).pipe(Effect.result)
 
       expect(result._tag).toBe('Failure')
-      if (result._tag === 'Failure') {
+
+      if (Predicate.isTagged(result, 'Failure')) {
         expect(result.failure.cause).toBe('security')
       }
     })

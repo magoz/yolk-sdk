@@ -22,6 +22,7 @@ export type WorkflowResumeStartIndexParseResult =
     }
 
 const routeUrlBase = 'http://yolk.local'
+
 const nonnegativeSafeIntegerPattern = /^(0|[1-9]\d*)$/
 
 export const workflowResumeStartIndexFromUrl = (

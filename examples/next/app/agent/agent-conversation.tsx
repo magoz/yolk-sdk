@@ -172,10 +172,12 @@ const questionForAnswer = (questions: ReadonlyArray<QuestionPrompt>, answer: Que
 const questionAnswerLine = (answer: QuestionAnswer, questions: ReadonlyArray<QuestionPrompt>) => {
   const question = questionForAnswer(questions, answer)
   const prompt = question?.prompt ?? answer.questionId
+
   const selected =
     answer.optionIds?.map(optionId =>
       question === undefined ? optionId : optionLabel(question, optionId)
     ) ?? []
+
   const custom = answer.customAnswer?.trim()
   const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
 
@@ -266,8 +268,10 @@ const subagentMetadata = (call: ToolCall, state: ToolRunState) => {
   }
 
   const structured = resultStructuredContent(state)
+
   const description =
     stringField(structured, 'description') ?? stringField(call.params, 'description')
+
   const subagentType =
     stringField(structured, 'subagent_type') ?? stringField(call.params, 'subagent_type')
 
@@ -353,6 +357,7 @@ function ApprovalControls({
   readonly onResponse: (response: ToolApprovalResponse) => void
 }) {
   const requestId = approvalRequestId(call, state)
+
   const handleApprove = useCallback(() => {
     onResponse(
       ToolApprovalResponse.make({
@@ -363,6 +368,7 @@ function ApprovalControls({
       })
     )
   }, [call.id, onResponse, requestId])
+
   const handleDeny = useCallback(() => {
     onResponse(
       ToolApprovalResponse.make({
@@ -421,6 +427,7 @@ function QuestionControls({
   const request = state.request
   const [drafts, setDrafts] = useState(() => initialQuestionDrafts(request.questions))
   const canSubmit = canSubmitQuestionDrafts(request.questions, drafts)
+
   const updateOption = useCallback((question: QuestionPrompt, optionId: string) => {
     setDrafts(current =>
       current.map(draft => {
@@ -439,6 +446,7 @@ function QuestionControls({
       })
     )
   }, [])
+
   const updateCustomAnswer = useCallback((questionId: string, value: string) => {
     setDrafts(current =>
       current.map(draft =>
@@ -446,6 +454,7 @@ function QuestionControls({
       )
     )
   }, [])
+
   const handleSubmit = useCallback(() => {
     if (!canSubmit) {
       return
@@ -461,6 +470,7 @@ function QuestionControls({
       })
     )
   }, [canSubmit, drafts, onResponse, request.requestId, request.toolCallId])
+
   const handleCancel = useCallback(() => {
     onResponse(
       QuestionResponse.make({
@@ -569,9 +579,12 @@ function ToolRunCard({
   const isError = toolStateHasError(state)
   const output = toolStateContent(state)
   const subagent = subagentMetadata(call, state)
+
   const title =
     subagent?.description === undefined ? call.name : `Subagent: ${subagent.description}`
+
   const detailsId = `${id}-details`
+
   const handleToggle = useCallback(() => {
     setExpanded(current => !current)
   }, [])
@@ -741,22 +754,27 @@ function MessageCard({
   const [editedContent, setEditedContent] = useState(currentText)
   const hasVisibleContent = parts.some(part => part._tag !== 'Text' || part.text.length > 0)
   const canEdit = role === 'user' && parts.every(part => part._tag === 'Text')
+
   const canSaveEdit = canSaveEditedMessage({
     currentText,
     draftText: editedContent,
     disabled: actionsDisabled
   })
+
   const handleDelete = useCallback(() => {
     onDeleteTurn(messageId)
   }, [messageId, onDeleteTurn])
+
   const handleEditStart = useCallback(() => {
     setEditedContent(currentText)
     setIsEditing(true)
   }, [currentText, setEditedContent, setIsEditing])
+
   const handleEditCancel = useCallback(() => {
     setIsEditing(false)
     setEditedContent(currentText)
   }, [currentText, setEditedContent, setIsEditing])
+
   const handleEditSubmit = useCallback(() => {
     if (!canSaveEdit) {
       return
@@ -765,6 +783,7 @@ function MessageCard({
     onEditUserMessage(messageId, editDraftText(editedContent))
     setIsEditing(false)
   }, [canSaveEdit, editedContent, messageId, onEditUserMessage, setIsEditing])
+
   const handleEditKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       const action = editKeyAction(event)
@@ -777,6 +796,7 @@ function MessageCard({
 
       if (action === 'cancel') {
         handleEditCancel()
+
         return
       }
 
@@ -784,6 +804,7 @@ function MessageCard({
     },
     [handleEditCancel, handleEditSubmit]
   )
+
   const handleRegenerate = useCallback(() => {
     onRegenerateFrom(messageId)
   }, [messageId, onRegenerateFrom])
@@ -970,6 +991,7 @@ function MessageContentParts({
             ) : null
           case 'Image':
             const imageUrl = attachmentSourceDataUrl(part.source, part.mimeType)
+
             if (imageUrl._tag === 'None') {
               return (
                 <div

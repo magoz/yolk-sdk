@@ -125,6 +125,7 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       chunk,
       embedding
     }))
+
     yield* store
       .replaceDocumentChunks({
         scopeId: input.scopeId,
@@ -139,6 +140,7 @@ export const ingestKnowledgeDocument = (input: IngestKnowledgeDocumentInput) =>
       )
 
     const tokenCount = chunks.reduce((total, chunk) => total + chunk.tokenCount, 0)
+
     return yield* store
       .markDocumentReady({
         scopeId: input.scopeId,

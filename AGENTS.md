@@ -52,21 +52,22 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 
 ## WHERE TO LOOK
 
-| Task                  | Location                           | Notes                                                       |
-| --------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| Package code          | `packages/*`                       | See `packages/AGENTS.md`                                    |
-| Package release       | `patterns/PACKAGE_DISTRIBUTION.md` | Changesets + canary flow                                    |
-| Docs app/content      | `apps/docs`                        | Fumadocs site; public package docs                          |
-| Next app/page/API     | `examples/next/app`                | See `examples/next/AGENTS.md` + nested docs                 |
-| Next patterns         | `examples/next/patterns`           | Pages, API routes, actions, nuqs, UX                        |
-| Server actions/domain | `examples/next/lib/core/*`         | App-owned; see local docs                                   |
-| Services/adapters     | `examples/next/lib/services/*`     | App-owned; see local docs                                   |
-| App agent wiring      | `examples/next/lib/agents/*`       | Provider selection, tools, MCP, runtime layers              |
-| UI components         | `examples/next/components/ui`      | App-owned UI; see local docs                                |
-| E2E                   | `examples/next/e2e`                | Playwright; see local docs                                  |
-| Cloudflare app        | `cloudflare/agent`                 | Worker/DO runtime; see local docs                           |
-| Scripts               | `scripts`                          | Node/process/console/raw JSON exceptions documented locally |
-| Local lint rules      | `eslint-local-rules`               | ESLint custom rules                                         |
+| Task                  | Location                           | Notes                                                           |
+| --------------------- | ---------------------------------- | --------------------------------------------------------------- |
+| Package code          | `packages/*`                       | See `packages/AGENTS.md`                                        |
+| Package release       | `patterns/PACKAGE_DISTRIBUTION.md` | Changesets + canary flow                                        |
+| Docs app/content      | `apps/docs`                        | Fumadocs site; public package docs                              |
+| Next app/page/API     | `examples/next/app`                | See `examples/next/AGENTS.md` + nested docs                     |
+| Next patterns         | `examples/next/patterns`           | Pages, API routes, actions, nuqs, UX                            |
+| Server actions/domain | `examples/next/lib/core/*`         | App-owned; see local docs                                       |
+| Services/adapters     | `examples/next/lib/services/*`     | App-owned; see local docs                                       |
+| App agent wiring      | `examples/next/lib/agents/*`       | Provider selection, tools, MCP, runtime layers                  |
+| UI components         | `examples/next/components/ui`      | App-owned UI; see local docs                                    |
+| E2E                   | `examples/next/e2e`                | Playwright; see local docs                                      |
+| Cloudflare app        | `cloudflare/agent`                 | Worker/DO runtime; see local docs                               |
+| Scripts               | `scripts`                          | Node/process/console/raw JSON exceptions documented locally     |
+| Local lint rules      | `eslint-local-rules`               | Oxlint JS-plugin local rules                                    |
+| Lint / format runtime | `tools/oxlint`                     | Oxlint 1.78.0 is the lint engine; Oxfmt 0.63.0 is the formatter |
 
 ## PACKAGE BOUNDARIES
 

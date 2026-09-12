@@ -12,7 +12,9 @@ import {
 } from './errors'
 
 const DEFAULT_LIMIT = 10
+
 const DEFAULT_MIN_SCORE = 0.5
+
 const DEFAULT_CONTEXT_CHUNKS = 0
 
 export type SearchAppKnowledgeOptions = {
@@ -42,6 +44,7 @@ const ensureUserOwnsScope = (input: {
     }
 
     const db = yield* Db
+
     const rows = yield* db
       .select({ id: schema.knowledgeCollection.id })
       .from(schema.knowledgeCollection)

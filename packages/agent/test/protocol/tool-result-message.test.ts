@@ -2,6 +2,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   BackgroundToolAccepted,
   ToolResult,
+  ToolResultMessage,
   toolResultMessageFromResult
 } from '@yolk-sdk/agent/protocol'
 
@@ -14,11 +15,13 @@ describe('toolResultMessageFromResult', () => {
       structuredContent: { status: 'accepted' },
       acceptance: BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
     })
+
     const envelope = {
       createdAtMs: 42,
       author: { displayName: 'Host' },
       annotations: { source: 'test' }
     }
+
     const message = toolResultMessageFromResult(result, envelope)
     expect(message).toMatchObject({ _tag: 'ToolResult', ...result, ...envelope })
     expect(message.content).toBe(result.content)
@@ -29,6 +32,6 @@ describe('toolResultMessageFromResult', () => {
     expect(toolResultMessageFromResult(result).annotations).toBeUndefined()
     expect(
       toolResultMessageFromResult(ToolResult.make({ toolCallId: 'plain', content: 'done' }))
-    ).toMatchObject({ _tag: 'ToolResult', toolCallId: 'plain', content: 'done' })
+    ).toMatchObject(ToolResultMessage.make({ toolCallId: 'plain', content: 'done' }))
   })
 })

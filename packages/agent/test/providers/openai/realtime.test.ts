@@ -1,10 +1,22 @@
 import { describe, expect, it } from '@effect/vitest'
 import { ToolDef } from '@yolk-sdk/agent/protocol'
-import { VoiceInputTranscription, VoiceSessionConfig } from '@yolk-sdk/agent/voice'
+import {
+  VoiceAssistantTranscriptFinal,
+  VoiceErrorEvent,
+  VoiceInputTranscription,
+  VoiceInterrupted,
+  VoiceSessionConfig,
+  VoiceSessionOpened,
+  VoiceToolCall,
+  VoiceToolCallsRequested,
+  VoiceUserTranscriptDelta
+} from '@yolk-sdk/agent/voice'
 import {
   decodeOpenAiRealtimeServerEvent,
   makeOpenAiRealtimeFunctionCallOutputEvent,
   makeOpenAiRealtimeSessionConfig,
+  OpenAiRealtimeError,
+  OpenAiRealtimeIgnored,
   openAiRealtimeSessionConfigFromVoice,
   openAiRealtimeToolParameters,
   openAiRealtimeServerEventToVoiceEvents,
@@ -21,11 +33,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
-    expect(event).toMatchObject({
-      _tag: 'InputAudioTranscriptionCompleted',
-      itemId: 'item_1',
-      transcript: 'Can you hear me?'
-    })
+    expect(event._tag).toBe('InputAudioTranscriptionCompleted')
+    expect(event).toMatchObject({ itemId: 'item_1', transcript: 'Can you hear me?' })
   })
 
   it('keeps output transcript metadata', () => {
@@ -38,8 +47,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('OutputAudioTranscriptDone')
     expect(event).toMatchObject({
-      _tag: 'OutputAudioTranscriptDone',
       itemId: 'item_2',
       responseId: 'resp_1',
       transcript: 'Yes, I can hear you.'
@@ -64,8 +73,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('SessionConfigured')
     expect(event).toMatchObject({
-      _tag: 'SessionConfigured',
       eventType: 'session.updated',
       model: 'gpt-realtime-2',
       transcriptionModel: 'gpt-4o-transcribe',
@@ -88,8 +97,8 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       })
     )
 
+    expect(event._tag).toBe('FunctionCalls')
     expect(event).toMatchObject({
-      _tag: 'FunctionCalls',
       calls: [{ callId: 'call_1', name: 'web_search', argumentsJson: '{"q":1}' }]
     })
   })
@@ -99,13 +108,13 @@ describe('decodeOpenAiRealtimeServerEvent', () => {
       decodeOpenAiRealtimeServerEvent(
         JSON.stringify({ type: 'error', error: { message: 'session expired' } })
       )
-    ).toMatchObject({ _tag: 'Error', message: 'session expired' })
-    expect(decodeOpenAiRealtimeServerEvent('not json')).toMatchObject({ _tag: 'Ignored' })
+    ).toMatchObject(OpenAiRealtimeError.make({ message: 'session expired' }))
+    expect(decodeOpenAiRealtimeServerEvent('not json')).toMatchObject(
+      OpenAiRealtimeIgnored.make({})
+    )
     expect(
       decodeOpenAiRealtimeServerEvent(JSON.stringify({ type: 'rate_limits.updated' }))
-    ).toMatchObject({
-      _tag: 'Ignored'
-    })
+    ).toMatchObject(OpenAiRealtimeIgnored.make({}))
   })
 })
 
@@ -122,7 +131,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
           delta: 'Hel'
         })
       )
-    ).toEqual([{ _tag: 'UserTranscriptDelta', itemId: 'item_1', delta: 'Hel' }])
+    ).toEqual([VoiceUserTranscriptDelta.make({ itemId: 'item_1', delta: 'Hel' })])
 
     expect(
       decodeToVoice(
@@ -134,12 +143,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'AssistantTranscriptFinal',
+      VoiceAssistantTranscriptFinal.make({
         itemId: 'item_2',
         responseId: 'resp_1',
         text: 'Hi there.'
-      }
+      })
     ])
   })
 
@@ -157,13 +165,12 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'ToolCallsRequested',
+      VoiceToolCallsRequested.make({
         calls: [
-          { callId: 'call_1', name: 'a', argumentsJson: '{}' },
-          { callId: 'call_2', name: 'b', argumentsJson: '{}' }
+          VoiceToolCall.make({ callId: 'call_1', name: 'a', argumentsJson: '{}' }),
+          VoiceToolCall.make({ callId: 'call_2', name: 'b', argumentsJson: '{}' })
         ]
-      }
+      })
     ])
   })
 
@@ -173,12 +180,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         JSON.stringify({ type: 'session.created', session: { model: 'gpt-realtime-2' } })
       )
     ).toEqual([
-      {
-        _tag: 'SessionOpened',
+      VoiceSessionOpened.make({
         model: 'gpt-realtime-2',
         transcriptionModel: null,
         transcriptionLanguage: null
-      }
+      })
     ])
 
     expect(
@@ -192,12 +198,11 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
         })
       )
     ).toEqual([
-      {
-        _tag: 'SessionOpened',
+      VoiceSessionOpened.make({
         model: 'gpt-realtime-2',
         transcriptionModel: 'gpt-4o-transcribe',
         transcriptionLanguage: 'en'
-      }
+      })
     ])
 
     expect(
@@ -207,7 +212,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
           response: { id: 'resp_1', status: 'cancelled', output: [] }
         })
       )
-    ).toEqual([{ _tag: 'Interrupted', responseId: 'resp_1' }])
+    ).toEqual([VoiceInterrupted.make({ responseId: 'resp_1' })])
 
     expect(
       decodeToVoice(
@@ -221,7 +226,7 @@ describe('openAiRealtimeServerEventToVoiceEvents', () => {
 
   it('maps provider errors to voice error events', () => {
     expect(decodeToVoice(JSON.stringify({ type: 'error', error: { message: 'boom' } }))).toEqual([
-      { _tag: 'Error', code: 'provider_error', message: 'boom' }
+      VoiceErrorEvent.make({ code: 'provider_error', message: 'boom' })
     ])
   })
 })
@@ -383,6 +388,7 @@ describe('openAiRealtimeToolParameters', () => {
         ]
       }
     })
+
     const config = makeOpenAiRealtimeSessionConfig({
       instructions: 'Be brief.',
       tools: [unionTool]

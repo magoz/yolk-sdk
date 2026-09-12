@@ -192,6 +192,7 @@ const OpenAiConfigLayer = Layer.effect(
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
     const maxCompletionTokens = yield* Config.int('OPENAI_MAX_COMPLETION_TOKENS')
+
     return { apiKey, maxCompletionTokens }
   }).pipe(
     Effect.mapError(
@@ -355,6 +356,7 @@ const toOpenAiMessage = (
           assistantContent(message),
           messageContextText(message)
         )
+
         const toolCalls = yield* Effect.forEach(assistantHostToolCalls(message), call =>
           toolCallToOpenAiToolCall(call, providerName)
         )
@@ -372,6 +374,7 @@ const toOpenAiMessage = (
           content: yield* contentToText(content, 'Assistant', providerName)
         }
       }
+
       case 'ToolResult':
         return {
           role: 'tool',
@@ -413,19 +416,23 @@ export const toOpenAiRequestBody = (
 
     yield* validateProviderTranscript(request.messages)
     const systemMessage: OpenAiMessage = { role: 'system', content: request.systemPrompt }
+
     const requestMessages = yield* Effect.forEach(request.messages, message =>
       toOpenAiMessage(message, providerName)
     )
+
     const messages = [systemMessage, ...requestMessages]
 
     const completionTokenLimit =
       config.completionTokenField === 'max_tokens'
         ? { max_tokens: config.maxCompletionTokens }
         : { max_completion_tokens: config.maxCompletionTokens }
+
     const reasoning =
       config.reasoningEffortFormat === 'reasoning-object' && request.reasoningEffort !== undefined
         ? { reasoning: { effort: request.reasoningEffort } }
         : {}
+
     const body: OpenAiRequestBody = {
       ...config.extraBody,
       ...reasoning,
@@ -471,6 +478,7 @@ const toLlmEvents = (
 
     const content = choice.message.content ?? ''
     const textEvents = content.length > 0 ? [LLMTextDelta.make({ text: content })] : []
+
     const toolCallEvents = yield* Effect.forEach(choice.message.tool_calls ?? [], call =>
       parseToolArguments(call.function.arguments, providerIdentity.name).pipe(
         Effect.map(params =>
@@ -541,6 +549,7 @@ const sendOpenAiRequest = (
 ): Effect.Effect<ReadonlyArray<LLMEvent>, LLMError> =>
   Effect.gen(function* () {
     const providerIdentity = config.providerIdentity ?? defaultOpenAiProviderIdentity
+
     const body = yield* toOpenAiRequestBody(request, {
       maxCompletionTokens: config.maxCompletionTokens,
       providerName: providerIdentity.name,
@@ -552,6 +561,7 @@ const sendOpenAiRequest = (
         ? {}
         : { reasoningEffortFormat: config.reasoningEffortFormat })
     })
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* encodeJsonString(
@@ -570,6 +580,7 @@ const sendOpenAiRequest = (
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientLlmError(providerIdentity, true)))
@@ -604,6 +615,7 @@ const sendOpenAiRequest = (
     }
 
     const json = yield* parseOpenAiResponseJson(response, providerIdentity.name)
+
     const parsed = yield* Schema.decodeUnknownEffect(OpenAiChatCompletionResponse)(json).pipe(
       Effect.mapError(
         error =>
@@ -614,6 +626,7 @@ const sendOpenAiRequest = (
           })
       )
     )
+
     const choice = parsed.choices[0]
 
     if (choice === undefined) {

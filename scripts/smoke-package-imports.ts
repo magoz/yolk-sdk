@@ -5,12 +5,12 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
-type PackageShape = {
+type PackageManifest = {
   readonly name: string
   readonly exports: ReadonlyArray<string>
 }
 
-const packages: ReadonlyArray<PackageShape> = [
+const packages: ReadonlyArray<PackageManifest> = [
   {
     name: '@yolk-sdk/agent',
     exports: [
@@ -123,10 +123,10 @@ const main = async () => {
   const fixtureDir = mkdtempSync(join(tmpdir(), 'yolk-package-smoke-'))
 
   try {
-    const tarballs = packages.map(packageShape => {
+    const tarballs = packages.map(packageManifest => {
       const output = execFileSync(
         'pnpm',
-        ['--filter', packageShape.name, 'pack', '--pack-destination', fixtureDir],
+        ['--filter', packageManifest.name, 'pack', '--pack-destination', fixtureDir],
         {
           cwd: workspaceRoot,
           encoding: 'utf8',
@@ -140,6 +140,7 @@ const main = async () => {
     const tarballPaths = tarballs.map(tarball =>
       isAbsolute(tarball) ? tarball : join(fixtureDir, tarball)
     )
+
     const packageJson = {
       type: 'module',
       private: true,
@@ -168,13 +169,14 @@ const main = async () => {
       stdio: 'inherit'
     })
 
-    for (const [index, packageShape] of packages.entries()) {
+    for (const [index, packageManifest] of packages.entries()) {
       const scopedPackageDir = join(
         fixtureDir,
         'node_modules',
         '@yolk-sdk',
-        packageShape.name.replace('@yolk-sdk/', '')
+        packageManifest.name.replace('@yolk-sdk/', '')
       )
+
       mkdirSync(scopedPackageDir, { recursive: true })
       execFileSync(
         'tar',
@@ -186,9 +188,9 @@ const main = async () => {
       )
     }
 
-    const imports = packages.flatMap(packageShape =>
-      packageShape.exports.map(exportPath =>
-        exportPath === '.' ? packageShape.name : `${packageShape.name}/${exportPath.slice(2)}`
+    const imports = packages.flatMap(packageManifest =>
+      packageManifest.exports.map(exportPath =>
+        exportPath === '.' ? packageManifest.name : `${packageManifest.name}/${exportPath.slice(2)}`
       )
     )
 

@@ -1,6 +1,7 @@
 import { Effect } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
+import { AssistantAgentMessage, AssistantTextPart, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
   emptyVoiceSessionLogState,
   foldStoredVoiceEvents,
@@ -22,6 +23,7 @@ import {
 } from '../../src/voice/index.ts'
 
 const encodeState = Schema.encodeUnknownEffect(VoiceSessionLogState)
+
 const decodeState = Schema.decodeUnknownEffect(VoiceSessionLogState)
 
 const sequencedEvents = (
@@ -50,9 +52,10 @@ describe('foldStoredVoiceEvents', () => {
       VoiceUserTranscriptFinal.make({ itemId: 'item-1', text: 'Hello there' }),
       VoiceAssistantTranscriptDelta.make({ itemId: 'item-2', responseId: 'resp-1', delta: 'Hi ' })
     ])
+
     const first = foldStoredVoiceEvents(emptyVoiceSessionLogState, [userFinal, delta])
 
-    expect(first.messages).toMatchObject([{ _tag: 'User', content: 'Hello there' }])
+    expect(first.messages).toMatchObject([UserMessage.make({ content: 'Hello there' })])
     expect(first.state.assistantDrafts).toEqual([{ key: 'item-2', text: 'Hi ' }])
 
     const second = foldStoredVoiceEvents(first.state, [
@@ -67,7 +70,9 @@ describe('foldStoredVoiceEvents', () => {
     ])
 
     expect(second.messages).toMatchObject([
-      { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'Hi friend.' }] }
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'Hi friend.' })]
+      })
     ])
     expect(second.state.assistantDrafts).toEqual([])
   })
@@ -76,6 +81,7 @@ describe('foldStoredVoiceEvents', () => {
     const [stored] = sequencedEvents('session-1', [
       VoiceUserTranscriptFinal.make({ itemId: 'item-1', text: 'Only once' })
     ])
+
     const first = foldStoredVoiceEvents(emptyVoiceSessionLogState, [stored, stored])
 
     expect(first.messages).toHaveLength(1)
@@ -88,11 +94,14 @@ describe('foldStoredVoiceEvents', () => {
 
   it('dedupes client-replayed and server-witnessed tool events', () => {
     const clientBatch = storedVoiceToolEvents(VoiceToolCallsRequested.make({ calls: [call] }))
+
     const serverBatch = storedToolEventsFromOutcome({
       call,
       outcome: VoiceToolCallExecutedOutcome.make({ callId: 'call-1', output: '{"ok":true}' })
     })
+
     const afterServer = foldStoredVoiceEvents(emptyVoiceSessionLogState, serverBatch)
+
     const afterClient = foldStoredVoiceEvents(afterServer.state, [
       ...clientBatch,
       ...storedVoiceToolEvents(
@@ -119,7 +128,9 @@ describe('foldStoredVoiceEvents', () => {
     expect(flushed.messages).toMatchObject([
       { _tag: 'Assistant', parts: [{ _tag: 'Text' }, { _tag: 'HostToolCall' }] },
       { _tag: 'ToolResult', toolCallId: 'call-1' },
-      { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'It is sunny.' }] }
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'It is sunny.' })]
+      })
     ])
   })
 
@@ -128,9 +139,11 @@ describe('foldStoredVoiceEvents', () => {
       const [stored] = sequencedEvents('session-1', [
         VoiceAssistantTranscriptDelta.make({ itemId: 'item-1', responseId: 'resp-1', delta: 'Par' })
       ])
+
       const folded = foldStoredVoiceEvents(emptyVoiceSessionLogState, [stored])
       const encoded = yield* encodeState(folded.state)
       const decoded = yield* decodeState(JSON.parse(JSON.stringify(encoded)))
+
       const resumed = foldStoredVoiceEvents(decoded, [
         StoredVoiceEvent.make({
           eventId: 'session-1:1',
@@ -143,7 +156,9 @@ describe('foldStoredVoiceEvents', () => {
       ])
 
       expect(resumed.messages).toMatchObject([
-        { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'Par' }] }
+        AssistantAgentMessage.make({
+          parts: [AssistantTextPart.make({ content: 'Par' })]
+        })
       ])
     })
   )
@@ -204,7 +219,9 @@ describe('projection preserve-heard rule', () => {
         delta: 'Already heard text'
       })
     ])
+
     const first = foldStoredVoiceEvents(emptyVoiceSessionLogState, [delta])
+
     const flushed = foldStoredVoiceEvents(first.state, [
       StoredVoiceEvent.make({
         eventId: 'session-1:1',
@@ -217,7 +234,9 @@ describe('projection preserve-heard rule', () => {
     ])
 
     expect(flushed.messages).toMatchObject([
-      { _tag: 'Assistant', parts: [{ _tag: 'Text', content: 'Already heard text' }] }
+      AssistantAgentMessage.make({
+        parts: [AssistantTextPart.make({ content: 'Already heard text' })]
+      })
     ])
   })
 })

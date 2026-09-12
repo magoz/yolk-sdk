@@ -25,6 +25,7 @@ export const deleteKnowledgeCollection = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [deleted] = yield* db
       .delete(schema.knowledgeCollection)
       .where(

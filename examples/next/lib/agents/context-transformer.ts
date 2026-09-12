@@ -13,6 +13,7 @@ export { estimateAgentMessagesTokens } from '@yolk-sdk/agent/compaction'
 export const contextCompactionStrategy = 'window-summary-v1'
 
 const exactTailMessageCount = 16
+
 const summaryPreviewMaxCharacters = 180
 
 const compactionOptions: WindowCompactionOptions = {

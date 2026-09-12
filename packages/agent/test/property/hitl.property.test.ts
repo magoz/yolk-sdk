@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   type AgentEvent,
@@ -163,7 +163,9 @@ const runQuestionBatch = (
   ).pipe(Effect.provide(testLayer))
 
 const toolExecutionStartedIds = (events: ReadonlyArray<AgentEvent>) =>
-  events.flatMap(event => (event._tag === 'ToolExecutionStarted' ? [event.call.id] : []))
+  events.flatMap(event =>
+    Predicate.isTagged(event, 'ToolExecutionStarted') ? [event.call.id] : []
+  )
 
 describe('HITL property tests', () => {
   it.effect.prop(

@@ -8,11 +8,17 @@ import { ActionResult } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const figmaConnectorId = 'figma'
+
 export const figmaOAuthSlotId = 'figma.oauth'
+
 export const figmaMcpServerUrl = 'https://mcp.figma.com/mcp'
+
 export const figmaOAuthRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
+
 export const figmaOAuthAuthorizeUrl = 'https://www.figma.com/oauth/mcp'
+
 export const figmaOAuthTokenUrl = 'https://api.figma.com/v1/oauth/token'
+
 export const figmaMcpScope = 'mcp:connect'
 
 export const FigmaOAuthCredentialSlot = CredentialSlot.make({
@@ -101,6 +107,7 @@ export const figmaMcpAuthAction = defineAction({
   execute: ({ integration }) =>
     Effect.gen(function* () {
       const token = yield* resolveFigmaAccessToken(integration)
+
       return ActionResult.success(
         makeFigmaMcpAuthData({
           accessToken: token.accessToken,

@@ -14,15 +14,23 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const webSearchToolName = 'web_search'
+
 const defaultNumResults = 8
+
 const maxNumResults = 20
+
 const defaultContextMaxCharacters = 10_000
+
 const maxContextMaxCharacters = 50_000
+
 const searchTimeoutMs = 25_000
 
 const WebSearchProvider = Schema.Literals(['exa', 'parallel'])
+
 const WebSearchType = Schema.Literals(['auto', 'fast', 'deep'])
+
 const WebSearchLiveCrawl = Schema.Literals(['fallback', 'preferred'])
+
 const WebSearchParams = Schema.Struct({
   query: Schema.String.pipe(Schema.annotate({ description: 'Web search query.' })),
   numResults: Schema.optional(Schema.Number).pipe(
@@ -43,8 +51,11 @@ const WebSearchParams = Schema.Struct({
 })
 
 type WebSearchProvider = typeof WebSearchProvider.Type
+
 type WebSearchType = typeof WebSearchType.Type
+
 type WebSearchLiveCrawl = typeof WebSearchLiveCrawl.Type
+
 type WebSearchParams = typeof WebSearchParams.Type
 
 type NormalizedWebSearchParams = {
@@ -169,6 +180,7 @@ const normalizePositiveInteger = (input: {
 const normalizeWebSearchParams = (params: WebSearchParams) =>
   Effect.gen(function* () {
     const query = params.query.trim()
+
     if (query.length === 0) {
       return yield* Effect.fail(makeModelVisibleError('query must not be empty', 'validation'))
     }
@@ -179,6 +191,7 @@ const normalizeWebSearchParams = (params: WebSearchParams) =>
       maxValue: maxNumResults,
       name: 'numResults'
     })
+
     const contextMaxCharacters = yield* normalizePositiveInteger({
       value: params.contextMaxCharacters,
       defaultValue: defaultContextMaxCharacters,
@@ -283,6 +296,7 @@ const mcpRequestForProvider = (
 const requestMcpWebSearch = (input: McpWebSearchRequest) =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+
     const request = yield* HttpClientRequest.post(input.url).pipe(
       HttpClientRequest.accept('application/json, text/event-stream'),
       HttpClientRequest.setHeaders(input.headers),
@@ -299,6 +313,7 @@ const requestMcpWebSearch = (input: McpWebSearchRequest) =>
         makeToolError(`Could not encode search request: ${unknownToMessage(error)}`, 'execution')
       )
     )
+
     const response = yield* HttpClient.filterStatusOk(http)
       .execute(request)
       .pipe(
@@ -325,6 +340,7 @@ const liveWebSearchDependencies: WebSearchDependencies = {
 const parseMcpPayload = (payload: string) =>
   Effect.gen(function* () {
     const trimmed = payload.trim()
+
     if (!trimmed.startsWith('{')) {
       return undefined
     }
@@ -341,6 +357,7 @@ const parseMcpPayload = (payload: string) =>
 export const parseMcpWebSearchResponse = (body: string) =>
   Effect.gen(function* () {
     const direct = yield* parseMcpPayload(body)
+
     if (direct !== undefined) {
       return direct
     }
@@ -348,6 +365,7 @@ export const parseMcpWebSearchResponse = (body: string) =>
     for (const line of body.split('\n')) {
       if (line.startsWith('data: ')) {
         const parsed = yield* parseMcpPayload(line.substring('data: '.length))
+
         if (parsed !== undefined) {
           return parsed
         }
@@ -406,6 +424,7 @@ export const searchWeb = (
     const config = yield* loadWebSearchConfig
     const override = config.providerOverride
     const provider = selectWebSearchProvider(normalized.query, override)
+
     const result = yield* runSearchWithFallback(deps, provider, normalized, override, config).pipe(
       Effect.mapError(error =>
         makeModelVisibleError(error.message, modelVisibleReasonFromToolError(error))

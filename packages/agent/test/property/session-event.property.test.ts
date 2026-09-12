@@ -186,12 +186,15 @@ describe('session event property tests', () => {
     ([input]) =>
       Effect.gen(function* () {
         const store = yield* SessionEventStore
+
         const initialLog = yield* store.append({
           sessionId: 'session_1',
           expectedRevision: 0,
           events: eventsForCommands(input.initialEvents)
         })
+
         const staleRevision = initialLog.revision + Math.abs(input.staleRevision) + 1
+
         const result = yield* store
           .append({
             sessionId: 'session_1',
@@ -199,6 +202,7 @@ describe('session event property tests', () => {
             events: [InputAppended.make({ message: UserMessage.make({ content: 'rejected' }) })]
           })
           .pipe(Effect.result)
+
         const after = yield* store.load('session_1')
 
         expect(result).toMatchObject({
@@ -225,7 +229,9 @@ describe('session event property tests', () => {
               : command.expectation === 'current'
                 ? expectedLog.revision
                 : expectedLog.revision + 1
+
           const events = [eventForCommand(command.event, index)]
+
           const result = yield* store
             .append({
               sessionId: 'session_1',
@@ -244,7 +250,7 @@ describe('session event property tests', () => {
               sessionId: 'session_1',
               events
             })
-            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(result._tag).toBe('Success')
           }
 
           const actual = yield* store.load('session_1')

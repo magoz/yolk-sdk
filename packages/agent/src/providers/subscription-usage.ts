@@ -1,7 +1,9 @@
 import * as Schema from 'effect/Schema'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 const PositiveNumber = Schema.Number.pipe(Schema.check(Schema.isGreaterThan(0)))
+
 const isCanonicalInstant = (value: string) => {
   const date = new Date(value)
 

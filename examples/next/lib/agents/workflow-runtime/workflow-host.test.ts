@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Predicate, Stream } from 'effect'
 import { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors'
 import { getWorkflowMetadata } from 'workflow'
 import { WorkflowRunNotFoundError } from 'workflow/errors'
@@ -47,8 +47,10 @@ const reports = vi.hoisted(() => vi.fn())
 // Exercise the real host entrypoints, loop, serializers, registry transitions and tool dispatch.
 // Only provider/runtime construction, persistence and the platform transport are behavioral fakes.
 vi.mock('@/lib/layers', async () => ({ AppLayer: (await import('effect')).Layer.empty }))
+
 vi.mock('@/lib/services/telemetry/report-error', async () => {
   const { Effect } = await import('effect')
+
   return {
     reportError: (error: unknown, context?: Record<string, unknown>) =>
       Effect.sync(() => {
@@ -56,43 +58,55 @@ vi.mock('@/lib/services/telemetry/report-error', async () => {
       })
   }
 })
+
 vi.mock('./text-response', () => ({
   makeAgentTextRuntime: (...args: Parameters<typeof makeAgentTextRuntime>) =>
     runtimeFactory(...args)
 }))
+
 vi.mock('workflow', async () => {
   const { testWorkflowModule } = await import('@yolk-sdk/vercel-workflows/testing')
+
   return {
     ...testWorkflowModule,
     createHook: <T>(input: { token: string }) => {
       const hook = testWorkflowModule.createHook<T>(input)
       hitlEntered.release()
+
       return hook
     },
     sleep: async (duration: unknown) => {
       sleepDurations.push(duration)
+
       // Test-harness runaway guard, not a claim about platform quotas.
       if (autoSleep) {
         if (advanceSleepClock && typeof duration === 'number')
           vi.setSystemTime(Date.now() + duration)
+
         if (sleepDurations.length > 40) throw new Error('Unbounded observation')
+
         return
       }
+
       sleeping.release()
       await new Promise<void>(resolve => sleepers.push(resolve))
     }
   }
 })
+
 vi.mock('workflow/api', () => ({
   start: async <A extends unknown[], R>(fn: (...args: A) => Promise<R>, args: A) => {
     workflowStarts++
     if (rejectStart) throw new Error('launch transport failed')
     const run = await world.sdk.start(fn, args)
+
     if (loseStartResponse) throw new Error('start response lost')
+
     return run
   },
   getRun: <R>(runId: string) => {
     const run = world.sdk.getRun<R>(runId)
+
     return {
       runId,
       getReadable: run.getReadable,
@@ -102,6 +116,7 @@ vi.mock('workflow/api', () => ({
       },
       get status() {
         statusReads++
+
         return missingStatus
           ? Promise.reject(new WorkflowRunNotFoundError(runId))
           : failStatus
@@ -115,45 +130,80 @@ vi.mock('workflow/api', () => ({
 
 const latch = () => {
   let release = () => {}
+
   const promise = new Promise<void>(resolve => {
     release = resolve
   })
+
   return { promise, release }
 }
+
 let world: TestWorkflowWorld
+
 let sleeping = latch()
+
 let childEntered = latch()
+
 let childGate = latch()
+
 let hitlEntered = latch()
+
 let sleepers: Array<() => void> = []
+
 let sleepDurations: unknown[] = []
+
 let autoSleep = false
+
 let advanceSleepClock = false
+
 let missingStatus = false
+
 let rejectStart = false
+
 let loseStartResponse = false
+
 let retryChild = false
+
 let childQuestion = false
+
 let failStatus = false
+
 let failAttachment = false
+
 let loseReservationResponse = false
+
 let failRead = false
+
 let failReadArmed = false
+
 let failChild = false
+
 let statusReads = 0
+
 let preparationFailure: WorkflowRegistryError | WorkflowRunForbidden | undefined
+
 let background = true
+
 let childModel: string | undefined
+
 let gated = false
+
 let waitAfterFailure = false
+
 let previousParent: string | undefined
+
 let childToolCalls = 0
+
 let workflowStarts = 0
+
 let requests: LLMRequest[] = []
+
 let parentStream:
   | ((request: LLMRequest) => Stream.Stream<LLMTextDelta | LLMToolCall | LLMUsage | LLMDone>)
   | undefined
+
 let registries = new Map<string, { userId: string; state: WorkflowRegistry }>()
+
 const originalStoreLayer = AgentWorkflowStore.layer
 
 const childCall = () =>
@@ -168,12 +218,15 @@ const childCall = () =>
       background
     }
   })
+
 const reply = (calls: ToolCall[]) =>
   Stream.fromIterable([
     ...calls.map(call => LLMToolCall.make({ call })),
     LLMDone.make({ stopReason: 'tool_use' })
   ])
+
 const childUsage = AgentUsage.make({ input: { total: 12 }, output: { total: 4 } })
+
 const finished = (text: string) =>
   Stream.fromIterable([
     LLMTextDelta.make({ text }),
@@ -185,15 +238,20 @@ const provider = (child: boolean) =>
   Layer.succeed(LLMProvider, {
     stream: (request: LLMRequest) => {
       requests.push(request)
+
       if (!child && parentStream !== undefined) return parentStream(request)
-      const results = request.messages.filter(message => message._tag === 'ToolResult')
+
+      const results = request.messages.filter(message => Predicate.isTagged(message, 'ToolResult'))
+
       if (child) {
         if (results.length > 0) return finished('Child final answer')
         childEntered.release()
+
         if (retryChild || failChild)
           return Stream.fail(
             new LLMError({ cause: 'rate_limit', message: 'Retry later', retryable: retryChild })
           )
+
         return Stream.fromEffect(Effect.promise(() => childGate.promise)).pipe(
           Stream.flatMap(() =>
             reply([
@@ -217,6 +275,7 @@ const provider = (child: boolean) =>
           )
         )
       }
+
       if (request.model === 'follow-up') {
         return results.length === 0
           ? reply([
@@ -228,11 +287,13 @@ const provider = (child: boolean) =>
             ])
           : finished('Follow-up done')
       }
+
       if (results.length === 0)
         return reply([
           childCall(),
           ...(gated ? [ToolCall.make({ id: 'gated', name: 'gated', params: {} })] : [])
         ])
+
       if (waitAfterFailure && !results.some(result => result.toolCallId === 'wait')) {
         return reply([
           ToolCall.make({
@@ -242,12 +303,14 @@ const provider = (child: boolean) =>
           })
         ])
       }
+
       return finished('Parent done')
     }
   })
 
 const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, options = {}) => {
   const child = options.childType !== undefined
+
   const tool = makeSubagentToolRegistration({
     subagents: [{ name: 'general', description: 'Research' }],
     models: [{ id: 'child-model', description: 'Alternate child model' }],
@@ -256,6 +319,7 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
       options.executeSubagent ??
       (() => Effect.succeed(ToolResult.make({ toolCallId: '', content: 'unavailable' })))
   })
+
   const read = makeTool({
     name: 'read',
     description: 'Read',
@@ -264,9 +328,11 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
     execute: ({ call }) =>
       Effect.sync(() => {
         childToolCalls++
+
         return ToolResult.make({ toolCallId: call.id, content: 'read result' })
       })
   })
+
   const approval = makeTool({
     name: 'gated',
     description: 'Write',
@@ -276,9 +342,11 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
     execute: ({ call }) =>
       Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'written' }))
   })
+
   const tools = child
     ? [read]
     : [tool, read, approval, ...(options.modules ?? []).flatMap(module => module.tools)]
+
   return Effect.succeed({
     input: request,
     config: {
@@ -295,10 +363,12 @@ const runtimeFactory: typeof makeAgentTextRuntime = (request, userId, _route, op
       Layer.succeed(ToolExecutor, {
         execute: call => {
           const registration = tools.find(tool => tool.def.name === call.name)
+
           if (registration === undefined)
             return Effect.succeed(
               ToolResult.make({ toolCallId: call.id, content: 'not found', isError: true })
             )
+
           return registration.execute({
             call,
             context: { userId, surface: 'text', route: '/agent/workflow', subagent: child }
@@ -343,20 +413,24 @@ beforeEach(() => {
   workflowStarts = 0
   requests = []
   parentStream = undefined
+
   const row = (
     runId: string,
     userId: string
   ): Effect.Effect<{ userId: string; state: WorkflowRegistry }, WorkflowRunForbidden> => {
     const value = registries.get(runId)
+
     return value?.userId === userId
       ? Effect.succeed(value)
       : Effect.fail(new WorkflowRunForbidden({ message: 'Not found' }))
   }
+
   AgentWorkflowStore.layer = Layer.succeed(AgentWorkflowStore, {
     register: (runId, userId) =>
       Effect.sync(() => {
         if (!registries.has(runId))
           registries.set(runId, { userId, state: emptyWorkflowRegistry() })
+
         return undefined
       }),
     read: (runId, userId) =>
@@ -364,6 +438,7 @@ beforeEach(() => {
         Effect.flatMap(row => {
           if (failReadArmed && getWorkflowMetadata().workflowRunId === runId) {
             failReadArmed = false
+
             return Effect.fail(
               new EffectDrizzleQueryError({
                 query: 'read owned registry',
@@ -372,12 +447,14 @@ beforeEach(() => {
               })
             )
           }
+
           return Effect.succeed(row.state)
         })
       ),
     change: (runId, userId, command) =>
       Effect.gen(function* () {
         const value = yield* row(runId, userId)
+
         if (
           command.type === 'admit' &&
           failAttachment &&
@@ -386,18 +463,24 @@ beforeEach(() => {
           return yield* Effect.fail(
             new WorkflowRegistryError({ message: 'Attachment response unavailable' })
           )
+
         if (command.type === 'reserve' && preparationFailure !== undefined) {
           return yield* Effect.fail(preparationFailure)
         }
+
         value.state = transitionWorkflowRegistry(value.state, command)
+
         if (command.type === 'reserve' && loseReservationResponse)
           return yield* Effect.fail(new WorkflowRegistryError({ message: 'Commit response lost' }))
+
         if (command.type === 'admit' && failRead && getWorkflowMetadata().workflowRunId === runId)
           failReadArmed = true
+
         return value.state
       })
   })
 })
+
 afterEach(() => {
   vi.useRealTimers()
   AgentWorkflowStore.layer = originalStoreLayer
@@ -413,17 +496,23 @@ const launch = async (model: string | null = 'parent', userId = 'owner') => {
       })
     )
   )
+
   return world.start(runAgentWorkflow, [{ userId, request }]).runId
 }
+
 const childId = (parent: string) => {
   const id = registries.get(parent)?.state.children[0]?.workflowRunId
+
   if (!id) throw new Error('Expected admitted child')
+
   return id
 }
+
 const events = (runId: string) =>
   Effect.runPromise(
     Effect.forEach(world.inspect(runId).chunks, chunk => {
       if (!(chunk instanceof Uint8Array)) throw new Error('Expected encoded chunk')
+
       return Schema.decodeUnknownEffect(Schema.fromJsonString(AgentEvent))(
         new TextDecoder().decode(chunk)
       )
@@ -440,9 +529,11 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const id = childId(parent)
     expect(world.inspect(id).status).toBe('running')
     const parentEvents = await events(parent)
-    expect(parentEvents.filter(event => event._tag === 'SubagentStarted')).toHaveLength(1)
-    expect(parentEvents.some(event => event._tag === 'SubagentCompleted')).toBe(false)
-    expect(parentEvents.find(event => event._tag === 'AgentEnd')).toMatchObject({
+    expect(parentEvents.filter(event => Predicate.isTagged(event, 'SubagentStarted'))).toHaveLength(
+      1
+    )
+    expect(parentEvents.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
+    expect(parentEvents.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
       usage: { input: { total: 0 }, output: { total: 0 } }
     })
     expect(requests.find(request => request.systemPrompt === 'Child')?.messages).toEqual([
@@ -455,7 +546,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const followup = await launch('follow-up')
     await world.settled(followup)
     expect(
-      (await events(followup)).find(event => event._tag === 'ToolExecutionCompleted')
+      (await events(followup)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({ result: { content: expect.stringContaining('Child final answer') } })
   })
 
@@ -470,7 +561,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       const parent = await launch(parentModel)
       await world.settled(parent)
       await world.settled(childId(parent))
-      expect((await events(parent)).find(event => event._tag === 'SubagentStarted')).toMatchObject({
+      expect(
+        (await events(parent)).find(event => Predicate.isTagged(event, 'SubagentStarted'))
+      ).toMatchObject({
         model: expected
       })
     }
@@ -482,16 +575,18 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await childEntered.promise
     await sleeping.promise
     const during = await events(parent)
-    expect(during.filter(event => event._tag === 'SubagentStarted')).toHaveLength(1)
-    expect(during.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(during.filter(event => Predicate.isTagged(event, 'SubagentStarted'))).toHaveLength(1)
+    expect(during.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
     childGate.release()
     await world.settled(childId(parent))
     sleepers.forEach(resume => resume())
     await world.settled(parent)
     const after = await events(parent)
-    expect(after.filter(event => event._tag === 'SubagentStarted')).toHaveLength(1)
-    expect(after.filter(event => event._tag === 'SubagentCompleted')).toHaveLength(1)
-    expect(after.find(event => event._tag === 'AgentEnd')).toMatchObject({ usage: childUsage })
+    expect(after.filter(event => Predicate.isTagged(event, 'SubagentStarted'))).toHaveLength(1)
+    expect(after.filter(event => Predicate.isTagged(event, 'SubagentCompleted'))).toHaveLength(1)
+    expect(after.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
+      usage: childUsage
+    })
     expect(world.inspect(parent).status).toBe('completed')
   })
 
@@ -500,7 +595,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const parent = await launch()
     await hitlEntered.promise
     expect(registries.get(parent)?.state.children).toHaveLength(0)
-    expect((await events(parent)).some(event => event._tag === 'SubagentStarted')).toBe(false)
+    expect((await events(parent)).some(event => Predicate.isTagged(event, 'SubagentStarted'))).toBe(
+      false
+    )
     await world.sdk.resumeHook(agentWorkflowHitlHookToken({ runId: parent }), {
       _tag: 'ToolApprovalResponse',
       requestId: 'approval:gated',
@@ -512,7 +609,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await world.settled(parent)
     expect(
       (await events(parent))
-        .filter(event => event._tag === 'ToolExecutionCompleted')
+        .filter(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
         .map(event => event.result.toolCallId)
     ).toHaveLength(2)
     childGate.release()
@@ -532,10 +629,11 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       workflowRunId: null,
       result: null
     })
-    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
     expect(
       output.find(
-        event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === 'wait'
+        event =>
+          Predicate.isTagged(event, 'ToolExecutionCompleted') && event.result.toolCallId === 'wait'
       )
     ).toMatchObject({
       result: {
@@ -554,7 +652,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(registries.get(parent)?.state.children).toHaveLength(0)
     expect(requests.some(request => request.systemPrompt === 'Child')).toBe(false)
     expect(
-      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+      (await events(parent)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({ result: { isError: true } })
   })
 
@@ -575,7 +673,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       }
     )
     expect(
-      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+      (await events(parent)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({
       result: {
         isError: true,
@@ -593,7 +691,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     expect(world.inspect(parent).status).toBe('completed')
     expect(reports).not.toHaveBeenCalled()
     expect(
-      (await events(parent)).find(event => event._tag === 'ToolExecutionCompleted')
+      (await events(parent)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({ result: { isError: true, content: 'Child launch preparation failed' } })
     expect(registries.get(parent)?.state.children).toHaveLength(0)
   })
@@ -606,15 +704,18 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const other = await launch('follow-up', 'intruder')
     await world.settled(other)
     const output = await events(other)
-    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
-      result: {
-        isError: true,
-        content: 'Child handle not found',
-        structuredContent: { workflow_run_id: null }
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: {
+          isError: true,
+          content: 'Child handle not found',
+          structuredContent: { workflow_run_id: null }
+        }
       }
-    })
+    )
     expect(JSON.stringify(output)).not.toContain(childId(parent))
     expect(reports).not.toHaveBeenCalled()
+
     const probe = world.start(
       async () =>
         world.runStep(readChildWorkflowStep, [
@@ -622,6 +723,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
         ]),
       []
     )
+
     await world.settled(probe.runId)
     expect(world.inspect(probe.runId).status).toBe('completed')
     expect(world.inspect(probe.runId).stepAttempts.get('readChildWorkflowStep')).toBe(1)
@@ -640,11 +742,15 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await childEntered.promise
     await world.settled(parent)
     const output = await events(parent)
-    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
-      result: { structuredContent: { type: 'subagent_accepted', workflow_run_id: childId(parent) } }
-    })
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: {
+          structuredContent: { type: 'subagent_accepted', workflow_run_id: childId(parent) }
+        }
+      }
+    )
     expect(statusReads).toBe(0)
-    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    expect(output.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
     childGate.release()
     await world.settled(childId(parent))
   })
@@ -661,11 +767,13 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       await childEntered.promise
       await world.settled(parent)
       const output = await events(parent)
-      expect(output.filter(event => event._tag === 'SubagentCompleted')).toHaveLength(0)
-      expect(output.find(event => event._tag === 'AgentEnd')).toMatchObject({
+      expect(output.filter(event => Predicate.isTagged(event, 'SubagentCompleted'))).toHaveLength(0)
+      expect(output.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
         usage: { input: { total: 0 }, output: { total: 0 } }
       })
-      expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(
+        output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         result: {
           structuredContent: { type: 'subagent_observation', done: false, parent_run_id: parent }
         }
@@ -678,7 +786,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       const followup = await launch('follow-up')
       await world.settled(followup)
       expect(
-        (await events(followup)).find(event => event._tag === 'ToolExecutionCompleted')
+        (await events(followup)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
       ).toMatchObject({
         result: { content: expect.stringContaining('Child final answer') }
       })
@@ -697,7 +805,8 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     })
     expect(
       (await events(parent)).find(
-        event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === 'wait'
+        event =>
+          Predicate.isTagged(event, 'ToolExecutionCompleted') && event.result.toolCallId === 'wait'
       )
     ).toMatchObject({ result: { isError: true, content: expect.stringContaining('unconfirmed') } })
   })
@@ -713,13 +822,15 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await childEntered.promise
     await world.settled(parent)
     const output = await events(parent)
-    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
-      result: {
-        content: expect.stringContaining('unconfirmed'),
-        structuredContent: { done: false, workflow_run_id: childId(parent) }
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: {
+          content: expect.stringContaining('unconfirmed'),
+          structuredContent: { done: false, workflow_run_id: childId(parent) }
+        }
       }
-    })
-    expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+    )
+    expect(output.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
     expect(sleepDurations).toEqual([1000, 5000, 15000, 30000, 30000])
     expect(registries.get(parent)?.state.children[0]?.result).toBeNull()
     missingStatus = false
@@ -729,7 +840,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const followup = await launch('follow-up')
     await world.settled(followup)
     expect(
-      (await events(followup)).find(event => event._tag === 'ToolExecutionCompleted')
+      (await events(followup)).find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
     ).toMatchObject({ result: { content: expect.stringContaining('Child final answer') } })
   })
 
@@ -746,7 +857,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       const callId = backgroundMode ? 'wait' : 'child-call'
       expect(
         output.find(
-          event => event._tag === 'ToolExecutionCompleted' && event.result.toolCallId === callId
+          event =>
+            Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+            event.result.toolCallId === callId
         )
       ).toMatchObject({
         result: {
@@ -760,7 +873,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
           }
         }
       })
-      expect(output.find(event => event._tag === 'AgentEnd')).toMatchObject({
+      expect(output.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
         usage: { input: { total: 0 }, output: { total: 0 } }
       })
       expect(
@@ -774,7 +887,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       )
       expect(sleepDurations).toHaveLength(31)
       expect(sleepDurations.slice(0, 5)).toEqual([1000, 5000, 15000, 30000, 30000])
-      expect(output.some(event => event._tag === 'SubagentCompleted')).toBe(false)
+      expect(output.some(event => Predicate.isTagged(event, 'SubagentCompleted'))).toBe(false)
       childGate.release()
       await world.settled(childId(parent))
       previousParent = parent
@@ -782,10 +895,12 @@ describe('actual Next Workflow host with fake external boundaries', () => {
       const followup = await launch('follow-up')
       await world.settled(followup)
       const followupEvents = await events(followup)
-      expect(followupEvents.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(
+        followupEvents.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         result: { content: expect.stringContaining('Child final answer') }
       })
-      expect(followupEvents.find(event => event._tag === 'AgentEnd')).toMatchObject({
+      expect(followupEvents.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
         usage: { input: { total: 0 }, output: { total: 0 } }
       })
     }
@@ -801,7 +916,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     const output = await events(id)
     expect(
       output.some(
-        event => event._tag === 'QuestionRequested' || event._tag === 'AgentAwaitingInput'
+        event =>
+          Predicate.isTagged(event, 'QuestionRequested') ||
+          Predicate.isTagged(event, 'AgentAwaitingInput')
       )
     ).toBe(false)
     expect(world.inspect(id).status).toBe('completed')
@@ -829,12 +946,14 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await world.settled(parent)
     expect(world.inspect(id).status).toBe('failed')
     const output = await events(parent)
-    expect(output.filter(event => event._tag === 'SubagentCompleted')).toMatchObject([
+    expect(output.filter(event => Predicate.isTagged(event, 'SubagentCompleted'))).toMatchObject([
       { status: 'error' }
     ])
-    expect(output.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
-      result: { isError: true, content: expect.stringContaining('Child workflow failed') }
-    })
+    expect(output.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))).toMatchObject(
+      {
+        result: { isError: true, content: expect.stringContaining('Child workflow failed') }
+      }
+    )
   })
 
   it('Stop while foreground waiting fences both later provider and child tool work', async () => {
@@ -865,7 +984,7 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await world.settled(parent)
     const id = childId(parent)
     await vi.waitFor(async () => {
-      expect((await events(id)).some(event => event._tag === 'AgentRetry')).toBe(true)
+      expect((await events(id)).some(event => Predicate.isTagged(event, 'AgentRetry'))).toBe(true)
     })
     await Effect.runPromise(
       stopAgentWorkflow(parent, 'owner').pipe(
@@ -875,7 +994,9 @@ describe('actual Next Workflow host with fake external boundaries', () => {
     await vi.advanceTimersByTimeAsync(20_000)
     await world.settled(id)
     expect(requests.filter(request => request.systemPrompt === 'Child')).toHaveLength(1)
-    expect((await events(id)).filter(event => event._tag === 'AgentRetry')).toHaveLength(1)
+    expect(
+      (await events(id)).filter(event => Predicate.isTagged(event, 'AgentRetry'))
+    ).toHaveLength(1)
   })
 
   it('Stop after parent completion cancels and fences the live child before further tools', async () => {

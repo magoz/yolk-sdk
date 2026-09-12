@@ -2,8 +2,11 @@ import { Effect } from 'effect'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
+
 export const telegramConnectorId = 'telegram'
+
 export const telegramBotTokenSlotId = 'telegram.bot_token'
+
 export const telegramApiBaseUrl = 'https://api.telegram.org'
 
 export const TelegramBotTokenSlot = CredentialSlot.make({

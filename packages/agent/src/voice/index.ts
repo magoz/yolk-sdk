@@ -4,6 +4,7 @@ export {
   VoiceToolCallRequest,
   VoiceToolExecutionResult
 } from './tool-bridge.ts'
+
 export {
   VoiceAssistantAudioStarted,
   VoiceAssistantAudioStopped,
@@ -46,8 +47,11 @@ export {
   VoiceUserTranscriptDelta,
   VoiceUserTranscriptFinal
 } from './protocol.ts'
+
 export { VoiceTransport, type VoiceTransportApi } from './transport.ts'
+
 export { makeWebSocketVoiceTransport, type WebSocketVoiceTransportOptions } from './websocket.ts'
+
 export {
   speechResultToAudioPart,
   VoiceSpeechError,
@@ -60,12 +64,15 @@ export {
   type VoiceSpeechResult,
   type VoiceTranscriptionRequest
 } from './speech.ts'
+
 export { type VoiceClientCodec } from './client-codec.ts'
+
 export {
   makeVoiceController,
   type VoiceControllerApi,
   type VoiceControllerOptions
 } from './controller.ts'
+
 export {
   decideVoiceToolCall,
   handleVoiceToolCall,
@@ -73,6 +80,7 @@ export {
   voiceToolDenialOutput,
   type VoiceToolCallDecision
 } from './tool-server.ts'
+
 export {
   emptyVoiceSessionLogState,
   foldStoredVoiceEvents,
@@ -85,11 +93,13 @@ export {
   type VoiceSessionLogFoldResult,
   type VoiceToolEventPhase
 } from './session-log.ts'
+
 export {
   makeVoiceEventOutbox,
   type VoiceEventOutboxApi,
   type VoiceEventOutboxOptions
 } from './outbox.ts'
+
 export {
   dedupeStoredVoiceEvents,
   emptyVoiceProjectionState,

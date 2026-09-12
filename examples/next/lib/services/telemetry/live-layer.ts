@@ -5,6 +5,7 @@ import { BatchLogRecordProcessor, ConsoleLogRecordExporter } from '@opentelemetr
 // This is an acceptable exception for infrastructure-level code
 export const TelemetryLayer = NodeSdk.layer(() => {
   const serviceName = process.env.APP_NAME
+
   if (!serviceName) throw new Error('APP_NAME not found')
 
   const environment = process.env.NODE_ENV || 'development'

@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentEnd,
@@ -38,6 +38,7 @@ import {
 import { propertyOptions } from './property-options'
 
 const terminalKind = Schema.Literals(['approvalDenied', 'questionAnswered', 'questionCancelled'])
+
 const terminalKindArbitrary = Schema.toArbitrary(terminalKind)
 
 const clientEventKind = Schema.Literals([
@@ -117,6 +118,7 @@ const terminalEvent = (kind: typeof terminalKind.Type) => {
 }
 
 const toolResult = ToolResult.make({ toolCallId: call.id, content: 'ok' })
+
 const assistantMessage = AssistantAgentMessage.make({
   parts: [AssistantTextPart.make({ content: 'done' })]
 })
@@ -360,6 +362,7 @@ describe('client HITL property tests', () => {
         AgentStart.make({ eventId: 'multi_event_start' }),
         ...input.commands.slice(0, 64).map(multiClientEvent)
       ]
+
       const state = reduceAgentEvents([...events, ...events])
       const ids = toolRunIds(state.toolRuns)
       const activeRuns = state.toolRuns.filter(isActiveToolRun)
@@ -381,7 +384,8 @@ describe('client HITL property tests', () => {
         AgentStart.make({ eventId: 'reset_event_start' }),
         ...input.commands.slice(0, 64).map(multiClientEvent)
       ])
-      const completedBefore = state.toolRuns.filter(run => run._tag === 'Completed')
+
+      const completedBefore = state.toolRuns.filter(run => Predicate.isTagged(run, 'Completed'))
       const submitted = submitAgentUserMessage(state, UserMessage.make({ content: 'next' }))
       const errored = markAgentError(state, 'failed')
       const aborted = markAgentAborted(state)

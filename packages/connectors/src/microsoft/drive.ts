@@ -22,14 +22,17 @@ import {
 } from './shared.ts'
 
 export const microsoftOneDriveAccessModeConfigKey = 'oneDriveAccessMode'
+
 export const MicrosoftOneDriveAccessMode = Schema.Literals([
   'delegated',
   'delegated_all',
   'application'
 ])
+
 export type MicrosoftOneDriveAccessMode = typeof MicrosoftOneDriveAccessMode.Type
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
+
 const OneDrivePageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999 }))
 
 const oneDriveItemSelect = [
@@ -166,6 +169,7 @@ const oneDriveTargetPath = (driveId: string | undefined) =>
 
 const oneDriveAccessMode = (integration: ConnectorIntegration) => {
   const configured = optionalStringConfig(integration, microsoftOneDriveAccessModeConfigKey)
+
   if (configured === undefined) return Effect.succeed<MicrosoftOneDriveAccessMode>('delegated')
 
   return Schema.decodeUnknownEffect(MicrosoftOneDriveAccessMode)(configured).pipe(
@@ -201,6 +205,7 @@ export const oneDriveReadSlot = (integration: ConnectorIntegration, driveId: str
   Effect.gen(function* () {
     const accessMode = yield* oneDriveAccessMode(integration)
     yield* requireDriveForApplicationAccess(integration, driveId, accessMode)
+
     return accessMode === 'delegated'
       ? MicrosoftOneDriveReadOAuthCredentialSlot
       : MicrosoftOneDriveReadAllOAuthCredentialSlot
@@ -210,6 +215,7 @@ export const oneDriveWriteSlot = (integration: ConnectorIntegration, driveId: st
   Effect.gen(function* () {
     const accessMode = yield* oneDriveAccessMode(integration)
     yield* requireDriveForApplicationAccess(integration, driveId, accessMode)
+
     return accessMode === 'delegated'
       ? MicrosoftOneDriveWriteOAuthCredentialSlot
       : MicrosoftOneDriveWriteAllOAuthCredentialSlot
@@ -240,6 +246,7 @@ const requireOneDriveListNextLink = (
 
   const parsed = new URL(nextLink)
   const targetRoot = `/v1.0${oneDriveTargetPath(driveId)}`
+
   const selectedCollection =
     parentItemId === undefined
       ? `${targetRoot}/root/children`
@@ -255,6 +262,7 @@ const requireOneDriveSearchNextLink = (nextLink: string, driveId: string | undef
 
   const parsed = new URL(nextLink)
   const searchPrefix = `/v1.0${oneDriveTargetPath(driveId)}/root/search(`
+
   return isTrustedGraphUrl(parsed) &&
     parsed.pathname.startsWith(searchPrefix) &&
     parsed.pathname.endsWith(')')
@@ -278,13 +286,18 @@ const oneDriveListUrl = (input: OneDriveListItemsInput) => {
   }
 
   const targetRoot = oneDriveTargetPath(input.driveId)
+
   const collectionPath =
     input.parentItemId === undefined
       ? `${targetRoot}/root/children`
       : `${targetRoot}/items/${encodeURIComponent(input.parentItemId)}/children`
+
   const params = new URLSearchParams({ $select: oneDriveItemSelect })
+
   if (input.top !== undefined) params.set('$top', String(input.top))
+
   if (input.orderBy !== undefined) params.set('$orderby', input.orderBy)
+
   return Effect.succeed(`${microsoftGraphApiBaseUrl}${collectionPath}?${params.toString()}`)
 }
 
@@ -297,8 +310,10 @@ const oneDriveSearchUrl = (input: OneDriveSearchItemsInput) => {
   }
 
   const params = new URLSearchParams({ $select: oneDriveItemSelect })
+
   if (input.top !== undefined) params.set('$top', String(input.top))
   const searchPath = `${oneDriveTargetPath(input.driveId)}/root/search(q='${encodedOneDriveSearchQuery(input.query)}')`
+
   return Effect.succeed(`${microsoftGraphApiBaseUrl}${searchPath}?${params.toString()}`)
 }
 
@@ -314,6 +329,7 @@ const oneDriveItemsAction = (input: {
     const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
     const url = yield* input.url
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       ConnectorHttpRequest.make({
         method: 'GET',
@@ -333,6 +349,7 @@ const oneDriveItemsAction = (input: {
     }
 
     const output = yield* decodeJsonResponse(OneDriveItemsApiOutput, response)
+
     return ActionResult.success(
       OneDriveListItemsOutput.make({
         items: output.value,
@@ -382,6 +399,7 @@ export const oneDriveGetItemAction = defineAction({
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams({ $select: oneDriveItemSelect })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -401,6 +419,7 @@ export const oneDriveGetItemAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OneDriveItem, response)
+
       return ActionResult.success(output)
     })
 })
@@ -417,10 +436,12 @@ export const oneDriveCreateFolderAction = defineAction({
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
       const targetRoot = oneDriveTargetPath(input.driveId)
+
       const collectionPath =
         input.parentItemId === undefined
           ? `${targetRoot}/root/children`
           : `${targetRoot}/items/${encodeURIComponent(input.parentItemId)}/children`
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -445,6 +466,7 @@ export const oneDriveCreateFolderAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OneDriveItem, response)
+
       return ActionResult.success(output)
     })
 })
@@ -460,6 +482,7 @@ export const oneDriveDeleteItemAction = defineAction({
       const slot = yield* oneDriveWriteSlot(integration, input.driveId)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'DELETE',

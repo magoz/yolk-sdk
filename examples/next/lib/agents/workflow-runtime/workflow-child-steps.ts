@@ -8,6 +8,7 @@ export async function registerWorkflowStep(
 ): ReturnType<ChildRuntime['registerWorkflowStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.registerWorkflowStep(...args)
 }
 
@@ -16,8 +17,10 @@ export async function planWorkflowCallStep(
 ): ReturnType<ChildRuntime['planWorkflowCallStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.planWorkflowCallStep(...args)
 }
+
 planWorkflowCallStep.maxRetries = 0
 
 export async function admitChildWorkflowStep(
@@ -25,6 +28,7 @@ export async function admitChildWorkflowStep(
 ): ReturnType<ChildRuntime['admitChildWorkflowStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.admitChildWorkflowStep(...args)
 }
 
@@ -33,6 +37,7 @@ export async function persistChildTerminalStep(
 ): ReturnType<ChildRuntime['persistChildTerminalStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.persistChildTerminalStep(...args)
 }
 
@@ -41,6 +46,7 @@ export async function readChildWorkflowStep(
 ): ReturnType<ChildRuntime['readChildWorkflowStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.readChildWorkflowStep(...args)
 }
 
@@ -49,6 +55,7 @@ export async function attachChildWorkflowStep(
 ): ReturnType<ChildRuntime['attachChildWorkflowStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.attachChildWorkflowStep(...args)
 }
 
@@ -57,6 +64,7 @@ export async function childToolResultStep(
 ): ReturnType<ChildRuntime['childToolResultStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.childToolResultStep(...args)
 }
 
@@ -65,6 +73,7 @@ export async function uncertainChildLaunchStep(
 ): ReturnType<ChildRuntime['uncertainChildLaunchStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.uncertainChildLaunchStep(...args)
 }
 
@@ -73,5 +82,6 @@ export async function childControlFailureStep(
 ): ReturnType<ChildRuntime['childControlFailureStep']> {
   'use step'
   const runtime = await import('./child-control')
+
   return await runtime.childControlFailureStep(...args)
 }

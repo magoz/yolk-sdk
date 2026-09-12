@@ -5,6 +5,7 @@ import type { ActionResult } from './result.ts'
 import type { ConnectorIntegration } from './integration.ts'
 
 type ActionInputSchema = Schema.Schema<unknown> & { readonly DecodingServices: never }
+
 type ActionOutputSchema = Schema.Schema<unknown> & { readonly EncodingServices: never }
 
 export type ConnectorActionAccess = 'read' | 'write' | 'destructive'

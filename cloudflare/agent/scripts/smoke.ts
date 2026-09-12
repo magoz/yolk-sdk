@@ -5,6 +5,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/unstable/
 import * as Socket from 'effect/unstable/socket/Socket'
 
 const statePath = '.alchemy/state/YolkAgentWorker/dev_magoz/Api.json'
+
 const timeoutMs = 10_000
 
 class SmokeConfigError extends Data.TaggedError('SmokeConfigError')<{
@@ -37,6 +38,7 @@ const SmokeEventSchema = Schema.Struct({
 type SmokeEvent = Schema.Schema.Type<typeof SmokeEventSchema>
 
 const decodeAlchemyState = Schema.decodeUnknownEffect(Schema.fromJsonString(AlchemyStateSchema))
+
 const decodeSmokeEventJson = Schema.decodeUnknownEffect(Schema.fromJsonString(SmokeEventSchema))
 
 const unknownToMessage = (error: unknown) =>
@@ -62,6 +64,7 @@ const readDeployedUrl = Effect.gen(function* () {
   }
 
   const raw = yield* readStateFile
+
   const state = yield* decodeAlchemyState(raw).pipe(
     Effect.mapError(
       error =>
@@ -89,6 +92,7 @@ const websocketUrl = (url: string, sessionId: string): Effect.Effect<string, Smo
       const parsed = new URL(url)
       parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
       parsed.pathname = `/connect/${sessionId}`
+
       return parsed.toString()
     },
     catch: error =>
@@ -130,6 +134,7 @@ const smokeWebSocket = (
         const socket = yield* Socket.makeWebSocket(wsUrl, {
           closeCodeIsError: code => code !== 1000
         })
+
         const write = yield* socket.writer
         const eventsRef = yield* Ref.make<ReadonlyArray<SmokeEvent>>([])
         const collectedTextRef = yield* Ref.make('')
@@ -150,6 +155,7 @@ const smokeWebSocket = (
             if (decoded._tag === 'AgentError') {
               yield* failDone(eventMessage(decoded))
               yield* write(new Socket.CloseEvent(1000))
+
               return
             }
 
@@ -159,6 +165,7 @@ const smokeWebSocket = (
               if (collectedText !== expectedText) {
                 yield* failDone(`Unexpected text: ${collectedText}`)
                 yield* write(new Socket.CloseEvent(1000))
+
                 return
               }
 
@@ -186,6 +193,7 @@ const smokeWebSocket = (
             orElse: () =>
               Effect.gen(function* () {
                 const collectedText = yield* Ref.get(collectedTextRef)
+
                 return yield* Effect.fail(
                   new SmokeProtocolError({
                     message: `Timed out waiting for AgentEnd; collected=${collectedText}`
@@ -202,6 +210,7 @@ const checkHealth = (url: string): Effect.Effect<void, SmokeHttpError, HttpClien
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const request = HttpClientRequest.get(`${url}/health`)
+
     const response = yield* client.execute(request).pipe(
       Effect.mapError(
         error =>

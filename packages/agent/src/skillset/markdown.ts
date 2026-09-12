@@ -63,6 +63,7 @@ export const parseMarkdownDocument = (markdown: string) =>
     const data = Object.fromEntries(
       entries.flatMap(entry => (entry === undefined ? [] : [[entry.key, entry.value]]))
     )
+
     const contentStart = markdown.startsWith('\n', endIndex + frontmatterStart.length)
       ? endIndex + frontmatterStart.length + 1
       : endIndex + frontmatterStart.length

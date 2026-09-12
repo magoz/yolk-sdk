@@ -12,6 +12,7 @@ export {
   telegramApiBaseUrl,
   TelegramBotTokenSlot
 } from './shared.ts'
+
 import { telegramConnectorId, telegramApiBaseUrl, resolveTelegramBotToken } from './shared.ts'
 
 const isSuccessStatus = (status: number) => status >= 200 && status < 300
@@ -62,6 +63,7 @@ export const telegramSendMessageAction = defineAction({
       const botToken = yield* resolveTelegramBotToken(integration)
       const chatId = yield* requiredStringConfig(integration, 'chatId')
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -98,6 +100,7 @@ export const telegramValidateAction = defineAction({
       const botToken = yield* resolveTelegramBotToken(integration)
       const chatId = yield* requiredStringConfig(integration, 'chatId')
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -127,4 +130,5 @@ export const TelegramConnector = defineConnector({
   description: 'Telegram bot connector actions.',
   actions: telegramActions
 })
+
 export { downloadTelegramFile, telegramHostedDownloadMaxBytes } from './download.ts'

@@ -44,9 +44,11 @@ describe('storage knowledge search tool', () => {
       readonly minScore?: number
       readonly contextChunks: number
     }> = []
+
     const toolModule = makeStorageSearchToolModule(input =>
       Effect.sync(() => {
         calls.push(input)
+
         return [searchResult]
       })
     )
@@ -56,6 +58,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -81,6 +84,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -99,9 +103,11 @@ describe('storage knowledge search tool', () => {
 
   it.effect('runs multiple storage queries', () => {
     const calls: Array<string> = []
+
     const toolModule = makeStorageSearchToolModule(input =>
       Effect.sync(() => {
         calls.push(input.query)
+
         return [searchResult]
       })
     )
@@ -111,6 +117,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -149,6 +156,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({ id: 'call_1', name: 'list_storage_sources', params: {} })
       )
@@ -185,6 +193,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -260,6 +269,7 @@ describe('storage knowledge search tool', () => {
         modules: [toolModule],
         context: { surface: 'text', route: '/agent/next', userId: 'user_1' }
       })
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',

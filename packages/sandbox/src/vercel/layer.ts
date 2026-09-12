@@ -1,4 +1,15 @@
-import { Array as Arr, Clock, Duration, Effect, Layer, Option, Ref, Semaphore } from 'effect'
+import {
+  Array as Arr,
+  Clock,
+  Duration,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Predicate,
+  Ref,
+  Semaphore
+} from 'effect'
 import {
   absoluteSandboxCwd,
   backgroundSandboxProbeMs,
@@ -26,7 +37,7 @@ import {
 } from '../model.ts'
 import { Sandbox } from '../service.ts'
 import { SandboxStateStore } from '../state-store.ts'
-import { SandboxProviderError, unknownToMessage } from '../errors.ts'
+import { SandboxProviderError } from '../errors.ts'
 import type { SandboxError } from '../errors.ts'
 import {
   VercelSandboxClient,
@@ -63,36 +74,48 @@ type CommandRunOutput = {
   readonly backgroundId?: string
 }
 
-const defaultVercelResources = SandboxResources.make({ vcpus: 2 })
-const defaultVercelRuntime: VercelSandboxRuntime = 'node24'
-
-const providerError = (operation: string, error: unknown) =>
-  new SandboxProviderError({
-    provider: 'vercel',
-    operation,
-    message: `Vercel Sandbox ${operation} failed: ${unknownToMessage(error)}`,
-    underlying: error
-  })
-
-const tryProvider = <A>(operation: string, effect: Effect.Effect<A, unknown>) =>
-  effect.pipe(Effect.mapError(error => providerError(operation, error)))
-
-const lifecycleTimeoutMs = (lifecycle: SandboxLifecycle) => {
-  switch (lifecycle._tag) {
-    case 'Disposable':
-      return Math.min(lifecycle.idleTtlMs, lifecycle.maxLifetimeMs)
-    case 'Persistent':
-      return lifecycle.idleTtlMs
-  }
+type CommandResultFields = {
+  readonly exitCode: number | null
+  readonly stdout: string
+  readonly stderr: string
+  readonly durationMs: number
+  readonly timedOut: boolean
+  readonly workspaceReset: boolean
+  backgroundId?: string
 }
 
-const persistentFlag = (lifecycle: SandboxLifecycle) => lifecycle._tag === 'Persistent'
+const defaultVercelResources = SandboxResources.make({ vcpus: 2 })
+
+const defaultVercelRuntime: VercelSandboxRuntime = 'node24'
+
+const tryProvider = <A>(operation: string, effect: Effect.Effect<A, unknown>) =>
+  effect.pipe(
+    Effect.mapError(
+      error =>
+        new SandboxProviderError({
+          provider: 'vercel',
+          operation,
+          message: `Vercel Sandbox ${operation} failed: ${error instanceof Error ? error.message : String(error)}`,
+          underlying: error
+        })
+    )
+  )
+
+const lifecycleTimeoutMs = (lifecycle: SandboxLifecycle) =>
+  Match.value(lifecycle).pipe(
+    Match.tagsExhaustive({
+      Disposable: disposable => Math.min(disposable.idleTtlMs, disposable.maxLifetimeMs),
+      Persistent: persistent => persistent.idleTtlMs
+    })
+  )
+
+const persistentFlag = (lifecycle: SandboxLifecycle) => Predicate.isTagged(lifecycle, 'Persistent')
 
 const snapshotExpirationMs = (lifecycle: SandboxLifecycle) =>
-  lifecycle._tag === 'Persistent' ? lifecycle.snapshotExpirationMs : undefined
+  Predicate.isTagged(lifecycle, 'Persistent') ? lifecycle.snapshotExpirationMs : undefined
 
 const keepLastSnapshots = (lifecycle: SandboxLifecycle) =>
-  lifecycle._tag === 'Persistent' ? lifecycle.keepLastSnapshots : undefined
+  Predicate.isTagged(lifecycle, 'Persistent') ? lifecycle.keepLastSnapshots : undefined
 
 const previewUrls = (handle: VercelSandboxHandle, ports: ReadonlyArray<number>) =>
   Effect.forEach(ports, port =>
@@ -148,7 +171,7 @@ const waitForegroundCommand = (
       duration: Duration.millis(timeoutMs),
       orElse: () =>
         Effect.gen(function* () {
-            yield* tryProvider('command.kill', command.kill('SIGKILL')).pipe(
+          yield* tryProvider('command.kill', command.kill('SIGKILL')).pipe(
             Effect.catchTag('SandboxProviderError', () => Effect.void)
           )
           const output = yield* commandOutputOrEmpty(command)
@@ -264,8 +287,17 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
               networkPolicy: config.networkPolicy
             })
           )
-          const state = initialSandboxState({ name, nowMs: input.nowMs, lifecycle })
-          yield* store.save({ sandboxSessionId: config.sandboxSessionId, state })
+
+          const state = initialSandboxState({
+            name,
+            nowMs: input.nowMs,
+            lifecycle
+          })
+
+          yield* store.save({
+            sandboxSessionId: config.sandboxSessionId,
+            state
+          })
 
           return { handle, state, workspaceReset: input.workspaceReset }
         })
@@ -275,8 +307,16 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
         readonly nowMs: number
       }) =>
         Effect.gen(function* () {
-          const state = initialSandboxState({ name, nowMs: input.nowMs, lifecycle })
-          yield* store.save({ sandboxSessionId: config.sandboxSessionId, state })
+          const state = initialSandboxState({
+            name,
+            nowMs: input.nowMs,
+            lifecycle
+          })
+
+          yield* store.save({
+            sandboxSessionId: config.sandboxSessionId,
+            state
+          })
 
           return {
             handle: input.handle,
@@ -311,16 +351,23 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
             nowMs: input.nowMs,
             lifecycle
           })
+
           const deltaMs =
-            lifecycle._tag === 'Persistent' && input.nowMs >= input.state.expiresAtMs
+            Predicate.isTagged(lifecycle, 'Persistent') && input.nowMs >= input.state.expiresAtMs
               ? 0
-              : sandboxTimeoutExtendDeltaMs({ before: input.state, after: touched })
+              : sandboxTimeoutExtendDeltaMs({
+                  before: input.state,
+                  after: touched
+                })
 
           if (deltaMs > 0) {
             yield* tryProvider('extendTimeout', input.handle.extendTimeout(deltaMs))
           }
 
-          yield* store.save({ sandboxSessionId: config.sandboxSessionId, state: touched })
+          yield* store.save({
+            sandboxSessionId: config.sandboxSessionId,
+            state: touched
+          })
 
           return {
             handle: input.handle,
@@ -332,9 +379,15 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
       const ensureSandbox = (nowMs: number): Effect.Effect<ActiveSandbox, SandboxError> =>
         Effect.gen(function* () {
           const loaded = yield* store.load(config.sandboxSessionId)
-          const decision = sandboxStateDecision({ state: loaded, name, nowMs, lifecycle })
 
-          if (decision._tag === 'Create') {
+          const decision = sandboxStateDecision({
+            state: loaded,
+            name,
+            nowMs,
+            lifecycle
+          })
+
+          if (Predicate.isTagged(decision, 'Create')) {
             if (Option.isNone(loaded)) {
               return yield* attachOrCreateSandbox({
                 nowMs,
@@ -347,13 +400,17 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
               yield* store.clear(config.sandboxSessionId)
             }
 
-            return yield* createSandbox({ nowMs, workspaceReset: decision.workspaceReset })
+            return yield* createSandbox({
+              nowMs,
+              workspaceReset: decision.workspaceReset
+            })
           }
 
           const handle = yield* tryProvider('get', client.get({ name }))
 
           if (handle === null) {
             yield* store.clear(config.sandboxSessionId)
+
             return yield* createSandbox({ nowMs, workspaceReset: true })
           }
 
@@ -377,6 +434,7 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
           const nowMs = yield* Clock.currentTimeMillis
           const active = yield* ensureSandbox(nowMs)
           const id = yield* nextCommandId
+
           const commandFiles = createCommandFiles({
             commandId: id,
             workspaceRoot,
@@ -387,6 +445,7 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
           yield* tryProvider('writeFiles', active.handle.writeFiles(commandFiles.files))
 
           const startedAtMs = yield* Clock.currentTimeMillis
+
           const command = yield* tryProvider(
             'runCommand',
             active.handle.runDetachedCommand({
@@ -395,20 +454,29 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
               cwd: absoluteSandboxCwd(workspaceRoot, normalizedCwd)
             })
           )
+
           const output = yield* input.background === true
             ? probeBackgroundCommand(active.handle, command)
             : waitForegroundCommand(command, timeoutMs)
+
           const endedAtMs = yield* Clock.currentTimeMillis
           const urls = yield* previewUrls(active.handle, ports)
 
-          return SandboxCommandResult.make({
+          const resultFields: CommandResultFields = {
             exitCode: output.exitCode,
             stdout: output.stdout,
             stderr: output.stderr,
             durationMs: Math.max(0, endedAtMs - startedAtMs),
             timedOut: output.timedOut,
-            workspaceReset: active.workspaceReset,
-            ...(output.backgroundId === undefined ? {} : { backgroundId: output.backgroundId }),
+            workspaceReset: active.workspaceReset
+          }
+
+          if (output.backgroundId !== undefined) {
+            resultFields.backgroundId = output.backgroundId
+          }
+
+          return SandboxCommandResult.make({
+            ...resultFields,
             previewUrls: urls,
             state: active.state
           })
@@ -419,9 +487,11 @@ export const makeVercelSandboxLayerWithClient = (config: VercelSandboxLayerConfi
         currentState: store.load(config.sandboxSessionId),
         delete: Effect.gen(function* () {
           const loaded = yield* store.load(config.sandboxSessionId)
+
           if (Option.isSome(loaded)) {
             yield* deleteNamedSandbox(loaded.value.name)
           }
+
           yield* store.clear(config.sandboxSessionId)
         })
       })

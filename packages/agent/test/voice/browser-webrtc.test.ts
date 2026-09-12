@@ -54,10 +54,12 @@ describe('makeWebRtcVoiceTransport', () => {
     Effect.gen(function* () {
       const world = makeFakeWorld()
       const scope = yield* Scope.make()
+
       const transport = yield* Scope.provide(
         makeWebRtcVoiceTransport(makeTransportOptions(world)),
         scope
       )
+
       const collected = yield* Effect.forkChild(Stream.runCollect(transport.events))
 
       yield* Scope.close(scope, Exit.void)
@@ -90,6 +92,7 @@ describe('makeWebRtcVoiceTransport', () => {
   it.effect('cleans up when negotiation fails', () =>
     Effect.gen(function* () {
       const world = makeFakeWorld()
+
       const error = yield* Effect.scoped(
         makeWebRtcVoiceTransport({
           ...makeTransportOptions(world),

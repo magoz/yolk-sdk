@@ -19,15 +19,18 @@ import {
 import { DropboxContentWriteOAuthCredentialSlot, resolveDropboxAccessToken } from './shared.ts'
 
 export const dropboxSingleUploadMaxBytes = 150_000_000
+
 export interface DropboxCreateFileInput {
   readonly path: string
   readonly bytes: Uint8Array
 }
+
 export interface DropboxUpdateFileInput {
   readonly fileId: string
   readonly expectedRev: string
   readonly bytes: Uint8Array
 }
+
 const Create = Schema.Struct({
   path: SafeText.check(
     Schema.makeFilter(
@@ -41,16 +44,19 @@ const Create = Schema.Struct({
     )
   )
 })
+
 const Update = Schema.Struct({
   fileId: OpaqueId.check(Schema.isPattern(/^id:.+$/)),
   expectedRev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/))
 })
+
 const Metadata = Schema.Struct({
   id: OpaqueId.check(Schema.isPattern(/^id:.+$/)),
   name: SafeText,
   rev: Schema.String.check(Schema.isPattern(/^[0-9a-f]{9,}$/)),
   size: ByteLimit
 })
+
 const upload = (
   integration: ConnectorIntegration,
   input: DropboxCreateFileInput | DropboxUpdateFileInput,
@@ -64,10 +70,12 @@ const upload = (
     const target = updating ? yield* decodeInput(Update, input) : yield* decodeInput(Create, input)
     const path = 'fileId' in target ? target.fileId : target.path
     const mode = 'expectedRev' in target ? { '.tag': 'update', update: target.expectedRev } : 'add'
+
     const token = yield* resolveDropboxAccessToken(
       integration,
       DropboxContentWriteOAuthCredentialSlot
     ).pipe(Effect.mapError(credentialFailure), Effect.flatMap(safeToken))
+
     const response = yield* writeBytes({
       method: 'POST',
       url: 'https://content.dropboxapi.com/2/files/upload',
@@ -84,20 +92,25 @@ const upload = (
       redirect: 'manual',
       credentials: 'omit'
     })
+
     const metadata = yield* decodeMetadata(Metadata, response.bytes)
+
     if (
       metadata.size !== input.bytes.byteLength ||
       ('fileId' in target && metadata.id !== target.fileId)
     )
       return yield* failTransfer('invalid_metadata')
+
     return metadata
   })
+
 /** Atomic add: conflicts never rename or overwrite. No automatic retry. */
 export const createDropboxFile = (
   integration: ConnectorIntegration,
   input: DropboxCreateFileInput,
   budget: ConnectorFileTransferBudget
 ) => upload(integration, input, budget, false)
+
 /** Strict revision update: a missing/deleted target is a conflict, never a create. */
 export const updateDropboxFile = (
   integration: ConnectorIntegration,

@@ -1,4 +1,4 @@
-import { Effect, Ref, Stream } from 'effect'
+import { Effect, Match, Predicate, Ref, Stream } from 'effect'
 import type {
   AgentEvent,
   AgentMessage,
@@ -72,11 +72,15 @@ export type RuntimeRequest =
   | AppendHitlResponseRuntimeRequest
 
 type LoopRequirements = ContextTransformer | LLMProvider | LoopConfig | ToolExecutor
+
 type AppendRuntimeRequirements = LoopRequirements | SessionEventStore
+
 type RuntimeRequirements = LoopRequirements | AppendRuntimeRequirements
+
 type RuntimeErrorUnion = RuntimeError | AgentLoopError
 
-const extractNewMessages = (event: AgentEvent) => (event._tag === 'AgentEnd' ? event.messages : [])
+const extractNewMessages = (event: AgentEvent) =>
+  Predicate.isTagged(event, 'AgentEnd') ? event.messages : []
 
 const runtimeRunConfig = (config: RuntimeConfig, messages: ReadonlyArray<AgentMessage>) => ({
   messages,
@@ -130,36 +134,33 @@ const loadAppendLogOrEmpty = (store: SessionEventStoreApi, sessionId: string) =>
 const latestAwaitingRequests = (log: RuntimeSessionEventLog): ReadonlyArray<HitlRequest> =>
   log.events.reduceRight<ReadonlyArray<HitlRequest> | undefined>((found, stored) => {
     if (found !== undefined) return found
-    switch (stored.event._tag) {
-      case 'RunAwaitingInput':
-        return stored.event.requests
-      case 'RunCompleted':
-      case 'RunFailed':
-      case 'RunInterrupted':
-        return []
-      case 'HitlResponseAppended':
-      case 'InputAppended':
-      case 'RunStarted':
-        return undefined
-    }
+
+    return Match.value(stored.event).pipe(
+      Match.tag('RunAwaitingInput', awaiting => awaiting.requests),
+      Match.tag('RunCompleted', 'RunFailed', 'RunInterrupted', () => []),
+      Match.tag('HitlResponseAppended', 'InputAppended', 'RunStarted', () => undefined),
+      Match.exhaustive
+    )
   }, undefined) ?? []
 
-const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) => {
-  switch (response._tag) {
-    case 'ToolApprovalResponse':
-      return (
-        request._tag === 'ToolApprovalRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-    case 'QuestionResponse':
-      return (
-        request._tag === 'QuestionRequest' &&
-        response.requestId === request.requestId &&
-        response.toolCallId === request.toolCallId
-      )
-  }
-}
+const hitlResponseMatchesRequest = (response: HitlResponse, request: HitlRequest) =>
+  Match.value(response).pipe(
+    Match.tag(
+      'ToolApprovalResponse',
+      approval =>
+        Predicate.isTagged(request, 'ToolApprovalRequest') &&
+        approval.requestId === request.requestId &&
+        approval.toolCallId === request.toolCallId
+    ),
+    Match.tag(
+      'QuestionResponse',
+      answer =>
+        Predicate.isTagged(request, 'QuestionRequest') &&
+        answer.requestId === request.requestId &&
+        answer.toolCallId === request.toolCallId
+    ),
+    Match.exhaustive
+  )
 
 const validateHitlResponse = (
   request: AppendHitlResponseRuntimeRequest,
@@ -196,6 +197,7 @@ const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config
     Effect.gen(function* () {
       const store = yield* SessionEventStore
       const initialLog = yield* loadAppendLogOrEmpty(store, request.sessionId)
+
       const startedLog = yield* store.append({
         sessionId: request.sessionId,
         expectedRevision: request.expectedRevision ?? initialLog.revision,
@@ -204,32 +206,38 @@ const makeAppendInputRuntimeStream = (request: AppendInputRuntimeRequest, config
           RunStarted.make({ runId: request.runId })
         ]
       })
+
       const messages = [...replayRuntimeSessionEvents(initialLog.events), request.input]
+
       return run(runtimeRunConfig(config, messages)).pipe(
         Stream.tap(event =>
-          event._tag === 'AgentEnd'
-            ? store
+          Match.value(event).pipe(
+            Match.tag('AgentEnd', end =>
+              store
                 .append({
                   sessionId: request.sessionId,
                   expectedRevision: startedLog.revision,
-                  events: [RunCompleted.make({ runId: request.runId, messages: event.messages })]
+                  events: [RunCompleted.make({ runId: request.runId, messages: end.messages })]
                 })
                 .pipe(Effect.asVoid)
-            : event._tag === 'AgentAwaitingInput'
-              ? store
-                  .append({
-                    sessionId: request.sessionId,
-                    expectedRevision: startedLog.revision,
-                    events: [
-                      RunAwaitingInput.make({
-                        runId: request.runId,
-                        requests: event.requests,
-                        messages: event.messages
-                      })
-                    ]
-                  })
-                  .pipe(Effect.asVoid)
-              : Effect.void
+            ),
+            Match.tag('AgentAwaitingInput', awaiting =>
+              store
+                .append({
+                  sessionId: request.sessionId,
+                  expectedRevision: startedLog.revision,
+                  events: [
+                    RunAwaitingInput.make({
+                      runId: request.runId,
+                      requests: awaiting.requests,
+                      messages: awaiting.messages
+                    })
+                  ]
+                })
+                .pipe(Effect.asVoid)
+            ),
+            Match.orElse(() => Effect.void)
+          )
         ),
         Stream.catchTags({
           AbortError: error =>
@@ -266,6 +274,7 @@ const makeAppendHitlResponseRuntimeStream = (
       const store = yield* SessionEventStore
       const initialLog = yield* loadAppendLogOrEmpty(store, request.sessionId)
       yield* validateHitlResponse(request, initialLog)
+
       const startedLog = yield* store.append({
         sessionId: request.sessionId,
         expectedRevision: request.expectedRevision ?? initialLog.revision,
@@ -274,35 +283,40 @@ const makeAppendHitlResponseRuntimeStream = (
           RunStarted.make({ runId: request.runId })
         ]
       })
+
       const messages = replayRuntimeSessionEvents(initialLog.events)
       const priorResponses = replayRuntimeHitlResponses(initialLog.events)
       const hitlResponses = [...priorResponses, request.response]
 
       return run(runtimeRunConfig({ ...config, hitlResponses }, messages)).pipe(
         Stream.tap(event =>
-          event._tag === 'AgentEnd'
-            ? store
+          Match.value(event).pipe(
+            Match.tag('AgentEnd', end =>
+              store
                 .append({
                   sessionId: request.sessionId,
                   expectedRevision: startedLog.revision,
-                  events: [RunCompleted.make({ runId: request.runId, messages: event.messages })]
+                  events: [RunCompleted.make({ runId: request.runId, messages: end.messages })]
                 })
                 .pipe(Effect.asVoid)
-            : event._tag === 'AgentAwaitingInput'
-              ? store
-                  .append({
-                    sessionId: request.sessionId,
-                    expectedRevision: startedLog.revision,
-                    events: [
-                      RunAwaitingInput.make({
-                        runId: request.runId,
-                        requests: event.requests,
-                        messages: event.messages
-                      })
-                    ]
-                  })
-                  .pipe(Effect.asVoid)
-              : Effect.void
+            ),
+            Match.tag('AgentAwaitingInput', awaiting =>
+              store
+                .append({
+                  sessionId: request.sessionId,
+                  expectedRevision: startedLog.revision,
+                  events: [
+                    RunAwaitingInput.make({
+                      runId: request.runId,
+                      requests: awaiting.requests,
+                      messages: awaiting.messages
+                    })
+                  ]
+                })
+                .pipe(Effect.asVoid)
+            ),
+            Match.orElse(() => Effect.void)
+          )
         ),
         Stream.catchTags({
           AbortError: error =>
@@ -350,12 +364,12 @@ export function runRuntime(
   request: RuntimeRequest,
   config: RuntimeConfig
 ): Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements> {
-  switch (request._tag) {
-    case 'Transcript':
-      return makeTranscriptRuntimeStream(request, config)
-    case 'AppendInput':
-      return makeAppendInputRuntimeStream(request, config)
-    case 'AppendHitlResponse':
-      return makeAppendHitlResponseRuntimeStream(request, config)
-  }
+  return Match.value(request).pipe(
+    Match.withReturnType<Stream.Stream<AgentEvent, RuntimeErrorUnion, RuntimeRequirements>>(),
+    Match.tagsExhaustive({
+      Transcript: transcript => makeTranscriptRuntimeStream(transcript, config),
+      AppendInput: appendInput => makeAppendInputRuntimeStream(appendInput, config),
+      AppendHitlResponse: appendHitl => makeAppendHitlResponseRuntimeStream(appendHitl, config)
+    })
+  )
 }

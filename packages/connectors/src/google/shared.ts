@@ -8,6 +8,7 @@ import type { ConnectorIntegration } from '../integration.ts'
 import { GoogleOAuthCredentialSlot } from './oauth.ts'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 export const resolveGoogleAccessToken = (
@@ -40,6 +41,7 @@ const decodeJsonObject = (body: string) =>
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -48,13 +50,18 @@ const jsonMessageField = (body: string, keys: ReadonlyArray<string>) =>
   decodeJsonObject(body).pipe(
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
+
       for (const key of keys) {
         const value = parsed[key]
+
         if (typeof value === 'string' && value.trim() !== '') return value
       }
+
       const error = parsed.error
+
       if (!isJsonObject(error)) return undefined
       const message = error.message
+
       return typeof message === 'string' && message.trim() !== '' ? message : undefined
     })
   )
@@ -69,10 +76,13 @@ const googleErrorReasons = (body: string) =>
     Effect.map(parsed => {
       if (parsed === undefined) return []
       const error = parsed.error
+
       if (!isJsonObject(error) || !Array.isArray(error.errors)) return []
+
       return error.errors.flatMap(item => {
         if (!isJsonObject(item)) return []
         const reason = item.reason
+
         return typeof reason === 'string' ? [reason] : []
       })
     })
@@ -106,8 +116,10 @@ const retryAfterMs = (headers: Readonly<Record<string, string>> | undefined) => 
   const retryAfter = Object.entries(headers ?? {}).find(
     ([name]) => name.toLowerCase() === 'retry-after'
   )?.[1]
+
   if (retryAfter === undefined) return undefined
   const seconds = Number(retryAfter)
+
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined
 }
 
@@ -122,6 +134,7 @@ export const providerFailureFromResponse = (input: {
     const message = yield* providerMessage(input.message, input.body)
     const reasons = yield* googleErrorReasons(input.body)
     const retry = retryAfterMs(input.headers)
+
     return ActionResult.failure(
       new ProviderFailure({
         code: providerCode(input.code, input.status, reasons),

@@ -9,6 +9,7 @@ const DEFAULT_STORAGE_COLLECTION_LABEL = 'storage'
 export const ensureUserKnowledgeCollection = (input: { readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [existing] = yield* db
       .select()
       .from(schema.knowledgeCollection)

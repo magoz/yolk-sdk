@@ -11,6 +11,7 @@ export const McpErrorCause = Schema.Literals([
   'validation',
   'tool_error'
 ])
+
 export type McpErrorCause = typeof McpErrorCause.Type
 
 export class McpError extends Schema.TaggedErrorClass<McpError>()('McpError', {

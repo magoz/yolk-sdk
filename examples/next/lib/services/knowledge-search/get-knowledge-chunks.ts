@@ -15,6 +15,7 @@ export const getKnowledgeChunks = (input: {
     }
 
     const db = yield* Db
+
     const rows = yield* db
       .select({
         chunk: schema.knowledgeChunk,

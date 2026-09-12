@@ -11,6 +11,7 @@ import {
   type ToolResult,
   type UserMessage
 } from '@yolk-sdk/agent/protocol'
+import { Predicate } from 'effect'
 
 export type AgentRunStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error' | 'aborted'
 
@@ -133,20 +134,20 @@ const toolRunId = (run: AgentToolRun) => {
 }
 
 export const isActiveToolRun = (run: AgentToolRun) =>
-  run._tag !== 'Accepted' &&
-  run._tag !== 'Completed' &&
-  run._tag !== 'Errored' &&
-  run._tag !== 'Denied' &&
-  run._tag !== 'QuestionAnswered' &&
-  run._tag !== 'QuestionCancelled' &&
-  run._tag !== 'ProviderCompleted'
+  !Predicate.isTagged(run, 'Accepted') &&
+  !Predicate.isTagged(run, 'Completed') &&
+  !Predicate.isTagged(run, 'Errored') &&
+  !Predicate.isTagged(run, 'Denied') &&
+  !Predicate.isTagged(run, 'QuestionAnswered') &&
+  !Predicate.isTagged(run, 'QuestionCancelled') &&
+  !Predicate.isTagged(run, 'ProviderCompleted')
 
 export const completedToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
-  runs.filter(run => run._tag === 'Completed')
+  runs.filter(run => Predicate.isTagged(run, 'Completed'))
 
 // Retention is not completion: an acknowledgement remains replay-fenced between turns.
 const retainedSettledToolRuns = (runs: ReadonlyArray<AgentToolRun>) =>
-  runs.filter(run => run._tag === 'Completed' || run._tag === 'Accepted')
+  runs.filter(run => Predicate.isTagged(run, 'Completed') || Predicate.isTagged(run, 'Accepted'))
 
 export const toolRunsFromHitlRequests = (
   requests: ReadonlyArray<HitlRequest>
@@ -184,7 +185,9 @@ const replaceToolRun = (
 }
 
 const isStartedToolRun = (run: AgentToolRun): run is StartedAgentToolRun =>
-  run._tag === 'Executing' || run._tag === 'Accepted' || run._tag === 'Completed'
+  Predicate.isTagged(run, 'Executing') ||
+  Predicate.isTagged(run, 'Accepted') ||
+  Predicate.isTagged(run, 'Completed')
 
 const startedAtMsFor = (runs: ReadonlyArray<AgentToolRun>, toolCallId: string) =>
   runs.filter(isStartedToolRun).find(run => run.call.id === toolCallId)?.startedAtMs
@@ -195,7 +198,9 @@ const appendToolInputDelta = (
   delta: string
 ): ReadonlyArray<AgentToolRun> =>
   runs.map(run =>
-    run._tag === 'InputStreaming' && run.id === id ? { ...run, input: `${run.input}${delta}` } : run
+    Predicate.isTagged(run, 'InputStreaming') && run.id === id
+      ? { ...run, input: `${run.input}${delta}` }
+      : run
   )
 
 const questionRequestForToolCall = (
@@ -297,10 +302,12 @@ const applyAgentEventUnchecked = (
   nowMs: number
 ): AgentClientState => {
   const activeCallId = activeEventToolCallId(event)
+
   const acknowledgesActiveCall = (message: AgentMessage) =>
-    message._tag === 'ToolResult' &&
+    Predicate.isTagged(message, 'ToolResult') &&
     message.toolCallId === activeCallId &&
     message.acceptance !== undefined
+
   if (
     activeCallId !== undefined &&
     (state.messages.some(acknowledgesActiveCall) || state.liveMessages.some(acknowledgesActiveCall))
@@ -420,7 +427,7 @@ const applyAgentEventUnchecked = (
       return {
         ...state,
         toolRuns: replaceToolRun(state.toolRuns, {
-          _tag: event._tag === 'ToolExecutionAccepted' ? 'Accepted' : 'Completed',
+          _tag: Predicate.isTagged(event, 'ToolExecutionAccepted') ? 'Accepted' : 'Completed',
           call: event.call,
           result: event.result,
           startedAtMs,
@@ -428,6 +435,7 @@ const applyAgentEventUnchecked = (
         })
       }
     }
+
     case 'ToolExecutionError':
       return {
         ...state,

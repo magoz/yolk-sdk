@@ -11,6 +11,7 @@ export const VoiceSpeechErrorCode = Schema.Literals([
   'provider_error',
   'unknown'
 ])
+
 export type VoiceSpeechErrorCode = typeof VoiceSpeechErrorCode.Type
 
 /** Safe speech/transcription failure; never carries raw provider bodies. */

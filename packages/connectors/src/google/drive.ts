@@ -18,10 +18,13 @@ import {
 } from './shared.ts'
 
 export const googleDriveApiBaseUrl = 'https://www.googleapis.com/drive/v3'
+
 export const googleDriveFolderMimeType = 'application/vnd.google-apps.folder'
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
+
 const GoogleDriveHeaderValue = NonEmptyString.check(Schema.isPattern(/^[^\r\n]+$/))
+
 const GoogleDrivePageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
 
 const parentResourceKeyRequiresParentId = Schema.makeFilter<{
@@ -190,10 +193,12 @@ const GoogleDriveFileApi = Schema.Struct({
   contentRestrictions: Schema.optional(Schema.Array(GoogleDriveContentRestriction)),
   linkShareMetadata: Schema.optional(GoogleDriveLinkShareMetadata)
 })
+
 type GoogleDriveFileApi = typeof GoogleDriveFileApi.Type
 
 const googleDriveFileFromApi = (file: GoogleDriveFileApi): GoogleDriveFile => {
   const { parents, spaces, owners, permissionIds, contentRestrictions, ...metadata } = file
+
   return GoogleDriveFile.make({
     ...metadata,
     ...(parents === undefined ? {} : { parents: Chunk.fromIterable(parents) }),
@@ -393,18 +398,22 @@ const driveFilesUrl = (input: {
   appendSearchParam(params, 'orderBy', input.orderBy)
 
   const clauses = driveQueryClauses(input)
+
   if (input.searchQuery !== undefined) {
     const query = escapeDriveQueryValue(input.searchQuery)
     clauses.unshift(`(name contains '${query}' or fullText contains '${query}')`)
   }
+
   if (clauses.length > 0) params.set('q', clauses.join(' and '))
 
   params.set('spaces', 'drive')
   params.set('supportsAllDrives', 'true')
   params.set('includeItemsFromAllDrives', 'true')
   params.set('corpora', input.driveId === undefined ? 'user' : 'drive')
+
   if (input.driveId !== undefined) params.set('driveId', input.driveId)
   params.set('fields', googleDriveListFields)
+
   return `${googleDriveApiBaseUrl}/files?${params.toString()}`
 }
 
@@ -421,7 +430,9 @@ const googleDriveListAction = (input: {
       input.integration,
       GoogleDriveMetadataReadonlyOAuthCredentialSlot
     )
+
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       ConnectorHttpRequest.make({
         method: 'GET',
@@ -444,6 +455,7 @@ const googleDriveListAction = (input: {
     }
 
     const output = yield* decodeJsonResponse(GoogleDriveListFilesApiOutput, response)
+
     return ActionResult.success(googleDriveListFilesOutputFromApi(output))
   })
 
@@ -490,11 +502,14 @@ export const googleDriveGetFileAction = defineAction({
         integration,
         GoogleDriveMetadataReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const params = new URLSearchParams({
         supportsAllDrives: 'true',
         fields: googleDriveFileFields
       })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -517,6 +532,7 @@ export const googleDriveGetFileAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleDriveFileApi, response)
+
       return ActionResult.success(googleDriveFileFromApi(output))
     })
 })
@@ -531,10 +547,12 @@ export const googleDriveCreateFolderAction = defineAction({
     Effect.gen(function* () {
       const token = yield* resolveGoogleAccessToken(integration, GoogleDriveFileOAuthCredentialSlot)
       const http = yield* ConnectorHttpClient
+
       const params = new URLSearchParams({
         supportsAllDrives: 'true',
         fields: googleDriveFileFields
       })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -562,6 +580,7 @@ export const googleDriveCreateFolderAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleDriveFileApi, response)
+
       return ActionResult.success(googleDriveFileFromApi(output))
     })
 })
@@ -576,10 +595,12 @@ export const googleDriveTrashFileAction = defineAction({
     Effect.gen(function* () {
       const token = yield* resolveGoogleAccessToken(integration, GoogleDriveFileOAuthCredentialSlot)
       const http = yield* ConnectorHttpClient
+
       const params = new URLSearchParams({
         supportsAllDrives: 'true',
         fields: googleDriveFileFields
       })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'PATCH',
@@ -603,6 +624,7 @@ export const googleDriveTrashFileAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GoogleDriveFileApi, response)
+
       return ActionResult.success(googleDriveFileFromApi(output))
     })
 })
@@ -618,6 +640,7 @@ export const googleDriveDeleteFileAction = defineAction({
       const token = yield* resolveGoogleAccessToken(integration, GoogleDriveFileOAuthCredentialSlot)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams({ supportsAllDrives: 'true' })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'DELETE',

@@ -186,6 +186,7 @@ export const reduceAgentChatState = (
         ]
       }
     }
+
     case 'RegenerateFrom': {
       const next = regenerateChatMessagesFrom(state.chatMessages, action.messageId)
 
@@ -210,6 +211,7 @@ export const reduceAgentChatState = (
         ]
       }
     }
+
     case 'EditUserMessage': {
       const next = editChatUserMessage(state.chatMessages, action.messageId, action.content)
 
@@ -235,6 +237,7 @@ export const reduceAgentChatState = (
         ]
       }
     }
+
     case 'Event': {
       if (hasSeenEvent(state, action.event)) {
         return state
@@ -334,6 +337,7 @@ export const reduceAgentChatState = (
           )
       }
     }
+
     case 'Error': {
       return {
         ...state,
@@ -344,6 +348,7 @@ export const reduceAgentChatState = (
         chatMessages: markChatError(state.chatMessages, action.message)
       }
     }
+
     case 'Abort':
       return { ...state, status: 'aborted', error: null, errorInfo: null, retryInfo: null }
   }
@@ -367,10 +372,12 @@ export const isActiveChatToolPart = (part: AgentChatPart) =>
   part.state._tag !== 'QuestionCancelled' &&
   part.state._tag !== 'Errored' &&
   part.state._tag !== 'Denied'
+
 export type ActiveChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
 
 export const isCompletedChatToolPart = (part: AgentChatPart) =>
   part._tag === 'ToolCall' && part.state._tag === 'Completed'
+
 export type CompletedChatToolPart = Extract<AgentChatPart, { readonly _tag: 'ToolCall' }>
 
 export const getActiveChatToolParts = (messages: ReadonlyArray<AgentChatMessage>) =>

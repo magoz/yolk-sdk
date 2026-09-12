@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Schema } from 'effect'
+import { Context, Data, Effect, Predicate, Schema } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentMessage,
@@ -30,10 +30,15 @@ const envelope = {
   author: { displayName: 'Reader' },
   annotations: { provenance: { trusted: false }, labels: ['attachment'] }
 }
+
 const opaque = { _tag: 'Image', source: { _tag: 'Ref', id: 'do-not-traverse' } }
+
 const call = ToolCall.make({ id: 'call-1', name: 'inspect', params: opaque })
+
 const reasoning = AssistantReasoningPart.make({ text: 'Visible reasoning summary' })
+
 const hostCall = HostToolCallPart.make({ call })
+
 const providerCall = ProviderToolCallPart.make({ call, providerMetadata: opaque })
 
 const transcript = (source: (id: string) => AttachmentSource): ReadonlyArray<AgentMessage> => {
@@ -43,6 +48,7 @@ const transcript = (source: (id: string) => AttachmentSource): ReadonlyArray<Age
     filename: 'brief.pdf',
     title: 'Brief'
   })
+
   const image = ImagePart.make({
     source: source('image'),
     mimeType: 'image/png',
@@ -51,6 +57,7 @@ const transcript = (source: (id: string) => AttachmentSource): ReadonlyArray<Age
     width: 320,
     height: 240
   })
+
   const audio = AudioPart.make({
     source: source('audio'),
     mimeType: 'audio/wav',
@@ -102,8 +109,10 @@ class AttachmentSigner extends Context.Service<
 const resolve: AttachmentSourceResolver<ResolutionError, AttachmentSigner> = part =>
   Effect.gen(function* () {
     const source = part.source
-    if (source._tag !== 'Ref') return source
+
+    if (!Predicate.isTagged(source, 'Ref')) return source
     const signer = yield* AttachmentSigner
+
     return yield* signer.sign(source.id)
   })
 
@@ -114,16 +123,19 @@ describe('message attachment resolution', () => {
     Effect.gen(function* () {
       const original = transcript(refAttachmentSource)
       const visits: Array<string> = []
+
       const program: Effect.Effect<
         ReadonlyArray<AgentMessage>,
         ResolutionError,
         AttachmentSigner
       > = resolveMessagesAttachmentSources(original, resolve)
+
       const resolved = yield* program.pipe(
         Effect.provideService(AttachmentSigner, {
           sign: id =>
             Effect.sync(() => {
               visits.push(id)
+
               return signed(id)
             })
         })
@@ -134,16 +146,19 @@ describe('message attachment resolution', () => {
       expect(original).toEqual(transcript(refAttachmentSource))
       const assistant = resolved[1]
       expect(assistant?._tag).toBe('Assistant')
+
       if (assistant?._tag === 'Assistant') {
         expect(assistant.parts[0]).toBe(reasoning)
         expect(assistant.parts[2]).toBe(hostCall)
         expect(assistant.parts[3]).toBe(providerCall)
         const result = assistant.parts[4]
+
         if (result?._tag === 'ProviderToolResult') {
           expect(result.providerMetadata).toBe(opaque)
           expect(result.result.structuredContent).toBe(opaque)
         }
       }
+
       const encoded = yield* Schema.encodeEffect(Schema.Array(AgentMessage))(resolved)
       expect(yield* Schema.decodeUnknownEffect(Schema.Array(AgentMessage))(encoded)).toEqual(
         resolved
@@ -158,12 +173,16 @@ describe('message attachment resolution', () => {
         AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: [] })] }),
         ToolResultMessage.make({ toolCallId: call.id, content: '' })
       ]
+
       const visits: Array<AttachmentSource['_tag']> = []
+
       const passthrough: AttachmentSourceResolver = part =>
         Effect.sync(() => {
           visits.push(part.source._tag)
+
           return part.source
         })
+
       expect(yield* resolveMessagesAttachmentSources(messages, passthrough)).toEqual(messages)
       expect(visits).toEqual([])
       expect(yield* resolveMessagesAttachmentSources([], passthrough)).toEqual([])
@@ -175,6 +194,7 @@ describe('message attachment resolution', () => {
           inlineBase64AttachmentSource('AA==')
         ].map(source => ImagePart.make({ source, mimeType: 'image/png' }))
       })
+
       expect(yield* resolveMessageAttachmentSources(message, passthrough)).toEqual(message)
       expect(visits).toEqual(['Ref', 'Url', 'InlineBase64'])
     })
@@ -185,16 +205,19 @@ describe('message attachment resolution', () => {
       const original = transcript(refAttachmentSource)
       const failure = new ResolutionError({ id: 'image' })
       const visits: Array<string> = []
+
       const error = yield* resolveMessagesAttachmentSources(original, resolve).pipe(
         Effect.provideService(AttachmentSigner, {
           sign: id =>
             Effect.gen(function* () {
               visits.push(id)
+
               return id === 'image' ? yield* Effect.fail(failure) : signed(id)
             })
         }),
         Effect.flip
       )
+
       expect(error).toBe(failure)
       expect(visits).toEqual(['pdf', 'image'])
       expect(original).toEqual(transcript(refAttachmentSource))
@@ -204,16 +227,20 @@ describe('message attachment resolution', () => {
   it.effect('resolves again whenever the same Effect is executed', () =>
     Effect.gen(function* () {
       let calls = 0
+
       const original = ToolResultMessage.make({
         toolCallId: call.id,
         content: [ImagePart.make({ source: refAttachmentSource('private'), mimeType: 'image/png' })]
       })
+
       const program = resolveMessageAttachmentSources(original, part =>
         Effect.sync(() => {
           calls++
+
           return urlAttachmentSource(`https://example.com/${part._tag}?attempt=${calls}`)
         })
       )
+
       const first = yield* program
       const second = yield* program
       expect(calls).toBe(2)

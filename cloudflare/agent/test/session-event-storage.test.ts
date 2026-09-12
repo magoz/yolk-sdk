@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref, Schema, Stream } from 'effect'
+import { Effect, Layer, Option, Predicate, Ref, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ContextTransformer, LoopConfig, type LLMRequest } from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
@@ -54,6 +54,7 @@ const getRequest = (requests: ReadonlyArray<LLMRequest>, index: number) => {
 const makeStorage = (initial?: RuntimeSessionEventLog) =>
   Effect.gen(function* () {
     const ref = yield* Ref.make<RuntimeSessionEventLog | undefined>(initial)
+
     const storage: RuntimeEventLogStorage = {
       get: () => Ref.get(ref),
       put: log => Ref.set(ref, log)
@@ -207,7 +208,7 @@ const latestApprovalRequest = (log: RuntimeSessionEventLog) => {
 
     switch (event._tag) {
       case 'RunAwaitingInput':
-        return event.requests.find(request => request._tag === 'ToolApprovalRequest')
+        return event.requests.find(request => Predicate.isTagged(request, 'ToolApprovalRequest'))
       case 'RunCompleted':
       case 'RunFailed':
       case 'RunInterrupted':
@@ -270,6 +271,7 @@ const runWsUserInput = (input: {
     }
 
     const revision = expectedRevision(input.command.kind, before.revision)
+
     const result = yield* runRuntime(
       {
         _tag: 'AppendInput',
@@ -281,7 +283,7 @@ const runWsUserInput = (input: {
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
-    return { mutated: result._tag === 'Success' }
+    return { mutated: Predicate.isTagged(result, 'Success') }
   })
 
 const runWsHitlResponse = (input: {
@@ -299,6 +301,7 @@ const runWsHitlResponse = (input: {
     }
 
     const revision = expectedRevision(input.command.kind, before.revision)
+
     const result = yield* runRuntime(
       {
         _tag: 'AppendHitlResponse',
@@ -310,7 +313,7 @@ const runWsHitlResponse = (input: {
       wsRuntimeConfig
     ).pipe(Stream.runCollect, Effect.result)
 
-    return { mutated: result._tag === 'Success' }
+    return { mutated: Predicate.isTagged(result, 'Success') }
   })
 
 describe('Cloudflare session event storage', () => {
@@ -319,15 +322,19 @@ describe('Cloudflare session event storage', () => {
       const sessionId = 'session_1'
       const requests: Array<LLMRequest> = []
       const storage = yield* makeStorage()
+
       const layer = Layer.mergeAll(
         makeLoopLayer(requests),
         makeDurableObjectSessionEventStoreLayer(sessionId, storage)
       )
+
       const firstInput = UserMessage.make({ content: 'first' })
       const secondInput = UserMessage.make({ content: 'second' })
+
       const firstAssistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'first reply' })]
       })
+
       const secondAssistant = AssistantAgentMessage.make({
         parts: [AssistantTextPart.make({ content: 'second reply' })]
       })
@@ -369,10 +376,12 @@ describe('Cloudflare session event storage', () => {
     Effect.gen(function* () {
       const sessionId = 'session_1'
       const input = UserMessage.make({ content: 'interrupted' })
+
       const initialLog = appendRuntimeSessionEventsToLog(emptyRuntimeEventLog(sessionId), {
         sessionId,
         events: [InputAppended.make({ message: input }), RunStarted.make({ runId: 'run_1' })]
       })
+
       const storage = yield* makeStorage(initialLog)
 
       yield* interruptLatestIncompleteRun(sessionId, storage)
@@ -392,6 +401,7 @@ describe('Cloudflare session event storage', () => {
   it.effect('rejects stale HITL revision without mutating durable log', () =>
     Effect.gen(function* () {
       const sessionId = 'session_1'
+
       const before = appendRuntimeSessionEventsToLog(emptyRuntimeEventLog(sessionId), {
         sessionId,
         events: [
@@ -403,8 +413,10 @@ describe('Cloudflare session event storage', () => {
           })
         ]
       })
+
       const storage = yield* makeStorage(before)
       const requests: Array<LLMRequest> = []
+
       const result = yield* runRuntime(
         {
           _tag: 'AppendHitlResponse',
@@ -415,6 +427,7 @@ describe('Cloudflare session event storage', () => {
         },
         wsRuntimeConfig
       ).pipe(Stream.runCollect, Effect.provide(makeWsLayer(storage, requests)), Effect.result)
+
       const after = yield* loadRuntimeEventLogOrEmpty(sessionId, storage)
 
       expect(result).toMatchObject({
@@ -448,7 +461,9 @@ describe('Cloudflare session event storage', () => {
                 : command.kind === 'appendCurrent'
                   ? expectedLog.revision
                   : expectedLog.revision + 1
+
             const event = runtimeEventForCommand(command.event, index)
+
             const result = yield* Effect.gen(function* () {
               const store = yield* SessionEventStore
 
@@ -508,6 +523,7 @@ describe('Cloudflare session event storage', () => {
                 )
                 break
               }
+
               case 'startActive': {
                 const store = yield* SessionEventStore
                 const activeRun = latestIncompleteRuntimeRun(before.events)
@@ -519,8 +535,10 @@ describe('Cloudflare session event storage', () => {
                     events: [RunStarted.make({ runId: `ws_active_run_${index}` })]
                   })
                 }
+
                 break
               }
+
               case 'userCurrent':
               case 'userNone':
               case 'userStale': {
@@ -530,20 +548,24 @@ describe('Cloudflare session event storage', () => {
                 if (!outcome.mutated) {
                   expect(after).toEqual(before)
                 }
+
                 break
               }
+
               case 'hitlCurrent':
               case 'hitlNone':
               case 'hitlStale':
               case 'hitlMismatch':
               case 'hitlDuplicate': {
                 const pending = latestApprovalRequest(before)
+
                 const response =
                   command.kind === 'hitlDuplicate'
                     ? (lastAcceptedHitlResponse ?? staleApprovalResponse())
                     : command.kind === 'hitlMismatch' || pending === undefined
                       ? staleApprovalResponse()
                       : responseForApprovalRequest(pending)
+
                 const outcome = yield* runWsHitlResponse({ storage, command, index, response })
                 const after = yield* loadRuntimeEventLogOrEmpty('session_1', storage)
 
@@ -552,6 +574,7 @@ describe('Cloudflare session event storage', () => {
                 } else {
                   expect(after).toEqual(before)
                 }
+
                 break
               }
             }
@@ -560,6 +583,7 @@ describe('Cloudflare session event storage', () => {
             expect(actual.revision).toBe(actual.events.length)
 
             const incomplete = latestIncompleteRuntimeRun(actual.events)
+
             if (Option.isSome(incomplete)) {
               expect(actual.events.at(-1)?.event._tag).toBe('RunStarted')
             }

@@ -7,8 +7,11 @@ import { makeTool, type ToolModule, type ToolRegistration } from '@yolk-sdk/agen
 import type { AgentToolContext } from './tool-context.ts'
 
 const justBashToolName = 'just_bash'
+
 const defaultTimeoutSeconds = 10
+
 const maxTimeoutSeconds = 30
+
 const maxOutputCharacters = 20_000
 
 const JustBashParams = Schema.Struct({

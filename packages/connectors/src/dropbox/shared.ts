@@ -5,18 +5,29 @@ import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const dropboxConnectorId = 'dropbox'
+
 export const dropboxOAuthSlotId = 'dropbox.oauth'
+
 export const dropboxOAuthAuthorizeUrl = 'https://www.dropbox.com/oauth2/authorize'
+
 export const dropboxOAuthTokenUrl = 'https://api.dropboxapi.com/oauth2/token'
+
 export const dropboxApiBaseUrl = 'https://api.dropboxapi.com/2'
+
 export const dropboxContentApiBaseUrl = 'https://content.dropboxapi.com/2'
 
 export const dropboxFilesMetadataReadScope = 'files.metadata.read'
+
 export const dropboxFilesContentReadScope = 'files.content.read'
+
 export const dropboxFilesContentWriteScope = 'files.content.write'
+
 export const dropboxMetadataReadScopes = Object.freeze([dropboxFilesMetadataReadScope])
+
 export const dropboxContentReadScopes = Object.freeze([dropboxFilesContentReadScope])
+
 export const dropboxContentWriteScopes = Object.freeze([dropboxFilesContentWriteScope])
+
 export const dropboxCombinedScopes = Object.freeze([
   dropboxFilesMetadataReadScope,
   dropboxFilesContentReadScope,

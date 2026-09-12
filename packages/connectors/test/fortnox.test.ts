@@ -1,4 +1,4 @@
-import { Chunk, Effect, Layer } from 'effect'
+import { Chunk, Effect, Layer, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { resolveTools } from '@yolk-sdk/agent/tools'
@@ -35,25 +35,30 @@ const integration = makeIntegration({
     makeCredentialBinding({ slotId: 'fortnox.oauth', credentialRef: 'host-fortnox-ref' })
   ]
 })
+
 const oauth = OAuthCredential.make({
   _tag: 'OAuthCredential',
   provider: 'fortnox',
   accessToken: 'test-access-token',
   expiresAt: 4_000_000_000_000
 })
+
 const response = (body: unknown, status = 200, headers: Readonly<Record<string, string>> = {}) =>
   ConnectorHttpResponse.make({ status, headers, body: JSON.stringify(body) })
+
 const meta = (currentPage = 1, totalPages = 1, totalResources = 1) => ({
   '@CurrentPage': currentPage,
   '@TotalPages': totalPages,
   '@TotalResources': totalResources
 })
+
 const makeHarness = (
   responses: ReadonlyArray<ConnectorHttpResponse>,
   credential: RuntimeCredential = oauth
 ) => {
   const requests: Array<ConnectorHttpRequest> = []
   const scopes: Array<ReadonlyArray<string> | undefined> = []
+
   const layer = Layer.mergeAll(
     Layer.succeed(
       CredentialResolver,
@@ -62,6 +67,7 @@ const makeHarness = (
           expect(request.binding.credentialRef).toBe('host-fortnox-ref')
           expect(request.slot.id).toBe('fortnox.oauth')
           scopes.push(request.slot.requiredScopes)
+
           return Effect.succeed(credential)
         }
       })
@@ -72,6 +78,7 @@ const makeHarness = (
         request: request => {
           requests.push(request)
           const next = responses.at(requests.length - 1)
+
           return next === undefined
             ? Effect.die(new Error('Unexpected Fortnox HTTP request'))
             : Effect.succeed(next)
@@ -79,8 +86,10 @@ const makeHarness = (
       })
     )
   )
+
   return { layer, requests, scopes }
 }
+
 const invoke = (action: string, input: unknown = {}) =>
   FortnoxConnector.invoke({ integration, action, input })
 
@@ -146,6 +155,7 @@ const reads = [
     expected: { GivenNumber: '004', InvoiceNumber: 'INV-2026', Total: '125.50', Balance: '0.00' }
   }
 ]
+
 const lists = [
   {
     action: 'fortnox.list_customers',
@@ -188,8 +198,11 @@ const decodeListItems = (value: unknown) =>
   )(value).pipe(
     Effect.map(output => {
       if ('customers' in output) return Chunk.toReadonlyArray(output.customers)
+
       if ('invoices' in output) return Chunk.toReadonlyArray(output.invoices)
+
       if ('suppliers' in output) return Chunk.toReadonlyArray(output.suppliers)
+
       return Chunk.toReadonlyArray(output.supplierInvoices)
     })
   )
@@ -220,15 +233,19 @@ describe('Fortnox connector', () => {
   it.effect('adapts all actions to read-only agent tools with object input schemas', () =>
     Effect.gen(function* () {
       const harness = makeHarness([])
+
       const toolSet = yield* resolveTools(
         [makeConnectorToolModule(FortnoxConnector, { integration, layer: harness.layer })],
         {}
       )
+
       expect(toolSet.tools).toHaveLength(10)
+
       for (const tool of toolSet.tools) {
         expect(tool.parameters).toMatchObject({ type: 'object' })
         expect(toolSet.metadata.find(item => item.name === tool.name)?.access).toBe('read')
       }
+
       expect(harness.requests).toHaveLength(0)
       expect(harness.scopes).toHaveLength(0)
     })
@@ -239,7 +256,9 @@ describe('Fortnox connector', () => {
       Effect.gen(function* () {
         const harness = makeHarness([response(item.body)])
         const result = yield* invoke(item.action, item.input).pipe(Effect.provide(harness.layer))
-        expect(result).toMatchObject({ _tag: 'Success', value: item.expected })
+        const expectedResultFields = { value: item.expected }
+        expect(result._tag).toBe('Success')
+        expect(result).toMatchObject(expectedResultFields)
         expect(harness.requests).toHaveLength(1)
         expect(harness.requests[0]).toMatchObject({
           method: 'GET',
@@ -259,24 +278,29 @@ describe('Fortnox connector', () => {
           response({ [item.key]: [item.item], MetaInformation: meta(2, 3, 5) }),
           response({ [item.key]: [], MetaInformation: meta(3, 3, 5) })
         ])
+
         const result = yield* invoke(item.action, {
           page: 2,
           limit: 2,
           lastModified: '2026-01-01 12:00'
         }).pipe(Effect.provide(harness.layer))
+
+        expect(result._tag).toBe('Success')
         expect(result).toMatchObject({
-          _tag: 'Success',
           value: { pagination: { currentPage: 2, totalPages: 3, totalResources: 5, nextPage: 3 } }
         })
-        if (result._tag !== 'Success') throw new Error('Expected list success')
+
+        if (!Predicate.isTagged(result, 'Success')) throw new Error('Expected list success')
         const items = yield* decodeListItems(result.value)
         expect(items).toMatchObject([item.item])
+
         const last = yield* invoke(item.action, {
           page: 3,
           limit: 2,
           lastModified: '2026-01-01 12:00'
         }).pipe(Effect.provide(harness.layer))
-        if (last._tag !== 'Success') throw new Error('Expected final page success')
+
+        if (!Predicate.isTagged(last, 'Success')) throw new Error('Expected final page success')
         expect(last.value).toMatchObject({ pagination: { currentPage: 3 } })
         expect(last.value).not.toHaveProperty('pagination.nextPage')
         expect(yield* decodeListItems(last.value)).toEqual([])
@@ -294,11 +318,10 @@ describe('Fortnox connector', () => {
           const harness = makeHarness([
             response({ [item.key]: [], MetaInformation: meta(1, 0, 0) })
           ])
+
           const result = yield* invoke(item.action).pipe(Effect.provide(harness.layer))
-          expect(result).toMatchObject({
-            _tag: 'Success',
-            value: { pagination: { totalResources: 0 } }
-          })
+          expect(result._tag).toBe('Success')
+          expect(result).toMatchObject({ value: { pagination: { totalResources: 0 } } })
           expect(result).not.toHaveProperty('value.pagination.nextPage')
           expect(harness.requests[0]?.url).toBe(`https://api.fortnox.se/3/${item.resource}`)
         })
@@ -317,6 +340,7 @@ describe('Fortnox connector', () => {
         lastModified: '2026-01-01 00:00'
       }).pipe(Effect.provide(harness.layer))
       const request = harness.requests[0]
+
       if (!request) throw new Error('Expected request')
       expect(Object.fromEntries(new URL(request.url).searchParams)).toEqual({
         customername: 'A & B/Å?limit=500',
@@ -334,6 +358,7 @@ describe('Fortnox connector', () => {
       const harness = makeHarness([
         response({ Customer: { CustomerNumber: 'a/b?#%', Name: 'Test' } })
       ])
+
       yield* invoke('fortnox.get_customer', { customerNumber: 'a/b?#%' }).pipe(
         Effect.provide(harness.layer)
       )
@@ -364,13 +389,16 @@ describe('Fortnox connector', () => {
           }
         })
       ])
+
       const invoice = yield* invoke('fortnox.get_invoice', { documentNumber: '2' }).pipe(
         Effect.provide(harness.layer)
       )
+
       const supplier = yield* invoke('fortnox.get_supplier_invoice', { givenNumber: '4' }).pipe(
         Effect.provide(harness.layer)
       )
-      if (invoice._tag !== 'Success' || supplier._tag !== 'Success')
+
+      if (!Predicate.isTagged(invoice, 'Success') || !Predicate.isTagged(supplier, 'Success'))
         throw new Error('Expected invoice successes')
       const i = yield* Schema.decodeUnknownEffect(FortnoxInvoice)(invoice.value)
       const s = yield* Schema.decodeUnknownEffect(FortnoxSupplierInvoice)(supplier.value)
@@ -402,15 +430,19 @@ describe('Fortnox connector', () => {
     { action: 'fortnox.list_customers', input: { search: { field: 'limit', value: '5' } } },
     { action: 'fortnox.list_suppliers', input: { search: { field: 'name', value: '' } } }
   ]
+
   for (const [index, item] of invalidInputs.entries()) {
     it.effect(`rejects invalid input ${index} before credential resolution or HTTP`, () =>
       Effect.gen(function* () {
         const harness = makeHarness([])
+
         const result = yield* invoke(item.action, item.input).pipe(
           Effect.provide(harness.layer),
           Effect.result
         )
-        expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
         expect(harness.requests).toHaveLength(0)
         expect(harness.scopes).toHaveLength(0)
       })
@@ -434,11 +466,12 @@ describe('Fortnox connector', () => {
             { 'Retry-After': '5' }
           )
         ])
+
         const result = yield* invoke('fortnox.get_company_information').pipe(
           Effect.provide(harness.layer)
         )
-        expect(result).toMatchObject({
-          _tag: 'Failure',
+
+        const expectedResultFields = {
           error: {
             code,
             status,
@@ -446,7 +479,10 @@ describe('Fortnox connector', () => {
             retryAfterMs: 5000,
             underlying: { providerCode: 2000003 }
           }
-        })
+        }
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject(expectedResultFields)
         expect(harness.requests).toHaveLength(1)
       })
     )
@@ -462,11 +498,13 @@ describe('Fortnox connector', () => {
           404
         )
       ])
+
       const result = yield* invoke('fortnox.get_company_information').pipe(
         Effect.provide(harness.layer)
       )
+
+      expect(result._tag).toBe('Failure')
       expect(result).toMatchObject({
-        _tag: 'Failure',
         error: {
           code: 'fortnox_not_found',
           message: 'Kan inte hitta kontot.',
@@ -486,11 +524,13 @@ describe('Fortnox connector', () => {
         const harness = makeHarness([
           ConnectorHttpResponse.make({ status: 502, body, headers: { 'retry-after': 'invalid' } })
         ])
+
         const result = yield* invoke('fortnox.get_company_information').pipe(
           Effect.provide(harness.layer)
         )
+
+        expect(result._tag).toBe('Failure')
         expect(result).toMatchObject({
-          _tag: 'Failure',
           error: { code: 'fortnox_request_failed', message: 'Fortnox request failed (HTTP 502)' }
         })
         expect(result).not.toHaveProperty('error.underlying')
@@ -511,11 +551,14 @@ describe('Fortnox connector', () => {
         const harness = makeHarness([
           ConnectorHttpResponse.make({ status: 200, body, headers: {} })
         ])
+
         const result = yield* invoke('fortnox.list_customers').pipe(
           Effect.provide(harness.layer),
           Effect.result
         )
-        expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'validation_failed' } })
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject({ failure: { cause: 'validation_failed' } })
       })
     )
   }
@@ -523,15 +566,15 @@ describe('Fortnox connector', () => {
   it.effect('fails missing bindings before resolving credentials or making HTTP calls', () =>
     Effect.gen(function* () {
       const harness = makeHarness([])
+
       const result = yield* FortnoxConnector.invoke({
         integration: makeIntegration({ connectorId: 'fortnox' }),
         action: 'fortnox.get_company_information',
         input: {}
       }).pipe(Effect.provide(harness.layer), Effect.result)
-      expect(result).toMatchObject({
-        _tag: 'Failure',
-        failure: { cause: 'credential_binding_missing' }
-      })
+
+      expect(result._tag).toBe('Failure')
+      expect(result).toMatchObject({ failure: { cause: 'credential_binding_missing' } })
       expect(harness.scopes).toHaveLength(0)
       expect(harness.requests).toHaveLength(0)
     })
@@ -546,11 +589,14 @@ describe('Fortnox connector', () => {
     it.effect('rejects wrong credential kinds, providers, or unsafe tokens without HTTP', () =>
       Effect.gen(function* () {
         const harness = makeHarness([], credential)
+
         const result = yield* invoke('fortnox.get_company_information').pipe(
           Effect.provide(harness.layer),
           Effect.result
         )
-        expect(result).toMatchObject({ _tag: 'Failure', failure: { cause: 'credential_invalid' } })
+
+        expect(result._tag).toBe('Failure')
+        expect(result).toMatchObject({ failure: { cause: 'credential_invalid' } })
         expect(harness.requests).toHaveLength(0)
       })
     )
@@ -562,19 +608,25 @@ describe('Fortnox connector', () => {
         cause: 'transport_failed',
         message: 'Host transport failed'
       })
+
       const credentialLayer = Layer.succeed(
         CredentialResolver,
         CredentialResolver.of({ resolve: () => Effect.succeed(oauth) })
       )
+
       const httpLayer = Layer.succeed(
         ConnectorHttpClient,
         ConnectorHttpClient.of({ request: () => Effect.fail(error) })
       )
+
       const result = yield* invoke('fortnox.get_company_information').pipe(
         Effect.provide(Layer.mergeAll(credentialLayer, httpLayer)),
         Effect.result
       )
-      expect(result).toMatchObject({ _tag: 'Failure', failure: error })
+
+      const expectedResultFields = { failure: error }
+      expect(result._tag).toBe('Failure')
+      expect(result).toMatchObject(expectedResultFields)
     })
   )
 })
@@ -596,19 +648,24 @@ it.effect(
           MetaInformation: meta(2, 3, 11)
         })
       ])
+
       const result = yield* invoke('fortnox.list_supplier_invoice_files', {
         givenNumber: '42',
         page: 2,
         limit: 5
       }).pipe(Effect.provide(h.layer))
+
       expect(h.requests[0]?.url).toBe(
         'https://api.fortnox.se/3/supplierinvoicefileconnections?supplierinvoicenumber=42&page=2&limit=5'
       )
       expect(h.scopes).toEqual([['connectfile']])
-      if (result._tag !== 'Success') return yield* Effect.die('Expected metadata')
+
+      if (!Predicate.isTagged(result, 'Success')) return yield* Effect.die('Expected metadata')
+
       const value = yield* Schema.decodeUnknownEffect(FortnoxListSupplierInvoiceFilesOutput)(
         result.value
       )
+
       expect(value.pagination.nextPage).toBe(3)
       expect(Chunk.toReadonlyArray(value.files)).toMatchObject([
         { fileId: 'file-id', givenNumber: '42' }

@@ -23,6 +23,17 @@ export default defineConfig({
       '**/e2e/**',
       '**/node_modules/**',
       '**/.repos/**',
+      // Sole runner is `pnpm test:anti-slop` (tools/oxlint/vitest.config.ts:
+      // node env, 120s timeouts, no dotenv/DB). Keep this tree out of the root
+      // suite to avoid duplicate/conflicting runs.
+      'tools/oxlint/**',
+      // Sole runner is the DB-free tooling gate
+      // (`vitest run --config tools/tooling/vitest.config.ts` via
+      // `pnpm test:tooling`: node env, no dotenv/DB). Keep these trees out of
+      // the root jsdom suite to avoid a duplicate runner.
+      'tools/tooling/**',
+      'eslint-local-rules/**',
+      'scripts/**',
       '**/*.integration.test.ts',
       // Package suites run in their own node-environment vitest configs (see
       // `pnpm --filter './packages/*' test:run`). Running them again under the

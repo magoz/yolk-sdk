@@ -124,6 +124,7 @@ describe('content helpers', () => {
     Effect.gen(function* () {
       const text = yield* attachmentSourceText(inlineBase64AttachmentSource(btoa('# Identity')))
       const unicode = 'Crème brûlée 🥚 — 東京'
+
       const unicodeText = yield* attachmentSourceText(
         inlineBase64AttachmentSource(textToBase64Utf8(unicode))
       )

@@ -9,6 +9,7 @@ export const ConnectorErrorCause = Schema.Literals([
   'transport_failed',
   'validation_failed'
 ])
+
 export type ConnectorErrorCause = typeof ConnectorErrorCause.Type
 
 export class ConnectorError extends Schema.TaggedErrorClass<ConnectorError>()('ConnectorError', {

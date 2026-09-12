@@ -22,6 +22,7 @@ const makeDependencies = (
   respond: (input: McpWebSearchRequest) => Effect.Effect<string, ToolError>
 ) => {
   const requested: Array<McpWebSearchRequest> = []
+
   const deps: WebSearchDependencies = {
     request: input => {
       requested.push(input)
@@ -63,6 +64,7 @@ describe('web_search tool', () => {
       const { deps, requested } = makeDependencies(() =>
         Effect.succeed(mcpResult('Search result with source.'))
       )
+
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -97,6 +99,7 @@ describe('web_search tool', () => {
             )
           : Effect.succeed(mcpResult('Fallback result.'))
       )
+
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -123,6 +126,7 @@ describe('web_search tool', () => {
           })
         )
       )
+
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -144,6 +148,7 @@ describe('web_search tool', () => {
   it.effect('returns model-visible errors for blank queries', () =>
     Effect.gen(function* () {
       const { deps, requested } = makeDependencies(() => Effect.succeed(mcpResult('unused')))
+
       const result = yield* executeWebSearchTool(
         ToolCall.make({
           id: 'call_1',
@@ -169,6 +174,7 @@ describe('web_search tool', () => {
         route: '/agent',
         userId: 'user_1'
       })
+
       const voiceTools = yield* resolveAgentTools({
         surface: 'voice',
         route: '/agent',

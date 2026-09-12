@@ -1,10 +1,13 @@
 export { ConnectorBinaryHttpClient, ConnectorBinaryHttpError } from './binary-http.ts'
+
 export type {
   ConnectorBinaryHttpClientApi,
   ConnectorBinaryHttpRequest,
   ConnectorBinaryHttpResponse
 } from './binary-http.ts'
+
 export { defineAction } from './action.ts'
+
 export type {
   ActionExecutionInput,
   ConnectorAction,
@@ -12,8 +15,11 @@ export type {
   DefineActionOptions,
   UnknownActionExecutionInput
 } from './action.ts'
+
 export { defineConnector } from './connector.ts'
+
 export type { Connector, ConnectorInvokeInput, DefineConnectorOptions } from './connector.ts'
+
 export {
   ApiKeyCredential,
   BearerTokenCredential,
@@ -28,9 +34,13 @@ export {
   makeCredentialBinding,
   resolveCredential
 } from './credential.ts'
+
 export type { CredentialResolveRequest, CredentialResolverApi } from './credential.ts'
+
 export { ConnectorError, ConnectorErrorCause } from './error.ts'
+
 export { optionalStringConfig, requiredStringConfig } from './config.ts'
+
 export {
   ConnectorHttpClient,
   ConnectorHttpRequest,
@@ -38,14 +48,22 @@ export {
   HttpMethod,
   decodeJsonResponse
 } from './http.ts'
+
 export type { ConnectorHttpClientApi } from './http.ts'
+
 export { ConnectorIntegration, IntegrationConfig, makeIntegration } from './integration.ts'
+
 export { ActionResult, ProviderFailure } from './result.ts'
+
 export type { ActionResult as ActionResultType } from './result.ts'
+
 export { ConnectorBinaryWriteHttpClient } from './binary-write-http.ts'
+
 export type {
   ConnectorBinaryWriteHttpClientApi,
   ConnectorBinaryWriteHttpRequest
 } from './binary-write-http.ts'
+
 export { ConnectorFileTransferError } from './file-transfer.ts'
+
 export type { ConnectorFileTransferBudget, ConnectorFileBytes } from './file-transfer.ts'

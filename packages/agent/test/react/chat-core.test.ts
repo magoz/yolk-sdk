@@ -30,6 +30,7 @@ import {
   makeAgentChatEventProjectionState,
   reduceAgentChatState
 } from '../../src/react/chat-core.ts'
+import { Predicate } from 'effect'
 
 describe('agent chat core', () => {
   it('submits user messages through the headless reducer', () => {
@@ -47,6 +48,7 @@ describe('agent chat core', () => {
       kind: 'overloaded',
       status: 529
     })
+
     const retry = AgentRetry.make({
       attempt: 1,
       reason: 'overloaded',
@@ -54,16 +56,19 @@ describe('agent chat core', () => {
       message: 'overloaded',
       provider
     })
+
     const error = AgentError.make({
       code: 'overloaded',
       message: 'provider overloaded',
       retryable: true,
       provider
     })
+
     const retrying = reduceAgentChatState(initialAgentChatState, {
       _tag: 'Event',
       event: retry
     })
+
     const failed = reduceAgentChatState(retrying, { _tag: 'Event', event: error })
 
     expect(retrying.retryInfo).toBe(retry)
@@ -141,7 +146,9 @@ describe('agent chat core', () => {
       createdAtMs: 1781260200000,
       author: { displayName: 'Magoz' }
     })
+
     const event = UserMessageEvent.make({ eventId: 'workflow:1:steer:0', message })
+
     const state = [event, event].reduce(
       (current, replayedEvent) => applyAgentEventToChatProjection(current, replayedEvent),
       makeAgentChatEventProjectionState()
@@ -258,7 +265,9 @@ describe('agent chat core', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const state = [
       ToolInputEnd.make({ call }),
       ToolExecutionCompleted.make({ call, result }),
@@ -286,7 +295,9 @@ describe('agent chat core', () => {
       name: 'web_fetch',
       params: { url: 'https://example.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
+
     const state = [
       ToolInputEnd.make({ call }),
       ToolExecutionStarted.make({ call }),
@@ -295,7 +306,8 @@ describe('agent chat core', () => {
       (current, event) => reduceAgentChatState(current, { _tag: 'Event', event, nowMs: 123 }),
       initialAgentChatState
     )
-    const toolPart = state.chatMessages[0]?.parts.find(part => part._tag === 'ToolCall')
+
+    const toolPart = state.chatMessages[0]?.parts.find(part => Predicate.isTagged(part, 'ToolCall'))
 
     expect(toolPart).toMatchObject({
       _tag: 'ToolCall',
@@ -305,7 +317,7 @@ describe('agent chat core', () => {
       }
     })
 
-    if (toolPart?._tag !== 'ToolCall' || toolPart.state._tag !== 'Completed') {
+    if (toolPart?._tag !== 'ToolCall' || !Predicate.isTagged(toolPart.state, 'Completed')) {
       throw new Error('Expected completed tool call part')
     }
 
@@ -315,12 +327,14 @@ describe('agent chat core', () => {
 
   it('optimistically applies HITL responses', () => {
     const call = ToolCall.make({ id: 'call_question', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_question',
       toolCallId: call.id,
       call,
       questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
     })
+
     const response = QuestionResponse.make({
       requestId: request.requestId,
       toolCallId: call.id,
@@ -328,10 +342,12 @@ describe('agent chat core', () => {
       source: 'user',
       answers: [QuestionAnswer.make({ questionId: 'choice', customAnswer: 'A' })]
     })
+
     const waiting = reduceAgentChatState(initialAgentChatState, {
       _tag: 'Event',
       event: QuestionRequested.make({ request })
     })
+
     const submitted = reduceAgentChatState(waiting, {
       _tag: 'SubmitHitlResponse',
       response

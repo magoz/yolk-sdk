@@ -1,4 +1,5 @@
 import * as Schema from 'effect/Schema'
+import { Predicate } from 'effect'
 import { AssistantAgentMessage, AgentMessage, UserMessage } from './message.ts'
 import {
   HitlRequest,
@@ -21,6 +22,7 @@ const EventIdentity = {
 }
 
 export const SubagentStatus = Schema.Literals(['running', 'completed', 'error'])
+
 export type SubagentStatus = typeof SubagentStatus.Type
 
 export const AgentErrorCode = Schema.Literals([
@@ -39,6 +41,7 @@ export const AgentErrorCode = Schema.Literals([
   'conflict',
   'unknown'
 ])
+
 export type AgentErrorCode = typeof AgentErrorCode.Type
 
 export const ProviderFailureKind = Schema.Literals([
@@ -52,6 +55,7 @@ export const ProviderFailureKind = Schema.Literals([
   'invalid_response',
   'unknown'
 ])
+
 export type ProviderFailureKind = typeof ProviderFailureKind.Type
 
 export class ProviderErrorInfo extends Schema.Class<ProviderErrorInfo>('ProviderErrorInfo')({
@@ -342,6 +346,7 @@ export const hitlResponseEvent = (response: HitlResponse): AgentEvent => {
         ? QuestionAnswered.make({ response: responseValue })
         : QuestionCancelled.make({ response: responseValue })
     }
+
     case 'ToolApprovalResponse': {
       const responseValue = toolApprovalResponseValue(response)
 
@@ -390,6 +395,7 @@ export const AgentEvent = Schema.Union([
   SubagentStarted,
   SubagentCompleted
 ])
+
 export type AgentEvent = typeof AgentEvent.Type
 
 export type TerminalAgentEvent = Extract<
@@ -398,4 +404,6 @@ export type TerminalAgentEvent = Extract<
 >
 
 export const isTerminalAgentEvent = (event: AgentEvent): event is TerminalAgentEvent =>
-  event._tag === 'AgentEnd' || event._tag === 'AgentError' || event._tag === 'AgentAwaitingInput'
+  Predicate.isTagged(event, 'AgentEnd') ||
+  Predicate.isTagged(event, 'AgentError') ||
+  Predicate.isTagged(event, 'AgentAwaitingInput')

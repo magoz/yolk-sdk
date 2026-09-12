@@ -5,13 +5,16 @@ import { VoiceToolBridgeError, type VoiceSessionConfig } from '@yolk-sdk/agent/v
 import { backgroundVoiceUnsupportedMessage } from '../../../background-execution-internal.ts'
 
 export type OpenAiRealtimeVoice = 'marin' | 'cedar'
+
 export type OpenAiRealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
 export const OpenAiRealtimeTranscriptionModelSchema = Schema.Literals([
   'gpt-realtime-whisper',
   'gpt-4o-transcribe',
   'gpt-4o-mini-transcribe',
   'gpt-4o-mini-transcribe-2025-12-15'
 ])
+
 export type OpenAiRealtimeTranscriptionModel = typeof OpenAiRealtimeTranscriptionModelSchema.Type
 
 type PromptedOpenAiRealtimeTranscriptionModel = Exclude<
@@ -77,10 +80,14 @@ export type OpenAiRealtimeSessionConfigInput = {
 }
 
 export const openAiRealtimeModel = 'gpt-realtime-2'
+
 export const defaultOpenAiRealtimeVoice: OpenAiRealtimeVoice = 'marin'
+
 export const defaultOpenAiRealtimeReasoningEffort: OpenAiRealtimeReasoningEffort = 'low'
+
 export const defaultOpenAiRealtimeTranscriptionModel: OpenAiRealtimeTranscriptionModel =
   'gpt-realtime-whisper'
+
 export const openAiRealtimeTranscriptionPrompt = 'Transcribe English speech. Preserve exact words.'
 
 const makeOpenAiRealtimeInputTranscription = (

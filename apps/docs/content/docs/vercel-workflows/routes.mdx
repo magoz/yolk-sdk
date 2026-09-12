@@ -120,12 +120,12 @@ Cancellation is host/Vercel-owned. The package does not define a cancellation pr
 
 Import these from `@yolk-sdk/agent/client`.
 
-| Client API                                      | Route shape                                   |
+| Client API                                           | Route shape                                   |
 | ---------------------------------------------------- | --------------------------------------------- |
 | `streamAgentEventStreamUntilTerminal`                | starts run and follows continuation headers   |
 | `streamAgentRunEventStreamUntilTerminal`             | reads an existing run tail                    |
 | `streamAgentRunHitlResponseEventStreamUntilTerminal` | resumes HITL and follows returned/tail chunks |
-| `cancelAgentRun`                                | calls your cancel route                       |
+| `cancelAgentRun`                                     | calls your cancel route                       |
 
 ## Headers
 

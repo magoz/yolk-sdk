@@ -65,6 +65,7 @@ export const openAiRealtimeServerEventToVoiceEvents = (
 
       return first === undefined ? [] : [VoiceToolCallsRequested.make({ calls: [first, ...rest] })]
     }
+
     case 'Error':
       return [VoiceErrorEvent.make({ code: 'provider_error', message: event.message })]
     case 'Ignored':

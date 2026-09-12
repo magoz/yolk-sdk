@@ -29,7 +29,9 @@ export type VercelWorkflowFunction<TArgs extends unknown[], TResult> = (
 ) => Promise<TResult>
 
 export type VercelWorkflowReadableOptions = WorkflowReadableStreamOptions
+
 export type VercelWorkflowReadableStream<Chunk> = WorkflowReadableStream<Chunk>
+
 export type VercelWorkflowRunStatus = WorkflowRun['status']
 
 export type VercelWorkflowsSdkRun<TResult> = {
@@ -101,7 +103,8 @@ const trySdkPromise = <A>(body: () => Promise<A>) =>
     catch: error => error
   })
 
-const mapSdkError = (operation: VercelWorkflowsOperation) =>
+const mapSdkError =
+  (operation: VercelWorkflowsOperation) =>
   <A>(effect: Effect.Effect<A, unknown>) =>
     effect.pipe(Effect.mapError(cause => workflowsError(operation, cause)))
 

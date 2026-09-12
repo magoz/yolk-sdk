@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Ref, Result, Stream } from 'effect'
+import { Effect, Layer, Option, Predicate, Ref, Result, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -117,6 +117,7 @@ type AnthropicUserBlock =
   | AnthropicImageBlock
   | AnthropicDocumentBlock
   | AnthropicToolResultBlock
+
 type AnthropicAssistantBlock = AnthropicTextBlock | AnthropicToolUseBlock
 
 type AnthropicMessage =
@@ -124,7 +125,9 @@ type AnthropicMessage =
   | { readonly role: 'assistant'; readonly content: ReadonlyArray<AnthropicAssistantBlock> }
 
 type JsonObject = Readonly<Record<string, unknown>>
+
 type TopLevelJsonSchemaCombinatorKey = 'anyOf' | 'oneOf' | 'allOf'
+
 type TopLevelJsonSchemaCombinator = {
   readonly key: TopLevelJsonSchemaCombinatorKey
   readonly items: ReadonlyArray<unknown>
@@ -155,13 +158,21 @@ type AnthropicToolBlockState = {
 }
 
 const anthropicClaudeSystemIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+
 const anthropicClaudeBillingPrefix = 'x-anthropic-billing-header:'
+
 const anthropicClaudeToolPrefix = 'mcp_'
+
 const anthropicClaudeVersion = '2023-06-01'
+
 const anthropicClaudeCchSalt = '59cf53e54c78'
+
 const anthropicClaudeCchPositions: ReadonlyArray<number> = [4, 7, 20]
+
 const anthropicClaudeEffortBeta = 'effort-2025-11-24'
+
 const anthropicClaudeInterleavedThinkingBeta = 'interleaved-thinking-2025-05-14'
+
 const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
   'claude-code-20250219',
   'oauth-2025-04-20',
@@ -170,6 +181,7 @@ const anthropicClaudeRequiredBetas: ReadonlyArray<string> = [
   'context-management-2025-06-27',
   'advisor-tool-2026-03-01'
 ]
+
 const anthropicClaudeSystemTextReplacements: ReadonlyArray<{
   readonly match: string
   readonly replacement: string
@@ -183,6 +195,7 @@ const anthropicClaudeSystemTextReplacements: ReadonlyArray<{
     replacement: 'Environment context you are running in:'
   }
 ]
+
 const anthropicClaudeStainlessPackageVersion = '0.81.0'
 
 // Claude subscription OAuth is fingerprinted against Claude Code tool names.
@@ -204,6 +217,7 @@ const unprefixClaudeToolName = (name: string) => {
 }
 
 const anthropicClaudeMessagesUrl = 'https://api.anthropic.com/v1/messages?beta=true'
+
 const anthropicClaudeIdentitySystemBlock: AnthropicSystemBlock = {
   type: 'text',
   text: anthropicClaudeSystemIdentity
@@ -299,16 +313,14 @@ const makeAnthropicClaudeBillingSystemBlock = (
     cch: computeAnthropicClaudeCch(text),
     suffix: computeAnthropicClaudeVersionSuffix(text)
   }).pipe(
-    Effect.map(
-      ({ cch, suffix }): AnthropicSystemBlock => ({
-        type: 'text',
-        text:
-          `${anthropicClaudeBillingPrefix} ` +
-          `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
-          `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
-          `cch=${cch};`
-      })
-    )
+    Effect.map(({ cch, suffix }): AnthropicSystemBlock => ({
+      type: 'text',
+      text:
+        `${anthropicClaudeBillingPrefix} ` +
+        `cc_version=${anthropicClaudeCodeVersion}.${suffix}; ` +
+        `cc_entrypoint=${anthropicClaudeCodeEntrypoint}; ` +
+        `cch=${cch};`
+    }))
   )
 }
 
@@ -324,6 +336,7 @@ const sanitizeAnthropicClaudeSystemText = (text: string) => {
 
 const anthropicClaudeBetaHeader = (model: string) => {
   const lowerModel = model.toLowerCase()
+
   const baseBetas = lowerModel.includes('haiku')
     ? anthropicClaudeRequiredBetas.filter(beta => beta !== anthropicClaudeInterleavedThinkingBeta)
     : anthropicClaudeRequiredBetas
@@ -771,13 +784,19 @@ const mergeUnionJsonSchemaObjects = (
         if (Object.hasOwn(object, key)) return [jsonObjectField(object, key)]
 
         const additionalProperties = owners?.[index]
+
         if (additionalProperties === undefined) return []
 
-        const additionalPropertySchema = jsonObjectField(additionalProperties, 'additionalProperties')
+        const additionalPropertySchema = jsonObjectField(
+          additionalProperties,
+          'additionalProperties'
+        )
+
         if (additionalPropertySchema === false) return []
 
         return [isJsonObject(additionalPropertySchema) ? additionalPropertySchema : {}]
       })
+
       const [first, ...rest] = values
 
       return [key, rest.reduce(mergePropertySchemas, first)]
@@ -886,7 +905,9 @@ const independentCommonVariantKeys = new Set([
 
 const commonVariantFields = (variants: ReadonlyArray<JsonObject>): JsonObject => {
   const first = firstJsonObject(variants)
+
   if (first === undefined) return {}
+
   if (variants.length === 1) return first
 
   return Object.fromEntries(
@@ -894,7 +915,11 @@ const commonVariantFields = (variants: ReadonlyArray<JsonObject>): JsonObject =>
       if (!independentCommonVariantKeys.has(key)) return false
 
       const valueKey = jsonValueKey(value)
-      return valueKey !== undefined && variants.every(variant => valueKey === jsonValueKey(jsonObjectField(variant, key)))
+
+      return (
+        valueKey !== undefined &&
+        variants.every(variant => valueKey === jsonValueKey(jsonObjectField(variant, key)))
+      )
     })
   )
 }
@@ -935,6 +960,7 @@ const normalizeJsonSchemaCombinator = (
   }
 
   if (normalizedItems.includes(true)) return base
+
   if (first === undefined) return base
 
   const merged = objectVariant(variants) ?? commonVariantFields(variants)
@@ -944,9 +970,11 @@ const normalizeJsonSchemaCombinator = (
 
 function normalizeAnthropicToolSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeAnthropicToolSchema)
+
   if (!isJsonObject(value)) return value
 
   const combinator = topLevelJsonSchemaCombinator(value)
+
   if (combinator !== undefined) return normalizeJsonSchemaCombinator(value, combinator)
 
   return normalizeJsonSchemaObjectFields(value)
@@ -993,10 +1021,13 @@ const flattenTopLevelCombinatorToolSchema = (
 ): JsonObject => {
   const base = withoutTopLevelJsonSchemaCombinators(schema)
   const objectVariants = combinator.items.filter(isJsonObject)
+
   const hasUnconstrainedUnion =
     combinator.key !== 'allOf' &&
     combinator.items.some(item => item === true || !isJsonObject(item))
+
   const additionalProperties = mergeAdditionalProperties(objectVariants)
+
   const flattened = {
     ...base,
     type: 'object',
@@ -1005,9 +1036,7 @@ const flattenTopLevelCombinatorToolSchema = (
       : combinator.key === 'allOf'
         ? mergeRightBiasedJsonSchemaObjects(objectVariants.map(jsonSchemaProperties))
         : mergeUnionJsonSchemaObjects(objectVariants.map(jsonSchemaProperties), objectVariants),
-    required: hasUnconstrainedUnion
-      ? []
-      : mergeJsonSchemaRequired(combinator.key, objectVariants),
+    required: hasUnconstrainedUnion ? [] : mergeJsonSchemaRequired(combinator.key, objectVariants),
     $defs: mergeJsonSchemaObjects([
       jsonSchemaDefinitions(schema),
       ...objectVariants.map(jsonSchemaDefinitions)
@@ -1061,11 +1090,15 @@ const toAnthropicMessage = (message: AgentMessage): Effect.Effect<AnthropicMessa
           prependMessageContextToContent(assistantContent(message), messageContextText(message)),
           'Assistant'
         )
+
         const textBlocks: ReadonlyArray<AnthropicTextBlock> =
           text.length === 0 ? [] : [{ type: 'text', text }]
+
         const toolBlocks = assistantHostToolCalls(message).map(toolCallToAnthropicBlock)
+
         return { role: 'assistant', content: [...textBlocks, ...toolBlocks] }
       }
+
       case 'ToolResult':
         return {
           role: 'user',
@@ -1098,10 +1131,12 @@ export const toAnthropicClaudeRequestBody = (
     const rawMessages = yield* Effect.forEach(request.messages, toAnthropicMessage)
     const billingSystemBlock = yield* makeAnthropicClaudeBillingSystemBlock(rawMessages)
     const messages = prependSystemPromptToFirstUserMessage(rawMessages, request.systemPrompt)
+
     const outputConfig =
       request.reasoningEffort === undefined || request.reasoningEffort === 'minimal'
         ? undefined
         : { effort: request.reasoningEffort }
+
     const baseBody = {
       model: request.model,
       system: [billingSystemBlock, anthropicClaudeIdentitySystemBlock],
@@ -1109,6 +1144,7 @@ export const toAnthropicClaudeRequestBody = (
       max_tokens: config.maxTokens,
       ...(outputConfig === undefined ? {} : { output_config: outputConfig })
     }
+
     const body: AnthropicRequestBody =
       config.stream === true ? { ...baseBody, stream: true } : baseBody
 
@@ -1157,6 +1193,7 @@ const field = (value: unknown, key: string) =>
 
 const stringField = (value: unknown, key: string) => {
   const raw = field(value, key)
+
   return typeof raw === 'string' ? raw : undefined
 }
 
@@ -1172,9 +1209,7 @@ const boundedAnthropicHttpErrorMessage = (message: string) =>
     ? message
     : `${message.slice(0, maxAnthropicHttpErrorMessageCharacters)}…`
 
-const decodeAnthropicHttpErrorInfo = (
-  raw: string
-): Effect.Effect<AnthropicHttpErrorInfo> =>
+const decodeAnthropicHttpErrorInfo = (raw: string): Effect.Effect<AnthropicHttpErrorInfo> =>
   Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(raw).pipe(
     Effect.map(parsed => {
       const error = field(parsed, 'error')
@@ -1182,9 +1217,7 @@ const decodeAnthropicHttpErrorInfo = (
       const providerCode = stringField(error, 'type') ?? stringField(error, 'code')
 
       return {
-        ...(message === undefined
-          ? {}
-          : { message: boundedAnthropicHttpErrorMessage(message) }),
+        ...(message === undefined ? {} : { message: boundedAnthropicHttpErrorMessage(message) }),
         ...(providerCode === undefined ? {} : { providerCode })
       }
     }),
@@ -1213,6 +1246,7 @@ const providerSignalError = (input: {
 
 const numberField = (value: unknown, key: string) => {
   const raw = field(value, key)
+
   return typeof raw === 'number' ? raw : undefined
 }
 
@@ -1334,7 +1368,7 @@ const usageStepFromUnknown = (
 ): AnthropicStreamUsageStep => {
   const parsed = Schema.decodeUnknownOption(AnthropicStreamUsageResponse)(usage)
 
-  if (parsed._tag === 'None') {
+  if (Predicate.isTagged(parsed, 'None')) {
     return { snapshot: previous, events: [] }
   }
 
@@ -1376,7 +1410,9 @@ const toLlmEvents = (
           )
       }
     })
+
     const stopReason = response.stop_reason === 'tool_use' ? 'tool_use' : 'stop'
+
     const usageEvent =
       response.usage === undefined ? [] : [LLMUsage.make({ usage: toAgentUsage(response.usage) })]
 
@@ -1522,6 +1558,7 @@ const makeAnthropicStreamEmitter = () => {
 
       if (index !== undefined && deltaType === 'input_json_delta' && partialJson !== undefined) {
         const current = toolBlocks.get(index)
+
         if (current !== undefined) {
           toolBlocks.set(index, { ...current, partialJson: `${current.partialJson}${partialJson}` })
         }
@@ -1710,6 +1747,7 @@ export const streamAnthropicClaudeResponse = (
     Ref.make(initialBodyState).pipe(
       Effect.map(bodyStateRef => {
         const emitData = makeAnthropicStreamEmitter()
+
         const chunks = response.stream.pipe(
           Stream.mapError(
             toHttpClientLlmError('Could not read Anthropic Claude stream', true, 'stream')
@@ -1720,11 +1758,13 @@ export const streamAnthropicClaudeResponse = (
               const state = yield* Ref.get(bodyStateRef)
               const step = yield* processBodyChunk(emitData, state, chunk)
               yield* Ref.set(bodyStateRef, step.bodyState)
+
               return step.events
             })
           ),
           Stream.flatMap(events => Stream.fromIterable(events))
         )
+
         const finalEvents = Stream.fromEffect(
           Ref.get(bodyStateRef).pipe(Effect.flatMap(state => finalizeBodyState(emitData, state)))
         ).pipe(Stream.flatMap(events => Stream.fromIterable(events)))
@@ -1742,12 +1782,14 @@ const sendAnthropicClaudeRequest = (
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError> =>
   Effect.gen(function* () {
     const body = yield* toAnthropicClaudeRequestBody(request, { ...config, stream: true })
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* encodeJsonString(
       replaceLoneSurrogatesDeep(body),
       'Could not serialize Anthropic Claude request'
     )
+
     const httpRequest = HttpClientRequest.post(
       config.messagesUrl ?? anthropicClaudeMessagesUrl
     ).pipe(
@@ -1760,6 +1802,7 @@ const sendAnthropicClaudeRequest = (
       }),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientLlmError('Anthropic Claude request failed', true)))
@@ -1775,6 +1818,7 @@ const sendAnthropicClaudeRequest = (
             })
         )
       )
+
       const errorInfo = yield* decodeAnthropicHttpErrorInfo(errorText)
 
       const provider = classifyProviderFailure({
@@ -1783,10 +1827,9 @@ const sendAnthropicClaudeRequest = (
         headers: response.headers,
         body: errorText,
         ...(errorInfo.message === undefined ? {} : { message: errorInfo.message }),
-        ...(errorInfo.providerCode === undefined
-          ? {}
-          : { providerCode: errorInfo.providerCode })
+        ...(errorInfo.providerCode === undefined ? {} : { providerCode: errorInfo.providerCode })
       })
+
       const message =
         errorInfo.message === undefined
           ? `Anthropic Claude returned ${response.status}`

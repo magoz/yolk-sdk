@@ -7,8 +7,9 @@
  *
  * @see https://github.com/sst/opencode (packages/core/src/session/run-coordinator.ts)
  */
-import { Deferred, Effect, Fiber, FiberSet } from 'effect'
-import type { Exit, Scope } from 'effect'
+import { Cause, Context, Deferred, Effect, Exit, Fiber, FiberSet, Layer } from 'effect'
+import type { Scope } from 'effect'
+import { RunStore } from './store.ts'
 
 // Private settlement receipt: succeed the Deferred with Exit as a value so
 // interrupt fan-out does not skip Effect 4.0.0-beta.80 Deferred listeners.
@@ -18,6 +19,9 @@ const awaitDone = <E>(done: Deferred.Deferred<Exit.Exit<void, E>>): Effect.Effec
 
 /** `"input"` subsumes `"steer"` when coalescing wakes. */
 export type Promotable = 'input' | 'steer'
+
+/** Shutdown retains the claim; explicit user stop releases it after settlement. */
+export type InterruptReason = 'user' | 'shutdown'
 
 export type CapturedRun<E> =
   | { readonly _tag: 'Started'; readonly join: Effect.Effect<void, E> }
@@ -252,3 +256,62 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       awaitIdle
     }
   })
+
+/** Owning coordinator layer, with per-acquisition claim receipts and settlement policy. */
+export class RunCoordinator extends Context.Service<
+  RunCoordinator,
+  Coordinator<string, never, InterruptReason>
+>()('@yolk-sdk/harness/RunCoordinator') {
+  static layer = (options?: {
+    readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+  }): Layer.Layer<RunCoordinator, never, RunStore> =>
+    Layer.effect(
+      this,
+      Effect.gen(function* () {
+        const store = yield* RunStore
+        const drain = options?.drain ?? ((_runId, _force, _scope) => Effect.void)
+        const acquired = new Set<string>()
+
+        return yield* makeCoordinator<string, never, InterruptReason>({
+          drain,
+          started: runId =>
+            store.claim(runId).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  acquired.add(runId)
+                })
+              )
+            ),
+          settled: (runId, exit, reason) =>
+            Effect.suspend(() => {
+              const owned = acquired.delete(runId)
+              if (
+                owned &&
+                (reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit)))
+              ) {
+                return store.release(runId)
+              }
+              // Acquisition receipt guards automatic failed-start settlement only.
+              // Explicit user-terminal authority still releases a leftover claim
+              // after this owner has actually settled, matching Idle/Settling stop.
+              if (reason === 'user' && !owned) {
+                return store
+                  .isClaimed(runId)
+                  .pipe(Effect.flatMap(claimed => (claimed ? store.release(runId) : Effect.void)))
+              }
+              return Effect.void
+            }).pipe(
+              Effect.exit,
+              Effect.flatMap(settledExit => {
+                if (Exit.isSuccess(settledExit)) return Effect.void
+                return Effect.failCause(
+                  Exit.isFailure(exit)
+                    ? Cause.combine(exit.cause, settledExit.cause)
+                    : settledExit.cause
+                )
+              })
+            )
+        })
+      })
+    )
+}

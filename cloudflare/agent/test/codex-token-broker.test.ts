@@ -28,6 +28,7 @@ describe('Cloudflare Codex token broker helpers', () => {
       accessToken: 'access',
       expiresAt: 1_000 + codexTokenRefreshBufferMs + 1
     })
+
     const stale = new TokenBrokerResponse({
       provider: openAiCodexProviderId,
       accessToken: 'access',

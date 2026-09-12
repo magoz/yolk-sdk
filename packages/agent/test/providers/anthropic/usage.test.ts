@@ -16,7 +16,9 @@ import {
 } from '../../../src/providers/anthropic/usage.ts'
 
 const fetchedAt = '2026-08-11T08:00:00.000Z'
+
 const tokenExpiresAt = 1_800_000_000_000
+
 const token = OAuthAccessToken.make({
   provider: 'anthropic-claude',
   accessToken: 'anthropic-secret',
@@ -56,6 +58,7 @@ describe('Anthropic Claude subscription usage', () => {
 
   it.effect('uses the fixed endpoint and exact subscription authorization headers', () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
+
     const client = HttpClient.make(request => {
       requests.push(request)
 
@@ -84,8 +87,10 @@ describe('Anthropic Claude subscription usage', () => {
 
   it.effect('rejects mismatched tokens before making an HTTP request', () => {
     let called = false
+
     const client = HttpClient.make(request => {
       called = true
+
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
     })
 
@@ -118,18 +123,21 @@ describe('Anthropic Claude subscription usage', () => {
           })
         )
       )
+
       const networkResult = yield* fetchAnthropicClaudeSubscriptionUsage(token).pipe(
         Effect.provideService(HttpClient.HttpClient, networkClient),
         Effect.result
       )
 
       const timeoutClient = HttpClient.make(() => Effect.never)
+
       const timeoutFiber = yield* Effect.forkChild(
         fetchAnthropicClaudeSubscriptionUsage(token, { requestTimeoutMs: 1_000 }).pipe(
           Effect.provideService(HttpClient.HttpClient, timeoutClient),
           Effect.result
         )
       )
+
       yield* TestClock.adjust(Duration.seconds(1))
       const timeoutResult = yield* Fiber.join(timeoutFiber)
 
@@ -148,8 +156,10 @@ describe('Anthropic Claude subscription usage', () => {
 
   it.effect('forces Fetch redirect handling to manual before sending credentials', () => {
     const redirectModes: Array<RequestRedirect | undefined> = []
+
     const fetch = (_input: RequestInfo | URL, init?: RequestInit) => {
       redirectModes.push(init?.redirect)
+
       return Promise.resolve(
         new Response('', {
           status: 302,
@@ -177,13 +187,16 @@ describe('Anthropic Claude subscription usage', () => {
 
   it.effect('suppresses credential-bearing HTTP spans', () => {
     const spans: Array<Tracer.Span> = []
+
     const tracer = Tracer.make({
       span: options => {
         const span = new Tracer.NativeSpan(options)
         spans.push(span)
+
         return span
       }
     })
+
     const client = HttpClient.make(request =>
       Effect.succeed(
         HttpClientResponse.fromWeb(
@@ -204,6 +217,7 @@ describe('Anthropic Claude subscription usage', () => {
       const trace = JSON.stringify(
         spans.map(span => ({ name: span.name, attributes: [...span.attributes.entries()] }))
       )
+
       expect(spans.map(span => span.name)).toEqual([
         'AnthropicClaudeSubscriptionUsage.fetch',
         'AnthropicClaudeSubscriptionUsage.parse'

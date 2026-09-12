@@ -27,6 +27,7 @@ describe('Cloudflare Anthropic token broker helpers', () => {
       accessToken: 'access',
       expiresAt: 1_000 + anthropicTokenRefreshBufferMs + 1
     })
+
     const stale = new TokenBrokerResponse({
       provider: anthropicClaudeProviderId,
       accessToken: 'access',
