@@ -48,6 +48,7 @@ SDK-first pnpm/Turbo monorepo. Public packages live in `packages/*`; private pro
 - Effect app/service code uses `Config.*` inside `Effect.gen`; map config errors around the whole block.
 - Direct `process.env` is limited to owner-documented synchronous config, script, test, and SDK callback boundaries.
 - Never add ad hoc `dotenv.config()` calls; use the loader documented by the owning app.
+- Worktree provisioning targets `examples/next` through root `package.json#provisionEnv.appDir`, not the docs or Cloudflare apps. Keep its env files and Vercel link app-local; see [the provisioning runbook](examples/next/README.md).
 
 ## WHERE TO LOOK
 

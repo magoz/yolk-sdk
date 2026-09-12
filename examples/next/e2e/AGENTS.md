@@ -12,6 +12,7 @@ streaming, redirect, and gotcha guidance.
 - Domain data on `TEST_USER_ID` uses unique deterministic names/IDs per file.
 - `process.env.TEST_SESSION_TOKEN` is an approved Playwright setup → fixture handoff boundary only.
 - Never add direct `dotenv.config()`; import centralized `examples/next/lib/dotenv` from Playwright boundaries.
+- Playwright loads only `.env.test`. `provision-env --database` overlays a disposable test database from Vercel's custom `test` environment; do not point e2e at Development or Production URLs.
 - Route-stub nondeterministic external streams only when asserting UI/request encoding or streamed UI projection.
 
 ## Files
