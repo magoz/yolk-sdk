@@ -29,18 +29,6 @@ export type StepOutcome =
     }
   | { readonly _tag: 'Failed'; readonly message: string }
 
-const failureMessage = (error: unknown) => {
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    return String(error.message)
-  }
-  return 'step failed'
-}
-
-const failedOutcome = (error: unknown): StepOutcome => ({
-  _tag: 'Failed',
-  message: failureMessage(error)
-})
-
 const completedOutcome = (
   result: ModelTurnResult
 ): Extract<StepOutcome, { readonly _tag: 'Completed' }> => ({
@@ -63,7 +51,7 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
 
 export const attemptToolBatch = (
   config: ToolBatchConfig
-): Effect.Effect<StepOutcome, never, LoopConfig | ToolExecutor> =>
+): Effect.Effect<StepOutcome, AgentLoopError, LoopConfig | ToolExecutor> =>
   runToolBatch(config).pipe(
     Stream.runFoldEffect(
       (): { requests: ReadonlyArray<HitlRequest>; usage: AgentUsage } => ({
@@ -92,6 +80,5 @@ export const attemptToolBatch = (
         }
       }
       return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }
-    }),
-    Effect.catch(error => Effect.succeed(failedOutcome(error)))
+    })
   )

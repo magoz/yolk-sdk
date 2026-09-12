@@ -9,7 +9,8 @@
       "@yolk-sdk/knowledge",
       "@yolk-sdk/mcp",
       "@yolk-sdk/sandbox",
-      "@yolk-sdk/vercel-workflows"
+      "@yolk-sdk/vercel-workflows",
+      "@yolk-sdk/harness"
     ]
   ],
   "linked": [],

@@ -40,47 +40,47 @@ export const makeSnapshotRunStoreLayer = (options: {
   readonly load: Effect.Effect<DurableRunStoreSnapshot | undefined>
   readonly save: (snapshot: DurableRunStoreSnapshot) => Effect.Effect<void>
 }): Layer.Layer<RunStore> =>
-  Layer.succeed(
+  Layer.effect(
     RunStore,
-    RunStore.of({
-      claim: runId =>
-        options.load.pipe(
-          Effect.flatMap(loaded => {
-            const state = stateFromSnapshot(loaded ?? emptySnapshot)
-            state.claimed.add(runId)
-            return options.save(snapshotFromState(state.claimed, state.resumes))
-          })
-        ),
-      release: runId =>
-        options.load.pipe(
-          Effect.flatMap(loaded => {
-            const state = stateFromSnapshot(loaded ?? emptySnapshot)
-            state.claimed.delete(runId)
-            state.resumes.delete(runId)
-            return options.save(snapshotFromState(state.claimed, state.resumes))
-          })
-        ),
-      isClaimed: runId =>
-        options.load.pipe(Effect.map(loaded => (loaded ?? emptySnapshot).claimed.includes(runId))),
-      claimed: options.load.pipe(Effect.map(loaded => new Set((loaded ?? emptySnapshot).claimed))),
-      incrementResumeCount: runId =>
-        options.load.pipe(
-          Effect.flatMap(loaded => {
-            const state = stateFromSnapshot(loaded ?? emptySnapshot)
-            const nextCount = (state.resumes.get(runId) ?? 0) + 1
-            state.resumes.set(runId, nextCount)
-            return options
-              .save(snapshotFromState(state.claimed, state.resumes))
-              .pipe(Effect.as(nextCount))
-          })
-        ),
-      resumeCount: runId =>
-        options.load.pipe(
-          Effect.map(loaded => {
-            const entry = (loaded ?? emptySnapshot).resumes.find(([key]) => key === runId)
-            return entry === undefined ? 0 : entry[1]
-          })
-        )
+    Effect.gen(function* () {
+      const loaded = yield* options.load
+      const initial = stateFromSnapshot(loaded ?? emptySnapshot)
+      const claimed = yield* Ref.make(initial.claimed)
+      const resumes = yield* Ref.make(initial.resumes)
+      const persist = () =>
+        Effect.gen(function* () {
+          const nextClaimed = yield* Ref.get(claimed)
+          const nextResumes = yield* Ref.get(resumes)
+          yield* options.save(snapshotFromState(nextClaimed, nextResumes))
+        })
+
+      return RunStore.of({
+        claim: runId =>
+          Ref.update(claimed, current => new Set(current).add(runId)).pipe(Effect.andThen(persist)),
+        release: runId =>
+          Effect.zip(
+            Ref.update(claimed, current => {
+              const next = new Set(current)
+              next.delete(runId)
+              return next
+            }),
+            Ref.update(resumes, current => {
+              const next = new Map(current)
+              next.delete(runId)
+              return next
+            })
+          ).pipe(Effect.andThen(persist), Effect.asVoid),
+        isClaimed: runId => Ref.get(claimed).pipe(Effect.map(current => current.has(runId))),
+        claimed: Ref.get(claimed).pipe(Effect.map(current => new Set(current))),
+        incrementResumeCount: runId =>
+          Ref.modify(resumes, current => {
+            const nextCount = (current.get(runId) ?? 0) + 1
+            const next = new Map(current)
+            next.set(runId, nextCount)
+            return [nextCount, next] as const
+          }).pipe(Effect.tap(persist)),
+        resumeCount: runId => Ref.get(resumes).pipe(Effect.map(current => current.get(runId) ?? 0))
+      })
     })
   )
 

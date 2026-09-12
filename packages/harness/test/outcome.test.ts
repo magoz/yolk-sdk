@@ -1,7 +1,7 @@
 import { Effect, Layer } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
-import { ToolCall, UserMessage } from '@yolk-sdk/agent/protocol'
-import { ContextTransformer, LoopConfig } from '@yolk-sdk/agent/loop'
+import { ToolCall, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
+import { ContextTransformer, LoopConfig, ToolExecutor } from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import { attemptModelTurn, attemptToolBatch } from '../src/outcome.ts'
 
@@ -65,5 +65,24 @@ describe('attemptToolBatch', () => {
         Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
       )
     )
+  )
+
+  it.effect('returns AwaitingInput for HITL instead of Failed', () =>
+    Effect.gen(function* () {
+      const outcome = yield* attemptToolBatch({
+        calls: [
+          ToolCall.make({
+            id: 'question-call',
+            name: 'question',
+            params: {
+              questions: [{ id: 'choice', prompt: 'Pick one', options: [{ id: 'a', label: 'A' }] }]
+            }
+          })
+        ],
+        tools: [ToolDef.make({ name: 'question', description: 'Ask', parameters: {} })]
+      })
+
+      expect(outcome._tag).toBe('AwaitingInput')
+    }).pipe(Effect.provide(Layer.mergeAll(ToolExecutor.unavailable, LoopConfig.defaultLayer)))
   )
 })

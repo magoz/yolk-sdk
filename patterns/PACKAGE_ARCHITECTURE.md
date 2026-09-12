@@ -118,7 +118,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Boundary script prevents agent core subpaths from importing knowledge, MCP, retired package names, `@yolk-sdk/agent/react`, Next, React, or Node builtins. `@yolk-sdk/agent/react` and `@yolk-sdk/agent/voice/react` are the only React-using subpaths.
 - Boundary script prevents knowledge from importing MCP/React/Next/Node.
 - Boundary script prevents sandbox core from importing agent deps and `@vercel/sandbox` outside `packages/sandbox/src/vercel`.
-- Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node in Phase 1.
+- Boundary script prevents harness from importing agent/knowledge/MCP/Next/React/Node except `packages/harness/src/outcome.ts`, which may import `@yolk-sdk/agent/{loop,protocol}`.
 - Export smoke script verifies explicit exports, ESM, `sideEffects: false`, and tiny agent/MCP roots.
 - Vercel Workflow durable event helpers stay generic over JSON-serializable events; do not import `@yolk-sdk/agent/protocol` there.
 

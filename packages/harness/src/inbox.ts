@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Ref } from 'effect'
 import type { Promotable } from './coordinator.ts'
 
-export type InboxKind = 'input' | 'hitl' | 'compaction'
+export type InboxKind = 'input' | 'hitl'
 
 export type InboxItem = {
   readonly id: string

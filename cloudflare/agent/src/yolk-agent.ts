@@ -182,13 +182,39 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
         put: log => state.storage.put(runtimeEventsStorageKey, log)
       }
-      const pendingDrain = yield* Ref.make<Effect.Effect<void>>(Effect.void)
+      type DrainSlot =
+        | { readonly _tag: 'Idle' }
+        | { readonly _tag: 'Held'; readonly work: Effect.Effect<void> }
+      const drainSlot = yield* Ref.make<DrainSlot>({ _tag: 'Idle' })
+      const occupyDrain = (work: Effect.Effect<void>) =>
+        Ref.modify(drainSlot, current => {
+          if (current._tag !== 'Idle') {
+            return [false, current]
+          }
+          const held: DrainSlot = { _tag: 'Held', work }
+          return [true, held]
+        })
+      const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
+        sendEvent(
+          socket,
+          AgentError.make({
+            code: 'conflict',
+            message: 'Run already active',
+            retryable: false
+          })
+        )
       const harnessLayer = makeDurableObjectDriverLayer({
         load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
         save: snapshot => state.storage.put(harnessStoreKey, snapshot),
         drain: () =>
-          Ref.get(pendingDrain).pipe(
-            Effect.flatMap(work => Ref.set(pendingDrain, Effect.void).pipe(Effect.andThen(work)))
+          Ref.get(drainSlot).pipe(
+            Effect.flatMap(slot => {
+              if (slot._tag === 'Idle') {
+                return Effect.void
+              }
+              const idle: DrainSlot = { _tag: 'Idle' }
+              return slot.work.pipe(Effect.ensuring(Ref.set(drainSlot, idle)))
+            })
           )
       })
 
@@ -446,14 +472,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
         const driver = yield* Driver
         if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
-          yield* sendEvent(
-            socket,
-            AgentError.make({
-              code: 'conflict',
-              message: 'Run already active',
-              retryable: false
-            })
-          )
+          yield* sendConflict(socket)
           return
         }
 
@@ -470,8 +489,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
-        yield* Ref.set(
-          pendingDrain,
+        const accepted = yield* occupyDrain(
           runRuntime(
             {
               _tag: 'AppendInput',
@@ -488,12 +506,19 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
               reasoningEffort: input.reasoningEffort
             }
           ).pipe(
-            Stream.runForEach(event => sendEvent(socket, event)),
+            Stream.runForEach(event =>
+              sendEvent(socket, event).pipe(Effect.catch(() => Effect.void))
+            ),
             Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
-            Effect.catch(error => sendEvent(socket, toAgentError(error))),
-            Effect.ignoreCause
+            Effect.catch(error =>
+              sendEvent(socket, toAgentError(error)).pipe(Effect.catch(() => Effect.void))
+            )
           )
         )
+        if (!accepted) {
+          yield* sendConflict(socket)
+          return
+        }
         yield* driver.run(sessionId)
       })
 
@@ -512,14 +537,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
         const driver = yield* Driver
         if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
-          yield* sendEvent(
-            socket,
-            AgentError.make({
-              code: 'conflict',
-              message: 'Run already active',
-              retryable: false
-            })
-          )
+          yield* sendConflict(socket)
           return
         }
 
@@ -536,8 +554,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         const selectedModel = input.model ?? runtimeBaseConfig.model
         const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
 
-        yield* Ref.set(
-          pendingDrain,
+        const accepted = yield* occupyDrain(
           runRuntime(
             {
               _tag: 'AppendHitlResponse',
@@ -554,12 +571,19 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
               reasoningEffort: input.reasoningEffort
             }
           ).pipe(
-            Stream.runForEach(event => sendEvent(socket, event)),
+            Stream.runForEach(event =>
+              sendEvent(socket, event).pipe(Effect.catch(() => Effect.void))
+            ),
             Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
-            Effect.catch(error => sendEvent(socket, toAgentError(error))),
-            Effect.ignoreCause
+            Effect.catch(error =>
+              sendEvent(socket, toAgentError(error)).pipe(Effect.catch(() => Effect.void))
+            )
           )
         )
+        if (!accepted) {
+          yield* sendConflict(socket)
+          return
+        }
         yield* driver.run(sessionId)
       })
 
