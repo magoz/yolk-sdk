@@ -18,6 +18,8 @@ import {
   latestIncompleteRuntimeRun,
   replayRuntimeSessionEvents,
   runRuntime,
+  type AppendHitlResponseRuntimeRequest,
+  type AppendInputRuntimeRequest,
   type RuntimeSessionEventLog
 } from '@yolk-sdk/agent/runtime'
 import {
@@ -462,10 +464,16 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           )
         )
 
-      const handleUserInput = Effect.fnUntraced(function* (
+      const handleRuntimeAppend = Effect.fnUntraced(function* (
         socket: Cloudflare.DurableWebSocket,
         sessionId: string,
-        input: UserInput
+        input: {
+          readonly model?: string
+          readonly reasoningEffort?: AgentReasoningEffort
+        },
+        request:
+          | Omit<AppendInputRuntimeRequest, 'runId'>
+          | Omit<AppendHitlResponseRuntimeRequest, 'runId'>
       ) {
         const log = yield* loadLogOrEmpty(sessionId)
         const activeRun = latestIncompleteRuntimeRun(log.events)
@@ -491,13 +499,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
         const accepted = yield* occupyDrain(
           runRuntime(
-            {
-              _tag: 'AppendInput',
-              sessionId,
-              input: input.message,
-              runId: crypto.randomUUID(),
-              expectedRevision: input.expectedRevision
-            },
+            { ...request, runId: crypto.randomUUID() },
             {
               ...runtimeBaseConfig,
               model,
@@ -522,7 +524,19 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         yield* driver.run(sessionId)
       })
 
-      const handleHitlResponse = Effect.fnUntraced(function* (
+      const handleUserInput = (
+        socket: Cloudflare.DurableWebSocket,
+        sessionId: string,
+        input: UserInput
+      ) =>
+        handleRuntimeAppend(socket, sessionId, input, {
+          _tag: 'AppendInput',
+          sessionId,
+          input: input.message,
+          expectedRevision: input.expectedRevision
+        })
+
+      const handleHitlResponse = (
         socket: Cloudflare.DurableWebSocket,
         sessionId: string,
         input: {
@@ -531,61 +545,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           readonly model?: string
           readonly reasoningEffort?: AgentReasoningEffort
         }
-      ) {
-        const log = yield* loadLogOrEmpty(sessionId)
-        const activeRun = latestIncompleteRuntimeRun(log.events)
-
-        const driver = yield* Driver
-        if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
-          yield* sendConflict(socket)
-          return
-        }
-
-        const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
-
-        if (resolvedToolSet._tag === 'Failure') {
-          yield* sendEvent(socket, resolvedToolSet.failure)
-          return
-        }
-
-        const toolSet = resolvedToolSet.success
-        const bootstrap = yield* state.storage.get<BootstrapRequestType>(bootstrapKey)
-        const skillset = skillsetFromBootstrap(bootstrap)
-        const selectedModel = input.model ?? runtimeBaseConfig.model
-        const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
-
-        const accepted = yield* occupyDrain(
-          runRuntime(
-            {
-              _tag: 'AppendHitlResponse',
-              sessionId,
-              response: input.response,
-              runId: crypto.randomUUID(),
-              expectedRevision: input.expectedRevision
-            },
-            {
-              ...runtimeBaseConfig,
-              model,
-              systemPrompt: systemPromptWithSkills(skillset),
-              tools: toolSet.tools,
-              reasoningEffort: input.reasoningEffort
-            }
-          ).pipe(
-            Stream.runForEach(event =>
-              sendEvent(socket, event).pipe(Effect.catch(() => Effect.void))
-            ),
-            Effect.provide(makeRuntimeLayer(sessionId, model, makeToolExecutorLayer(toolSet))),
-            Effect.catch(error =>
-              sendEvent(socket, toAgentError(error)).pipe(Effect.catch(() => Effect.void))
-            )
-          )
-        )
-        if (!accepted) {
-          yield* sendConflict(socket)
-          return
-        }
-        yield* driver.run(sessionId)
-      })
+      ) =>
+        handleRuntimeAppend(socket, sessionId, input, {
+          _tag: 'AppendHitlResponse',
+          sessionId,
+          response: input.response,
+          expectedRevision: input.expectedRevision
+        })
 
       for (const socket of yield* state.getWebSockets()) {
         const attachment = socket.deserializeAttachment<SocketAttachment>()
