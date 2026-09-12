@@ -40,7 +40,7 @@ import {
   ToolError,
   ToolExecutor
 } from '@yolk-sdk/agent/loop'
-import { attemptModelTurn } from '@yolk-sdk/harness/outcome'
+import { attemptModelTurn, type StepOutcome } from '@yolk-sdk/harness/outcome'
 
 import { AppLayer } from '@/lib/layers'
 
@@ -182,6 +182,26 @@ export async function runAgentWorkflowModelStep(input: {
       const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
       // Stream construction can happen eagerly during retry setup. Admission belongs at
       // subscription, after the retry delay, before every provider attempt's effects.
+      const requireCompletedTurn = (outcome: StepOutcome) => {
+        if (outcome._tag === 'Completed') {
+          return Effect.succeed(outcome)
+        }
+        if (
+          outcome._tag === 'Retry' ||
+          outcome._tag === 'Continue' ||
+          outcome._tag === 'RecoverFull'
+        ) {
+          return Effect.fail(outcome.error)
+        }
+        return Effect.fail(
+          new LLMError({
+            cause: 'context_overflow',
+            message: 'Context overflow',
+            retryable: true
+          })
+        )
+      }
+
       const {
         assistantMessage: currentAssistantMessage,
         toolCalls: currentToolCalls,
@@ -209,6 +229,7 @@ export async function runAgentWorkflowModelStep(input: {
             })
         }
       ).pipe(
+        Effect.flatMap(requireCompletedTurn),
         Effect.provide(
           decorateLLMProvider(provider => ({
             stream: request =>

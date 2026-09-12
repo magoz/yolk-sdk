@@ -6,16 +6,16 @@ decoration, not hooks. There is no `World`.
 
 ## Subpaths
 
-| Subpath                                   | Source                         | Role                                                                 |
-| ----------------------------------------- | ------------------------------ | -------------------------------------------------------------------- |
-| `@yolk-sdk/harness`                       | `src/index.ts`                 | Tiny root                                                            |
-| `@yolk-sdk/harness/coordinator`           | `src/coordinator.ts`           | Process-local doorbell coordinator                                   |
-| `@yolk-sdk/harness/store`                 | `src/store.ts`                 | `RunStore` claim/release contract + in-memory                        |
-| `@yolk-sdk/harness/inbox`                 | `src/inbox.ts`                 | Admission / steer / queue / HITL items                               |
-| `@yolk-sdk/harness/driver`                | `src/driver.ts`                | `Driver` + `makeHarness`                                             |
-| `@yolk-sdk/harness/driver/memory`         | `src/driver/memory.ts`         | In-memory driver + harness layer for tests                           |
-| `@yolk-sdk/harness/driver/durable-object` | `src/driver/durable-object.ts` | Snapshot `RunStore` + driver for Durable Object storage              |
-| `@yolk-sdk/harness/outcome`               | `src/outcome.ts`               | `attemptModelTurn` / `attemptToolBatch` over loop `collectModelTurn` |
+| Subpath                                   | Source                         | Role                                                                                                                                  |
+| ----------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/harness`                       | `src/index.ts`                 | Tiny root                                                                                                                             |
+| `@yolk-sdk/harness/coordinator`           | `src/coordinator.ts`           | Process-local doorbell coordinator                                                                                                    |
+| `@yolk-sdk/harness/store`                 | `src/store.ts`                 | `RunStore` claim/release contract + in-memory                                                                                         |
+| `@yolk-sdk/harness/inbox`                 | `src/inbox.ts`                 | Admission / steer / queue / HITL items                                                                                                |
+| `@yolk-sdk/harness/driver`                | `src/driver.ts`                | `Driver` + `makeHarness`                                                                                                              |
+| `@yolk-sdk/harness/driver/memory`         | `src/driver/memory.ts`         | In-memory driver + harness layer for tests                                                                                            |
+| `@yolk-sdk/harness/driver/durable-object` | `src/driver/durable-object.ts` | Snapshot `RunStore` + driver for Durable Object storage                                                                               |
+| `@yolk-sdk/harness/outcome`               | `src/outcome.ts`               | `attemptModelTurn` / `attemptToolBatch` step outcomes (`Completed`, `AwaitingInput`, `Retry`, `Continue`, `RecoverFull`, `Compacted`) |
 
 ## Boundaries
 
@@ -24,7 +24,7 @@ decoration, not hooks. There is no `World`.
 - Do not model users, teams, orgs, billing, or product permissions. Run ids are opaque strings.
 - Hosts own tool catalogs, prompts, auth, concrete Store/Inbox adapters, and `'use workflow'` files.
 - `@yolk-sdk/vercel-workflows` stays protocol-free; a Vercel driver (later) wraps it, it does not import harness protocol types.
-- Durable compaction is a host/harness _step_, not `ContextTransformer`. Do not persist transformer checkpoints.
+- Durable compaction is a host/harness _step_, not `ContextTransformer`. Do not persist transformer checkpoints. Overflow before output may return `Compacted` when the host supplies `compact`; overflow after output is terminal. In-process silent retry still uses `makeContextOverflowRetryProvider` on the provider Layer.
 
 ## Design rules
 
