@@ -48,23 +48,35 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
   ContextTransformer | LLMProvider | LoopConfig | R2
 > => collectModelTurn(runModelTurn(config), options).pipe(Effect.map(completedOutcome))
 
-export const attemptToolBatch = (
-  config: ToolBatchConfig
-): Effect.Effect<StepOutcome, AgentLoopError, LoopConfig | ToolExecutor> =>
-  runToolBatch(config).pipe(
+export const attemptToolBatch = <E2 = never, R2 = never>(
+  config: ToolBatchConfig,
+  options?: {
+    readonly onEvent?: (event: AgentEvent) => Effect.Effect<void, E2, R2>
+  }
+): Effect.Effect<StepOutcome, AgentLoopError | E2, LoopConfig | ToolExecutor | R2> => {
+  const onEvent = options?.onEvent
+
+  return runToolBatch(config).pipe(
     Stream.runFoldEffect(
-      (): { requests: ReadonlyArray<HitlRequest>; usage: AgentUsage } => ({
+      (): {
+        requests: ReadonlyArray<HitlRequest>
+        usage: AgentUsage
+        toolCalls: ModelTurnResult['toolCalls']
+      } => ({
         requests: [],
-        usage: config.usage ?? zeroAgentUsage
+        usage: config.usage ?? zeroAgentUsage,
+        toolCalls: []
       }),
       (acc, event) => {
-        if (event._tag === 'AgentAwaitingInput') {
-          return Effect.succeed({ requests: event.requests, usage: event.usage })
-        }
-        if (event._tag === 'UsageUpdate') {
-          return Effect.succeed({ ...acc, usage: addAgentUsage(acc.usage, event.usage) })
-        }
-        return Effect.succeed(acc)
+        const next =
+          event._tag === 'AgentAwaitingInput'
+            ? { ...acc, requests: event.requests, usage: event.usage }
+            : event._tag === 'UsageUpdate'
+              ? { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
+              : event._tag === 'ToolExecutionCompleted' || event._tag === 'ToolExecutionAccepted'
+                ? { ...acc, toolCalls: [...acc.toolCalls, event.call] }
+                : acc
+        return onEvent === undefined ? Effect.succeed(next) : onEvent(event).pipe(Effect.as(next))
       }
     ),
     Effect.map((result): StepOutcome => {
@@ -73,7 +85,7 @@ export const attemptToolBatch = (
           _tag: 'Completed',
           needsContinuation: false,
           assistantMessage: undefined,
-          toolCalls: [],
+          toolCalls: result.toolCalls,
           usage: result.usage,
           stopReason: 'stop'
         }
@@ -81,3 +93,4 @@ export const attemptToolBatch = (
       return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }
     })
   )
+}

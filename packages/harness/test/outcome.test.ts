@@ -1,4 +1,4 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
 import {
@@ -94,6 +94,32 @@ describe('attemptToolBatch', () => {
       expect(outcome._tag).toBe('Completed')
       if (outcome._tag !== 'Completed') return
       expect(outcome.needsContinuation).toBe(false)
+      expect(outcome.toolCalls).toEqual([
+        ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
+      ])
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)
+      )
+    )
+  )
+
+  it.effect('delivers tool results through onEvent', () =>
+    Effect.gen(function* () {
+      const events = yield* Ref.make<ReadonlyArray<string>>([])
+      yield* attemptToolBatch(
+        {
+          calls: [ToolCall.make({ id: 'call_1', name: 'weather', params: {} })]
+        },
+        {
+          onEvent: event =>
+            event._tag === 'ToolExecutionCompleted'
+              ? Ref.update(events, current => [...current, String(event.result.content)])
+              : Effect.void
+        }
+      )
+
+      expect(yield* Ref.get(events)).toEqual(['72F'])
     }).pipe(
       Effect.provide(
         Layer.mergeAll(TestToolExecutor.layer({ weather: '72F' }), LoopConfig.defaultLayer)

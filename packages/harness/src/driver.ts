@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Exit, Layer } from 'effect'
 import { makeCoordinator, type Promotable } from './coordinator.ts'
 import { Inbox, type InboxItem } from './inbox.ts'
 import { RunStore } from './store.ts'
@@ -55,8 +55,10 @@ export const makeDriverLayer = (options?: {
       const coordinator = yield* makeCoordinator<string, never, InterruptReason>({
         drain,
         started: runId => store.claim(runId),
-        settled: (runId, _exit, reason) =>
-          reason === 'shutdown' ? Effect.void : store.release(runId)
+        settled: (runId, exit, reason) =>
+          reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit))
+            ? store.release(runId)
+            : Effect.void
       })
 
       const resumeSuspended = Effect.gen(function* () {
