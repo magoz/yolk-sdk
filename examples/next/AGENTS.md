@@ -40,6 +40,7 @@ Private Next.js dogfood/reference app for `@yolk-sdk/*` packages.
 
 ## App Notes
 
+- Auth and Next dev-origin checks use validated `PORTLESS_URL` only in `NODE_ENV=development`; see [Portless origins](README.md#portless-origins). Keep deployed/static fallback and fixed-port E2E behavior intact; never trust arbitrary request origins.
 - React Compiler is enabled.
 - PostHog is proxied through `/ph/*`.
 - Drizzle v1 RC uses the Effect-native driver.

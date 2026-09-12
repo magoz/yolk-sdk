@@ -7,6 +7,7 @@ import { emailOTP } from 'better-auth/plugins'
 import { Email } from '../email/live-layer'
 import { AuthApiError, AuthConfigError } from './errors'
 import { drizzle } from 'drizzle-orm/neon-http'
+import { getAuthOriginConfig } from './auth-origin-config'
 
 // Auth database service (internal) - uses Neon HTTP driver for serverless
 class AuthDb extends Context.Service<AuthDb, ReturnType<typeof drizzle>>()('@app/AuthDb') {}
@@ -23,30 +24,21 @@ const AuthDbLive = Layer.effect(
 class AuthConfig extends Context.Service<
   AuthConfig,
   {
-    readonly projectUrl: string
+    readonly baseURL: string
+    readonly trustedOrigins: string[]
     readonly appName: string
     readonly emailSender: string
-    readonly vercelUrl: string | undefined
-    readonly vercelBranchUrl: string | undefined
   }
 >()('@app/AuthConfig') {}
 
 const AuthConfigLive = Layer.effect(
   AuthConfig,
   Effect.gen(function* () {
-    const projectUrl = yield* Config.string('NEXT_PUBLIC_PROJECT_URL')
+    const origins = yield* getAuthOriginConfig()
     const appName = yield* Config.string('APP_NAME')
     const emailSender = yield* Config.string('EMAIL_SENDER')
-    const vercelUrl = yield* Config.option(Config.string('VERCEL_URL'))
-    const vercelBranchUrl = yield* Config.option(Config.string('VERCEL_BRANCH_URL'))
 
-    return {
-      projectUrl,
-      appName,
-      emailSender,
-      vercelUrl: vercelUrl._tag === 'Some' ? vercelUrl.value : undefined,
-      vercelBranchUrl: vercelBranchUrl._tag === 'Some' ? vercelBranchUrl.value : undefined
-    }
+    return { ...origins, appName, emailSender }
   }).pipe(Effect.mapError(() => new AuthConfigError({ message: 'Auth config missing' })))
 )
 
@@ -58,12 +50,8 @@ export class Auth extends Context.Service<Auth>()('@app/Auth', {
     const config = yield* AuthConfig
 
     const auth = betterAuth({
-      baseURL: config.vercelUrl ? `https://${config.vercelUrl}` : config.projectUrl,
-      trustedOrigins: [
-        config.projectUrl,
-        ...(config.vercelBranchUrl ? [`https://${config.vercelBranchUrl}`] : []),
-        ...(config.vercelUrl ? [`https://${config.vercelUrl}`] : [])
-      ],
+      baseURL: config.baseURL,
+      trustedOrigins: config.trustedOrigins,
       database: drizzleAdapter(authDb, {
         provider: 'pg',
         schema

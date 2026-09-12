@@ -56,10 +56,25 @@ starts serving real production users or the configured project/parent changes.
 Do not infer clone permission from a branch name alone.
 
 Only the databases are isolated. Copied credentials and service URLs can still
-refer to shared email, AI, telemetry, storage, or Cloudflare services. Local app
-origin/auth configuration is a separate concern: provisioning does not adapt
-`NEXT_PUBLIC_PROJECT_URL` or `YOLK_APP_URL` to each worktree. Do not assign `PORT`
-in provisioning; Portless owns the development server port.
+refer to shared email, AI, telemetry, storage, or Cloudflare services. Provisioning
+copies service URLs as configured; it does not rewrite `YOLK_APP_URL` for external
+callbacks. Do not assign `PORT` in provisioning; Portless owns the development
+server port.
+
+### Portless origins
+
+Use root `pnpm dev` for Portless; `pnpm dev:app` runs Next directly. In development,
+Better Auth uses the validated runtime `PORTLESS_URL` as its base URL and sole
+trusted origin, overriding copied project/deployment URLs. The browser auth client
+already uses same-origin requests. Next adds the exact runtime hostname to its dev
+allowlist, including custom proxy suffixes, without trusting an entire suffix.
+
+Production ignores `PORTLESS_URL` and retains the existing explicit project,
+Vercel branch, and deployment origins. Fixed-port E2E (`NODE_ENV=test`) also ignores
+Portless and uses its configured local URL. Direct Next development without
+Portless still needs `NEXT_PUBLIC_PROJECT_URL` set to the intended app origin.
+Malformed or credential-bearing Portless URLs fail closed; request headers do not
+expand the trusted-origin list.
 
 ## Lease verification and lifecycle
 
