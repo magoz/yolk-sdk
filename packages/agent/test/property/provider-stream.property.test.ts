@@ -302,9 +302,9 @@ describe('provider stream property tests', () => {
           failure: { _tag: 'LLMError', cause: 'invalid_response' }
         })
         if (result._tag === 'Failure') {
-          expect(
-            'responseIssue' in result.failure ? result.failure.responseIssue : undefined
-          ).toBe(input.done === 'none' ? 'missing_done' : undefined)
+          expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
+            input.done === 'none' ? 'missing_done' : undefined
+          )
         }
       })
     },

@@ -212,8 +212,7 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
           error: outcome.error,
           collected: {
             assistantMessage:
-              outcome.collection.assistantMessage ??
-              outcome.collection.partialAssistantMessage,
+              outcome.collection.assistantMessage ?? outcome.collection.partialAssistantMessage,
             toolCalls: outcome.collection.toolCalls,
             usage: outcome.collection.usage,
             stopReason: outcome.collection.stopReason

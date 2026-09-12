@@ -249,14 +249,17 @@ describe('agent compaction', () => {
         AssistantTextPart.make({ content: 'done' })
       ]
     })
-    const formatted = formatAgentMessagesForCompaction([
-      user('hello'),
-      assistantMessage,
-      ToolResultMessage.make({
-        toolCallId: 'call_1',
-        content: 'result text that will truncate'
-      })
-    ], { maxToolOutputCharacters: 16 })
+    const formatted = formatAgentMessagesForCompaction(
+      [
+        user('hello'),
+        assistantMessage,
+        ToolResultMessage.make({
+          toolCallId: 'call_1',
+          content: 'result text that will truncate'
+        })
+      ],
+      { maxToolOutputCharacters: 16 }
+    )
 
     expect(formatAgentMessageForCompaction(user('hello'))).toBe('[User]: hello')
     expect(formatted).toContain('[Assistant]: I will look')
@@ -383,7 +386,9 @@ describe('agent compaction', () => {
       const retryProvider = yield* makeContextOverflowRetryProvider({
         provider: {
           stream: () =>
-            Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(Stream.concat(Stream.fail(overflow)))
+            Stream.make(LLMTextDelta.make({ text: 'partial' })).pipe(
+              Stream.concat(Stream.fail(overflow))
+            )
         },
         compact: () => {
           compactCalls += 1

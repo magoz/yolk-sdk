@@ -38,9 +38,7 @@ export type ContextOverflowRetryProviderInput = {
   readonly compact: ContextOverflowRetryCompactor
 }
 
-type OverflowCompactionInput =
-  | ContextOverflowRetryCompactionResult
-  | OverflowCompactionDecision
+type OverflowCompactionInput = ContextOverflowRetryCompactionResult | OverflowCompactionDecision
 
 /** Durable persist-then-retry and in-process silent retry both compact at most once. */
 export const overflowCompactionMaxAttempts = 1
@@ -83,13 +81,15 @@ export const applyOverflowCompaction = <E, R>(input: {
     return Effect.succeed({ _tag: 'Skipped' })
   }
 
-  return input.compact(input.messages).pipe(
-    Effect.map(result =>
-      result._tag === 'Compacted'
-        ? { _tag: 'Compacted' as const, messages: result.messages }
-        : { _tag: 'Skipped' as const }
+  return input
+    .compact(input.messages)
+    .pipe(
+      Effect.map(result =>
+        result._tag === 'Compacted'
+          ? { _tag: 'Compacted' as const, messages: result.messages }
+          : { _tag: 'Skipped' as const }
+      )
     )
-  )
 }
 
 const contextOverflowRetryStream = (
@@ -99,9 +99,7 @@ const contextOverflowRetryStream = (
   request: LLMRequest
 ) =>
   input.provider.stream(request).pipe(
-    Stream.tap(event =>
-      llmEventStartsOutput(event) ? Ref.set(outputStarted, true) : Effect.void
-    ),
+    Stream.tap(event => (llmEventStartsOutput(event) ? Ref.set(outputStarted, true) : Effect.void)),
     Stream.catchTags({
       LLMError: error => {
         if (error.cause !== 'context_overflow') return Stream.fail(error)
@@ -125,11 +123,13 @@ const contextOverflowRetryStream = (
               yield* Ref.set(input.messagesRef, decision.messages)
             }
 
-            return input.provider.stream({ ...request, messages: decision.messages }).pipe(
-              Stream.tap(event =>
-                llmEventStartsOutput(event) ? Ref.set(outputStarted, true) : Effect.void
+            return input.provider
+              .stream({ ...request, messages: decision.messages })
+              .pipe(
+                Stream.tap(event =>
+                  llmEventStartsOutput(event) ? Ref.set(outputStarted, true) : Effect.void
+                )
               )
-            )
           })
         )
       }

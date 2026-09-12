@@ -13,15 +13,15 @@ pnpm add @yolk-sdk/harness@canary effect@4.0.0-beta.80
 
 ## Subpaths
 
-| Subpath                                   | Purpose                                                                                          |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `@yolk-sdk/harness`                       | Tiny root                                                                                        |
-| `@yolk-sdk/harness/coordinator`           | Process-local doorbell coordinator                                                               |
-| `@yolk-sdk/harness/store`                 | `RunStore` claim/release                                                                         |
-| `@yolk-sdk/harness/inbox`                 | Admission / steer / queue items                                                                  |
-| `@yolk-sdk/harness/driver`                | `Driver` + `makeHarness`                                                                         |
-| `@yolk-sdk/harness/driver/memory`         | In-memory driver for tests                                                                       |
-| `@yolk-sdk/harness/driver/durable-object` | Durable Object storage-backed claims + driver                                                    |
+| Subpath                                   | Purpose                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/harness`                       | Tiny root                                                                                               |
+| `@yolk-sdk/harness/coordinator`           | Process-local doorbell coordinator                                                                      |
+| `@yolk-sdk/harness/store`                 | `RunStore` claim/release                                                                                |
+| `@yolk-sdk/harness/inbox`                 | Admission / steer / queue items                                                                         |
+| `@yolk-sdk/harness/driver`                | `Driver` + `makeHarness`                                                                                |
+| `@yolk-sdk/harness/driver/memory`         | In-memory driver for tests                                                                              |
+| `@yolk-sdk/harness/driver/durable-object` | Durable Object storage-backed claims + driver                                                           |
 | `@yolk-sdk/harness/outcome`               | Classify one model/tool attempt: Completed / Retry / Continue / RecoverFull / Compacted / AwaitingInput |
 
 ## Example
@@ -48,11 +48,11 @@ Hosts still own tools, prompts, auth, and `'use workflow'` / `'use step'` files.
 
 `attemptToolBatch` sets `needsContinuation` when the batch executed calls (the next step is a model turn). `runToolBatch` fences all execution when any HITL request is pending, so `AwaitingInput` does not carry executed sibling calls.
 
-| Owner | What it retries |
-| --- | --- |
-| `@yolk-sdk/agent/loop` `run` / `runModelTurn` | Generic retryable LLM errors (`LoopConfig.maxRetries`) inside the invocation |
-| `makeContextOverflowRetryProvider` | In-process overflow, silent compact-and-retry **once per provider stream**, and only before published output |
-| Harness `Compacted` | Durable persist-then-retry. Host stores compacted messages plus `overflowCompactionAttempt` and re-enters the step |
+| Owner                                         | What it retries                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/agent/loop` `run` / `runModelTurn` | Generic retryable LLM errors (`LoopConfig.maxRetries`) inside the invocation                                       |
+| `makeContextOverflowRetryProvider`            | In-process overflow, silent compact-and-retry **once per provider stream**, and only before published output       |
+| Harness `Compacted`                           | Durable persist-then-retry. Host stores compacted messages plus `overflowCompactionAttempt` and re-enters the step |
 
 Pass `overflowCompactionAttempt` (default `0`). A successful compact returns `attempt + 1`. Compact is allowed only while `attempt < 1`. Invalid/negative/nonfinite counts fail as `validation_error`. If the host omits or resets the count, there is no cross-invocation budget.
 

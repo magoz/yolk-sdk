@@ -43,7 +43,7 @@ import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-o
 import type { DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
 import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
-import { makeLiveDrain } from './drain-lifecycle.ts'
+import { makeLiveDrain, notifyRejectedStart } from './drain-lifecycle.ts'
 import {
   agentTextModel,
   agentTextModelMaxOutputTokens,
@@ -500,10 +500,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           Effect.catch(() => Effect.void)
         )
         const started = yield* live.runOwned(prepareEpoch, socketId, work, driver, sessionId)
-        if (started._tag === 'Conflict') {
-          yield* sendConflict(socket)
-          return
-        }
+        yield* notifyRejectedStart(started, sendConflict(socket))
       })
 
       const handleUserInput = (

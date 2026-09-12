@@ -11,6 +11,11 @@ export type StartResult =
   | { readonly _tag: 'Conflict' }
   | { readonly _tag: 'Stale' }
 
+export const notifyRejectedStart = <E, R>(
+  started: StartResult,
+  notifyConflict: Effect.Effect<void, E, R>
+): Effect.Effect<void, E, R> => (started._tag === 'Accepted' ? Effect.void : notifyConflict)
+
 type LiveOwner = {
   readonly token: LiveToken
   readonly done: Deferred.Deferred<void, unknown>

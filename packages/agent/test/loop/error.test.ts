@@ -139,9 +139,7 @@ describe('LLMError', () => {
         retryable: false,
         responseIssue: 'missing_done'
       })
-      expect(
-        agentLoopErrorToAgentError(decoded)
-      ).toMatchObject({
+      expect(agentLoopErrorToAgentError(decoded)).toMatchObject({
         code: 'invalid_response',
         retryable: false
       })
