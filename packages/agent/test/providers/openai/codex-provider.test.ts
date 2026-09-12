@@ -1,5 +1,10 @@
-import { Effect, Stream } from 'effect'
-import { HttpClientError, HttpClientRequest, HttpClientResponse } from 'effect/unstable/http'
+import { Effect, Layer, Stream } from 'effect'
+import {
+  HttpClient,
+  HttpClientError,
+  HttpClientRequest,
+  HttpClientResponse
+} from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AudioPart,
@@ -15,7 +20,10 @@ import {
   inlineBase64Source,
   urlAttachmentSource
 } from '@yolk-sdk/agent/protocol'
+import { LLMProvider, type LLMRequest } from '@yolk-sdk/agent/loop'
+import { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import {
+  makeOpenAiCodexProviderLayer,
   streamOpenAiCodexResponse,
   toOpenAiCodexRequestBody as lowerOpenAiCodexRequestBody
 } from '../../../src/providers/openai/codex-provider.ts'
@@ -80,6 +88,57 @@ const streamErrorResponse = () => {
 
   return response
 }
+
+const codexToken = new OAuthAccessToken({
+  provider: 'openai-codex',
+  accessToken: 'subscription-token',
+  expiresAt: Date.now() + 60_000
+})
+
+const makeHttpClientLayer = (response: Response) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make(request => Effect.succeed(HttpClientResponse.fromWeb(request, response)))
+  )
+
+const sseWebResponse = (events: ReadonlyArray<unknown>) => sseWebResponseFromChunks([events])
+
+const sseWebResponseFromChunks = (chunks: ReadonlyArray<ReadonlyArray<unknown>>) => {
+  const encoder = new TextEncoder()
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const events of chunks) {
+          controller.enqueue(
+            encoder.encode(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''))
+          )
+        }
+        controller.close()
+      }
+    }),
+    { status: 200 }
+  )
+}
+
+const defaultCodexRequest: LLMRequest = {
+  model: 'gpt-5.4',
+  systemPrompt: '',
+  messages: [UserMessage.make({ content: 'Hello' })],
+  tools: []
+}
+
+const collectCodexProviderEvents = (response: Response) =>
+  Effect.gen(function* () {
+    const provider = yield* LLMProvider
+    return yield* provider.stream(defaultCodexRequest).pipe(Stream.runCollect)
+  }).pipe(
+    Effect.provide(
+      makeOpenAiCodexProviderLayer({ token: codexToken }).pipe(
+        Layer.provide(makeHttpClientLayer(response))
+      )
+    )
+  )
 
 describe('OpenAI Codex provider', () => {
   it.effect('allows request lowering without a compatibility config object', () =>
@@ -745,6 +804,76 @@ describe('OpenAI Codex provider', () => {
         cause: 'provider_error',
         retryable: true,
         provider: { provider: 'openai_codex', kind: 'stream' }
+      })
+    })
+  )
+
+  it.effect('recovers a missing final output after a tool call as tool_use', () =>
+    Effect.gen(function* () {
+      const events = yield* collectCodexProviderEvents(
+        sseWebResponseFromChunks([
+          [
+            {
+              type: 'response.output_item.done',
+              item: codexFunctionCall('call-1', 'search')
+            }
+          ],
+          [{ type: 'response.completed', response: {} }]
+        ])
+      )
+
+      expect(
+        Array.from(events).flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+      ).toEqual(['call-1'])
+      expect(
+        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+      ).toEqual(['tool_use'])
+    })
+  )
+
+  it.effect('recovers a missing final output with no tool call as stop', () =>
+    Effect.gen(function* () {
+      const events = yield* collectCodexProviderEvents(
+        sseWebResponse([{ type: 'response.completed', response: {} }])
+      )
+
+      expect(Array.from(events).map(event => event._tag)).toEqual(['Done'])
+      expect(
+        Array.from(events).flatMap(event => (event._tag === 'Done' ? [event.stopReason] : []))
+      ).toEqual(['stop'])
+    })
+  )
+
+  it.effect('still fails unrelated invalid_response errors', () =>
+    Effect.gen(function* () {
+      const error = yield* collectCodexProviderEvents(
+        sseWebResponse([completedCodexResponse()])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'invalid_response',
+        retryable: false
+      })
+      expect(error.message).toContain('did not include text or tool calls')
+    })
+  )
+
+  it.effect('normalizes context-window messages to non-retryable overflow', () =>
+    Effect.gen(function* () {
+      const error = yield* collectCodexProviderEvents(
+        sseWebResponse([
+          {
+            type: 'error',
+            message: 'Your input exceeds the context window of this model.'
+          }
+        ])
+      ).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: 'LLMError',
+        cause: 'context_overflow',
+        retryable: false
       })
     })
   )

@@ -17,6 +17,7 @@ Cloudflare app for the Yolk durable agent runtime.
 - Keep Cloudflare-specific code here, not in `packages/*`.
 - Keep agent/MCP packages provider-neutral; provider subpaths stay host-runtime agnostic.
 - Route/runtime adapters choose tool modules explicitly.
+- Compose the DO agent loop with `makeAgentLoopLayer({ provider, tools })` plus the Durable Object session event store.
 - Preserve faux fallback for smoke/unbootstrapped sessions; bootstrapped app sessions select Codex or Anthropic provider by model.
 - Bootstrapped Anthropic construction must use `agentTextModelMaxOutputTokens(model)` for required Claude `maxTokens`, with no Worker-owned fallback. ChatGPT Codex rejects `max_output_tokens`, so direct/proxied Codex construction does not accept or send an output-token limit.
 - Centralize provider refresh in Next; DO caches `TokenBrokerResponse` (`provider`, `accessToken`, `expiresAt`, optional `accountId`) only and never stores refresh tokens.

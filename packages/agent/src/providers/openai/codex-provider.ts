@@ -1,6 +1,14 @@
-import { Effect } from 'effect'
+import { Effect, Layer, Ref, Stream } from 'effect'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
-import type { LLMError, LLMRequest } from '@yolk-sdk/agent/loop'
+import {
+  decorateLLMProvider,
+  LLMDone,
+  LLMError,
+  LLMProvider,
+  type LLMEvent,
+  type LLMProviderError,
+  type LLMRequest
+} from '@yolk-sdk/agent/loop'
 import type { OAuthAccessToken } from '@yolk-sdk/agent/oauth'
 import type { HttpClientResponse } from 'effect/unstable/http'
 import {
@@ -102,6 +110,53 @@ const openAiCodexProviderDescriptor = {
   allowEofCompletion: true
 } as const
 
+const isMissingCodexFinalOutputError = (error: LLMError) =>
+  error.cause === 'invalid_response' &&
+  error.message.includes('Missing key') &&
+  error.message.includes('["output"]')
+
+const isCodexContextWindowError = (error: LLMError) => {
+  const signal = error.message.toLowerCase()
+
+  return (
+    error.cause === 'context_overflow' ||
+    signal.includes('context_window_exceeded') ||
+    signal.includes('exceeds the context window') ||
+    signal.includes('context window exceeded')
+  )
+}
+
+const normalizeCodexContextWindowError = (error: LLMError) =>
+  error.cause === 'context_overflow'
+    ? error
+    : new LLMError({
+        cause: 'context_overflow',
+        message: error.message,
+        retryable: false,
+        ...(error.provider === undefined ? {} : { provider: error.provider })
+      })
+
+const noteCodexToolCall =
+  (hasToolCallRef: Ref.Ref<boolean>) =>
+  (event: LLMEvent): Effect.Effect<LLMEvent> => {
+    if (event._tag !== 'ToolCall') return Effect.succeed(event)
+
+    return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
+  }
+
+const recoverMissingCodexFinalOutput = (
+  hasToolCallRef: Ref.Ref<boolean>,
+  error: LLMError
+): Stream.Stream<LLMEvent, LLMProviderError> => {
+  if (!isMissingCodexFinalOutputError(error)) return Stream.fail(error)
+
+  return Stream.fromEffect(
+    Ref.get(hasToolCallRef).pipe(
+      Effect.map(hasToolCall => LLMDone.make({ stopReason: hasToolCall ? 'tool_use' : 'stop' }))
+    )
+  )
+}
+
 export const toOpenAiCodexRequestBody = (
   request: LLMRequest,
   config: {
@@ -131,14 +186,35 @@ export const makeOpenAiCodexProviderLayer = (config: OpenAiCodexProviderConfig) 
   // The Codex subscription endpoint rejects max_output_tokens.
   const { maxOutputTokens: _maxOutputTokens, ...sharedConfig } = config
 
-  return makeOpenAiResponsesProviderLayer({
-    ...sharedConfig,
-    providerId: openAiCodexProviderDescriptor.providerId,
-    providerName: openAiCodexProviderDescriptor.providerName,
-    responsesUrl: config.responsesUrl ?? openAiCodexResponsesUrl,
-    authorizationHeaders: token => openAiCodexAuthorizationHeaders(token),
-    alwaysIncludeReasoning: true,
-    allowEofCompletion: true,
-    unsupportedContentProviderName: 'OpenAI Codex OAuth'
-  })
+  return decorateLLMProvider(provider =>
+    LLMProvider.of({
+      stream: request =>
+        Stream.fromEffect(Ref.make(false)).pipe(
+          Stream.flatMap(hasToolCallRef =>
+            provider.stream(request).pipe(
+              Stream.mapEffect(noteCodexToolCall(hasToolCallRef)),
+              Stream.catchTags({
+                LLMError: error =>
+                  isCodexContextWindowError(error)
+                    ? Stream.fail(normalizeCodexContextWindowError(error))
+                    : recoverMissingCodexFinalOutput(hasToolCallRef, error)
+              })
+            )
+          )
+        )
+    })
+  ).pipe(
+    Layer.provide(
+      makeOpenAiResponsesProviderLayer({
+        ...sharedConfig,
+        providerId: openAiCodexProviderDescriptor.providerId,
+        providerName: openAiCodexProviderDescriptor.providerName,
+        responsesUrl: config.responsesUrl ?? openAiCodexResponsesUrl,
+        authorizationHeaders: token => openAiCodexAuthorizationHeaders(token),
+        alwaysIncludeReasoning: true,
+        allowEofCompletion: true,
+        unsupportedContentProviderName: 'OpenAI Codex OAuth'
+      })
+    )
+  )
 }

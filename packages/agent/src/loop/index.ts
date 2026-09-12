@@ -24,6 +24,9 @@ export {
   LLMToolInputStart,
   LLMUsage
 } from './llm-event.ts'
+export { collectModelTurn } from './collect.ts'
+export type { ModelTurnResult } from './collect.ts'
+export { decorateLLMProvider, makeAgentLoopLayer } from './layer.ts'
 export { run, runModelTurn, runToolBatch, prepareToolBatch } from './run.ts'
 export type {
   AgentLoopRunId,
