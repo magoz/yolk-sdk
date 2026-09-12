@@ -900,6 +900,8 @@ describe('attemptToolBatch', () => {
         if (paused._tag !== 'AwaitingInput') return
         const approval = paused.requests.find(request => request._tag === 'ToolApprovalRequest')
         const question = paused.requests.find(request => request._tag === 'QuestionRequest')
+        expect(approval).toBeDefined()
+        expect(question).toBeDefined()
         if (approval === undefined || question === undefined) return
 
         const partial = yield* attemptToolBatch({

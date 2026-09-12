@@ -31,8 +31,9 @@ export type Coordinator<Key, E, Reason = never> = {
   readonly run: (key: Key) => Effect.Effect<void, E>
   /**
    * Captures a run waiter without awaiting settlement.
-   * Idle starts force=true (`Started`); an active owner is joined (`Joined`);
-   * a stopping/settling owner yields `Stopping` with a settlement waiter and no start.
+   * Idle starts force=true (`Started`); an active owner is joined (`Joined`),
+   * including during natural settlement. A stopping owner yields `Stopping` with a
+   * settlement waiter and no start.
    */
   readonly captureRun: (key: Key) => Effect.Effect<CapturedRun<E>>
   /** Rings the doorbell: idle starts; active drains again before settling. */
