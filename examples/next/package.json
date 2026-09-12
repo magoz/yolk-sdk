@@ -29,6 +29,7 @@
     "@paralleldrive/cuid2": "^3.0.6",
     "@radix-ui/react-slot": "^1.2.4",
     "@yolk-sdk/agent": "workspace:^",
+    "@yolk-sdk/harness": "workspace:^",
     "@yolk-sdk/connectors": "workspace:^",
     "@yolk-sdk/knowledge": "workspace:^",
     "@yolk-sdk/mcp": "workspace:^",

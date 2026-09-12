@@ -22,7 +22,7 @@ App-owned Vercel Workflow wrappers over `@yolk-sdk/vercel-workflows`.
 
 ## Step split
 
-- Model step runs one model turn, streams deltas, and folds assistant message/tool calls/usage with `collectModelTurn`; admission fencing uses `decorateLLMProvider`.
+- Model step runs one model turn, streams deltas, and folds assistant message/tool calls/usage with `@yolk-sdk/harness/outcome` `attemptModelTurn`; admission fencing uses `decorateLLMProvider`.
 - Parent tool orchestration preflights the entire batch, dispatches bounded individual tool/child work, then merges ordered `ToolResultMessage`s. Foreground child results add usage once; background observations never charge that usage to the parent.
 - Failed tools still append `ToolResultMessage.isError`; never resume the model with dangling host tool calls.
 - HITL tool step writes `AgentAwaitingInput`, returns hook metadata, and the workflow waits on `createHook` before rerunning the tool step with the response.

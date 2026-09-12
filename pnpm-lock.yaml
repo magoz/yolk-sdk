@@ -184,6 +184,9 @@ importers:
       '@yolk-sdk/agent':
         specifier: workspace:^
         version: link:../../packages/agent
+      '@yolk-sdk/harness':
+        specifier: workspace:^
+        version: link:../../packages/harness
       '@yolk-sdk/mcp':
         specifier: workspace:^
         version: link:../../packages/mcp
@@ -248,6 +251,9 @@ importers:
       '@yolk-sdk/connectors':
         specifier: workspace:^
         version: link:../../packages/connectors
+      '@yolk-sdk/harness':
+        specifier: workspace:^
+        version: link:../../packages/harness
       '@yolk-sdk/knowledge':
         specifier: workspace:^
         version: link:../../packages/knowledge
@@ -380,6 +386,15 @@ importers:
         version: 19.2.3
 
   packages/connectors:
+    dependencies:
+      '@yolk-sdk/agent':
+        specifier: workspace:^
+        version: link:../agent
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-beta.80
+
+  packages/harness:
     dependencies:
       '@yolk-sdk/agent':
         specifier: workspace:^
