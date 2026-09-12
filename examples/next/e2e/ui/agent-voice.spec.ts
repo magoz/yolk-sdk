@@ -1,6 +1,18 @@
 import { test, expect } from '../fixtures'
 
+declare global {
+  interface Window {
+    yolkVoiceTestChannelOpen: Promise<void>
+    yolkVoiceTestPeerConnectionState: () => string
+  }
+}
+
 const mockRealtimeBrowserApis = `
+let settleChannelOpen
+window.yolkVoiceTestChannelOpen = new Promise(resolve => {
+  settleChannelOpen = resolve
+})
+
 class FakeDataChannel extends EventTarget {
   readyState = 'connecting'
   sent = []
@@ -17,6 +29,7 @@ class FakeDataChannel extends EventTarget {
   open() {
     this.readyState = 'open'
     this.dispatchEvent(new Event('open'))
+    settleChannelOpen()
   }
 }
 
@@ -39,7 +52,7 @@ class FakePeerConnection extends EventTarget {
   async setLocalDescription() {}
 
   async setRemoteDescription() {
-    window.setTimeout(() => this.channel?.open(), 0)
+    this.channel?.open()
   }
 
   close() {
@@ -54,6 +67,8 @@ class FakePeerConnection extends EventTarget {
 }
 
 const sessions = []
+
+window.yolkVoiceTestPeerConnectionState = () => sessions.at(-1)?.connectionState ?? 'absent'
 
 Object.defineProperty(navigator, 'mediaDevices', {
   configurable: true,
@@ -91,7 +106,12 @@ test('voice mode waits for connected WebRTC transport before live', async ({ aut
   await authedPage.getByRole('button', { name: 'Activity' }).click()
   await authedPage.getByRole('button', { name: 'Start realtime voice' }).click()
 
+  await authedPage.evaluate(() => window.yolkVoiceTestChannelOpen)
+
   await expect(authedPage.getByText('voice connecting')).toHaveCount(2, { timeout: 15_000 })
+  expect(await authedPage.evaluate(() => window.yolkVoiceTestPeerConnectionState())).not.toBe(
+    'connected'
+  )
 
   await authedPage.evaluate(() => window.dispatchEvent(new Event('yolk-voice-test-connect')))
 

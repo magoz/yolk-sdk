@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Layer, Ref, Stream } from 'effect'
+import { Cause, Duration, Effect, Fiber, Layer, Ref, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -560,6 +560,23 @@ describe('attemptModelTurn', () => {
       }).pipe(Effect.flip)
 
       expect(error).toMatchObject({ _tag: 'LLMError', cause: 'rate_limit', retryable: true })
+    }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
+  )
+
+  it.effect('does not classify mixed sink typed+Die causes as recoverable', () =>
+    Effect.gen(function* () {
+      const typed = rateLimitError()
+      const defect = new Error('sink defect')
+      const exit = yield* attemptModelTurn(turnConfig, {
+        onEvent: () => Effect.failCause(Cause.combine(Cause.fail(typed), Cause.die(defect)))
+      }).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expect(Cause.findError(exit.cause)).toMatchObject({ _tag: 'Success', success: typed })
+      expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
     }).pipe(Effect.provide(providerLayer(Stream.make(LLMTextDelta.make({ text: 'partial' })))))
   )
 

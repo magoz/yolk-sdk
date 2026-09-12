@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref, Stream } from 'effect'
+import { Cause, Context, Effect, Layer, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -36,6 +36,32 @@ const assistantMessageFromResult = (message: AgentMessage | undefined) => {
   }
 
   return message
+}
+
+class CollectTestRequestId extends Context.Service<CollectTestRequestId, string>()(
+  'CollectTestRequestId'
+) {}
+
+const collectTestRequestAnnotation = Context.make(CollectTestRequestId, 'req-1')
+
+const annotatedFailCause = <E>(error: E) =>
+  Cause.annotate(Cause.fail(error), collectTestRequestAnnotation)
+
+const expectOriginalTypedFail = <E>(cause: Cause.Cause<E>, typed: E) => {
+  const fail = Cause.findFail(cause)
+  expect(fail._tag).toBe('Success')
+  if (fail._tag !== 'Success') return
+  expect(fail.success.error).toBe(typed)
+  expect(Context.getOrUndefined(Cause.reasonAnnotations(fail.success), CollectTestRequestId)).toBe(
+    'req-1'
+  )
+}
+
+const expectOriginalDefect = <E>(cause: Cause.Cause<E>, defect: unknown) => {
+  const die = Cause.findDie(cause)
+  expect(die._tag).toBe('Success')
+  if (die._tag !== 'Success') return
+  expect(die.success.defect).toBe(defect)
 }
 
 describe('collectModelTurn', () => {
@@ -258,6 +284,125 @@ describe('collectModelTurnAttempt', () => {
       expect(outcome.error).toBe(forged)
     })
   )
+
+  it.effect('preserves mixed sink typed+Die causes instead of SinkFailed', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'sink',
+        retryable: true
+      })
+      const defect = new Error('sink defect')
+      const exit = yield* collectModelTurnAttempt(
+        Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
+        {
+          onEvent: () =>
+            Effect.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
+        }
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
+
+  it.effect('preserves mixed upstream typed+Die causes instead of StreamFailed', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'upstream',
+        retryable: true
+      })
+      const defect = new Error('upstream defect')
+      const exit = yield* collectModelTurnAttempt(
+        Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
+
+  it.effect('preserves mixed sink typed+Interrupt causes instead of SinkFailed', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'sink interrupt',
+        retryable: true
+      })
+      const exit = yield* collectModelTurnAttempt(
+        Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
+        {
+          onEvent: () =>
+            Effect.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
+        }
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+    })
+  )
+
+  it.effect('preserves mixed upstream typed+Interrupt causes instead of StreamFailed', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'upstream interrupt',
+        retryable: true
+      })
+      const exit = yield* collectModelTurnAttempt(
+        Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+    })
+  )
+
+  it.effect('keeps pure sink defects as defects', () =>
+    Effect.gen(function* () {
+      const defect = new Error('pure sink defect')
+      const exit = yield* collectModelTurnAttempt(
+        Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
+        {
+          onEvent: () => Effect.die(defect)
+        }
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(false)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
+
+  it.effect('keeps pure upstream defects as defects', () =>
+    Effect.gen(function* () {
+      const defect = new Error('pure upstream defect')
+      const exit = yield* collectModelTurnAttempt(Stream.die(defect)).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(false)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
 })
 
 describe('collectModelTurn legacy success', () => {
@@ -269,6 +414,94 @@ describe('collectModelTurn legacy success', () => {
 
       expect(result.assistantMessage).toBeUndefined()
       expect(result.stopReason).toBe('stop')
+    })
+  )
+
+  it.effect('preserves mixed sink typed+Die causes', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'legacy sink',
+        retryable: true
+      })
+      const defect = new Error('legacy sink defect')
+      const exit = yield* collectModelTurn(
+        Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
+        {
+          onEvent: () =>
+            Effect.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
+        }
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
+
+  it.effect('preserves mixed upstream typed+Die causes', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'legacy upstream',
+        retryable: true
+      })
+      const defect = new Error('legacy upstream defect')
+      const exit = yield* collectModelTurn(
+        Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasDies(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+      expectOriginalDefect(exit.cause, defect)
+    })
+  )
+
+  it.effect('preserves mixed sink typed+Interrupt causes', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'legacy sink interrupt',
+        retryable: true
+      })
+      const exit = yield* collectModelTurn(
+        Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
+        {
+          onEvent: () =>
+            Effect.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
+        }
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
+    })
+  )
+
+  it.effect('preserves mixed upstream typed+Interrupt causes', () =>
+    Effect.gen(function* () {
+      const typed = new LLMError({
+        cause: 'rate_limit',
+        message: 'legacy upstream interrupt',
+        retryable: true
+      })
+      const exit = yield* collectModelTurn(
+        Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
+      ).pipe(Effect.exit)
+
+      expect(exit._tag).toBe('Failure')
+      if (exit._tag !== 'Failure') return
+      expect(Cause.hasFails(exit.cause)).toBe(true)
+      expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+      expectOriginalTypedFail(exit.cause, typed)
     })
   )
 })
