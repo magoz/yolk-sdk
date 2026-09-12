@@ -248,6 +248,9 @@ importers:
       '@yolk-sdk/connectors':
         specifier: workspace:^
         version: link:../../packages/connectors
+      '@yolk-sdk/harness':
+        specifier: workspace:^
+        version: link:../../packages/harness
       '@yolk-sdk/knowledge':
         specifier: workspace:^
         version: link:../../packages/knowledge

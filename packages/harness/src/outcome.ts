@@ -10,6 +10,7 @@ import {
   collectModelTurn,
   runModelTurn,
   runToolBatch,
+  type AgentLoopError,
   type ContextTransformer,
   type LLMProvider,
   type LoopConfig,
@@ -40,23 +41,25 @@ const failedOutcome = (error: unknown): StepOutcome => ({
   message: failureMessage(error)
 })
 
+const completedOutcome = (
+  result: ModelTurnResult
+): Extract<StepOutcome, { readonly _tag: 'Completed' }> => ({
+  _tag: 'Completed',
+  needsContinuation: result.stopReason === 'tool_use',
+  ...result
+})
+
 export const attemptModelTurn = <E2 = never, R2 = never>(
   config: ModelTurnConfig,
   options?: {
     readonly onEvent?: (event: AgentEvent) => Effect.Effect<void, E2, R2>
     readonly initialUsage?: AgentUsage
   }
-): Effect.Effect<StepOutcome, never, ContextTransformer | LLMProvider | LoopConfig | R2> =>
-  collectModelTurn(runModelTurn(config), options).pipe(
-    Effect.map(
-      (result): StepOutcome => ({
-        _tag: 'Completed',
-        needsContinuation: result.stopReason === 'tool_use',
-        ...result
-      })
-    ),
-    Effect.catch(error => Effect.succeed(failedOutcome(error)))
-  )
+): Effect.Effect<
+  Extract<StepOutcome, { readonly _tag: 'Completed' }>,
+  AgentLoopError | E2,
+  ContextTransformer | LLMProvider | LoopConfig | R2
+> => collectModelTurn(runModelTurn(config), options).pipe(Effect.map(completedOutcome))
 
 export const attemptToolBatch = (
   config: ToolBatchConfig

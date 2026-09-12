@@ -33,15 +33,14 @@ import {
 
 import {
   AbortError,
-  collectModelTurn,
   decorateLLMProvider,
   LLMError,
   prepareToolBatch,
-  runModelTurn,
   runToolBatch,
   ToolError,
   ToolExecutor
 } from '@yolk-sdk/agent/loop'
+import { attemptModelTurn } from '@yolk-sdk/harness/outcome'
 
 import { AppLayer } from '@/lib/layers'
 
@@ -187,9 +186,9 @@ export async function runAgentWorkflowModelStep(input: {
         assistantMessage: currentAssistantMessage,
         toolCalls: currentToolCalls,
         usage: currentUsage,
-        stopReason: currentReason
-      } = yield* collectModelTurn(
-        runModelTurn({
+        needsContinuation
+      } = yield* attemptModelTurn(
+        {
           messages: runtime.input.messages,
           systemPrompt: runtime.config.systemPrompt,
           tools: runtime.config.tools,
@@ -197,7 +196,7 @@ export async function runAgentWorkflowModelStep(input: {
           capabilities: runtime.config.capabilities,
           model: runtime.config.model,
           turn: input.state.turn
-        }),
+        },
         {
           initialUsage,
           onEvent: event =>
@@ -240,7 +239,7 @@ export async function runAgentWorkflowModelStep(input: {
           ? runtime.input.messages
           : [...runtime.input.messages, currentAssistantMessage]
 
-      if (currentReason === 'stop') {
+      if (!needsContinuation) {
         yield* writeSequencedWorkflowEvent({
           writer,
           event: AgentEnd.make({
@@ -256,7 +255,7 @@ export async function runAgentWorkflowModelStep(input: {
       const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
-        done: currentReason === 'stop',
+        done: !needsContinuation,
         messages: yield* Effect.forEach(nextMessages, message => encodeMessage(message)),
         createdMessages: yield* Effect.forEach(nextCreatedMessages, message =>
           encodeMessage(message)
