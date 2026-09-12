@@ -48,6 +48,7 @@ describe('Workflow run route model', () => {
 
   it('resumes HITL streams after the previous tail index', async () => {
     const readableOptions: Array<WorkflowReadableOptions | undefined> = []
+
     const getRun: WorkflowRunResolver = runId =>
       makeRun({
         runId,
@@ -55,6 +56,7 @@ describe('Workflow run route model', () => {
         onCancel: () => undefined,
         onReadable: options => readableOptions.push(options)
       })
+
     const response = workflowResumeResponse('wrun_123', getRun, {
       startIndex: workflowResumeStartIndexAfterTail(3),
       tailIndex: 3

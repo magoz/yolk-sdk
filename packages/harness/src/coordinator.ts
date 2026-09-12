@@ -7,11 +7,15 @@
  *
  * @see https://github.com/sst/opencode (packages/core/src/session/run-coordinator.ts)
  */
-import { Deferred, Effect, Fiber, FiberSet } from 'effect'
-import type { Exit, Scope } from 'effect'
+import { Context, Deferred, Effect, Exit, Fiber, FiberSet, Layer } from 'effect'
+import type { Scope } from 'effect'
+import { RunStore } from './store.ts'
 
 /** `"input"` subsumes `"steer"` when coalescing wakes. */
 export type Promotable = 'input' | 'steer'
+
+/** Why a run execution was interrupted. A `shutdown` interrupt keeps the run claimed. */
+export type InterruptReason = 'user' | 'shutdown'
 
 export type Coordinator<Key, E, Reason = never> = {
   readonly active: Effect.Effect<ReadonlySet<Key>>
@@ -65,6 +69,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
             if (execution.stopping || execution.pendingWake === undefined) return Effect.void
             execution.scope = execution.pendingWake
             execution.pendingWake = undefined
+
             return Effect.yieldNow.pipe(Effect.andThen(loop(key, execution, false)))
           })
         )
@@ -73,6 +78,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
     const settle = (key: Key, execution: Execution<E, Reason>, exit: Exit.Exit<void, E>) => {
       if (execution.pendingWake !== undefined) start(key, false, execution.pendingWake)
       else executions.delete(key)
+
       return Deferred.done(execution.done, exit).pipe(Effect.asVoid)
     }
 
@@ -82,6 +88,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
         scope,
         stopping: false
       }
+
       executions.set(key, execution)
       execution.owner = fork(
         Effect.yieldNow.pipe(
@@ -101,28 +108,36 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           Effect.asVoid
         )
       )
+
       return execution
     }
 
     const interruptNow = (key: Key, reason?: Reason): Effect.Effect<boolean> =>
       Effect.sync(() => {
         const execution = executions.get(key)
+
         if (execution === undefined || execution.stopping) return false
+
         if (execution.owner === undefined) {
           execution.pendingWake = undefined
+
           return false
         }
+
         execution.stopping = true
         execution.pendingWake = undefined
         execution.interruptionReason = reason
         fork(Fiber.interrupt(execution.owner))
+
         return true
       })
 
     const awaitIdle = (key: Key): Effect.Effect<void> =>
       Effect.suspend(() => {
         const execution = executions.get(key)
+
         if (execution === undefined) return Effect.void
+
         return Deferred.await(execution.done).pipe(
           Effect.ignoreCause,
           Effect.andThen(awaitIdle(key))
@@ -135,13 +150,17 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       run: key =>
         Effect.suspend(() => {
           const execution = executions.get(key)
+
           if (execution === undefined) return Deferred.await(start(key, true, 'input').done)
+
           if (!execution.stopping) return Deferred.await(execution.done)
+
           return Deferred.await(execution.done).pipe(
             Effect.ignoreCause,
             Effect.andThen(
               Effect.suspend(() => {
                 const next = executions.get(key)
+
                 return next === undefined
                   ? Deferred.await(start(key, true, 'input').done)
                   : Deferred.await(next.done)
@@ -152,15 +171,19 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       wake: (key, scope = 'input') =>
         Effect.sync(() => {
           const execution = executions.get(key)
+
           if (execution !== undefined) {
             execution.pendingWake = widerScope(execution.pendingWake, scope)
+
             return
           }
+
           start(key, false, scope)
         }),
       interrupt: (key, reason, options) =>
         Effect.suspend(() => {
           const execution = executions.get(key)
+
           return interruptNow(key, reason).pipe(
             Effect.tap(() =>
               options?.awaitSettlement === true && execution !== undefined
@@ -172,3 +195,36 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       awaitIdle
     }
   })
+
+/**
+ * Process-local coordinator for run ids.
+ *
+ * Owning service for run doorbell state. Acquire it through {@link RunCoordinator.layer},
+ * which wires claim-on-start / release-on-settle against the contextual {@link RunStore}:
+ * a `user` stop (or a clean exit) releases the claim, while a `shutdown` interrupt keeps
+ * it so the run can be resumed after a crash.
+ */
+export class RunCoordinator extends Context.Service<
+  RunCoordinator,
+  Coordinator<string, never, InterruptReason>
+>()('@yolk-sdk/harness/RunCoordinator') {
+  static layer = (options?: {
+    readonly drain?: (runId: string, force: boolean, scope: Promotable) => Effect.Effect<void>
+  }): Layer.Layer<RunCoordinator, never, RunStore> =>
+    Layer.effect(
+      this,
+      Effect.gen(function* () {
+        const store = yield* RunStore
+        const drain = options?.drain ?? ((_runId, _force, _scope) => Effect.void)
+
+        return yield* makeCoordinator<string, never, InterruptReason>({
+          drain,
+          started: runId => store.claim(runId),
+          settled: (runId, exit, reason) =>
+            reason === 'user' || (reason === undefined && !Exit.hasInterrupts(exit))
+              ? store.release(runId)
+              : Effect.void
+        })
+      })
+    )
+}

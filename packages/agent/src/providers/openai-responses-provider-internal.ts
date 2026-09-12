@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option, Ref, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Predicate, Ref, Stream } from 'effect'
 import {
   HttpClient,
   HttpClientRequest,
@@ -215,6 +215,7 @@ const OpenAiResponsesOutputItem = Schema.Union([
   OpenAiResponsesFunctionCallOutput,
   OpenAiResponsesReasoningOutput
 ])
+
 type OpenAiResponsesOutputItem = typeof OpenAiResponsesOutputItem.Type
 
 class OpenAiResponsesResponse extends Schema.Class<OpenAiResponsesResponse>(
@@ -324,6 +325,7 @@ const contentPartToResponsesInputPart = (
         case 'Ref':
           return Effect.fail(unsupportedContentError('Unresolved document source', providerName))
       }
+
     case 'Audio':
       return Effect.fail(unsupportedContentError('Audio', providerName))
   }
@@ -340,7 +342,7 @@ const contentToUserInput = (
   const parts = contentParts(content)
   const onlyPart = parts[0]
 
-  if (onlyPart !== undefined && parts.length === 1 && onlyPart._tag === 'Text') {
+  if (onlyPart !== undefined && parts.length === 1 && Predicate.isTagged(onlyPart, 'Text')) {
     return Effect.succeed(onlyPart.text)
   }
 
@@ -410,6 +412,7 @@ const messageToResponsesInput = (
           'Assistant',
           providerName
         )
+
         const toolCallInputs = yield* Effect.forEach(
           assistantHostToolCalls(message),
           toolCallToResponsesInput
@@ -423,6 +426,7 @@ const messageToResponsesInput = (
 
         return toolCallInputs
       }
+
       case 'ToolResult':
         return [
           {
@@ -471,6 +475,7 @@ export const toOpenAiResponsesRequestBody = (
     }
 
     yield* validateProviderTranscript(request.messages)
+
     const input = Arr.flatten(
       yield* Effect.forEach(request.messages, message =>
         messageToResponsesInput(
@@ -479,7 +484,9 @@ export const toOpenAiResponsesRequestBody = (
         )
       )
     )
+
     const reasoningEffort = request.reasoningEffort ?? config.defaultReasoningEffort
+
     const reasoning =
       config.alwaysIncludeReasoning || reasoningEffort !== undefined
         ? {
@@ -684,9 +691,12 @@ const toLlmEvents = (
   Effect.gen(function* () {
     const text = response.output_text ?? textFromOutputItems(response.output)
     const reasoning = reasoningFromOutputItems(response.output)
+
     const reasoningEvents =
       reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
+
     const textEvents = text.length > 0 ? [LLMTextDelta.make({ text })] : []
+
     const toolCallEvents = Arr.getSomes(
       yield* Effect.forEach(response.output, item => {
         switch (item.type) {
@@ -793,9 +803,11 @@ const initialBodyState: OpenAiResponsesBodyState = {
 }
 
 const shouldEmitSseEvent = (state: OpenAiResponsesSseState, event: LLMEvent) => {
-  if (state.hasTextDelta && event._tag === 'TextDelta') return false
-  if (state.hasReasoningDelta && event._tag === 'ReasoningDelta') return false
-  if (event._tag === 'ToolCall' && state.toolCallIds.has(event.call.id)) return false
+  if (state.hasTextDelta && Predicate.isTagged(event, 'TextDelta')) return false
+
+  if (state.hasReasoningDelta && Predicate.isTagged(event, 'ReasoningDelta')) return false
+
+  if (Predicate.isTagged(event, 'ToolCall') && state.toolCallIds.has(event.call.id)) return false
 
   return true
 }
@@ -806,7 +818,7 @@ const dedupeSseEvents = (
 ): ReadonlyArray<LLMEvent> => events.filter(event => shouldEmitSseEvent(state, event))
 
 const toolCallIdsFromEvents = (events: ReadonlyArray<LLMEvent>) =>
-  events.flatMap(event => (event._tag === 'ToolCall' ? [event.call.id] : []))
+  events.flatMap(event => (Predicate.isTagged(event, 'ToolCall') ? [event.call.id] : []))
 
 const normalizeNewlines = (text: string) => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
@@ -883,6 +895,7 @@ const eventsFromOutputItem = (
 
       return Effect.succeed(text.length > 0 ? [LLMTextDelta.make({ text })] : [])
     }
+
     case 'reasoning': {
       const reasoning = reasoningFromOutputItems([item])
 
@@ -890,6 +903,7 @@ const eventsFromOutputItem = (
         reasoning.length > 0 ? [LLMReasoningDelta.make({ text: reasoning })] : []
       )
     }
+
     case 'function_call':
       return parseToolArguments(item.arguments).pipe(
         Effect.map(params => [
@@ -939,6 +953,7 @@ const finalResponseToEvents = (
   Effect.gen(function* () {
     const hasToolCalls = state.toolCallIds.size > 0
     const parsedFinal = yield* decodeOpenAiResponsesResponse(response)
+
     const finalEvents = yield* toLlmEvents(
       responseWithoutReplayedToolCalls(parsedFinal, state.toolCallIds),
       { allowEmptyStop: state.hasTextDelta || hasToolCalls }
@@ -952,7 +967,7 @@ const finalResponseToEvents = (
     }
 
     return dedupedEvents.map(event =>
-      event._tag === 'Done' ? LLMDone.make({ stopReason: 'tool_use' }) : event
+      Predicate.isTagged(event, 'Done') ? LLMDone.make({ stopReason: 'tool_use' }) : event
     )
   })
 
@@ -996,6 +1011,7 @@ const processSseData = (
       typeof parsed.delta === 'string'
     ) {
       const partKey = reasoningSummaryPartKey(parsed)
+
       const startsNewPart =
         partKey !== undefined &&
         state.reasoningSummaryPartKey !== undefined &&
@@ -1019,15 +1035,18 @@ const processSseData = (
     }
 
     const outputItemDoneEvents = yield* eventsFromOutputItemDone(parsed)
+
     if (outputItemDoneEvents.length > 0) {
       const events = dedupeSseEvents(state, outputItemDoneEvents)
       const emittedToolCallIds = toolCallIdsFromEvents(events)
 
       return {
         state: {
-          hasTextDelta: state.hasTextDelta || events.some(event => event._tag === 'TextDelta'),
+          hasTextDelta:
+            state.hasTextDelta || events.some(event => Predicate.isTagged(event, 'TextDelta')),
           hasReasoningDelta:
-            state.hasReasoningDelta || events.some(event => event._tag === 'ReasoningDelta'),
+            state.hasReasoningDelta ||
+            events.some(event => Predicate.isTagged(event, 'ReasoningDelta')),
           reasoningSummaryPartKey: state.reasoningSummaryPartKey,
           toolCallIds: new Set([...state.toolCallIds, ...emittedToolCallIds]),
           hasDone: state.hasDone
@@ -1042,8 +1061,8 @@ const processSseData = (
       }
 
       const events = yield* finalResponseToEvents(parsed.response, state)
-      const emittedText = events.some(event => event._tag === 'TextDelta')
-      const emittedReasoning = events.some(event => event._tag === 'ReasoningDelta')
+      const emittedText = events.some(event => Predicate.isTagged(event, 'TextDelta'))
+      const emittedReasoning = events.some(event => Predicate.isTagged(event, 'ReasoningDelta'))
       const emittedToolCallIds = toolCallIdsFromEvents(events)
 
       return {
@@ -1245,6 +1264,7 @@ export const streamOpenAiResponsesResponse = (
               const state = yield* Ref.get(bodyStateRef)
               const step = yield* processBodyChunk(descriptor, state, chunk)
               yield* Ref.set(bodyStateRef, step.bodyState)
+
               return step.events
             })
           ),
@@ -1291,6 +1311,7 @@ const sendOpenAiResponsesRequest = (
     const body = yield* toOpenAiResponsesRequestBody(request, config).pipe(
       Effect.mapError(error => withOpenAiResponsesProviderName(config.providerName, error))
     )
+
     // Replayed transcripts can carry lone surrogates; harden the lowered
     // body so one bad historical string cannot poison every model call.
     const serializedBody = yield* encodeJsonString(
@@ -1309,6 +1330,7 @@ const sendOpenAiResponsesRequest = (
       HttpClientRequest.setHeaders(headers),
       HttpClientRequest.bodyText(serializedBody, 'application/json')
     )
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(

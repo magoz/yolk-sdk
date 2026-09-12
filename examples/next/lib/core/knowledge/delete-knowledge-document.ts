@@ -7,6 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 export const deleteKnowledgeDocument = (input: { readonly userId: string; readonly id: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const files = yield* db
       .select({ storageKey: schema.userKnowledgeFile.storageKey })
       .from(schema.userKnowledgeFile)

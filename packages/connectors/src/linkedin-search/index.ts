@@ -9,12 +9,17 @@ import { ActionResult, ProviderFailure } from '../result.ts'
 import type { ConnectorIntegration } from '../integration.ts'
 
 export const linkedInSearchConnectorId = 'linkedin-search'
+
 export const exaApiKeySlotId = 'linkedin-search.exa_api_key'
+
 export const enrichLayerApiKeySlotId = 'linkedin-search.enrich_layer_api_key'
+
 export const exaApiBaseUrl = 'https://api.exa.ai'
+
 export const enrichLayerApiBaseUrl = 'https://enrichlayer.com/api/v2'
 
 export const ExaApiKeySlot = CredentialSlot.make({ id: exaApiKeySlotId, kind: 'api_key' })
+
 export const EnrichLayerApiKeySlot = CredentialSlot.make({
   id: enrichLayerApiKeySlotId,
   kind: 'api_key'
@@ -107,7 +112,9 @@ const LinkedInEmailApiOutput = Schema.Struct({
 
 const linkedInEmailStatus = (email: string | null | undefined) => {
   if (email === undefined) return 'unknown'
+
   if (email === null) return 'not_found'
+
   return 'found'
 }
 
@@ -128,6 +135,7 @@ export const linkedInSearchAction = defineAction({
     Effect.gen(function* () {
       const token = yield* resolveApiToken(integration, ExaApiKeySlot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -162,6 +170,7 @@ export const linkedInSearchAction = defineAction({
         }),
         response
       )
+
       return ActionResult.success(LinkedInSearchOutput.make(decoded))
     })
 })
@@ -176,7 +185,9 @@ export const linkedInProfileAction = defineAction({
       const token = yield* resolveApiToken(integration, EnrichLayerApiKeySlot).pipe(
         Effect.catchTag('ConnectorError', () => Effect.fail(missingEnrichLayer(integration)))
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -195,6 +206,7 @@ export const linkedInProfileAction = defineAction({
       }
 
       const profile = yield* decodeJsonResponse(Schema.Unknown, response)
+
       return ActionResult.success(LinkedInProfileOutput.make({ profile }))
     })
 })
@@ -209,7 +221,9 @@ export const linkedInEmailAction = defineAction({
       const token = yield* resolveApiToken(integration, EnrichLayerApiKeySlot).pipe(
         Effect.catchTag('ConnectorError', () => Effect.fail(missingEnrichLayer(integration)))
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -228,6 +242,7 @@ export const linkedInEmailAction = defineAction({
       }
 
       const decoded = yield* decodeJsonResponse(LinkedInEmailApiOutput, response)
+
       if (decoded.email_queue_count !== undefined && decoded.email === undefined) {
         return ActionResult.success(
           LinkedInEmailOutput.make({

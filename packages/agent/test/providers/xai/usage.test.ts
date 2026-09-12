@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Result, Tracer } from 'effect'
+import { Duration, Effect, Fiber, Predicate, Result, Tracer } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -16,13 +16,16 @@ import {
 } from '../../../src/providers/xai/usage.ts'
 
 const fetchedAt = '2026-06-03T00:00:00.000Z'
+
 const tokenExpiresAt = 1_800_000_000_000
+
 const token = OAuthAccessToken.make({
   provider: 'xai-grok',
   accessToken: 'grok-secret',
   expiresAt: tokenExpiresAt,
   accountId: 'must-not-be-used-as-xai-user-id'
 })
+
 const options = {
   xAiUserId: 'xai-user-123',
   clientVersion: '2.4.0'
@@ -86,6 +89,7 @@ describe('xAI Grok subscription usage', () => {
         },
         fetchedAt
       )
+
       const daily = yield* parseXAiGrokSubscriptionUsage(
         {
           config: {
@@ -98,6 +102,7 @@ describe('xAI Grok subscription usage', () => {
         },
         fetchedAt
       )
+
       const unavailable = yield* parseXAiGrokSubscriptionUsage(
         {
           config: {
@@ -133,6 +138,7 @@ describe('xAI Grok subscription usage', () => {
         },
         fetchedAt
       )
+
       const legacyProtoZero = yield* parseXAiGrokSubscriptionUsage(
         {
           config: {
@@ -144,6 +150,7 @@ describe('xAI Grok subscription usage', () => {
         },
         fetchedAt
       )
+
       const modern = yield* parseXAiGrokSubscriptionUsage(
         {
           config: {
@@ -169,6 +176,7 @@ describe('xAI Grok subscription usage', () => {
   it.effect('fails safely for malformed, non-finite, and out-of-range percentages', () =>
     Effect.gen(function* () {
       const values: ReadonlyArray<unknown> = ['private malformed percent', Number.NaN, -1, 101]
+
       const results = yield* Effect.forEach(values, creditUsagePercent =>
         parseXAiGrokSubscriptionUsage(
           { config: { ...modernUsage().config, creditUsagePercent } },
@@ -221,6 +229,7 @@ describe('xAI Grok subscription usage', () => {
         },
         fetchedAt
       ).pipe(Effect.result)
+
       const fetchedAtResult = yield* parseXAiGrokSubscriptionUsage({}, 'not-an-instant').pipe(
         Effect.result
       )
@@ -241,6 +250,7 @@ describe('xAI Grok subscription usage', () => {
     () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const sentHeaders: Array<Record<string, string | undefined>> = []
+
       const client = HttpClient.make(request => {
         requests.push(request)
         sentHeaders.push({
@@ -252,6 +262,7 @@ describe('xAI Grok subscription usage', () => {
           'x-grok-client-mode': request.headers['x-grok-client-mode'],
           'x-grok-model-override': request.headers['x-grok-model-override']
         })
+
         return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(modernUsage(1))))
       })
 
@@ -283,8 +294,10 @@ describe('xAI Grok subscription usage', () => {
     'rejects provider, identity, client-version, and timeout configuration before HTTP',
     () => {
       let called = false
+
       const client = HttpClient.make(request => {
         called = true
+
         return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({})))
       })
 
@@ -315,7 +328,7 @@ describe('xAI Grok subscription usage', () => {
         expect(
           results.map(result =>
             Result.isFailure(result) &&
-            result.failure._tag === 'ProviderSubscriptionUsageConfigurationError'
+            Predicate.isTagged(result.failure, 'ProviderSubscriptionUsageConfigurationError')
               ? result.failure.reason
               : undefined
           )
@@ -341,7 +354,9 @@ describe('xAI Grok subscription usage', () => {
         headers: { 'Content-Type': 'application/json' }
       })
     ]
+
     let call = 0
+
     const client = HttpClient.make(request =>
       Effect.succeed(HttpClientResponse.fromWeb(request, responses[call++] ?? new Response()))
     )
@@ -385,18 +400,21 @@ describe('xAI Grok subscription usage', () => {
           })
         )
       )
+
       const networkResult = yield* fetchXAiGrokSubscriptionUsage(token, options).pipe(
         Effect.provideService(HttpClient.HttpClient, networkClient),
         Effect.result
       )
 
       const timeoutClient = HttpClient.make(() => Effect.never)
+
       const timeoutFiber = yield* Effect.forkChild(
         fetchXAiGrokSubscriptionUsage(token, { ...options, requestTimeoutMs: 1_000 }).pipe(
           Effect.provideService(HttpClient.HttpClient, timeoutClient),
           Effect.result
         )
       )
+
       yield* TestClock.adjust(Duration.seconds(1))
       const timeoutResult = yield* Fiber.join(timeoutFiber)
 
@@ -410,12 +428,14 @@ describe('xAI Grok subscription usage', () => {
           )
         )
       )
+
       const bodyTimeoutFiber = yield* Effect.forkChild(
         fetchXAiGrokSubscriptionUsage(token, { ...options, requestTimeoutMs: 1_000 }).pipe(
           Effect.provideService(HttpClient.HttpClient, stalledBodyClient),
           Effect.result
         )
       )
+
       yield* TestClock.adjust(Duration.seconds(1))
       const bodyTimeoutResult = yield* Fiber.join(bodyTimeoutFiber)
 
@@ -442,8 +462,10 @@ describe('xAI Grok subscription usage', () => {
 
   it.effect('forces Fetch redirect handling to manual before sending credentials', () => {
     const redirectModes: Array<RequestRedirect | undefined> = []
+
     const fetch = (_input: RequestInfo | URL, init?: RequestInit) => {
       redirectModes.push(init?.redirect)
+
       return Promise.resolve(
         new Response('', {
           status: 302,
@@ -471,13 +493,16 @@ describe('xAI Grok subscription usage', () => {
 
   it.effect('suppresses credential-bearing HTTP spans', () => {
     const spans: Array<Tracer.Span> = []
+
     const tracer = Tracer.make({
       span: spanOptions => {
         const span = new Tracer.NativeSpan(spanOptions)
         spans.push(span)
+
         return span
       }
     })
+
     const client = HttpClient.make(request =>
       Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(modernUsage(1))))
     )
@@ -491,6 +516,7 @@ describe('xAI Grok subscription usage', () => {
       const trace = JSON.stringify(
         spans.map(span => ({ name: span.name, attributes: [...span.attributes.entries()] }))
       )
+
       expect(spans.map(span => span.name)).toEqual([
         'XAiGrokSubscriptionUsage.fetch',
         'XAiGrokSubscriptionUsage.parse'

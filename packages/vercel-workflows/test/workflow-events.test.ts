@@ -23,6 +23,7 @@ describe('durable workflow agent events', () => {
       event: { _tag: 'LLMTextDelta', text: 'hej' },
       createdAtMs: 123
     })
+
     const second = sequenceDurableAgentEvent({
       state: first.nextState,
       streamId: 'workflow:run-1',
@@ -64,11 +65,13 @@ describe('durable workflow agent events', () => {
 
   it('writes sequenced NDJSON', async () => {
     const chunks: Array<Uint8Array> = []
+
     const writable = new WritableStream<Uint8Array>({
       write: chunk => {
         chunks.push(chunk)
       }
     })
+
     const writer = writable.getWriter()
 
     const result = await Effect.runPromise(
@@ -80,9 +83,11 @@ describe('durable workflow agent events', () => {
         event: { _tag: 'LLMTextDelta', text: 'hej' }
       })
     )
+
     writer.releaseLock()
 
     const firstChunk = chunks[0]
+
     if (firstChunk === undefined) throw new Error('Missing NDJSON chunk')
 
     expect(result.event.eventId).toBe('workflow:run-1:1:0')
@@ -91,6 +96,7 @@ describe('durable workflow agent events', () => {
 
   it('commits before writing terminal events', async () => {
     const operations: Array<string> = []
+
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
         terminal: { _tag: 'AgentEnd' },
@@ -113,15 +119,14 @@ describe('durable workflow agent events', () => {
     )
 
     expect(operations).toEqual(['commit', 'write:AgentEnd'])
-    expect(result).toMatchObject({
-      _tag: 'Committed',
-      writeResult: { nextEventSequence: 2 }
-    })
+    expect(result._tag).toBe('Committed')
+    expect(result).toMatchObject({ writeResult: { nextEventSequence: 2 } })
   })
 
   it('writes terminal error when commit fails', async () => {
     const operations: Array<string> = []
     const commitError = new Error('commit failed')
+
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
         terminal: { _tag: 'AgentEnd' },
@@ -157,6 +162,7 @@ describe('durable workflow agent events', () => {
   it('reports terminal write failures', async () => {
     const operations: Array<string> = []
     const writeError = new Error('write failed')
+
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
         terminal: { _tag: 'AgentEnd' },
@@ -191,6 +197,7 @@ describe('durable workflow agent events', () => {
     const operations: Array<string> = []
     const commitError = new Error('commit failed')
     const writeError = new Error('write commit error failed')
+
     const result = await Effect.runPromise(
       commitThenWriteTerminalEvent({
         terminal: { _tag: 'AgentEnd' },

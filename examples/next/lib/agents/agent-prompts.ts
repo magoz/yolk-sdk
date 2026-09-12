@@ -8,6 +8,7 @@ export const baseAgentSystemPrompt = [
 ].join('\n')
 
 export const textAgentSystemPromptAddendum = ''
+
 export const voiceAgentSystemPromptAddendum = 'Respond naturally for spoken conversation.'
 
 export const defaultAgentSystemPrompt = joinPromptSections([

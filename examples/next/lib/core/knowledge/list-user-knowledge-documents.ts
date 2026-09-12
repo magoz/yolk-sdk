@@ -6,6 +6,7 @@ import * as schema from '@/lib/services/db/schema'
 import type { KnowledgeAvailability } from './availability'
 
 const defaultLimit = 20
+
 const maxLimit = 50
 
 export type KnowledgeDocumentSummary = {
@@ -30,11 +31,13 @@ export type KnowledgeDocumentSummary = {
 
 const normalizeLimit = (value: number | undefined) => {
   const limit = value ?? defaultLimit
+
   if (!Number.isInteger(limit) || limit < 1) {
     return Effect.fail(
       new ValidationError({ field: 'limit', message: 'limit must be a positive integer' })
     )
   }
+
   return Effect.succeed(Math.min(limit, maxLimit))
 }
 
@@ -48,6 +51,7 @@ export const listUserKnowledgeDocuments = (input: {
     const limit = yield* normalizeLimit(input.limit)
     const query = input.query?.trim()
     const db = yield* Db
+
     const documents = yield* db
       .select()
       .from(schema.userKnowledgeDocument)
@@ -71,6 +75,7 @@ export const listUserKnowledgeDocuments = (input: {
           .select()
           .from(schema.userKnowledgeFile)
           .where(eq(schema.userKnowledgeFile.documentId, document.id))
+
         const chunks = yield* db
           .select({ id: schema.userKnowledgeChunk.id })
           .from(schema.userKnowledgeChunk)

@@ -26,6 +26,7 @@ export const getKnowledgeDocument = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [row] = yield* db
       .select({ document: schema.knowledgeDocument, storageRecord: schema.storageObject })
       .from(schema.knowledgeDocument)

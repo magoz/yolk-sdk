@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Ref } from 'effect'
+import { Context, Data, Effect, Layer, Match, Option, Predicate, Ref } from 'effect'
 import * as Schema from 'effect/Schema'
 import { AgentError, AgentMessage, HitlRequest, HitlResponse } from '@yolk-sdk/agent/protocol'
 import { SessionConflictError, SessionNotFoundError } from './error.ts'
@@ -50,6 +50,7 @@ export const RuntimeSessionEvent = Schema.Union([
   RunFailed,
   RunInterrupted
 ])
+
 export type RuntimeSessionEvent = typeof RuntimeSessionEvent.Type
 
 export type StoredRuntimeSessionEvent = {
@@ -92,86 +93,79 @@ export class SessionEventStore extends Context.Service<SessionEventStore, Sessio
 export const replayRuntimeSessionEvents = (
   events: ReadonlyArray<StoredRuntimeSessionEvent>
 ): ReadonlyArray<AgentMessage> =>
-  events.flatMap(stored => {
-    switch (stored.event._tag) {
-      case 'InputAppended':
-        return [stored.event.message]
-      case 'RunCompleted':
-      case 'RunAwaitingInput':
-        return stored.event.messages
-      case 'HitlResponseAppended':
-      case 'RunFailed':
-      case 'RunInterrupted':
-      case 'RunStarted':
-        return []
-    }
-  })
+  events.flatMap(stored =>
+    Match.value(stored.event).pipe(
+      Match.tag('InputAppended', appended => [appended.message]),
+      Match.tag('RunCompleted', 'RunAwaitingInput', terminal => terminal.messages),
+      Match.tag('HitlResponseAppended', 'RunFailed', 'RunInterrupted', 'RunStarted', () => []),
+      Match.exhaustive
+    )
+  )
 
 export const replayRuntimeHitlResponses = (
   events: ReadonlyArray<StoredRuntimeSessionEvent>
 ): ReadonlyArray<HitlResponse> =>
   events.flatMap(stored =>
-    stored.event._tag === 'HitlResponseAppended' ? [stored.event.response] : []
+    Predicate.isTagged(stored.event, 'HitlResponseAppended') ? [stored.event.response] : []
   )
 
-type IncompleteRunSearch =
-  | {
-      readonly _tag: 'Found'
-      readonly run: IncompleteRuntimeRun
-    }
-  | {
-      readonly _tag: 'Searching'
-      readonly terminalRunIds: ReadonlySet<string>
-    }
-
-const terminalRunId = (event: RuntimeSessionEvent): Option.Option<string> => {
-  switch (event._tag) {
-    case 'RunCompleted':
-    case 'RunAwaitingInput':
-    case 'RunFailed':
-    case 'RunInterrupted':
-      return Option.some(event.runId)
-    case 'HitlResponseAppended':
-    case 'InputAppended':
-    case 'RunStarted':
-      return Option.none()
+type IncompleteRunSearch = Data.TaggedEnum<{
+  readonly Found: {
+    readonly run: IncompleteRuntimeRun
   }
-}
+  readonly Searching: {
+    readonly terminalRunIds: ReadonlySet<string>
+  }
+}>
+
+const IncompleteRunSearch = Data.taggedEnum<IncompleteRunSearch>()
+
+const terminalRunId = (event: RuntimeSessionEvent): Option.Option<string> =>
+  Match.value(event).pipe(
+    Match.tag('RunCompleted', 'RunAwaitingInput', 'RunFailed', 'RunInterrupted', terminal =>
+      Option.some(terminal.runId)
+    ),
+    Match.tag('HitlResponseAppended', 'InputAppended', 'RunStarted', (): Option.Option<string> =>
+      Option.none()
+    ),
+    Match.exhaustive
+  )
 
 export const latestIncompleteRuntimeRun = (
   events: ReadonlyArray<StoredRuntimeSessionEvent>
 ): Option.Option<IncompleteRuntimeRun> => {
   const search = events.reduceRight<IncompleteRunSearch>(
     (state, stored) => {
-      if (state._tag === 'Found') {
+      if (Predicate.isTagged(state, 'Found')) {
         return state
       }
 
       const terminal = terminalRunId(stored.event)
 
       if (Option.isSome(terminal)) {
-        return {
-          _tag: 'Searching',
+        return IncompleteRunSearch.Searching({
           terminalRunIds: new Set([...state.terminalRunIds, terminal.value])
-        }
+        })
       }
 
-      if (stored.event._tag === 'RunStarted' && !state.terminalRunIds.has(stored.event.runId)) {
-        return {
-          _tag: 'Found',
+      if (
+        Predicate.isTagged(stored.event, 'RunStarted') &&
+        !state.terminalRunIds.has(stored.event.runId)
+      ) {
+        return IncompleteRunSearch.Found({
           run: {
             runId: stored.event.runId,
             startedRevision: stored.revision
           }
-        }
+        })
       }
 
       return state
     },
-    { _tag: 'Searching', terminalRunIds: new Set() }
+    IncompleteRunSearch.Searching({ terminalRunIds: new Set() })
   )
 
-  return search._tag === 'Found' ? Option.some(search.run) : Option.none()
+  return Predicate.isTagged(search, 'Found') ? Option.some(search.run) : Option.none()
 }
 
 const emptyLog = (sessionId: string): RuntimeSessionEventLog => ({

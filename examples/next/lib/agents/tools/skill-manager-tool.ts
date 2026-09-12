@@ -38,6 +38,7 @@ const SkillManagerParams = Schema.Struct({
     Schema.annotate({ description: 'Optional slash command name. Defaults to the skill name.' })
   )
 })
+
 type SkillManagerParams = typeof SkillManagerParams.Type
 
 export type SkillManagerAction =
@@ -121,6 +122,7 @@ const paramsToAction = (params: SkillManagerParams, userId: string) =>
           commandName: optionalText(params.commandName)
         } satisfies SkillManagerAction
       }
+
       case 'update': {
         const description = yield* requiredText(params, 'description')
         const content = yield* requiredText(params, 'content')

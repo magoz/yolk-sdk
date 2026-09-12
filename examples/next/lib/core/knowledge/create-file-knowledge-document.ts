@@ -58,11 +58,13 @@ export const createFileKnowledgeDocument = (input: {
     }
 
     const fileId = createId()
+
     const storageKey = knowledgeFileStorageKey({
       documentId: document.id,
       fileId,
       kind: 'original'
     })
+
     return yield* Effect.gen(function* () {
       yield* fileStore.putFile({
         storageKey,

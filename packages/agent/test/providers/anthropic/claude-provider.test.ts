@@ -61,6 +61,7 @@ const responseFromChunks = (chunks: ReadonlyArray<string>) => {
         for (const chunk of chunks) {
           controller.enqueue(encoder.encode(chunk))
         }
+
         controller.close()
       }
     }),
@@ -123,6 +124,7 @@ const readCapturedBody = (requests: ReadonlyArray<CapturedRequest>) => {
 
 const collectKeys = (value: unknown): ReadonlyArray<string> => {
   if (Array.isArray(value)) return value.flatMap(collectKeys)
+
   if (typeof value !== 'object' || value === null) return []
 
   return Object.entries(value).flatMap(([key, child]) => [key, ...collectKeys(child)])
@@ -426,11 +428,8 @@ describe('Anthropic Claude provider', () => {
         tools: []
       }).pipe(Effect.flip)
 
-      expect(error).toMatchObject({
-        _tag: 'LLMError',
-        cause: 'validation_error',
-        retryable: false
-      })
+      expect(error._tag).toBe('LLMError')
+      expect(error).toMatchObject({ cause: 'validation_error', retryable: false })
       expect(error.message).toContain('search (call-1)')
     })
   )
@@ -711,6 +710,7 @@ describe('Anthropic Claude provider', () => {
           })
         ]
       })
+
       const schema = body.tools?.[0]?.input_schema
       const keys = collectKeys(schema)
 
@@ -950,6 +950,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('maps Anthropic prompt-too-long HTTP errors to context overflow', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           type: 'error',
@@ -960,10 +961,11 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 400 }
       )
+
       const error = yield* runMinimalProviderRequest({ response }, requests).pipe(Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'context_overflow',
         message:
           'Anthropic Claude returned 400: prompt is too long: 233153 tokens > 200000 maximum',
@@ -981,9 +983,11 @@ describe('Anthropic Claude provider', () => {
   it.effect('streams Anthropic text deltas as they arrive', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = openResponseWithFirstChunk(
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hel"}}\n\n'
       )
+
       const providerLayer = makeAnthropicClaudeProviderLayer({
         token: new OAuthAccessToken({
           provider: 'anthropic-claude',
@@ -992,6 +996,7 @@ describe('Anthropic Claude provider', () => {
         }),
         maxTokens: anthropicTestMaxTokens
       }).pipe(Layer.provide(makeHttpClientLayer(response, requests)))
+
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
 
@@ -1004,6 +1009,7 @@ describe('Anthropic Claude provider', () => {
           })
           .pipe(Stream.take(1), Stream.runCollect)
       }).pipe(Effect.provide(providerLayer))
+
       const events = Array.from(eventsChunk)
 
       expect(events.map(event => event._tag)).toEqual(['TextDelta'])
@@ -1014,11 +1020,13 @@ describe('Anthropic Claude provider', () => {
   it.effect('parses chunked CRLF Anthropic SSE streams', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = responseFromChunks([
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"he',
         'l"}}\r\n\r\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"lo"}}\r\n\r\n',
         'data: {"type":"message_stop"}\r\n\r\n'
       ])
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
 
@@ -1031,6 +1039,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('supports non-streaming Anthropic JSON responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           content: [{ type: 'text', text: 'hello' }],
@@ -1039,6 +1048,7 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 200 }
       )
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
 
@@ -1051,6 +1061,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('fails non-streaming responses truncated at max_tokens', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           content: [{ type: 'text', text: 'I will call the tool next.' }],
@@ -1059,10 +1070,11 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 200 }
       )
+
       const error = yield* collectProviderEvents(response, requests).pipe(Effect.flip)
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         message: 'Anthropic Claude stopped after reaching max_tokens',
         retryable: false
@@ -1073,6 +1085,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('maps Anthropic cache usage into total input usage', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           content: [{ type: 'text', text: 'hello' }],
@@ -1086,6 +1099,7 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 200 }
       )
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
 
@@ -1101,6 +1115,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('treats null Anthropic cache usage fields as zero', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           content: [{ type: 'text', text: 'hello' }],
@@ -1114,6 +1129,7 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 200 }
       )
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
       const usageEvent = events[2]
@@ -1121,6 +1137,7 @@ describe('Anthropic Claude provider', () => {
       expect(usageEvent).toMatchObject({
         usage: { input: { total: 2, uncached: 2 }, output: { total: 4 } }
       })
+
       if (usageEvent?._tag !== 'Usage') expect.fail('Expected usage event')
       expect(usageEvent.usage.input.cacheRead).toBeUndefined()
       expect(usageEvent.usage.input.cacheWrite).toBeUndefined()
@@ -1130,6 +1147,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('streams Anthropic tool calls from partial JSON deltas', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = responseFromChunks([
         'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp_Search"}}\n\n',
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":"}}\n\n',
@@ -1137,6 +1155,7 @@ describe('Anthropic Claude provider', () => {
         'data: {"type":"content_block_stop","index":0}\n\n',
         'data: {"type":"message_stop"}\n\n'
       ])
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
 
@@ -1153,6 +1172,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('preserves StructuredOutput casing when unprefixing Claude tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const response = new Response(
         JSON.stringify({
           content: [
@@ -1163,6 +1183,7 @@ describe('Anthropic Claude provider', () => {
         }),
         { status: 200 }
       )
+
       const eventsChunk = yield* collectProviderEvents(response, requests)
       const events = Array.from(eventsChunk)
 
@@ -1175,6 +1196,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('emits Anthropic streaming usage deltas when output snapshots arrive', () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get('https://example.com')
+
       const response = HttpClientResponse.fromWeb(
         request,
         responseFromChunks([
@@ -1183,6 +1205,7 @@ describe('Anthropic Claude provider', () => {
           'data: {"type":"message_stop"}\n\n'
         ])
       )
+
       const eventsChunk = yield* streamAnthropicClaudeResponse(response).pipe(Stream.runCollect)
       const events = Array.from(eventsChunk)
 
@@ -1200,6 +1223,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('fails streams truncated at max_tokens instead of reporting completion', () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get('https://example.com')
+
       const response = HttpClientResponse.fromWeb(
         request,
         responseFromChunks([
@@ -1208,13 +1232,14 @@ describe('Anthropic Claude provider', () => {
           'data: {"type":"message_stop"}\n\n'
         ])
       )
+
       const error = yield* streamAnthropicClaudeResponse(response).pipe(
         Stream.runCollect,
         Effect.flip
       )
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'invalid_response',
         message: 'Anthropic Claude stopped after reaching max_tokens',
         retryable: false
@@ -1225,6 +1250,7 @@ describe('Anthropic Claude provider', () => {
   it.effect('parses null Anthropic streaming usage fields without dropping output usage', () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get('https://example.com')
+
       const response = HttpClientResponse.fromWeb(
         request,
         responseFromChunks([
@@ -1233,6 +1259,7 @@ describe('Anthropic Claude provider', () => {
           'data: {"type":"message_stop"}\n\n'
         ])
       )
+
       const eventsChunk = yield* streamAnthropicClaudeResponse(response).pipe(Stream.runCollect)
       const events = Array.from(eventsChunk)
 
@@ -1245,19 +1272,21 @@ describe('Anthropic Claude provider', () => {
   it.effect('maps Anthropic overloaded stream errors to retryable metadata', () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get('https://example.com')
+
       const response = HttpClientResponse.fromWeb(
         request,
         responseFromChunks([
           'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n'
         ])
       )
+
       const error = yield* streamAnthropicClaudeResponse(response).pipe(
         Stream.runCollect,
         Effect.flip
       )
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'overloaded',
         retryable: true,
         provider: {
@@ -1272,13 +1301,14 @@ describe('Anthropic Claude provider', () => {
   it.effect('marks Anthropic stream read failures retryable', () =>
     Effect.gen(function* () {
       const response = streamErrorHttpResponse()
+
       const error = yield* streamAnthropicClaudeResponse(response).pipe(
         Stream.runCollect,
         Effect.flip
       )
 
+      expect(error._tag).toBe('LLMError')
       expect(error).toMatchObject({
-        _tag: 'LLMError',
         cause: 'provider_error',
         retryable: true,
         provider: { provider: 'anthropic_claude', kind: 'stream' }

@@ -17,6 +17,7 @@ import { getKnowledgeContext } from './get-knowledge-context'
 import { searchUserKnowledge } from './search-user-knowledge'
 
 const describeWithDb = process.env.DATABASE_URL ? describe : describe.skip
+
 const embedding = (activeIndex: 0 | 1) =>
   Array.from({ length: 1536 }, (_, index) => (index === activeIndex ? 1 : 0))
 
@@ -43,6 +44,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
         })
 
         const bytes = new TextEncoder().encode('  Alpha file knowledge.  ')
+
         const document = yield* createFileKnowledgeDocument({
           userId,
           filename: 'alpha.txt',
@@ -55,15 +57,18 @@ describeWithDb('createFileKnowledgeDocument', () => {
           .select()
           .from(schema.userKnowledgeFile)
           .where(eq(schema.userKnowledgeFile.documentId, document.id))
+
         const chunks = yield* db
           .select()
           .from(schema.userKnowledgeChunk)
           .where(eq(schema.userKnowledgeChunk.documentId, document.id))
+
         const results = yield* searchUserKnowledge({
           userId,
           query: 'Alpha file knowledge',
           limit: 4
         })
+
         const context = yield* getKnowledgeContext({
           userId,
           documentId: document.id,
@@ -71,15 +76,18 @@ describeWithDb('createFileKnowledgeDocument', () => {
           before: 2,
           after: 2
         })
+
         const otherUserResults = yield* searchUserKnowledge({
           userId: createId(),
           query: 'Alpha file knowledge',
           limit: 4
         })
+
         yield* db
           .update(schema.userKnowledgeDocument)
           .set({ availability: 'archived' })
           .where(eq(schema.userKnowledgeDocument.id, document.id))
+
         const archivedResults = yield* searchUserKnowledge({
           userId,
           query: 'Alpha file knowledge',
@@ -162,6 +170,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
         })
 
         const bytes = new Uint8Array([37, 80, 68, 70])
+
         const document = yield* createFileKnowledgeDocument({
           userId,
           filename: 'detached.pdf',
@@ -202,6 +211,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
               Effect.sync(() => {
                 if (input.bytes.buffer instanceof ArrayBuffer) {
                   structuredClone(input.bytes.buffer, { transfer: [input.bytes.buffer] })
+
                   return {
                     content: 'Detached PDF text.',
                     metadata: { format: 'pdf', title: input.filename }
@@ -279,6 +289,7 @@ describeWithDb('createFileKnowledgeDocument', () => {
           .select()
           .from(schema.userKnowledgeDocument)
           .where(eq(schema.userKnowledgeDocument.id, documentId))
+
         const files = yield* db
           .select()
           .from(schema.userKnowledgeFile)

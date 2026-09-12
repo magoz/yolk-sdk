@@ -40,6 +40,7 @@ const writeEvent = (response: ServerResponse, event: unknown) => {
 }
 
 const loginEmail = 'e2e-test@example.com'
+
 const loginOtp = '123456'
 
 const seedLoginOtp = () =>
@@ -68,9 +69,11 @@ const login = async (page: Page) => {
 
 const startWorkflowStreamServer = async () => {
   let releaseCompletions: (() => void) | undefined
+
   const completionsReleased = new Promise<void>(resolve => {
     releaseCompletions = resolve
   })
+
   const server = createServer((_request, response) => {
     const startedAtMs = Date.now()
     response.writeHead(200, {
@@ -181,12 +184,12 @@ test('shows same-turn workflow subagents running concurrently', async ({ page })
 
     streamServer.releaseCompletions()
 
-    await expect(
-      page.getByRole('button', { name: /Subagent: slow task.*\d+ms/ })
-    ).toBeVisible({ timeout: 15_000 })
-    await expect(
-      page.getByRole('button', { name: /Subagent: fast task.*\d+ms/ })
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: /Subagent: slow task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
+    await expect(page.getByRole('button', { name: /Subagent: fast task.*\d+ms/ })).toBeVisible({
+      timeout: 15_000
+    })
   } finally {
     await streamServer.close()
   }

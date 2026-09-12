@@ -7,6 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 import { Db } from '@/lib/services/db/live-layer'
 
 const title = 'E2E knowledge note alpha'
+
 const content = 'E2E durable knowledge alpha marker for search and availability smoke.'
 
 test.describe('knowledge UI', () => {
@@ -47,6 +48,7 @@ test.describe('knowledge UI', () => {
     const objects = authedPage.getByRole('list').filter({
       has: authedPage.getByRole('button', { name: `Delete ${title}` })
     })
+
     const item = objects.getByRole('listitem').filter({ hasText: title })
     await expect(item).toBeVisible({ timeout: 15_000 })
     await expect(item).toContainText(content)
@@ -54,9 +56,11 @@ test.describe('knowledge UI', () => {
     await authedPage.getByLabel('Query').fill('alpha marker')
     await authedPage.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(authedPage.getByText('matches')).toBeVisible({ timeout: 15_000 })
+
     const searchResults = authedPage.getByRole('list').filter({
       has: authedPage.getByText('score')
     })
+
     await expect(searchResults.getByText(title)).toBeVisible()
 
     await item.getByLabel(`Set availability for ${title}`).selectOption('archived')

@@ -12,6 +12,7 @@ import { deleteAgentSkillAction } from '@/lib/core/agent/delete-agent-skill-acti
 import { toggleAgentSkillAction } from '@/lib/core/agent/toggle-agent-skill-action'
 import { updateAgentSkillAction } from '@/lib/core/agent/update-agent-skill-action'
 import type { AgentSkill } from '@/lib/services/db/schema'
+import { Predicate } from 'effect'
 
 type ActionState = {
   readonly message?: string
@@ -43,8 +44,11 @@ export function CreateSkillForm() {
                 createCommand: formData.get('createCommand') === 'on',
                 commandName: formValue(formData, 'commandName')
               }).then(result => {
-                setState({ message: result._tag === 'Success' ? 'Skill created' : result.message })
-                if (result._tag === 'Success') {
+                setState({
+                  message: Predicate.isTagged(result, 'Success') ? 'Skill created' : result.message
+                })
+
+                if (Predicate.isTagged(result, 'Success')) {
                   router.refresh()
                 }
               })
@@ -146,8 +150,11 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
                 createCommand: formData.get('createCommand') === 'on',
                 commandName: formValue(formData, 'commandName')
               }).then(result => {
-                setState({ message: result._tag === 'Success' ? 'Saved' : result.message })
-                if (result._tag === 'Success') {
+                setState({
+                  message: Predicate.isTagged(result, 'Success') ? 'Saved' : result.message
+                })
+
+                if (Predicate.isTagged(result, 'Success')) {
                   router.refresh()
                 }
               })
@@ -220,14 +227,14 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
                   void toggleAgentSkillAction({ id: skill.id, enabled: !skill.enabled }).then(
                     result => {
                       setState({
-                        message:
-                          result._tag === 'Success'
-                            ? skill.enabled
-                              ? 'Disabled'
-                              : 'Enabled'
-                            : result.message
+                        message: Predicate.isTagged(result, 'Success')
+                          ? skill.enabled
+                            ? 'Disabled'
+                            : 'Enabled'
+                          : result.message
                       })
-                      if (result._tag === 'Success') {
+
+                      if (Predicate.isTagged(result, 'Success')) {
                         router.refresh()
                       }
                     }
@@ -244,8 +251,11 @@ function SkillCard({ skill }: { readonly skill: AgentSkill }) {
               onClick={() => {
                 startTransition(() => {
                   void deleteAgentSkillAction({ id: skill.id }).then(result => {
-                    setState({ message: result._tag === 'Success' ? 'Deleted' : result.message })
-                    if (result._tag === 'Success') {
+                    setState({
+                      message: Predicate.isTagged(result, 'Success') ? 'Deleted' : result.message
+                    })
+
+                    if (Predicate.isTagged(result, 'Success')) {
                       router.refresh()
                     }
                   })

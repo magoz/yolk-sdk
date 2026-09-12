@@ -59,6 +59,7 @@ export const makeInMemorySandboxStateStoreLayer = (
           Ref.update(states, current => {
             const next = new Map(current)
             next.delete(sandboxSessionId)
+
             return next
           })
       })

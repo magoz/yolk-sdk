@@ -1,4 +1,4 @@
-import { Effect, Fiber, Queue, Stream, type Cause } from 'effect'
+import { Effect, Fiber, Predicate, Queue, Stream, type Cause } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   ToolApprovalPolicy,
@@ -86,6 +86,7 @@ type EventCollector = {
 const collectEvents = (controller: VoiceControllerApi): Effect.Effect<EventCollector> =>
   Effect.gen(function* () {
     const seen: Array<VoiceEvent> = []
+
     const fiber = yield* Effect.forkChild(
       Stream.runForEach(controller.events, event =>
         Effect.sync(() => {
@@ -115,6 +116,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const executed: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -158,6 +160,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const executed: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -176,7 +179,9 @@ describe('makeVoiceController', () => {
       const events = yield* Stream.runCollect(controller.events)
 
       expect(executed).toEqual(['call_1'])
-      expect([...events].filter(event => event._tag === 'ToolCallCompleted')).toHaveLength(1)
+      expect(
+        [...events].filter(event => Predicate.isTagged(event, 'ToolCallCompleted'))
+      ).toHaveLength(1)
       expect(fake.sent.filter(payload => payload === 'response-turn')).toHaveLength(1)
     })
   )
@@ -184,6 +189,7 @@ describe('makeVoiceController', () => {
   it.effect('maps server failures to failed tool calls with model-visible error output', () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -197,7 +203,7 @@ describe('makeVoiceController', () => {
       yield* fake.end
 
       const events = yield* Stream.runCollect(controller.events)
-      const failed = [...events].find(event => event._tag === 'ToolCallFailed')
+      const failed = [...events].find(event => Predicate.isTagged(event, 'ToolCallFailed'))
 
       expect(failed).toMatchObject({ callId: 'call_1', message: 'tool endpoint failed' })
       expect(fake.sent[0]).toContain('tool endpoint failed')
@@ -209,6 +215,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const approvals: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -224,6 +231,7 @@ describe('makeVoiceController', () => {
           )
         }
       })
+
       const collector = yield* collectEvents(controller)
 
       yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
@@ -247,6 +255,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const resumeDecisions: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -266,6 +275,7 @@ describe('makeVoiceController', () => {
           )
         }
       })
+
       const collector = yield* collectEvents(controller)
 
       yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
@@ -274,7 +284,7 @@ describe('makeVoiceController', () => {
       yield* fake.end
       yield* Fiber.join(collector.fiber)
 
-      const failed = collector.seen.find(event => event._tag === 'ToolCallFailed')
+      const failed = collector.seen.find(event => Predicate.isTagged(event, 'ToolCallFailed'))
 
       expect(failed).toMatchObject({ callId: 'call_1', message: 'Tool was denied: denied by user' })
       expect(resumeDecisions).toEqual(['denied'])
@@ -286,6 +296,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const serverCalls: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -299,6 +310,7 @@ describe('makeVoiceController', () => {
               )
         }
       })
+
       const collector = yield* collectEvents(controller)
 
       yield* controller.submitHitlResponse(approvalResponse('approved'))
@@ -310,8 +322,12 @@ describe('makeVoiceController', () => {
       yield* Fiber.join(collector.fiber)
 
       expect(serverCalls).toEqual(['initial', 'resume'])
-      expect(collector.seen.filter(event => event._tag === 'ToolCallCompleted')).toHaveLength(1)
-      expect(collector.seen.filter(event => event._tag === 'ToolCallFailed')).toHaveLength(0)
+      expect(
+        collector.seen.filter(event => Predicate.isTagged(event, 'ToolCallCompleted'))
+      ).toHaveLength(1)
+      expect(
+        collector.seen.filter(event => Predicate.isTagged(event, 'ToolCallFailed'))
+      ).toHaveLength(0)
     })
   )
 
@@ -319,6 +335,7 @@ describe('makeVoiceController', () => {
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
       const serverCalls: Array<string> = []
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -328,6 +345,7 @@ describe('makeVoiceController', () => {
           return Effect.succeed(approvalRequiredOutcome('call_1'))
         }
       })
+
       const collector = yield* collectEvents(controller)
 
       yield* fake.emit(VoiceToolCallsRequested.make({ calls: [toolCall('call_1', 'sandbox')] }))
@@ -348,6 +366,7 @@ describe('makeVoiceController', () => {
   it.effect('sends user text with a response turn and seeds without one', () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
@@ -371,12 +390,14 @@ describe('makeVoiceController', () => {
   it.effect('passes through non-tool events untouched', () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeTransport()
+
       const controller = yield* makeVoiceController({
         transport: fake.transport,
         codec: testCodec,
         executeToolCall: () =>
           Effect.succeed(VoiceToolCallExecutedOutcome.make({ callId: 'x', output: '{}' }))
       })
+
       const transcript = VoiceUserTranscriptFinal.make({ itemId: 'item_1', text: 'Hi' })
 
       yield* fake.emit(transcript)

@@ -13,6 +13,7 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
 
 const codexHost = 'chatgpt.com'
+
 const codexPath = '/backend-api/codex/responses'
 
 class SmokeConfigError extends Schema.TaggedErrorClass<SmokeConfigError>()('SmokeConfigError', {
@@ -25,18 +26,22 @@ class SmokeHttpError extends Schema.TaggedErrorClass<SmokeHttpError>()('SmokeHtt
 
 const requireEnv = (name: string) => {
   const value = process.env[name]
+
   if (value === undefined || value.length === 0) {
     return Effect.fail(new SmokeConfigError({ message: `Missing ${name}` }))
   }
+
   return Effect.succeed(value)
 }
 
 const configuredOrFirstCodexUserId = () => {
   const configured = process.env.YOLK_CODEX_SMOKE_USER_ID
+
   if (configured !== undefined && configured.length > 0) return Effect.succeed(configured)
 
   return Effect.gen(function* () {
     const db = yield* Db
+
     const [account] = yield* db
       .select({ userId: dbSchema.account.userId })
       .from(dbSchema.account)
@@ -91,14 +96,17 @@ const fetchToken = (input: { readonly userId: string; readonly bridgeSecret: Red
 const encodeClientTextFrame = (text: string) => {
   const payload = Buffer.from(text, 'utf8')
   const mask = randomBytes(4)
+
   const lengthBytes =
     payload.length < 126
       ? Buffer.from([0x81, 0x80 | payload.length])
       : Buffer.from([0x81, 0x80 | 126, (payload.length >> 8) & 0xff, payload.length & 0xff])
+
   const masked = Buffer.alloc(payload.length)
 
   for (let index = 0; index < payload.length; index++) {
     const maskByte = mask[index % 4]
+
     if (maskByte !== undefined) masked[index] = payload[index] ^ maskByte
   }
 
@@ -112,6 +120,7 @@ const decodeServerFrames = (buffer: Buffer) => {
   while (offset + 2 <= buffer.length) {
     const first = buffer[offset]
     const second = buffer[offset + 1]
+
     if (first === undefined || second === undefined) break
 
     const opcode = first & 0x0f
@@ -125,12 +134,14 @@ const decodeServerFrames = (buffer: Buffer) => {
     }
 
     if (length === 127) break
+
     if (offset + headerLength + length > buffer.length) break
 
     const payload = buffer.subarray(offset + headerLength, offset + headerLength + length)
     offset += headerLength + length
 
     if (opcode === 1) frames.push(payload.toString('utf8'))
+
     if (opcode === 8) frames.push(`[close] ${payload.toString('utf8')}`)
   }
 
@@ -144,8 +155,10 @@ const runCodexWsSmoke = (input: {
   Effect.callback<string, SmokeHttpError>(resume => {
     const socket = tls.connect({ host: codexHost, port: 443, servername: codexHost }, () => {
       const key = randomBytes(16).toString('base64')
+
       const accountHeader =
         input.token.accountId === undefined ? [] : [`ChatGPT-Account-Id: ${input.token.accountId}`]
+
       socket.write(
         [
           `GET ${codexPath} HTTP/1.1`,
@@ -168,20 +181,24 @@ const runCodexWsSmoke = (input: {
         ].join('\r\n')
       )
     })
+
     let raw: Buffer<ArrayBufferLike> = Buffer.alloc(0)
     let upgraded = false
     let frameBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
     const received: Array<string> = []
+
     const timeout = setTimeout(() => {
       cleanup()
       resume(Effect.succeed(`Timed out. Frames:\n${received.join('\n')}`))
     }, 20_000)
+
     const cleanup = () => {
       clearTimeout(timeout)
       socket.off('data', onData)
       socket.off('error', onError)
       socket.end()
     }
+
     const sendPrompt = () => {
       socket.write(
         encodeClientTextFrame(
@@ -197,16 +214,20 @@ const runCodexWsSmoke = (input: {
         )
       )
     }
+
     const onData = (chunk: Buffer) => {
       if (!upgraded) {
         raw = Buffer.concat([raw, chunk])
         const splitAt = raw.indexOf('\r\n\r\n')
+
         if (splitAt === -1) return
 
         const headers = raw.subarray(0, splitAt + 4).toString('utf8')
+
         if (!headers.startsWith('HTTP/1.1 101')) {
           cleanup()
           resume(Effect.succeed(headers))
+
           return
         }
 
@@ -219,8 +240,10 @@ const runCodexWsSmoke = (input: {
 
       const decoded = decodeServerFrames(frameBuffer)
       frameBuffer = decoded.rest
+
       for (const frame of decoded.frames) {
         received.push(frame)
+
         if (
           frame.includes('response.completed') ||
           frame.includes('response.failed') ||
@@ -229,10 +252,12 @@ const runCodexWsSmoke = (input: {
         ) {
           cleanup()
           resume(Effect.succeed(received.join('\n')))
+
           return
         }
       }
     }
+
     const onError = (error: Error) => {
       cleanup()
       resume(Effect.fail(new SmokeHttpError({ message: error.message })))

@@ -12,6 +12,7 @@ const runtimeSource = readFileSync(
 )
 
 const workflowFunctionStart = source.lastIndexOf('export async function runAgentWorkflow')
+
 const workflowFunctionSource = source.slice(workflowFunctionStart)
 
 describe('runAgentWorkflow', () => {
@@ -40,10 +41,12 @@ describe('runAgentWorkflow', () => {
     expect(source).toContain("await import('./agent-workflow-steps')")
     expect(source).not.toContain("from 'effect'")
     expect(runtimeSource).not.toContain("'use step'")
+
     const childSteps = readFileSync(
       'examples/next/lib/agents/workflow-runtime/workflow-child-steps.ts',
       'utf8'
     )
+
     expect(childSteps).toContain("await import('./child-control')")
     expect(childSteps).toContain('planWorkflowCallStep.maxRetries = 0')
   })

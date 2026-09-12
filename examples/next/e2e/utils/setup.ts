@@ -12,5 +12,6 @@ export const createTestSetup = (input?: { user?: Partial<InsertUser> }) =>
   Effect.gen(function* () {
     yield* ensureTestEnv('Create Test Setup')
     const user = yield* createTestUser(input?.user)
+
     return { user }
   }).pipe(Effect.provide(TestDbLayer), Effect.scoped)

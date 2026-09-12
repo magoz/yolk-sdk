@@ -14,10 +14,13 @@ export type TokenEstimateOptions = {
 }
 
 export type MessageTokenEstimator = (message: AgentMessage) => number
+
 export type TranscriptTokenEstimator = (messages: ReadonlyArray<AgentMessage>) => number
 
 export const defaultCharactersPerToken = 4
+
 export const defaultMediaPartTokens = 512
+
 export const defaultMessageOverheadTokens = 6
 
 const charactersPerToken = (options: TokenEstimateOptions) =>
@@ -32,9 +35,7 @@ const messageOverheadTokens = (options: TokenEstimateOptions) =>
 export const estimateTextTokens = (text: string, options: TokenEstimateOptions = {}) =>
   Math.max(
     0,
-    Math.ceil(
-      options.countTextTokens?.(text) ?? text.length / charactersPerToken(options)
-    )
+    Math.ceil(options.countTextTokens?.(text) ?? text.length / charactersPerToken(options))
   )
 
 export const estimateContentTokens = (content: Content, options: TokenEstimateOptions = {}) => {

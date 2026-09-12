@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import {
   ActionResult,
   ApiKeyCredential,
@@ -21,14 +21,18 @@ import { downloadTelegramFile } from '@yolk-sdk/connectors/telegram'
 import { downloadTodoistAttachment, TodoistConnector } from '@yolk-sdk/connectors/todoist'
 
 const budget = { maxBytes: 16, maxMetadataBytes: 2048, maxErrorBodyBytes: 64 }
+
 const bytes = new Uint8Array([0, 128, 255])
+
 const response = (body = bytes, status = 200, headers = {}): ConnectorBinaryHttpResponse => ({
   bytes: body,
   status,
   headers,
   bodyComplete: true
 })
+
 const json = (value: unknown) => response(new TextEncoder().encode(JSON.stringify(value)))
+
 const integration = (connectorId: string, config = {}) =>
   makeIntegration({
     connectorId,
@@ -47,9 +51,11 @@ const integration = (connectorId: string, config = {}) =>
       })
     ]
   })
+
 const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
   const requests: ConnectorBinaryHttpRequest[] = []
   const slots: { id: string; scopes: readonly string[] | undefined }[] = []
+
   return {
     requests,
     slots,
@@ -57,6 +63,7 @@ const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
       Layer.succeed(CredentialResolver, {
         resolve: req => {
           slots.push({ id: req.slot.id, scopes: req.slot.requiredScopes })
+
           return Effect.succeed(
             req.integration.connectorId === 'telegram'
               ? ApiKeyCredential.make({ _tag: 'ApiKeyCredential', key: '123:SECRET' })
@@ -79,6 +86,7 @@ const host = (responses: readonly ConnectorBinaryHttpResponse[]) => {
         request: req => {
           const r = responses[requests.length] ?? response(new Uint8Array(), 500)
           requests.push(req)
+
           return Effect.succeed(r)
         }
       })
@@ -95,11 +103,13 @@ describe('host-only mail bytes', () => {
         ['', 0, new Uint8Array()]
       ] as const) {
         const h = host([json({ data, size })])
+
         const result = yield* downloadGmailAttachment(
           integration('google'),
           { messageId: 'message', attachmentId: 'attachment' },
           budget
         ).pipe(Effect.provide(h.layer))
+
         expect(result.bytes).toEqual(expected)
         expect(result.byteLength).toBe(size)
         expect(h.requests[0]?.url).toBe(
@@ -144,11 +154,13 @@ describe('host-only mail bytes', () => {
         }),
         response()
       ])
+
       const result = yield* downloadOutlookAttachment(
         integration('microsoft'),
         { messageId: 'm', attachmentId: 'a', mailbox: 'mail@example.com' },
         budget
       ).pipe(Effect.provide(h.layer))
+
       expect(result.bytes).toEqual(bytes)
       expect(h.requests[0]?.url).not.toContain('contentBytes')
       expect(h.requests[1]?.url).toBe(
@@ -173,6 +185,7 @@ describe('host-only mail bytes', () => {
           ).toBe('Failure')
           expect(h.requests).toHaveLength(1)
         }
+
         const h = host([])
         expect(
           (yield* downloadOutlookAttachment(
@@ -190,6 +203,7 @@ describe('host-only mail bytes', () => {
       Effect.gen(function* () {
         const h = host([])
         const requests: unknown[] = []
+
         const client = EmailClient.of({
           listMessages: () =>
             Effect.succeed(ActionResult.failure({ code: 'unused', message: 'unused' })),
@@ -201,6 +215,7 @@ describe('host-only mail bytes', () => {
             Effect.succeed(ActionResult.failure({ code: 'unused', message: 'unused' })),
           getAttachmentBytes: req => {
             requests.push(req)
+
             return Effect.succeed({
               messageId: req.messageId,
               attachmentId: req.attachmentId,
@@ -209,18 +224,22 @@ describe('host-only mail bytes', () => {
             })
           }
         })
+
         for (const protocol of ['imap', 'pop3']) {
           const i = integration('email', {
             incomingProtocol: protocol,
             incomingHost: 'mail.example.com'
           })
+
           const result = yield* downloadEmailAttachment(
             i,
             { messageId: 'm', attachmentId: 'a' },
             budget
           ).pipe(Effect.provideService(EmailClient, client), Effect.provide(h.layer))
+
           expect(result.bytes).toBe(bytes)
         }
+
         expect(requests).toMatchObject([
           {
             connection: { protocol: 'imap', port: 993 },
@@ -229,18 +248,22 @@ describe('host-only mail bytes', () => {
           },
           { connection: { protocol: 'pop3', port: 995 } }
         ])
+
         const invalid = yield* downloadEmailAttachment(
           integration('email', { incomingProtocol: 'pop3', incomingHost: 'mail.example.com' }),
           { messageId: 'm', attachmentId: 'a', folder: 'INBOX' },
           budget
         ).pipe(Effect.provideService(EmailClient, client), Effect.provide(h.layer), Effect.result)
+
         expect(invalid._tag).toBe('Failure')
         expect(requests).toHaveLength(2)
+
         const oversized = yield* downloadEmailAttachment(
           integration('email', { incomingHost: 'mail.example.com' }),
           { messageId: 'm', attachmentId: 'a' },
           { ...budget, maxBytes: 2 }
         ).pipe(Effect.provideService(EmailClient, client), Effect.provide(h.layer), Effect.result)
+
         expect(oversized._tag).toBe('Failure')
       })
   )
@@ -261,11 +284,13 @@ describe('Telegram and Todoist file bytes', () => {
         }),
         response()
       ])
+
       const r = yield* downloadTelegramFile(
         integration('telegram'),
         { fileId: 'id' },
         { ...budget, maxBytes: 30_000_000 }
       ).pipe(Effect.provide(h.layer))
+
       expect(h.requests[0]?.url).toBe('https://api.telegram.org/bot123:SECRET/getFile?file_id=id')
       expect(h.requests[1]).toMatchObject({
         url: 'https://api.telegram.org/file/bot123:SECRET/documents/file_1.pdf',
@@ -290,15 +315,18 @@ describe('Telegram and Todoist file bytes', () => {
         'a\\b'
       ]) {
         const h = host([json({ ok: true, result: { file_id: 'id', file_path } })])
+
         const result = yield* downloadTelegramFile(
           integration('telegram'),
           { fileId: 'id' },
           budget
         ).pipe(Effect.provide(h.layer), Effect.result)
+
         expect(result._tag).toBe('Failure')
         expect(JSON.stringify(result)).not.toContain('SECRET')
         expect(h.requests).toHaveLength(1)
       }
+
       for (const next of [
         response(bytes, 302, { location: 'https://evil.example/' }),
         response(new Uint8Array(17))
@@ -325,15 +353,18 @@ describe('Telegram and Todoist file bytes', () => {
         response(new Uint8Array(), 302, { location: 'https://todoist.b-cdn.net/x?signed=SECRET' }),
         response()
       ])
+
       const r = yield* downloadTodoistAttachment(
         integration('todoist'),
         { commentId: 'c' },
         budget
       ).pipe(Effect.provide(h.layer))
+
       expect(r.bytes).toEqual(bytes)
       expect(h.requests[1]?.headers.authorization).toBe('Bearer SECRET')
       expect(h.requests[2]?.headers).toEqual({})
       expect(JSON.stringify(r)).not.toContain('SECRET')
+
       const cdn = host([
         json({
           id: 'c',
@@ -342,6 +373,7 @@ describe('Telegram and Todoist file bytes', () => {
         }),
         response()
       ])
+
       yield* downloadTodoistAttachment(integration('todoist'), { commentId: 'c' }, budget).pipe(
         Effect.provide(cdn.layer)
       )
@@ -365,6 +397,7 @@ describe('Telegram and Todoist file bytes', () => {
         ).toBe('Failure')
         expect(h.requests).toHaveLength(1)
       }
+
       const h = host([
         json({
           id: 'c',
@@ -375,6 +408,7 @@ describe('Telegram and Todoist file bytes', () => {
           response(new Uint8Array(), 302, { location: 'https://todoist.b-cdn.net/x' })
         )
       ])
+
       expect(
         (yield* downloadTodoistAttachment(integration('todoist'), { commentId: 'c' }, budget).pipe(
           Effect.provide(h.layer),
@@ -389,6 +423,7 @@ describe('Telegram and Todoist file bytes', () => {
     Effect.gen(function* () {
       const h = host([])
       let calls = 0
+
       for (const input of [{}, { taskId: 'task', projectId: 'project' }]) {
         const result = yield* TodoistConnector.invoke({
           integration: integration('todoist'),
@@ -398,15 +433,20 @@ describe('Telegram and Todoist file bytes', () => {
           Effect.provideService(ConnectorHttpClient, {
             request: () => {
               calls++
+
               return Effect.die('Unexpected HTTP request')
             }
           }),
           Effect.provide(h.layer),
           Effect.result
         )
+
         expect(result._tag).toBe('Failure')
-        if (result._tag === 'Failure') expect(result.failure.cause).toBe('validation_failed')
+
+        if (Predicate.isTagged(result, 'Failure'))
+          expect(result.failure.cause).toBe('validation_failed')
       }
+
       expect(calls).toBe(0)
       expect(h.slots).toHaveLength(0)
     })
@@ -415,6 +455,7 @@ describe('Telegram and Todoist file bytes', () => {
     Effect.gen(function* () {
       const h = host([])
       const urls: string[] = []
+
       const r = yield* TodoistConnector.invoke({
         integration: integration('todoist'),
         action: 'todoist.list_comments',
@@ -423,6 +464,7 @@ describe('Telegram and Todoist file bytes', () => {
         Effect.provideService(ConnectorHttpClient, {
           request: req => {
             urls.push(req.url)
+
             return Effect.succeed(
               ConnectorHttpResponse.make({
                 status: 200,
@@ -446,6 +488,7 @@ describe('Telegram and Todoist file bytes', () => {
         }),
         Effect.provide(h.layer)
       )
+
       expect(urls).toEqual([
         'https://api.todoist.com/api/v1/comments?task_id=task&cursor=opaque&limit=5'
       ])
@@ -457,6 +500,7 @@ describe('Telegram and Todoist file bytes', () => {
   it.effect('binary port failure preserves safe code, without provider details', () =>
     Effect.gen(function* () {
       const h = host([])
+
       const r = yield* downloadGmailAttachment(
         integration('google'),
         { messageId: 'm', attachmentId: 'a' },
@@ -469,6 +513,7 @@ describe('Telegram and Todoist file bytes', () => {
         Effect.provide(h.layer),
         Effect.result
       )
+
       expect(r._tag).toBe('Failure')
       expect(JSON.stringify(r)).not.toContain('SECRET')
     })
@@ -481,6 +526,7 @@ it.effect('Graph opaque IDs containing slash are encoded as complete path segmen
       json({ id: 'a/b==', '@odata.type': '#microsoft.graph.fileAttachment' }),
       response()
     ])
+
     yield* downloadOutlookAttachment(
       integration('microsoft'),
       { messageId: 'm/n==', attachmentId: 'a/b==' },
@@ -499,21 +545,25 @@ it.effect('Todoist never follows 304 or malformed redirect byte bodies', () =>
       content: '',
       file_attachment: { file_url: 'https://files.todoist.com/x' }
     })
+
     const malformed = {
       ...response(new Uint8Array(), 302, { location: 'https://todoist.b-cdn.net/x' }),
       bytes: 'SECRET'
     }
+
     for (const r of [
       response(new Uint8Array(), 304, { location: 'https://todoist.b-cdn.net/x' }),
       malformed
     ]) {
       // @ts-expect-error Exercise a malformed host response as well as valid 304.
       const h = host([comment, r])
+
       const result = yield* downloadTodoistAttachment(
         integration('todoist'),
         { commentId: 'c' },
         budget
       ).pipe(Effect.provide(h.layer), Effect.result)
+
       expect(result._tag).toBe('Failure')
       expect(h.requests).toHaveLength(2)
       expect(JSON.stringify(result)).not.toContain('SECRET')

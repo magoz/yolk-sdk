@@ -6,6 +6,7 @@ import { describe, expect, it } from '@effect/vitest'
 import { loadProjectSkillset } from './file-source'
 
 const writeText = (path: string, content: string) => Effect.promise(() => writeFile(path, content))
+
 const makeDirectory = (path: string) => Effect.promise(() => mkdir(path, { recursive: true }))
 
 const makeTempRoot = () => Effect.promise(() => mkdtemp(join(tmpdir(), 'yolk-skillset-')))

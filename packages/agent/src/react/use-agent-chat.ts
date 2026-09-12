@@ -124,6 +124,7 @@ export function useAgentChat({
       initialAgentChatState
     )
   )
+
   const abortControllerRef = useRef<AbortController | null>(null)
   const fiberRef = useRef<Fiber.Fiber<void, never> | null>(null)
   const isRunning = state.status === 'running'
@@ -172,12 +173,14 @@ export function useAgentChat({
     (messages: AgentTranscript, hitlResponses?: ReadonlyArray<HitlResponse>) => {
       const controller = new AbortController()
       abortControllerRef.current = controller
+
       const clearController = Effect.sync(() => {
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null
           fiberRef.current = null
         }
       })
+
       const eventStream =
         transport === undefined
           ? streamAgentEventStream(makeTransportRequest(messages, controller.signal, hitlResponses))
@@ -194,6 +197,7 @@ export function useAgentChat({
               Effect.sync(() => {
                 if (controller.signal.aborted || isAbortError(caught)) {
                   markAborted()
+
                   return
                 }
 
@@ -204,6 +208,7 @@ export function useAgentChat({
           Effect.ensuring(clearController)
         )
       )
+
       fiberRef.current = fiber
     },
     [applyEvent, fail, makeTransportRequest, markAborted, transport]
@@ -373,13 +378,17 @@ export function useAgentChat({
   const stop = useCallback(() => {
     const controller = abortControllerRef.current
     const fiber = fiberRef.current
+
     if (controller === null && fiber === null && !isRunning) {
       return
     }
+
     controller?.abort()
+
     if (fiber !== null) {
       Effect.runFork(Fiber.interrupt(fiber))
     }
+
     markAborted()
   }, [isRunning, markAborted])
 
@@ -387,6 +396,7 @@ export function useAgentChat({
     () => () => {
       abortControllerRef.current?.abort()
       const fiber = fiberRef.current
+
       if (fiber !== null) {
         Effect.runFork(Fiber.interrupt(fiber))
       }

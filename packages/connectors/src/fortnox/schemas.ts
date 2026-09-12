@@ -1,23 +1,34 @@
 import * as Schema from 'effect/Schema'
 
 const NonEmptyString = Schema.Trimmed.check(Schema.isNonEmpty())
+
 // Reject dot segments and malformed UTF-16 before encoding identifiers into URL paths.
 const Identifier = NonEmptyString.check(
   Schema.isPattern(/^(?!\.{1,2}$)[^\u0000-\u001f\u007f\uD800-\uDFFF]+$/)
 )
+
 export const FortnoxCustomerNumber = Identifier.pipe(Schema.brand('FortnoxCustomerNumber'))
+
 export type FortnoxCustomerNumber = typeof FortnoxCustomerNumber.Type
+
 export const FortnoxDocumentNumber = Identifier.pipe(Schema.brand('FortnoxDocumentNumber'))
+
 export type FortnoxDocumentNumber = typeof FortnoxDocumentNumber.Type
+
 export const FortnoxSupplierNumber = Identifier.pipe(Schema.brand('FortnoxSupplierNumber'))
+
 export type FortnoxSupplierNumber = typeof FortnoxSupplierNumber.Type
+
 export const FortnoxGivenNumber = Schema.Trimmed.check(Schema.isPattern(/^[0-9]+$/)).pipe(
   Schema.brand('FortnoxGivenNumber')
 )
+
 export type FortnoxGivenNumber = typeof FortnoxGivenNumber.Type
 
 const OptionalString = Schema.optional(Schema.String)
+
 const OptionalNumber = Schema.optional(Schema.Number)
+
 const OptionalBoolean = Schema.optional(Schema.Boolean)
 
 // Resource fields deliberately retain Fortnox spelling and monetary wire types.
@@ -188,6 +199,7 @@ export class FortnoxCustomerSearch extends Schema.Class<FortnoxCustomerSearch>(
   ]),
   value: NonEmptyString
 }) {}
+
 export class FortnoxSupplierSearch extends Schema.Class<FortnoxSupplierSearch>(
   'FortnoxSupplierSearch'
 )({
@@ -201,12 +213,14 @@ export class FortnoxSupplierSearch extends Schema.Class<FortnoxSupplierSearch>(
   ]),
   value: NonEmptyString
 }) {}
+
 export class FortnoxInvoiceSearch extends Schema.Class<FortnoxInvoiceSearch>(
   'FortnoxInvoiceSearch'
 )({
   field: Schema.Literals(['customernumber', 'customername', 'documentnumber', 'ocr']),
   value: NonEmptyString
 }) {}
+
 export class FortnoxSupplierInvoiceSearch extends Schema.Class<FortnoxSupplierInvoiceSearch>(
   'FortnoxSupplierInvoiceSearch'
 )({
@@ -227,12 +241,14 @@ export class FortnoxListCustomersInput extends Schema.Class<FortnoxListCustomers
   search: Schema.optional(FortnoxCustomerSearch),
   filter: Schema.optional(Schema.Literals(['active', 'inactive']))
 }) {}
+
 export class FortnoxListSuppliersInput extends Schema.Class<FortnoxListSuppliersInput>(
   'FortnoxListSuppliersInput'
 )({
   ...PaginationFields,
   search: Schema.optional(FortnoxSupplierSearch)
 }) {}
+
 export class FortnoxListInvoicesInput extends Schema.Class<FortnoxListInvoicesInput>(
   'FortnoxListInvoicesInput'
 )({
@@ -244,6 +260,7 @@ export class FortnoxListInvoicesInput extends Schema.Class<FortnoxListInvoicesIn
   fromDate: Schema.optional(NonEmptyString),
   toDate: Schema.optional(NonEmptyString)
 }) {}
+
 export class FortnoxListSupplierInvoicesInput extends Schema.Class<FortnoxListSupplierInvoicesInput>(
   'FortnoxListSupplierInvoicesInput'
 )({
@@ -267,21 +284,25 @@ export class FortnoxListSupplierInvoicesInput extends Schema.Class<FortnoxListSu
 export class FortnoxGetCompanyInformationInput extends Schema.Class<FortnoxGetCompanyInformationInput>(
   'FortnoxGetCompanyInformationInput'
 )({}) {}
+
 export class FortnoxGetCustomerInput extends Schema.Class<FortnoxGetCustomerInput>(
   'FortnoxGetCustomerInput'
 )({
   customerNumber: FortnoxCustomerNumber
 }) {}
+
 export class FortnoxGetInvoiceInput extends Schema.Class<FortnoxGetInvoiceInput>(
   'FortnoxGetInvoiceInput'
 )({
   documentNumber: FortnoxDocumentNumber
 }) {}
+
 export class FortnoxGetSupplierInput extends Schema.Class<FortnoxGetSupplierInput>(
   'FortnoxGetSupplierInput'
 )({
   supplierNumber: FortnoxSupplierNumber
 }) {}
+
 export class FortnoxGetSupplierInvoiceInput extends Schema.Class<FortnoxGetSupplierInvoiceInput>(
   'FortnoxGetSupplierInvoiceInput'
 )({
@@ -294,24 +315,28 @@ export class FortnoxPagination extends Schema.Class<FortnoxPagination>('FortnoxP
   totalResources: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   nextPage: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
 }) {}
+
 export class FortnoxListCustomersOutput extends Schema.Class<FortnoxListCustomersOutput>(
   'FortnoxListCustomersOutput'
 )({
   customers: Schema.Chunk(FortnoxCustomer),
   pagination: FortnoxPagination
 }) {}
+
 export class FortnoxListInvoicesOutput extends Schema.Class<FortnoxListInvoicesOutput>(
   'FortnoxListInvoicesOutput'
 )({
   invoices: Schema.Chunk(FortnoxInvoice),
   pagination: FortnoxPagination
 }) {}
+
 export class FortnoxListSuppliersOutput extends Schema.Class<FortnoxListSuppliersOutput>(
   'FortnoxListSuppliersOutput'
 )({
   suppliers: Schema.Chunk(FortnoxSupplier),
   pagination: FortnoxPagination
 }) {}
+
 export class FortnoxListSupplierInvoicesOutput extends Schema.Class<FortnoxListSupplierInvoicesOutput>(
   'FortnoxListSupplierInvoicesOutput'
 )({

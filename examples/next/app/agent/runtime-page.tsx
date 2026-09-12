@@ -88,6 +88,7 @@ const cloudflareWebSocketUrl = (url: string, sessionId: string) =>
       const parsed = new URL(url)
       parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:'
       parsed.pathname = `/connect/${encodeURIComponent(sessionId)}`
+
       return parsed.toString()
     },
     catch: error => error
@@ -112,17 +113,21 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
       'CLOUDFLARE_AGENT_URL',
       yield* Config.option(Config.string('CLOUDFLARE_AGENT_URL'))
     )
+
     const appUrl = yield* requireConfigOption(
       'YOLK_APP_URL',
       yield* Config.option(Config.string('YOLK_APP_URL'))
     )
+
     const bridgeSecret = yield* requireConfigOption(
       'YOLK_CLOUDFLARE_BRIDGE_SECRET',
       yield* Config.option(Config.string('YOLK_CLOUDFLARE_BRIDGE_SECRET'))
     )
+
     const mcpServers = yield* loadProjectMcpServers()
     const skillset = yield* loadRuntimeSkillset({ userId: input.userId })
     const client = yield* HttpClient.HttpClient
+
     const body = yield* encodeJson({
       userId: input.userId,
       tokenEndpoint: `${appUrl}/api/internal/cloudflare/codex-token`,
@@ -131,6 +136,7 @@ const bootstrapCloudflareAgent = (input: { readonly sessionId: string; readonly 
       mcpServers,
       skillset: skillsetManifestFromMergedSkillset(skillset)
     })
+
     const response = yield* client.execute(
       HttpClientRequest.post(`${workerUrl}/bootstrap/${encodeURIComponent(input.sessionId)}`).pipe(
         HttpClientRequest.setHeaders({
@@ -180,6 +186,7 @@ async function Content({ runtime }: AgentRuntimePageProps): Promise<ReactNode> {
       const openAiCodexConnected = yield* hasOpenAiCodexAuth(session.user.id)
       const anthropicClaudeConnected = yield* hasAnthropicClaudeAuth(session.user.id)
       const sessionId = `agent-${runtime}-${session.user.id}`
+
       const runtimeDetails = yield* runtime === 'cloudflare'
         ? Effect.map(
             bootstrapCloudflareAgent({ sessionId, userId: session.user.id }),

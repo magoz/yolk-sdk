@@ -10,6 +10,7 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
 const dbSkillSource = 'db'
+
 const dbCommandSource = 'db'
 
 export type AgentSkillManifestRow = {
@@ -58,6 +59,7 @@ export const agentSkillRowsToManifest = (rows: ReadonlyArray<AgentSkillManifestR
 export const loadUserSkillsetManifest = (input: { readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const skillRows = yield* db
       .select({
         id: schema.agentSkill.id,
@@ -68,6 +70,7 @@ export const loadUserSkillsetManifest = (input: { readonly userId: string }) =>
       .from(schema.agentSkill)
       .where(and(eq(schema.agentSkill.userId, input.userId), eq(schema.agentSkill.enabled, true)))
       .orderBy(asc(schema.agentSkill.name))
+
     const commandRows = yield* db
       .select({
         id: schema.agentCommand.id,

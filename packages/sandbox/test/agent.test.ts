@@ -50,6 +50,7 @@ describe('sandbox agent tool', () => {
         currentState: Effect.succeed(Option.some(state)),
         delete: Effect.void
       }
+
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
 
       expect(toolSet.tools.map(tool => tool.name)).toEqual([sandboxToolName])
@@ -72,7 +73,9 @@ describe('sandbox agent tool', () => {
         currentState: Effect.succeed(Option.some(state)),
         delete: Effect.void
       }
+
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: sandboxToolName,
@@ -131,7 +134,9 @@ describe('sandbox agent tool', () => {
         currentState: Effect.succeed(Option.none()),
         delete: Effect.void
       }
+
       const toolSet = yield* resolveTools([makeSandboxToolModuleFromApi(api)], {})
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: sandboxToolName,

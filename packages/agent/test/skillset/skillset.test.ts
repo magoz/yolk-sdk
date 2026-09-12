@@ -188,6 +188,7 @@ Explain this.
         markdown: skillMarkdown,
         location: 'base/SKILL.md'
       })
+
       const overrideSkill = yield* parseSkillMarkdown({
         markdown: `---
 name: git-release

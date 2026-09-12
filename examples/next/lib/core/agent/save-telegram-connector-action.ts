@@ -33,6 +33,7 @@ export const saveTelegramConnectorAction = async (
       const session = yield* getSession()
       yield* Effect.annotateCurrentSpan({ 'user.id': session.user.id })
       yield* saveTelegramConnectorConfig({ ...input, userId: session.user.id })
+
       return { _tag: 'Success' as const, chatId: input.chatId.trim() }
     }).pipe(
       Effect.withSpan('action.agent.telegramConnector.save'),

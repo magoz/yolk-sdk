@@ -17,6 +17,7 @@ export const getKnowledgeDocumentsContent = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const rows = yield* db
       .select({
         document: schema.knowledgeDocument,
@@ -44,10 +45,12 @@ export const getKnowledgeDocumentsContent = (input: {
 
     for (const row of rows) {
       const existing = documents.get(row.document.id)
+
       if (existing !== undefined) {
         if (row.chunkContent !== null) {
           existing.chunks.push(row.chunkContent)
         }
+
         continue
       }
 

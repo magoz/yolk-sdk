@@ -8,21 +8,31 @@ type PptxXmlFile = {
 }
 
 const slideXmlFile = /^ppt\/slides\/slide(\d+)\.xml$/
+
 const notesXmlFile = /^ppt\/notesSlides\/notesSlide(\d+)\.xml$/
+
 const xmlName = '[A-Za-z_][\\w.-]*'
+
 const optionalXmlPrefix = `(?:${xmlName}:)?`
+
 const paragraphXml = new RegExp(
   `<${optionalXmlPrefix}p\\b[^>]*>[\\s\\S]*?<\/${optionalXmlPrefix}p>`,
   'g'
 )
+
 const textXml = new RegExp(
   `<${optionalXmlPrefix}t\\b[^>]*>([\\s\\S]*?)<\/${optionalXmlPrefix}t>`,
   'g'
 )
+
 const lineBreakXml = new RegExp(`<${optionalXmlPrefix}br\\b[^>]*/>`, 'g')
+
 const tabXml = new RegExp(`<${optionalXmlPrefix}tab\\b[^>]*/>`, 'g')
+
 const xmlEntity = /&([^;]+);/g
+
 const hexEntity = /^#x([0-9a-fA-F]+)$/
+
 const decimalEntity = /^#(\d+)$/
 
 const indexedXmlFile = (
@@ -33,11 +43,13 @@ const indexedXmlFile = (
 ): PptxXmlFile | undefined => {
   const match = pattern.exec(fileName)
   const indexText = match?.[1]
+
   if (indexText === undefined) {
     return undefined
   }
 
   const index = Number.parseInt(indexText, 10)
+
   if (!Number.isInteger(index)) {
     return undefined
   }
@@ -47,6 +59,7 @@ const indexedXmlFile = (
 
 const pptxXmlFile = (fileName: string, bytes: Uint8Array): PptxXmlFile | undefined => {
   const slideFile = indexedXmlFile(fileName, bytes, slideXmlFile, 0)
+
   if (slideFile !== undefined) {
     return slideFile
   }
@@ -68,6 +81,7 @@ const extractMatches = (
 
   for (const match of text.matchAll(pattern)) {
     const value = match[groupIndex]
+
     if (value !== undefined) {
       matches.push(value)
     }
@@ -78,6 +92,7 @@ const extractMatches = (
 
 const decodeCodePoint = (raw: string, codePointText: string, radix: number) => {
   const codePoint = Number.parseInt(codePointText, radix)
+
   if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
     return raw
   }
@@ -102,11 +117,13 @@ const decodeXmlEntity = (raw: string, entity: string) => {
   }
 
   const hex = hexEntity.exec(entity)?.[1]
+
   if (hex !== undefined) {
     return decodeCodePoint(raw, hex, 16)
   }
 
   const decimal = decimalEntity.exec(entity)?.[1]
+
   if (decimal !== undefined) {
     return decodeCodePoint(raw, decimal, 10)
   }
@@ -157,6 +174,7 @@ export const extractPptxText = (bytes: Uint8Array) => {
   return Object.entries(archive)
     .flatMap(([fileName, fileBytes]) => {
       const xmlFile = pptxXmlFile(fileName, fileBytes)
+
       return xmlFile === undefined ? [] : [xmlFile]
     })
     .sort(comparePptxXmlFiles)

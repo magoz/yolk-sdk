@@ -1,4 +1,4 @@
-import { Clock, Effect, Option, Ref, Stream } from 'effect'
+import { Clock, Effect, Option, Predicate, Ref, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   AgentAwaitingInput,
@@ -66,7 +66,7 @@ import {
 import type { LLMEvent } from './llm-event.ts'
 import { ContextTransformer, type ContextTransformResult } from './services/context-transformer.ts'
 import { LLMProvider, type LLMRequest } from './services/llm-provider.ts'
-import { LoopConfig, type LoopConfigShape } from './services/loop-config.ts'
+import { LoopConfig, type LoopConfigSettings } from './services/loop-config.ts'
 import { ToolExecutor, unavailableToolExecutor } from './services/tool-executor.ts'
 
 export type AgentLoopRunId = string
@@ -158,6 +158,7 @@ const subagentCompletedEvent = (input: {
   readonly endedAtMs: number
 }) => {
   const metadata = subagentCallMetadata(input.call)
+
   const accepted =
     objectField(input.result.structuredContent, 'type') === 'subagent_accepted' &&
     objectField(input.result.structuredContent, 'status') === 'accepted' &&
@@ -200,7 +201,9 @@ const toolCompletionEvents = (input: {
       })
     ]
   }
+
   const completed = subagentCompletedEvent(input)
+
   const toolCompleted = ToolExecutionCompleted.make({
     call: input.call,
     result: input.result,
@@ -274,7 +277,9 @@ const contentPartsFromMessage = (message: AgentMessage) => {
     case 'ToolResult':
       return contentParts(message.content)
     case 'Assistant':
-      return message.parts.flatMap(part => (part._tag === 'Text' ? contentParts(part.content) : []))
+      return message.parts.flatMap(part =>
+        Predicate.isTagged(part, 'Text') ? contentParts(part.content) : []
+      )
   }
 }
 
@@ -345,7 +350,7 @@ type TurnStreamInput = {
       messages: ReadonlyArray<AgentMessage>
     ) => Effect.Effect<ContextTransformResult, AgentLoopError>
   }
-  readonly loopConfig: LoopConfigShape
+  readonly loopConfig: LoopConfigSettings
   readonly provider: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMProviderError>
   }
@@ -359,6 +364,7 @@ type TurnStreamInput = {
 }
 
 const maxUnhintedRetryDelayMs = 30_000
+
 const maxHintedRetryDelayMs = 2_147_483_647
 
 const validDelayMs = (delayMs: number) =>
@@ -421,6 +427,7 @@ const withProviderRetries = (
                     }
 
                     const delayMs = retryDelayMs(loopConfig.retryBaseDelayMs, attempt, error)
+
                     return Stream.make(
                       AgentRetry.make({
                         attempt,
@@ -455,6 +462,7 @@ const makeToolExecutionStream = (
     Effect.gen(function* () {
       const startedAtMs = yield* Clock.currentTimeMillis
       const started = subagentStartedEvent({ call, model, startedAtMs })
+
       const startEvents: ReadonlyArray<AgentEvent> =
         started === undefined
           ? [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
@@ -542,7 +550,7 @@ export type PreparedToolBatch = {
 
 type NonEmptyHitlRequests = readonly [HitlRequest, ...Array<HitlRequest>]
 
-const boundedToolConcurrency = (loopConfig: LoopConfigShape) =>
+const boundedToolConcurrency = (loopConfig: LoopConfigSettings) =>
   Math.max(1, loopConfig.toolConcurrency)
 
 const toolDefFor = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
@@ -554,7 +562,9 @@ const approvalRequired = (tools: ReadonlyArray<ToolDef>, call: ToolCall) =>
 // Lossless canonical binding (not a collision-prone hash). Hosts must echo the opaque ID.
 const canonicalJson = (value: Schema.Json): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
+
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+
   return `{${Object.keys(value)
     .sort()
     .map(
@@ -600,14 +610,16 @@ const approvalResponseFor = (
   tools: ReadonlyArray<ToolDef>
 ) =>
   responses.flatMap(response =>
-    response._tag === 'ToolApprovalResponse' && matchesApproval(response, call, tools)
+    Predicate.isTagged(response, 'ToolApprovalResponse') && matchesApproval(response, call, tools)
       ? [response]
       : []
   )[0]
 
 const questionResponseFor = (responses: ReadonlyArray<HitlResponse>, call: ToolCall) =>
   responses.flatMap(response =>
-    response._tag === 'QuestionResponse' && matchesQuestion(response, call) ? [response] : []
+    Predicate.isTagged(response, 'QuestionResponse') && matchesQuestion(response, call)
+      ? [response]
+      : []
   )[0]
 
 const toolApprovalRequest = (tools: ReadonlyArray<ToolDef>, call: ToolCall): ToolApprovalRequest =>
@@ -663,7 +675,7 @@ const prepareQuestionCall = (
       Effect.result
     )
 
-    if (decoded._tag === 'Failure') {
+    if (Predicate.isTagged(decoded, 'Failure')) {
       return {
         _tag: 'Result',
         index,
@@ -790,17 +802,21 @@ export const prepareToolBatch = (input: {
 
     return {
       callsToExecute: prepared.flatMap(item =>
-        item._tag === 'Execute' ? [{ index: item.index, call: item.call }] : []
+        Predicate.isTagged(item, 'Execute') ? [{ index: item.index, call: item.call }] : []
       ),
       resultMessages: prepared.flatMap(item =>
-        item._tag === 'Result'
+        Predicate.isTagged(item, 'Result')
           ? [{ index: item.index, message: toolResultMessageFromResult(item.result) }]
           : []
       ),
       resultEvents: syntheticToolCompletionEvents(prepared),
-      events: prepared.flatMap(item => (item._tag === 'Pending' ? [] : item.events)),
-      pendingRequests: prepared.flatMap(item => (item._tag === 'Pending' ? [item.request] : [])),
-      pendingEvents: prepared.flatMap(item => (item._tag === 'Pending' ? item.events : []))
+      events: prepared.flatMap(item => (Predicate.isTagged(item, 'Pending') ? [] : item.events)),
+      pendingRequests: prepared.flatMap(item =>
+        Predicate.isTagged(item, 'Pending') ? [item.request] : []
+      ),
+      pendingEvents: prepared.flatMap(item =>
+        Predicate.isTagged(item, 'Pending') ? item.events : []
+      )
     }
   })
 
@@ -811,19 +827,23 @@ const syntheticToolCompletionEvents = (
   prepared: ReadonlyArray<PreparedToolCall>
 ): ReadonlyArray<AgentEvent> =>
   prepared.flatMap(item =>
-    item._tag === 'Result'
+    Predicate.isTagged(item, 'Result')
       ? [ToolExecutionCompleted.make({ call: item.call, result: item.result })]
       : []
   )
 
 const toolResultIds = (messages: ReadonlyArray<AgentMessage>): ReadonlySet<string> =>
-  new Set(messages.flatMap(message => (message._tag === 'ToolResult' ? [message.toolCallId] : [])))
+  new Set(
+    messages.flatMap(message =>
+      Predicate.isTagged(message, 'ToolResult') ? [message.toolCallId] : []
+    )
+  )
 
 const pendingHostToolCalls = (messages: ReadonlyArray<AgentMessage>) => {
   const completed = toolResultIds(messages)
 
   return messages.flatMap(message =>
-    message._tag === 'Assistant'
+    Predicate.isTagged(message, 'Assistant')
       ? assistantHostToolCalls(message).filter(call => !completed.has(call.id))
       : []
   )
@@ -840,7 +860,7 @@ const nonEmptyHitlRequests = (
 const parallelToolExecutionStream = (input: {
   readonly calls: ReadonlyArray<IndexedToolCall>
   readonly executor: TurnStreamInput['executor']
-  readonly loopConfig: LoopConfigShape
+  readonly loopConfig: LoopConfigSettings
   readonly model: string
   readonly results: Ref.Ref<ReadonlyArray<IndexedToolResultMessage>>
 }) =>
@@ -848,7 +868,10 @@ const parallelToolExecutionStream = (input: {
     input.calls.map(({ call, index }) =>
       makeToolExecutionStream(input.executor, call, input.model).pipe(
         Stream.tap(event => {
-          if (event._tag !== 'ToolExecutionCompleted' && event._tag !== 'ToolExecutionAccepted') {
+          if (
+            !Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+            !Predicate.isTagged(event, 'ToolExecutionAccepted')
+          ) {
             return Effect.void
           }
 
@@ -887,7 +910,7 @@ type TurnCompletion = {
 const validateTurnCompletion = (
   events: ReadonlyArray<LLMEvent>
 ): Effect.Effect<TurnCompletion, LLMError> => {
-  const doneEvents = events.filter(event => event._tag === 'Done')
+  const doneEvents = events.filter(event => Predicate.isTagged(event, 'Done'))
   const toolCalls = collectToolCalls(events)
   const stopReason: TurnCompletion['stopReason'] = toolCalls.length === 0 ? 'stop' : 'tool_use'
 
@@ -936,6 +959,7 @@ const makeAfterLlmStream = (
       const llmEvents = yield* Ref.get(llmEventsRef)
       const completion = yield* validateTurnCompletion(llmEvents)
       const assistantMessage = accumulateAssistantMessage(llmEvents)
+
       const turnEndEvents: ReadonlyArray<AgentEvent> = [
         LLMStreamEnd.make({ turn: input.turn }),
         AssistantMessageEvent.make({ message: assistantMessage })
@@ -959,6 +983,7 @@ const makeAfterLlmStream = (
       }
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
@@ -977,6 +1002,7 @@ const makeAfterLlmStream = (
         }
 
         const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+
         if (readyResults.length > 0) {
           yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
         }
@@ -1005,6 +1031,7 @@ const makeAfterLlmStream = (
         model: input.config.model,
         results: toolResultMessages
       })
+
       const nextTurnStream = Stream.unwrap(
         Ref.get(toolResultMessages).pipe(
           Effect.flatMap(results => {
@@ -1086,7 +1113,7 @@ const makeLlmStream = (
 
         const appendEvent = Ref.update(llmEvents, events => [...events, event])
 
-        if (event._tag !== 'Usage') {
+        if (!Predicate.isTagged(event, 'Usage')) {
           return appendEvent
         }
 
@@ -1095,7 +1122,7 @@ const makeLlmStream = (
         )
       }),
       Stream.flatMap(event =>
-        event._tag === 'AgentRetry'
+        Predicate.isTagged(event, 'AgentRetry')
           ? Stream.make(event)
           : isLlmEvent(event)
             ? Stream.fromIterable(toLlmEvent(event))
@@ -1129,7 +1156,7 @@ const makeModelOnlyLlmStream = (
 
         const appendEvent = Ref.update(llmEvents, events => [...events, event])
 
-        if (event._tag !== 'Usage') {
+        if (!Predicate.isTagged(event, 'Usage')) {
           return appendEvent
         }
 
@@ -1138,7 +1165,7 @@ const makeModelOnlyLlmStream = (
         )
       }),
       Stream.flatMap(event =>
-        event._tag === 'AgentRetry'
+        Predicate.isTagged(event, 'AgentRetry')
           ? Stream.make(event)
           : isLlmEvent(event)
             ? Stream.fromIterable(toLlmEvent(event))
@@ -1182,6 +1209,7 @@ const makePendingToolResumeStream = (
       }
 
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: input.config.tools,
         responses: input.config.hitlResponses ?? [],
@@ -1200,6 +1228,7 @@ const makePendingToolResumeStream = (
         }
 
         const readyResults = orderedToolResultMessages(yield* Ref.get(toolResultMessages))
+
         if (readyResults.length > 0) {
           yield* Ref.update(input.createdMessages, messages => [...messages, ...readyResults])
         }
@@ -1226,6 +1255,7 @@ const makePendingToolResumeStream = (
         model: input.config.model,
         results: toolResultMessages
       })
+
       const nextTurnStream = Stream.unwrap(
         Ref.get(toolResultMessages).pipe(
           Effect.flatMap(results => {
@@ -1310,14 +1340,17 @@ export const runToolBatch = (
       const executor = yield* ToolExecutor
       const loopConfig = yield* LoopConfig
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
+
       const prepared = yield* prepareToolBatch({
         tools: config.tools ?? [],
         responses: config.hitlResponses ?? [],
         calls: config.calls
       })
+
       const hasPendingRequests = prepared.pendingRequests.length > 0
       const resultEvents = hasPendingRequests ? [] : prepared.resultEvents
       const pendingRequests = nonEmptyHitlRequests(prepared.pendingRequests)
+
       const awaitingEvents: ReadonlyArray<AgentEvent> =
         pendingRequests === undefined
           ? []

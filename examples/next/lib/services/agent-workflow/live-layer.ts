@@ -25,8 +25,10 @@ export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
   {
     make: Effect.gen(function* () {
       const db = yield* Db
+
       const owned = (runId: string, userId: string) =>
         and(eq(agentWorkflowRun.runId, runId), eq(agentWorkflowRun.userId, userId))
+
       return {
         register: (runId: string, userId: string) =>
           Effect.gen(function* () {
@@ -36,12 +38,15 @@ export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
               .values({ runId, userId, registry })
               .onConflictDoNothing()
             const [row] = yield* db.select().from(agentWorkflowRun).where(owned(runId, userId))
+
             if (row === undefined) return yield* Effect.fail(forbidden())
           }).pipe(Effect.withSpan('AgentWorkflowStore.register')),
         read: (runId: string, userId: string) =>
           Effect.gen(function* () {
             const [row] = yield* db.select().from(agentWorkflowRun).where(owned(runId, userId))
+
             if (row === undefined) return yield* Effect.fail(forbidden())
+
             return yield* Schema.decodeUnknownEffect(WorkflowRegistry)(row.registry)
           }).pipe(Effect.withSpan('AgentWorkflowStore.read')),
         change: (runId: string, userId: string, command: RegistryCommand) =>
@@ -54,19 +59,23 @@ export class AgentWorkflowStore extends Context.Service<AgentWorkflowStore>()(
                   .from(agentWorkflowRun)
                   .where(owned(runId, userId))
                   .for('update')
+
                 if (row === undefined) return yield* Effect.fail(forbidden())
                 const state = yield* Schema.decodeUnknownEffect(WorkflowRegistry)(row.registry)
                 const next = transitionWorkflowRegistry(state, command)
                 const registry = yield* Schema.encodeEffect(WorkflowRegistry)(next)
+
                 const updated = yield* tx
                   .update(agentWorkflowRun)
                   .set({ registry })
                   .where(owned(runId, userId))
                   .returning()
+
                 if (updated.length !== 1)
                   return yield* Effect.fail(
                     new WorkflowRegistryError({ message: 'Workflow registry update failed' })
                   )
+
                 return next
               })
             )

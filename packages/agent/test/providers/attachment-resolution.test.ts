@@ -1,4 +1,4 @@
-import { Effect, Ref, Stream } from 'effect'
+import { Effect, Predicate, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AssistantAgentMessage,
@@ -27,12 +27,15 @@ const pdf = DocumentPart.make({
   mimeType: 'application/pdf',
   filename: 'brief.pdf'
 })
+
 const image = ImagePart.make({ source: refAttachmentSource('image'), mimeType: 'image/png' })
+
 const hostCall = AssistantAgentMessage.make({
   parts: [
     HostToolCallPart.make({ call: ToolCall.make({ id: 'call-1', name: 'read', params: {} }) })
   ]
 })
+
 const toolResult = (content: ReadonlyArray<AttachmentContentPart>) =>
   ToolResultMessage.make({
     toolCallId: 'call-1',
@@ -41,6 +44,7 @@ const toolResult = (content: ReadonlyArray<AttachmentContentPart>) =>
     annotations: { source: 'private' },
     content: [TextPart.make({ text: 'Attachments:' }), ...content]
   })
+
 const request = (messages: ReadonlyArray<AgentMessage>): LLMRequest => ({
   messages,
   model: 'test-model',
@@ -48,7 +52,9 @@ const request = (messages: ReadonlyArray<AgentMessage>): LLMRequest => ({
   tools: [],
   reasoningEffort: 'medium'
 })
+
 const signedUrl = (id: string, attempt: number) => `https://example.com/${id}?attempt=${attempt}`
+
 const overflow = new LLMError({ cause: 'context_overflow', message: 'too large', retryable: false })
 
 const providers = [
@@ -108,14 +114,17 @@ for (const provider of providers) {
       () =>
         Effect.gen(function* () {
           const oldPdf = DocumentPart.make({ ...pdf, source: refAttachmentSource('old-pdf') })
+
           const original = [
             UserMessage.make({ content: [oldPdf] }),
             hostCall,
             toolResult([image, pdf])
           ]
+
           const snapshot = yield* resolveMessagesAttachmentSources(original, part =>
             Effect.succeed(part.source)
           )
+
           const compacted = [UserMessage.make({ content: 'Checkpoint' }), ...original.slice(1)]
           const messagesRef = yield* Ref.make<ReadonlyArray<AgentMessage>>(original)
           const compactCalls: Array<ReadonlyArray<AgentMessage>> = []
@@ -123,6 +132,7 @@ for (const provider of providers) {
           const visits: Array<string> = []
           let attempts = 0
           let transports = 0
+
           const transport = LLMProvider.of({
             stream: input =>
               Stream.unwrap(
@@ -131,12 +141,14 @@ for (const provider of providers) {
                   expect(input).toMatchObject({ ...request(input.messages) })
                   const body = yield* provider.lower(input)
                   expect(body).toMatchObject(provider.expected(attempts))
+
                   return transports % 2 === 1
                     ? Stream.fail(overflow)
                     : Stream.make(LLMTextDelta.make({ text: 'ok' }))
                 })
               )
           })
+
           // Host-owned composition: retry -> policy/resolution -> actual provider.
           const resolvingProvider = LLMProvider.of({
             stream: input =>
@@ -144,31 +156,40 @@ for (const provider of providers) {
                 Effect.gen(function* () {
                   attempts++
                   prepared.push(input.messages)
+
                   const messages = yield* resolveMessagesAttachmentSources(input.messages, part => {
                     const source = part.source
-                    if (source._tag !== 'Ref') return Effect.succeed(source)
+
+                    if (!Predicate.isTagged(source, 'Ref')) return Effect.succeed(source)
                     visits.push(source.id)
+
                     return Effect.succeed(urlAttachmentSource(signedUrl(source.id, attempts)))
                   })
+
                   return transport.stream({ ...input, messages })
                 })
               )
           })
+
           const retryProvider = yield* makeContextOverflowRetryProvider({
             provider: resolvingProvider,
             messagesRef,
             compact: messages =>
               Effect.sync(() => {
                 compactCalls.push(messages)
+
                 return { _tag: 'Compacted', messages: compacted }
               })
           })
+
           const stream = retryProvider.stream(request(original))
           expect(attempts).toBe(0)
+
           for (let run = 0; run < 2; run++) {
             const events = yield* stream.pipe(Stream.runCollect)
             expect(Array.from(events)).toEqual([LLMTextDelta.make({ text: 'ok' })])
           }
+
           yield* retryProvider.stream(request(original)).pipe(Stream.runDrain)
           expect(attempts).toBe(6)
           expect(transports).toBe(6)
@@ -192,15 +213,17 @@ for (const provider of providers) {
       })
     ]) {
       it.effect(
-        `rejects ${part._tag === 'Audio' ? 'unsupported audio' : `unresolved ${part._tag} Ref`} tool-result content`,
+        `rejects ${Predicate.isTagged(part, 'Audio') ? 'unsupported audio' : `unresolved ${part._tag} Ref`} tool-result content`,
         () =>
           Effect.gen(function* () {
             const error = yield* provider
               .lower(request([hostCall, toolResult([part])]))
               .pipe(Effect.flip)
-            expect(error).toMatchObject({ _tag: 'LLMError', retryable: false })
+
+            expect(error._tag).toBe('LLMError')
+            expect(error).toMatchObject({ retryable: false })
             expect(error.message).toContain(
-              part._tag === 'Audio'
+              Predicate.isTagged(part, 'Audio')
                 ? 'Audio content'
                 : `Unresolved ${part._tag.toLowerCase()} source`
             )
@@ -214,6 +237,7 @@ for (const provider of providers) {
           [AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: [pdf] })] })],
           () => Effect.succeed(urlAttachmentSource(signedUrl('pdf', 1)))
         )
+
         const error = yield* provider.lower(request(messages)).pipe(Effect.flip)
         expect(error.message).toContain('Assistant document content is not supported')
       })
@@ -226,8 +250,10 @@ for (const provider of providers) {
           message: 'Attachment unavailable',
           retryable: false
         })
+
         let transports = 0
         let compactions = 0
+
         const retryProvider = yield* makeContextOverflowRetryProvider({
           provider: LLMProvider.of({
             stream: input =>
@@ -235,6 +261,7 @@ for (const provider of providers) {
                 resolveMessagesAttachmentSources(input.messages, () => Effect.fail(failure)).pipe(
                   Effect.map(messages => {
                     transports++
+
                     return Stream.fromEffect(provider.lower({ ...input, messages })).pipe(
                       Stream.drain
                     )
@@ -245,12 +272,15 @@ for (const provider of providers) {
           compact: messages =>
             Effect.sync(() => {
               compactions++
+
               return { _tag: 'Compacted', messages }
             })
         })
+
         const error = yield* retryProvider
           .stream(request([hostCall, toolResult([pdf])]))
           .pipe(Stream.runDrain, Effect.flip)
+
         expect(error).toBe(failure)
         expect(transports).toBe(0)
         expect(compactions).toBe(0)

@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { deleteTelegramConnectorAction } from '@/lib/core/agent/delete-telegram-connector-action'
 import { saveTelegramConnectorAction } from '@/lib/core/agent/save-telegram-connector-action'
+import { Predicate } from 'effect'
 
 type TelegramConnectorFormProps = {
   readonly initialConnected: boolean
@@ -27,8 +28,9 @@ export function TelegramConnectorForm({
     startTransition(async () => {
       const result = await saveTelegramConnectorAction({ botToken, chatId })
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
+
         return
       }
 
@@ -43,8 +45,9 @@ export function TelegramConnectorForm({
     startTransition(async () => {
       const result = await deleteTelegramConnectorAction()
 
-      if (result._tag === 'Error') {
+      if (Predicate.isTagged(result, 'Error')) {
         toast.error(result.message)
+
         return
       }
 

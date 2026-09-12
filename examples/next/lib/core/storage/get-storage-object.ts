@@ -7,6 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 export const getStorageObject = (input: { readonly id: string; readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [row] = yield* db
       .select({ object: schema.storageObject, document: schema.knowledgeDocument })
       .from(schema.storageObject)

@@ -16,6 +16,7 @@ if (DATABASE_URL === undefined || DATABASE_URL.length === 0) {
 const sql = neon(DATABASE_URL)
 
 await sql`DROP SCHEMA IF EXISTS public CASCADE`
+
 await sql`CREATE SCHEMA public`
 
 const setupResult = spawnSync('pnpm', ['db:setup'], {

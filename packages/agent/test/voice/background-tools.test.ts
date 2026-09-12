@@ -1,4 +1,4 @@
-import { Cause, Effect } from 'effect'
+import { Cause, Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -31,6 +31,7 @@ import {
 const setup = (manual: boolean, activated = true) =>
   Effect.gen(function* () {
     const counts = { validate: 0, inline: 0, admissions: 0 }
+
     const tool = makeTool({
       name: 'work',
       description: 'Work',
@@ -41,9 +42,11 @@ const setup = (manual: boolean, activated = true) =>
       execute: ({ call }) =>
         Effect.sync(() => {
           counts.inline++
+
           return ToolResult.make({ toolCallId: call.id, content: 'done' })
         })
     })
+
     const set = yield* resolveTools(
       [
         {
@@ -66,12 +69,14 @@ const setup = (manual: boolean, activated = true) =>
               accept: () =>
                 Effect.sync(() => {
                   counts.admissions++
+
                   return BackgroundToolAccepted.make({ version: 1, executionId: 'owner:work' })
                 })
             }
           }
         : {}
     )
+
     return { set, counts, tool }
   })
 
@@ -90,6 +95,7 @@ describe('activated background tools fail closed in voice', () => {
         const { set } = yield* setup(false)
         const def = set.tools[0]!
         const config = VoiceSessionConfig.make({ model: 'test', instructions: 'Help' })
+
         for (const advertise of [
           () => toOpenAiRealtimeTool(def),
           () => makeOpenAiRealtimeSessionConfig({ instructions: 'Help', tools: set.tools }),
@@ -108,12 +114,14 @@ describe('activated background tools fail closed in voice', () => {
         for (const manual of [false, true]) {
           const { set, counts } = yield* setup(manual)
           const original = call('foreground', 'original')
+
           const approval = ToolApprovalResponse.make({
             requestId: voiceApprovalRequestId(original.callId),
             toolCallId: original.callId,
             decision: 'approved',
             source: 'user'
           })
+
           for (const request of [
             original,
             call('foreground', 'changed'),
@@ -121,18 +129,23 @@ describe('activated background tools fail closed in voice', () => {
             call('background', 'changed')
           ]) {
             expect(decideVoiceToolCall(set.tools, request)._tag).toBe('Deny')
+
             for (const response of [undefined, approval]) {
               const outcome = yield* handleVoiceToolCall({
                 call: request,
                 tools: set.tools,
                 approval: response
               }).pipe(Effect.provide(makeToolExecutorLayer(set)))
-              expect(outcome).toMatchObject({ _tag: 'Denied', callId: original.callId })
-              expect(outcome._tag === 'Denied' && outcome.output).toContain(
+
+              const expectedOutcomeFields = { callId: original.callId }
+              expect(outcome._tag).toBe('Denied')
+              expect(outcome).toMatchObject(expectedOutcomeFields)
+              expect(Predicate.isTagged(outcome, 'Denied') && outcome.output).toContain(
                 'not supported in voice/realtime'
               )
             }
           }
+
           expect(counts).toEqual({ validate: 0, inline: 0, admissions: 0 })
         }
       })
@@ -143,8 +156,10 @@ describe('activated background tools fail closed in voice', () => {
     () =>
       Effect.gen(function* () {
         const { set, counts } = yield* setup(false)
+
         for (const execution of ['foreground', 'background']) {
           const request = call(execution, 'original')
+
           const outcome = yield* executeVoiceToolCall(
             VoiceToolCallRequest.make({
               callId: request.callId,
@@ -152,8 +167,10 @@ describe('activated background tools fail closed in voice', () => {
               arguments: request.argumentsJson
             })
           ).pipe(Effect.provide(makeToolExecutorLayer(set)))
+
           expect(outcome.output).toContain('not supported in voice/realtime')
         }
+
         expect(counts).toEqual({ validate: 0, inline: 0, admissions: 0 })
         yield* set.execute(
           ToolCall.make({
@@ -176,6 +193,7 @@ describe('activated background tools fail closed in voice', () => {
         expect(
           makeOpenAiRealtimeSessionConfig({ instructions: '', tools: set.tools }).tools
         ).toEqual([toOpenAiRealtimeTool(tool.def)])
+
         const outcome = yield* handleVoiceToolCall({
           tools: set.tools,
           call: VoiceToolCall.make({
@@ -190,7 +208,9 @@ describe('activated background tools fail closed in voice', () => {
             source: 'user'
           })
         }).pipe(Effect.provide(makeToolExecutorLayer(set)))
-        expect(outcome).toMatchObject({ _tag: 'Executed', output: '{"result":"done"}' })
+
+        expect(outcome._tag).toBe('Executed')
+        expect(outcome).toMatchObject({ output: '{"result":"done"}' })
         expect(counts).toEqual({ validate: 0, inline: 1, admissions: 0 })
       })
   )
@@ -203,9 +223,11 @@ it.effect(
       const { set, counts } = yield* setup(false)
       const def = set.tools[0]
       expect(def).toBeDefined()
+
       if (def === undefined) return
       const config = VoiceSessionConfig.make({ model: 'test', instructions: 'Help' })
       let hostEffects = 0
+
       for (const build of [
         () => toOpenAiRealtimeToolEffect(def),
         () => makeOpenAiRealtimeSessionConfigEffect({ instructions: 'Help', tools: set.tools }),
@@ -214,10 +236,13 @@ it.effect(
         const caught = yield* Effect.gen(function* () {
           yield* build()
           hostEffects++ // represents SDP exchange or callback transport, not just validation
+
           return 'unexpected'
         }).pipe(Effect.catchTag('VoiceToolBridgeError', error => Effect.succeed(error.message)))
+
         expect(caught).toContain('not supported in voice/realtime')
       }
+
       expect(hostEffects).toBe(0)
       expect(counts).toEqual({ validate: 0, inline: 0, admissions: 0 })
       const plain = yield* setup(false, false)
@@ -241,19 +266,23 @@ it.effect('does not disguise unexpected mapper defects as VoiceToolBridgeError',
       }
     })
     let caught = false
+
     const exit = yield* makeOpenAiRealtimeSessionConfigEffect({
       instructions: '',
       tools: [tool.def]
     }).pipe(
       Effect.catchTag('VoiceToolBridgeError', () => {
         caught = true
+
         return Effect.void
       }),
       Effect.exit
     )
+
     expect(caught).toBe(false)
     expect(exit._tag).toBe('Failure')
-    if (exit._tag === 'Failure')
+
+    if (Predicate.isTagged(exit, 'Failure'))
       expect(Cause.findDefect(exit.cause)).toMatchObject({ _tag: 'Success', success: defect })
   })
 )

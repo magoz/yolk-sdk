@@ -17,7 +17,9 @@ export type KnowledgeSearchResult = {
 type Match = Omit<KnowledgeSearchResult, 'context'>
 
 const defaultLimit = 8
+
 const maxLimit = 20
+
 const maxContextChunks = 5
 
 const normalizePositiveInteger = (input: {
@@ -27,6 +29,7 @@ const normalizePositiveInteger = (input: {
   readonly field: string
 }) => {
   const value = input.value ?? input.defaultValue
+
   if (!Number.isInteger(value) || value < 1) {
     return Effect.fail(
       new ValidationError({
@@ -35,11 +38,13 @@ const normalizePositiveInteger = (input: {
       })
     )
   }
+
   return Effect.succeed(Math.min(value, input.maxValue))
 }
 
 const normalizeContextChunks = (value: number | undefined) => {
   const normalized = value ?? 1
+
   if (!Number.isInteger(normalized) || normalized < 0) {
     return Effect.fail(
       new ValidationError({
@@ -48,6 +53,7 @@ const normalizeContextChunks = (value: number | undefined) => {
       })
     )
   }
+
   return Effect.succeed(Math.min(normalized, maxContextChunks))
 }
 
@@ -68,6 +74,7 @@ export const searchUserKnowledge = (input: {
 }) =>
   Effect.gen(function* () {
     const query = input.query.trim()
+
     if (query.length === 0) {
       return yield* Effect.fail(
         new ValidationError({ field: 'query', message: 'Knowledge query is empty' })
@@ -80,12 +87,14 @@ export const searchUserKnowledge = (input: {
       maxValue: maxLimit,
       field: 'limit'
     })
+
     const contextChunks = yield* normalizeContextChunks(input.contextChunks)
     const db = yield* Db
     const embedder = yield* KnowledgeEmbedder
     const embedding = yield* embedder.embedQuery(query)
     const distance = cosineDistance(schema.userKnowledgeChunk.embedding, Array.from(embedding))
     const vectorScore = sql<number>`1 - (${distance})`
+
     const minScoreCondition =
       input.minScore === undefined ? undefined : lte(distance, 1 - input.minScore)
 
@@ -114,6 +123,7 @@ export const searchUserKnowledge = (input: {
     const searchVector = sql`to_tsvector('english', ${schema.userKnowledgeChunk.content})`
     const searchQuery = sql`websearch_to_tsquery('english', ${query})`
     const textScore = sql<number>`ts_rank_cd(${searchVector}, ${searchQuery})`
+
     const textMatches = yield* db
       .select({
         document: schema.userKnowledgeDocument,

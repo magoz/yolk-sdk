@@ -70,18 +70,16 @@ const searchStorageForAgent = (input: {
 const listStorageSourcesForAgent = (input: { readonly userId: string }) =>
   getUserStorage({ userId: input.userId }).pipe(
     Effect.map(rows =>
-      rows.map(
-        (row): StorageSourceSummary => ({
-          id: row.object.id,
-          name: storageSourceName(row.object),
-          sourceType: row.object.sourceType,
-          status: row.document?.status,
-          summary: row.document?.summary ?? undefined,
-          chunkCount: row.document?.chunkCount,
-          tokenCount: row.document?.tokenCount,
-          createdAt: row.object.createdAt.toISOString()
-        })
-      )
+      rows.map((row): StorageSourceSummary => ({
+        id: row.object.id,
+        name: storageSourceName(row.object),
+        sourceType: row.object.sourceType,
+        status: row.document?.status,
+        summary: row.document?.summary ?? undefined,
+        chunkCount: row.document?.chunkCount,
+        tokenCount: row.document?.tokenCount,
+        createdAt: row.object.createdAt.toISOString()
+      }))
     ),
     Effect.provide(Db.layer),
     Effect.mapError(error => fatalToolError('list_storage_sources', error))

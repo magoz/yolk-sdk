@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import { defineConnector } from '../connector.ts'
@@ -22,11 +22,13 @@ export {
   DropboxDownloadErrorCode,
   DropboxDownloadSource
 } from './download.ts'
+
 export type {
   DropboxDownloadBudget,
   DropboxDownloadInput,
   DropboxDownloadResult
 } from './download.ts'
+
 export {
   DropboxCombinedOAuthCredentialSlot,
   DropboxContentReadOAuthCredentialSlot,
@@ -50,12 +52,16 @@ export {
 } from './shared.ts'
 
 const NonEmptyString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 const DropboxSearchQuery = NonEmptyString.pipe(Schema.check(Schema.isMaxLength(1000)))
+
 const DropboxRevision = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{9,}$/)))
+
 const DropboxListLimit = Schema.Int.pipe(
   Schema.check(Schema.isGreaterThanOrEqualTo(1)),
   Schema.check(Schema.isLessThanOrEqualTo(2000))
 )
+
 const DropboxSearchLimit = Schema.Int.pipe(
   Schema.check(Schema.isGreaterThanOrEqualTo(1)),
   Schema.check(Schema.isLessThanOrEqualTo(1000))
@@ -100,6 +106,7 @@ export const DropboxMetadata = Schema.Union([
   DropboxFolderMetadata,
   DropboxDeletedMetadata
 ])
+
 export type DropboxMetadata = typeof DropboxMetadata.Type
 
 export class DropboxListFolderInput extends Schema.Class<DropboxListFolderInput>(
@@ -217,6 +224,7 @@ const DropboxMetadataApi = Schema.Union([
   DropboxFolderMetadataApi,
   DropboxDeletedMetadataApi
 ])
+
 type DropboxMetadataApi = typeof DropboxMetadataApi.Type
 
 const DropboxListFolderApiOutput = Schema.Struct({
@@ -264,6 +272,7 @@ const DropboxDeleteApiOutput = Schema.Struct({
 })
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 const decodeJsonObject = (body: string) =>
@@ -271,6 +280,7 @@ const decodeJsonObject = (body: string) =>
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -280,12 +290,16 @@ const dropboxErrorDetail = (body: string) =>
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
       const summary = parsed.error_summary
+
       if (typeof summary === 'string' && summary.trim() !== '') return summary
       const description = parsed.error_description
+
       if (typeof description === 'string' && description.trim() !== '') return description
       const userMessage = parsed.user_message
+
       if (!isJsonObject(userMessage)) return undefined
       const text = userMessage.text
+
       return typeof text === 'string' && text.trim() !== '' ? text : undefined
     })
   )
@@ -299,7 +313,9 @@ const providerCode = (fallback: string, status: number, detail: string | undefin
       return 'dropbox_not_found'
     case 409:
       if (detail?.includes('not_found') === true) return 'dropbox_not_found'
+
       if (detail?.includes('conflict') === true) return 'dropbox_conflict'
+
       return fallback
     case 429:
       return 'dropbox_rate_limited'
@@ -312,8 +328,10 @@ const retryAfterMs = (response: ConnectorHttpResponse) => {
   const retryAfter = Object.entries(response.headers).find(
     ([name]) => name.toLowerCase() === 'retry-after'
   )?.[1]
+
   if (retryAfter === undefined) return undefined
   const seconds = Number(retryAfter)
+
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined
 }
 
@@ -325,6 +343,7 @@ const dropboxProviderFailure = (input: {
   dropboxErrorDetail(input.response.body).pipe(
     Effect.map(detail => {
       const retry = retryAfterMs(input.response)
+
       return ActionResult.failure(
         new ProviderFailure({
           code: providerCode(input.code, input.response.status, detail),
@@ -366,6 +385,7 @@ const dropboxJsonAction = <A>(input: {
   Effect.gen(function* () {
     const token = yield* resolveDropboxAccessToken(input.integration, input.slot)
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       dropboxRequest({ token, path: input.path, body: input.body })
     )
@@ -379,6 +399,7 @@ const dropboxJsonAction = <A>(input: {
     }
 
     const output = yield* decodeJsonResponse(input.outputSchema, response)
+
     return ActionResult.success(output)
   }).pipe(
     Effect.withSpan('connector.dropbox.request', {
@@ -472,7 +493,9 @@ export const dropboxListFolderAction = defineAction({
         errorCode: 'dropbox_list_folder_failed',
         errorMessage: 'Dropbox list folder failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(listFolderOutputFromApi(result.value))
     })
 })
@@ -493,7 +516,9 @@ export const dropboxListFolderContinueAction = defineAction({
         errorCode: 'dropbox_list_folder_continue_failed',
         errorMessage: 'Dropbox list folder continuation failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(listFolderOutputFromApi(result.value))
     })
 })
@@ -522,7 +547,9 @@ export const dropboxSearchAction = defineAction({
         errorCode: 'dropbox_search_failed',
         errorMessage: 'Dropbox search failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(searchOutputFromApi(result.value))
     })
 })
@@ -543,7 +570,9 @@ export const dropboxSearchContinueAction = defineAction({
         errorCode: 'dropbox_search_continue_failed',
         errorMessage: 'Dropbox search continuation failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(searchOutputFromApi(result.value))
     })
 })
@@ -567,7 +596,9 @@ export const dropboxGetMetadataAction = defineAction({
         errorCode: 'dropbox_get_metadata_failed',
         errorMessage: 'Dropbox get metadata failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(metadataFromApi(result.value))
     })
 })
@@ -589,7 +620,9 @@ export const dropboxCreateFolderAction = defineAction({
         errorCode: 'dropbox_create_folder_failed',
         errorMessage: 'Dropbox create folder failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(metadataFromApi(result.value.metadata))
     })
 })
@@ -616,7 +649,9 @@ export const dropboxMoveAction = defineAction({
         errorCode: 'dropbox_move_failed',
         errorMessage: 'Dropbox move failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(metadataFromApi(result.value.metadata))
     })
 })
@@ -642,7 +677,9 @@ export const dropboxCopyAction = defineAction({
         errorCode: 'dropbox_copy_failed',
         errorMessage: 'Dropbox copy failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(metadataFromApi(result.value.metadata))
     })
 })
@@ -664,7 +701,9 @@ export const dropboxDeleteAction = defineAction({
         errorCode: 'dropbox_delete_failed',
         errorMessage: 'Dropbox delete failed'
       })
-      if (result._tag === 'Failure') return result
+
+      if (Predicate.isTagged(result, 'Failure')) return result
+
       return ActionResult.success(metadataFromApi(result.value.metadata))
     })
 })
@@ -686,5 +725,7 @@ export const DropboxConnector = defineConnector({
   description: 'Dropbox file metadata and file-management connector actions.',
   actions: dropboxActions
 })
+
 export { createDropboxFile, updateDropboxFile, dropboxSingleUploadMaxBytes } from './write.ts'
+
 export type { DropboxCreateFileInput, DropboxUpdateFileInput } from './write.ts'

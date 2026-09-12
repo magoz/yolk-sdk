@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { Effect, Exit, Scope, Stream } from 'effect'
+import { Effect, Exit, Predicate, Scope, Stream } from 'effect'
 import type {
   HitlResponse,
   ToolApprovalRequest,
@@ -110,12 +110,15 @@ const applyEvent = (state: VoiceHookState, event: VoiceEvent): VoiceHookState =>
     case 'UserTranscriptFinal':
       return { ...state, userDraft: '' }
     case 'AwaitingInput': {
-      const approvals = event.requests.filter(request => request._tag === 'ToolApprovalRequest')
+      const approvals = event.requests.filter(request =>
+        Predicate.isTagged(request, 'ToolApprovalRequest')
+      )
 
       return approvals.length === 0
         ? state
         : { ...state, pendingApprovals: [...state.pendingApprovals, ...approvals] }
     }
+
     case 'ToolCallCompleted':
     case 'ToolCallFailed':
       return {
@@ -220,12 +223,14 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 
       if (attemptIdRef.current !== attemptId) {
         yield* Scope.close(scope, Exit.void)
+
         return
       }
 
       scopeRef.current = scope
 
       const opts = optionsRef.current
+
       const { session, outbox } = yield* Scope.provide(
         Effect.gen(function* () {
           const transport = yield* makeWebRtcVoiceTransport({
@@ -242,11 +247,13 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
               }
             }
           })
+
           const controller = yield* makeVoiceController({
             transport,
             codec: opts.codec,
             executeToolCall: opts.executeToolCall
           })
+
           const eventOutbox =
             opts.eventLog === undefined ? null : yield* makeVoiceEventOutbox(opts.eventLog)
 
@@ -284,7 +291,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
           optionsRef.current.onEvent?.(event)
           dispatch({ _tag: 'Event', event })
 
-          if (event._tag === 'Error') {
+          if (Predicate.isTagged(event, 'Error')) {
             optionsRef.current.onError?.(
               new VoiceSessionError({ code: event.code, message: event.message })
             )
@@ -320,6 +327,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
   const toggle = useCallback(() => {
     if (isConnecting || isLive) {
       stop()
+
       return
     }
 
@@ -347,7 +355,7 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
       return
     }
 
-    if (response._tag === 'ToolApprovalResponse') {
+    if (Predicate.isTagged(response, 'ToolApprovalResponse')) {
       dispatch({ _tag: 'ApprovalSubmitted', requestId: response.requestId })
     }
 
@@ -414,4 +422,5 @@ export const useYolkVoice = (options: UseYolkVoiceOptions): YolkVoiceApi => {
 }
 
 export { voiceSeedTextsFromMessages }
+
 export type { VoiceSeedText, VoiceSeedTextOptions }

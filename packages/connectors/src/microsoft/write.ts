@@ -19,33 +19,39 @@ import { oneDriveWriteSlot } from './drive.ts'
 import { resolveMicrosoftAccessToken } from './shared.ts'
 
 export const oneDriveSingleUploadMaxBytes = 250_000_000
+
 export interface OneDriveCreateFileInput {
   readonly driveId?: string
   readonly parentItemId: string
   readonly name: string
   readonly bytes: Uint8Array
 }
+
 export interface OneDriveUpdateFileInput {
   readonly driveId?: string
   readonly itemId: string
   readonly bytes: Uint8Array
   readonly acknowledgeOverwrite: true
 }
+
 const Name = SafeText.check(
   Schema.makeFilter(
     s => !/["*:<>?\/\\|]/.test(s) && s !== '.' && s !== '..' && s.trim() === s && !s.endsWith('.')
   )
 )
+
 const Create = Schema.Struct({
   driveId: Schema.optional(OpaqueId),
   parentItemId: OpaqueId,
   name: Name
 })
+
 const Update = Schema.Struct({
   driveId: Schema.optional(OpaqueId),
   itemId: OpaqueId,
   acknowledgeOverwrite: Schema.Literal(true)
 })
+
 const Metadata = Schema.Struct({
   id: OpaqueId,
   name: SafeText,
@@ -54,6 +60,7 @@ const Metadata = Schema.Struct({
   cTag: Schema.optional(SafeText),
   file: Schema.Struct({ mimeType: Schema.optional(SafeText) })
 })
+
 const upload = (
   integration: ConnectorIntegration,
   input: OneDriveCreateFileInput | OneDriveUpdateFileInput,
@@ -65,19 +72,24 @@ const upload = (
     yield* decodeInput(Schema.Record(Schema.String, Schema.Unknown), input)
     yield* validateUpload(input.bytes, limits, oneDriveSingleUploadMaxBytes)
     const target = updating ? yield* decodeInput(Update, input) : yield* decodeInput(Create, input)
+
     const slot = yield* oneDriveWriteSlot(integration, target.driveId).pipe(
       Effect.catch(() => failTransfer('invalid_input'))
     )
+
     const token = yield* resolveMicrosoftAccessToken(integration, slot).pipe(
       Effect.mapError(credentialFailure),
       Effect.flatMap(safeToken)
     )
+
     const root =
       target.driveId === undefined ? '/me/drive' : `/drives/${encodeURIComponent(target.driveId)}`
+
     const path =
       'itemId' in target
         ? `/items/${encodeURIComponent(target.itemId)}/content`
         : `/items/${encodeURIComponent(target.parentItemId)}:/${encodeURIComponent(target.name)}:/content?@microsoft.graph.conflictBehavior=fail`
+
     const response = yield* writeBytes({
       method: 'PUT',
       url: `https://graph.microsoft.com/v1.0${root}${path}`,
@@ -90,13 +102,16 @@ const upload = (
       redirect: 'manual',
       credentials: 'omit'
     })
+
     const metadata = yield* decodeMetadata(Metadata, response.bytes)
+
     if (
       metadata.size !== input.bytes.byteLength ||
       ('itemId' in target && metadata.id !== target.itemId) ||
       ('name' in target && metadata.name !== target.name)
     )
       return yield* failTransfer('invalid_metadata')
+
     return {
       itemId: metadata.id,
       name: metadata.name,
@@ -105,12 +120,14 @@ const upload = (
       cTag: metadata.cTag
     }
   })
+
 /** Conflict-failing creation, never the provider's default replacement behavior. */
 export const createOneDriveFile = (
   integration: ConnectorIntegration,
   input: OneDriveCreateFileInput,
   budget: ConnectorFileTransferBudget
 ) => upload(integration, input, budget, false)
+
 /** Unconditional replacement by stable ID. Explicit acknowledgement is NOT atomic CAS. */
 export const updateOneDriveFile = (
   integration: ConnectorIntegration,

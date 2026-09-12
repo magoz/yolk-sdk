@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -37,6 +37,7 @@ const makeHttpClientLayer = (
           body: 'Unexpected test request',
           contentType: 'text/plain'
         }
+
         const body = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body)
 
         return HttpClientResponse.fromWeb(
@@ -65,7 +66,7 @@ const readBodyText = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
   expect(body._tag).toBe('Uint8Array')
 
-  if (body._tag !== 'Uint8Array') {
+  if (!Predicate.isTagged(body, 'Uint8Array')) {
     expect.fail('Expected text body')
   }
 
@@ -78,6 +79,7 @@ describe('AnthropicClaudeOAuth', () => {
       const requests: Array<CapturedRequest> = []
       const before = 1_000_000
       yield* TestClock.setTime(before)
+
       const layer = makeAnthropicClaudeOAuthLayer(
         makeHttpClientLayer(
           [
@@ -95,6 +97,7 @@ describe('AnthropicClaudeOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* AnthropicClaudeOAuth
+
         return yield* oauth.exchangeAuthorizationCode({
           authorizationCode: 'code_1#state_1',
           codeVerifier: 'verifier_1',
@@ -129,6 +132,7 @@ describe('AnthropicClaudeOAuth', () => {
 
       const error = yield* Effect.gen(function* () {
         const oauth = yield* AnthropicClaudeOAuth
+
         return yield* oauth.exchangeAuthorizationCode({
           authorizationCode: 'code_1#wrong_state',
           codeVerifier: 'verifier_1',
@@ -145,6 +149,7 @@ describe('AnthropicClaudeOAuth', () => {
   it.effect('refreshes token and preserves refresh token when omitted', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeAnthropicClaudeOAuthLayer(
         makeHttpClientLayer(
           [
@@ -161,6 +166,7 @@ describe('AnthropicClaudeOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* AnthropicClaudeOAuth
+
         return yield* oauth.refreshToken('refresh_old')
       }).pipe(Effect.provide(layer))
 
@@ -183,12 +189,14 @@ describe('AnthropicClaudeOAuth', () => {
   it.effect('fails non-OK responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeAnthropicClaudeOAuthLayer(
         makeHttpClientLayer([{ status: 500, body: 'bad', contentType: 'text/plain' }], requests)
       )
 
       const error = yield* Effect.gen(function* () {
         const oauth = yield* AnthropicClaudeOAuth
+
         return yield* oauth.refreshToken('refresh_old')
       }).pipe(Effect.provide(layer), Effect.flip)
 

@@ -3,6 +3,7 @@ import {
   Channel,
   Effect,
   Exit,
+  Predicate,
   Pull,
   Queue,
   Ref,
@@ -128,8 +129,11 @@ export type StreamCloudflareAgentEventsRequest = {
 }
 
 const defaultEndpoint = '/api/agent'
+
 const defaultRunContinuationLimit = 120
+
 const defaultIdleReconnectMaxAttempts = 12
+
 const relativeEndpointBase = 'http://yolk.local'
 
 const headerValue = (headers: Readonly<Record<string, string | undefined>>, name: string) => {
@@ -180,6 +184,7 @@ export const agentRunStreamTailIndexFromHeaders = (
   headers: Readonly<Record<string, string | undefined>>
 ) => {
   const raw = nonEmptyHeaderValue(headers, 'x-workflow-stream-tail-index')
+
   if (raw === undefined) return undefined
 
   const parsed = parseSafeInteger(raw)
@@ -424,7 +429,8 @@ const parseWebSocketServerMessage = (
     return yield* decodeWebSocketServerMessage(parsed)
   })
 
-const isUserMessage = (message: AgentMessage): message is UserMessage => message._tag === 'User'
+const isUserMessage = (message: AgentMessage): message is UserMessage =>
+  Predicate.isTagged(message, 'User')
 
 const lastUserMessage = (
   messages: AgentTranscript
@@ -475,7 +481,7 @@ const makeClientInputJson = (
     }
 
     return yield* encodeJsonString(
-      hitlResponse._tag === 'ToolApprovalResponse'
+      Predicate.isTagged(hitlResponse, 'ToolApprovalResponse')
         ? ToolApprovalResponseInput.make({
             response: hitlResponse,
             expectedRevision,
@@ -540,6 +546,7 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const httpRequest = yield* makeHttpRequest(request)
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientTransportError('Agent request failed')))
@@ -548,6 +555,7 @@ const requestAgentResponse = (request: StreamAgentEventsRequest) =>
       yield* Effect.sync(() =>
         request.onResponse?.({ status: response.status, headers: response.headers })
       )
+
       return response
     }
 
@@ -569,6 +577,7 @@ const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
     )
 
     const client = yield* HttpClient.HttpClient
+
     const response = yield* client
       .execute(
         HttpClientRequest.get(endpoint).pipe(
@@ -581,6 +590,7 @@ const requestAgentRunResponse = (request: StreamAgentRunEventsRequest) =>
       yield* Effect.sync(() =>
         request.onResponse?.({ status: response.status, headers: response.headers })
       )
+
       return response
     }
 
@@ -598,6 +608,7 @@ const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRe
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
     const httpRequest = yield* makeHttpRunHitlResponseRequest(request)
+
     const response = yield* client
       .execute(httpRequest)
       .pipe(Effect.mapError(toHttpClientTransportError('Agent run HITL request failed')))
@@ -606,6 +617,7 @@ const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRe
       yield* Effect.sync(() =>
         request.onResponse?.({ status: response.status, headers: response.headers })
       )
+
       return response
     }
 
@@ -622,6 +634,7 @@ const requestAgentRunHitlResponse = (request: StreamAgentRunHitlResponseEventsRe
 export const cancelAgentRun = (request: CancelAgentRunRequest) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const response = yield* client
       .execute(HttpClientRequest.delete(request.endpoint))
       .pipe(Effect.mapError(toHttpClientTransportError('Agent run cancel failed')))
@@ -662,10 +675,12 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
       const responseScope = yield* Scope.make()
       const responseScopeClosed = yield* Ref.make(false)
       const terminalReached = yield* Ref.make(false)
+
       const pull = yield* Channel.toPullScoped(
         Stream.toChannel(responseToLineStream(response)),
         responseScope
       )
+
       const closeResponseScope = Effect.gen(function* () {
         const closed = yield* Ref.get(responseScopeClosed)
 
@@ -674,15 +689,19 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
           yield* closeScope(responseScope)
         }
       })
+
       const endQueue = Queue.end(queue).pipe(Effect.asVoid)
+
       const failQueue = (cause: Cause.Cause<AgentTransportError>) =>
         Queue.failCause(queue, cause).pipe(Effect.andThen(closeResponseScope), Effect.asVoid)
+
       const drainResponse = (): Effect.Effect<void, AgentTransportError> =>
         Pull.matchEffect(pull, {
           onSuccess: () => drainResponse(),
           onFailure: cause => Effect.failCause(cause),
           onDone: () => Effect.void
         })
+
       const startTerminalDrain = Effect.gen(function* () {
         yield* Ref.set(terminalReached, true)
         yield* endQueue
@@ -693,6 +712,7 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
           Effect.asVoid
         )
       })
+
       const emitLines = (lines: ReadonlyArray<string>): Effect.Effect<void, AgentTransportError> =>
         Effect.gen(function* () {
           for (const line of lines) {
@@ -702,12 +722,14 @@ const responseToEventStream = (response: HttpClientResponse.HttpClientResponse) 
 
             if (isTerminalAgentEvent(event)) {
               yield* startTerminalDrain
+
               return
             }
           }
 
           yield* run()
         })
+
       const run = (): Effect.Effect<void, AgentTransportError> =>
         Pull.matchEffect(pull, {
           onSuccess: emitLines,
@@ -746,6 +768,7 @@ const abortSignalEffect = (signal: AbortSignal) =>
   Effect.callback<never, AgentTransportError>(resume => {
     if (signal.aborted) {
       resume(Effect.fail(abortSignalError(signal)))
+
       return Effect.void
     }
 
@@ -885,6 +908,7 @@ const drainAgentEventStream = (input: {
   Effect.gen(function* () {
     const scope = yield* Scope.make()
     const pull = yield* Channel.toPullScoped(Stream.toChannel(input.stream), scope)
+
     const run = (state: {
       readonly count: number
       readonly terminal: boolean
@@ -952,10 +976,12 @@ const streamAgentRunContinuations = (
     let terminal = input.terminal
     let startIndex = input.startIndex
     const limit = yield* agentRunContinuationLimitEffect(input.continuationLimit)
+
     const idleReconnectLimit =
       input.idleReconnect === undefined
         ? undefined
         : yield* idleReconnectMaxAttemptsEffect(input.idleReconnect.maxAttempts)
+
     let idleReconnects = 0
 
     if (terminal) {
@@ -967,6 +993,7 @@ const streamAgentRunContinuations = (
     }
 
     let continuation = 0
+
     while (continuation < limit) {
       const endpoint = input.endpoint
       const chunkStartIndex = startIndex
@@ -1026,6 +1053,7 @@ export const streamAgentEventStreamUntilTerminal = (
       yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
       let runEndpoint: string | undefined
       let startIndex: number | undefined
+
       const firstChunk = yield* drainAgentEventStream({
         queue,
         stream: streamAgentEventStream({
@@ -1033,6 +1061,7 @@ export const streamAgentEventStreamUntilTerminal = (
           onResponse: response => {
             startIndex = agentRunStreamStartIndexFromHeaders(response.headers)
             const runId = agentRunIdFromHeaders(response.headers)
+
             if (runId !== undefined) {
               runEndpoint =
                 request.runEndpoint?.(runId) ?? defaultAgentRunEndpoint(request.endpoint, runId)
@@ -1083,6 +1112,7 @@ export const streamAgentRunEventStreamUntilTerminal = (
       yield* agentRunContinuationLimitEffect(request.continuationLimit).pipe(Effect.asVoid)
       yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
       yield* validateAgentRunStartIndexEffect(request.startIndex)
+
       const firstChunk = yield* streamAgentRunContinuationChunk({
         queue,
         endpoint: request.endpoint,
@@ -1146,6 +1176,7 @@ export const streamAgentRunHitlResponseEventStreamUntilTerminal = (
       yield* agentRunContinuationLimitEffect(request.continuationLimit).pipe(Effect.asVoid)
       yield* validateAgentRunIdleReconnectEffect(request.idleReconnect)
       let startIndex: number | undefined
+
       const firstChunk = yield* streamAgentRunHitlResponseInitialChunk(
         request,
         queue,
@@ -1183,7 +1214,7 @@ export const streamAgentRunHitlResponseEventStreamUntilTerminal = (
 }
 
 const isAgentEvent = (message: AgentWebSocketServerMessageType): message is AgentEventType =>
-  message._tag !== 'SessionSnapshot'
+  !Predicate.isTagged(message, 'SessionSnapshot')
 
 export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentEventsRequest) =>
   applyAbortSignal(
@@ -1192,23 +1223,27 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
         const socket = new WebSocket(request.webSocketUrl)
         let sentInput = false
         let settled = false
+
         const closeSocket = Effect.sync(() => {
           if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
             socket.close(1000, 'done')
           }
         })
+
         const failQueue = (error: AgentTransportError) =>
           Effect.runFork(Queue.failCause(queue, Cause.fail(error)).pipe(Effect.asVoid))
+
         const handleMessage = (event: MessageEvent) => {
           if (typeof event.data !== 'string') {
             failQueue(toTransportError('Agent WebSocket returned binary data', event.data))
+
             return
           }
 
           Effect.runFork(
             parseWebSocketServerMessage(event.data).pipe(
               Effect.flatMap(message => {
-                if (message._tag === 'SessionSnapshot') {
+                if (Predicate.isTagged(message, 'SessionSnapshot')) {
                   return sentInput
                     ? Effect.void
                     : makeClientInputJson(request, message.revision).pipe(
@@ -1241,9 +1276,11 @@ export const streamCloudflareAgentEventStream = (request: StreamCloudflareAgentE
             )
           )
         }
+
         const handleError = () => {
           failQueue(toTransportError('Agent WebSocket failed', request.webSocketUrl))
         }
+
         const handleClose = () => {
           if (!settled) {
             failQueue(toTransportError('Agent WebSocket closed', request.webSocketUrl))

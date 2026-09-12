@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { deleteKnowledgeDocumentAction } from '@/lib/core/knowledge/delete-knowledge-document-action'
+import { Predicate } from 'effect'
 
 export function DeleteKnowledgeDocumentButton({
   id,
@@ -28,10 +29,13 @@ export function DeleteKnowledgeDocumentButton({
           startTransition(async () => {
             onDeleteOptimistic(id)
             const result = await deleteKnowledgeDocumentAction(id)
-            if (result._tag === 'Error') {
+
+            if (Predicate.isTagged(result, 'Error')) {
               setMessage(result.message)
+
               return
             }
+
             setMessage(undefined)
           })
         }}

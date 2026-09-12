@@ -13,7 +13,7 @@ import type {
 import { Db } from '@/lib/services/db/live-layer'
 import * as dbSchema from '@/lib/services/db/schema'
 
-type R2KnowledgeFileStoreConfigShape = {
+type R2KnowledgeFileStoreConfigValues = {
   readonly endpoint: string
   readonly bucketName: string
   readonly accessKeyId: Redacted.Redacted<string>
@@ -42,7 +42,7 @@ export type R2PresignedUpload = {
 
 class R2KnowledgeFileStoreConfig extends Context.Service<
   R2KnowledgeFileStoreConfig,
-  R2KnowledgeFileStoreConfigShape
+  R2KnowledgeFileStoreConfigValues
 >()('@app/R2KnowledgeFileStoreConfig') {}
 
 export class R2KnowledgeUploadStore extends Context.Service<
@@ -111,20 +111,24 @@ const propertyValue = (input: unknown, key: string) => {
 
 const stringProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
+
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 const numberProperty = (input: unknown, key: string) => {
   const value = propertyValue(input, key)
+
   return typeof value === 'number' ? value : undefined
 }
 
 const externalErrorMessage = (error: unknown) => {
   const name =
     error instanceof Error && error.name.length > 0 ? error.name : stringProperty(error, 'name')
+
   const message = error instanceof Error ? error.message : stringProperty(error, 'message')
   const metadata = propertyValue(error, '$metadata')
   const status = numberProperty(metadata, 'httpStatusCode')
+
   const details = [name, status === undefined ? undefined : `HTTP ${status}`, message]
     .filter(detail => detail !== undefined && detail.length > 0)
     .join(' · ')
@@ -134,6 +138,7 @@ const externalErrorMessage = (error: unknown) => {
 
 const fileIntegrationError = (message: string, cause: unknown) => {
   const details = externalErrorMessage(cause)
+
   return new KnowledgeFileError({
     message: details === undefined ? message : `${message}: ${details}`,
     cause
@@ -141,6 +146,7 @@ const fileIntegrationError = (message: string, cause: unknown) => {
 }
 
 const storeError = (message: string, cause?: unknown) => new KnowledgeStoreError({ message, cause })
+
 const fileError = (message: string, cause?: unknown) => new KnowledgeFileError({ message, cause })
 
 const mapStoreError = (error: unknown) =>
@@ -223,6 +229,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
   KnowledgeStore,
   Effect.gen(function* () {
     const db = yield* Db
+
     const getScopedDocument = (input: { readonly scope: KnowledgeScope; readonly id: string }) =>
       Effect.gen(function* () {
         const [row] = yield* db
@@ -274,6 +281,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
       updateDocument: input =>
         Effect.gen(function* () {
           const existing = yield* getScopedDocument({ scope: input.scope, id: input.id })
+
           const [updated] = yield* db
             .update(dbSchema.userKnowledgeDocument)
             .set(updateSet({ existing, update: input }))
@@ -384,6 +392,7 @@ export const DrizzleKnowledgeStoreLayer = Layer.effect(
       listFiles: input =>
         Effect.gen(function* () {
           yield* getScopedDocument(input)
+
           const rows = yield* db
             .select()
             .from(dbSchema.userKnowledgeFile)
@@ -427,7 +436,9 @@ export const R2KnowledgeFileBlobStoreLayer = Layer.effect(
             Bucket: config.bucketName,
             Key: input.storageKey
           })
+
           const body = response.Body
+
           if (body === undefined) {
             return yield* Effect.fail(fileError('R2 object body missing'))
           }

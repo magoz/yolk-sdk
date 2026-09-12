@@ -7,29 +7,35 @@ const textFromFileReaderEffect = (blob: Blob) =>
   Effect.callback<string, Error>(resume => {
     if (typeof FileReader === 'undefined') {
       resume(Effect.fail(couldNotReadTextError()))
+
       return Effect.void
     }
 
     const reader = new FileReader()
+
     const removeListeners = () => {
       reader.removeEventListener('load', handleLoad)
       reader.removeEventListener('error', handleError)
       reader.removeEventListener('abort', handleError)
     }
+
     const fail = () => {
       removeListeners()
       resume(Effect.fail(couldNotReadTextError()))
     }
+
     const handleLoad = () => {
       removeListeners()
 
       if (typeof reader.result === 'string') {
         resume(Effect.succeed(reader.result))
+
         return
       }
 
       resume(Effect.fail(couldNotReadTextError()))
     }
+
     const handleError = () => fail()
 
     reader.addEventListener('load', handleLoad)

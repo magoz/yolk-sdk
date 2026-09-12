@@ -50,7 +50,7 @@ import {
   updateR2Object
 } from '../packages/connectors/src/r2-storage/index.ts'
 
-type PackageExportShape = {
+type PackageExportContract = {
   readonly packageDir: string
   readonly packageName: string
   readonly expectedExports: ReadonlyArray<string>
@@ -59,7 +59,7 @@ type PackageExportShape = {
 
 const workspaceRoot = process.cwd()
 
-const packageExportShapes: ReadonlyArray<PackageExportShape> = [
+const packageExportContracts: ReadonlyArray<PackageExportContract> = [
   {
     packageDir: 'packages/agent',
     packageName: '@yolk-sdk/agent',
@@ -197,16 +197,19 @@ const field = (value: unknown, key: string): unknown => {
 
 const stringField = (value: unknown, key: string): string | undefined => {
   const result = field(value, key)
+
   return typeof result === 'string' ? result : undefined
 }
 
 const booleanField = (value: unknown, key: string): boolean | undefined => {
   const result = field(value, key)
+
   return typeof result === 'boolean' ? result : undefined
 }
 
 const objectKeysField = (value: unknown, key: string): ReadonlyArray<string> => {
   const result = field(value, key)
+
   if (typeof result !== 'object' || result === null) {
     return []
   }
@@ -228,38 +231,52 @@ const sorted = (values: ReadonlyArray<string>) =>
 const sameMembers = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
   sorted(left).join('\n') === sorted(right).join('\n')
 
-const failures = packageExportShapes.flatMap(shape => {
-  const packageJsonPath = join(workspaceRoot, shape.packageDir, 'package.json')
+const failures = packageExportContracts.flatMap(packageExport => {
+  const packageJsonPath = join(workspaceRoot, packageExport.packageDir, 'package.json')
   const packageJson = readJson(packageJsonPath)
   const exportKeys = objectKeysField(packageJson, 'exports')
-  const rootSource = readFileSync(join(workspaceRoot, shape.packageDir, 'src/index.ts'), 'utf8')
+
+  const rootSource = readFileSync(
+    join(workspaceRoot, packageExport.packageDir, 'src/index.ts'),
+    'utf8'
+  )
+
   const rootStatements = normalizedRootSource(rootSource)
   const packageFailures: Array<string> = []
 
-  if (stringField(packageJson, 'name') !== shape.packageName) {
-    packageFailures.push(`${shape.packageDir}/package.json name must be ${shape.packageName}`)
+  if (stringField(packageJson, 'name') !== packageExport.packageName) {
+    packageFailures.push(
+      `${packageExport.packageDir}/package.json name must be ${packageExport.packageName}`
+    )
   }
 
   if (stringField(packageJson, 'type') !== 'module') {
-    packageFailures.push(`${shape.packageDir}/package.json must use type=module`)
+    packageFailures.push(`${packageExport.packageDir}/package.json must use type=module`)
   }
 
   if (booleanField(packageJson, 'sideEffects') !== false) {
-    packageFailures.push(`${shape.packageDir}/package.json must declare sideEffects=false`)
+    packageFailures.push(`${packageExport.packageDir}/package.json must declare sideEffects=false`)
   }
 
-  if (!sameMembers(exportKeys, shape.expectedExports)) {
+  if (!sameMembers(exportKeys, packageExport.expectedExports)) {
     packageFailures.push(
-      `${shape.packageDir}/package.json exports mismatch: expected ${sorted(shape.expectedExports).join(', ')}, got ${sorted(exportKeys).join(', ')}`
+      `${packageExport.packageDir}/package.json exports mismatch: expected ${sorted(packageExport.expectedExports).join(', ')}, got ${sorted(exportKeys).join(', ')}`
     )
   }
 
   if (exportKeys.some(exportKey => exportKey.includes('*'))) {
-    packageFailures.push(`${shape.packageDir}/package.json exports must be explicit, no wildcards`)
+    packageFailures.push(
+      `${packageExport.packageDir}/package.json exports must be explicit, no wildcards`
+    )
   }
 
-  if (shape.tinyRoot && (rootStatements.length !== 1 || rootStatements[0] !== 'export {}')) {
-    packageFailures.push(`${shape.packageDir}/src/index.ts root must stay tiny: only export {}`)
+  if (
+    packageExport.tinyRoot &&
+    (rootStatements.length !== 1 || rootStatements[0] !== 'export {}')
+  ) {
+    packageFailures.push(
+      `${packageExport.packageDir}/src/index.ts root must stay tiny: only export {}`
+    )
   }
 
   return packageFailures
@@ -315,8 +332,10 @@ if (
 
 if (failures.length > 0) {
   console.error('Package export/tree-shake smoke failures:')
+
   for (const failure of failures) {
     console.error(`- ${failure}`)
   }
+
   process.exitCode = 1
 }

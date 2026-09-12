@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   Content,
@@ -12,9 +12,11 @@ import { BackgroundToolAccepted, ToolCall, ToolResult } from './tool.ts'
 export const MessageAuthor = Schema.Struct({
   displayName: Schema.optional(Schema.String)
 })
+
 export type MessageAuthor = typeof MessageAuthor.Type
 
 export const MessageAnnotations = Schema.Record(Schema.String, Schema.Json)
+
 export type MessageAnnotations = typeof MessageAnnotations.Type
 
 export type MessageEnvelope = {
@@ -73,6 +75,7 @@ export const AssistantPart = Schema.Union([
   ProviderToolCallPart,
   ProviderToolResultPart
 ])
+
 export type AssistantPart = typeof AssistantPart.Type
 
 export class AssistantAgentMessage extends Schema.TaggedClass<AssistantAgentMessage>()(
@@ -110,6 +113,7 @@ export const toolResultMessageFromResult = (
   })
 
 export const AgentMessage = Schema.Union([UserMessage, AssistantAgentMessage, ToolResultMessage])
+
 export type AgentMessage = typeof AgentMessage.Type
 
 const resolveAssistantPartAttachmentSources = <E, R>(
@@ -191,7 +195,10 @@ export type RepairDanglingHostToolCallsOptions = {
 }
 
 export const assistantContent = (message: AssistantAgentMessage): Content => {
-  const parts = message.parts.flatMap(part => (part._tag === 'Text' ? [part.content] : []))
+  const parts = message.parts.flatMap(part =>
+    Predicate.isTagged(part, 'Text') ? [part.content] : []
+  )
+
   const first = parts[0]
 
   if (parts.length === 0) {
@@ -206,10 +213,10 @@ export const assistantContent = (message: AssistantAgentMessage): Content => {
 }
 
 export const assistantReasoningText = (message: AssistantAgentMessage) =>
-  message.parts.flatMap(part => (part._tag === 'Reasoning' ? [part.text] : [])).join('')
+  message.parts.flatMap(part => (Predicate.isTagged(part, 'Reasoning') ? [part.text] : [])).join('')
 
 export const assistantHostToolCalls = (message: AssistantAgentMessage) =>
-  message.parts.flatMap(part => (part._tag === 'HostToolCall' ? [part.call] : []))
+  message.parts.flatMap(part => (Predicate.isTagged(part, 'HostToolCall') ? [part.call] : []))
 
 type PendingHostToolCall = {
   readonly call: ToolCall
@@ -217,7 +224,7 @@ type PendingHostToolCall = {
 }
 
 const pendingHostToolCalls = (message: AgentMessage, messageIndex: number) =>
-  message._tag === 'Assistant'
+  Predicate.isTagged(message, 'Assistant')
     ? assistantHostToolCalls(message).map(call => ({ call, assistantMessageIndex: messageIndex }))
     : []
 
@@ -257,14 +264,14 @@ export const danglingHostToolCalls = (
   let pending: ReadonlyArray<PendingHostToolCall> = []
 
   for (const [messageIndex, message] of messages.entries()) {
-    if (message._tag !== 'ToolResult' && pending.length > 0) {
+    if (!Predicate.isTagged(message, 'ToolResult') && pending.length > 0) {
       dangling.push(...pending.map(call => danglingHostToolCall(call, messageIndex)))
       pending = []
     }
 
     pending = [...pending, ...pendingHostToolCalls(message, messageIndex)]
 
-    if (message._tag === 'ToolResult') {
+    if (Predicate.isTagged(message, 'ToolResult')) {
       pending = pending.filter(call => call.call.id !== message.toolCallId)
     }
   }
@@ -298,18 +305,18 @@ export const repairDanglingHostToolCalls = (
   let pending: ReadonlyArray<ToolCall> = []
 
   for (const message of messages) {
-    if (message._tag !== 'ToolResult' && pending.length > 0) {
+    if (!Predicate.isTagged(message, 'ToolResult') && pending.length > 0) {
       repaired.push(...pending.map(call => danglingHostToolResultMessage(call, options)))
       pending = []
     }
 
     repaired.push(message)
 
-    if (message._tag === 'Assistant') {
+    if (Predicate.isTagged(message, 'Assistant')) {
       pending = [...pending, ...assistantHostToolCalls(message)]
     }
 
-    if (message._tag === 'ToolResult') {
+    if (Predicate.isTagged(message, 'ToolResult')) {
       pending = pending.filter(call => call.id !== message.toolCallId)
     }
   }
@@ -333,6 +340,7 @@ export const messageContextText = (message: MessageEnvelope) => {
       ? []
       : [`- sent_at: ${formatCreatedAtMs(message.createdAtMs)}`])
   ]
+
   const annotationLines = Object.entries(message.annotations ?? {}).map(
     ([key, value]) => `- ${key}: ${formatAnnotationValue(value)}`
   )

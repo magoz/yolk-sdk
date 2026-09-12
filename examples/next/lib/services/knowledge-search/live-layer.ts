@@ -1,5 +1,5 @@
 import { and, asc, cosineDistance, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
-import { Config, Context, Effect, Layer, Redacted } from 'effect'
+import { Config, Context, Effect, Layer, Predicate, Redacted } from 'effect'
 import {
   FetchHttpClient,
   HttpClient,
@@ -46,6 +46,7 @@ const OpenAiEmbeddingResponseSchema = Schema.Struct({
 })
 
 type StorageSourceType = (typeof dbSchema.storageSourceType.enumValues)[number]
+
 const hasStringMessage = (error: unknown): error is { readonly message: string } =>
   typeof error === 'object' &&
   error !== null &&
@@ -57,6 +58,7 @@ const hasTag = <Tag extends string>(error: unknown, tag: Tag): error is { readon
 
 const isSearchIndexStoreError = (error: unknown): error is SearchIndexStoreError =>
   hasTag(error, 'SearchIndexStoreError')
+
 const isKnowledgeExtractionError = (error: unknown): error is KnowledgeExtractionError =>
   hasTag(error, 'KnowledgeExtractionError')
 
@@ -65,6 +67,7 @@ const unknownToMessage = (error: unknown) =>
 
 const metadataString = (metadata: KnowledgeMetadata | undefined, key: string) => {
   const value = metadata?.[key]
+
   return typeof value === 'string' ? value : undefined
 }
 
@@ -162,6 +165,7 @@ const readErrorBody = (response: HttpClientResponse.HttpClientResponse) =>
 const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse) =>
   Effect.gen(function* () {
     const body = yield* readErrorBody(response)
+
     return yield* Effect.fail(
       new AppKnowledgeEmbedderError({
         message: `OpenAI embeddings failed: ${response.status} ${body}`,
@@ -220,6 +224,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
       upsertDocument: input =>
         Effect.gen(function* () {
           const storageObjectId = storageObjectIdForDocument(input)
+
           const [row] = yield* db
             .insert(dbSchema.knowledgeDocument)
             .values({
@@ -273,6 +278,7 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
                 eq(dbSchema.knowledgeDocument.collectionId, input.scopeId)
               )
             )
+
           return yield* getDocument(input.documentId)
         }).pipe(
           Effect.withSpan('SearchIndexStore.markDocumentProcessing'),
@@ -389,15 +395,21 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
             dbSchema.knowledgeChunk.embedding,
             Array.from(input.embedding)
           )
+
           const score = sql<number>`1 - (${distance})`
-          const scopeIds =
-            input.scope._tag === 'KnowledgeScope' ? [input.scope.id] : [...input.scope.ids]
+
+          const scopeIds = Predicate.isTagged(input.scope, 'KnowledgeScope')
+            ? [input.scope.id]
+            : [...input.scope.ids]
+
           const scopeCondition =
             scopeIds.length === 1
               ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
               : inArray(dbSchema.knowledgeChunk.collectionId, scopeIds)
+
           const minScoreCondition =
             input.minScore === undefined ? undefined : lte(distance, 1 - input.minScore)
+
           const matches = yield* db
             .select({
               chunk: dbSchema.knowledgeChunk,
@@ -432,15 +444,19 @@ export const DrizzleSearchIndexStoreLayer = Layer.effect(
 
       searchChunksByText: input =>
         Effect.gen(function* () {
-          const scopeIds =
-            input.scope._tag === 'KnowledgeScope' ? [input.scope.id] : [...input.scope.ids]
+          const scopeIds = Predicate.isTagged(input.scope, 'KnowledgeScope')
+            ? [input.scope.id]
+            : [...input.scope.ids]
+
           const scopeCondition =
             scopeIds.length === 1
               ? eq(dbSchema.knowledgeChunk.collectionId, scopeIds[0] ?? '')
               : inArray(dbSchema.knowledgeChunk.collectionId, scopeIds)
+
           const searchVector = sql`to_tsvector('english', ${dbSchema.knowledgeChunk.content})`
           const searchQuery = sql`websearch_to_tsquery('english', ${input.query})`
           const score = sql<number>`ts_rank_cd(${searchVector}, ${searchQuery})`
+
           const matches = yield* db
             .select({
               chunk: dbSchema.knowledgeChunk,
@@ -516,6 +532,7 @@ export const TextKnowledgeExtractorLayer = Layer.succeed(KnowledgeExtractor, {
       }
 
       const content = source.content.trim()
+
       if (content.length === 0) {
         return yield* Effect.fail(
           new KnowledgeExtractionError({ message: 'Cannot extract empty text' })
@@ -523,6 +540,7 @@ export const TextKnowledgeExtractorLayer = Layer.succeed(KnowledgeExtractor, {
       }
 
       const title = metadataString(source.metadata, 'title')
+
       return {
         content,
         title,
@@ -539,20 +557,21 @@ export const TextKnowledgeExtractorLayer = Layer.succeed(KnowledgeExtractor, {
     )
 })
 
-type OpenAiEmbeddingsConfigShape = {
+type OpenAiEmbeddingsConfigValues = {
   readonly apiKey: Redacted.Redacted<string>
   readonly model: string
 }
 
 class OpenAiEmbeddingsConfig extends Context.Service<
   OpenAiEmbeddingsConfig,
-  OpenAiEmbeddingsConfigShape
+  OpenAiEmbeddingsConfigValues
 >()('@app/OpenAiEmbeddingsConfig') {}
 
 const OpenAiEmbeddingsConfigLayer = Layer.effect(
   OpenAiEmbeddingsConfig,
   Effect.gen(function* () {
     const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+
     return { apiKey, model: 'text-embedding-3-small' }
   }).pipe(
     Effect.mapError(() => new AppKnowledgeEmbedderError({ message: 'OPENAI_API_KEY not found' }))
@@ -588,6 +607,7 @@ export const OpenAiKnowledgeEmbedderLayer = Layer.effect(
               })
           )
         )
+
         const response = yield* client.execute(request).pipe(Effect.mapError(toRequestError))
 
         if (!isOkStatus(response.status)) {
@@ -595,6 +615,7 @@ export const OpenAiKnowledgeEmbedderLayer = Layer.effect(
         }
 
         const parsed = yield* parseOpenAiResponse(response)
+
         return parsed.data.map(item => item.embedding)
       }).pipe(
         Effect.retry({ while: isTransientError, schedule: retryPolicy }),

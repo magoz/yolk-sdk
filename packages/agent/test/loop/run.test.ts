@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Option, Stream } from 'effect'
+import { Deferred, Effect, Layer, Option, Predicate, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentContentCapabilities,
@@ -19,6 +19,7 @@ import {
   ToolApprovalResponse,
   ToolDef,
   ToolResult,
+  ToolResultMessage,
   UserMessage
 } from '@yolk-sdk/agent/protocol'
 import type { AssistantAgentMessage } from '@yolk-sdk/agent/protocol'
@@ -160,6 +161,7 @@ describe('run', () => {
             Stream.make(LLMTextDelta.make({ text: 'o' })).pipe(Stream.concat(Stream.never))
         })
       )
+
       const eventsOption = yield* run({
         messages: [UserMessage.make({ content: 'hello' })],
         systemPrompt: 'Be brief.',
@@ -241,7 +243,7 @@ describe('run', () => {
         'AgentEnd'
       ])
 
-      const agentEnd = events.find(event => event._tag === 'AgentEnd')
+      const agentEnd = events.find(event => Predicate.isTagged(event, 'AgentEnd'))
       expect(agentEnd).toMatchObject({ turns: 2 })
     })
   )
@@ -284,8 +286,12 @@ describe('run', () => {
         'TurnEnd',
         'AgentAwaitingInput'
       ])
-      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
-      expect(events.find(event => event._tag === 'ToolApprovalRequested')).toMatchObject({
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
+      ).toBeUndefined()
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolApprovalRequested'))
+      ).toMatchObject({
         request: { requestId: 'approval:call_1', toolCallId: 'call_1' }
       })
     })
@@ -299,6 +305,7 @@ describe('run', () => {
         decision: 'approved',
         source: 'user'
       })
+
       const eventsChunk = yield* run({
         messages: [UserMessage.make({ content: 'what is the weather?' })],
         systemPrompt: 'Use tools when useful.',
@@ -329,15 +336,20 @@ describe('run', () => {
       expect(events.map(event => event._tag)).toContain('ToolApprovalGranted')
       expect(events.map(event => event._tag)).toContain('ToolExecutionStarted')
       expect(
-        events.flatMap(event => (event._tag === 'ToolExecutionStarted' ? [event.call.id] : []))
+        events.flatMap(event =>
+          Predicate.isTagged(event, 'ToolExecutionStarted') ? [event.call.id] : []
+        )
       ).toEqual(['call_1'])
-      expect(events.find(event => event._tag === 'AgentEnd')).toMatchObject({ turns: 2 })
+      expect(events.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
+        turns: 2
+      })
     })
   )
 
   it.effect('turns denied approval into a model-visible tool result', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const response = ToolApprovalResponse.make({
         requestId: 'approval:call_1',
         toolCallId: 'call_1',
@@ -345,6 +357,7 @@ describe('run', () => {
         source: 'user',
         reason: 'not needed'
       })
+
       const eventsChunk = yield* run({
         messages: [UserMessage.make({ content: 'what is the weather?' })],
         systemPrompt: 'Use tools when useful.',
@@ -376,13 +389,16 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toContain('ToolApprovalDenied')
-      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
-      expect(requests[1]?.messages.at(-1)).toMatchObject({
-        _tag: 'ToolResult',
-        toolCallId: 'call_1',
-        isError: true,
-        content: 'Tool call denied: not needed'
-      })
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
+      ).toBeUndefined()
+      expect(requests[1]?.messages.at(-1)).toMatchObject(
+        ToolResultMessage.make({
+          toolCallId: 'call_1',
+          isError: true,
+          content: 'Tool call denied: not needed'
+        })
+      )
     })
   )
 
@@ -402,6 +418,7 @@ describe('run', () => {
           ]
         }
       })
+
       const pausedChunk = yield* run({
         messages: [UserMessage.make({ content: 'ask me' })],
         systemPrompt: 'Ask a question.',
@@ -421,6 +438,7 @@ describe('run', () => {
       expect(paused.map(event => event._tag)).toContain('AgentAwaitingInput')
 
       const requests: Array<LLMRequest> = []
+
       const answer = QuestionResponse.make({
         requestId: 'question:call_question',
         toolCallId: call.id,
@@ -428,6 +446,7 @@ describe('run', () => {
         source: 'user',
         answers: [QuestionAnswer.make({ questionId: 'choice', optionIds: ['a'] })]
       })
+
       const resumedChunk = yield* run({
         messages: [UserMessage.make({ content: 'ask me' })],
         systemPrompt: 'Ask a question.',
@@ -475,6 +494,7 @@ describe('run', () => {
       Effect.gen(function* () {
         const call = ToolCall.make({ id: 'call_1', name: 'web_search', params: { q: 'weather' } })
         const result = ToolResult.make({ toolCallId: call.id, content: 'sunny' })
+
         const provider = Layer.succeed(
           LLMProvider,
           LLMProvider.of({
@@ -521,7 +541,9 @@ describe('run', () => {
           'ProviderToolCall',
           'ProviderToolResult'
         ])
-        expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
+        expect(
+          events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
+        ).toBeUndefined()
       })
   )
 
@@ -587,6 +609,7 @@ describe('run', () => {
   it.effect('fails before provider call when input exceeds model capabilities', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const result = yield* run({
         messages: [
           UserMessage.make({
@@ -624,6 +647,7 @@ describe('run', () => {
   it.effect('fails before provider call when document input is unsupported', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const result = yield* run({
         messages: [
           UserMessage.make({
@@ -696,6 +720,7 @@ describe('run', () => {
   it.effect('transforms context before LLM requests', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const eventsChunk = yield* run({
         messages: [UserMessage.make({ content: 'hello' })],
         systemPrompt: 'Be brief.',
@@ -806,7 +831,7 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toContain('UsageUpdate')
-      expect(events.find(event => event._tag === 'AgentEnd')).toMatchObject({
+      expect(events.find(event => Predicate.isTagged(event, 'AgentEnd'))).toMatchObject({
         usage: { input: { total: 10 }, output: { total: 3 } }
       })
     })
@@ -815,11 +840,13 @@ describe('run', () => {
   it.effect('retries retryable provider errors before failing the turn', () =>
     Effect.gen(function* () {
       let calls = 0
+
       const provider = Layer.succeed(
         LLMProvider,
         LLMProvider.of({
           stream: () => {
             calls++
+
             if (calls === 1) {
               return Stream.fail(
                 new LLMError({
@@ -861,7 +888,7 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(calls).toBe(2)
-      expect(events.find(event => event._tag === 'AgentRetry')).toMatchObject({
+      expect(events.find(event => Predicate.isTagged(event, 'AgentRetry'))).toMatchObject({
         attempt: 1,
         reason: 'rate_limit',
         delayMs: 0
@@ -873,12 +900,14 @@ describe('run', () => {
   it.effect('uses provider retry-after metadata for retry delay', () =>
     Effect.gen(function* () {
       let calls = 0
+
       const providerInfo = ProviderErrorInfo.make({
         provider: 'openai',
         kind: 'rate_limit',
         status: 429,
         retryAfterMs: 0
       })
+
       const provider = Layer.succeed(
         LLMProvider,
         LLMProvider.of({
@@ -925,7 +954,7 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       expect(calls).toBe(2)
-      expect(events.find(event => event._tag === 'AgentRetry')).toMatchObject({
+      expect(events.find(event => Predicate.isTagged(event, 'AgentRetry'))).toMatchObject({
         attempt: 1,
         reason: 'rate_limit',
         delayMs: 0,
@@ -937,6 +966,7 @@ describe('run', () => {
   it.effect('caps default retry attempts at three provider calls', () =>
     Effect.gen(function* () {
       let calls = 0
+
       const provider = Layer.succeed(
         LLMProvider,
         LLMProvider.of({
@@ -991,6 +1021,7 @@ describe('run', () => {
   it.effect('does not retry post-emission provider failures', () =>
     Effect.gen(function* () {
       let calls = 0
+
       const provider = Layer.succeed(
         LLMProvider,
         LLMProvider.of({
@@ -1187,13 +1218,16 @@ describe('run', () => {
         'AssistantMessage',
         'TurnEnd'
       ])
-      expect(events.find(event => event._tag === 'TurnEnd')).toMatchObject({ reason: 'tool_use' })
+      expect(events.find(event => Predicate.isTagged(event, 'TurnEnd'))).toMatchObject({
+        reason: 'tool_use'
+      })
     })
   )
 
   it.effect('runs a tool batch as a separate stateless step', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+
       const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
         Stream.runCollect,
         Effect.provide(TestToolExecutor.layer({ weather: '72F' })),
@@ -1205,7 +1239,9 @@ describe('run', () => {
         'ToolExecutionStarted',
         'ToolExecutionCompleted'
       ])
-      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         result: { toolCallId: 'call_1', content: '72F' }
       })
     })
@@ -1214,6 +1250,7 @@ describe('run', () => {
   it.effect('turns tool batch failures into model-visible error tool results', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+
       const eventsChunk = yield* runToolBatch({ calls: [call] }).pipe(
         Stream.runCollect,
         Effect.provide(failingToolExecutorLayer),
@@ -1226,12 +1263,14 @@ describe('run', () => {
         'ToolExecutionError',
         'ToolExecutionCompleted'
       ])
-      expect(events.find(event => event._tag === 'ToolExecutionError')).toMatchObject({
+      expect(events.find(event => Predicate.isTagged(event, 'ToolExecutionError'))).toMatchObject({
         call,
         message: 'Tool failed: weather',
         code: 'tool_error'
       })
-      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         call,
         result: {
           toolCallId: call.id,
@@ -1246,6 +1285,7 @@ describe('run', () => {
     Effect.gen(function* () {
       const failingCall = ToolCall.make({ id: 'call_fail', name: 'weather', params: {} })
       const successCall = ToolCall.make({ id: 'call_ok', name: 'time', params: {} })
+
       const executorLayer = Layer.succeed(
         ToolExecutor,
         ToolExecutor.of({
@@ -1261,6 +1301,7 @@ describe('run', () => {
               : Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'noon' }))
         })
       )
+
       const eventsChunk = yield* runToolBatch({ calls: [failingCall, successCall] }).pipe(
         Stream.runCollect,
         Effect.provide(executorLayer),
@@ -1268,11 +1309,12 @@ describe('run', () => {
       )
 
       const events = Array.from(eventsChunk)
+
       const completed = events.flatMap(event =>
-        event._tag === 'ToolExecutionCompleted' ? [event] : []
+        Predicate.isTagged(event, 'ToolExecutionCompleted') ? [event] : []
       )
 
-      expect(events.find(event => event._tag === 'ToolExecutionError')).toMatchObject({
+      expect(events.find(event => Predicate.isTagged(event, 'ToolExecutionError'))).toMatchObject({
         call: failingCall,
         message: 'Weather unavailable'
       })
@@ -1289,6 +1331,7 @@ describe('run', () => {
   it.effect('continues the agent run after a tool failure result', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const eventsChunk = yield* run({
         messages: [UserMessage.make({ content: 'check weather' })],
         systemPrompt: 'Be brief.',
@@ -1314,8 +1357,10 @@ describe('run', () => {
 
       const events = Array.from(eventsChunk)
       const secondRequest = requests[1]
-      expect(events.some(event => event._tag === 'AgentEnd')).toBe(true)
-      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(events.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(true)
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         result: { toolCallId: 'call_1', isError: true }
       })
       expect(secondRequest?.messages.map(message => message._tag)).toEqual([
@@ -1323,12 +1368,13 @@ describe('run', () => {
         'Assistant',
         'ToolResult'
       ])
-      expect(secondRequest?.messages[2]).toMatchObject({
-        _tag: 'ToolResult',
-        toolCallId: 'call_1',
-        content: 'Tool failed: weather',
-        isError: true
-      })
+      expect(secondRequest?.messages[2]).toMatchObject(
+        ToolResultMessage.make({
+          toolCallId: 'call_1',
+          content: 'Tool failed: weather',
+          isError: true
+        })
+      )
     })
   )
 
@@ -1336,6 +1382,7 @@ describe('run', () => {
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
       const created = UserMessage.make({ content: 'created' })
+
       const eventsChunk = yield* runToolBatch({
         calls: [call],
         tools: [
@@ -1359,8 +1406,10 @@ describe('run', () => {
         'ToolApprovalRequested',
         'AgentAwaitingInput'
       ])
-      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
-      expect(events.find(event => event._tag === 'AgentAwaitingInput')).toMatchObject({
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
+      ).toBeUndefined()
+      expect(events.find(event => Predicate.isTagged(event, 'AgentAwaitingInput'))).toMatchObject({
         requests: [{ requestId: 'approval:call_1' }],
         messages: [created],
         turns: 1
@@ -1371,6 +1420,7 @@ describe('run', () => {
   it.effect('turns denied tool batch approval into a synthetic completion', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+
       const response = ToolApprovalResponse.make({
         requestId: 'approval:call_1',
         toolCallId: call.id,
@@ -1378,6 +1428,7 @@ describe('run', () => {
         source: 'user',
         reason: 'skip'
       })
+
       const eventsChunk = yield* runToolBatch({
         calls: [call],
         tools: [
@@ -1400,8 +1451,12 @@ describe('run', () => {
         'ToolApprovalDenied',
         'ToolExecutionCompleted'
       ])
-      expect(events.find(event => event._tag === 'ToolExecutionStarted')).toBeUndefined()
-      expect(events.find(event => event._tag === 'ToolExecutionCompleted')).toMatchObject({
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionStarted'))
+      ).toBeUndefined()
+      expect(
+        events.find(event => Predicate.isTagged(event, 'ToolExecutionCompleted'))
+      ).toMatchObject({
         result: {
           toolCallId: call.id,
           isError: true,
@@ -1417,6 +1472,7 @@ describe('run', () => {
       const fast = ToolCall.make({ id: 'call_fast', name: 'fast', params: {} })
       const slowGate = yield* Deferred.make<void>()
       const started: Array<string> = []
+
       const executor = Layer.succeed(
         ToolExecutor,
         ToolExecutor.of({
@@ -1453,7 +1509,7 @@ describe('run', () => {
       ])
       expect(
         events.flatMap(event =>
-          event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []
+          Predicate.isTagged(event, 'ToolExecutionCompleted') ? [event.result.toolCallId] : []
         )
       ).toEqual(['call_slow', 'call_fast'])
       expect(started).toEqual(['slow', 'fast'])
@@ -1467,6 +1523,7 @@ describe('run', () => {
         name: 'subagent',
         params: { description: 'inspect bug', prompt: 'inspect', subagent_type: 'general' }
       })
+
       const eventsChunk = yield* runToolBatch({ calls: [call], model: 'gpt-test' }).pipe(
         Stream.runCollect,
         Effect.provide(TestToolExecutor.layer({ subagent: 'done' })),
@@ -1502,12 +1559,15 @@ describe('run', () => {
         name: 'subagent',
         params: { description: 'slow task', prompt: 'slow', subagent_type: 'general' }
       })
+
       const fast = ToolCall.make({
         id: 'call_fast_subagent',
         name: 'subagent',
         params: { description: 'fast task', prompt: 'fast', subagent_type: 'general' }
       })
+
       const slowGate = yield* Deferred.make<void>()
+
       const executor = Layer.succeed(
         ToolExecutor,
         ToolExecutor.of({
@@ -1535,6 +1595,7 @@ describe('run', () => {
       )
 
       const lifecycle = Array.from(eventsChunk).map(event => event._tag)
+
       const firstCompletion = lifecycle.findIndex(
         tag => tag === 'ToolExecutionCompleted' || tag === 'SubagentCompleted'
       )
@@ -1555,6 +1616,7 @@ describe('run', () => {
       const slowGate = yield* Deferred.make<void>()
       const requests: Array<LLMRequest> = []
       const started: Array<string> = []
+
       const provider = Layer.succeed(
         LLMProvider,
         LLMProvider.of({
@@ -1574,6 +1636,7 @@ describe('run', () => {
           }
         })
       )
+
       const executor = Layer.succeed(
         ToolExecutor,
         ToolExecutor.of({
@@ -1618,7 +1681,7 @@ describe('run', () => {
       const events = Array.from(eventsChunk)
       expect(
         events.flatMap(event =>
-          event._tag === 'ToolExecutionCompleted' ? [event.result.toolCallId] : []
+          Predicate.isTagged(event, 'ToolExecutionCompleted') ? [event.result.toolCallId] : []
         )
       ).toEqual(['call_slow', 'call_fast'])
       expect(started).toEqual(['slow', 'fast'])
@@ -1630,7 +1693,7 @@ describe('run', () => {
       ])
       expect(
         requests[1]?.messages.flatMap(message =>
-          message._tag === 'ToolResult' ? [message.toolCallId] : []
+          Predicate.isTagged(message, 'ToolResult') ? [message.toolCallId] : []
         )
       ).toEqual(['call_slow', 'call_fast'])
     })

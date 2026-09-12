@@ -26,6 +26,7 @@ export const decorateLLMProvider = <E = never, R = never>(
     LLMProvider,
     Effect.flatMap(LLMProvider, provider => {
       const result = f(provider)
+
       return Effect.isEffect(result) ? result : Effect.succeed(result)
     })
   )

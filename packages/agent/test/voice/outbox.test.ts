@@ -25,6 +25,7 @@ describe('makeVoiceEventOutbox', () => {
     Effect.gen(function* () {
       const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<StoredVoiceEvent>>>([])
       const scope = yield* Scope.make()
+
       const outbox = yield* Scope.provide(
         makeVoiceEventOutbox({ streamId: 'session-1', flush: collectingFlush(batches) }),
         scope
@@ -47,6 +48,7 @@ describe('makeVoiceEventOutbox', () => {
     Effect.gen(function* () {
       const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<StoredVoiceEvent>>>([])
       const scope = yield* Scope.make()
+
       const outbox = yield* Scope.provide(
         makeVoiceEventOutbox({ streamId: 'session-1', flush: collectingFlush(batches) }),
         scope
@@ -68,6 +70,7 @@ describe('makeVoiceEventOutbox', () => {
     Effect.gen(function* () {
       const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<StoredVoiceEvent>>>([])
       const scope = yield* Scope.make()
+
       const outbox = yield* Scope.provide(
         makeVoiceEventOutbox({ streamId: 'session-1', flush: collectingFlush(batches) }),
         scope
@@ -100,6 +103,7 @@ describe('makeVoiceEventOutbox', () => {
       const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<StoredVoiceEvent>>>([])
       const failures = yield* Ref.make(1)
       const scope = yield* Scope.make()
+
       const outbox = yield* Scope.provide(
         makeVoiceEventOutbox({
           streamId: 'session-1',
@@ -137,6 +141,7 @@ describe('makeVoiceEventOutbox', () => {
     Effect.gen(function* () {
       const batches = yield* Ref.make<ReadonlyArray<ReadonlyArray<StoredVoiceEvent>>>([])
       const scope = yield* Scope.make()
+
       const outbox = yield* Scope.provide(
         makeVoiceEventOutbox({ streamId: 'session-1', flush: collectingFlush(batches) }),
         scope

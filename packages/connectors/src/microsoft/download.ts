@@ -27,6 +27,7 @@ export const OneDriveDownloadErrorCode = Schema.Literals([
   'redirect_limit',
   'partial_content'
 ])
+
 export type OneDriveDownloadErrorCode = typeof OneDriveDownloadErrorCode.Type
 
 /** Safe boundary: deliberately contains no upstream message, URL, headers, body or cause. */
@@ -79,19 +80,24 @@ const OpaqueId = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isPattern(/^(?!\.+$)[^\u0000-\u0020\u007f]+$/)
 )
+
 const Input = Schema.Struct({ itemId: OpaqueId, driveId: Schema.optional(OpaqueId) })
+
 const ByteLimit = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 )
+
 const Budget = Schema.Struct({
   maxBytes: ByteLimit,
   maxMetadataBytes: ByteLimit,
   maxErrorBodyBytes: ByteLimit
 })
+
 const RemoteItem = Schema.Struct({
   id: Schema.optional(OpaqueId),
   parentReference: Schema.optional(Schema.Struct({ driveId: Schema.optional(OpaqueId) }))
 })
+
 const Metadata = Schema.Struct({
   id: OpaqueId,
   name: Schema.String,
@@ -107,6 +113,7 @@ const Metadata = Schema.Struct({
   deleted: Schema.optional(Schema.Unknown),
   remoteItem: Schema.optional(RemoteItem)
 })
+
 const metadataSelect = [
   'id',
   'name',
@@ -122,7 +129,9 @@ const metadataSelect = [
   'deleted',
   'remoteItem'
 ].join(',')
+
 const maxRemoteItems = 4
+
 const maxRedirects = 5
 
 const itemUrl = (input: OneDriveDownloadInput) =>
@@ -130,6 +139,7 @@ const itemUrl = (input: OneDriveDownloadInput) =>
     try: () => {
       const root =
         input.driveId === undefined ? '/me/drive' : `/drives/${encodeURIComponent(input.driveId)}`
+
       return `${microsoftGraphApiBaseUrl}${root}/items/${encodeURIComponent(input.itemId)}`
     },
     catch: () => new OneDriveDownloadError({ code: 'invalid_input' })
@@ -145,10 +155,13 @@ const publicHttpsUrl = (value: string) => {
   )
     return undefined
   const authority = value.slice('https://'.length).split(/[/?]/, 1)[0]
+
   if (!authority || authority.includes('@') || authority.endsWith(':')) return undefined
+
   if (!URL.canParse(value)) return undefined
   const url = new URL(value)
   const host = url.hostname.toLowerCase().replace(/\.$/, '')
+
   if (
     url.protocol !== 'https:' ||
     url.username !== '' ||
@@ -162,11 +175,13 @@ const publicHttpsUrl = (value: string) => {
     /(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid|example)$/.test(host)
   )
     return undefined
+
   return url
 }
 
 const locationHeader = (headers: Readonly<Record<string, string>>) => {
   const matches = Object.entries(headers).filter(([name]) => name.toLowerCase() === 'location')
+
   return matches.length === 1 ? matches[0]?.[1] : undefined
 }
 
@@ -195,13 +210,16 @@ const checkBody = (
   maxErrorBodyBytes: number
 ) => {
   const limit = response.status === 200 ? maxBytes : maxErrorBodyBytes
+
   if (response.bytes.byteLength > limit) return fail('response_too_large')
+
   if (
     response.status === 200 &&
     (!response.bodyComplete ||
       Object.keys(response.headers).some(name => name.toLowerCase() === 'content-range'))
   )
     return fail('partial_content')
+
   return Effect.void
 }
 
@@ -223,17 +241,23 @@ export const downloadOneDriveItem = (
     const requested = yield* Schema.decodeUnknownEffect(Input)(input).pipe(
       Effect.mapError(() => new OneDriveDownloadError({ code: 'invalid_input' }))
     )
+
     const limits = yield* Schema.decodeUnknownEffect(Budget)(budget).pipe(
       Effect.mapError(() => new OneDriveDownloadError({ code: 'invalid_input' }))
     )
+
     if (integration.connectorId !== microsoftConnectorId) return yield* fail('invalid_input')
+
     const slot = yield* oneDriveReadSlot(integration, requested.driveId).pipe(
       Effect.mapError(() => new OneDriveDownloadError({ code: 'invalid_input' }))
     )
+
     const token = yield* resolveMicrosoftAccessToken(integration, slot).pipe(
       Effect.mapError(() => new OneDriveDownloadError({ code: 'credential_failed' }))
     )
+
     const http = yield* ConnectorBinaryHttpClient
+
     const request = (url: string, headers: Readonly<Record<string, string>>, maxBytes: number) =>
       http
         .request({
@@ -263,16 +287,21 @@ export const downloadOneDriveItem = (
     let target: OneDriveDownloadInput = requested
     const visited = new Set<string>()
     let remoteCount = 0
+
     while (true) {
       const url = yield* itemUrl(target)
+
       if (visited.has(url)) return yield* fail('remote_item_limit')
       visited.add(url)
+
       const response = yield* request(
         `${url}?${new URLSearchParams({ $select: metadataSelect })}`,
         { ...microsoftAuthorizationHeaders(token), accept: 'application/json' },
         limits.maxMetadataBytes
       )
+
       if (response.status !== 200) return yield* fail(statusCode(response.status))
+
       // This decoder is ONLY for the bounded Graph metadata response, never /content bytes.
       const metadata = yield* Effect.try({
         try: () => new TextDecoder('utf-8', { fatal: true }).decode(response.bytes),
@@ -282,6 +311,7 @@ export const downloadOneDriveItem = (
         Effect.flatMap(Schema.decodeUnknownEffect(Metadata)),
         Effect.mapError(() => new OneDriveDownloadError({ code: 'invalid_metadata' }))
       )
+
       if (
         metadata.id !== target.itemId ||
         (target.driveId !== undefined &&
@@ -289,21 +319,28 @@ export const downloadOneDriveItem = (
           target.driveId !== metadata.parentReference.driveId)
       )
         return yield* fail('invalid_metadata')
+
       if (metadata.deleted !== undefined) return yield* fail('not_a_file')
+
       if (metadata.remoteItem !== undefined) {
         const itemId = metadata.remoteItem.id
         const driveId = metadata.remoteItem.parentReference?.driveId
+
         if (itemId === undefined || driveId === undefined)
           return yield* fail('remote_item_unresolved')
+
         if (remoteCount >= maxRemoteItems) return yield* fail('remote_item_limit')
         remoteCount++
         target = { itemId, driveId }
         continue
       }
+
       if (metadata.folder !== undefined || metadata.file === undefined)
         return yield* fail('not_a_file')
+
       if (metadata.size !== undefined && metadata.size > limits.maxBytes)
         return yield* fail('response_too_large')
+
       const source = OneDriveDownloadSource.make({
         itemId: metadata.id,
         driveId: metadata.parentReference?.driveId ?? target.driveId,
@@ -319,12 +356,15 @@ export const downloadOneDriveItem = (
         createdDateTime: metadata.createdDateTime,
         lastModifiedDateTime: metadata.lastModifiedDateTime
       })
+
       // Use resolved metadata drive identity when available, including /me discovery.
       let contentUrl = `${yield* itemUrl({ itemId: source.itemId, driveId: source.driveId })}/content`
       let headers: Readonly<Record<string, string>> = microsoftAuthorizationHeaders(token)
       let redirects = 0
+
       while (true) {
         const content = yield* request(contentUrl, headers, limits.maxBytes)
+
         if (content.status === 200)
           return {
             bytes: content.bytes,
@@ -332,10 +372,13 @@ export const downloadOneDriveItem = (
             source,
             requested
           }
+
         if (![301, 302, 303, 307, 308].includes(content.status))
           return yield* fail(statusCode(content.status))
+
         if (redirects >= maxRedirects) return yield* fail('redirect_limit')
         const location = locationHeader(content.headers)
+
         if (location === undefined || publicHttpsUrl(location) === undefined)
           return yield* fail('invalid_redirect')
         contentUrl = location

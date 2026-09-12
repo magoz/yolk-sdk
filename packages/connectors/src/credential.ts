@@ -9,6 +9,7 @@ export const CredentialKind = Schema.Literals([
   'oauth',
   'username_password'
 ])
+
 export type CredentialKind = typeof CredentialKind.Type
 
 export class CredentialSlot extends Schema.Class<CredentialSlot>('CredentialSlot')({
@@ -62,6 +63,7 @@ export const RuntimeCredential = Schema.Union([
   OAuthCredential,
   UsernamePasswordCredential
 ])
+
 export type RuntimeCredential = typeof RuntimeCredential.Type
 
 export type CredentialResolveRequest = {
@@ -106,5 +108,6 @@ export const resolveCredential = (integration: ConnectorIntegration, slot: Crede
     }
 
     const resolver = yield* CredentialResolver
+
     return yield* resolver.resolve({ integration, slot, binding: binding.value })
   })

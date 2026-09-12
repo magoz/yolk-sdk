@@ -140,10 +140,12 @@ const loadSourceManifest = (source: FileSkillsetSource) =>
 export const loadProjectSkillsetFromFileSystem = (rootDirectory: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
+
     const sources = sourceDirectories.map(source => ({
       ...source,
       rootDirectory: path.join(rootDirectory, source.id.replace('project-', ''))
     }))
+
     const manifests = yield* Effect.forEach(
       sources,
       source =>

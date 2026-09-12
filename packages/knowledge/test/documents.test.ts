@@ -1,9 +1,9 @@
-import { DateTime, Effect, Layer } from 'effect'
+import { Data, DateTime, Effect, Layer } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall } from '@yolk-sdk/agent/protocol'
 import { ToolError } from '@yolk-sdk/agent/loop'
-import { makeKnowledgeLookupTool } from '../src/agent.ts'
+import { makeKnowledgeLookupTool, makeKnowledgeManageTool } from '../src/agent.ts'
 import {
   KnowledgeChunker,
   chunkKnowledgeText,
@@ -28,10 +28,26 @@ import {
 import { KnowledgeSummarizer } from '../src/summarization.ts'
 import type { SearchIndexStoreApi } from '../src/store.ts'
 
+class TextKnowledgeSource extends Data.TaggedClass('Text')<{
+  readonly label?: string
+}> {}
+
+class KnowledgeScope extends Data.TaggedClass('KnowledgeScope')<{
+  readonly id: string
+}> {}
+
+class KnowledgeScopes extends Data.TaggedClass('KnowledgeScopes')<{
+  readonly ids: readonly [string, ...string[]]
+}> {}
+
+class EmptyKnowledgeScopes extends Data.TaggedClass('KnowledgeScopes')<{
+  readonly ids: ReadonlyArray<string>
+}> {}
+
 const document: IndexedKnowledgeDocument = {
   id: 'doc_1',
   scopeId: 'scope_1',
-  source: { _tag: 'Text', label: 'note' },
+  source: new TextKnowledgeSource({ label: 'note' }),
   status: 'ready'
 }
 
@@ -81,6 +97,7 @@ describe('knowledge searching', () => {
         createdAt: new Date(),
         updatedAt: new Date()
       }).pipe(Effect.result)
+
       const invalidChunk = yield* Schema.decodeUnknownEffect(KnowledgeChunkSchema)({
         id: 'chunk_1',
         scopeId: 'scope_1',
@@ -89,14 +106,14 @@ describe('knowledge searching', () => {
         position: -1,
         tokenCount: 0
       }).pipe(Effect.result)
-      const invalidScope = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)({
-        _tag: 'KnowledgeScope',
-        id: ' scope_1 '
-      }).pipe(Effect.result)
-      const emptyScopes = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)({
-        _tag: 'KnowledgeScopes',
-        ids: []
-      }).pipe(Effect.result)
+
+      const invalidScope = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)(
+        new KnowledgeScope({ id: ' scope_1 ' })
+      ).pipe(Effect.result)
+
+      const emptyScopes = yield* Schema.decodeUnknownEffect(KnowledgeSearchScopeSchema)(
+        new EmptyKnowledgeScopes({ ids: [] })
+      ).pipe(Effect.result)
 
       expect(invalidDocument._tag).toBe('Failure')
       expect(invalidChunk._tag).toBe('Failure')
@@ -183,7 +200,7 @@ describe('knowledge searching', () => {
       const indexed = yield* ingestKnowledgeDocument({
         scopeId: 'scope_1',
         documentId: 'doc_1',
-        source: { source: { _tag: 'Text', label: 'note' }, content: 'ignored' }
+        source: { source: new TextKnowledgeSource({ label: 'note' }), content: 'ignored' }
       })
 
       expect(indexed.status).toBe('ready')
@@ -237,6 +254,7 @@ describe('knowledge searching', () => {
           }
         ])
     } satisfies SearchIndexStoreApi
+
     const layer = Layer.mergeAll(
       Layer.succeed(SearchIndexStore, store),
       Layer.succeed(KnowledgeEmbedder, {
@@ -247,11 +265,12 @@ describe('knowledge searching', () => {
 
     return Effect.gen(function* () {
       const results = yield* searchKnowledge({
-        scope: { _tag: 'KnowledgeScope', id: 'scope_1' },
+        scope: new KnowledgeScope({ id: 'scope_1' }),
         query: 'alpha',
         mode: 'vector',
         contextChunks: 1
       })
+
       expect(packKnowledgeSearchContext('alpha', results).text).toBe('before\n\nmatch')
     }).pipe(Effect.provide(layer))
   })
@@ -269,6 +288,7 @@ describe('knowledge searching', () => {
         searchChunksByText: () => Effect.die(new Error('unused')),
         getContextChunks: () => Effect.die(new Error('unused'))
       } satisfies SearchIndexStoreApi
+
       const layer = Layer.mergeAll(
         Layer.succeed(SearchIndexStore, store),
         Layer.succeed(KnowledgeEmbedder, {
@@ -276,8 +296,9 @@ describe('knowledge searching', () => {
           embedQuery: () => Effect.die(new Error('unused'))
         })
       )
+
       const error = yield* searchKnowledge({
-        scope: { _tag: 'KnowledgeScope', id: 'scope_1' },
+        scope: new KnowledgeScope({ id: 'scope_1' }),
         query: '   '
       }).pipe(Effect.flip, Effect.provide(layer))
 
@@ -286,6 +307,45 @@ describe('knowledge searching', () => {
       expect(new SearchIndexStoreError({ message: 'store' })._tag).toBe('SearchIndexStoreError')
     })
   )
+
+  it.effect('rejects empty queries for one and many search scopes', () => {
+    const store = {
+      upsertDocument: () => Effect.die(new Error('unused')),
+      markDocumentProcessing: () => Effect.die(new Error('unused')),
+      replaceDocumentChunks: () => Effect.die(new Error('unused')),
+      markDocumentReady: () => Effect.die(new Error('unused')),
+      markDocumentError: () => Effect.die(new Error('unused')),
+      deleteDocument: () => Effect.die(new Error('unused')),
+      searchChunks: () => Effect.die(new Error('unused')),
+      searchChunksByText: () => Effect.die(new Error('unused')),
+      getContextChunks: () => Effect.die(new Error('unused'))
+    } satisfies SearchIndexStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(SearchIndexStore, store),
+      Layer.succeed(KnowledgeEmbedder, {
+        embedTexts: () => Effect.die(new Error('unused')),
+        embedQuery: () => Effect.die(new Error('unused'))
+      })
+    )
+
+    return Effect.gen(function* () {
+      const one = yield* searchKnowledge({
+        scope: new KnowledgeScope({ id: 'scope_1' }),
+        query: '   '
+      }).pipe(Effect.flip, Effect.provide(layer))
+
+      const many = yield* searchKnowledge({
+        scope: new KnowledgeScopes({ ids: ['scope_1', 'scope_2'] }),
+        query: '   '
+      }).pipe(Effect.flip, Effect.provide(layer))
+
+      expect(one).toBeInstanceOf(KnowledgeSearchError)
+      expect(one.message).toBe('Search query is empty')
+      expect(many).toBeInstanceOf(KnowledgeSearchError)
+      expect(many.message).toBe('Search query is empty')
+    })
+  })
 
   it.effect('adapts lookup as an agent tool', () => {
     const tool = makeKnowledgeLookupTool<{ readonly userId: string }>({
@@ -315,9 +375,11 @@ describe('knowledge searching', () => {
 
   it.effect('rejects invalid lookup count parameters before host handlers', () => {
     let searchCount = 0
+
     const tool = makeKnowledgeLookupTool<undefined>({
       search: () => {
         searchCount += 1
+
         return Effect.succeed([])
       },
       get: () =>
@@ -335,6 +397,7 @@ describe('knowledge searching', () => {
           params: { operation: 'search', query: 'docs', limit: 0 }
         })
       })
+
       const invalidContext = yield* tool.execute({
         context: undefined,
         call: ToolCall.make({
@@ -346,7 +409,89 @@ describe('knowledge searching', () => {
 
       expect(invalidLimit.isError).toBe(true)
       expect(invalidContext.isError).toBe(true)
+      expect(invalidLimit.content).toContain('Invalid knowledge lookup arguments:')
+      expect(invalidContext.content).toContain('Invalid knowledge lookup arguments:')
       expect(searchCount).toBe(0)
     })
+  })
+
+  it.effect('rejects invalid manage parameters before host handlers', () => {
+    let handlerCalls = 0
+
+    const unexpectedHandler = () => {
+      handlerCalls += 1
+
+      return Effect.die(new Error('Invalid parameters must not reach a host handler'))
+    }
+
+    const tool = makeKnowledgeManageTool<undefined>({
+      upsert: unexpectedHandler,
+      setAvailability: unexpectedHandler,
+      renameSlug: unexpectedHandler,
+      delete: unexpectedHandler
+    })
+
+    return Effect.gen(function* () {
+      const invalidTarget = yield* tool.execute({
+        context: undefined,
+        call: ToolCall.make({
+          id: 'call_manage',
+          name: 'knowledge_manage',
+          params: { operation: 'delete' }
+        })
+      })
+
+      expect(invalidTarget.isError).toBe(true)
+      expect(invalidTarget.content).toContain('Invalid knowledge manage arguments:')
+      expect(handlerCalls).toBe(0)
+    })
+  })
+
+  it.effect('searches vector matches across many scopes', () => {
+    const store = {
+      upsertDocument: (input: { readonly document: IndexedKnowledgeDocument }) =>
+        Effect.succeed(input.document),
+      markDocumentProcessing: () => Effect.succeed(document),
+      replaceDocumentChunks: () => Effect.void,
+      markDocumentReady: () => Effect.succeed(document),
+      markDocumentError: () => Effect.void,
+      deleteDocument: () => Effect.void,
+      searchChunks: () =>
+        Effect.succeed([
+          {
+            chunk: {
+              id: 'chunk_2',
+              scopeId: 'scope_1',
+              documentId: 'doc_1',
+              content: 'match',
+              position: 1,
+              tokenCount: 1
+            },
+            score: 0.9,
+            document
+          }
+        ]),
+      searchChunksByText: () => Effect.succeed([]),
+      getContextChunks: () => Effect.succeed([])
+    } satisfies SearchIndexStoreApi
+
+    const layer = Layer.mergeAll(
+      Layer.succeed(SearchIndexStore, store),
+      Layer.succeed(KnowledgeEmbedder, {
+        embedTexts: texts => Effect.succeed(texts.map(() => [1, 0])),
+        embedQuery: () => Effect.succeed([1, 0])
+      })
+    )
+
+    return Effect.gen(function* () {
+      const results = yield* searchKnowledge({
+        scope: new KnowledgeScopes({ ids: ['scope_1', 'scope_2'] }),
+        query: 'alpha',
+        mode: 'vector'
+      })
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.chunk.content).toBe('match')
+    }).pipe(Effect.provide(layer))
   })
 })

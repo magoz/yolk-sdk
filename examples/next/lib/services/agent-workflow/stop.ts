@@ -1,4 +1,4 @@
-import { Data, Effect } from 'effect'
+import { Data, Effect, Predicate } from 'effect'
 import { VercelWorkflows } from '@yolk-sdk/vercel-workflows/effect'
 import { AgentWorkflowStore } from './live-layer'
 
@@ -14,18 +14,21 @@ export const stopAgentWorkflow = (runId: string, userId: string) =>
     const workflows = yield* VercelWorkflows
     // Durable barrier first. Late reservations/admissions are now rejected, even if cancel fails.
     const registry = yield* store.change(runId, userId, { type: 'stop' })
+
     const runIds = [
       runId,
       ...registry.children.flatMap(child =>
         child.workflowRunId === null ? [] : [child.workflowRunId]
       )
     ]
+
     const outcomes = yield* Effect.forEach(
       runIds,
       id =>
         Effect.gen(function* () {
           const run = yield* workflows.getRun(id)
           const status = yield* run.status
+
           if (status !== 'completed' && status !== 'failed' && status !== 'cancelled')
             yield* run.cancel
         }).pipe(
@@ -34,9 +37,11 @@ export const stopAgentWorkflow = (runId: string, userId: string) =>
         ),
       { concurrency: 4 }
     )
+
     const failures = outcomes
-      .filter(outcome => outcome.result._tag === 'Failure')
+      .filter(outcome => Predicate.isTagged(outcome.result, 'Failure'))
       .map(outcome => outcome.id)
+
     if (failures.length > 0)
       return yield* Effect.fail(
         new WorkflowStopIncomplete({

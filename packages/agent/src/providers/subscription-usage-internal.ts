@@ -112,6 +112,7 @@ export const executeAndReadProviderSubscriptionUsageJson = (input: {
 }) =>
   Effect.gen(function* () {
     const response = yield* executeProviderSubscriptionUsageRequest(input)
+
     return yield* readProviderSubscriptionUsageJson(input.provider, response)
   }).pipe(
     Effect.timeoutOrElse({

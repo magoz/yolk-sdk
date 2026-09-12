@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option, Stream } from 'effect'
+import { Array as Arr, Effect, Option, Predicate, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   assistantContent,
@@ -42,17 +42,24 @@ export class AgentDocumentLimitError extends Schema.TaggedErrorClass<AgentDocume
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 const maxImageCount = 4
+
 const maxImageBase64Chars = 5 * 1024 * 1024
+
 const maxTotalImageBase64Chars = 12 * 1024 * 1024
+
 const maxDocumentCount = 4
+
 const maxDocumentBase64Chars = 14 * 1024 * 1024
+
 const maxTotalDocumentBase64Chars = 28 * 1024 * 1024
+
 const allowedImageMimeTypes: ReadonlyArray<string> = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif'
 ]
+
 const allowedDocumentMimeTypes: ReadonlyArray<string> = ['application/pdf']
 
 const isAllowedImageMimeType = (mimeType: string) =>
@@ -75,18 +82,17 @@ const messageContentParts = (message: AgentMessage): ReadonlyArray<ContentPart> 
 }
 
 const requestImageParts = (input: AgentRouteRequest) =>
-  Arr.filter(
-    Arr.flatMap(input.messages, messageContentParts),
-    (part): part is ImagePart => part._tag === 'Image'
+  Arr.filter(Arr.flatMap(input.messages, messageContentParts), (part): part is ImagePart =>
+    Predicate.isTagged(part, 'Image')
   )
 
 const requestDocumentParts = (input: AgentRouteRequest) =>
-  Arr.filter(
-    Arr.flatMap(input.messages, messageContentParts),
-    (part): part is DocumentPart => part._tag === 'Document'
+  Arr.filter(Arr.flatMap(input.messages, messageContentParts), (part): part is DocumentPart =>
+    Predicate.isTagged(part, 'Document')
   )
 
 const imageLimitError = (message: string) => new AgentImageLimitError({ message })
+
 const documentLimitError = (message: string) => new AgentDocumentLimitError({ message })
 
 const inlineData = (source: ImagePart['source'] | DocumentPart['source']) =>
@@ -139,6 +145,7 @@ const documentPartLimitError = (document: DocumentPart) => {
 export const validateAgentRouteImages = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const images = requestImageParts(input)
+
     const totalBase64Chars = Arr.reduce(
       images,
       0,
@@ -172,6 +179,7 @@ export const validateAgentRouteImages = (input: AgentRouteRequest) =>
 export const validateAgentRouteDocuments = (input: AgentRouteRequest) =>
   Effect.gen(function* () {
     const documents = requestDocumentParts(input)
+
     const totalBase64Chars = Arr.reduce(
       documents,
       0,

@@ -9,7 +9,7 @@
 
 const BANNED_METHODS = ['catchCause', 'catchAllCause']
 
-/** @type {import('eslint').Rule.RuleModule} */
+/** @type {import('@oxlint/plugins').Rule} */
 export const noCatchAllCause = {
   meta: {
     type: 'problem',

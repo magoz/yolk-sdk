@@ -3,12 +3,19 @@ import * as Schema from 'effect/Schema'
 import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk-sdk/agent/oauth'
 
 export const anthropicClaudeProviderId = 'anthropic-claude'
+
 export const anthropicClaudeClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+
 export const anthropicClaudeCodeVersion = '2.1.112'
+
 export const anthropicClaudeCodeEntrypoint = 'sdk-cli'
+
 export const anthropicClaudeAuthorizeUrl = 'https://claude.ai/oauth/authorize'
+
 export const anthropicClaudeTokenEndpoint = 'https://platform.claude.com/v1/oauth/token'
+
 export const anthropicClaudeRedirectUri = 'https://platform.claude.com/oauth/code/callback'
+
 export const anthropicClaudeScopes = [
   'org:create_api_key',
   'user:profile',
@@ -17,7 +24,9 @@ export const anthropicClaudeScopes = [
   'user:mcp_servers',
   'user:file_upload'
 ].join(' ')
+
 export const anthropicClaudeOAuthUserAgent = `claude-cli/${anthropicClaudeCodeVersion} (external, ${anthropicClaudeCodeEntrypoint})`
+
 export const anthropicClaudeRefreshBufferMs = 5 * 60 * 1000
 
 export class AnthropicClaudeOAuthToken extends Schema.Class<AnthropicClaudeOAuthToken>(

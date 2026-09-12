@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Stream } from 'effect'
+import { Effect, Layer, Option, Predicate, Stream } from 'effect'
 import {
   Headers,
   HttpClient,
@@ -158,12 +158,14 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('maps a text request to OpenAI Codex responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
       )
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -198,6 +200,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('maps OpenAI Codex function calls to tool call events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -216,6 +219,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
@@ -250,12 +254,14 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('maps image user content to OpenAI Codex responses input', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
       )
 
       yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [
@@ -290,6 +296,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('parses streamed OpenAI Codex function calls before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -306,6 +313,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'what is magoz.com about?' })],
@@ -330,6 +338,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('ends streamed OpenAI Codex function calls as tool use without completion event', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -343,6 +352,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'what is magoz.com about?' })],
@@ -364,12 +374,14 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('passes custom reasoning effort to OpenAI Codex', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ output_text: 'ok', output: [] }, requests)
       )
 
       yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -390,12 +402,14 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('rejects empty OpenAI Codex responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ output_text: '', output: [] }, requests)
       )
 
       const result = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -420,6 +434,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('parses OpenAI Codex SSE even when content type is not event-stream', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -439,6 +454,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -451,17 +467,16 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual(['TextDelta', 'TextDelta', 'Done'])
-      expect(events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))).toEqual([
-        'oauth ',
-        'smoke ok',
-        'Done'
-      ])
+      expect(
+        events.map(event => (Predicate.isTagged(event, 'TextDelta') ? event.text : event._tag))
+      ).toEqual(['oauth ', 'smoke ok', 'Done'])
     })
   )
 
   it.effect('parses OpenAI Codex reasoning summary deltas', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -481,6 +496,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -494,7 +510,7 @@ describe('OpenAiCodexProviderLayer', () => {
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'TextDelta', 'Done'])
       expect(
-        events.map(event => (event._tag === 'ReasoningDelta' ? event.text : event._tag))
+        events.map(event => (Predicate.isTagged(event, 'ReasoningDelta') ? event.text : event._tag))
       ).toEqual(['think', 'TextDelta', 'Done'])
     })
   )
@@ -502,6 +518,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('parses OpenAI Codex message output items before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -521,6 +538,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -533,17 +551,16 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const events = Array.from(eventsChunk)
       expect(events.map(event => event._tag)).toEqual(['ReasoningDelta', 'TextDelta', 'Done'])
-      expect(events.map(event => (event._tag === 'TextDelta' ? event.text : event._tag))).toEqual([
-        'ReasoningDelta',
-        'ok',
-        'Done'
-      ])
+      expect(
+        events.map(event => (Predicate.isTagged(event, 'TextDelta') ? event.text : event._tag))
+      ).toEqual(['ReasoningDelta', 'ok', 'Done'])
     })
   )
 
   it.effect('rejects malformed OpenAI Codex SSE JSON events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           [
@@ -557,6 +574,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -579,6 +597,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('rejects OpenAI Codex tool calls with invalid JSON arguments', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -597,6 +616,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
@@ -619,6 +639,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('maps OpenAI Codex SSE overload errors to retryable provider errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeRawHttpClientLayer(
           ['event: error', 'data: {"type":"error","message":"backend overloaded"}', ''].join('\n'),
@@ -628,6 +649,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -651,6 +673,7 @@ describe('OpenAiCodexProviderLayer', () => {
   it.effect('emits OpenAI Codex SSE deltas before completion', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeOpenSseHttpClientLayer(
           [
@@ -665,6 +688,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsOption = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -689,6 +713,7 @@ describe('OpenAiCodexProviderLayer', () => {
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       let cancelled = false
+
       const layer = makeProviderLayer(
         makeCancelableOpenSseHttpClientLayer({
           responseChunk: [
@@ -706,6 +731,7 @@ describe('OpenAiCodexProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],

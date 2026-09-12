@@ -15,6 +15,7 @@ describe('skill manager tool', () => {
   it.effect('treats nullable optional fields as omitted', () =>
     Effect.gen(function* () {
       let handled: SkillManagerAction | undefined
+
       const toolSet = yield* resolveTools(
         [
           makeSkillManagerToolModule(action => {
@@ -25,6 +26,7 @@ describe('skill manager tool', () => {
         ],
         context
       )
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',
@@ -61,6 +63,7 @@ describe('skill manager tool', () => {
         [makeSkillManagerToolModule(() => Effect.succeed({ message: 'unused', data: {} }))],
         context
       )
+
       const result = yield* toolSet.execute(
         ToolCall.make({
           id: 'call_1',

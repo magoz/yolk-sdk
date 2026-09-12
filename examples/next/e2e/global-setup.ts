@@ -37,6 +37,7 @@ const globalSetup = async () => {
     const effectDb = yield* Db
 
     yield* Effect.log('Creating test user')
+
     const [user] = yield* effectDb
       .insert(schema.user)
       .values({
@@ -55,6 +56,7 @@ const globalSetup = async () => {
     const { token } = yield* createTestAuthSession(user.id)
 
     yield* Effect.log(`Setup complete — user: ${user.email}`)
+
     return token
   }).pipe(Effect.provide(TestDbLayer), Effect.scoped, Effect.runPromise)
 

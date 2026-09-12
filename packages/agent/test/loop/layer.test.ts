@@ -45,6 +45,7 @@ describe('makeAgentLoopLayer', () => {
       const config = yield* LoopConfig
       const executor = yield* ToolExecutor
       const transformed = yield* transformer.transform([UserMessage.make({ content: 'hello' })])
+
       const result = yield* executor
         .execute(ToolCall.make({ id: 'call_1', name: 'weather', params: {} }))
         .pipe(Effect.result)
@@ -77,6 +78,7 @@ describe('decorateLLMProvider', () => {
   it.effect('wraps the provider stream', () =>
     Effect.gen(function* () {
       let streams = 0
+
       const eventsChunk = yield* runModelTurn({
         messages: [UserMessage.make({ content: 'hello' })],
         systemPrompt: 'Be brief.',
@@ -91,6 +93,7 @@ describe('decorateLLMProvider', () => {
               LLMProvider.of({
                 stream: request => {
                   streams += 1
+
                   return provider.stream(request)
                 }
               })
@@ -114,6 +117,7 @@ describe('decorateLLMProvider', () => {
 
   it.effect('accepts an Effect-returning decorator', () => {
     let streams = 0
+
     return Effect.gen(function* () {
       const provider = yield* LLMProvider
       yield* provider
@@ -133,6 +137,7 @@ describe('decorateLLMProvider', () => {
             LLMProvider.of({
               stream: request => {
                 streams += 1
+
                 return provider.stream(request)
               }
             })

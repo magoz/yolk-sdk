@@ -73,6 +73,7 @@ export const makeFakeWorld = (): FakeWorld => {
     getUserMediaError: undefined,
     remoteDescriptions: []
   }
+
   const peerListeners: FakeListeners = new Map()
   const channelListeners: FakeListeners = new Map()
   let connectionState = 'new'

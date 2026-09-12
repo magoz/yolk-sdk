@@ -89,6 +89,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const tool = toolSet.tools[0]
 
       expect(tool?.description).toContain('fast-model: Fast model for focused exploration.')
@@ -120,6 +121,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const parameters = toolSet.tools[0]?.parameters
 
       expect(parameters).not.toMatchObject({
@@ -139,10 +141,12 @@ describe('subagent tool', () => {
     Effect.gen(function* () {
       const execute = ({ call }: { readonly call: { readonly id: string } }) =>
         Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'unused' }))
+
       const modelOnly = yield* resolveTools(
         [makeSubagentToolModule<TestContext>({ subagents, models, execute })],
         { sessionId: 'session_1' }
       )
+
       const reasoningOnly = yield* resolveTools(
         [makeSubagentToolModule<TestContext>({ subagents, reasoningEfforts, execute })],
         { sessionId: 'session_1' }
@@ -193,6 +197,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -214,6 +219,7 @@ describe('subagent tool', () => {
   it.effect('preserves configured model IDs as opaque values', () =>
     Effect.gen(function* () {
       const opaqueModelId = '  host/model id  '
+
       const toolSet = yield* resolveTools(
         [
           makeSubagentToolModule<TestContext>({
@@ -227,6 +233,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -256,6 +263,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -290,6 +298,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -329,6 +338,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -355,6 +365,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -385,6 +396,7 @@ describe('subagent tool', () => {
         ],
         { sessionId: 'session_1' }
       )
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: subagentToolName,
@@ -432,9 +444,11 @@ describe('subagent tool', () => {
       const disabledTopLevelTools = yield* resolveTools([subagentModule], {
         sessionId: 'disabled_session'
       })
+
       const enabledTopLevelTools = yield* resolveTools([subagentModule], {
         sessionId: 'enabled_session'
       })
+
       const enabledSubagentTools = yield* resolveTools([subagentModule], {
         sessionId: 'enabled_session',
         subagent: true
@@ -585,6 +599,7 @@ describe('subagent tool', () => {
       kind: 'context_overflow',
       providerCode: 'context_window_exceeded'
     })
+
     const summary = subagentResultFromEvents([
       TurnStart.make({ turn: 1 }),
       UsageUpdate.make({
@@ -601,6 +616,7 @@ describe('subagent tool', () => {
         provider
       })
     ])
+
     const result = makeSubagentToolResult({
       callId: 'call_2',
       output: summary.text,

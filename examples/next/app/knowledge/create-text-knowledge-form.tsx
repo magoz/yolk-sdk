@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { createTextKnowledgeDocumentAction } from '@/lib/core/knowledge/create-text-knowledge-document-action'
+import { Predicate } from 'effect'
 
 export function CreateTextKnowledgeForm() {
   const [title, setTitle] = useState('')
@@ -21,7 +22,8 @@ export function CreateTextKnowledgeForm() {
         event.preventDefault()
         startTransition(async () => {
           const result = await createTextKnowledgeDocumentAction({ title, content, pinned })
-          if (result._tag === 'Success') {
+
+          if (Predicate.isTagged(result, 'Success')) {
             setTitle('')
             setContent('')
             setMessage('Saved knowledge')

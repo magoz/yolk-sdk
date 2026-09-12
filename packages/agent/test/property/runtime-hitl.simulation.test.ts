@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   HitlResponseSource,
@@ -307,6 +307,7 @@ const commandResponse = (input: typeof approvalCommand.Type) => {
     input.kind === 'stale' || input.kind === 'mismatchedRequestId'
       ? 'approval:stale'
       : 'approval:call_1'
+
   const toolCallId =
     input.kind === 'stale' || input.kind === 'mismatchedToolCallId' ? 'stale' : 'call_1'
 
@@ -339,6 +340,7 @@ const questionCommandResponse = (input: typeof questionCommand.Type) => {
     input.kind === 'stale' || input.kind === 'mismatchedRequestId'
       ? 'question:stale'
       : 'question:call_question'
+
   const toolCallId =
     input.kind === 'stale' || input.kind === 'mismatchedToolCallId' ? 'stale' : 'call_question'
 
@@ -375,6 +377,7 @@ const secondMixedResponse = (input: typeof mixedFirstResponse.Type) =>
 const latestPendingRequests = (log: RuntimeSessionEventLog) => {
   for (const stored of [...log.events].reverse()) {
     const event = stored.event
+
     switch (event._tag) {
       case 'RunAwaitingInput':
         return event.requests
@@ -397,20 +400,20 @@ const requestMatchesResponseKind = (
   kind: 'validApproval' | 'validQuestion'
 ) =>
   kind === 'validApproval'
-    ? request._tag === 'ToolApprovalRequest'
-    : request._tag === 'QuestionRequest'
+    ? Predicate.isTagged(request, 'ToolApprovalRequest')
+    : Predicate.isTagged(request, 'QuestionRequest')
 
 const responseMatchesPendingRequest = (response: HitlResponse, request: HitlRequest) => {
   switch (response._tag) {
     case 'ToolApprovalResponse':
       return (
-        request._tag === 'ToolApprovalRequest' &&
+        Predicate.isTagged(request, 'ToolApprovalRequest') &&
         response.requestId === request.requestId &&
         response.toolCallId === request.toolCallId
       )
     case 'QuestionResponse':
       return (
-        request._tag === 'QuestionRequest' &&
+        Predicate.isTagged(request, 'QuestionRequest') &&
         response.requestId === request.requestId &&
         response.toolCallId === request.toolCallId
       )
@@ -476,12 +479,16 @@ const stateMachineResponse = (input: {
   switch (input.command.kind) {
     case 'validApproval': {
       const request = input.pending.find(item => requestMatchesResponseKind(item, 'validApproval'))
+
       return request === undefined ? undefined : responseForPendingRequest(request, input.command)
     }
+
     case 'validQuestion': {
       const request = input.pending.find(item => requestMatchesResponseKind(item, 'validQuestion'))
+
       return request === undefined ? undefined : responseForPendingRequest(request, input.command)
     }
+
     case 'staleApproval':
     case 'staleQuestion':
       return staleStateMachineResponse(input.command)
@@ -536,6 +543,7 @@ describe('runtime HITL property tests', () => {
 
         const store = yield* SessionEventStore
         const before = yield* store.load('session_1')
+
         const result = yield* runRuntime(
           {
             _tag: 'AppendHitlResponse',
@@ -546,6 +554,7 @@ describe('runtime HITL property tests', () => {
           },
           questionRuntimeConfig
         ).pipe(Stream.runCollect, Effect.result)
+
         const after = yield* store.load('session_1')
 
         expectConflictNoMutation({ result, before, after })
@@ -580,6 +589,7 @@ describe('runtime HITL property tests', () => {
         ).pipe(Stream.runCollect)
 
         const completed = yield* store.load('session_1')
+
         const result = yield* runRuntime(
           {
             _tag: 'AppendHitlResponse',
@@ -590,6 +600,7 @@ describe('runtime HITL property tests', () => {
           },
           runtimeConfig
         ).pipe(Stream.runCollect, Effect.result)
+
         const afterDuplicate = yield* store.load('session_1')
 
         expectConflictNoMutation({ result, before: completed, after: afterDuplicate })
@@ -623,6 +634,7 @@ describe('runtime HITL property tests', () => {
         ).pipe(Stream.runCollect)
 
         const completed = yield* store.load('session_1')
+
         const result = yield* runRuntime(
           {
             _tag: 'AppendHitlResponse',
@@ -633,6 +645,7 @@ describe('runtime HITL property tests', () => {
           },
           questionRuntimeConfig
         ).pipe(Stream.runCollect, Effect.result)
+
         const afterDuplicate = yield* store.load('session_1')
 
         expectConflictNoMutation({ result, before: completed, after: afterDuplicate })
@@ -656,6 +669,7 @@ describe('runtime HITL property tests', () => {
 
         for (const command of commands) {
           const before = yield* store.load('session_1')
+
           const result = yield* runRuntime(
             {
               _tag: 'AppendHitlResponse',
@@ -666,11 +680,12 @@ describe('runtime HITL property tests', () => {
             },
             runtimeConfig
           ).pipe(Stream.runCollect, Effect.result)
+
           const after = yield* store.load('session_1')
           const shouldAccept = pending && command.kind === 'valid'
 
           if (shouldAccept) {
-            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(result._tag).toBe('Success')
             expect(after.revision).toBeGreaterThan(before.revision)
             expect(after.events.map(event => event.event._tag)).toContain('RunCompleted')
             pending = false
@@ -700,6 +715,7 @@ describe('runtime HITL property tests', () => {
 
         for (const command of commands) {
           const before = yield* store.load('session_1')
+
           const result = yield* runRuntime(
             {
               _tag: 'AppendHitlResponse',
@@ -710,11 +726,12 @@ describe('runtime HITL property tests', () => {
             },
             questionRuntimeConfig
           ).pipe(Stream.runCollect, Effect.result)
+
           const after = yield* store.load('session_1')
           const shouldAccept = pending && command.kind === 'valid'
 
           if (shouldAccept) {
-            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(result._tag).toBe('Success')
             expect(after.revision).toBeGreaterThan(before.revision)
             expect(after.events.map(event => event.event._tag)).toContain('RunCompleted')
             pending = false
@@ -741,9 +758,11 @@ describe('runtime HITL property tests', () => {
         const store = yield* SessionEventStore
         const initial = yield* store.load('session_1')
         const initialLast = initial.events.at(-1)?.event
+
         if (initialLast?._tag !== 'RunAwaitingInput') {
           throw new Error('Expected mixed run to await input')
         }
+
         expect(initialLast.requests).toHaveLength(2)
 
         yield* runRuntime(
@@ -759,9 +778,11 @@ describe('runtime HITL property tests', () => {
 
         const afterFirst = yield* store.load('session_1')
         const afterFirstLast = afterFirst.events.at(-1)?.event
+
         if (afterFirstLast?._tag !== 'RunAwaitingInput') {
           throw new Error('Expected sibling request to remain pending')
         }
+
         expect(afterFirstLast.requests).toHaveLength(1)
 
         const duplicateResult = yield* runRuntime(
@@ -774,6 +795,7 @@ describe('runtime HITL property tests', () => {
           },
           mixedRuntimeConfig
         ).pipe(Stream.runCollect, Effect.result)
+
         const afterDuplicate = yield* store.load('session_1')
         expectConflictNoMutation({
           result: duplicateResult,
@@ -833,17 +855,20 @@ describe('runtime HITL property tests', () => {
               },
               mixedRuntimeConfig
             ).pipe(Stream.runCollect, Effect.result)
+
             const after = yield* store.load('session_1')
 
-            expect(result).toMatchObject({ _tag: 'Success' })
+            expect(result._tag).toBe('Success')
             expect(after.revision).toBeGreaterThan(before.revision)
             expect(after.revision).toBe(after.events.length)
             runIndex += 1
           } else {
             const pending = latestPendingRequests(before)
+
             const response =
               stateMachineResponse({ command, pending, lastAccepted }) ??
               staleStateMachineResponse(command)
+
             const shouldAccept = pending.some(request =>
               responseMatchesPendingRequest(response, request)
             )
@@ -858,12 +883,13 @@ describe('runtime HITL property tests', () => {
               },
               mixedRuntimeConfig
             ).pipe(Stream.runCollect, Effect.result)
+
             const after = yield* store
               .load('session_1')
               .pipe(Effect.catchTag('SessionNotFoundError', () => Effect.succeed(before)))
 
             if (shouldAccept) {
-              expect(result).toMatchObject({ _tag: 'Success' })
+              expect(result._tag).toBe('Success')
               expect(after.revision).toBeGreaterThan(before.revision)
               expect(after.revision).toBe(after.events.length)
               lastAccepted = response

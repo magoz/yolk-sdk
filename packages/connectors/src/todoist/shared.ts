@@ -2,8 +2,11 @@ import { Effect } from 'effect'
 import { CredentialSlot, resolveCredential } from '../credential.ts'
 import { ConnectorError } from '../error.ts'
 import type { ConnectorIntegration } from '../integration.ts'
+
 export const todoistConnectorId = 'todoist'
+
 export const todoistApiTokenSlotId = 'todoist.api_token'
+
 export const todoistApiBaseUrl = 'https://api.todoist.com/api/v1'
 
 export const TodoistApiTokenSlot = CredentialSlot.make({

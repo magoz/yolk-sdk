@@ -1,4 +1,15 @@
-import { Cause, Deferred, Effect, Fiber, Option, Queue, Ref, Stream, type Scope } from 'effect'
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Fiber,
+  Option,
+  Predicate,
+  Queue,
+  Ref,
+  Stream,
+  type Scope
+} from 'effect'
 import * as Schema from 'effect/Schema'
 import type {
   HitlResponse,
@@ -190,7 +201,7 @@ export const makeVoiceController = (
       emit(VoiceToolCallExecuting.make({ callId: call.callId })).pipe(
         Effect.andThen(options.executeToolCall(call)),
         Effect.flatMap(outcome => {
-          if (outcome._tag !== 'ApprovalRequired') {
+          if (!Predicate.isTagged(outcome, 'ApprovalRequired')) {
             return settleOutcome(call, outcome)
           }
 
@@ -221,7 +232,7 @@ export const makeVoiceController = (
       }).pipe(Effect.catch(error => Queue.failCause(out, Cause.fail(error)).pipe(Effect.asVoid)))
 
     const dispatch = (event: VoiceEvent): Effect.Effect<void, never, Scope.Scope> => {
-      if (event._tag !== 'ToolCallsRequested') {
+      if (!Predicate.isTagged(event, 'ToolCallsRequested')) {
         return emit(event)
       }
 
@@ -239,6 +250,7 @@ export const makeVoiceController = (
 
         if (Option.isSome(failure)) {
           yield* Queue.failCause(out, failure.value)
+
           return
         }
 
@@ -260,7 +272,7 @@ export const makeVoiceController = (
       )
 
     const submitHitlResponse = (response: HitlResponse): Effect.Effect<void> => {
-      if (response._tag !== 'ToolApprovalResponse') {
+      if (!Predicate.isTagged(response, 'ToolApprovalResponse')) {
         return Effect.void
       }
 

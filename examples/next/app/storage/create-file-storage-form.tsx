@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { completeFileStorageUploadAction } from '@/lib/core/storage/complete-file-storage-upload-action'
 import { createFileStorageUploadUrlAction } from '@/lib/core/storage/create-file-storage-upload-url-action'
+import { Predicate } from 'effect'
 
 const acceptedFileTypes =
   '.txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,.pptx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
@@ -31,16 +32,18 @@ const uploadFile = async (file: File) => {
     byteSize: file.size
   })
 
-  if (signed._tag === 'Error') {
+  if (Predicate.isTagged(signed, 'Error')) {
     return signed
   }
 
   const headers = new Headers()
+
   if (file.type.length > 0) {
     headers.set('content-type', file.type)
   }
 
   const uploaded = await fetch(signed.upload.uploadUrl, { method: 'PUT', headers, body: file })
+
   if (!uploaded.ok) {
     return { _tag: 'Error' as const, message: 'Could not upload file' }
   }
@@ -64,6 +67,7 @@ export function CreateFileStorageForm() {
     const incoming = Array.from(files)
     setSelectedFiles(current => {
       const existing = new Set(current.map(fileKey))
+
       return [...current, ...incoming.filter(file => !existing.has(fileKey(file)))]
     })
   }
@@ -74,19 +78,23 @@ export function CreateFileStorageForm() {
         className="space-y-4 rounded-xl border bg-card p-5 text-card-foreground shadow-xs"
         action={() => {
           const files = selectedFiles
+
           if (files.length === 0) {
             setFileMessage('Choose files')
+
             return
           }
 
           startFileTransition(() => {
             void Promise.all(files.map(uploadFile)).then(results => {
-              const failures = results.filter(result => result._tag === 'Error')
+              const failures = results.filter(result => Predicate.isTagged(result, 'Error'))
+
               if (failures.length === 0) {
                 setSelectedFiles([])
                 setFileMessage(
                   files.length === 1 ? 'Indexed file' : `Indexed ${files.length} files`
                 )
+
                 if (inputRef.current !== null) {
                   inputRef.current.value = ''
                 }

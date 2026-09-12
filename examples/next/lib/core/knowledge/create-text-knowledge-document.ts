@@ -30,6 +30,7 @@ export const createTextKnowledgeDocument = (input: {
 
     const db = yield* Db
     const documentId = createId()
+
     const [document] = yield* db
       .insert(schema.userKnowledgeDocument)
       .values({

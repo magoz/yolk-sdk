@@ -16,6 +16,7 @@ const AuthDbLive = Layer.effect(
   AuthDb,
   Effect.gen(function* () {
     const url = yield* Config.string('DATABASE_URL')
+
     return drizzle({ connection: url, relations: schema.relations })
   })
 )

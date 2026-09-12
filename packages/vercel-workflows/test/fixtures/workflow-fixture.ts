@@ -203,6 +203,7 @@ async function packageWriteStreamStep(chunk: string) {
   'use step'
 
   const writer = getWritable<string>().getWriter()
+
   try {
     await writer.write(chunk)
   } finally {

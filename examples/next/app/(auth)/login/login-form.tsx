@@ -29,6 +29,7 @@ export const LoginForm = () => {
       if (error) {
         console.error('Error sending email', error)
         toast.error(`Login error: ${error.statusText}`)
+
         return setErrorMessage(error.statusText ?? 'Something went wrong. Try again later.')
       }
 

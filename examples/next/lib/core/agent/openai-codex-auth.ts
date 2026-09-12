@@ -27,6 +27,7 @@ const accountIdForToken = (token: OpenAiCodexOAuthToken) =>
 const selectOpenAiCodexAccount = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [account] = yield* db
       .select({
         id: schema.account.id,
@@ -84,6 +85,7 @@ const tokenFromAccount = (account: OpenAiCodexAccount) =>
 export const hasOpenAiCodexAuth = (userId: string) =>
   Effect.gen(function* () {
     const account = yield* selectOpenAiCodexAccount(userId)
+
     return account !== undefined
   }).pipe(Effect.withSpan('agent.openaiCodexAuth.has'))
 
@@ -107,6 +109,7 @@ export const saveOpenAiCodexToken = (input: {
         refreshToken: input.token.refresh,
         accessTokenExpiresAt: expiresAt
       })
+
       return
     }
 

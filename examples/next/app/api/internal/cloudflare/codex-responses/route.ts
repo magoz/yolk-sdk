@@ -26,12 +26,14 @@ const handler = Effect.gen(function* () {
 
   const client = yield* HttpClient.HttpClient
   const body = yield* request.text
+
   const response = yield* client.execute(
     HttpClientRequest.post(openAiCodexResponsesUrl).pipe(
       HttpClientRequest.setHeaders(forwardedHeaders(request.headers)),
       HttpClientRequest.bodyText(body, request.headers['content-type'] ?? 'application/json')
     )
   )
+
   const responseBody = yield* response.stream.pipe(Stream.toReadableStreamEffect())
 
   return HttpServerResponse.raw(responseBody, {

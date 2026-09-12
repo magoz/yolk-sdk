@@ -7,13 +7,17 @@ import { toOpenAiCodexRequestBody } from '../../../src/providers/openai/codex-pr
 import { toOpenAiRequestBody } from '../../../src/providers/openai/provider.ts'
 
 const defaultPropertyRuns = 50
+
 const propertyRunsEnv = process.env.PROPERTY_RUNS
+
 const parsedPropertyRuns =
   propertyRunsEnv === undefined ? defaultPropertyRuns : Number(propertyRunsEnv)
+
 const propertyRuns =
   Number.isInteger(parsedPropertyRuns) && parsedPropertyRuns > 0
     ? parsedPropertyRuns
     : defaultPropertyRuns
+
 const propertyOptions = { fastCheck: { numRuns: propertyRuns } }
 
 const schemaVariant = Schema.Literals([
@@ -132,6 +136,7 @@ const assertProviderSafeParameters = (parameters: unknown) => {
   expect(Array.isArray(anyOf) && anyOf.some(item => field(item, 'type') === 'array')).toBe(false)
 
   const definitions = field(parameters, '$defs')
+
   for (const ref of collectLocalRefs(parameters)) {
     expect(field(definitions, ref)).toBeDefined()
   }
@@ -153,6 +158,7 @@ describe('OpenAI provider schema properties', () => {
         const body = yield* toOpenAiRequestBody(requestForTool(variant), {
           maxCompletionTokens: 123
         })
+
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
         const functionSchema = field(tool, 'function')
 
@@ -169,6 +175,7 @@ describe('OpenAI provider schema properties', () => {
         const body = yield* toOpenAiCodexRequestBody(requestForTool(variant), {
           maxOutputTokens: 123
         })
+
         const tool = Array.isArray(body.tools) ? body.tools[0] : undefined
 
         assertProviderSafeParameters(field(tool, 'parameters'))

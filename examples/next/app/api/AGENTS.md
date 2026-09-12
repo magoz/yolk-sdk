@@ -9,7 +9,7 @@ See `examples/next/patterns/EFFECT_API_ROUTES.md` for the canonical route patter
 | Route                                          | Role                                   |
 | ---------------------------------------------- | -------------------------------------- |
 | `auth/[...all]/route.ts`                       | better-auth Next handler               |
-| `agent/*`                                      | See `agent/AGENTS.md`                   |
+| `agent/*`                                      | See `agent/AGENTS.md`                  |
 | `knowledge/files/route.ts`                     | Authenticated knowledge file download  |
 | `internal/cloudflare/codex-token/route.ts`     | Internal DO token bridge               |
 | `internal/cloudflare/codex-responses/route.ts` | Internal DO Codex streaming HTTP proxy |

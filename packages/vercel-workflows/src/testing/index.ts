@@ -153,6 +153,7 @@ export class TestWorkflowWorld {
   ): { readonly runId: string } {
     this.runSequence += 1
     const runId = `twr_${this.runSequence}`
+
     const run: TestWorkflowRunRecord = {
       runId,
       status: 'pending',
@@ -169,6 +170,7 @@ export class TestWorkflowWorld {
       stepSequence: 0,
       stepAttempts: new Map()
     }
+
     this.runs.set(runId, run)
 
     run.settled = ambientStorage.run(
@@ -177,14 +179,18 @@ export class TestWorkflowWorld {
         // Yield once so callers observe `pending` before execution begins,
         // mirroring the platform's enqueue-then-run lifecycle.
         await Promise.resolve()
+
         if (run.status === 'cancelled') return
 
         run.status = 'running'
+
         try {
           run.returnValue = await workflowFn(...args)
+
           if (run.status === 'running') run.status = 'completed'
         } catch (error) {
           run.runError = error
+
           if (run.status === 'running') run.status = 'failed'
         } finally {
           this.notifyChange(run)
@@ -228,20 +234,24 @@ export class TestWorkflowWorld {
     }
 
     run.status = 'cancelled'
+
     for (const [token, hook] of run.hooks) {
       run.hooks.delete(token)
       hook.reject(new TestWorkflowRunCancelledError(runId))
     }
+
     this.notifyChange(run)
   }
 
   async resumeHook(token: string, payload: unknown): Promise<void> {
     for (const run of this.runs.values()) {
       const hook = run.hooks.get(token)
+
       if (hook !== undefined) {
         run.hooks.delete(token)
         run.resumedHookTokens.add(token)
         hook.resolve(payload)
+
         return
       }
 
@@ -282,6 +292,7 @@ export class TestWorkflowWorld {
 
     for (;;) {
       run.stepAttempts.set(stepName, (run.stepAttempts.get(stepName) ?? 0) + 1)
+
       try {
         return await ambientStorage.run(
           { world: this, run, stepMetadata: { attempt, stepId, stepName } },
@@ -359,7 +370,9 @@ export class TestWorkflowWorld {
 
   private makeHook<T>(run: TestWorkflowRunRecord, token: string): TestWorkflowHook<T> {
     let resolveHook: (payload: unknown) => void = () => {}
+
     let rejectHook: (error: unknown) => void = () => {}
+
     const promise = new Promise<T>((resolve, reject) => {
       // Hook payloads are caller-typed on the platform (`createHook<T>`).
       // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
@@ -382,6 +395,7 @@ export class TestWorkflowWorld {
   ): VercelWorkflowReadableStream<T> {
     const run = this.requireRun(runId)
     const requestedStart = options?.startIndex ?? 0
+
     let index =
       requestedStart < 0 ? Math.max(0, run.chunks.length + requestedStart) : requestedStart
 
@@ -398,6 +412,7 @@ export class TestWorkflowWorld {
           // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
           controller.enqueue(run.chunks[index] as T)
           index += 1
+
           return
         }
 
@@ -417,6 +432,7 @@ export class TestWorkflowWorld {
   private notifyChange(run: TestWorkflowRunRecord): void {
     const listeners = [...run.changeListeners]
     run.changeListeners.clear()
+
     for (const listener of listeners) listener()
   }
 
@@ -439,6 +455,7 @@ export class TestWorkflowWorld {
   private sdkRun<TResult>(run: TestWorkflowRunRecord): VercelWorkflowsSdkRun<TResult> {
     const getReadable = <Chunk>(options?: VercelWorkflowReadableOptions) =>
       this.getReadable<Chunk>(run.runId, options)
+
     const cancel = () => this.cancel(run.runId)
 
     return {

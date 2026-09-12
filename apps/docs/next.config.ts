@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { createMDX } from 'fumadocs-mdx/next'
 
 const docsDir = dirname(fileURLToPath(import.meta.url))
+
 const workspaceRoot = join(docsDir, '../..')
+
 const withMDX = createMDX()
 
 const nextConfig: NextConfig = {

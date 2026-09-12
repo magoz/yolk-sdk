@@ -1,5 +1,7 @@
 import { fortnoxListSupplierInvoiceFilesAction } from './files.ts'
+
 export * from './files.ts'
+
 import { Chunk } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
@@ -41,21 +43,26 @@ import {
 } from './wire.ts'
 
 export * from './oauth.ts'
+
 export * from './schemas.ts'
+
 export { fortnoxApiBaseUrl } from './shared.ts'
 
 const CustomersResponse = Schema.Struct({
   Customers: Schema.Array(FortnoxCustomer),
   MetaInformation: FortnoxMetaInformation
 })
+
 const InvoicesResponse = Schema.Struct({
   Invoices: Schema.Array(FortnoxInvoiceApi),
   MetaInformation: FortnoxMetaInformation
 })
+
 const SuppliersResponse = Schema.Struct({
   Suppliers: Schema.Array(FortnoxSupplier),
   MetaInformation: FortnoxMetaInformation
 })
+
 const SupplierInvoicesResponse = Schema.Struct({
   SupplierInvoices: Schema.Array(FortnoxSupplierInvoiceApi),
   MetaInformation: FortnoxMetaInformation
@@ -98,6 +105,7 @@ export const fortnoxListCustomersAction = defineAction({
         })
     )
 })
+
 export const fortnoxGetCustomerAction = defineAction({
   id: 'fortnox.get_customer',
   description: 'Read a Fortnox customer by CustomerNumber.',
@@ -113,6 +121,7 @@ export const fortnoxGetCustomerAction = defineAction({
       value => value.Customer
     )
 })
+
 export const fortnoxListInvoicesAction = defineAction({
   id: 'fortnox.list_invoices',
   description:
@@ -133,6 +142,7 @@ export const fortnoxListInvoicesAction = defineAction({
         })
     )
 })
+
 export const fortnoxGetInvoiceAction = defineAction({
   id: 'fortnox.get_invoice',
   description:
@@ -149,6 +159,7 @@ export const fortnoxGetInvoiceAction = defineAction({
       value => invoiceFromApi(value.Invoice)
     )
 })
+
 export const fortnoxListSuppliersAction = defineAction({
   id: 'fortnox.list_suppliers',
   description:
@@ -169,6 +180,7 @@ export const fortnoxListSuppliersAction = defineAction({
         })
     )
 })
+
 export const fortnoxGetSupplierAction = defineAction({
   id: 'fortnox.get_supplier',
   description: 'Read a Fortnox supplier by SupplierNumber.',
@@ -184,6 +196,7 @@ export const fortnoxGetSupplierAction = defineAction({
       value => value.Supplier
     )
 })
+
 export const fortnoxListSupplierInvoicesAction = defineAction({
   id: 'fortnox.list_supplier_invoices',
   description:
@@ -204,6 +217,7 @@ export const fortnoxListSupplierInvoicesAction = defineAction({
         })
     )
 })
+
 export const fortnoxGetSupplierInvoiceAction = defineAction({
   id: 'fortnox.get_supplier_invoice',
   description:

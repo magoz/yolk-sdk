@@ -27,11 +27,17 @@ import {
 } from './schemas'
 
 export const OPENAI_CODEX_CLIENT_ID = openAiCodexClientId
+
 export const OPENAI_DEVICE_AUTH_USERCODE_URL = openAiCodexDeviceAuthUserCodeUrl
+
 export const OPENAI_DEVICE_AUTH_TOKEN_URL = openAiCodexDeviceAuthTokenUrl
+
 export const OPENAI_DEVICE_AUTH_CALLBACK_REDIRECT = openAiCodexDeviceAuthCallbackRedirect
+
 export const OPENAI_DEVICE_VERIFICATION_URL = openAiCodexDeviceVerificationUrl
+
 export const OPENAI_TOKEN_ENDPOINT = openAiCodexTokenEndpoint
+
 export const OPENAI_CODEX_REFRESH_BUFFER_MS = openAiCodexRefreshBufferMs
 
 const unknownToMessage = (error: unknown) =>
@@ -61,16 +67,19 @@ const accountIdFromPayload = (payload: unknown): string | undefined => {
   }
 
   const direct = payload.chatgpt_account_id
+
   if (typeof direct === 'string') {
     return direct
   }
 
   const auth = payload['https://api.openai.com/auth']
+
   if (isRecord(auth) && typeof auth.chatgpt_account_id === 'string') {
     return auth.chatgpt_account_id
   }
 
   const organizations = payload.organizations
+
   if (Array.isArray(organizations)) {
     for (const organization of organizations) {
       if (isRecord(organization) && typeof organization.id === 'string') {
@@ -97,6 +106,7 @@ const toOAuthToken = (
 ): OpenAiCodexOAuthToken => {
   const accountId = extractAccountIdFromTokens(tokens) ?? currentAccountId
   const expiresIn = tokens.expires_in ?? 3600
+
   const base: Omit<OpenAiCodexOAuthToken, 'accountId'> = {
     type: 'oauth',
     refresh: tokens.refresh_token ?? refreshToken,
@@ -133,6 +143,7 @@ const readErrorBody = (response: HttpClientResponse.HttpClientResponse, operatio
 const failOpenAiResponse = (response: HttpClientResponse.HttpClientResponse, operation: string) =>
   Effect.gen(function* () {
     const text = yield* readErrorBody(response, operation)
+
     return yield* Effect.fail(
       new OpenAiCodexOAuthError({
         message: `OpenAI Codex ${operation} failed: ${response.status} ${text}`,
@@ -199,6 +210,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           }),
           HttpClientRequest.bodyText(body.toString(), 'application/x-www-form-urlencoded')
         )
+
         const response = yield* execute(request, operation)
 
         if (!isOkStatus(response.status)) {
@@ -221,11 +233,13 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
         }
 
         const json = yield* parseResponseJson(response, 'device authorization')
+
         const deviceAuth = yield* decodeJson(
           OpenAiCodexDeviceAuthUserCodeResponseSchema,
           json,
           'device authorization'
         )
+
         const interval = Math.max(Number.parseInt(deviceAuth.interval, 10) || 5, 1)
 
         return {
@@ -253,6 +267,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
 
         if (!isOkStatus(response.status)) {
           const text = yield* readErrorBody(response, 'device token poll')
+
           return {
             _tag: 'Failed' as const,
             message: `Device authorization failed: ${response.status} ${text}`
@@ -260,6 +275,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
         }
 
         const json = yield* parseResponseJson(response, 'device token poll')
+
         const deviceToken = yield* decodeJson(
           OpenAiCodexDeviceAuthTokenResponseSchema,
           json,
@@ -282,12 +298,15 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           }),
           'token exchange'
         )
+
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token exchange')
+
         if (tokens.refresh_token === undefined) {
           return yield* new OpenAiCodexOAuthError({
             message: 'Invalid OpenAI Codex token exchange response: missing refresh_token'
           })
         }
+
         const nowMs = yield* Clock.currentTimeMillis
 
         return toOAuthToken(tokens, undefined, tokens.refresh_token, nowMs)
@@ -304,6 +323,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
           }),
           'token refresh'
         )
+
         const tokens = yield* decodeJson(OpenAiCodexTokenResponseSchema, json, 'token refresh')
         const nowMs = yield* Clock.currentTimeMillis
 
@@ -316,6 +336,7 @@ export class OpenAiCodexOAuth extends Context.Service<OpenAiCodexOAuth>()('@app/
     ) =>
       Effect.gen(function* () {
         const nowMs = yield* Clock.currentTimeMillis
+
         return !token.access || token.expires < nowMs + minTtlMs
       })
 

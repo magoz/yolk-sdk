@@ -6,7 +6,7 @@ Runtime-portable app tool modules consumed by Next, Workflow, voice, and Cloudfl
 
 | Tool/module                                                               | Text | Voice | Cloudflare                             | Notes                                                                          |
 | ------------------------------------------------------------------------- | ---- | ----- | -------------------------------------- | ------------------------------------------------------------------------------ |
-| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                    |
+| `question`                                                                | yes  | no    | yes                                    | top-level package HITL question tool; omitted from subagents                   |
 | `web_fetch`                                                               | yes  | yes   | yes                                    | public URL fetch only                                                          |
 | `web_search`                                                              | yes  | yes   | yes                                    | Exa/Parallel MCP endpoints                                                     |
 | `skill`                                                                   | yes  | no    | bootstrap-injected; generated fallback | project skill command/runtime tool                                             |

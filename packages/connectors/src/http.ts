@@ -3,6 +3,7 @@ import * as Schema from 'effect/Schema'
 import { ConnectorError } from './error.ts'
 
 export const HttpMethod = Schema.Literals(['GET', 'POST', 'PATCH', 'PUT', 'DELETE'])
+
 export type HttpMethod = typeof HttpMethod.Type
 
 export class ConnectorHttpRequest extends Schema.Class<ConnectorHttpRequest>(

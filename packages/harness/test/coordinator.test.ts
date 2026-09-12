@@ -7,6 +7,7 @@ describe('makeCoordinator', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const drains = yield* Ref.make(0)
+
         const coordinator = yield* makeCoordinator<string, never>({
           drain: () => Ref.update(drains, count => count + 1)
         })
@@ -27,6 +28,7 @@ describe('makeCoordinator', () => {
         const drains = yield* Ref.make(0)
         const started = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
+
         const coordinator = yield* makeCoordinator<string, never>({
           started: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
           drain: () =>
@@ -56,6 +58,7 @@ describe('makeCoordinator', () => {
         const scopes = yield* Ref.make<ReadonlyArray<string>>([])
         const started = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
+
         const coordinator = yield* makeCoordinator<string, never>({
           started: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
           drain: (_key, _force, scope) =>
@@ -88,6 +91,7 @@ describe('makeCoordinator', () => {
         const drains = yield* Ref.make(0)
         const started = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
+
         const coordinator = yield* makeCoordinator<string, never>({
           drain: () =>
             Ref.update(drains, count => count + 1).pipe(
@@ -117,6 +121,7 @@ describe('makeCoordinator', () => {
         const firstRelease = yield* Deferred.make<void>()
         const secondStarted = yield* Deferred.make<void>()
         const secondRelease = yield* Deferred.make<void>()
+
         const coordinator = yield* makeCoordinator<string, never>({
           started: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
           drain: () =>
@@ -154,6 +159,7 @@ describe('makeCoordinator', () => {
         const startedA = yield* Deferred.make<void>()
         const startedB = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
+
         const coordinator = yield* makeCoordinator<string, never>({
           drain: key =>
             (key === 'a'

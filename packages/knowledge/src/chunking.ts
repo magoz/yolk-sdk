@@ -4,7 +4,9 @@ import type { KnowledgeChunk, KnowledgeMetadata } from './documents.ts'
 import { KnowledgeChunkingError } from './errors.ts'
 
 const SENTENCE_PATTERN = /[^.!?]+[.!?]+(?:["')\]]+)?\s*|[^.!?]+$/g
+
 const PARAGRAPH_BREAK_PATTERN = /(\n{2,})/
+
 const WORD_PATTERN = /\S+\s*/g
 
 export type ChunkKnowledgeDocumentInput = {
@@ -52,6 +54,7 @@ const splitSentences = (text: string) =>
 
 const splitEncodedTokens = (text: string, maxTokens: number) => {
   const tokens = encode(text)
+
   return Array.from({ length: Math.ceil(tokens.length / maxTokens) }, (_, index) =>
     decode(tokens.slice(index * maxTokens, index * maxTokens + maxTokens)).trim()
   ).filter(chunk => chunk.length > 0)
@@ -68,6 +71,7 @@ const splitOversizedUnit = (text: string, maxTokens: number) => {
 
     if (wordTokenCount > maxTokens) {
       const currentChunk = current.trim()
+
       if (currentChunk.length > 0) {
         chunks.push(currentChunk)
       }
@@ -80,6 +84,7 @@ const splitOversizedUnit = (text: string, maxTokens: number) => {
 
     if (currentTokenCount > 0 && currentTokenCount + wordTokenCount > maxTokens) {
       const currentChunk = current.trim()
+
       if (currentChunk.length > 0) {
         chunks.push(currentChunk)
       }
@@ -94,6 +99,7 @@ const splitOversizedUnit = (text: string, maxTokens: number) => {
   }
 
   const finalChunk = current.trim()
+
   if (finalChunk.length > 0) {
     chunks.push(finalChunk)
   }
@@ -113,6 +119,7 @@ const buildChunkContents = (units: ReadonlyArray<string>, maxTokens: number) => 
 
   const pushCurrent = () => {
     const content = current.trim()
+
     if (content.length > 0) {
       chunks.push(content)
     }
@@ -133,6 +140,7 @@ const buildChunkContents = (units: ReadonlyArray<string>, maxTokens: number) => 
   }
 
   pushCurrent()
+
   return chunks
 }
 
@@ -145,6 +153,7 @@ export const chunkKnowledgeText = (input: ChunkKnowledgeDocumentInput, maxTokens
     }
 
     const sanitized = sanitizeText(input.content)
+
     if (sanitized.length === 0) {
       return yield* Effect.fail(
         new KnowledgeChunkingError({ message: 'Cannot chunk empty content' })

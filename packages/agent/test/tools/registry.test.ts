@@ -70,9 +70,11 @@ describe('resolveTools', () => {
   it.effect('executes resolved tools through ToolExecutor layer', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools([makeModule([makeTool('echo')])], { enabled: true })
+
       const executor = yield* Effect.provide(
         Effect.gen(function* () {
           const service = yield* ToolExecutor
+
           return yield* service.execute({ id: 'call_1', name: 'echo', params: {} })
         }),
         makeToolExecutorLayer(toolSet)
@@ -85,9 +87,11 @@ describe('resolveTools', () => {
   it.effect('fails unknown tool execution as not found', () =>
     Effect.gen(function* () {
       const toolSet = yield* resolveTools([makeModule([makeTool('echo')])], { enabled: true })
+
       const result = yield* Effect.provide(
         Effect.gen(function* () {
           const service = yield* ToolExecutor
+
           return yield* service.execute({ id: 'call_1', name: 'missing', params: {} })
         }),
         makeToolExecutorLayer(toolSet)
@@ -125,7 +129,9 @@ describe('resolveTools', () => {
         execute: ({ call, params }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: params.text }))
       })
+
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: 'schema_echo',
@@ -151,6 +157,7 @@ describe('resolveTools', () => {
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
       expect(toolSet.tools[0]?.parameters).toEqual({
@@ -172,6 +179,7 @@ describe('resolveTools', () => {
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
 
       expect(toolSet.tools[0]?.parameters).toEqual({
@@ -194,7 +202,9 @@ describe('resolveTools', () => {
         execute: ({ call }) =>
           Effect.succeed(ToolResult.make({ toolCallId: call.id, content: 'ok' }))
       })
+
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: 'empty_params',
@@ -232,7 +242,9 @@ describe('resolveTools', () => {
             })
           )
       })
+
       const toolSet = yield* resolveTools([makeModule([tool])], { enabled: true })
+
       const result = yield* toolSet.execute({
         id: 'call_1',
         name: 'visible_error',

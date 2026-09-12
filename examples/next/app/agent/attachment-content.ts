@@ -1,4 +1,4 @@
-import { Array as Arr } from 'effect'
+import { Array as Arr, Predicate } from 'effect'
 import {
   DocumentPart,
   ImagePart,
@@ -29,19 +29,20 @@ export type FailedAttachment = AgentComposerFailedAttachment & {
 export type AgentAttachment = ReadyAttachment | FailedAttachment
 
 export const isReadyAttachment = (attachment: AgentAttachment): attachment is ReadyAttachment =>
-  attachment._tag === 'Ready'
+  Predicate.isTagged(attachment, 'Ready')
 
 export const isReadyImageAttachment = (
   attachment: AgentAttachment
-): attachment is ReadyImageAttachment => attachment._tag === 'Ready' && attachment.kind === 'image'
+): attachment is ReadyImageAttachment =>
+  Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'image'
 
 export const isReadyDocumentAttachment = (
   attachment: AgentAttachment
 ): attachment is ReadyDocumentAttachment =>
-  attachment._tag === 'Ready' && attachment.kind === 'document'
+  Predicate.isTagged(attachment, 'Ready') && attachment.kind === 'document'
 
 export const isFailedAttachment = (attachment: AgentAttachment): attachment is FailedAttachment =>
-  attachment._tag === 'Failed'
+  Predicate.isTagged(attachment, 'Failed')
 
 export const contentFromInput = (
   input: string,

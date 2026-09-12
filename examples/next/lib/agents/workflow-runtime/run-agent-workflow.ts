@@ -27,16 +27,21 @@ import {
   uncertainChildLaunchStep,
   childControlFailureStep
 } from './workflow-child-steps'
+import { Predicate } from 'effect'
+
 export { agentWorkflowHitlHookToken } from './workflow-contract'
+
 export type { AgentWorkflowInput } from './workflow-contract'
 
 // These wrappers are the durable boundaries; runtime imports belong inside them.
 type StepRuntime = typeof StepRuntimeModule
+
 export async function runAgentWorkflowModelStep(
   ...args: Parameters<StepRuntime['runAgentWorkflowModelStep']>
 ): ReturnType<StepRuntime['runAgentWorkflowModelStep']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.runAgentWorkflowModelStep(...args)
 }
 
@@ -45,6 +50,7 @@ export async function runAgentWorkflowToolBatchStep(
 ): ReturnType<StepRuntime['runAgentWorkflowToolBatchStep']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.runAgentWorkflowToolBatchStep(...args)
 }
 
@@ -53,6 +59,7 @@ export async function closeAgentWorkflowStream(
 ): ReturnType<StepRuntime['closeAgentWorkflowStream']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.closeAgentWorkflowStream(...args)
 }
 
@@ -61,6 +68,7 @@ export async function writeAgentWorkflowError(
 ): ReturnType<StepRuntime['writeAgentWorkflowError']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.writeAgentWorkflowError(...args)
 }
 
@@ -69,6 +77,7 @@ export async function mergeWorkflowToolResultsStep(
 ): ReturnType<StepRuntime['mergeWorkflowToolResultsStep']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.mergeWorkflowToolResultsStep(...args)
 }
 
@@ -77,6 +86,7 @@ export async function startWorkflowChildToolStep(
 ): ReturnType<StepRuntime['startWorkflowChildToolStep']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.startWorkflowChildToolStep(...args)
 }
 
@@ -85,11 +95,14 @@ export async function executableWorkflowCallStep(
 ): ReturnType<StepRuntime['executableWorkflowCallStep']> {
   'use step'
   const runtime = await import('./agent-workflow-steps')
+
   return await runtime.executableWorkflowCallStep(...args)
 }
 
 runAgentWorkflowModelStep.maxRetries = 0
+
 runAgentWorkflowToolBatchStep.maxRetries = 0
+
 startWorkflowChildToolStep.maxRetries = 0
 
 const writeWorkflowErrorStep = (error: unknown) =>
@@ -100,6 +113,7 @@ async function orchestrateAgentWorkflowTools(
   input: VercelAgentWorkflowToolBatchStepInput
 ): Promise<VercelAgentWorkflowToolBatchStepResult> {
   const prepared = await runAgentWorkflowToolBatchStep({ ...input, preflightOnly: true })
+
   const batch = await orchestrateWorkflowToolBatch<
     unknown,
     VercelAgentWorkflowToolBatchStepResult,
@@ -121,30 +135,40 @@ async function orchestrateAgentWorkflowTools(
         eventSequence: 0,
         eventNamespace: `${input.turn ?? 0}:${index}`
       }
+
       const eligible = await executableWorkflowCallStep(call, prepared.executableIds ?? [])
+
       if (!eligible) return await runAgentWorkflowToolBatchStep(single)
+
       const plan = await planWorkflowCallStep({
         context: input.context,
         request: input.request,
         call
       })
+
       if (plan.type === 'normal') return await runAgentWorkflowToolBatchStep(single)
+
       if (plan.type === 'result')
         return await runAgentWorkflowToolBatchStep({ ...single, result: plan.result })
+
       const lifecycle = await startWorkflowChildToolStep({
         ...single,
         call,
         childModel: plan.type === 'launch' ? plan.model : null
       })
+
       const completion = {
         ...single,
         eventSequence: lifecycle.eventSequence,
         executionStartedAtMs: lifecycle.startedAtMs
       }
+
       let result: unknown
+
       try {
         let attemptedRunId: string | undefined
         let confirmedRunId = plan.type === 'launch' ? plan.workflowRunId : null
+
         if (plan.type === 'launch' && plan.workflowRunId === null) {
           try {
             const attempt = await start(runChildAgentWorkflow, [plan.child])
@@ -155,6 +179,7 @@ async function orchestrateAgentWorkflowTools(
             throw error
           }
         }
+
         // Reservation + attachment is the acknowledgement. Resilient starts need not
         // exist in platform status storage yet, and status availability is irrelevant.
         const child =
@@ -164,6 +189,7 @@ async function orchestrateAgentWorkflowTools(
                 read: async attempt => {
                   const value = await readChildWorkflowStep(plan.child, attemptedRunId)
                   const wait = plan.type === 'lookup' ? plan.wait : !plan.background
+
                   return value.done ||
                     attempt + 1 >= maxChildObservationReads ||
                     (!wait && (plan.type === 'lookup' || value.workflowRunId !== null))
@@ -174,6 +200,7 @@ async function orchestrateAgentWorkflowTools(
                   await sleep(childObservationDelayMs(attempt))
                 }
               })
+
         result = await childToolResultStep({
           callId: eligible,
           childCallId: plan.child.callId,
@@ -186,9 +213,11 @@ async function orchestrateAgentWorkflowTools(
         // Isolate transport/launch failure here, not inside the child execution boundary.
         result = await childControlFailureStep(eligible, plan.child.parentRunId, plan.child.callId)
       }
+
       return await runAgentWorkflowToolBatchStep({ ...completion, result })
     }
   })
+
   return batch.ready
     ? await mergeWorkflowToolResultsStep(input, batch.results, batch.failures?.[0]?.error)
     : batch.value
@@ -198,7 +227,9 @@ export async function runChildAgentWorkflow(input: ChildLaunch) {
   'use workflow'
 
   const admitted = await admitChildWorkflowStep(input)
+
   if (admitted === null) return { status: 'not-admitted' } as const
+
   const terminal = await runVercelAgentWorkflow({
     input: admitted,
     maxTurns: maxChildWorkflowTurns,
@@ -207,13 +238,16 @@ export async function runChildAgentWorkflow(input: ChildLaunch) {
     closeStream: closeAgentWorkflowStream,
     writeError: writeWorkflowErrorStep
   })
+
   const outcome = await persistChildTerminalStep(input, {
-    status: terminal._tag === 'Completed' ? 'completed' : 'error',
+    status: Predicate.isTagged(terminal, 'Completed') ? 'completed' : 'error',
     state: terminal.state
   })
+
   // The isolated child boundary stays visibly failed (including defects), even when the
   // parent observes a sanitized failed ToolResult. Never mask child defects globally.
-  if (terminal._tag !== 'Completed') throw new Error('Child workflow failed')
+  if (!Predicate.isTagged(terminal, 'Completed')) throw new Error('Child workflow failed')
+
   return outcome
 }
 
@@ -221,6 +255,7 @@ export async function runAgentWorkflow(input: AgentWorkflowInput) {
   'use workflow'
 
   await registerWorkflowStep(input.userId)
+
   return await runVercelAgentWorkflow({
     input: { request: input.request, context: { userId: input.userId } },
     runModelStep: runAgentWorkflowModelStep,
@@ -229,6 +264,7 @@ export async function runAgentWorkflow(input: AgentWorkflowInput) {
     writeError: writeWorkflowErrorStep,
     awaitInput: async awaitingInput => {
       using hook = createHook<unknown>({ token: awaitingInput.hookToken })
+
       return await hook
     }
   })

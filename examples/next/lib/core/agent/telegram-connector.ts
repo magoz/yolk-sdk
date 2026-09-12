@@ -42,6 +42,7 @@ const validateTelegramConnectorConfig = (input: TelegramConnectorConfig) =>
 const selectTelegramConnector = (userId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [connector] = yield* db
       .select({
         id: schema.agentConnector.id,
@@ -100,6 +101,7 @@ export const saveTelegramConnectorConfig = (
         chatId: config.chatId,
         credentialSecret: config.botToken
       })
+
       return
     }
 

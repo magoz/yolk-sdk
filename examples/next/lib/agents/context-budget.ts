@@ -5,6 +5,7 @@ export {
   contextBudgetUsageRatio,
   makeContextBudget
 } from '@yolk-sdk/agent/compaction'
+
 export type { ContextBudget, ContextBudgetStatus } from '@yolk-sdk/agent/compaction'
 
 export const agentTextContextBudget = makeSharedContextBudget({

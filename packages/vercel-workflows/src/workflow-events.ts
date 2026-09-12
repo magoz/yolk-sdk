@@ -92,6 +92,7 @@ export const sequenceDurableAgentEvent = <Event extends object>(
 ): SequencedDurableAgentEvent<Event> => {
   const eventSequence = input.state.eventSequence
   const nextEventSequence = eventSequence + 1
+
   const event = {
     ...input.event,
     eventId: durableAgentEventId({

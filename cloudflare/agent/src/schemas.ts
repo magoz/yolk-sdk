@@ -11,7 +11,9 @@ export const BootstrapRequest = Schema.Struct({
   mcpServers: Schema.optional(McpRemoteServerConfigsSchema),
   skillset: Schema.optional(SkillsetManifest)
 })
+
 export type BootstrapRequest = typeof BootstrapRequest.Type
 
 export const CodexAccessToken = TokenBrokerResponse
+
 export type CodexAccessToken = typeof CodexAccessToken.Type

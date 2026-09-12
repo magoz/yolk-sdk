@@ -10,8 +10,10 @@ export async function awaitWorkflowChild<A>(input: {
   readonly sleep: (attempt: number) => Promise<void>
 }): Promise<A> {
   const { read, sleep } = input
+
   for (let attempt = 0; ; attempt++) {
     const state = await read(attempt)
+
     if (state.done) return state.value
     await sleep(attempt)
   }
@@ -37,6 +39,7 @@ export async function orchestrateWorkflowToolBatch<Call, Result, Pause>(input: {
 > {
   const { calls, concurrency, preflight, execute } = input
   const prepared = await preflight()
+
   if (!prepared.ready) return prepared
   const width = Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 1
   const entries = calls.map((call, index) => ({ call, index }))
@@ -47,7 +50,9 @@ export async function orchestrateWorkflowToolBatch<Call, Result, Pause>(input: {
     Array.from({ length: Math.min(width, calls.length) }, async () => {
       while (failures.length === 0) {
         const entry = entries[next++]
+
         if (entry === undefined) return
+
         try {
           results.set(entry.index, await execute(entry.call, entry.index))
         } catch (error) {
@@ -56,6 +61,7 @@ export async function orchestrateWorkflowToolBatch<Call, Result, Pause>(input: {
       }
     })
   )
+
   return {
     ready: true,
     results: [...results.entries()].sort(([a], [b]) => a - b).map(([, result]) => result),

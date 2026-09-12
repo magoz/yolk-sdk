@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolApprovalPolicy, ToolApprovalResponse, ToolDef } from '@yolk-sdk/agent/protocol'
 import { TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
@@ -38,15 +38,17 @@ describe('decideVoiceToolCall', () => {
       VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '{"command":"ls"}' })
     )
 
-    expect(decision).toMatchObject({
-      _tag: 'RequireApproval',
+    const expectedDecisionFields = {
       request: {
         requestId: voiceApprovalRequestId('call_1'),
         toolCallId: 'call_1',
         call: { id: 'call_1', name: 'sandbox', params: { command: 'ls' } },
         policy: { mode: 'manual' }
       }
-    })
+    }
+
+    expect(decision._tag).toBe('RequireApproval')
+    expect(decision).toMatchObject(expectedDecisionFields)
   })
 
   it('keeps raw arguments when approval display params are not valid JSON', () => {
@@ -55,10 +57,8 @@ describe('decideVoiceToolCall', () => {
       VoiceToolCall.make({ callId: 'call_1', name: 'sandbox', argumentsJson: '{broken' })
     )
 
-    expect(decision).toMatchObject({
-      _tag: 'RequireApproval',
-      request: { call: { params: { argumentsJson: '{broken' } } }
-    })
+    expect(decision._tag).toBe('RequireApproval')
+    expect(decision).toMatchObject({ request: { call: { params: { argumentsJson: '{broken' } } } })
   })
 
   it('executes unknown tools so the executor can return a model-visible failure', () => {
@@ -79,11 +79,13 @@ describe('handleVoiceToolCall', () => {
         tools: [searchTool]
       }).pipe(Effect.provide(TestToolExecutor.layer({ echo: 'hello' })))
 
-      expect(outcome).toMatchObject({
-        _tag: 'Executed',
+      const expectedOutcomeFields = {
         callId: 'call_1',
         output: JSON.stringify({ result: 'hello' })
-      })
+      }
+
+      expect(outcome._tag).toBe('Executed')
+      expect(outcome).toMatchObject(expectedOutcomeFields)
     })
   )
 
@@ -94,10 +96,12 @@ describe('handleVoiceToolCall', () => {
         tools: [sandboxTool]
       }).pipe(Effect.provide(TestToolExecutor.layer({})))
 
-      expect(outcome).toMatchObject({
-        _tag: 'ApprovalRequired',
+      const expectedOutcomeFields = {
         request: { requestId: voiceApprovalRequestId('call_1'), toolCallId: 'call_1' }
-      })
+      }
+
+      expect(outcome._tag).toBe('ApprovalRequired')
+      expect(outcome).toMatchObject(expectedOutcomeFields)
     })
   )
 
@@ -114,11 +118,13 @@ describe('handleVoiceToolCall', () => {
         })
       }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
 
-      expect(outcome).toMatchObject({
-        _tag: 'Executed',
+      const expectedOutcomeFields = {
         callId: 'call_1',
         output: JSON.stringify({ result: 'ran' })
-      })
+      }
+
+      expect(outcome._tag).toBe('Executed')
+      expect(outcome).toMatchObject(expectedOutcomeFields)
     })
   )
 
@@ -136,13 +142,10 @@ describe('handleVoiceToolCall', () => {
         })
       }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
 
-      expect(outcome).toMatchObject({
-        _tag: 'Denied',
-        callId: 'call_1',
-        reason: 'not allowed'
-      })
-      expect(outcome._tag === 'Denied' && outcome.output).toContain('denied')
-      expect(outcome._tag === 'Denied' && outcome.output).toContain('Do not retry')
+      expect(outcome._tag).toBe('Denied')
+      expect(outcome).toMatchObject({ callId: 'call_1', reason: 'not allowed' })
+      expect(Predicate.isTagged(outcome, 'Denied') && outcome.output).toContain('denied')
+      expect(Predicate.isTagged(outcome, 'Denied') && outcome.output).toContain('Do not retry')
     })
   )
 
@@ -159,10 +162,12 @@ describe('handleVoiceToolCall', () => {
         })
       }).pipe(Effect.provide(TestToolExecutor.layer({ sandbox: 'ran' })))
 
-      expect(outcome).toMatchObject({
-        _tag: 'ApprovalRequired',
+      const expectedOutcomeFields = {
         request: { requestId: voiceApprovalRequestId('call_1') }
-      })
+      }
+
+      expect(outcome._tag).toBe('ApprovalRequired')
+      expect(outcome).toMatchObject(expectedOutcomeFields)
     })
   )
 })

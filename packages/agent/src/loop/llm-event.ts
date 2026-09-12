@@ -49,4 +49,5 @@ export const LLMEvent = Schema.Union([
   LLMProviderToolResult,
   LLMUsage
 ])
+
 export type LLMEvent = typeof LLMEvent.Type

@@ -175,6 +175,7 @@ describe('useYolkVoice', () => {
   it('surfaces pending approvals and resumes execution on approve', async () => {
     const world = makeFakeWorld()
     const approvals: Array<ToolApprovalResponse> = []
+
     const hook = renderUseYolkVoice(
       makeOptions(world, {
         executeToolCall: (call, approval) => {
@@ -241,6 +242,7 @@ describe('useYolkVoice', () => {
 
   it('seeds conversation context on connect', async () => {
     const world = makeFakeWorld()
+
     const hook = renderUseYolkVoice(
       makeOptions(world, {
         seeds: () => [

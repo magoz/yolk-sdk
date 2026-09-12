@@ -25,6 +25,7 @@ describe('TextKnowledgeExtractorLayer', () => {
   it.effect('extracts trimmed text and source title', () =>
     Effect.gen(function* () {
       const extractor = yield* KnowledgeExtractor
+
       const extracted = yield* extractor.extract({
         source: { _tag: 'Text', label: 'Original title' },
         content: '  Alpha beta.  ',
@@ -164,6 +165,7 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
           limit: 2,
           minScore: 0.8
         })
+
         const textResults = yield* store.searchChunksByText({
           scope: { _tag: 'KnowledgeScope', id: collectionId },
           query: 'beta after',
@@ -176,36 +178,43 @@ describeWithDb('DrizzleSearchIndexStoreLayer', () => {
           position: 1,
           contextChunks: 1
         })
+
         const listed = yield* getKnowledgeDocuments({ userId, collectionId })
         const document = yield* getKnowledgeDocument({ userId, documentId })
         const withContent = yield* getKnowledgeDocumentsContent({ userId, collectionId })
         const chunks = yield* getKnowledgeChunks({ userId, chunkIds: [`${documentId}:chunk:1`] })
+
         const updated = yield* updateKnowledgeDocument({
           userId,
           documentId,
           fields: { title: 'Updated note', metadata: { storageObjectId, updated: true } }
         })
+
         const appSearchResults = yield* searchAppKnowledge({
           userId,
           scope: { _tag: 'KnowledgeScope', id: collectionId },
           query: 'alpha',
           options: { limit: 1, contextChunks: 1 }
         })
+
         const otherUserDocumentError = yield* getKnowledgeDocument({
           userId: otherUserId,
           documentId
         }).pipe(Effect.flip)
+
         const otherUserUpdateError = yield* updateKnowledgeDocument({
           userId: otherUserId,
           documentId,
           fields: { title: 'Should not update' }
         }).pipe(Effect.flip)
+
         const otherUserChunks = yield* getKnowledgeChunks({
           userId: otherUserId,
           chunkIds: [`${documentId}:chunk:1`]
         })
 
         yield* store.deleteDocument({ scopeId: collectionId, documentId })
+
         const afterDelete = yield* store.searchChunks({
           scope: { _tag: 'KnowledgeScope', id: collectionId },
           embedding: embedding(0),

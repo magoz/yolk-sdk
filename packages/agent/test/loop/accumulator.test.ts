@@ -2,16 +2,33 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   assistantContent,
   assistantHostToolCalls,
+  assistantReasoningText,
   contentText,
   ToolCall,
   ToolResult
 } from '@yolk-sdk/agent/protocol'
-import { accumulateAssistantMessage } from '../../src/loop'
-import { LLMDone, LLMProviderToolResult, LLMTextDelta, LLMToolCall } from '../../src/loop/llm-event'
+import {
+  accumulateAssistantMessage,
+  collectReasoning,
+  collectText,
+  collectToolCalls
+} from '../../src/loop'
+import {
+  LLMDone,
+  LLMProviderToolResult,
+  LLMReasoningDelta,
+  LLMTextDelta,
+  LLMToolCall,
+  LLMToolInputDelta,
+  LLMToolInputStart,
+  LLMUsage
+} from '../../src/loop/llm-event'
+import { AgentInputUsage, AgentOutputUsage, AgentUsage } from '../../src/protocol/usage.ts'
 
 describe('accumulateAssistantMessage', () => {
   it('collects text and tool calls', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: { q: 'weather' } })
+
     const message = accumulateAssistantMessage([
       LLMTextDelta.make({ text: 'Let me check.' }),
       LLMToolCall.make({ call }),
@@ -25,6 +42,7 @@ describe('accumulateAssistantMessage', () => {
   it('preserves provider-executed tool parts in event order', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'web_search', params: { q: 'weather' } })
     const result = ToolResult.make({ toolCallId: call.id, content: 'sunny' })
+
     const message = accumulateAssistantMessage([
       LLMTextDelta.make({ text: 'Before.' }),
       LLMProviderToolResult.make({ call, result }),
@@ -39,5 +57,110 @@ describe('accumulateAssistantMessage', () => {
       'Text'
     ])
     expect(contentText(assistantContent(message))).toBe('Before.After.')
+  })
+
+  it('coalesces consecutive text and reasoning and splits nonconsecutive runs', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: { q: 'weather' } })
+    const result = ToolResult.make({ toolCallId: 'call_search', content: 'sunny' })
+
+    const searchCall = ToolCall.make({
+      id: 'call_search',
+      name: 'web_search',
+      params: { q: 'weather' }
+    })
+
+    const message = accumulateAssistantMessage([
+      LLMTextDelta.make({ text: 'A' }),
+      LLMTextDelta.make({ text: 'B' }),
+      LLMReasoningDelta.make({ text: 'r1' }),
+      LLMReasoningDelta.make({ text: 'r2' }),
+      LLMTextDelta.make({ text: 'C' }),
+      LLMToolCall.make({ call }),
+      LLMTextDelta.make({ text: 'D' }),
+      LLMReasoningDelta.make({ text: 'r3' }),
+      LLMProviderToolResult.make({ call: searchCall, result }),
+      LLMReasoningDelta.make({ text: 'r4' })
+    ])
+
+    expect(message.parts.map(part => part._tag)).toEqual([
+      'Text',
+      'Reasoning',
+      'Text',
+      'HostToolCall',
+      'Text',
+      'Reasoning',
+      'ProviderToolCall',
+      'ProviderToolResult',
+      'Reasoning'
+    ])
+    expect(contentText(assistantContent(message))).toBe('ABCD')
+    expect(assistantReasoningText(message)).toBe('r1r2r3r4')
+  })
+
+  it('ignores Done, usage, and tool-input events', () => {
+    const usage = AgentUsage.make({
+      input: AgentInputUsage.make({ total: 1 }),
+      output: AgentOutputUsage.make({ total: 2 })
+    })
+
+    const message = accumulateAssistantMessage([
+      LLMToolInputStart.make({ id: 'call_1', name: 'lookup' }),
+      LLMToolInputDelta.make({ id: 'call_1', delta: '{' }),
+      LLMUsage.make({ usage }),
+      LLMTextDelta.make({ text: 'Hello' }),
+      LLMDone.make({ stopReason: 'stop' })
+    ])
+
+    expect(message.parts.map(part => part._tag)).toEqual(['Text'])
+    expect(assistantContent(message)).toBe('Hello')
+  })
+
+  it('does not mutate frozen input arrays or events', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: { q: 'weather' } })
+    const text = Object.freeze(LLMTextDelta.make({ text: 'Frozen.' }))
+    const tool = Object.freeze(LLMToolCall.make({ call }))
+    const events = Object.freeze([text, tool])
+    const before = JSON.stringify(events)
+
+    const message = accumulateAssistantMessage(events)
+
+    expect(JSON.stringify(events)).toBe(before)
+    expect(Object.isFrozen(events)).toBe(true)
+    expect(assistantContent(message)).toBe('Frozen.')
+    expect(assistantHostToolCalls(message)).toEqual([call])
+  })
+
+  it('skips sparse holes the same way Array.prototype.reduce does', () => {
+    const events = [LLMTextDelta.make({ text: 'A' })]
+    events[2] = LLMTextDelta.make({ text: 'B' })
+
+    const message = accumulateAssistantMessage(events)
+
+    expect(assistantContent(message)).toBe('AB')
+    expect(message.parts).toHaveLength(1)
+  })
+
+  it('allocates a distinct public parts array on repeated calls', () => {
+    const events = [LLMTextDelta.make({ text: 'One' })]
+    const first = accumulateAssistantMessage(events)
+    const second = accumulateAssistantMessage(events)
+
+    expect(second.parts).not.toBe(first.parts)
+    expect(second.parts[0]).not.toBe(first.parts[0])
+    expect(assistantContent(second)).toBe('One')
+  })
+
+  it('keeps collectText, collectReasoning, and collectToolCalls', () => {
+    const call = ToolCall.make({ id: 'call_1', name: 'lookup', params: { q: 'weather' } })
+
+    const events = [
+      LLMTextDelta.make({ text: 'Hi' }),
+      LLMReasoningDelta.make({ text: 'why' }),
+      LLMToolCall.make({ call })
+    ]
+
+    expect(collectText(events)).toBe('Hi')
+    expect(collectReasoning(events)).toBe('why')
+    expect(collectToolCalls(events)).toEqual([call])
   })
 })

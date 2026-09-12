@@ -5,6 +5,7 @@ import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import YolkAgent from './yolk-agent.ts'
 
 const connectPath = '/connect/'
+
 const bootstrapPath = '/bootstrap/'
 
 export class Api extends Cloudflare.Worker<Api>()('Api', {

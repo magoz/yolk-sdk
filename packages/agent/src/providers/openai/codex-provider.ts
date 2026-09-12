@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref, Stream } from 'effect'
+import { Effect, Layer, Predicate, Ref, Stream } from 'effect'
 import type { AgentReasoningEffort } from '@yolk-sdk/agent/protocol'
 import {
   decorateLLMProvider,
@@ -139,7 +139,7 @@ const normalizeCodexContextWindowError = (error: LLMError) =>
 const noteCodexToolCall =
   (hasToolCallRef: Ref.Ref<boolean>) =>
   (event: LLMEvent): Effect.Effect<LLMEvent> => {
-    if (event._tag !== 'ToolCall') return Effect.succeed(event)
+    if (!Predicate.isTagged(event, 'ToolCall')) return Effect.succeed(event)
 
     return Ref.set(hasToolCallRef, true).pipe(Effect.as(event))
   }

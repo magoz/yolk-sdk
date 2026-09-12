@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Predicate, Schema, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -108,13 +108,14 @@ const fragmentsToEvents = (fragments: ReadonlyArray<typeof providerFragment.Type
   fragments.slice(0, 24).map(eventForFragment)
 
 const hasHostToolCall = (events: ReadonlyArray<LLMEvent>) =>
-  events.some(event => event._tag === 'ToolCall')
+  events.some(event => Predicate.isTagged(event, 'ToolCall'))
 
 const expectedStopReason = (events: ReadonlyArray<LLMEvent>) =>
   hasHostToolCall(events) ? 'tool_use' : 'stop'
 
 const eventsWithDone = (input: typeof validProviderCase.Type) => {
   const events = fragmentsToEvents(input.fragments)
+
   return [...events, LLMDone.make({ stopReason: expectedStopReason(events) })]
 }
 
@@ -201,6 +202,7 @@ const makeNonRetryableLayer = (input: {
       LLMProvider.of({
         stream: request => {
           input.requests.push(request)
+
           const failure = Stream.fail(
             new LLMError({
               cause: input.cause,
@@ -269,16 +271,16 @@ describe('provider stream property tests', () => {
         expect(tags.indexOf('LLMStreamEnd')).toBeLessThan(tags.indexOf('AssistantMessage'))
         expect(tags.indexOf('AssistantMessage')).toBeLessThan(tags.indexOf('TurnEnd'))
         expect(countTag(events, 'LLMTextDelta')).toBe(
-          llmEvents.filter(event => event._tag === 'TextDelta').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'TextDelta')).length
         )
         expect(countTag(events, 'LLMReasoningDelta')).toBe(
-          llmEvents.filter(event => event._tag === 'ReasoningDelta').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'ReasoningDelta')).length
         )
         expect(countTag(events, 'UsageUpdate')).toBe(
-          llmEvents.filter(event => event._tag === 'Usage').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'Usage')).length
         )
         expect(countTag(events, 'ToolInputEnd')).toBe(
-          llmEvents.filter(event => event._tag === 'ToolCall').length
+          llmEvents.filter(event => Predicate.isTagged(event, 'ToolCall')).length
         )
       })
     },
@@ -331,8 +333,9 @@ describe('provider stream property tests', () => {
         expect(requests).toHaveLength(shouldSucceed ? input.failuresBeforeSuccess + 1 : 3)
 
         if (shouldSucceed) {
-          expect(result).toMatchObject({ _tag: 'Success' })
-          if (result._tag === 'Success') {
+          expect(result._tag).toBe('Success')
+
+          if (Predicate.isTagged(result, 'Success')) {
             expect(countTag(result.success, 'AgentRetry')).toBe(expectedRetries)
             expect(countTag(result.success, 'TurnEnd')).toBe(1)
           }

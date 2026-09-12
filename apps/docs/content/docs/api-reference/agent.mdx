@@ -47,16 +47,25 @@ for fresh signing inside retries.
 
 `@yolk-sdk/agent/loop`
 
-| Export                                                                              | Purpose                                            |
-| ----------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `run`                                                                               | stateless agent loop, returns `Stream<AgentEvent>` |
-| `runModelTurn`, `runToolBatch`                                                      | lower-level model/tool-turn primitives             |
-| `LLMProvider`                                                                       | provider service contract                          |
-| `ToolExecutor`                                                                      | host tool execution service                        |
-| `ContextTransformer`                                                                | host context compaction/injection service          |
-| `LoopConfig`                                                                        | loop limits/retry config service                   |
-| `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                   |
-| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                         |
+| Export                                                                              | Purpose                                                                 |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `run`                                                                               | stateless agent loop, returns `Stream<AgentEvent>`                      |
+| `runModelTurn`, `runToolBatch`                                                      | lower-level model/tool-turn primitives                                  |
+| `LLMProvider`                                                                       | provider service contract                                               |
+| `ToolExecutor`                                                                      | host tool execution service                                             |
+| `ContextTransformer`                                                                | host context compaction/injection service                               |
+| `LoopConfig`                                                                        | loop limits/retry config service                                        |
+| `LoopConfigSettings`                                                                | settings object for `LoopConfig.layer` (renamed from `LoopConfigShape`) |
+| `LLMError`, `ToolError`                                                             | safe loop/provider/tool failures                                        |
+| `accumulateAssistantMessage`, `collectText`, `collectReasoning`, `collectToolCalls` | stream accumulator helpers                                              |
+
+Breaking type import (runtime/wire unchanged, no `Shape` alias):
+
+```ts
+import type { LoopConfigSettings } from '@yolk-sdk/agent/loop'
+```
+
+`LoopConfigShape` is removed. Update `import type { LoopConfigShape }` to `LoopConfigSettings`.
 
 ### Whole-batch preflight
 

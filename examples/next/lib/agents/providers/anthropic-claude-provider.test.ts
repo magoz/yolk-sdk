@@ -69,6 +69,7 @@ describe('AnthropicClaudeProviderLayer', () => {
   it.effect('maps text and tools to Anthropic messages', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -82,6 +83,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],
@@ -121,6 +123,7 @@ describe('AnthropicClaudeProviderLayer', () => {
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       const call = ToolCall.make({ id: 'call_1', name: 'weather', params: { city: 'Paris' } })
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -133,6 +136,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [
@@ -196,6 +200,7 @@ describe('AnthropicClaudeProviderLayer', () => {
   it.effect('maps Anthropic thinking, tool use, and cache usage events', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer(
           {
@@ -217,6 +222,7 @@ describe('AnthropicClaudeProviderLayer', () => {
 
       const eventsChunk = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'weather?' })],
@@ -251,12 +257,14 @@ describe('AnthropicClaudeProviderLayer', () => {
   it.effect('maps non-OK Anthropic responses to retryable LLM errors', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeProviderLayer(
         makeHttpClientLayer({ error: { message: 'too many requests' } }, requests, 429)
       )
 
       const error = yield* Effect.gen(function* () {
         const provider = yield* LLMProvider
+
         return yield* provider
           .stream({
             messages: [UserMessage.make({ content: 'hello' })],

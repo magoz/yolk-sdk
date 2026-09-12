@@ -30,10 +30,12 @@ const handler = Effect.gen(function* () {
   const session = yield* getSession()
   const input = yield* HttpServerRequest.schemaBodyJson(VoiceSessionToolCallRequest)
   const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
+
   const telegramToolModules =
     telegramConnectorConfig === undefined
       ? []
       : [makeAppTelegramToolModule(telegramConnectorConfig)]
+
   const toolSet = yield* resolveAgentToolSet({
     modules: [
       ...nodeVoiceToolModules,
@@ -48,6 +50,7 @@ const handler = Effect.gen(function* () {
       sessionId: input.sessionId
     }
   })
+
   const outcome = yield* handleVoiceToolCall({
     call: VoiceToolCall.make({
       callId: input.callId,
@@ -57,6 +60,7 @@ const handler = Effect.gen(function* () {
     tools: toolSet.tools,
     approval: input.approval
   }).pipe(Effect.provide(makeToolExecutorLayer(toolSet)))
+
   const encoded = yield* encodeOutcome(outcome)
 
   return yield* HttpServerResponse.json(encoded, {

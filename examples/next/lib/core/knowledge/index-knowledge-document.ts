@@ -28,6 +28,7 @@ export const indexKnowledgeDocument = (input: {
       content: input.content,
       metadata: input.metadata
     })
+
     const embeddings = yield* embedder.embedTexts(chunks.map(chunk => chunk.content))
 
     if (embeddings.length !== chunks.length) {
@@ -46,6 +47,7 @@ export const indexKnowledgeDocument = (input: {
           .where(eq(schema.userKnowledgeChunk.documentId, input.documentId))
 
         const indexedChunks = Arr.zip(chunks, embeddings)
+
         if (indexedChunks.length > 0) {
           yield* tx.insert(schema.userKnowledgeChunk).values(
             indexedChunks.map(([chunk, embedding]) => ({
@@ -93,6 +95,7 @@ export const indexKnowledgeDocument = (input: {
             updatedAt: sql`CURRENT_TIMESTAMP`
           })
           .where(eq(schema.userKnowledgeDocument.id, input.documentId))
+
         return yield* Effect.fail(error)
       })
     )

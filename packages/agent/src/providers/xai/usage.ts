@@ -187,6 +187,7 @@ export const parseXAiGrokSubscriptionUsage = (
               }),
               canonicalFetchedAt
             )
+
             window = makeSharedWindow(usedPercent, legacyPeriod)
           }
         }
@@ -257,6 +258,7 @@ export const fetchXAiGrokSubscriptionUsage = (
     }
 
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(xAiGrokSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
@@ -267,12 +269,14 @@ export const fetchXAiGrokSubscriptionUsage = (
         'x-grok-client-mode': 'headless'
       })
     )
+
     const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: xAiGrokProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
+
     const responseFetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseXAiGrokSubscriptionUsage(json, responseFetchedAt)

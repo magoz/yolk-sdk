@@ -1,4 +1,4 @@
-import { Duration, Effect, Queue, Ref, type Scope } from 'effect'
+import { Duration, Effect, Predicate, Queue, Ref, type Scope } from 'effect'
 import {
   initialVoiceEventSequencerState,
   sequenceVoiceEvent,
@@ -32,6 +32,7 @@ export type VoiceEventOutboxApi = {
 }
 
 const defaultFlushIntervalMs = 500
+
 const defaultMaxBatchSize = 100
 
 /**
@@ -61,9 +62,9 @@ const isToolLifecycleEvent = (
   VoiceEvent,
   { _tag: 'ToolCallsRequested' | 'ToolCallCompleted' | 'ToolCallFailed' }
 > =>
-  event._tag === 'ToolCallsRequested' ||
-  event._tag === 'ToolCallCompleted' ||
-  event._tag === 'ToolCallFailed'
+  Predicate.isTagged(event, 'ToolCallsRequested') ||
+  Predicate.isTagged(event, 'ToolCallCompleted') ||
+  Predicate.isTagged(event, 'ToolCallFailed')
 
 type OutboxBuffer = {
   readonly pending: ReadonlyArray<StoredVoiceEvent>
@@ -89,6 +90,7 @@ export const makeVoiceEventOutbox = (
       pending: [],
       sequencer: initialVoiceEventSequencerState
     })
+
     const wake = yield* Queue.unbounded<void>()
     const maxBatchSize = options.maxBatchSize ?? defaultMaxBatchSize
     const flushInterval = Duration.millis(options.flushIntervalMs ?? defaultFlushIntervalMs)
@@ -122,9 +124,11 @@ export const makeVoiceEventOutbox = (
           const stored = isToolLifecycleEvent(event)
             ? storedVoiceToolEvents(event)
             : [sequenceVoiceEvent(options.streamId, current.sequencer, event).stored]
+
           const sequencer = isToolLifecycleEvent(event)
             ? current.sequencer
             : { nextSequence: current.sequencer.nextSequence + 1 }
+
           const pending = [...current.pending, ...stored]
 
           return [pending.length, { pending, sequencer } satisfies OutboxBuffer]

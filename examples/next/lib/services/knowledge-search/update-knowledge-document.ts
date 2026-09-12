@@ -45,6 +45,7 @@ export const updateKnowledgeDocument = (input: UpdateKnowledgeDocumentInput) =>
     yield* getKnowledgeDocument({ userId: input.userId, documentId: input.documentId })
 
     const db = yield* Db
+
     const [document] = yield* db
       .update(schema.knowledgeDocument)
       .set(documentPatch(input.fields))

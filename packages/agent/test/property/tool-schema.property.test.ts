@@ -180,6 +180,7 @@ describe('tool schema property tests', () => {
     ([variant]) =>
       Effect.gen(function* () {
         const tool = providerSafeTool(variant)
+
         const result = yield* tool.execute({
           context: undefined,
           call: { id: 'call_1', name: tool.def.name, params: validParams(variant) }
@@ -196,6 +197,7 @@ describe('tool schema property tests', () => {
     ([variant]) =>
       Effect.gen(function* () {
         const tool = providerSafeTool(variant)
+
         const result = yield* tool.execute({
           context: undefined,
           call: { id: 'call_1', name: tool.def.name, params: invalidParams(variant) }

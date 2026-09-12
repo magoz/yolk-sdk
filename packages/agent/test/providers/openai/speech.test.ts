@@ -38,6 +38,7 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
       const audioBytes = new Uint8Array([1, 2, 3, 4])
+
       const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
         Layer.provide(
           makeHttpClientLayer(
@@ -46,6 +47,7 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
           )
         )
       )
+
       const result = yield* Effect.gen(function* () {
         const synthesizer = yield* VoiceSpeechSynthesizer
 
@@ -70,10 +72,12 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
   it.effect('sends instructions only when resolved from request or config', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const httpLayer = makeHttpClientLayer(
         () => new Response(new Uint8Array([1]).slice().buffer, { status: 200 }),
         requests
       )
+
       const bodyJson = (index: number) => {
         const body = requests[index]?.request.body
 
@@ -116,6 +120,7 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
       const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
         Layer.provide(makeHttpClientLayer(() => new Response('nope', { status: 500 }), []))
       )
+
       const error = yield* Effect.gen(function* () {
         const synthesizer = yield* VoiceSpeechSynthesizer
 
@@ -133,6 +138,7 @@ describe('makeOpenAiSpeechSynthesizerLayer', () => {
       const layer = makeOpenAiSpeechSynthesizerLayer(config).pipe(
         Layer.provide(makeHttpClientLayer(() => new Response('quota', { status: 429 }), []))
       )
+
       const error = yield* Effect.gen(function* () {
         const synthesizer = yield* VoiceSpeechSynthesizer
 
@@ -150,6 +156,7 @@ describe('makeOpenAiTranscriberLayer', () => {
   it.effect('transcribes audio with verbose json metadata', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiTranscriberLayer(config).pipe(
         Layer.provide(
           makeHttpClientLayer(
@@ -164,6 +171,7 @@ describe('makeOpenAiTranscriberLayer', () => {
           )
         )
       )
+
       const result = yield* Effect.gen(function* () {
         const transcriber = yield* VoiceTranscriber
 
@@ -191,6 +199,7 @@ describe('makeOpenAiTranscriberLayer', () => {
   it.effect('requests verbose_json only for whisper models', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiTranscriberLayer(config).pipe(
         Layer.provide(
           makeHttpClientLayer(
@@ -221,6 +230,7 @@ describe('makeOpenAiTranscriberLayer', () => {
   it.effect('names the uploaded file after the audio MIME type for format detection', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiTranscriberLayer(config).pipe(
         Layer.provide(makeHttpClientLayer(() => Response.json({ text: 'ok' }), requests))
       )
@@ -248,6 +258,7 @@ describe('makeOpenAiTranscriberLayer', () => {
           makeHttpClientLayer(() => Response.json({ transcriptText: 'wrong shape' }), [])
         )
       )
+
       const error = yield* Effect.gen(function* () {
         const transcriber = yield* VoiceTranscriber
 

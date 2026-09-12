@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
 import { getTelegramConnectorStatus } from '@/lib/core/agent/telegram-connector'
@@ -41,8 +41,10 @@ async function Content() {
           </div>
 
           <TelegramConnectorForm
-            initialConnected={telegramStatus._tag === 'Connected'}
-            initialChatId={telegramStatus._tag === 'Connected' ? telegramStatus.chatId : undefined}
+            initialConnected={Predicate.isTagged(telegramStatus, 'Connected')}
+            initialChatId={
+              Predicate.isTagged(telegramStatus, 'Connected') ? telegramStatus.chatId : undefined
+            }
           />
         </main>
       )

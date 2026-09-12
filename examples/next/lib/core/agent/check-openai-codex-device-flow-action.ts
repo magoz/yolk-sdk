@@ -1,6 +1,6 @@
 'use server'
 
-import { Effect } from 'effect'
+import { Effect, Predicate } from 'effect'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { AppLayer } from '@/lib/layers'
@@ -39,6 +39,7 @@ export const checkOpenAiCodexDeviceFlowAction = async (input: {
         case 'Authorized': {
           const token = yield* oauth.exchangeDeviceToken(pollResult.deviceToken)
           yield* saveOpenAiCodexToken({ userId: session.user.id, token })
+
           return { _tag: 'Success' as const }
         }
       }
@@ -51,7 +52,9 @@ export const checkOpenAiCodexDeviceFlowAction = async (input: {
       ),
       Effect.catchTag('UnauthenticatedError', () => NextEffect.redirect('/login')),
       Effect.tap(result =>
-        result._tag === 'Success' ? Effect.sync(() => revalidatePath('/agent')) : Effect.void
+        Predicate.isTagged(result, 'Success')
+          ? Effect.sync(() => revalidatePath('/agent'))
+          : Effect.void
       ),
       Effect.catch(() =>
         Effect.succeed({

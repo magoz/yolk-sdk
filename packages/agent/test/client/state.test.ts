@@ -45,9 +45,11 @@ describe('reduceAgentEvents', () => {
   it('builds client state from streamed events', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
+
     const message = AssistantAgentMessage.make({
       parts: [AssistantTextPart.make({ content: 'ok' }), HostToolCallPart.make({ call })]
     })
+
     const toolResultMessage = ToolResultMessage.make({
       toolCallId: call.id,
       content: result.content
@@ -85,6 +87,7 @@ describe('reduceAgentEvents', () => {
   it('keeps tool runs anchored in live messages during active runs', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'weather', params: {} })
     const result = ToolResult.make({ toolCallId: 'call_1', content: '72F' })
+
     const message = AssistantAgentMessage.make({
       parts: [HostToolCallPart.make({ call })]
     })
@@ -116,6 +119,7 @@ describe('reduceAgentEvents', () => {
       name: 'web_fetch',
       params: { url: 'https://e.com' }
     })
+
     const result = ToolResult.make({ toolCallId: call.id, content: 'Example Domain' })
 
     const inputStreaming = reduceAgentEvents([
@@ -138,10 +142,12 @@ describe('reduceAgentEvents', () => {
       call,
       questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
     })
+
     const question = reduceAgentEvents([
       AgentStart.make({}),
       QuestionRequested.make({ request: questionRequest })
     ])
+
     expect(question.toolRuns).toEqual([{ _tag: 'QuestionRequested', request: questionRequest }])
 
     const questionResponse = QuestionResponse.make({
@@ -150,11 +156,13 @@ describe('reduceAgentEvents', () => {
       outcome: 'answered',
       source: 'user'
     })
+
     const answeredQuestion = reduceAgentEvents([
       AgentStart.make({}),
       QuestionRequested.make({ request: questionRequest }),
       QuestionAnswered.make({ response: questionResponse })
     ])
+
     expect(answeredQuestion.toolRuns).toEqual([
       { _tag: 'QuestionAnswered', response: questionResponse, request: questionRequest }
     ])
@@ -164,6 +172,7 @@ describe('reduceAgentEvents', () => {
       ToolApprovalRequested.make({ call }),
       ToolApprovalDenied.make({ toolCallId: call.id, reason: 'policy' })
     ])
+
     expect(denied.toolRuns).toEqual([{ _tag: 'Denied', toolCallId: call.id, reason: 'policy' }])
 
     const errored = reduceAgentEvents(
@@ -174,6 +183,7 @@ describe('reduceAgentEvents', () => {
       undefined,
       { nowMs: 42 }
     )
+
     expect(errored.toolRuns).toEqual([
       { _tag: 'Errored', call, message: 'safe failure', endedAtMs: 42 }
     ])
@@ -182,18 +192,22 @@ describe('reduceAgentEvents', () => {
       AgentStart.make({}),
       ProviderToolResult.make({ call, result })
     ])
+
     expect(providerCompleted.toolRuns).toEqual([{ _tag: 'ProviderCompleted', call, result }])
   })
 
   it('marks client state waiting on HITL input', () => {
     const call = ToolCall.make({ id: 'call_1', name: 'question', params: {} })
+
     const request = QuestionRequest.make({
       requestId: 'question:call_1',
       toolCallId: call.id,
       call,
       questions: [QuestionPrompt.make({ id: 'choice', prompt: 'Pick one' })]
     })
+
     const message = AssistantAgentMessage.make({ parts: [HostToolCallPart.make({ call })] })
+
     const state = reduceAgentEvents([
       AgentStart.make({}),
       AgentAwaitingInput.make({
@@ -210,12 +224,14 @@ describe('reduceAgentEvents', () => {
 
   it('stores in-band agent errors', () => {
     const provider = ProviderErrorInfo.make({ provider: 'openai', kind: 'rate_limit', status: 429 })
+
     const error = AgentError.make({
       code: 'rate_limit',
       message: 'Provider failed',
       retryable: true,
       provider
     })
+
     const state = reduceAgentEvents([AgentStart.make({}), error])
 
     expect(state).toMatchObject({
@@ -233,6 +249,7 @@ describe('reduceAgentEvents', () => {
       status: 529,
       retryAfterMs: 500
     })
+
     const retry = AgentRetry.make({
       attempt: 1,
       reason: 'overloaded',
@@ -240,6 +257,7 @@ describe('reduceAgentEvents', () => {
       message: 'overloaded',
       provider
     })
+
     const retrying = reduceAgentEvents([AgentStart.make({}), retry])
 
     expect(retrying.retryInfo).toBe(retry)

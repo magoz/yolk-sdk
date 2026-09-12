@@ -36,7 +36,7 @@ Architecture and convention patterns for the SDK workspace.
 | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
 | [SIMULATION_PROPERTY_TESTING.md](./SIMULATION_PROPERTY_TESTING.md) | Deterministic simulation seams, property tests, model invariants |
 | [TYPESCRIPT_CONVENTIONS.md](./TYPESCRIPT_CONVENTIONS.md)           | Code style, file naming, type safety rules                       |
-| [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                       | Test seams, organization, and behavior-first strategy             |
+| [TESTING_STRATEGY.md](./TESTING_STRATEGY.md)                       | Test seams, organization, and behavior-first strategy            |
 
 ## Next example
 

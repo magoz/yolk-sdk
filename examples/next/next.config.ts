@@ -5,6 +5,7 @@ import { withWorkflow } from 'workflow/next'
 import { getAllowedDevOrigins } from './next-dev-origins'
 
 const exampleDir = dirname(fileURLToPath(import.meta.url))
+
 const workspaceRoot = join(exampleDir, '../..')
 
 const nextConfig: NextConfig = {

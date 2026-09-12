@@ -96,7 +96,7 @@ examples/next, examples/next/e2e, cloudflare/agent -> @yolk-sdk/* public subpath
 - Every publishable package declares `"sideEffects": false`.
 - Use explicit `exports`; avoid broad root barrels for feature APIs.
 - No top-level env reads, service construction, SDK clients, or network calls in packages.
-- Import types as types; ESLint enforces `@typescript-eslint/consistent-type-imports`.
+- Import types as types; Oxlint enforces `typescript/consistent-type-imports`.
 - Keep Node-specific APIs behind Node subpaths (`@yolk-sdk/mcp/client/node`, `@yolk-sdk/mcp/server/node`).
 - Prefer runtime-portable Effect APIs in package code.
 

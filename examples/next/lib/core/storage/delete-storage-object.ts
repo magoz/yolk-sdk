@@ -7,6 +7,7 @@ import * as schema from '@/lib/services/db/schema'
 export const deleteStorageObject = (input: { readonly id: string; readonly userId: string }) =>
   Effect.gen(function* () {
     const db = yield* Db
+
     const [deleted] = yield* db
       .delete(schema.storageObject)
       .where(

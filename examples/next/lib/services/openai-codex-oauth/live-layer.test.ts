@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Predicate } from 'effect'
 import { TestClock } from 'effect/testing'
 import { HttpClient, HttpClientResponse, type HttpClientRequest } from 'effect/unstable/http'
 import { describe, expect, it } from '@effect/vitest'
@@ -43,6 +43,7 @@ const makeHttpClientLayer = (
           body: 'Unexpected test request',
           contentType: 'text/plain'
         }
+
         const body = typeof spec.body === 'string' ? spec.body : JSON.stringify(spec.body)
 
         return HttpClientResponse.fromWeb(
@@ -71,7 +72,7 @@ const readBodyText = (request: HttpClientRequest.HttpClientRequest) => {
   const body = request.body
   expect(body._tag).toBe('Uint8Array')
 
-  if (body._tag !== 'Uint8Array') {
+  if (!Predicate.isTagged(body, 'Uint8Array')) {
     expect.fail('Expected text body')
   }
 
@@ -82,6 +83,7 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('starts device flow with JSON request', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer(
           [
@@ -99,6 +101,7 @@ describe('OpenAiCodexOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.startDeviceFlow()
       }).pipe(Effect.provide(layer))
 
@@ -117,12 +120,14 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('maps pending device poll status', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer([{ status: 403, body: 'pending', contentType: 'text/plain' }], requests)
       )
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.pollDeviceFlow({ deviceAuthId: 'device_1', userCode: 'user_1' })
       }).pipe(Effect.provide(layer))
 
@@ -141,6 +146,7 @@ describe('OpenAiCodexOAuth', () => {
       const requests: Array<CapturedRequest> = []
       const before = 1_000_000
       yield* TestClock.setTime(before)
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer(
           [
@@ -159,6 +165,7 @@ describe('OpenAiCodexOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.exchangeDeviceToken({
           authorization_code: 'code_1',
           code_verifier: 'verifier_1'
@@ -186,6 +193,7 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('refreshes token and preserves current account id', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer(
           [
@@ -203,6 +211,7 @@ describe('OpenAiCodexOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.refreshToken('refresh_old', 'acct_current')
       }).pipe(Effect.provide(layer))
 
@@ -224,6 +233,7 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('refreshes token when response omits refresh and id tokens', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer(
           [
@@ -240,6 +250,7 @@ describe('OpenAiCodexOAuth', () => {
 
       const result = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.refreshToken('refresh_old', 'acct_current')
       }).pipe(Effect.provide(layer))
 
@@ -255,12 +266,14 @@ describe('OpenAiCodexOAuth', () => {
   it.effect('fails non-OK device authorization responses', () =>
     Effect.gen(function* () {
       const requests: Array<CapturedRequest> = []
+
       const layer = makeOpenAiCodexOAuthLayer(
         makeHttpClientLayer([{ status: 500, body: 'bad', contentType: 'text/plain' }], requests)
       )
 
       const error = yield* Effect.gen(function* () {
         const oauth = yield* OpenAiCodexOAuth
+
         return yield* oauth.startDeviceFlow()
       }).pipe(Effect.provide(layer), Effect.flip)
 

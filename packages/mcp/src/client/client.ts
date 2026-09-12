@@ -126,6 +126,7 @@ const mapUnknownToMcpError =
 
 const findDuplicateToolName = (tools: ReadonlyArray<McpResolvedTool>) => {
   const names = tools.map(tool => tool.def.name)
+
   return Option.fromNullishOr(names.find((name, index) => names.indexOf(name) !== index))
 }
 
@@ -140,6 +141,7 @@ const sdkFailureCause = (error: unknown): McpError['cause'] => {
     }
 
     const message = error.message.toLowerCase()
+
     return message.includes('content type') || message.includes('json') || message.includes('parse')
       ? 'protocol'
       : 'transport'
@@ -165,17 +167,21 @@ const withRemoteSdkClient = <A>(
   Effect.gen(function* () {
     const url = yield* validateRemoteUrl(config, securityPolicy(options))
     const http = yield* HttpClient.HttpClient
+
     const sdkClient = yield* Effect.try({
       try: () => {
         const client = new SdkClient(clientInfo(options), {
           ...options?.sdk,
           versionNegotiation: options?.sdk?.versionNegotiation ?? { mode: 'auto' }
         })
+
         options?.configureClient?.(client)
+
         return client
       },
       catch: mapSdkError(config.name, 'Could not configure MCP client')
     })
+
     const transport = new StreamableHTTPClientTransport(new URL(url), {
       fetch: makeEffectFetch(http),
       requestInit: { headers: new Headers(config.headers) }
@@ -220,11 +226,13 @@ const requestLocalEncoded = (
   options?: McpClientOptions
 ) => {
   const policy = securityPolicy(options)
+
   if (!policy.allowLocalServers) {
     return fail(config.name, 'Local MCP servers are disabled by policy', 'security')
   }
 
   const command = config.command[0]
+
   if (command === undefined) {
     return fail(config.name, 'Local MCP command must not be empty', 'validation')
   }
@@ -233,12 +241,14 @@ const requestLocalEncoded = (
     const stdin = Stream.fromIterable(messages.map(message => `${message.line}\n`)).pipe(
       Stream.encodeText
     )
+
     const child = yield* ChildProcess.make(command, config.command.slice(1), {
       env: config.environment ?? {},
       extendEnv: false,
       stdin: { stream: stdin, endOnDone: true },
       stderr: 'ignore'
     })
+
     const lines = yield* child.stdout.pipe(
       Stream.decodeText,
       Stream.splitLines,
@@ -246,6 +256,7 @@ const requestLocalEncoded = (
       Stream.take(expectedResponses),
       Stream.runCollect
     )
+
     const responses = yield* Effect.forEach(lines, line =>
       decodeJsonRpcResponseFromJson(config.name, line)
     )
@@ -307,22 +318,27 @@ const requestLocalSession = (
 ) =>
   Effect.gen(function* () {
     const initialize = initializeRequest(options)
+
     const responses = yield* requestLocal(
       config,
       [initialize, makeInitializedNotification(), request],
       2,
       options
     )
+
     const initializeResponse = responseById(responses, initialize.id)
+
     if (Option.isNone(initializeResponse)) {
       return yield* fail(config.name, 'Local MCP did not return initialize response', 'protocol')
     }
+
     yield* unwrapResponse(config.name, initializeResponse.value)
 
     return responses
   }).pipe(
     Effect.flatMap(responses => {
       const response = responseById(responses, request.id)
+
       return Option.isNone(response)
         ? fail(config.name, 'Local MCP did not return expected response', 'protocol')
         : unwrapResponse(config.name, response.value)
@@ -364,6 +380,7 @@ export const listRemoteMcpServerTools = (
     const result = yield* withRemoteSdkClient(config, options, client =>
       client.listTools(undefined, sdkRequestOptions(options))
     )
+
     return yield* resolveMcpTools(config, result)
   })
 
@@ -382,6 +399,7 @@ export const listLocalMcpServerTools = (
 
     yield* validateLocal(config, securityPolicy(options))
     const result = yield* requestLocalSession(config, listToolsRequest(), options)
+
     return yield* resolveMcpTools(config, result)
   })
 
@@ -436,13 +454,16 @@ export const callRemoteMcpServerTool = (
           })
       )
     )
+
     const result = yield* withRemoteSdkClient(input.config, input.options, async client => {
       await client.listTools(undefined, sdkRequestOptions(input.options))
+
       return client.callTool(
         { name: input.mcpToolName, arguments: args },
         sdkRequestOptions(input.options)
       )
     })
+
     return yield* resolveMcpToolResult(input, result)
   })
 
@@ -455,6 +476,7 @@ export const callLocalMcpServerTool = (
       callToolRequest({ toolName: input.mcpToolName, params: input.params }),
       input.options
     )
+
     return yield* resolveMcpToolResult(input, result)
   })
 
@@ -487,6 +509,7 @@ export const listMcpTools = (configs: ReadonlyArray<McpServerConfig>, options?: 
     tools => {
       const resolved = tools.flat()
       const duplicate = findDuplicateToolName(resolved)
+
       if (Option.isSome(duplicate)) {
         return fail('mcp', `Duplicate MCP tool name: ${duplicate.value}`, 'validation')
       }

@@ -4,12 +4,15 @@ import { Content } from './content.ts'
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
 
 export const HitlResponseSource = Schema.Literals(['user', 'policy', 'replay'])
+
 export type HitlResponseSource = typeof HitlResponseSource.Type
 
 export const ToolApprovalDecision = Schema.Literals(['approved', 'denied'])
+
 export type ToolApprovalDecision = typeof ToolApprovalDecision.Type
 
 export const ToolApprovalMode = Schema.Literals(['manual'])
+
 export type ToolApprovalMode = typeof ToolApprovalMode.Type
 
 export class ToolApprovalPolicy extends Schema.Class<ToolApprovalPolicy>('ToolApprovalPolicy')({
@@ -33,6 +36,7 @@ export class ToolDef extends Schema.Class<ToolDef>('ToolDef')({
 }) {}
 
 export const BackgroundToolExecution = Schema.Literals(['foreground', 'background'])
+
 export type BackgroundToolExecution = typeof BackgroundToolExecution.Type
 
 /** Model-facing envelope of an activated (`execution: 'background-v1'`) tool call. Control fields
@@ -154,6 +158,7 @@ export type PlainQuestionAnswer = {
 }
 
 export const QuestionResponseOutcome = Schema.Literals(['answered', 'cancelled'])
+
 export type QuestionResponseOutcome = typeof QuestionResponseOutcome.Type
 
 export class QuestionResponse extends Schema.TaggedClass<QuestionResponse>()('QuestionResponse', {
@@ -251,10 +256,12 @@ const questionForAnswer = (questions: ReadonlyArray<QuestionPrompt>, answer: Que
 const formatQuestionAnswer = (answer: QuestionAnswer, questions: ReadonlyArray<QuestionPrompt>) => {
   const question = questionForAnswer(questions, answer)
   const prompt = question?.prompt ?? answer.questionId
+
   const selected =
     answer.optionIds?.map(optionId =>
       question === undefined ? optionId : optionLabel(question, optionId)
     ) ?? []
+
   const custom = answer.customAnswer?.trim()
   const values = custom === undefined || custom.length === 0 ? selected : [...selected, custom]
 
@@ -278,17 +285,21 @@ export const formatQuestionResponseContent = (
   const formatted = answers
     .map(answer => formatQuestionAnswer(answer, questions).slice('- '.length))
     .join('; ')
+
   const label = answers.length === 1 ? 'question' : 'questions'
 
   return `User has answered your ${label}: ${formatted}. Continue with the user's answers in mind.`
 }
 
 export const HitlRequest = Schema.Union([ToolApprovalRequest, QuestionRequest])
+
 export type HitlRequest = typeof HitlRequest.Type
 
 export const HitlResponse = Schema.Union([ToolApprovalResponse, QuestionResponse])
+
 export type HitlResponse = typeof HitlResponse.Type
 
 // Canonical loop-owned names. Public compatibility exports remain on /tools.
 export const questionToolName = 'question'
+
 export const subagentToolName = 'subagent'

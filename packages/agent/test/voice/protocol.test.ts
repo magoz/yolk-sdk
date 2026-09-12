@@ -21,8 +21,11 @@ import {
 } from '../../src/voice/index.ts'
 
 const decodeEvent = Schema.decodeUnknownEffect(VoiceEvent)
+
 const encodeEvent = Schema.encodeEffect(VoiceEvent)
+
 const decodeCommand = Schema.decodeUnknownEffect(VoiceCommand)
+
 const decodeSessionConfig = Schema.decodeUnknownEffect(VoiceSessionConfig)
 
 const roundTripEvent = (event: VoiceEvent) =>
@@ -58,6 +61,7 @@ describe('voice protocol', () => {
   it.effect('round-trips awaiting-input events with protocol HITL requests', () =>
     Effect.gen(function* () {
       const call = ToolCall.make({ id: 'call_1', name: 'sandbox', params: { command: 'ls' } })
+
       const event = VoiceAwaitingInput.make({
         requests: [
           ToolApprovalRequest.make({
@@ -91,6 +95,7 @@ describe('voice protocol', () => {
     Effect.gen(function* () {
       const connect = yield* decodeCommand({ _tag: 'Connect' })
       const sendText = yield* decodeCommand({ _tag: 'SendText', text: 'hi' })
+
       const hitl = yield* decodeCommand({
         _tag: 'SubmitHitlResponse',
         response: {
@@ -114,6 +119,7 @@ describe('voice protocol', () => {
         model: '  ',
         instructions: 'Be brief.'
       }).pipe(Effect.flip)
+
       const commandError = yield* decodeCommand({ _tag: 'SendText', text: '  ' }).pipe(Effect.flip)
 
       expect(configError._tag).toBe('SchemaError')

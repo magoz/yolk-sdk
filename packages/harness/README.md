@@ -40,7 +40,43 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(makeInMemoryHarnessLayer()))
 ```
 
-Hosts still own tools, prompts, auth, and `'use workflow'` / `'use step'` files. Durable Object claims ship as `@yolk-sdk/harness/driver/durable-object`. There is no Vercel Workflow driver in this package and no hook registry or `World`.
+Hosts still own tools, prompts, auth, and `'use workflow'` / `'use step'` files. Durable Object claims
+ship as `@yolk-sdk/harness/driver/durable-object`. There is no Vercel Workflow driver in this package
+and no hook registry or `World`.
+
+## Type imports (breaking)
+
+Runtime/wire is unchanged. These public type exports were renamed; there are no `Shape` aliases.
+
+```ts
+import type { RunStoreApi } from '@yolk-sdk/harness/store'
+import type { InboxApi } from '@yolk-sdk/harness/inbox'
+import type { DriverApi } from '@yolk-sdk/harness/driver'
+```
+
+| Old type import                                | New type import |
+| ---------------------------------------------- | --------------- |
+| `RunStoreShape` from `@yolk-sdk/harness/store` | `RunStoreApi`   |
+| `InboxShape` from `@yolk-sdk/harness/inbox`    | `InboxApi`      |
+| `DriverShape` from `@yolk-sdk/harness/driver`  | `DriverApi`     |
+
+## Owner layers
+
+Each service is acquired through its owning static layer factory, which holds the real
+construction logic. The historical `make*` factories keep their signatures and behavior
+and delegate to these canonical owners:
+
+| Canonical owner layer                                                                                                       | Backward-compatible factory                                                                |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `RunStore.inMemoryLayer()` / `snapshotLayer()`                                                                              | `makeInMemoryRunStoreLayer` / `makeSnapshotRunStoreLayer`                                  |
+| `Inbox.layer()`                                                                                                             | `makeInMemoryInboxLayer`                                                                   |
+| `RunCoordinator.layer()` (claims via `RunStore`)                                                                            | `makeCoordinator` stays as the scoped doorbell factory                                     |
+| `Driver.layer()` (requires `RunStore` + `RunCoordinator`) + `Driver.coordinatedLayer()` (default coordinator, lazy options) | `makeDriverLayer` delegates to `coordinatedLayer`, keeping the `RunStore`-only requirement |
+
+Every factory call builds fresh layers, so composed harnesses never share `Ref` state.
+Within one composed harness, the driver and the merged output share a single store
+instance. `InterruptReason` is owned by `@yolk-sdk/harness/coordinator` and re-exported
+from `@yolk-sdk/harness/driver`.
 
 ## Step outcomes
 

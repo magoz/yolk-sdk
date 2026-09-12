@@ -5,6 +5,7 @@ import { ToolExecutor, type ToolError } from '@yolk-sdk/agent/loop'
 import { ToolCall, type Content } from '@yolk-sdk/agent/protocol'
 
 const NonEmptyTrimmedString = Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()))
+
 const maxVoiceToolResultCharacters = 6000
 
 export class VoiceToolCallRequest extends Schema.Class<VoiceToolCallRequest>(
@@ -76,6 +77,7 @@ export const executeVoiceToolCall = (input: VoiceToolCallRequest) =>
   Effect.gen(function* () {
     const executor = yield* ToolExecutor
     const params = yield* parseToolArguments(input.arguments)
+
     const result = yield* Effect.suspend(() =>
       executor.execute(
         ToolCall.make({
@@ -85,6 +87,7 @@ export const executeVoiceToolCall = (input: VoiceToolCallRequest) =>
         })
       )
     ).pipe(Effect.provideService(VoiceToolDispatch, true))
+
     const output = yield* stringifyToolOutput({ result: contentToSerializable(result.content) })
 
     return makeVoiceToolExecutionResult(input.callId, output)

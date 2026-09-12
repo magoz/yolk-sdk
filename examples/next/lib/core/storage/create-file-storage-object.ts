@@ -18,6 +18,7 @@ export const createFileStorageObject = (input: {
 
     const db = yield* Db
     const collection = yield* ensureUserKnowledgeCollection({ userId: input.userId })
+
     const [object] = yield* db
       .insert(schema.storageObject)
       .values({

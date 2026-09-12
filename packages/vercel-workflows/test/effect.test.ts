@@ -66,6 +66,7 @@ class RecordingWorkflowSdk implements VercelWorkflowsSdkClient {
   ) {
     this.startedArgs.push(args)
     const runId = `wrun_${this.startedArgs.length}`
+
     const run = new FakeSdkRun(
       runId,
       workflow(...args),
@@ -108,13 +109,16 @@ const runWithSdk = <A, E>(
 describe('VercelWorkflows', () => {
   it('starts workflows and exposes run status/value as effects', async () => {
     const sdk = new RecordingWorkflowSdk()
+
     const result = await runWithSdk(
       Effect.gen(function* () {
         const workflows = yield* VercelWorkflows
+
         const run = yield* workflows.start(
           async (input: { readonly id: string }) => `done:${input.id}`,
           [{ id: 'request-1' }]
         )
+
         const status = yield* run.status
         const returnValue = yield* run.returnValue
 
@@ -129,6 +133,7 @@ describe('VercelWorkflows', () => {
 
   it('reads streams by run id and resolves tail index', async () => {
     const sdk = new RecordingWorkflowSdk()
+
     const result = await runWithSdk(
       Effect.gen(function* () {
         const workflows = yield* VercelWorkflows
@@ -163,6 +168,7 @@ describe('VercelWorkflows', () => {
 
   it('maps SDK failures to tagged errors', async () => {
     const failure = new Error('workflow boom')
+
     const sdk = {
       start: <TArgs extends unknown[], TResult>(
         _workflow: VercelWorkflowFunction<TArgs, TResult>,

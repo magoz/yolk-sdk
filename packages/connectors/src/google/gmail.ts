@@ -1,4 +1,4 @@
-import { Chunk, Effect, Result } from 'effect'
+import { Chunk, Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { defineAction } from '../action.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -45,9 +45,7 @@ export class GmailGetMessageInput extends Schema.Class<GmailGetMessageInput>(
   format: Schema.optional(Schema.Literals(['minimal', 'full', 'raw', 'metadata']))
 }) {}
 
-export class GmailGetThreadInput extends Schema.Class<GmailGetThreadInput>(
-  'GmailGetThreadInput'
-)({
+export class GmailGetThreadInput extends Schema.Class<GmailGetThreadInput>('GmailGetThreadInput')({
   threadId: Schema.String,
   format: Schema.Literals(['full', 'metadata', 'minimal'])
 }) {}
@@ -138,6 +136,7 @@ export class GmailMessageOutput extends Schema.Class<GmailMessageOutput>('GmailM
 }) {}
 
 const GmailAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
 const isGmailAttachmentSize = Schema.is(GmailAttachmentSize)
 
 export class GmailThreadAttachment extends Schema.Class<GmailThreadAttachment>(
@@ -179,11 +178,13 @@ export class GmailListAttachmentsOutput extends Schema.Class<GmailListAttachment
 export const GmailAttachmentBase64Url = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2}(?:==)?|[A-Za-z0-9_-]{3}=?)?$/)
 )
+
 export type GmailAttachmentBase64Url = typeof GmailAttachmentBase64Url.Type
 
 export const GmailAttachmentBase64 = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 )
+
 export type GmailAttachmentBase64 = typeof GmailAttachmentBase64.Type
 
 export class GmailGetAttachmentOutput extends Schema.Class<GmailGetAttachmentOutput>(
@@ -239,11 +240,13 @@ const unknownField = (value: unknown, key: string) =>
 
 const unknownStringField = (value: unknown, key: string) => {
   const field = unknownField(value, key)
+
   return typeof field === 'string' ? field : undefined
 }
 
 const unknownArrayField = (value: unknown, key: string) => {
   const field = unknownField(value, key)
+
   return Array.isArray(field) ? field : []
 }
 
@@ -265,6 +268,7 @@ const gmailPartHeaders = (part: unknown) =>
   unknownArrayField(part, 'headers').flatMap(header => {
     const name = unknownStringField(header, 'name')
     const value = unknownStringField(header, 'value')
+
     return name === undefined || value === undefined ? [] : [{ name, value }]
   })
 
@@ -276,9 +280,9 @@ const gmailPartHeader = (part: unknown, name: string) =>
 
 const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
   const compact = value.replaceAll(/\s/g, '')
-  const normalized = urlEncoded
-    ? compact.replaceAll('-', '+').replaceAll('_', '/')
-    : compact
+
+  const normalized = urlEncoded ? compact.replaceAll('-', '+').replaceAll('_', '/') : compact
+
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 === 1) {
     return undefined
   }
@@ -286,13 +290,16 @@ const decodeBase64Bytes = (value: string, urlEncoded: boolean) => {
   const unpadded = normalized.replaceAll(/=+$/g, '')
   const padded = `${unpadded}${'='.repeat((4 - (unpadded.length % 4)) % 4)}`
   const decoded = Result.try(() => atob(padded))
+
   if (Result.isFailure(decoded)) return undefined
 
   const binary = decoded.success
   const bytes = new Uint8Array(binary.length)
+
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index)
   }
+
   return bytes
 }
 
@@ -304,6 +311,7 @@ const decodeQuotedPrintable = (value: string) => {
   for (let index = 0; index < withoutSoftBreaks.length; index += 1) {
     const character = withoutSoftBreaks[index]
     const pair = withoutSoftBreaks.slice(index + 1, index + 3)
+
     if (character === '=' && /^[A-Fa-f0-9]{2}$/.test(pair)) {
       bytes.push(Number.parseInt(pair, 16))
       index += 2
@@ -321,19 +329,64 @@ const decodeQuotedPrintable = (value: string) => {
 const decodeGmailTextBody = (part: unknown) => {
   const body = unknownField(part, 'body')
   const data = unknownStringField(body, 'data')
+
   if (data === undefined) return undefined
 
   const bytes = decodeBase64Bytes(data, true)
+
   if (bytes === undefined) return undefined
 
   const value = new TextDecoder().decode(bytes)
   const transferEncoding = gmailPartHeader(part, 'content-transfer-encoding')?.toLowerCase()
+
   if (transferEncoding === 'quoted-printable') return decodeQuotedPrintable(value)
+
   if (transferEncoding === 'base64') {
     const transferredBytes = decodeBase64Bytes(value, false)
+
     return transferredBytes === undefined ? undefined : new TextDecoder().decode(transferredBytes)
   }
+
   return value
+}
+
+type GmailThreadAttachmentFields = {
+  partId?: string
+  filename?: string
+  mimeType?: string
+  size?: number
+  attachmentId?: string
+  inline?: boolean
+  contentId?: string
+}
+
+type GmailThreadHeaderFields = {
+  readonly name: string
+  readonly value: string
+}
+
+type GmailThreadMessagePrefixFields = {
+  readonly id: string
+  threadId?: string
+  labelIds?: ReadonlyArray<string>
+  snippet?: string
+  internalDate?: string
+}
+
+type GmailThreadMessageWithHeadersFields = {
+  readonly id: string
+  threadId?: string
+  labelIds?: ReadonlyArray<string>
+  snippet?: string
+  internalDate?: string
+  readonly headers: ReadonlyArray<GmailThreadHeaderFields>
+  body?: string
+  bodyMimeType?: 'text/plain' | 'text/html'
+}
+
+type GmailThreadOutputFields = {
+  readonly id: string
+  historyId?: string
 }
 
 type GmailCollectedParts = {
@@ -358,6 +411,7 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
   const contentId = gmailPartHeader(part, 'content-id')
   const isInline = contentDisposition?.startsWith('inline') === true || contentId !== undefined
   const isTextBody = mimeType === 'text/plain' || mimeType === 'text/html'
+
   const isAttachment =
     hasFilename ||
     attachmentId !== undefined ||
@@ -367,21 +421,49 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
 
   if (isAttachment) {
     collected.attachments.push(
-      GmailThreadAttachment.make({
-        ...(partId === undefined ? {} : { partId }),
-        ...(hasFilename ? { filename } : {}),
-        ...(mimeType === undefined ? {} : { mimeType }),
-        ...(size === undefined ? {} : { size }),
-        ...(attachmentId === undefined ? {} : { attachmentId }),
-        ...(isInline ? { inline: true } : {}),
-        ...(contentId === undefined ? {} : { contentId })
-      })
+      GmailThreadAttachment.make(
+        (() => {
+          const fields: GmailThreadAttachmentFields = {}
+
+          if (partId !== undefined) {
+            fields.partId = partId
+          }
+
+          if (hasFilename) {
+            fields.filename = filename
+          }
+
+          if (mimeType !== undefined) {
+            fields.mimeType = mimeType
+          }
+
+          if (size !== undefined) {
+            fields.size = size
+          }
+
+          if (attachmentId !== undefined) {
+            fields.attachmentId = attachmentId
+          }
+
+          if (isInline) {
+            fields.inline = true
+          }
+
+          if (contentId !== undefined) {
+            fields.contentId = contentId
+          }
+
+          return fields
+        })()
+      )
     )
+
     return
   }
 
   if (mimeType === 'text/plain' || mimeType === 'text/html') {
     const decoded = decodeGmailTextBody(part)
+
     if (decoded !== undefined && decoded.trim() !== '') {
       if (mimeType === 'text/plain') collected.plain.push(decoded)
       else collected.html.push(decoded)
@@ -396,6 +478,7 @@ const collectGmailParts = (part: unknown, collected: GmailCollectedParts): void 
 const gmailAttachmentsFromPayload = (payload: unknown) => {
   const collected: GmailCollectedParts = { plain: [], html: [], attachments: [] }
   collectGmailParts(payload, collected)
+
   return collected.attachments
 }
 
@@ -408,29 +491,65 @@ const normalizeGmailThreadMessage = (
   const bodies = usesPlain ? collected.plain : collected.html
   const body = bodies.length === 0 ? undefined : bodies.join('\n\n')
 
-  return new GmailThreadMessage({
-    id: message.id,
-    ...(message.threadId === undefined ? {} : { threadId: message.threadId }),
-    ...(message.labelIds === undefined ? {} : { labelIds: message.labelIds }),
-    ...(message.snippet === undefined ? {} : { snippet: message.snippet }),
-    ...(message.internalDate === undefined ? {} : { internalDate: message.internalDate }),
-    headers: selectedGmailPartHeaders(message.payload),
-    ...(body === undefined ? {} : { body }),
-    ...(body === undefined ? {} : { bodyMimeType: usesPlain ? 'text/plain' : 'text/html' }),
-    attachments: collected.attachments
-  })
+  return new GmailThreadMessage(
+    (() => {
+      const prefix: GmailThreadMessagePrefixFields = {
+        id: message.id
+      }
+
+      if (message.threadId !== undefined) {
+        prefix.threadId = message.threadId
+      }
+
+      if (message.labelIds !== undefined) {
+        prefix.labelIds = message.labelIds
+      }
+
+      if (message.snippet !== undefined) {
+        prefix.snippet = message.snippet
+      }
+
+      if (message.internalDate !== undefined) {
+        prefix.internalDate = message.internalDate
+      }
+
+      const fields: GmailThreadMessageWithHeadersFields = {
+        ...prefix,
+        headers: selectedGmailPartHeaders(message.payload)
+      }
+
+      if (body !== undefined) {
+        fields.body = body
+      }
+
+      if (body !== undefined) {
+        fields.bodyMimeType = usesPlain ? 'text/plain' : 'text/html'
+      }
+
+      return { ...fields, attachments: collected.attachments }
+    })()
+  )
 }
 
 const normalizeGmailThread = (thread: typeof GmailThreadWireOutput.Type) =>
-  new GmailThreadOutput({
-    id: thread.id,
-    ...(thread.historyId === undefined ? {} : { historyId: thread.historyId }),
-    messages: (thread.messages ?? []).map(normalizeGmailThreadMessage)
-  })
+  new GmailThreadOutput(
+    (() => {
+      const fields: GmailThreadOutputFields = {
+        id: thread.id
+      }
+
+      if (thread.historyId !== undefined) {
+        fields.historyId = thread.historyId
+      }
+
+      return { ...fields, messages: (thread.messages ?? []).map(normalizeGmailThreadMessage) }
+    })()
+  )
 
 const base64UrlToBase64 = (value: string) => {
   const withoutPadding = value.replace(/=+$/, '')
   const base64 = withoutPadding.replaceAll('-', '+').replaceAll('_', '/')
+
   return `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
 }
 
@@ -487,27 +606,33 @@ const hasOnlyAscii = (value: string) => /^[\u0000-\u007f]*$/.test(value)
 const base64Encode = (value: string) => {
   const bytes = new TextEncoder().encode(value)
   let binary = ''
+
   for (const byte of bytes) {
     binary += String.fromCharCode(byte)
   }
+
   return btoa(binary)
 }
 
 const encodeRfc2047 = (value: string) => {
   const safeValue = sanitizeHeader(value)
+
   return hasOnlyAscii(safeValue) ? safeValue : `=?UTF-8?B?${base64Encode(safeValue)}?=`
 }
 
 const encodeEmailAddress = (address: string) => {
   const trimmed = sanitizeHeader(address)
   const angleIndex = trimmed.lastIndexOf('<')
+
   if (angleIndex <= 0) return trimmed
 
   const displayPart = trimmed.slice(0, angleIndex).trim()
   const emailPart = trimmed.slice(angleIndex)
+
   if (displayPart === '') return emailPart
 
   const name = displayPart.replace(/^"(.*)"$/, '$1')
+
   return hasOnlyAscii(name) ? trimmed : `${encodeRfc2047(name)} ${emailPart}`
 }
 
@@ -520,9 +645,11 @@ const encodeAddressList = (addresses: ReadonlyArray<string>) =>
 const base64UrlEncode = (value: string) => {
   const bytes = new TextEncoder().encode(value)
   let binary = ''
+
   for (const byte of bytes) {
     binary += String.fromCharCode(byte)
   }
+
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
@@ -548,6 +675,7 @@ const splitAddresses = (value: string | undefined) => {
 
     if (char === ',' && !inQuotes && !inAngle) {
       const address = current.trim()
+
       if (address !== '') result.push(address)
       current = ''
     } else {
@@ -556,7 +684,9 @@ const splitAddresses = (value: string | undefined) => {
   }
 
   const address = current.trim()
+
   if (address !== '') result.push(address)
+
   return result
 }
 
@@ -576,6 +706,7 @@ const sendAsEmailsFromOutput = (output: GmailListSendAsOutput) =>
 const fetchSendAsOutput = (token: string) =>
   Effect.gen(function* () {
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       gmailRequest({ token, method: 'GET', path: '/users/me/settings/sendAs' })
     )
@@ -590,6 +721,7 @@ const fetchSendAsOutput = (token: string) =>
     }
 
     const output = yield* decodeJsonResponse(GmailListSendAsOutput, response)
+
     return ActionResult.success(output)
   })
 
@@ -607,7 +739,7 @@ const fetchSendAsEmails = (token: string) =>
 
 const fetchOptionalSendAsEmails = (token: string) =>
   fetchSendAsEmails(token).pipe(
-    Effect.map(result => (result._tag === 'Success' ? result.value : new Set<string>()))
+    Effect.map(result => (Predicate.isTagged(result, 'Success') ? result.value : new Set<string>()))
   )
 
 const validateFromAddress = (fromAddress: string, sendAsEmails: ReadonlySet<string>) => {
@@ -629,7 +761,8 @@ const validateOptionalFromAddress = (token: string, fromAddress: string | undefi
     if (fromAddress === undefined) return ActionResult.success(undefined)
 
     const sendAsEmails = yield* fetchSendAsEmails(token)
-    if (sendAsEmails._tag === 'Failure') return sendAsEmails
+
+    if (Predicate.isTagged(sendAsEmails, 'Failure')) return sendAsEmails
 
     return validateFromAddress(fromAddress, sendAsEmails.value)
   })
@@ -640,8 +773,10 @@ const detectReplyFromAddress = (
 ): string | undefined => {
   for (const headerName of ['Delivered-To', 'To', 'Cc']) {
     const header = headerValue(original, headerName)
+
     for (const address of splitAddresses(header)) {
       const email = extractEmailAddress(address)
+
       if (sendAsEmails.has(email)) return email
     }
   }
@@ -674,6 +809,7 @@ const runGmailJsonAction = (
     }
 
     const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+
     return ActionResult.success(output)
   })
 
@@ -688,12 +824,14 @@ export const gmailSearchAction = defineAction({
         integration,
         GoogleGmailReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'q', input.query)
       appendNumberSearchParam(params, 'maxResults', input.maxResults)
       const query = params.toString()
       const url = `${googleGmailApiBaseUrl}/users/me/messages${query === '' ? '' : `?${query}`}`
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -712,6 +850,7 @@ export const gmailSearchAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailSearchOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -727,11 +866,13 @@ export const gmailGetMessageAction = defineAction({
         integration,
         GoogleGmailReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'format', input.format)
       const query = params.toString()
       const url = `${googleGmailApiBaseUrl}/users/me/messages/${encodeURIComponent(input.id)}${query === '' ? '' : `?${query}`}`
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -750,6 +891,7 @@ export const gmailGetMessageAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailMessageOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -769,6 +911,7 @@ export const gmailListAction = defineAction({
         appendNumberSearchParam(params, 'maxResults', input.maxResults)
         appendSearchParam(params, 'pageToken', input.pageToken)
         const query = params.toString()
+
         return gmailRequest({
           token,
           method: 'GET',
@@ -794,6 +937,7 @@ export const gmailListDraftsAction = defineAction({
         appendNumberSearchParam(params, 'maxResults', input.maxResults)
         appendSearchParam(params, 'pageToken', input.pageToken)
         const query = params.toString()
+
         return gmailRequest({
           token,
           method: 'GET',
@@ -818,9 +962,11 @@ export const gmailGetThreadAction = defineAction({
         integration,
         GoogleGmailReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams()
       appendSearchParam(params, 'format', input.format)
+
       const response = yield* http.request(
         gmailRequest({
           token,
@@ -839,6 +985,7 @@ export const gmailGetThreadAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailThreadWireOutput, response)
+
       return ActionResult.success(normalizeGmailThread(output))
     })
 })
@@ -929,10 +1076,13 @@ export const gmailDraftComposeAction = defineAction({
         integration,
         GoogleGmailComposeOAuthCredentialSlot
       )
+
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
-      if (fromValidation._tag === 'Failure') return fromValidation
+
+      if (Predicate.isTagged(fromValidation, 'Failure')) return fromValidation
 
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         gmailRequest({
           token,
@@ -952,6 +1102,7 @@ export const gmailDraftComposeAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -967,10 +1118,13 @@ export const gmailDraftUpdateAction = defineAction({
         integration,
         GoogleGmailComposeOAuthCredentialSlot
       )
+
       const fromValidation = yield* validateOptionalFromAddress(token, input.from)
-      if (fromValidation._tag === 'Failure') return fromValidation
+
+      if (Predicate.isTagged(fromValidation, 'Failure')) return fromValidation
 
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         gmailRequest({
           token,
@@ -990,6 +1144,7 @@ export const gmailDraftUpdateAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailUnknownOutput, response)
+
       return ActionResult.success(output)
     })
 })
@@ -1025,7 +1180,9 @@ export const gmailDraftReplyAction = defineAction({
         integration,
         GoogleGmailDraftReplyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const messageResponse = yield* http.request(
         gmailRequest({
           token,
@@ -1057,43 +1214,52 @@ export const gmailDraftReplyAction = defineAction({
       }
 
       const original = yield* decodeJsonResponse(GmailMessageOutput, messageResponse)
+
       const profile = yield* decodeJsonResponse(
         Schema.Struct({ emailAddress: Schema.optional(Schema.String) }),
         profileResponse
       )
+
       const requestedFrom = input.from
+
       const sendAsEmailsResult =
         requestedFrom === undefined
           ? ActionResult.success(yield* fetchOptionalSendAsEmails(token))
           : yield* fetchSendAsEmails(token).pipe(
               Effect.flatMap(result => {
-                if (result._tag === 'Failure') return Effect.succeed(result)
+                if (Predicate.isTagged(result, 'Failure')) return Effect.succeed(result)
 
                 const fromValidation = validateFromAddress(requestedFrom, result.value)
+
                 return Effect.succeed(
-                  fromValidation._tag === 'Failure'
+                  Predicate.isTagged(fromValidation, 'Failure')
                     ? fromValidation
                     : ActionResult.success(result.value)
                 )
               })
             )
 
-      if (sendAsEmailsResult._tag === 'Failure') return sendAsEmailsResult
+      if (Predicate.isTagged(sendAsEmailsResult, 'Failure')) return sendAsEmailsResult
 
       const ownEmails = new Set([
         ...sendAsEmailsResult.value,
         ...(profile.emailAddress === undefined ? [] : [extractEmailAddress(profile.emailAddress)])
       ])
+
       const fromAddress =
         requestedFrom ?? detectReplyFromAddress(original, sendAsEmailsResult.value)
+
       const recipients = splitAddresses(headerValue(original, 'From'))
         .concat(splitAddresses(headerValue(original, 'To')))
         .concat(splitAddresses(headerValue(original, 'Cc')))
         .filter(address => !ownEmails.has(extractEmailAddress(address)))
+
       const messageId = headerValue(original, 'Message-ID')
+
       const references = [headerValue(original, 'References'), messageId]
         .filter((value): value is string => value !== undefined && value.trim() !== '')
         .join(' ')
+
       const draftResponse = yield* http.request(
         gmailRequest({
           token,
@@ -1125,6 +1291,7 @@ export const gmailDraftReplyAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailUnknownOutput, draftResponse)
+
       return ActionResult.success(output)
     })
 })
@@ -1141,7 +1308,9 @@ export const gmailListAttachmentsAction = defineAction({
         integration,
         GoogleGmailReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         gmailRequest({
           token,
@@ -1160,6 +1329,7 @@ export const gmailListAttachmentsAction = defineAction({
       }
 
       const message = yield* decodeJsonResponse(GmailThreadWireMessage, response)
+
       return ActionResult.success(
         GmailListAttachmentsOutput.make({
           attachments: Chunk.fromIterable(gmailAttachmentsFromPayload(message.payload))
@@ -1180,7 +1350,9 @@ export const gmailGetAttachmentAction = defineAction({
         integration,
         GoogleGmailReadonlyOAuthCredentialSlot
       )
+
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         gmailRequest({
           token,
@@ -1199,6 +1371,7 @@ export const gmailGetAttachmentAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(GmailAttachmentWireOutput, response)
+
       return ActionResult.success(
         GmailGetAttachmentOutput.make({
           messageId: input.messageId,
@@ -1222,6 +1395,7 @@ export const gmailListSendAsAction = defineAction({
         integration,
         GoogleGmailSettingsOAuthCredentialSlot
       )
+
       return yield* fetchSendAsOutput(token)
     })
 })

@@ -1,4 +1,4 @@
-import { Effect, Result } from 'effect'
+import { Effect, Predicate, Result } from 'effect'
 import * as Schema from 'effect/Schema'
 import { resolveCredential } from '../credential.ts'
 import type { CredentialSlot } from '../credential.ts'
@@ -38,14 +38,22 @@ export const listPath = (
   }
 ) => {
   const query = new URLSearchParams()
+
   if (input.page !== undefined) query.set('page', String(input.page))
+
   if (input.limit !== undefined) query.set('limit', String(input.limit))
+
   if (input.lastModified !== undefined) query.set('lastmodified', input.lastModified)
+
   if (input.search !== undefined) query.set(input.search.field, input.search.value)
+
   if (input.filter !== undefined) query.set('filter', input.filter)
+
   if (input.fromDate !== undefined) query.set('fromdate', input.fromDate)
+
   if (input.toDate !== undefined) query.set('todate', input.toDate)
   const suffix = query.toString()
+
   return suffix === '' ? resource : `${resource}?${suffix}`
 }
 
@@ -79,17 +87,22 @@ const providerFailure = (response: ConnectorHttpResponse) =>
     const parsed = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(
       response.body
     ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(ErrorEnvelope)), Effect.result)
+
     const detail = Result.isSuccess(parsed) ? parsed.success.ErrorInformation : undefined
     const message = detail?.message ?? detail?.Message
     const providerCode = detail?.code ?? detail?.Code
+
     const retryAfter = Object.entries(response.headers).find(
       ([key]) => key.toLowerCase() === 'retry-after'
     )?.[1]
+
     // Delta-seconds only. Hosts own HTTP-date handling, scheduling, and retry policy.
     const seconds =
       retryAfter !== undefined && /^\d+$/.test(retryAfter) ? Number(retryAfter) : undefined
+
     const retryAfterMs =
       seconds !== undefined && Number.isSafeInteger(seconds * 1000) ? seconds * 1000 : undefined
+
     return ActionResult.failure({
       code: failureCode(response.status),
       message: message?.trim() ? message : `Fortnox request failed (HTTP ${response.status})`,
@@ -108,8 +121,9 @@ export const readFortnox = <A, B>(
 ) =>
   Effect.gen(function* () {
     const credential = yield* resolveCredential(integration, slot)
+
     if (
-      credential._tag !== 'OAuthCredential' ||
+      !Predicate.isTagged(credential, 'OAuthCredential') ||
       credential.provider !== 'fortnox' ||
       !/^[\x21-\x7e]+$/.test(credential.accessToken)
     ) {
@@ -122,7 +136,9 @@ export const readFortnox = <A, B>(
         })
       )
     }
+
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       ConnectorHttpRequest.make({
         method: 'GET',
@@ -130,7 +146,9 @@ export const readFortnox = <A, B>(
         headers: { authorization: `Bearer ${credential.accessToken}`, accept: 'application/json' }
       })
     )
+
     if (response.status < 200 || response.status >= 300) return yield* providerFailure(response)
     const decoded = yield* decodeJsonResponse(schema, response)
+
     return ActionResult.success(map(decoded))
   })

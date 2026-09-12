@@ -10,6 +10,7 @@ import { MicrosoftOAuthCredentialSlot } from './oauth.ts'
 export const microsoftGraphApiBaseUrl = 'https://graph.microsoft.com/v1.0'
 
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown)
+
 const isJsonObject = Schema.is(JsonObject)
 
 export const resolveMicrosoftAccessToken = (
@@ -42,6 +43,7 @@ const decodeJsonObject = (body: string) =>
     Effect.result,
     Effect.map(result => {
       if (Result.isFailure(result) || !isJsonObject(result.success)) return undefined
+
       return result.success
     })
   )
@@ -51,8 +53,10 @@ const graphErrorDetail = (body: string) =>
     Effect.map(parsed => {
       if (parsed === undefined) return undefined
       const error = parsed.error
+
       if (!isJsonObject(error)) return undefined
       const message = error.message
+
       return typeof message === 'string' && message.trim() !== '' ? message : undefined
     })
   )
@@ -83,8 +87,10 @@ const providerCode = (fallback: string, status: number) => {
 
 const retryAfterMs = (headers: Readonly<Record<string, string>>) => {
   const retryAfter = headers['retry-after'] ?? headers['Retry-After']
+
   if (retryAfter === undefined) return undefined
   const seconds = Number(retryAfter)
+
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined
 }
 
@@ -98,6 +104,7 @@ export const microsoftProviderFailure = (input: {
   graphErrorDetail(input.body).pipe(
     Effect.map(detail => {
       const retryAfter = retryAfterMs(input.headers)
+
       return ActionResult.failure(
         new ProviderFailure({
           code: providerCode(input.code, input.status),

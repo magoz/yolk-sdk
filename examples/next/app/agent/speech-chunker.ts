@@ -10,9 +10,13 @@ export type SpeechChunkerResult = {
 export const emptySpeechChunkerState: SpeechChunkerState = { pending: '' }
 
 const minSpeechChunkChars = 24
+
 const maxSpeechChunkChars = 280
+
 const whitespace = /\s/u
+
 const terminalMarks = new Set(['.', '!', '?', '…'])
+
 const closingMarks = new Set(['"', "'", '”', '’', ')', ']', '}'])
 
 const isWhitespace = (value: string | undefined) => value !== undefined && whitespace.test(value)

@@ -25,9 +25,13 @@ export type OpenAiSpeechConfig = {
 }
 
 const defaultSpeechUrl = 'https://api.openai.com/v1/audio/speech'
+
 const defaultTranscriptionUrl = 'https://api.openai.com/v1/audio/transcriptions'
+
 const defaultSpeechModel = 'gpt-4o-mini-tts'
+
 const defaultTranscriptionModel = 'gpt-4o-mini-transcribe'
+
 const defaultVoice = 'alloy'
 
 const audioMimeTypes: Readonly<Record<string, string>> = {
@@ -114,6 +118,7 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
           Effect.gen(function* () {
             const outputFormat = request.outputFormat ?? 'mp3'
             const instructions = request.instructions ?? config.defaultInstructions
+
             const body = yield* encodeSpeechBody({
               model: request.model ?? config.defaultSpeechModel ?? defaultSpeechModel,
               input: request.text,
@@ -129,6 +134,7 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
                   })
               )
             )
+
             const httpRequest = HttpClientRequest.post(config.speechUrl ?? defaultSpeechUrl).pipe(
               HttpClientRequest.setHeaders({
                 authorization: `Bearer ${Redacted.value(config.apiKey)}`,
@@ -136,6 +142,7 @@ export const makeOpenAiSpeechSynthesizerLayer = (config: OpenAiSpeechConfig) =>
               }),
               HttpClientRequest.bodyText(body, 'application/json')
             )
+
             const response = yield* client
               .execute(httpRequest)
               .pipe(Effect.mapError(httpFailure('OpenAI speech request failed')))
@@ -178,8 +185,10 @@ export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
               new Blob([request.audio.slice().buffer], { type: request.mimeType }),
               transcriptionFilename(request.mimeType)
             )
+
             const model =
               request.model ?? config.defaultTranscriptionModel ?? defaultTranscriptionModel
+
             formData.set('model', model)
             formData.set('response_format', transcriptionResponseFormat(model))
 
@@ -199,6 +208,7 @@ export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
               }),
               HttpClientRequest.setBody(HttpBody.formData(formData))
             )
+
             const response = yield* client
               .execute(httpRequest)
               .pipe(Effect.mapError(httpFailure('OpenAI transcription request failed')))
@@ -210,6 +220,7 @@ export const makeOpenAiTranscriberLayer = (config: OpenAiSpeechConfig) =>
             const payload = yield* response.json.pipe(
               Effect.mapError(httpFailure('Could not read OpenAI transcription response'))
             )
+
             const decoded = yield* decodeTranscriptionResponse(payload).pipe(
               Effect.mapError(
                 () =>

@@ -1,0 +1,22 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": [],
+  "jsPlugins": ["./index.js"],
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "local/no-disable-validation": "error",
+    "local/no-catch-all-cause": "error",
+    "local/no-schema-from-self": "error",
+    "local/no-schema-decode-sync": "error",
+    "local/no-node-deps-in-agent-tools": "error",
+    "local/prefer-option-from-nullable": "warn"
+  }
+}

@@ -76,12 +76,14 @@ const makeEmailClientLayer = (input?: {
   readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
 }) => {
   const requests = input?.requests ?? makeRequests()
+
   return Layer.succeed(
     EmailClient,
     EmailClient.of({
       listMessages: request =>
         Effect.sync(() => {
           requests.list.push(request)
+
           return (
             input?.listResult ??
             ActionResult.success<EmailListMessagesOutput>({
@@ -99,11 +101,13 @@ const makeEmailClientLayer = (input?: {
       getMessage: request =>
         Effect.sync(() => {
           requests.get.push(request)
+
           return ActionResult.success({ message })
         }),
       getAttachment: request =>
         Effect.sync(() => {
           requests.attachment.push(request)
+
           return (
             input?.attachmentResult ??
             ActionResult.success({
@@ -121,6 +125,7 @@ const makeEmailClientLayer = (input?: {
       createDraft: request =>
         Effect.sync(() => {
           requests.draft.push(request)
+
           return ActionResult.success(
             EmailCreateDraftOutput.make({
               saved: true,
@@ -132,6 +137,7 @@ const makeEmailClientLayer = (input?: {
       sendMessage: request =>
         Effect.sync(() => {
           requests.send.push(request)
+
           return ActionResult.success(
             EmailSendMessageOutput.make({ accepted: true, submissionId: 'submission-1' })
           )
@@ -147,16 +153,19 @@ const makeHostLayer = (input?: {
   readonly attachmentResult?: ActionResultType<EmailGetAttachmentOutput>
 }) => {
   const refs = input?.refs ?? []
+
   const credentials = Layer.succeed(
     CredentialResolver,
     CredentialResolver.of({
       resolve: request =>
         Effect.sync(() => {
           refs.push(request.binding.credentialRef)
+
           return usernamePassword
         })
     })
   )
+
   return Layer.merge(credentials, makeEmailClientLayer(input))
 }
 
@@ -164,6 +173,7 @@ const incomingBinding = makeCredentialBinding({
   slotId: EmailIncomingCredentialSlot.id,
   credentialRef: 'incoming-credential'
 })
+
 const smtpBinding = makeCredentialBinding({
   slotId: EmailSmtpCredentialSlot.id,
   credentialRef: 'smtp-credential'
@@ -201,6 +211,7 @@ describe('generic email connector', () => {
         [makeConnectorToolModule(EmailConnector, { integration, layer: makeHostLayer() })],
         {}
       )
+
       const tool = toolSet.tools.find(candidate => candidate.name === 'email.get_attachment')
       const schema = JSON.stringify(tool?.parameters)
 
@@ -216,6 +227,7 @@ describe('generic email connector', () => {
         size: 4,
         contentBase64: 'not-base64'
       }).pipe(Effect.result)
+
       const invalidSize = yield* Schema.decodeUnknownEffect(EmailAttachmentContent)({
         id: 'mime-part-2',
         size: -1,
@@ -233,6 +245,7 @@ describe('generic email connector', () => {
       config: { incomingHost: 'imap.example.com' },
       credentialBindings: [incomingBinding]
     })
+
     const attachmentResult = ActionResult.success<EmailGetAttachmentOutput>({
       attachment: {
         id: 'mime-part-2',
@@ -261,6 +274,7 @@ describe('generic email connector', () => {
       config: { incomingHost: 'imap.example.com' },
       credentialBindings: [incomingBinding]
     })
+
     const legacyClient = Layer.succeed(
       EmailClient,
       EmailClient.of({
@@ -279,6 +293,7 @@ describe('generic email connector', () => {
           Effect.succeed(ActionResult.success(EmailSendMessageOutput.make({ accepted: true })))
       })
     )
+
     const credentials = Layer.succeed(
       CredentialResolver,
       CredentialResolver.of({ resolve: () => Effect.succeed(usernamePassword) })
@@ -304,6 +319,7 @@ describe('generic email connector', () => {
 
   it.effect('applies incoming defaults and dispatches normalized list input', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -335,6 +351,7 @@ describe('generic email connector', () => {
 
   it.effect('retrieves decoded IMAP attachment content as base64', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -381,6 +398,7 @@ describe('generic email connector', () => {
 
   it.effect('saves recipient-less drafts through IMAP and allows an explicit folder', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -420,6 +438,7 @@ describe('generic email connector', () => {
 
   it.effect('leaves an omitted draft folder for host mailbox discovery', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -433,16 +452,15 @@ describe('generic email connector', () => {
         input: { message: { to: [], body: { text: 'Unfiled draft' } } }
       })
 
-      expect(result).toMatchObject({
-        _tag: 'Success',
-        value: { saved: true, folder: 'Drafts' }
-      })
+      expect(result._tag).toBe('Success')
+      expect(result).toMatchObject({ value: { saved: true, folder: 'Drafts' } })
       expect(requests.draft[0]?.folder).toBeUndefined()
     }).pipe(Effect.provide(makeHostLayer({ requests })))
   })
 
   it.effect('rejects empty explicit draft folders before dispatch', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -466,6 +484,7 @@ describe('generic email connector', () => {
 
   it.effect('applies SMTP defaults and reports accepted submission without delivery claims', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { smtpHost: 'smtp.example.com' },
@@ -504,6 +523,7 @@ describe('generic email connector', () => {
   it.effect('honors POP3 and SMTP connection overrides and separate credential bindings', () => {
     const requests = makeRequests()
     const refs: Array<string> = []
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: {
@@ -561,6 +581,7 @@ describe('generic email connector', () => {
       config: { incomingHost: 'imap.example.com' },
       credentialBindings: [incomingBinding]
     })
+
     const smtp = makeIntegration({
       connectorId: 'email',
       config: { smtpHost: 'smtp.example.com' },
@@ -573,11 +594,13 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       })
+
       const sent = yield* EmailConnector.invoke({
         integration: smtp,
         action: 'email.send_message',
         input: { message: { to: [{ address: 'bob@example.com' }], body: { text: 'Hi' } } }
       })
+
       expect(listed._tag).toBe('Success')
       expect(sent._tag).toBe('Success')
     }).pipe(Effect.provide(makeHostLayer()))
@@ -585,6 +608,7 @@ describe('generic email connector', () => {
 
   it.effect('rejects a folder for POP3 list, get, and attachment actions before dispatch', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingProtocol: 'pop3', incomingHost: 'pop.example.com' },
@@ -597,11 +621,13 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: { folder: 'Archive' }
       }).pipe(Effect.result)
+
       const fetched = yield* EmailConnector.invoke({
         integration,
         action: 'email.get_message',
         input: { messageId: 'message-1', folder: 'Archive' }
       }).pipe(Effect.result)
+
       const attachment = yield* EmailConnector.invoke({
         integration,
         action: 'email.get_attachment',
@@ -631,6 +657,7 @@ describe('generic email connector', () => {
     () => {
       const requests = makeRequests()
       const refs: Array<string> = []
+
       const integration = makeIntegration({
         connectorId: 'email',
         config: { incomingProtocol: 'pop3', incomingHost: 'pop.example.com' },
@@ -656,6 +683,7 @@ describe('generic email connector', () => {
 
   it.effect('rejects recipient-less SMTP messages but permits BCC-only submission', () => {
     const requests = makeRequests()
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { smtpHost: 'smtp.example.com' },
@@ -668,6 +696,7 @@ describe('generic email connector', () => {
         action: 'email.send_message',
         input: { message: { to: [], body: {} } }
       }).pipe(Effect.result)
+
       const accepted = yield* EmailConnector.invoke({
         integration,
         action: 'email.send_message',
@@ -695,6 +724,7 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       }).pipe(Effect.result)
+
       const missingCredential = yield* EmailConnector.invoke({
         integration: makeIntegration({
           connectorId: 'email',
@@ -721,6 +751,7 @@ describe('generic email connector', () => {
       config: { incomingHost: 'imap.example.com', incomingPort: 70_000 },
       credentialBindings: [incomingBinding]
     })
+
     const invalidCredentialLayer = Layer.succeed(
       CredentialResolver,
       CredentialResolver.of({
@@ -735,6 +766,7 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       }).pipe(Effect.result)
+
       expect(invalidPort).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', cause: 'validation_failed' }
@@ -749,6 +781,7 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       }).pipe(Effect.result)
+
       expect(invalidCredential).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', cause: 'credential_invalid' }
@@ -761,6 +794,7 @@ describe('generic email connector', () => {
       code: 'authentication_rejected',
       message: 'The server rejected authentication'
     })
+
     const integration = makeIntegration({
       connectorId: 'email',
       config: { incomingHost: 'imap.example.com' },
@@ -773,11 +807,13 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       })
+
       const attachmentResult = yield* EmailConnector.invoke({
         integration,
         action: 'email.get_attachment',
         input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
       })
+
       expect(listResult).toEqual(rejection)
       expect(attachmentResult).toEqual(rejection)
     }).pipe(Effect.provide(makeHostLayer({ listResult: rejection, attachmentResult: rejection })))
@@ -789,6 +825,7 @@ describe('generic email connector', () => {
       config: { incomingHost: 'imap.example.com' },
       credentialBindings: [incomingBinding]
     })
+
     const failingClient = Layer.succeed(
       EmailClient,
       EmailClient.of({
@@ -821,11 +858,13 @@ describe('generic email connector', () => {
         action: 'email.list_messages',
         input: {}
       }).pipe(Effect.result)
+
       const attachmentResult = yield* EmailConnector.invoke({
         integration,
         action: 'email.get_attachment',
         input: { messageId: 'message-1', attachmentId: 'mime-part-2' }
       }).pipe(Effect.result)
+
       expect(listResult).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'ConnectorError', message: 'Transport unavailable' }

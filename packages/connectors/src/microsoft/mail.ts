@@ -22,8 +22,11 @@ import {
   microsoftProviderFailure,
   resolveMicrosoftAccessToken
 } from './shared.ts'
+
 export const microsoftMailboxAccessModeConfigKey = 'mailboxAccessMode'
+
 export const MicrosoftMailboxAccessMode = Schema.Literals(['delegated', 'application'])
+
 export type MicrosoftMailboxAccessMode = typeof MicrosoftMailboxAccessMode.Type
 
 const OutlookPageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000 }))
@@ -198,9 +201,11 @@ export class OutlookUntrashInput extends Schema.Class<OutlookUntrashInput>('Outl
 }) {}
 
 export const OutlookAttachmentKind = Schema.Literals(['file', 'item', 'reference', 'unknown'])
+
 export type OutlookAttachmentKind = typeof OutlookAttachmentKind.Type
 
 const OutlookAttachmentSize = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+
 const OutlookAttachmentBase64 = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)
 )
@@ -304,36 +309,101 @@ const outlookAttachmentKind = (
   }
 }
 
+type OutlookAttachmentMetadataFields = {
+  readonly id: string
+  readonly kind: OutlookAttachmentKind
+  name?: string | null
+  contentType?: string | null
+  size?: number
+  isInline?: boolean
+  contentId?: string | null
+  lastModifiedDateTime?: string
+}
+
+type OutlookFileAttachmentFields = {
+  readonly id: string
+  readonly kind: 'file'
+  name?: string | null
+  contentType?: string | null
+  size?: number
+  isInline?: boolean
+  contentId?: string | null
+  lastModifiedDateTime?: string
+}
+
 const outlookAttachmentMetadata = (
   attachment: typeof OutlookAttachmentApi.Type
 ): OutlookAttachmentMetadata =>
-  OutlookAttachmentMetadata.make({
-    id: attachment.id,
-    kind: outlookAttachmentKind(attachment['@odata.type']),
-    ...(attachment.name === undefined ? {} : { name: attachment.name }),
-    ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
-    ...(attachment.size === undefined ? {} : { size: attachment.size }),
-    ...(attachment.isInline === undefined ? {} : { isInline: attachment.isInline }),
-    ...(attachment.contentId === undefined ? {} : { contentId: attachment.contentId }),
-    ...(attachment.lastModifiedDateTime === undefined
-      ? {}
-      : { lastModifiedDateTime: attachment.lastModifiedDateTime })
-  })
+  OutlookAttachmentMetadata.make(
+    (() => {
+      const fields: OutlookAttachmentMetadataFields = {
+        id: attachment.id,
+        kind: outlookAttachmentKind(attachment['@odata.type'])
+      }
+
+      if (attachment.name !== undefined) {
+        fields.name = attachment.name
+      }
+
+      if (attachment.contentType !== undefined) {
+        fields.contentType = attachment.contentType
+      }
+
+      if (attachment.size !== undefined) {
+        fields.size = attachment.size
+      }
+
+      if (attachment.isInline !== undefined) {
+        fields.isInline = attachment.isInline
+      }
+
+      if (attachment.contentId !== undefined) {
+        fields.contentId = attachment.contentId
+      }
+
+      if (attachment.lastModifiedDateTime !== undefined) {
+        fields.lastModifiedDateTime = attachment.lastModifiedDateTime
+      }
+
+      return fields
+    })()
+  )
 
 const outlookAttachment = (attachment: typeof OutlookFileAttachmentApi.Type): OutlookAttachment =>
-  OutlookAttachment.make({
-    id: attachment.id,
-    kind: 'file',
-    ...(attachment.name === undefined ? {} : { name: attachment.name }),
-    ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
-    ...(attachment.size === undefined ? {} : { size: attachment.size }),
-    ...(attachment.isInline === undefined ? {} : { isInline: attachment.isInline }),
-    ...(attachment.contentId === undefined ? {} : { contentId: attachment.contentId }),
-    ...(attachment.lastModifiedDateTime === undefined
-      ? {}
-      : { lastModifiedDateTime: attachment.lastModifiedDateTime }),
-    contentBase64: attachment.contentBytes
-  })
+  OutlookAttachment.make(
+    (() => {
+      const fields: OutlookFileAttachmentFields = {
+        id: attachment.id,
+        kind: 'file'
+      }
+
+      if (attachment.name !== undefined) {
+        fields.name = attachment.name
+      }
+
+      if (attachment.contentType !== undefined) {
+        fields.contentType = attachment.contentType
+      }
+
+      if (attachment.size !== undefined) {
+        fields.size = attachment.size
+      }
+
+      if (attachment.isInline !== undefined) {
+        fields.isInline = attachment.isInline
+      }
+
+      if (attachment.contentId !== undefined) {
+        fields.contentId = attachment.contentId
+      }
+
+      if (attachment.lastModifiedDateTime !== undefined) {
+        fields.lastModifiedDateTime = attachment.lastModifiedDateTime
+      }
+
+      return { ...fields, contentBase64: attachment.contentBytes }
+    })()
+  )
 
 export class OutlookComposeInput extends Schema.Class<OutlookComposeInput>('OutlookComposeInput')({
   mailbox: Schema.optional(Schema.String),
@@ -377,17 +447,71 @@ const outlookContentType = (contentType: 'text' | 'html' | undefined) =>
 const outlookRecipients = (addresses: ReadonlyArray<string>) =>
   addresses.map(address => ({ emailAddress: { address } }))
 
-const outlookMessageBody = (input: OutlookComposeInput | OutlookSendMailInput) => ({
-  subject: input.subject,
-  body: {
-    contentType: outlookContentType(input.contentType),
-    content: input.body
-  },
-  toRecipients: outlookRecipients(input.to),
-  ...(input.mailbox === undefined ? {} : { from: { emailAddress: { address: input.mailbox } } }),
-  ...(input.cc === undefined ? {} : { ccRecipients: outlookRecipients(input.cc) }),
-  ...(input.bcc === undefined ? {} : { bccRecipients: outlookRecipients(input.bcc) })
-})
+type OutlookGraphRecipientFields = {
+  readonly emailAddress: {
+    readonly address: string
+  }
+}
+
+type OutlookGraphMessageBodyFields = {
+  readonly contentType: 'HTML' | 'Text'
+  readonly content: string
+}
+
+type OutlookGraphMessageFields = {
+  readonly subject: string
+  readonly body: OutlookGraphMessageBodyFields
+  readonly toRecipients: ReadonlyArray<OutlookGraphRecipientFields>
+  from?: {
+    readonly emailAddress: {
+      readonly address: string
+    }
+  }
+  ccRecipients?: ReadonlyArray<OutlookGraphRecipientFields>
+  bccRecipients?: ReadonlyArray<OutlookGraphRecipientFields>
+}
+
+const outlookMessageBody = (
+  input: OutlookComposeInput | OutlookSendMailInput
+): OutlookGraphMessageFields => {
+  const message: OutlookGraphMessageFields = {
+    subject: input.subject,
+    body: {
+      contentType: outlookContentType(input.contentType),
+      content: input.body
+    },
+    toRecipients: outlookRecipients(input.to)
+  }
+
+  if (input.mailbox !== undefined) {
+    message.from = { emailAddress: { address: input.mailbox } }
+  }
+
+  if (input.cc !== undefined) {
+    message.ccRecipients = outlookRecipients(input.cc)
+  }
+
+  if (input.bcc !== undefined) {
+    message.bccRecipients = outlookRecipients(input.bcc)
+  }
+
+  return message
+}
+
+type OutlookSendMailPayloadFields = {
+  readonly message: OutlookGraphMessageFields
+  saveToSentItems?: boolean
+}
+
+type OutlookListMessagesOutputFields = {
+  readonly messages: ReadonlyArray<OutlookMessage>
+  nextLink?: string
+}
+
+type OutlookListAttachmentsOutputFields = {
+  readonly attachments: Chunk.Chunk<OutlookAttachmentMetadata>
+  nextLink?: string
+}
 
 const outlookReadHeaders = (token: string, includeBody: boolean) => ({
   ...microsoftAuthorizationHeaders(token),
@@ -434,10 +558,12 @@ const requireMicrosoftNextLink = (
 
   const parsed = new URL(nextLink)
   const mailboxRoot = `/v1.0${outlookMailboxPath(mailbox)}`
+
   const selectedMessagesPath =
     folderId === undefined
       ? `${mailboxRoot}/messages`
       : `${mailboxRoot}/mailFolders/${encodeURIComponent(folderId)}/messages`
+
   const isGraphV1Url =
     parsed.protocol === 'https:' &&
     parsed.hostname === 'graph.microsoft.com' &&
@@ -462,6 +588,7 @@ const requireMicrosoftAttachmentNextLink = (
 
   const parsed = new URL(nextLink)
   const selectedAttachmentsPath = `/v1.0${outlookMailboxPath(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments`
+
   const isGraphV1Url =
     parsed.protocol === 'https:' &&
     parsed.hostname === 'graph.microsoft.com' &&
@@ -477,6 +604,7 @@ const requireMicrosoftAttachmentNextLink = (
 
 const outlookMessagesPath = (mailbox: string | undefined, folderId: string | undefined) => {
   const mailboxPath = outlookMailboxPath(mailbox)
+
   return folderId === undefined
     ? `${mailboxPath}/messages`
     : `${mailboxPath}/mailFolders/${encodeURIComponent(folderId)}/messages`
@@ -484,6 +612,7 @@ const outlookMessagesPath = (mailbox: string | undefined, folderId: string | und
 
 const mailboxAccessMode = (integration: ConnectorIntegration) => {
   const configured = optionalStringConfig(integration, microsoftMailboxAccessModeConfigKey)
+
   if (configured === undefined) return Effect.succeed<MicrosoftMailboxAccessMode>('delegated')
 
   return Schema.decodeUnknownEffect(MicrosoftMailboxAccessMode)(configured).pipe(
@@ -518,6 +647,7 @@ export const outlookReadSlot = (integration: ConnectorIntegration, mailbox: stri
   Effect.gen(function* () {
     const accessMode = yield* mailboxAccessMode(integration)
     yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)
+
     return mailbox === undefined || accessMode === 'application'
       ? MicrosoftOutlookReadOAuthCredentialSlot
       : MicrosoftOutlookSharedReadOAuthCredentialSlot
@@ -527,6 +657,7 @@ const outlookWriteSlot = (integration: ConnectorIntegration, mailbox: string | u
   Effect.gen(function* () {
     const accessMode = yield* mailboxAccessMode(integration)
     yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)
+
     return mailbox === undefined || accessMode === 'application'
       ? MicrosoftOutlookWriteOAuthCredentialSlot
       : MicrosoftOutlookSharedWriteOAuthCredentialSlot
@@ -536,6 +667,7 @@ const outlookSendSlot = (integration: ConnectorIntegration, mailbox: string | un
   Effect.gen(function* () {
     const accessMode = yield* mailboxAccessMode(integration)
     yield* requireMailboxForApplicationAccess(integration, mailbox, accessMode)
+
     return mailbox === undefined || accessMode === 'application'
       ? MicrosoftOutlookSendOAuthCredentialSlot
       : MicrosoftOutlookSharedSendOAuthCredentialSlot
@@ -553,11 +685,15 @@ const outlookListUrl = (input: OutlookListMessagesInput) => {
 
   const params = new URLSearchParams()
   params.set('$select', outlookListSelect)
+
   if (input.top !== undefined) params.set('$top', String(input.top))
+
   if (input.filter !== undefined && input.filter.trim() !== '') params.set('$filter', input.filter)
+
   if (input.orderBy !== undefined && input.orderBy.trim() !== '') {
     params.set('$orderby', input.orderBy)
   }
+
   return Effect.succeed(
     `${microsoftGraphApiBaseUrl}${outlookMessagesPath(input.mailbox, input.folderId)}?${params.toString()}`
   )
@@ -578,7 +714,9 @@ const outlookSearchUrl = (input: OutlookSearchMessagesInput) => {
   const params = new URLSearchParams()
   params.set('$search', `"${escapedSearchQuery(input.query)}"`)
   params.set('$select', outlookListSelect)
+
   if (input.top !== undefined) params.set('$top', String(input.top))
+
   return Effect.succeed(
     `${microsoftGraphApiBaseUrl}${outlookMessagesPath(input.mailbox, input.folderId)}?${params.toString()}`
   )
@@ -596,6 +734,7 @@ const outlookMessagesAction = (input: {
     const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
     const url = yield* input.url
     const http = yield* ConnectorHttpClient
+
     const response = yield* http.request(
       ConnectorHttpRequest.make({
         method: 'GET',
@@ -615,11 +754,21 @@ const outlookMessagesAction = (input: {
     }
 
     const output = yield* decodeJsonResponse(OutlookMessagesApiOutput, response)
+
     return ActionResult.success(
-      OutlookListMessagesOutput.make({
-        messages: output.value,
-        ...(output['@odata.nextLink'] === undefined ? {} : { nextLink: output['@odata.nextLink'] })
-      })
+      OutlookListMessagesOutput.make(
+        (() => {
+          const fields: OutlookListMessagesOutputFields = {
+            messages: output.value
+          }
+
+          if (output['@odata.nextLink'] !== undefined) {
+            fields.nextLink = output['@odata.nextLink']
+          }
+
+          return fields
+        })()
+      )
     )
   })
 
@@ -664,6 +813,7 @@ export const outlookGetMessageAction = defineAction({
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
       const params = new URLSearchParams({ $select: outlookMessageSelect })
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -683,6 +833,7 @@ export const outlookGetMessageAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OutlookMessage, response)
+
       return ActionResult.success(output)
     })
 })
@@ -697,17 +848,21 @@ export const outlookListAttachmentsAction = defineAction({
       const slot = yield* outlookReadSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const url = yield* (() => {
         if (input.nextLink !== undefined) {
           return requireMicrosoftAttachmentNextLink(input.nextLink, input.mailbox, input.messageId)
         }
 
         const params = new URLSearchParams({ $select: outlookAttachmentSelect })
+
         if (input.top !== undefined) params.set('$top', String(input.top))
+
         return Effect.succeed(
           `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/messages/${encodeURIComponent(input.messageId)}/attachments?${params.toString()}`
         )
       })()
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -727,13 +882,21 @@ export const outlookListAttachmentsAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OutlookAttachmentsApiOutput, response)
+
       return ActionResult.success(
-        OutlookListAttachmentsOutput.make({
-          attachments: Chunk.fromIterable(output.value.map(outlookAttachmentMetadata)),
-          ...(output['@odata.nextLink'] === undefined
-            ? {}
-            : { nextLink: output['@odata.nextLink'] })
-        })
+        OutlookListAttachmentsOutput.make(
+          (() => {
+            const fields: OutlookListAttachmentsOutputFields = {
+              attachments: Chunk.fromIterable(output.value.map(outlookAttachmentMetadata))
+            }
+
+            if (output['@odata.nextLink'] !== undefined) {
+              fields.nextLink = output['@odata.nextLink']
+            }
+
+            return fields
+          })()
+        )
       )
     })
 })
@@ -748,6 +911,7 @@ export const outlookGetAttachmentAction = defineAction({
       const slot = yield* outlookReadSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'GET',
@@ -767,6 +931,7 @@ export const outlookGetAttachmentAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OutlookFileAttachmentApi, response)
+
       return ActionResult.success(
         OutlookGetAttachmentOutput.make({ attachment: outlookAttachment(output) })
       )
@@ -784,6 +949,7 @@ export const outlookCreateDraftAction = defineAction({
       const slot = yield* outlookWriteSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -804,6 +970,7 @@ export const outlookCreateDraftAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OutlookMessage, response)
+
       return ActionResult.success(output)
     })
 })
@@ -819,6 +986,7 @@ export const outlookCreateReplyDraftAction = defineAction({
       const slot = yield* outlookWriteSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -846,6 +1014,7 @@ export const outlookCreateReplyDraftAction = defineAction({
       }
 
       const output = yield* decodeJsonResponse(OutlookMessage, response)
+
       return ActionResult.success(output)
     })
 })
@@ -861,17 +1030,25 @@ export const outlookSendMailAction = defineAction({
       const slot = yield* outlookSendSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
           url: `${microsoftGraphApiBaseUrl}${outlookMailboxPath(input.mailbox)}/sendMail`,
           headers: outlookWriteHeaders(token),
-          body: JSON.stringify({
-            message: outlookMessageBody(input),
-            ...(input.saveToSentItems === undefined
-              ? {}
-              : { saveToSentItems: input.saveToSentItems })
-          })
+          body: JSON.stringify(
+            (() => {
+              const payload: OutlookSendMailPayloadFields = {
+                message: outlookMessageBody(input)
+              }
+
+              if (input.saveToSentItems !== undefined) {
+                payload.saveToSentItems = input.saveToSentItems
+              }
+
+              return payload
+            })()
+          )
         })
       )
 
@@ -900,6 +1077,7 @@ export const outlookSendDraftAction = defineAction({
       const slot = yield* outlookSendSlot(integration, input.mailbox)
       const token = yield* resolveMicrosoftAccessToken(integration, slot)
       const http = yield* ConnectorHttpClient
+
       const response = yield* http.request(
         ConnectorHttpRequest.make({
           method: 'POST',
@@ -934,9 +1112,12 @@ const outlookMutateMessage = (input: {
     const token = yield* resolveMicrosoftAccessToken(input.integration, slot)
     const http = yield* ConnectorHttpClient
     const mailboxPath = outlookMailboxPath(input.mailbox)
+
     const collection =
       input.operation === 'untrash' ? `${mailboxPath}/mailFolders/deleteditems` : mailboxPath
+
     const suffix = input.operation === 'set_read' ? '' : '/move'
+
     const response = yield* http.request(
       ConnectorHttpRequest.make({
         method: input.operation === 'set_read' ? 'PATCH' : 'POST',
@@ -945,6 +1126,7 @@ const outlookMutateMessage = (input: {
         body: JSON.stringify(input.body)
       })
     )
+
     if (!isMicrosoftSuccessStatus(response.status)) {
       return yield* microsoftProviderFailure({
         code: `outlook_${input.operation}_failed`,
@@ -954,7 +1136,9 @@ const outlookMutateMessage = (input: {
         body: response.body
       })
     }
+
     const output = yield* decodeJsonResponse(OutlookMessage, response)
+
     return ActionResult.success(output)
   })
 

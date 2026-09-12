@@ -3,14 +3,23 @@ import * as Schema from 'effect/Schema'
 import { OAuthAccessToken, TokenBrokerRequest, type TokenBrokerClient } from '@yolk-sdk/agent/oauth'
 
 export const xAiGrokProviderId = 'xai-grok'
+
 export const xAiGrokResponsesUrl = 'https://cli-chat-proxy.grok.com/v1/responses'
+
 export const xAiGrokAuthIssuer = 'https://auth.x.ai'
+
 export const xAiGrokClientId = 'b1a00492-073a-47ea-816f-4c329264a828'
+
 export const xAiGrokAuthorizeUrl = `${xAiGrokAuthIssuer}/oauth2/authorize`
+
 export const xAiGrokTokenEndpoint = `${xAiGrokAuthIssuer}/oauth2/token`
+
 export const xAiGrokDeviceCodeEndpoint = `${xAiGrokAuthIssuer}/oauth2/device/code`
+
 export const xAiGrokDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code'
+
 export const xAiGrokRedirectUri = 'http://127.0.0.1:56121/callback'
+
 export const xAiGrokScopes = [
   'openid',
   'profile',
@@ -19,6 +28,7 @@ export const xAiGrokScopes = [
   'grok-cli:access',
   'api:access'
 ].join(' ')
+
 export const xAiGrokRefreshBufferMs = 5 * 60 * 1000
 
 export class XAiGrokOAuthToken extends Schema.Class<XAiGrokOAuthToken>('XAiGrokOAuthToken')({

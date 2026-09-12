@@ -1,4 +1,5 @@
 const fnvOffsetBasis32 = 0x811c9dc5
+
 const fnvPrime32 = 0x01000193
 
 const fnv1a32 = (value: string, seed: number) => {

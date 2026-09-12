@@ -36,6 +36,7 @@ export const nodeTextToolModules = [
   skillToolModule,
   justBashToolModule
 ]
+
 export const nodeVoiceToolModules = [webFetchToolModule, webSearchToolModule]
 
 export const makeTextToolModules = (

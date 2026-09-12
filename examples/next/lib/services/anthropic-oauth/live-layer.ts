@@ -23,9 +23,13 @@ import {
 } from './schemas'
 
 export const ANTHROPIC_CLAUDE_CLIENT_ID = anthropicClaudeClientId
+
 export const ANTHROPIC_CLAUDE_TOKEN_ENDPOINT = anthropicClaudeTokenEndpoint
+
 export const ANTHROPIC_CLAUDE_REDIRECT_URI = anthropicClaudeRedirectUri
+
 export const ANTHROPIC_CLAUDE_OAUTH_USER_AGENT = anthropicClaudeOAuthUserAgent
+
 export const ANTHROPIC_CLAUDE_REFRESH_BUFFER_MS = anthropicClaudeRefreshBufferMs
 
 const unknownToMessage = (error: unknown) =>
@@ -56,6 +60,7 @@ const failAnthropicResponse = (
 ) =>
   Effect.gen(function* () {
     const text = yield* readErrorBody(response, operation)
+
     return yield* Effect.fail(
       new AnthropicClaudeOAuthError({
         message: `Anthropic Claude ${operation} failed: ${response.status} ${text}`,
@@ -123,6 +128,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
                 })
             )
           )
+
           const response = yield* execute(request, operation)
 
           if (!isOkStatus(response.status)) {
@@ -165,6 +171,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
             },
             'token exchange'
           )
+
           const tokens = yield* decodeJson(
             AnthropicClaudeTokenResponseSchema,
             json,
@@ -193,11 +200,13 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
             },
             'token refresh'
           )
+
           const tokens = yield* decodeJson(
             AnthropicClaudeTokenResponseSchema,
             json,
             'token refresh'
           )
+
           const nowMs = yield* Clock.currentTimeMillis
 
           return toOAuthToken(tokens, refreshTokenValue, nowMs)
@@ -209,6 +218,7 @@ export class AnthropicClaudeOAuth extends Context.Service<AnthropicClaudeOAuth>(
       ) =>
         Effect.gen(function* () {
           const nowMs = yield* Clock.currentTimeMillis
+
           return !token.access || token.expires < nowMs + minTtlMs
         })
 

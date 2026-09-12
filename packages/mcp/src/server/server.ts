@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Option } from 'effect'
+import { Array as Arr, Effect, Option, Predicate } from 'effect'
 import type { Context } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -78,10 +78,12 @@ const decodedResponse = (response: Option.Option<string>): DecodedLine => ({
 })
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
+
 const decodeJsonRpcMessage = Schema.decodeUnknownEffect(JsonRpcMessageSchema)
+
 const decodeCallToolParams = Schema.decodeUnknownEffect(CallToolParamsSchema)
 
-const encodeJson = (value: unknown) =>
+const encodeJson = (value: JsonRpcResponse) =>
   Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(value).pipe(
     Effect.mapError(
       error =>
@@ -259,6 +261,7 @@ export const makeMcpToolServer = <R>(input: {
   readonly allowedOriginHostnames?: ReadonlyArray<string>
 }): McpToolServer<R> => {
   const findTool = (name: string) => Arr.findFirst(input.tools, tool => tool.def.name === name)
+
   const toolInputSchemas = input.tools.map(tool => ({
     tool,
     schema: Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))(
@@ -332,7 +335,9 @@ export const makeMcpToolServer = <R>(input: {
                 })
             )
           )
+
           const tool = findTool(params.name)
+
           if (Option.isNone(tool)) {
             return errorResponse(request.id, -32_602, `Unknown tool: ${params.name}`)
           }
@@ -353,6 +358,7 @@ export const makeMcpToolServer = <R>(input: {
 
           return successResponse(request.id, mcpResultFromExecutionResult(result))
         }
+
         default:
           return errorResponse(request.id, -32_601, `Method not found: ${request.method}`)
       }
@@ -375,7 +381,7 @@ export const makeMcpToolServer = <R>(input: {
         )
       )
 
-      if (decoded._tag === 'Response') {
+      if (Predicate.isTagged(decoded, 'Response')) {
         return decoded.response
       }
 
@@ -387,12 +393,14 @@ export const makeMcpToolServer = <R>(input: {
 
       const response = yield* handleRequest(message)
       const encoded = yield* encodeJson(response)
+
       return Option.some(encoded)
     })
 
   const handleJson = (body: string) =>
     Effect.gen(function* () {
       const response = yield* handleLine(body)
+
       if (Option.isNone(response)) {
         return yield* encodeJson(errorResponse(null, -32_600, 'Notifications have no response'))
       }
@@ -403,10 +411,12 @@ export const makeMcpToolServer = <R>(input: {
   const handleHttpRequest = (request: Request) =>
     Effect.gen(function* () {
       const targetHostname = new URL(request.url).hostname
+
       const rejected = originValidationResponse(
         request,
         Array.from(input.allowedOriginHostnames ?? [targetHostname])
       )
+
       if (rejected !== undefined) {
         return rejected
       }
@@ -414,6 +424,7 @@ export const makeMcpToolServer = <R>(input: {
       if (!request.headers.has('mcp-protocol-version')) {
         if (request.method !== 'POST') {
           const body = yield* methodNotAllowedBody()
+
           return jsonResponse(body, { status: 405, headers: { allow: 'POST' } })
         }
 
@@ -421,9 +432,11 @@ export const makeMcpToolServer = <R>(input: {
           Effect.mapError(error => unknownToMessage(error)),
           Effect.catch(error => badRequestBody(`Could not read request body: ${error}`))
         )
+
         const responseBody = yield* handleJson(body).pipe(
           Effect.catch(error => badRequestBody(unknownToMessage(error)))
         )
+
         return jsonResponse(responseBody)
       }
 

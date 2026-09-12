@@ -22,6 +22,7 @@ import {
 import type { AgentToolContext } from './tool-context.ts'
 
 const telegramToolName = 'telegram_send_message'
+
 const telegramCredentialRef = 'app:telegram_bot_token'
 
 export type TelegramToolConfig = {
@@ -42,6 +43,7 @@ const providerFailureContent = (error: {
   readonly underlying?: unknown
 }) => {
   const status = error.status === undefined ? '' : ` (HTTP ${error.status})`
+
   const underlying =
     typeof error.underlying === 'string' && error.underlying.length > 0
       ? `: ${error.underlying}`
@@ -81,6 +83,7 @@ const makeConnectorHttpClientLayer = Layer.effect(
         Effect.gen(function* () {
           const httpRequest = makeConnectorHttpRequest(request)
           const response = yield* http.execute(httpRequest)
+
           const body = yield* response.text.pipe(
             Effect.mapError(
               error =>

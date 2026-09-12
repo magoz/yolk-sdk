@@ -26,9 +26,11 @@ const main = async () => {
 
   if (failures.length > 0) {
     console.error('Package publint failures:')
+
     for (const failure of failures) {
       console.error(`- ${failure}`)
     }
+
     process.exitCode = 1
   }
 }

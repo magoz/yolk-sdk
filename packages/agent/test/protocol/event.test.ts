@@ -15,6 +15,7 @@ import {
 describe('agent protocol events', () => {
   it('identifies protocol-terminal events', () => {
     const messages = [UserMessage.make({ content: 'hello' })]
+
     const request = ToolApprovalRequest.make({
       requestId: 'request-1',
       toolCallId: 'call-1',

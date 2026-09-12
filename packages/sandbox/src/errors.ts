@@ -5,6 +5,7 @@ export const SandboxInputErrorCause = Schema.Literals([
   'invalid_cwd',
   'invalid_timeout'
 ])
+
 export type SandboxInputErrorCause = typeof SandboxInputErrorCause.Type
 
 export class SandboxInputError extends Schema.TaggedErrorClass<SandboxInputError>()(
@@ -66,6 +67,3 @@ export type SandboxError =
   | SandboxStateError
   | SandboxStateStoreError
   | SandboxProviderError
-
-export const unknownToMessage = (error: unknown) =>
-  error instanceof Error ? error.message : String(error)

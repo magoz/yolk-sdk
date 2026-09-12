@@ -1,4 +1,4 @@
-import { Clock, Config, Effect, Layer, Stream } from 'effect'
+import { Clock, Config, Effect, Layer, Predicate, Stream } from 'effect'
 import { FetchHttpClient } from 'effect/unstable/http'
 import {
   ToolError,
@@ -216,7 +216,9 @@ const getAgentTextConfig = () =>
     return {
       model: agentTextModel,
       reasoningEffort: agentTextReasoningEffort,
-      systemPrompt: systemPrompt._tag === 'Some' ? systemPrompt.value : defaultAgentSystemPrompt
+      systemPrompt: Predicate.isTagged(systemPrompt, 'Some')
+        ? systemPrompt.value
+        : defaultAgentSystemPrompt
     }
   })
 
@@ -234,6 +236,7 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
     switch (agentTextModelProvider(model)) {
       case 'anthropic-claude': {
         const token = yield* getValidAnthropicClaudeToken(userId)
+
         return makeAnthropicClaudeProviderLayer({
           token: new OAuthAccessToken({
             provider: anthropicClaudeProviderId,
@@ -243,8 +246,10 @@ const providerLayerForModel = (model: AgentTextModel, userId: string) =>
           maxTokens: agentTextModelMaxOutputTokens(model)
         }).pipe(Layer.provide(FetchHttpClient.layer))
       }
+
       case 'openai-codex': {
         const token = yield* getValidOpenAiCodexToken(userId)
+
         return makeOpenAiCodexProviderLayer({
           token: new OAuthAccessToken({
             provider: openAiCodexProviderId,
@@ -322,6 +327,7 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
           data
         }
       }
+
       case 'Create': {
         yield* Effect.annotateCurrentSpan({
           'tool.manage_skills.action': 'create',
@@ -330,6 +336,7 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
           'agent_skill.create_command': action.createCommand,
           'agent_command.name': action.commandName ?? action.name
         })
+
         const skill = yield* createAgentSkillWithCommand({
           userId: action.userId,
           name: action.name,
@@ -355,12 +362,14 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
           }
         }
       }
+
       case 'Update': {
         const existing = yield* findSkillForUpdate({
           userId: action.userId,
           id: action.id,
           name: action.name
         })
+
         const skillName = action.name ?? existing.name
         yield* Effect.annotateCurrentSpan({
           'tool.manage_skills.action': 'update',
@@ -370,6 +379,7 @@ const manageSkillsForAgent = (action: SkillManagerAction) =>
           'agent_skill.create_command': action.createCommand,
           'agent_command.name': action.commandName ?? skillName
         })
+
         const skill = yield* updateAgentSkillWithCommand({
           id: existing.id,
           userId: action.userId,
@@ -429,33 +439,41 @@ export const makeAgentTextRuntime = (
     const skillset = yield* loadRuntimeSkillset({ userId })
     const mcpServers = yield* loadProjectMcpServers()
     const baseToolModules = yield* makeTextToolModules(mcpServers)
+
     const pinnedKnowledge = yield* getPinnedKnowledgeContext({ userId }).pipe(
       Effect.provide(KnowledgeLayer),
       Effect.catch(error =>
         Effect.logWarning('Pinned knowledge unavailable', { error }).pipe(Effect.as(''))
       )
     )
+
     const storageToolModule = makeAppStorageKnowledgeSearchToolModule()
     const knowledgeToolModule = makeAppKnowledgeToolModule()
     const telegramConnectorConfig = yield* getTelegramConnectorConfig(userId)
+
     const telegramToolModules =
       telegramConnectorConfig === undefined
         ? []
         : [makeAppTelegramToolModule(telegramConnectorConfig)]
+
     const skillManagerToolModule = makeSkillManagerToolModule(manageSkillsForAgent)
+
     const subagentToolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...baseToolModules,
       knowledgeToolModule,
       storageToolModule,
       ...telegramToolModules
     ]
+
     const selectedModel = input.model ?? baseConfig.model
     const model = isAgentTextModel(selectedModel) ? selectedModel : agentTextModel
     const providerLayer = yield* providerLayerForModel(model, userId)
+
     const baseSystemPrompt = appendPinnedKnowledge(
       appendAvailableSkills(baseConfig.systemPrompt, skillset),
       pinnedKnowledge
     )
+
     const subagentToolModule = makeNonRecursiveSubagentToolModule<AgentToolContext>({
       subagents: agentTextSubagents,
       background: options.executeSubagent !== undefined,
@@ -478,6 +496,7 @@ export const makeAgentTextRuntime = (
                     subagent: true
                   }
                 }).pipe(Effect.mapError(toolRegistryErrorToToolError))
+
                 const events = yield* collectSubagentEvents(
                   runRuntime(
                     {
@@ -504,6 +523,7 @@ export const makeAgentTextRuntime = (
                     )
                   )
                 )
+
                 const summary = subagentResultFromEvents(events)
                 const endedAtMs = yield* Clock.currentTimeMillis
 
@@ -531,12 +551,14 @@ export const makeAgentTextRuntime = (
             )
           }))
     })
+
     const toolModules: ReadonlyArray<ToolModule<AgentToolContext>> = [
       ...subagentToolModules,
       ...(options.childType === undefined
         ? [skillManagerToolModule, subagentToolModule, ...(options.modules ?? [])]
         : [])
     ]
+
     const toolSet = yield* resolveAgentToolSet({
       modules:
         options.childType === undefined
@@ -556,7 +578,9 @@ export const makeAgentTextRuntime = (
         skillset
       }
     })
+
     const normalizedInput = new AgentRouteRequest({ ...input, model })
+
     const config: AgentTextRuntimeConfig = {
       ...baseConfig,
       model,

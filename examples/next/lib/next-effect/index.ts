@@ -1,4 +1,4 @@
-import { Data, Effect, Result } from 'effect'
+import { Data, Effect, Predicate, Result } from 'effect'
 import { redirect, notFound } from 'next/navigation'
 
 // Tagged errors for navigation intents
@@ -42,13 +42,17 @@ const runPromise = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
           : Effect.fail(e)
     )
   )
+
   if (Result.isFailure(result)) {
     const error = result.failure
-    if (error._tag === 'NotFoundError') {
+
+    if (Predicate.isTagged(error, 'NotFoundError')) {
       return notFound()
     }
+
     return redirect(error.path)
   }
+
   return result.success
 }
 

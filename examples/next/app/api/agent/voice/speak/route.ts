@@ -15,7 +15,9 @@ import { reportError } from '@/lib/services/telemetry/report-error'
 export const dynamic = 'force-dynamic'
 
 const maxSpeechCharacters = 4_000
+
 const defaultTtsVoice = 'marin'
+
 // Applied per synthesis request; keeps prosody consistent across the
 // sentence-chunked TTS stream. Steers delivery only, never content.
 const defaultTtsInstructions =
@@ -45,11 +47,13 @@ const handler = Effect.gen(function* () {
   }
 
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
+
   const synthesizerLayer = makeOpenAiSpeechSynthesizerLayer({
     apiKey,
     defaultVoice: defaultTtsVoice,
     defaultInstructions: defaultTtsInstructions
   }).pipe(Layer.provide(FetchHttpClient.layer))
+
   const result = yield* Effect.gen(function* () {
     const synthesizer = yield* VoiceSpeechSynthesizer
 

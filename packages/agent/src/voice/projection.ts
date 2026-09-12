@@ -143,6 +143,7 @@ const flushSegment = (
 ): VoiceProjectionResult => {
   const draft = state.assistantDrafts.find(entry => entry.key === key)
   const remainingDrafts = state.assistantDrafts.filter(entry => entry.key !== key)
+
   // Truncated/interrupted segments can arrive as finals with an empty
   // transcript; never lose text the user already heard streaming.
   const text =
@@ -326,11 +327,13 @@ export const voiceSeedTextsFromMessages = (
 
         return text.length === 0 ? [] : [{ role: 'user' as const, text }]
       }
+
       case 'Assistant': {
         const text = contentPreview(assistantContent(message))
 
         return text.length === 0 ? [] : [{ role: 'assistant' as const, text }]
       }
+
       case 'ToolResult':
         return []
     }

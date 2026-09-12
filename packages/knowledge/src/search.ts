@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import type { IndexedKnowledgeDocument, KnowledgeChunk, KnowledgeSearchScope } from './documents.ts'
 import { KnowledgeEmbedder } from './embeddings.ts'
 import { KnowledgeSearchError } from './errors.ts'
@@ -55,14 +55,13 @@ export const packKnowledgeSearchContext = (
   text: results.map(packedResultText).join('\n\n')
 })
 
-const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> => {
-  switch (scope._tag) {
-    case 'KnowledgeScope':
-      return [scope.id]
-    case 'KnowledgeScopes':
-      return scope.ids
-  }
-}
+const scopeIds = (scope: KnowledgeSearchScope): ReadonlyArray<string> =>
+  Match.value(scope).pipe(
+    Match.tagsExhaustive({
+      KnowledgeScope: ({ id }) => [id],
+      KnowledgeScopes: ({ ids }) => ids
+    })
+  )
 
 const defaultHybridCandidateLimit = (limit: number) => Math.max(limit * 5, 40)
 
@@ -75,6 +74,7 @@ export const fuseKnowledgeSearchResults = (input: {
   readonly rankConstant?: number
 }): ReadonlyArray<KnowledgeSearchResult> => {
   const rankConstant = input.rankConstant ?? 60
+
   const fused = new Map<
     string,
     {
@@ -118,8 +118,10 @@ const validateSearchInput = (input: KnowledgeSearchInput) => {
   const limit = input.limit ?? 10
   const contextChunks = input.contextChunks ?? 0
   const mode = input.mode ?? 'hybrid'
+
   const vectorLimit =
     input.vectorLimit ?? (mode === 'hybrid' ? defaultHybridCandidateLimit(limit) : limit)
+
   const textLimit = input.textLimit ?? defaultHybridCandidateLimit(limit)
 
   if (query.length === 0) {
@@ -185,6 +187,7 @@ const searchVectorChunks = (input: {
   Effect.gen(function* () {
     const store = yield* SearchIndexStore
     const embedder = yield* KnowledgeEmbedder
+
     const embedding = yield* embedder
       .embedQuery(input.query)
       .pipe(
@@ -216,6 +219,7 @@ const searchTextChunks = (input: {
 }) =>
   Effect.gen(function* () {
     const store = yield* SearchIndexStore
+
     return yield* store
       .searchChunksByText({ scope: input.scope, query: input.query, limit: input.limit })
       .pipe(
@@ -237,6 +241,7 @@ export const searchKnowledge = (input: KnowledgeSearchInput) =>
       'knowledge_search.scope_count': scopeIds(input.scope).length
     })
     const store = yield* SearchIndexStore
+
     const results: ReadonlyArray<KnowledgeSearchResult> =
       valid.mode === 'vector'
         ? yield* searchVectorChunks({

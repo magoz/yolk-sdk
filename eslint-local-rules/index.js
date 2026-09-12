@@ -1,5 +1,5 @@
 /**
- * Local ESLint rules for Effect-TS best practices
+ * Local Oxlint JavaScript rules for Effect-TS best practices
  *
  * These rules enforce the conventions documented in patterns/EFFECT_BEST_PRACTICES.md
  */
@@ -11,7 +11,7 @@ import { noSchemaDecodeSync } from './no-schema-decode-sync.js'
 import { preferOptionFromNullable } from './prefer-option-from-nullable.js'
 import { noNodeDepsInAgentTools } from './no-node-deps-in-agent-tools.js'
 
-/** @type {import('eslint').ESLint.Plugin} */
+/** @type {import('@oxlint/plugins').Plugin} */
 export const localRulesPlugin = {
   meta: {
     name: 'local',
@@ -27,17 +27,4 @@ export const localRulesPlugin = {
   }
 }
 
-// Recommended config preset
-export const recommended = {
-  plugins: {
-    local: localRulesPlugin
-  },
-  rules: {
-    'local/no-disable-validation': 'error',
-    'local/no-catch-all-cause': 'error',
-    'local/no-schema-from-self': 'error',
-    'local/no-schema-decode-sync': 'error',
-    'local/no-node-deps-in-agent-tools': 'error',
-    'local/prefer-option-from-nullable': 'warn'
-  }
-}
+export default localRulesPlugin

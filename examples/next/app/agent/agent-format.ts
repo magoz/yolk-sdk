@@ -22,6 +22,7 @@ export const unknownPreview = (value: unknown) => {
   }
 
   const encoded = JSON.stringify(value)
+
   return truncate(encoded ?? String(value))
 }
 

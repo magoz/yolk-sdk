@@ -48,6 +48,7 @@ describe('Google Calendar event date/time boundaries', () => {
         const result = yield* Schema.decodeUnknownEffect(GoogleCalendarEventDateTime)(input).pipe(
           Effect.result
         )
+
         expect(result._tag, label).toBe('Failure')
       }
     })
@@ -61,12 +62,14 @@ describe('Google Calendar event date/time boundaries', () => {
       access: 'write',
       execute: () => Effect.die('schema-only test')
     })
+
     const properties = objectField(registration.def.parameters, 'properties')
     const start = objectField(properties, 'start')
     const end = objectField(properties, 'end')
     const alternatives = objectField(start, 'anyOf')
 
     expect(Array.isArray(alternatives)).toBe(true)
+
     if (!Array.isArray(alternatives)) return
 
     expect(alternatives).toHaveLength(2)

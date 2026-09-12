@@ -112,6 +112,7 @@ describe('makeWebSocketVoiceTransport', () => {
     Effect.gen(function* () {
       FakeWebSocket.instances = []
       const scope = yield* Scope.make()
+
       const transportFiber = yield* Effect.forkChild(
         Scope.provide(
           makeWebSocketVoiceTransport({
@@ -123,6 +124,7 @@ describe('makeWebSocketVoiceTransport', () => {
           scope
         ).pipe(Effect.provide(fakeConstructorLayer))
       )
+
       const fakeSocket = yield* awaitFakeSocket
 
       fakeSocket.fireOpen()
@@ -152,6 +154,7 @@ describe('makeWebSocketVoiceTransport', () => {
   it.live('fails acquisition when the socket never opens', () =>
     Effect.gen(function* () {
       FakeWebSocket.instances = []
+
       const error = yield* Effect.scoped(
         makeWebSocketVoiceTransport({
           url: 'wss://example.com/voice',
@@ -169,6 +172,7 @@ describe('makeWebSocketVoiceTransport', () => {
     Effect.gen(function* () {
       FakeWebSocket.instances = []
       const scope = yield* Scope.make()
+
       const transportFiber = yield* Effect.forkChild(
         Scope.provide(
           makeWebSocketVoiceTransport({
@@ -179,6 +183,7 @@ describe('makeWebSocketVoiceTransport', () => {
           scope
         ).pipe(Effect.provide(fakeConstructorLayer))
       )
+
       const fakeSocket = yield* awaitFakeSocket
 
       fakeSocket.fireOpen()

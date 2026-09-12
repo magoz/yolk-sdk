@@ -25,6 +25,7 @@ export type AnthropicClaudeSubscriptionUsageOptions = {
 }
 
 const NullableNumber = Schema.NullOr(Schema.Number)
+
 const NullableString = Schema.NullOr(Schema.String)
 
 class AnthropicClaudeSubscriptionUsageWindowWire extends Schema.Class<AnthropicClaudeSubscriptionUsageWindowWire>(
@@ -59,6 +60,7 @@ export const parseAnthropicClaudeSubscriptionUsage = (
   return Schema.decodeUnknownEffect(AnthropicClaudeSubscriptionUsageWire)(value).pipe(
     Effect.map(decoded => {
       const windows: Array<ProviderSubscriptionUsageWindow> = []
+
       const append = (
         wire: AnthropicClaudeSubscriptionUsageWindowWire | null | undefined,
         id: 'five-hour' | 'seven-day'
@@ -68,6 +70,7 @@ export const parseAnthropicClaudeSubscriptionUsage = (
         }
 
         const resetValue = wire.resets_at === null ? undefined : wire.resets_at
+
         const resetsAt =
           resetValue === undefined ? undefined : canonicalSubscriptionUsageInstant(resetValue)
 
@@ -129,6 +132,7 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
     }
 
     const client = yield* HttpClient.HttpClient
+
     const request = HttpClientRequest.get(anthropicClaudeSubscriptionUsageUrl).pipe(
       HttpClientRequest.setHeaders({
         accept: 'application/json',
@@ -136,12 +140,14 @@ export const fetchAnthropicClaudeSubscriptionUsage = (
         'anthropic-beta': 'oauth-2025-04-20'
       })
     )
+
     const json = yield* executeAndReadProviderSubscriptionUsageJson({
       provider: anthropicClaudeProviderId,
       client,
       request,
       timeoutMs: requestTimeoutMs
     })
+
     const fetchedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
 
     return yield* parseAnthropicClaudeSubscriptionUsage(json, fetchedAt)

@@ -5,9 +5,13 @@ import { Db } from '@/lib/services/db/live-layer'
 import * as schema from '@/lib/services/db/schema'
 
 const defaultBefore = 3
+
 const defaultAfter = 6
+
 const maxContextChunks = 20
+
 const defaultMaxChars = 20_000
+
 const maxMaxChars = 60_000
 
 export type KnowledgeContextWindow = {
@@ -25,9 +29,11 @@ export type KnowledgeContextWindow = {
 
 const normalizeId = (value: string, field: string) => {
   const normalized = value.trim()
+
   if (normalized.length === 0) {
     return Effect.fail(new ValidationError({ field, message: `${field} must not be empty` }))
   }
+
   return Effect.succeed(normalized)
 }
 
@@ -39,6 +45,7 @@ const normalizeInteger = (input: {
   readonly field: string
 }) => {
   const value = input.value ?? input.defaultValue
+
   if (!Number.isInteger(value) || value < input.minimum) {
     return Effect.fail(
       new ValidationError({
@@ -47,6 +54,7 @@ const normalizeInteger = (input: {
       })
     )
   }
+
   return Effect.succeed(Math.min(value, input.maxValue))
 }
 
@@ -69,8 +77,10 @@ export const getKnowledgeContext = (input: {
 }) =>
   Effect.gen(function* () {
     const documentId = yield* normalizeId(input.documentId, 'documentId')
+
     const chunkId =
       input.chunkId === undefined ? undefined : yield* normalizeId(input.chunkId, 'chunkId')
+
     if (chunkId !== undefined && input.position !== undefined) {
       return yield* Effect.fail(
         new ValidationError({ field: 'position', message: 'Use chunkId or position, not both' })
@@ -84,6 +94,7 @@ export const getKnowledgeContext = (input: {
       minimum: 0,
       field: 'before'
     })
+
     const after = yield* normalizeInteger({
       value: input.after,
       defaultValue: defaultAfter,
@@ -91,6 +102,7 @@ export const getKnowledgeContext = (input: {
       minimum: 0,
       field: 'after'
     })
+
     const maxChars = yield* normalizeInteger({
       value: input.maxChars,
       defaultValue: defaultMaxChars,
@@ -98,6 +110,7 @@ export const getKnowledgeContext = (input: {
       minimum: 1,
       field: 'maxChars'
     })
+
     const db = yield* Db
 
     const [document] = yield* db
@@ -158,6 +171,7 @@ export const getKnowledgeContext = (input: {
 
     const startPosition = Math.max(0, anchor.position - before)
     const endPosition = anchor.position + after
+
     const chunks = yield* db
       .select()
       .from(schema.userKnowledgeChunk)
@@ -180,6 +194,7 @@ export const getKnowledgeContext = (input: {
         )
       )
       .limit(1)
+
     const [nextChunk] = yield* db
       .select({ id: schema.userKnowledgeChunk.id })
       .from(schema.userKnowledgeChunk)

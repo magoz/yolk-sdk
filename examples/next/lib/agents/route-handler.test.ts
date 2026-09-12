@@ -1,4 +1,4 @@
-import { Array as Arr, Effect, Layer, Option, Result, Stream } from 'effect'
+import { Array as Arr, Effect, Layer, Option, Predicate, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from '@effect/vitest'
 import {
@@ -35,6 +35,7 @@ const config = {
 }
 
 const parseJson = (line: string): unknown => JSON.parse(line)
+
 const decodeEvent = (value: unknown) => Schema.decodeUnknownEffect(AgentEvent)(value)
 
 const decodeEvents = (body: string) =>
@@ -145,6 +146,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -210,6 +212,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeFailingLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -241,6 +244,7 @@ describe('makeAgentPostResponse', () => {
           capabilities: noToolReasoningCapabilities
         }
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -270,6 +274,7 @@ describe('makeAgentPostResponse', () => {
           tools: [ToolDef.make({ name: 'slow_tool', description: 'Slow.', parameters: {} })]
         }
       ).pipe(Effect.provide(makeFailingToolLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -296,14 +301,15 @@ describe('makeAgentPostResponse', () => {
           isError: true
         }
       })
-      expect(events.some(event => event._tag === 'AgentError')).toBe(false)
-      expect(events.some(event => event._tag === 'AgentEnd')).toBe(true)
+      expect(events.some(event => Predicate.isTagged(event, 'AgentError'))).toBe(false)
+      expect(events.some(event => Predicate.isTagged(event, 'AgentEnd'))).toBe(true)
     })
   )
 
   it.effect('uses the client-provided transcript', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
         LoopConfig.defaultLayer,
@@ -313,10 +319,12 @@ describe('makeAgentPostResponse', () => {
         }),
         TestToolExecutor.layer({})
       )
+
       const firstMessages = [UserMessage.make({ content: 'hello' })] satisfies readonly [
         AgentMessage,
         ...Array<AgentMessage>
       ]
+
       const secondMessages = [
         ...firstMessages,
         AssistantAgentMessage.make({ parts: [AssistantTextPart.make({ content: 'ok' })] }),
@@ -331,12 +339,14 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(layer))
+
       yield* Effect.promise(() => firstResponse.text())
 
       const secondResponse = yield* makeAgentPostResponse(
         AgentRouteRequest.make({ sessionId: 'session_1', messages: secondMessages }),
         config
       ).pipe(Effect.provide(layer))
+
       yield* Effect.promise(() => secondResponse.text())
 
       expect(requests.map(request => request.messages.map(messageContent))).toEqual([
@@ -350,11 +360,13 @@ describe('makeAgentPostResponse', () => {
   it.effect('executes configured tool calls', () =>
     Effect.gen(function* () {
       const requests: Array<LLMRequest> = []
+
       const tool = ToolDef.make({
         name: 'echo',
         description: 'Echo fixture tool.',
         parameters: { type: 'object', additionalProperties: false, properties: {}, required: [] }
       })
+
       const layer = Layer.mergeAll(
         ContextTransformer.identity,
         LoopConfig.defaultLayer,
@@ -371,6 +383,7 @@ describe('makeAgentPostResponse', () => {
         }),
         TestToolExecutor.layer({ echo: 'pong' })
       )
+
       const response = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -378,10 +391,12 @@ describe('makeAgentPostResponse', () => {
         }),
         { ...config, tools: [tool] }
       ).pipe(Effect.provide(layer))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
+
       const toolResultContents = Arr.filterMap(events, event =>
-        event._tag === 'ToolExecutionCompleted'
+        Predicate.isTagged(event, 'ToolExecutionCompleted')
           ? Result.succeed(event.result.content)
           : Result.failVoid
       )
@@ -502,6 +517,7 @@ describe('makeAgentPostResponse', () => {
   it.effect('rejects oversized image payloads', () =>
     Effect.gen(function* () {
       const imageData = 'a'.repeat(4 * 1024 * 1024)
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -545,6 +561,7 @@ describe('makeAgentPostResponse', () => {
         }),
         config
       ).pipe(Effect.provide(makeLayer()))
+
       const body = yield* Effect.promise(() => response.text())
       const events = yield* decodeEvents(body)
 
@@ -560,6 +577,7 @@ describe('makeAgentPostResponse', () => {
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -639,6 +657,7 @@ describe('makeAgentPostResponse', () => {
   it.effect('rejects oversized document payloads', () =>
     Effect.gen(function* () {
       const documentData = 'a'.repeat(15 * 1024 * 1024)
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',
@@ -667,11 +686,13 @@ describe('makeAgentPostResponse', () => {
   it.effect('rejects oversized total document payloads', () =>
     Effect.gen(function* () {
       const documentData = 'a'.repeat(8 * 1024 * 1024)
+
       const document = DocumentPart.make({
         source: inlineBase64Source(documentData),
         mimeType: 'application/pdf',
         filename: 'brief.pdf'
       })
+
       const result = yield* makeAgentPostResponse(
         AgentRouteRequest.make({
           sessionId: 'session_1',

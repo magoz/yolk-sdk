@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Match } from 'effect'
 import * as Schema from 'effect/Schema'
 import { ToolError } from '@yolk-sdk/agent/loop'
 import { ToolResult, type ToolCall } from '@yolk-sdk/agent/protocol'
@@ -25,7 +25,9 @@ export const sandboxToolName = 'sandbox'
 
 const SandboxToolParams = Schema.Struct({
   command: Schema.String.pipe(
-    Schema.annotate({ description: 'Shell command to run. Multiline commands are allowed.' })
+    Schema.annotate({
+      description: 'Shell command to run. Multiline commands are allowed.'
+    })
   ),
   cwd: Schema.optional(
     Schema.NullOr(
@@ -39,14 +41,18 @@ const SandboxToolParams = Schema.Struct({
   stdin: Schema.optional(
     Schema.NullOr(
       Schema.String.pipe(
-        Schema.annotate({ description: 'Optional stdin text passed to the command.' })
+        Schema.annotate({
+          description: 'Optional stdin text passed to the command.'
+        })
       )
     )
   ),
   timeoutSeconds: Schema.optional(
     Schema.NullOr(
       Schema.Number.pipe(
-        Schema.annotate({ description: 'Foreground timeout in seconds. Default 120, max 600.' })
+        Schema.annotate({
+          description: 'Foreground timeout in seconds. Default 120, max 600.'
+        })
       )
     )
   ),
@@ -113,37 +119,36 @@ const toolError = (message: string, cause: ToolError['cause']) =>
 
 const modelVisibleSandboxError = (
   error: SandboxInputError | SandboxExpiredError
-): ModelVisibleToolError => {
-  switch (error._tag) {
-    case 'SandboxInputError':
-      return modelVisibleToolError({
-        tool: sandboxToolName,
-        message: error.message,
-        reason: 'invalid_input'
-      })
-    case 'SandboxExpiredError':
-      return modelVisibleToolError({
-        tool: sandboxToolName,
-        message: error.message,
-        reason: 'unavailable',
-        details: { expiredAtMs: error.expiredAtMs }
-      })
-  }
-}
+): ModelVisibleToolError =>
+  Match.value(error).pipe(
+    Match.tagsExhaustive({
+      SandboxInputError: inputError =>
+        modelVisibleToolError({
+          tool: sandboxToolName,
+          message: inputError.message,
+          reason: 'invalid_input'
+        }),
+      SandboxExpiredError: expiredError =>
+        modelVisibleToolError({
+          tool: sandboxToolName,
+          message: expiredError.message,
+          reason: 'unavailable',
+          details: { expiredAtMs: expiredError.expiredAtMs }
+        })
+    })
+  )
 
 const sandboxInfraToolError = (
   error: Exclude<SandboxError, SandboxInputError | SandboxExpiredError>
-) => {
-  switch (error._tag) {
-    case 'SandboxConfigError':
-      return toolError(error.message, 'invalid_input')
-    case 'SandboxProviderError':
-      return toolError(error.message, 'execution')
-    case 'SandboxStateError':
-    case 'SandboxStateStoreError':
-      return toolError(error.message, 'unavailable')
-  }
-}
+) =>
+  Match.value(error).pipe(
+    Match.tagsExhaustive({
+      SandboxConfigError: configError => toolError(configError.message, 'invalid_input'),
+      SandboxProviderError: providerError => toolError(providerError.message, 'execution'),
+      SandboxStateError: stateError => toolError(stateError.message, 'unavailable'),
+      SandboxStateStoreError: storeError => toolError(storeError.message, 'unavailable')
+    })
+  )
 
 const normalizeTimeoutMs = (timeoutSeconds: number | null | undefined) => {
   const value = nullToUndefined(timeoutSeconds)
@@ -170,9 +175,11 @@ const normalizeToolParams = (params: SandboxToolParams) =>
     const command = yield* validateSandboxCommand(params.command).pipe(
       Effect.mapError(modelVisibleSandboxError)
     )
+
     const cwd = yield* normalizeWorkspaceCwd(params.cwd).pipe(
       Effect.mapError(modelVisibleSandboxError)
     )
+
     const timeoutMs = yield* normalizeTimeoutMs(params.timeoutSeconds)
 
     return {
@@ -227,33 +234,50 @@ const plainSandboxPreviewUrl = (
   url: previewUrl.url
 })
 
-const plainSandboxState = (state: SandboxCommandResult['state']): PlainSandboxState => {
-  switch (state._tag) {
-    case 'Vercel':
-      return {
-        _tag: state._tag,
-        name: state.name,
-        createdAtMs: state.createdAtMs,
-        lastUsedAtMs: state.lastUsedAtMs,
-        expiresAtMs: state.expiresAtMs,
-        maxExpiresAtMs: state.maxExpiresAtMs
-      }
-  }
+const plainSandboxState = (state: SandboxCommandResult['state']): PlainSandboxState =>
+  Match.value(state._tag).pipe(
+    Match.when('Vercel', () => ({
+      _tag: state._tag,
+      name: state.name,
+      createdAtMs: state.createdAtMs,
+      lastUsedAtMs: state.lastUsedAtMs,
+      expiresAtMs: state.expiresAtMs,
+      maxExpiresAtMs: state.maxExpiresAtMs
+    })),
+    Match.exhaustive
+  )
+
+type SandboxToolStructuredContentFields = {
+  readonly exitCode: number | null
+  readonly durationMs: number
+  readonly timedOut: boolean
+  readonly truncated: boolean
+  readonly workspaceReset: boolean
+  backgroundId?: string
 }
 
 const structuredContent = (
   result: SandboxCommandResult,
   truncated: boolean
-): SandboxToolStructuredContent => ({
-  exitCode: result.exitCode,
-  durationMs: result.durationMs,
-  timedOut: result.timedOut,
-  truncated,
-  workspaceReset: result.workspaceReset,
-  ...(result.backgroundId === undefined ? {} : { backgroundId: result.backgroundId }),
-  previewUrls: result.previewUrls.map(plainSandboxPreviewUrl),
-  state: plainSandboxState(result.state)
-})
+): SandboxToolStructuredContent => {
+  const content: SandboxToolStructuredContentFields = {
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    timedOut: result.timedOut,
+    truncated,
+    workspaceReset: result.workspaceReset
+  }
+
+  if (result.backgroundId !== undefined) {
+    content.backgroundId = result.backgroundId
+  }
+
+  return {
+    ...content,
+    previewUrls: result.previewUrls.map(plainSandboxPreviewUrl),
+    state: plainSandboxState(result.state)
+  }
+}
 
 export const makeSandboxToolResult = (input: {
   readonly callId: string
@@ -277,6 +301,7 @@ const sandboxToolDescription = <Context>(options: SandboxToolModuleOptions<Conte
     'start dev servers and use preview ports',
     'run browser checks through agent-browser when available'
   ]
+
   const ports = options.previewPorts ?? []
 
   return [
@@ -318,19 +343,20 @@ export const makeSandboxToolModuleFromApi = <Context>(
           }
 
           const normalized = yield* normalizeToolParams(params)
+
           const result = yield* sandbox.run(normalized).pipe(
-            Effect.mapError(error => {
-              switch (error._tag) {
-                case 'SandboxInputError':
-                case 'SandboxExpiredError':
-                  return modelVisibleSandboxError(error)
-                case 'SandboxConfigError':
-                case 'SandboxProviderError':
-                case 'SandboxStateError':
-                case 'SandboxStateStoreError':
-                  return sandboxInfraToolError(error)
-              }
-            })
+            Effect.mapError(error =>
+              Match.value(error).pipe(
+                Match.tagsExhaustive({
+                  SandboxInputError: inputError => modelVisibleSandboxError(inputError),
+                  SandboxExpiredError: expiredError => modelVisibleSandboxError(expiredError),
+                  SandboxConfigError: configError => sandboxInfraToolError(configError),
+                  SandboxProviderError: providerError => sandboxInfraToolError(providerError),
+                  SandboxStateError: stateError => sandboxInfraToolError(stateError),
+                  SandboxStateStoreError: storeError => sandboxInfraToolError(storeError)
+                })
+              )
+            )
           )
 
           return makeSandboxToolResult({ callId: call.id, result })
@@ -344,6 +370,7 @@ export const makeSandboxToolModule = <Context>(
 ): Effect.Effect<ToolModule<Context>, never, Sandbox> =>
   Effect.gen(function* () {
     const sandbox = yield* Sandbox
+
     return makeSandboxToolModuleFromApi(sandbox, options)
   })
 

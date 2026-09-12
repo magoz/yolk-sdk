@@ -81,6 +81,7 @@ const makeSessionConfigJson = (input: {
       tools: input.tools,
       transcriptionModel: input.transcriptionModel
     })
+
     return yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(config).pipe(
       Effect.mapError(
         error =>
@@ -101,10 +102,12 @@ const requestOpenAiRealtimeAnswer = (input: {
 }) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+
     const sessionConfig = yield* makeSessionConfigJson({
       tools: input.tools,
       transcriptionModel: input.transcriptionModel
     })
+
     const formData = new FormData()
     formData.set('sdp', input.sdp)
     formData.set('session', sessionConfig)
@@ -117,6 +120,7 @@ const requestOpenAiRealtimeAnswer = (input: {
       }),
       HttpClientRequest.bodyFormData(formData)
     )
+
     const response = yield* client.execute(request).pipe(
       Effect.mapError(
         error =>
@@ -126,6 +130,7 @@ const requestOpenAiRealtimeAnswer = (input: {
           })
       )
     )
+
     const body = yield* response.text.pipe(
       Effect.mapError(
         error =>
@@ -169,10 +174,12 @@ const handler = Effect.gen(function* () {
   const transcriptionModel = yield* readTranscriptionModel
   const apiKey = yield* Config.redacted('OPENAI_API_KEY')
   const telegramConnectorConfig = yield* getTelegramConnectorConfig(session.user.id)
+
   const telegramToolModules =
     telegramConnectorConfig === undefined
       ? []
       : [makeAppTelegramToolModule(telegramConnectorConfig)]
+
   const toolSet = yield* resolveAgentToolSet({
     modules: [
       ...nodeVoiceToolModules,
@@ -186,6 +193,7 @@ const handler = Effect.gen(function* () {
       userId: session.user.id
     }
   })
+
   const answer = yield* requestOpenAiRealtimeAnswer({
     apiKey,
     sdp,
@@ -244,6 +252,7 @@ const handler = Effect.gen(function* () {
 )
 
 const RouteLayer = Layer.mergeAll(AppLayer, FetchHttpClient.layer)
+
 const { handler: effectHandler } = HttpEffect.toWebHandlerLayer(handler, RouteLayer)
 
 export const POST = (request: Request) => effectHandler(request)

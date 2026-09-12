@@ -18,7 +18,9 @@ export {
   touchSandboxState,
   validateSandboxCommand
 } from './lifecycle.ts'
+
 export { makeVercelSandboxName } from './name.ts'
+
 export {
   DisposableSandboxLifecycle,
   EmptySandboxInitialSource,
@@ -37,8 +39,11 @@ export {
   TarballSandboxInitialSource,
   VercelSandboxState
 } from './model.ts'
+
 export { Sandbox } from './service.ts'
+
 export { SandboxStateStore } from './state-store.ts'
+
 export {
   SandboxConfigError,
   SandboxExpiredError,
@@ -48,6 +53,9 @@ export {
   SandboxStateError,
   SandboxStateStoreError
 } from './errors.ts'
+
 export type { SandboxError } from './errors.ts'
+
 export type { SandboxApi } from './service.ts'
+
 export type { SandboxStateStoreApi } from './state-store.ts'
