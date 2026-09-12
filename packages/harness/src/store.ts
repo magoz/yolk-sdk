@@ -39,63 +39,6 @@ const memoryFromSnapshot = (snapshot: DurableRunStoreSnapshot): MemorySnapshot =
   resumes: new Map(snapshot.resumes)
 })
 
-const makeSnapshotRunStore = (
-  options: SnapshotRunStoreOptions
-): Effect.Effect<RunStore['Service']> =>
-  Effect.gen(function* () {
-    const loaded = yield* options.load
-    const memory = yield* Ref.make(memoryFromSnapshot(loaded ?? emptySnapshot))
-    const lock = yield* Semaphore.make(1)
-    const mutate = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.uninterruptibleMask(restore =>
-        restore(lock.take(1)).pipe(
-          Effect.flatMap(() => effect.pipe(Effect.ensuring(lock.release(1))))
-        )
-      )
-    const commit = (next: MemorySnapshot) =>
-      options.save(snapshotFromMemory(next)).pipe(Effect.flatMap(() => Ref.set(memory, next)))
-
-    return RunStore.of({
-      claim: runId =>
-        mutate(
-          Effect.gen(function* () {
-            const current = yield* Ref.get(memory)
-            yield* commit({
-              claimed: new Set(current.claimed).add(runId),
-              resumes: current.resumes
-            })
-          })
-        ),
-      release: runId =>
-        mutate(
-          Effect.gen(function* () {
-            const current = yield* Ref.get(memory)
-            const claimed = new Set(current.claimed)
-            claimed.delete(runId)
-            const resumes = new Map(current.resumes)
-            resumes.delete(runId)
-            yield* commit({ claimed, resumes })
-          })
-        ),
-      isClaimed: runId => Ref.get(memory).pipe(Effect.map(current => current.claimed.has(runId))),
-      claimed: Ref.get(memory).pipe(Effect.map(current => new Set(current.claimed))),
-      incrementResumeCount: runId =>
-        mutate(
-          Effect.gen(function* () {
-            const current = yield* Ref.get(memory)
-            const nextCount = (current.resumes.get(runId) ?? 0) + 1
-            const resumes = new Map(current.resumes)
-            resumes.set(runId, nextCount)
-            yield* commit({ claimed: current.claimed, resumes })
-
-            return nextCount
-          })
-        ),
-      resumeCount: runId =>
-        Ref.get(memory).pipe(Effect.map(current => current.resumes.get(runId) ?? 0))
-    })
-  })
-
 export class RunStore extends Context.Service<RunStore, RunStoreApi>()(
   '@yolk-sdk/harness/RunStore'
 ) {
@@ -104,7 +47,65 @@ export class RunStore extends Context.Service<RunStore, RunStoreApi>()(
    * composed harnesses never share `Ref` state or the snapshot lock across factory calls.
    */
   static snapshotLayer = (options: SnapshotRunStoreOptions): Layer.Layer<RunStore> =>
-    Layer.effect(this, makeSnapshotRunStore(options))
+    Layer.effect(
+      this,
+      Effect.gen(function* () {
+        const loaded = yield* options.load
+        const memory = yield* Ref.make(memoryFromSnapshot(loaded ?? emptySnapshot))
+        const lock = yield* Semaphore.make(1)
+
+        const mutate = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.uninterruptibleMask(restore =>
+            restore(lock.take(1)).pipe(
+              Effect.flatMap(() => effect.pipe(Effect.ensuring(lock.release(1))))
+            )
+          )
+
+        const commit = (next: MemorySnapshot) =>
+          options.save(snapshotFromMemory(next)).pipe(Effect.flatMap(() => Ref.set(memory, next)))
+
+        return RunStore.of({
+          claim: runId =>
+            mutate(
+              Effect.gen(function* () {
+                const current = yield* Ref.get(memory)
+                yield* commit({
+                  claimed: new Set(current.claimed).add(runId),
+                  resumes: current.resumes
+                })
+              })
+            ),
+          release: runId =>
+            mutate(
+              Effect.gen(function* () {
+                const current = yield* Ref.get(memory)
+                const claimed = new Set(current.claimed)
+                claimed.delete(runId)
+                const resumes = new Map(current.resumes)
+                resumes.delete(runId)
+                yield* commit({ claimed, resumes })
+              })
+            ),
+          isClaimed: runId =>
+            Ref.get(memory).pipe(Effect.map(current => current.claimed.has(runId))),
+          claimed: Ref.get(memory).pipe(Effect.map(current => new Set(current.claimed))),
+          incrementResumeCount: runId =>
+            mutate(
+              Effect.gen(function* () {
+                const current = yield* Ref.get(memory)
+                const nextCount = (current.resumes.get(runId) ?? 0) + 1
+                const resumes = new Map(current.resumes)
+                resumes.set(runId, nextCount)
+                yield* commit({ claimed: current.claimed, resumes })
+
+                return nextCount
+              })
+            ),
+          resumeCount: runId =>
+            Ref.get(memory).pipe(Effect.map(current => current.resumes.get(runId) ?? 0))
+        })
+      })
+    )
 
   /**
    * Canonical owning layer for process-local claims. Each call builds a fresh layer so

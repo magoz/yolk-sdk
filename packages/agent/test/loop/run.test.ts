@@ -1185,6 +1185,7 @@ describe('run', () => {
           message: 'LLM done reason must be tool_use'
         }
       })
+
       if (result._tag === 'Failure') {
         expect('responseIssue' in result.failure ? result.failure.responseIssue : undefined).toBe(
           undefined

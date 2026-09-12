@@ -25,6 +25,7 @@ const makeDelayedReleaseStoreLayer = (
     Effect.gen(function* () {
       const claimed = yield* Ref.make(new Set<string>())
       const resumes = yield* Ref.make(new Map<string, number>())
+
       return RunStore.of({
         claim: runId => Ref.update(claimed, current => new Set(current).add(runId)),
         release: runId =>
@@ -35,11 +36,13 @@ const makeDelayedReleaseStoreLayer = (
                 Ref.update(claimed, current => {
                   const next = new Set(current)
                   next.delete(runId)
+
                   return next
                 }),
                 Ref.update(resumes, current => {
                   const next = new Map(current)
                   next.delete(runId)
+
                   return next
                 })
               )
@@ -53,6 +56,7 @@ const makeDelayedReleaseStoreLayer = (
             const nextCount = (current.get(runId) ?? 0) + 1
             const next = new Map(current)
             next.set(runId, nextCount)
+
             return [nextCount, next] as const
           }),
         resumeCount: runId => Ref.get(resumes).pipe(Effect.map(current => current.get(runId) ?? 0))
@@ -86,6 +90,7 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const running = yield* live
           .runOwned(
             prepare,
@@ -95,6 +100,7 @@ describe('makeLiveDrain', () => {
             'run_1'
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(started)
 
         const overlapping = yield* live.beginPrepare()
@@ -124,13 +130,16 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const work = Deferred.succeed(started, undefined).pipe(
           Effect.andThen(Effect.never),
           Effect.onInterrupt(() => Ref.set(stillRunning, false))
         )
+
         const waiting = yield* live
           .runOwned(prepare, 'sock_1', work, driver, 'run_1')
           .pipe(Effect.forkDetach({ startImmediately: true }))
+
         yield* Deferred.await(started)
         expect(yield* Ref.get(stillRunning)).toBe(true)
         yield* Fiber.interrupt(waiting)
@@ -152,9 +161,11 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const waiting = yield* live
           .runOwned(prepare, 'sock_1', Effect.never, driver, 'run_1')
           .pipe(Effect.forkDetach({ startImmediately: true }))
+
         yield* Fiber.interrupt(waiting)
         const next = yield* live.beginPrepare()
         expect((yield* live.runOwned(next, 'sock_2', Effect.void, driver, 'run_1'))._tag).toBe(
@@ -172,9 +183,11 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const waiting = yield* live
           .runOwned(prepare, 'sock_1', Effect.never, driver, 'run_1')
           .pipe(Effect.forkDetach({ startImmediately: true }))
+
         yield* live.reconnect(driver, 'run_1', Effect.void)
         yield* Fiber.join(waiting).pipe(Effect.ignoreCause)
         const next = yield* live.beginPrepare()
@@ -195,14 +208,17 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const work = Deferred.succeed(started, undefined).pipe(
           Effect.andThen(Ref.update(events, current => [...current, 'start'])),
           Effect.andThen(Effect.never),
           Effect.onInterrupt(() => Ref.update(events, current => [...current, 'interrupted']))
         )
+
         const running = yield* live
           .runOwned(prepare, 'sock_1', work, driver, 'run_1')
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(started)
         yield* live.reconnect(
           driver,
@@ -225,9 +241,11 @@ describe('makeLiveDrain', () => {
 
       yield* Effect.gen(function* () {
         const driver = yield* Driver
+
         const exit = yield* live
           .reconnect(driver, 'run_1', Effect.die('finalize failed'))
           .pipe(Effect.exit)
+
         expect(Exit.isFailure(exit)).toBe(true)
         const prepare = yield* live.beginPrepare()
         expect((yield* live.runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1'))._tag).toBe(
@@ -246,6 +264,7 @@ describe('makeLiveDrain', () => {
 
       yield* Effect.gen(function* () {
         const driver = yield* Driver
+
         const first = yield* live
           .reconnect(
             driver,
@@ -255,6 +274,7 @@ describe('makeLiveDrain', () => {
             )
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(firstEntered)
         const second = yield* live.reconnect(driver, 'run_1', Effect.void).pipe(Effect.forkChild)
         yield* Deferred.succeed(firstHold, undefined)
@@ -280,6 +300,7 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const firstPrepare = yield* live.beginPrepare()
+
         const first = yield* live
           .runOwned(
             firstPrepare,
@@ -289,12 +310,14 @@ describe('makeLiveDrain', () => {
             'run_1'
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(firstStarted)
 
         const closing = yield* live.closeOwner('sock_a', driver, 'run_1').pipe(Effect.forkChild)
         yield* Fiber.join(first).pipe(Effect.ignoreCause)
 
         const secondPrepare = yield* live.beginPrepare()
+
         const second = yield* live
           .runOwned(
             secondPrepare,
@@ -306,6 +329,7 @@ describe('makeLiveDrain', () => {
             'run_1'
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(secondStarted)
         expect(yield* driver.isActive('run_1')).toBe(true)
 
@@ -345,6 +369,7 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const running = yield* live
           .runOwned(
             prepare,
@@ -354,6 +379,7 @@ describe('makeLiveDrain', () => {
             'run_1'
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(started)
 
         yield* live.closeOwner('sock_old', driver, 'run_1')
@@ -373,6 +399,7 @@ describe('makeLiveDrain', () => {
       const releaseEntered = yield* Deferred.make<void>()
       const releaseHold = yield* Deferred.make<void>()
       const finalized = yield* Ref.make(false)
+
       const layer = makeHarnessLayer(
         live,
         makeDelayedReleaseStoreLayer(releaseEntered, releaseHold)
@@ -381,6 +408,7 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const running = yield* live
           .runOwned(
             prepare,
@@ -390,17 +418,21 @@ describe('makeLiveDrain', () => {
             'run_1'
           )
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(started)
 
         const reconnecting = yield* live
           .reconnect(driver, 'run_1', Ref.set(finalized, true))
           .pipe(Effect.forkChild)
+
         yield* Deferred.await(releaseEntered)
 
         const successorPrepare = yield* live.beginPrepare()
+
         const successor = yield* live
           .runOwned(successorPrepare, 'sock_2', Effect.void, driver, 'run_1')
           .pipe(Effect.forkChild)
+
         expect(reconnecting.pollUnsafe()).toBeUndefined()
         expect(successor.pollUnsafe()).toBeUndefined()
         expect(yield* Ref.get(finalized)).toBe(false)
@@ -429,6 +461,7 @@ describe('makeLiveDrain', () => {
         const started = yield* Deferred.make<void>()
         const releaseEntered = yield* Deferred.make<void>()
         const releaseHold = yield* Deferred.make<void>()
+
         const layer = makeHarnessLayer(
           live,
           makeDelayedReleaseStoreLayer(releaseEntered, releaseHold)
@@ -437,6 +470,7 @@ describe('makeLiveDrain', () => {
         yield* Effect.gen(function* () {
           const driver = yield* Driver
           const prepare = yield* live.beginPrepare()
+
           const running = yield* live
             .runOwned(
               prepare,
@@ -446,15 +480,18 @@ describe('makeLiveDrain', () => {
               'run_1'
             )
             .pipe(Effect.forkChild)
+
           yield* Deferred.await(started)
 
           const closing = yield* live.closeOwner('sock_a', driver, 'run_1').pipe(Effect.forkChild)
           yield* Deferred.await(releaseEntered)
 
           const successorPrepare = yield* live.beginPrepare()
+
           const successor = yield* live
             .runOwned(successorPrepare, 'sock_b', Effect.void, driver, 'run_1')
             .pipe(Effect.forkChild)
+
           expect(closing.pollUnsafe()).toBeUndefined()
           expect(successor.pollUnsafe()).toBeUndefined()
           expect(yield* driver.isActive('run_1')).toBe(true)
@@ -481,6 +518,7 @@ describe('makeLiveDrain', () => {
         const started = yield* Deferred.make<void>()
         const releaseEntered = yield* Deferred.make<void>()
         const releaseHold = yield* Deferred.make<void>()
+
         const layer = makeHarnessLayer(
           live,
           makeDelayedReleaseStoreLayer(releaseEntered, releaseHold)
@@ -489,6 +527,7 @@ describe('makeLiveDrain', () => {
         yield* Effect.gen(function* () {
           const driver = yield* Driver
           const prepare = yield* live.beginPrepare()
+
           const waiting = yield* live
             .runOwned(
               prepare,
@@ -498,15 +537,18 @@ describe('makeLiveDrain', () => {
               'run_1'
             )
             .pipe(Effect.forkDetach({ startImmediately: true }))
+
           yield* Deferred.await(started)
 
           const cancelling = yield* Fiber.interrupt(waiting).pipe(Effect.forkChild)
           yield* Deferred.await(releaseEntered)
 
           const successorPrepare = yield* live.beginPrepare()
+
           const successor = yield* live
             .runOwned(successorPrepare, 'sock_2', Effect.void, driver, 'run_1')
             .pipe(Effect.forkChild)
+
           expect(cancelling.pollUnsafe()).toBeUndefined()
           expect(successor.pollUnsafe()).toBeUndefined()
           expect(yield* driver.isActive('run_1')).toBe(true)
@@ -528,6 +570,7 @@ describe('makeLiveDrain', () => {
     Effect.gen(function* () {
       const live = yield* makeLiveDrain()
       const attempts = yield* Ref.make(0)
+
       const layer = makeHarnessLayer(
         live,
         makeClaimStoreLayer(() =>
@@ -540,9 +583,11 @@ describe('makeLiveDrain', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const exit = yield* live
           .runOwned(prepare, 'sock_1', Effect.void, driver, 'run_1')
           .pipe(Effect.exit)
+
         expect(Exit.isFailure(exit)).toBe(true)
         expect(Exit.hasDies(exit)).toBe(true)
         expect(yield* driver.isActive('run_1')).toBe(false)
@@ -575,6 +620,7 @@ describe('notifyRejectedStart', () => {
           yield* live.reconnect(driver, 'run_1', Effect.void)
 
           const successorPrepare = yield* live.beginPrepare()
+
           const successor = yield* live
             .runOwned(
               successorPrepare,
@@ -587,6 +633,7 @@ describe('notifyRejectedStart', () => {
               'run_1'
             )
             .pipe(Effect.forkChild)
+
           yield* Deferred.await(successorStarted)
 
           const started = yield* live.runOwned(
@@ -596,6 +643,7 @@ describe('notifyRejectedStart', () => {
             driver,
             'run_1'
           )
+
           yield* notifyRejectedStart(
             started,
             Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)
@@ -628,6 +676,7 @@ describe('notifyRejectedStart', () => {
         yield* Effect.gen(function* () {
           const driver = yield* Driver
           const prepare = yield* live.beginPrepare()
+
           const running = yield* live
             .runOwned(
               prepare,
@@ -640,9 +689,11 @@ describe('notifyRejectedStart', () => {
               'run_1'
             )
             .pipe(Effect.forkChild)
+
           yield* Deferred.await(started)
 
           const overlappingPrepare = yield* live.beginPrepare()
+
           const overlapping = yield* live.runOwned(
             overlappingPrepare,
             'sock_2',
@@ -650,6 +701,7 @@ describe('notifyRejectedStart', () => {
             driver,
             'run_1'
           )
+
           yield* notifyRejectedStart(
             overlapping,
             Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)
@@ -677,6 +729,7 @@ describe('notifyRejectedStart', () => {
       yield* Effect.gen(function* () {
         const driver = yield* Driver
         const prepare = yield* live.beginPrepare()
+
         const started = yield* live.runOwned(
           prepare,
           'sock_1',
@@ -684,6 +737,7 @@ describe('notifyRejectedStart', () => {
           driver,
           'run_1'
         )
+
         yield* notifyRejectedStart(
           started,
           Ref.update(conflicts, current => current + 1).pipe(Effect.asVoid)

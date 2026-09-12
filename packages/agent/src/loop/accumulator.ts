@@ -26,7 +26,7 @@ export const collectReasoning = (events: ReadonlyArray<LLMEvent>) =>
 export const collectToolCalls = (events: ReadonlyArray<LLMEvent>) =>
   events.flatMap(event => (Predicate.isTagged(event, 'ToolCall') ? [event.call] : []))
 
-const appendTextPart = (parts: Array<AssistantPart>, text: string) => {
+const appendTextPartMutable = (parts: Array<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
   if (last?._tag === 'Text') {
@@ -40,7 +40,7 @@ const appendTextPart = (parts: Array<AssistantPart>, text: string) => {
   return parts
 }
 
-const appendReasoningPart = (parts: Array<AssistantPart>, text: string) => {
+const appendReasoningPartMutable = (parts: Array<AssistantPart>, text: string) => {
   const last = parts.at(-1)
 
   if (last?._tag === 'Reasoning') {
@@ -55,9 +55,9 @@ const appendReasoningPart = (parts: Array<AssistantPart>, text: string) => {
 const applyAssistantLlmEventMutable = (parts: Array<AssistantPart>, event: LLMEvent) => {
   switch (event._tag) {
     case 'TextDelta':
-      return appendTextPart(parts, event.text)
+      return appendTextPartMutable(parts, event.text)
     case 'ReasoningDelta':
-      return appendReasoningPart(parts, event.text)
+      return appendReasoningPartMutable(parts, event.text)
     case 'ToolCall':
       parts.push(HostToolCallPart.make({ call: event.call }))
 
@@ -83,17 +83,43 @@ export const applyAssistantLlmEvent = (
   event: LLMEvent
 ): ReadonlyArray<AssistantPart> => {
   switch (event._tag) {
+    case 'TextDelta':
+      return appendTextPart(parts, event.text)
+    case 'ReasoningDelta':
+      return appendReasoningPart(parts, event.text)
+    case 'ToolCall':
+      return [...parts, HostToolCallPart.make({ call: event.call })]
+    case 'ProviderToolResult':
+      return [
+        ...parts,
+        ProviderToolCallPart.make({ call: event.call }),
+        ProviderToolResultPart.make({ toolCallId: event.call.id, result: event.result })
+      ]
     case 'Done':
     case 'ToolInputDelta':
     case 'ToolInputStart':
     case 'Usage':
       return parts
-    case 'TextDelta':
-    case 'ReasoningDelta':
-    case 'ToolCall':
-    case 'ProviderToolResult':
-      return applyAssistantLlmEventMutable(parts.slice(), event)
   }
+}
+
+const appendTextPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
+  const last = parts.at(-1)
+
+  return last?._tag === 'Text'
+    ? [
+        ...parts.slice(0, -1),
+        AssistantTextPart.make({ content: appendTextToContent(last.content, text) })
+      ]
+    : [...parts, AssistantTextPart.make({ content: text })]
+}
+
+const appendReasoningPart = (parts: ReadonlyArray<AssistantPart>, text: string) => {
+  const last = parts.at(-1)
+
+  return last?._tag === 'Reasoning'
+    ? [...parts.slice(0, -1), AssistantReasoningPart.make({ text: `${last.text}${text}` })]
+    : [...parts, AssistantReasoningPart.make({ text })]
 }
 
 const accumulateAssistantParts = (events: ReadonlyArray<LLMEvent>) =>

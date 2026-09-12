@@ -1,5 +1,5 @@
 import * as Cloudflare from 'alchemy/Cloudflare'
-import { Clock, Context, Effect } from 'effect'
+import { Clock, Context, Effect, Predicate } from 'effect'
 import * as Scope from 'effect/Scope'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
@@ -81,8 +81,11 @@ type SocketAttachment = {
 }
 
 const bootstrapKey = 'bootstrap'
+
 const harnessStoreKey = 'harness-run-store'
+
 const codexTokenKey = 'codex-access-token'
+
 const anthropicTokenKey = 'anthropic-access-token'
 
 const cloudflareSystemPrompt = 'You are a minimal Yolk Cloudflare runtime smoke-test agent.'
@@ -152,12 +155,14 @@ const makeFauxProviderLayer = Layer.succeed(
   LLMProvider.of({
     stream: request => {
       const last = request.messages.at(-1)
+
       const text =
         last === undefined
           ? ''
-          : last._tag === 'Assistant'
+          : Predicate.isTagged(last, 'Assistant')
             ? contentText(assistantContent(last))
             : contentText(last.content)
+
       const reply = `faux-cloudflare: ${text}`
 
       return Stream.fromIterable([
@@ -186,8 +191,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
         put: log => state.storage.put(runtimeEventsStorageKey, log)
       }
+
       const instanceScope = yield* Scope.make()
       const live = yield* Scope.provide(makeLiveDrain(), instanceScope)
+
       const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
         sendEvent(
           socket,
@@ -197,6 +204,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
             retryable: false
           })
         )
+
       const harnessContext = yield* Layer.buildWithScope(
         makeDurableObjectDriverLayer({
           load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
@@ -205,6 +213,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         }),
         instanceScope
       )
+
       const driver = Context.get(harnessContext, Driver)
 
       const loadLogOrEmpty = (sessionId: string) =>
@@ -229,6 +238,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
           const body = yield* encodeJson(makeCodexTokenBrokerRequest(bootstrap.userId))
+
           const response = yield* client
             .execute(
               HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
@@ -295,6 +305,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         Effect.gen(function* () {
           const client = yield* HttpClient.HttpClient
           const body = yield* encodeJson(makeAnthropicTokenBrokerRequest(bootstrap.userId))
+
           const response = yield* client
             .execute(
               HttpClientRequest.post(bootstrap.tokenEndpoint).pipe(
@@ -469,12 +480,15 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
 
         if (Option.isSome(activeRun) || (yield* driver.isActive(sessionId))) {
           yield* sendConflict(socket)
+
           return
         }
+
         const resolvedToolSet = yield* resolveCloudflareToolSet(sessionId).pipe(Effect.result)
 
-        if (resolvedToolSet._tag === 'Failure') {
+        if (Predicate.isTagged(resolvedToolSet, 'Failure')) {
           yield* sendEvent(socket, resolvedToolSet.failure)
+
           return
         }
 
@@ -499,6 +513,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           Effect.catch(error => sendEvent(socket, toAgentError(error))),
           Effect.catch(() => Effect.void)
         )
+
         const started = yield* live.runOwned(prepareEpoch, socketId, work, driver, sessionId)
         yield* notifyRejectedStart(started, sendConflict(socket))
       })
@@ -593,12 +608,13 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
                 retryable: false
               })
             )
+
             return
           }
 
           const decodedInput = yield* decodeClientMessage(message).pipe(Effect.result)
 
-          if (decodedInput._tag === 'Failure') {
+          if (Predicate.isTagged(decodedInput, 'Failure')) {
             return yield* handleUserInput(
               socket,
               attachment.sessionId,
@@ -608,8 +624,10 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
           }
 
           const input = decodedInput.success
-          if (input._tag === 'UserInput') {
+
+          if (Predicate.isTagged(input, 'UserInput')) {
             yield* handleUserInput(socket, attachment.sessionId, attachment.socketId, input)
+
             return
           }
 

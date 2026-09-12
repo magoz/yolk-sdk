@@ -101,6 +101,7 @@ describe('LLMError', () => {
         message: 'truncated',
         retryable: false
       })
+
       expect(decoded.responseIssue).toBeUndefined()
 
       const encoded = yield* Schema.encodeUnknownEffect(LLMError)(
@@ -110,6 +111,7 @@ describe('LLMError', () => {
           retryable: false
         })
       )
+
       expect(encoded).toMatchObject({
         _tag: 'LLMError',
         cause: 'invalid_response',
@@ -131,6 +133,7 @@ describe('LLMError', () => {
         retryable: false,
         responseIssue: 'missing_done'
       })
+
       const encoded = yield* Schema.encodeUnknownEffect(LLMError)(error)
       const decoded = yield* Schema.decodeUnknownEffect(LLMError)(encoded)
       expect(decoded).toMatchObject({

@@ -108,6 +108,7 @@ const contextOverflowRetryStream = (
           Effect.gen(function* () {
             const attempt = yield* Ref.get(attempts)
             const started = yield* Ref.get(outputStarted)
+
             const decision = yield* applyOverflowCompaction({
               compact: input.compact,
               messages: request.messages,
@@ -144,6 +145,7 @@ export const makeContextOverflowRetryProvider = (input: ContextOverflowRetryProv
           Effect.gen(function* () {
             const attempts = yield* Ref.make(0)
             const outputStarted = yield* Ref.make(false)
+
             return contextOverflowRetryStream(input, attempts, outputStarted, request)
           })
         )

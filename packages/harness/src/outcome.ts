@@ -1,4 +1,4 @@
-import { Effect, Stream } from 'effect'
+import { Effect, Predicate, Stream } from 'effect'
 import {
   addAgentUsage,
   zeroAgentUsage,
@@ -88,7 +88,9 @@ const isAgentLoopError = (error: unknown): error is AgentLoopError => {
   if (typeof error !== 'object' || error === null || !('_tag' in error)) {
     return false
   }
+
   const tag = error._tag
+
   return (
     tag === 'LLMError' ||
     tag === 'FauxExhaustedError' ||
@@ -159,6 +161,7 @@ const classifyModelTurnFailure = <E2, R2>(input: {
     if (input.error.cause === 'invalid_response') {
       return Effect.succeed({ _tag: 'RecoverFull', error: input.error })
     }
+
     return Effect.succeed({ _tag: 'Retry', error: input.error })
   }
 
@@ -190,6 +193,7 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
 > =>
   Effect.gen(function* () {
     const overflowCompactionAttempt = options?.overflowCompactionAttempt ?? 0
+
     if (!isOverflowCompactionAttemptCount(overflowCompactionAttempt)) {
       return yield* Effect.fail(invalidOverflowCompactionAttemptError())
     }
@@ -208,6 +212,7 @@ export const attemptModelTurn = <E2 = never, R2 = never>(
         if (!isAgentLoopError(outcome.error)) {
           return yield* Effect.fail(outcome.error)
         }
+
         return yield* classifyModelTurnFailure({
           error: outcome.error,
           collected: {
@@ -245,20 +250,22 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
         toolCalls: []
       }),
       (acc, event) => {
-        const next =
-          event._tag === 'AgentAwaitingInput'
-            ? { ...acc, requests: event.requests, usage: event.usage }
-            : event._tag === 'UsageUpdate'
-              ? { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
-              : event._tag === 'ToolExecutionCompleted' || event._tag === 'ToolExecutionAccepted'
-                ? { ...acc, toolCalls: [...acc.toolCalls, event.call] }
-                : acc
+        const next = Predicate.isTagged(event, 'AgentAwaitingInput')
+          ? { ...acc, requests: event.requests, usage: event.usage }
+          : Predicate.isTagged(event, 'UsageUpdate')
+            ? { ...acc, usage: addAgentUsage(acc.usage, event.usage) }
+            : Predicate.isTagged(event, 'ToolExecutionCompleted') ||
+                Predicate.isTagged(event, 'ToolExecutionAccepted')
+              ? { ...acc, toolCalls: [...acc.toolCalls, event.call] }
+              : acc
+
         return onEvent === undefined ? Effect.succeed(next) : onEvent(event).pipe(Effect.as(next))
       }
     ),
     Effect.map((result): ToolBatchOutcome => {
       if (result.requests.length === 0) {
         const needsContinuation = result.toolCalls.length > 0
+
         return {
           _tag: 'Completed',
           needsContinuation,
@@ -268,6 +275,7 @@ export const attemptToolBatch = <E2 = never, R2 = never>(
           stopReason: needsContinuation ? 'tool_use' : 'stop'
         }
       }
+
       return { _tag: 'AwaitingInput', requests: result.requests, usage: result.usage }
     })
   )

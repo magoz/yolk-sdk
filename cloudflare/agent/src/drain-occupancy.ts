@@ -25,7 +25,9 @@ export const makeDrainOccupancy = (): Effect.Effect<{
           if (current._tag !== 'Idle') {
             return [false, current]
           }
+
           const held: DrainSlot = { _tag: 'Held', work, token }
+
           return [true, held]
         }),
       runHeld: Ref.get(drainSlot).pipe(
@@ -36,6 +38,7 @@ export const makeDrainOccupancy = (): Effect.Effect<{
           if (current._tag !== 'Held' || current.token.id !== token.id) {
             return [false, current]
           }
+
           return [true, { _tag: 'Idle' as const }]
         }),
       isHeld: Ref.get(drainSlot).pipe(Effect.map(slot => slot._tag === 'Held'))

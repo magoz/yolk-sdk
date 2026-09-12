@@ -17,8 +17,11 @@ import * as Namespace from 'alchemy/Namespace'
 import * as Effect from 'effect/Effect'
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url))
+
 const agentPackageJson = fileURLToPath(new URL('../package.json', import.meta.url))
+
 const alchemyRoot = fileURLToPath(new URL('..', import.meta.resolve('alchemy')))
+
 const failures: string[] = []
 
 const expectFunction = (name: string, value: unknown) => {
@@ -28,10 +31,15 @@ const expectFunction = (name: string, value: unknown) => {
 }
 
 expectFunction('Alchemy.Stack', Alchemy.Stack)
+
 expectFunction('Alchemy.localState', Alchemy.localState)
+
 expectFunction('Cloudflare.Worker', Cloudflare.Worker)
+
 expectFunction('Cloudflare.providers', Cloudflare.providers)
+
 expectFunction('Cloudflare.DurableObjectNamespace', Cloudflare.DurableObjectNamespace)
+
 expectFunction('Cloudflare.upgrade', Cloudflare.upgrade)
 
 if (Namespace.CurrentNamespace === undefined) {
@@ -53,7 +61,9 @@ if (typeof Reflect.get(namespaceOption, 'asEffect') === 'function') {
 const resolveEffect = (fromFile: string) => realpathSync(createRequire(fromFile).resolve('effect'))
 
 const effectFromAgent = resolveEffect(agentPackageJson)
+
 const effectFromRoot = resolveEffect(join(repoRoot, 'package.json'))
+
 const effectFromAlchemy = resolveEffect(join(alchemyRoot, 'package.json'))
 
 if (effectFromAgent !== effectFromRoot || effectFromAgent !== effectFromAlchemy) {
@@ -68,6 +78,7 @@ if (effectFromAgent !== effectFromRoot || effectFromAgent !== effectFromAlchemy)
 }
 
 const alchemyBin = join(alchemyRoot, 'bin/cli.js')
+
 const help = spawnSync(process.execPath, [alchemyBin, '--help'], {
   cwd: join(repoRoot, 'cloudflare/agent'),
   encoding: 'utf8',
@@ -81,6 +92,7 @@ if (help.error?.name === 'TimeoutError' || help.signal === 'SIGTERM') {
     `${help.stderr ?? ''}${help.stdout ?? ''}`.trim() ||
     help.error?.message ||
     `status ${String(help.status)}`
+
   failures.push(`alchemy --help failed: ${detail}`)
 } else if (!help.stdout.toLowerCase().includes('usage')) {
   failures.push('alchemy --help produced no usage output')
@@ -92,5 +104,7 @@ if (failures.length > 0) {
 }
 
 console.log('alchemy compat ok')
+
 console.log(`effect ${effectFromAgent}`)
+
 console.log(`cli help ${help.status}`)
