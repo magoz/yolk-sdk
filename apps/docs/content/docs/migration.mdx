@@ -23,6 +23,21 @@ Do not mix versions unless a release note explicitly says it is safe.
 
 ## Recent canary migrations
 
+### Next canary: host-only connector file retrieval and writes
+
+New byte helpers on existing connector subpaths are host-only. They are not connector actions and
+`makeConnectorToolModule` does not serialize them. Provide `ConnectorBinaryHttpClient` and/or
+`ConnectorBinaryWriteHttpClient`, keep streamed limits and connection-time network policy in the
+host, and keep raw bytes out of generic tool JSON. Dropbox create is strict add; Dropbox update
+requires a stable `id:` and expected revision; OneDrive update requires `acknowledgeOverwrite: true`
+and is unconditional, not compare-and-swap; R2 puts stay ETag-conditional. Fortnox `connectfile` and
+`archive` slots are opt-in and are **not** on `FortnoxCombinedOAuthCredentialSlot`. Drive content
+defaults to `drive.file`; `contentAccess: 'readonly'` is host-only `drive.readonly`.
+
+Passing whole `FortnoxConnector` or `TodoistConnector` into `makeConnectorToolModule` now also
+exposes `fortnox.list_supplier_invoice_files` and `todoist.list_comments`. See
+[Transfer connector files](./connectors/files).
+
 ### Next canary: host-only Dropbox original-byte download
 
 `downloadDropboxFile` from `@yolk-sdk/connectors/dropbox` is an optional host helper that reuses

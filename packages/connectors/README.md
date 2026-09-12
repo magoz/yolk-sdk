@@ -14,22 +14,22 @@ Published package metadata requires Node.js 22+.
 
 ## Subpaths
 
-| Subpath                                | Purpose                                                                                             |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives                                             |
-| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                   |
-| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                         |
-| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only file download         |
-| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port |
-| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                    |
-| `@yolk-sdk/connectors/fortnox`         | Read-only company information, customers, invoices, suppliers, and supplier invoices with OAuth     |
-| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                 |
-| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                            |
-| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                    |
-| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot               |
-| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action with host-provided presigner                                        |
-| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                  |
-| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                             |
+| Subpath                                | Purpose                                                                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `@yolk-sdk/connectors`                 | Core connector/action/integration/credential primitives plus binary HTTP ports and file-transfer types    |
+| `@yolk-sdk/connectors/agent`           | Adapter from connector actions to `@yolk-sdk/agent/tools` modules                                         |
+| `@yolk-sdk/connectors/afloat`          | Afloat remote MCP auth action, API-key slot, endpoint, and protocol version                               |
+| `@yolk-sdk/connectors/dropbox`         | Dropbox metadata, search, file-management actions, OAuth slots, and host-only download plus create/update |
+| `@yolk-sdk/connectors/email`           | Portable IMAP reads/drafts/message state, POP3 reads, and SMTP submission through a host email port       |
+| `@yolk-sdk/connectors/figma`           | Figma remote MCP auth action and OAuth constants                                                          |
+| `@yolk-sdk/connectors/fortnox`         | Read-only company, customer, invoice, supplier, and supplier-invoice file listing with OAuth              |
+| `@yolk-sdk/connectors/google`          | Gmail, Calendar, and Drive actions plus Google OAuth slot constants                                       |
+| `@yolk-sdk/connectors/linkedin-search` | Exa people search and Enrich Layer profile/email actions                                                  |
+| `@yolk-sdk/connectors/microsoft`       | Microsoft Outlook/OneDrive actions through Graph and shared OAuth slot constants                          |
+| `@yolk-sdk/connectors/notion`          | Notion search/page/block/database/data-source/comment/user actions and API token slot                     |
+| `@yolk-sdk/connectors/r2-storage`      | Cloudflare R2 upload URL action plus host-only `R2ObjectClient` get/create/update                         |
+| `@yolk-sdk/connectors/telegram`        | Telegram bot send/validate actions                                                                        |
+| `@yolk-sdk/connectors/todoist`         | Todoist project/task/label/comment actions and API token slot constants                                   |
 
 ## Imports
 
@@ -48,6 +48,9 @@ import { GoogleConnector } from '@yolk-sdk/connectors/google'
 - **CredentialBinding**: integration slot-to-host-credential-ref mapping.
 - **CredentialResolver**: host Effect service that resolves refs at runtime.
 - **ConnectorHttpClient**: host-provided HTTP port used by provider actions.
+- **ConnectorBinaryHttpClient** / **ConnectorBinaryWriteHttpClient**: optional host-provided GET/write byte ports used by host-only file helpers.
+- **R2ObjectClient**: host-provided conditional object port for R2 get/create/update.
+- **ConnectorFileTransferBudget**: host-owned streamed byte/metadata/error limits for those helpers.
 - **EmailClient**: host-provided IMAP, POP3, and SMTP transport port used by generic email actions.
 
 ## HTTP port
@@ -667,7 +670,11 @@ import { downloadGoogleDriveFile } from '@yolk-sdk/connectors/google'
 
 const budget = { maxBytes: 20_000_000, maxMetadataBytes: 1_000_000, maxErrorBodyBytes: 16_384 }
 const create = createDropboxFile(dropboxIntegration, { path: '/new.pdf', bytes }, budget)
-const update = updateDropboxFile(dropboxIntegration, { fileId, expectedRev, bytes }, budget)
+const update = updateDropboxFile(
+  dropboxIntegration,
+  { fileId: 'id:host-dropbox-file-id', expectedRev, bytes },
+  budget
+)
 const replace = updateOneDriveFile(
   microsoftIntegration,
   { itemId, driveId, bytes, acknowledgeOverwrite: true },
@@ -768,20 +775,20 @@ orchestration only.
 
 ## Provider actions
 
-| Subpath                                | Capabilities                                                                                         |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                    |
-| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download      |
-| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                      |
-| `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                     |
-| `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, and supplier invoices              |
-| `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions |
-| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                         |
-| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                  |
-| `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                         |
-| `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url`                                                                              |
-| `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                         |
-| `@yolk-sdk/connectors/todoist`         | Todoist project, task, label, and comment actions                                                    |
+| Subpath                                | Capabilities                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `@yolk-sdk/connectors/afloat`          | `afloat.mcp_auth`                                                                                                  |
+| `@yolk-sdk/connectors/dropbox`         | list/continue, search/continue, metadata, create folder, move, copy, delete; host-only download plus create/update |
+| `@yolk-sdk/connectors/email`           | list/get messages, attachments, drafts, send, and IMAP read-state/trash/restore                                    |
+| `@yolk-sdk/connectors/figma`           | `figma.mcp_auth`                                                                                                   |
+| `@yolk-sdk/connectors/fortnox`         | get company information; list/get customers, invoices, suppliers, supplier invoices, and supplier-invoice files    |
+| `@yolk-sdk/connectors/google`          | Gmail mail actions; Calendar event actions; Drive metadata, folder-create, trash, and delete actions               |
+| `@yolk-sdk/connectors/linkedin-search` | `linkedin_search.search`, `linkedin_search.profile`, `linkedin_search.email`                                       |
+| `@yolk-sdk/connectors/microsoft`       | Outlook mail plus OneDrive metadata, search, folder-create, and recycle-bin actions                                |
+| `@yolk-sdk/connectors/notion`          | Notion search, page, block, database, data source, user, and comment actions                                       |
+| `@yolk-sdk/connectors/r2-storage`      | `r2_storage.upload_url` plus host-only `R2ObjectClient` get/create/update                                          |
+| `@yolk-sdk/connectors/telegram`        | `telegram.send_message`, `telegram.validate`                                                                       |
+| `@yolk-sdk/connectors/todoist`         | Todoist project, task, label, and comment actions                                                                  |
 
 R2 presigning is host-provided through `R2Presigner`; no AWS SDK dependency is bundled. `r2_storage.upload_url` includes `publicUrl` only when integration config provides `publicUrl`.
 
@@ -819,6 +826,9 @@ from the runtime `OAuthCredential`. Keep these values in the host credential sto
 - Store, encrypt, refresh, revoke, and audit credentials.
 - Own OAuth routes, callbacks, state, token persistence, and required-scope consent.
 - Provide the `ConnectorHttpClient` implementation and Effect layers required by enabled connectors.
+- Provide `ConnectorBinaryHttpClient` / `ConnectorBinaryWriteHttpClient` when using host-only byte APIs; never log URLs/bodies; enforce streamed limits, TLS, and connection-time DNS/IP policy.
+- Provide `R2ObjectClient` for conditional R2 get/create/update; provide `EmailClient` (including optional `getAttachmentBytes`) for email.
+- Keep byte results out of `makeConnectorToolModule` / generic tool JSON; own materialization, scanning, and format readers.
 - Preserve connector request headers and body content types while applying host networking policy.
 - Map integrations to users, workspaces, agents, or projects outside this package.
 - Authorize action execution before invoking connectors.

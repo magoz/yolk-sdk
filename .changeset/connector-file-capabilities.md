@@ -1,10 +1,10 @@
 ---
-'@yolk-sdk/agent': minor
-'@yolk-sdk/connectors': minor
-'@yolk-sdk/knowledge': minor
-'@yolk-sdk/mcp': minor
-'@yolk-sdk/sandbox': minor
-'@yolk-sdk/vercel-workflows': minor
+'@yolk-sdk/agent': patch
+'@yolk-sdk/connectors': patch
+'@yolk-sdk/knowledge': patch
+'@yolk-sdk/mcp': patch
+'@yolk-sdk/sandbox': patch
+'@yolk-sdk/vercel-workflows': patch
 ---
 
-Add host-only connector file downloads/exports and bounded Dropbox, OneDrive and conditional R2 byte writes. Preserve existing GET adapters, base64 actions and R2 presigning. OneDrive replacement explicitly acknowledges unconditional overwrite; Dropbox revisions and R2 ETags remain strict provider/host preconditions. Add Fortnox supplier-file and Todoist comment metadata discovery, document consent/streaming/concurrency limits and reuse existing Afloat/Figma MCP file operations. No generic agent byte actions or app wiring.
+Add host-only retrieval for Google Drive download/export, Gmail, Outlook, IMAP/POP3, Notion, Telegram, Todoist attachments, Fortnox preview/archive, and R2 gets, plus bounded Dropbox/OneDrive writes and conditional R2 puts. Preserve GET-only binary adapters, base64 attachment actions, and R2 presigning. OneDrive update requires acknowledgeOverwrite and is unconditional, not CAS; Dropbox revision and R2 ETag preconditions stay strict. Add Fortnox list_supplier_invoice_files and Todoist list_comments read actions. Drive bytes default to drive.file with host-only drive.readonly opt-in; Fortnox archive/connectfile slots are opt-in and not added to the combined hint. No generic agent byte actions or app wiring.
