@@ -2,6 +2,7 @@ import * as Schema from 'effect/Schema'
 import { AgentError, ProviderErrorInfo, type AgentErrorCode } from '@yolk-sdk/agent/protocol'
 
 export const LLMResponseIssue = Schema.Literal('missing_done')
+
 export type LLMResponseIssue = typeof LLMResponseIssue.Type
 
 export class LLMError extends Schema.TaggedErrorClass<LLMError>()('LLMError', {

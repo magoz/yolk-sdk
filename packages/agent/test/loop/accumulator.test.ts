@@ -1,8 +1,10 @@
 import { describe, expect, it } from '@effect/vitest'
+import { Predicate } from 'effect'
 import {
   assistantContent,
   assistantHostToolCalls,
   assistantReasoningText,
+  AssistantTextPart,
   contentText,
   ToolCall,
   ToolResult
@@ -13,6 +15,7 @@ import {
   collectText,
   collectToolCalls
 } from '../../src/loop'
+import { applyAssistantLlmEvent } from '../../src/loop/accumulator.ts'
 import {
   LLMDone,
   LLMProviderToolResult,
@@ -162,5 +165,109 @@ describe('accumulateAssistantMessage', () => {
     expect(collectText(events)).toBe('Hi')
     expect(collectReasoning(events)).toBe('why')
     expect(collectToolCalls(events)).toEqual([call])
+  })
+})
+
+const instrumentTextDelta = (event: LLMTextDelta, receipts: string[]): LLMTextDelta => {
+  const tag = event._tag
+  const text = event.text
+
+  Object.defineProperty(event, '_tag', {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      receipts.push('tag')
+
+      return tag
+    }
+  })
+  Object.defineProperty(event, 'text', {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      receipts.push('text')
+
+      return text
+    }
+  })
+
+  return event
+}
+
+class SliceRecordingParts extends Array<AssistantTextPart> {
+  readonly receipts: string[] = []
+
+  override slice(...args: Parameters<Array<AssistantTextPart>['slice']>): AssistantTextPart[] {
+    this.receipts.push(`slice(${args.join(',')})`)
+
+    return super.slice(...args)
+  }
+}
+
+class IdentitySliceParts extends Array<AssistantTextPart> {
+  override slice(): this {
+    return this
+  }
+}
+
+describe('applyAssistantLlmEvent', () => {
+  it('reads the tag once, then payload, then slice(0, -1) when coalescing text', () => {
+    const parts = new SliceRecordingParts()
+    const receipts = parts.receipts
+    parts.push(AssistantTextPart.make({ content: 'A' }))
+    const event = instrumentTextDelta(LLMTextDelta.make({ text: 'B' }), receipts)
+
+    const next = applyAssistantLlmEvent(parts, event)
+    const coalesced = next[0]
+
+    expect(receipts.filter(entry => entry === 'tag')).toHaveLength(1)
+    expect(receipts).toEqual(['tag', 'text', 'slice(0,-1)'])
+    expect(next).not.toBe(parts)
+    expect(next).toHaveLength(1)
+
+    if (coalesced === undefined || !Predicate.isTagged(coalesced, 'Text')) {
+      throw new Error('expected coalesced text part')
+    }
+
+    expect(coalesced.content).toEqual('AB')
+  })
+
+  it('does not mutate a frozen parts array and coalesces onto a new array', () => {
+    const parts = Object.freeze([AssistantTextPart.make({ content: 'A' })])
+    const before = JSON.stringify(parts)
+
+    const next = applyAssistantLlmEvent(parts, LLMTextDelta.make({ text: 'B' }))
+    const coalesced = next[0]
+
+    expect(JSON.stringify(parts)).toBe(before)
+    expect(Object.isFrozen(parts)).toBe(true)
+    expect(next).not.toBe(parts)
+    expect(next).toHaveLength(1)
+
+    if (coalesced === undefined || !Predicate.isTagged(coalesced, 'Text')) {
+      throw new Error('expected coalesced text part')
+    }
+
+    expect(coalesced.content).toEqual('AB')
+  })
+
+  it('returns the original parts identity for no-op Done events', () => {
+    const parts = [AssistantTextPart.make({ content: 'A' })]
+
+    expect(applyAssistantLlmEvent(parts, LLMDone.make({ stopReason: 'stop' }))).toBe(parts)
+  })
+
+  it('does not mutate an array whose slice returns this', () => {
+    const original = AssistantTextPart.make({ content: 'A' })
+    const parts = new IdentitySliceParts()
+    parts.push(original)
+    const before = JSON.stringify(parts)
+
+    applyAssistantLlmEvent(parts, LLMTextDelta.make({ text: 'B' }))
+
+    expect(JSON.stringify(parts)).toBe(before)
+    expect(parts[0]).toBe(original)
+    expect(parts).toHaveLength(1)
+    expect(original.content).toBe('A')
   })
 })

@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Ref, Stream } from 'effect'
+import { Cause, Context, Effect, Layer, Predicate, Ref, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import {
   AgentInputUsage,
@@ -31,7 +31,7 @@ const modelTurnLayer = (...responses: ReadonlyArray<FauxResponse>) =>
   })
 
 const assistantMessageFromResult = (message: AgentMessage | undefined) => {
-  if (message === undefined || message._tag !== 'Assistant') {
+  if (message === undefined || !Predicate.isTagged(message, 'Assistant')) {
     throw new Error('Expected assistant message')
   }
 
@@ -50,6 +50,7 @@ const annotatedFailCause = <E>(error: E) =>
 const expectOriginalTypedFail = <E>(cause: Cause.Cause<E>, typed: E) => {
   const fail = Cause.findFail(cause)
   expect(fail._tag).toBe('Success')
+
   if (fail._tag !== 'Success') return
   expect(fail.success.error).toBe(typed)
   expect(Context.getOrUndefined(Cause.reasonAnnotations(fail.success), CollectTestRequestId)).toBe(
@@ -60,6 +61,7 @@ const expectOriginalTypedFail = <E>(cause: Cause.Cause<E>, typed: E) => {
 const expectOriginalDefect = <E>(cause: Cause.Cause<E>, defect: unknown) => {
   const die = Cause.findDie(cause)
   expect(die._tag).toBe('Success')
+
   if (die._tag !== 'Success') return
   expect(die.success.defect).toBe(defect)
 }
@@ -114,6 +116,7 @@ describe('collectModelTurn', () => {
   it.effect('runs onEvent after each fold update in order', () =>
     Effect.gen(function* () {
       const seen = yield* Ref.make<ReadonlyArray<string>>([])
+
       const result = yield* collectModelTurn(
         runModelTurn({
           messages: [UserMessage.make({ content: 'hello' })],
@@ -147,6 +150,7 @@ describe('collectModelTurn', () => {
         input: AgentInputUsage.make({ total: 5 }),
         output: AgentOutputUsage.make({ total: 1 })
       })
+
       const result = yield* collectModelTurn(
         runModelTurn({
           messages: [UserMessage.make({ content: 'hello' })],
@@ -206,6 +210,7 @@ describe('collectModelTurnAttempt', () => {
       )
 
       expect(outcome._tag).toBe('StreamFailed')
+
       if (outcome._tag !== 'StreamFailed') return
       expect(outcome.error).toMatchObject({
         _tag: 'LLMError',
@@ -213,6 +218,7 @@ describe('collectModelTurnAttempt', () => {
       })
       expect(outcome.collection.outputStarted).toBe(true)
       expect(outcome.collection.assistantMessage).toBeUndefined()
+
       if (outcome.collection.partialAssistantMessage?._tag !== 'Assistant') return
       expect(assistantContent(outcome.collection.partialAssistantMessage)).toBe('partial')
     }).pipe(Effect.provide(loopLayer))
@@ -225,6 +231,7 @@ describe('collectModelTurnAttempt', () => {
         message: 'sink',
         retryable: true
       })
+
       const outcome = yield* collectModelTurnAttempt(
         runModelTurn({
           messages: [UserMessage.make({ content: 'hello' })],
@@ -237,6 +244,7 @@ describe('collectModelTurnAttempt', () => {
       ).pipe(Effect.provide(modelTurnLayer(Reply.text('ok'))))
 
       expect(outcome._tag).toBe('SinkFailed')
+
       if (outcome._tag !== 'SinkFailed') return
       expect(outcome.error).toBe(sinkError)
     })
@@ -266,9 +274,11 @@ describe('collectModelTurnAttempt', () => {
       )
 
       expect(outcome._tag).toBe('StreamFailed')
+
       if (outcome._tag !== 'StreamFailed') return
       expect(outcome.collection.outputStarted).toBe(true)
       expect(outcome.collection.assistantMessage).toBeUndefined()
+
       if (outcome.collection.partialAssistantMessage?._tag !== 'Assistant') return
       expect(assistantReasoningText(outcome.collection.partialAssistantMessage)).toBe('thinking')
     })
@@ -280,6 +290,7 @@ describe('collectModelTurnAttempt', () => {
       const outcome = yield* collectModelTurnAttempt(Stream.fail(forged))
 
       expect(outcome._tag).toBe('StreamFailed')
+
       if (outcome._tag !== 'StreamFailed') return
       expect(outcome.error).toBe(forged)
     })
@@ -292,7 +303,9 @@ describe('collectModelTurnAttempt', () => {
         message: 'sink',
         retryable: true
       })
+
       const defect = new Error('sink defect')
+
       const exit = yield* collectModelTurnAttempt(
         Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
         {
@@ -302,6 +315,7 @@ describe('collectModelTurnAttempt', () => {
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -317,12 +331,15 @@ describe('collectModelTurnAttempt', () => {
         message: 'upstream',
         retryable: true
       })
+
       const defect = new Error('upstream defect')
+
       const exit = yield* collectModelTurnAttempt(
         Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -338,6 +355,7 @@ describe('collectModelTurnAttempt', () => {
         message: 'sink interrupt',
         retryable: true
       })
+
       const exit = yield* collectModelTurnAttempt(
         Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
         {
@@ -347,6 +365,7 @@ describe('collectModelTurnAttempt', () => {
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
@@ -361,11 +380,13 @@ describe('collectModelTurnAttempt', () => {
         message: 'upstream interrupt',
         retryable: true
       })
+
       const exit = yield* collectModelTurnAttempt(
         Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
@@ -376,6 +397,7 @@ describe('collectModelTurnAttempt', () => {
   it.effect('keeps pure sink defects as defects', () =>
     Effect.gen(function* () {
       const defect = new Error('pure sink defect')
+
       const exit = yield* collectModelTurnAttempt(
         Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
         {
@@ -384,6 +406,7 @@ describe('collectModelTurnAttempt', () => {
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(false)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -397,6 +420,7 @@ describe('collectModelTurnAttempt', () => {
       const exit = yield* collectModelTurnAttempt(Stream.die(defect)).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(false)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -424,7 +448,9 @@ describe('collectModelTurn legacy success', () => {
         message: 'legacy sink',
         retryable: true
       })
+
       const defect = new Error('legacy sink defect')
+
       const exit = yield* collectModelTurn(
         Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
         {
@@ -434,6 +460,7 @@ describe('collectModelTurn legacy success', () => {
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -449,12 +476,15 @@ describe('collectModelTurn legacy success', () => {
         message: 'legacy upstream',
         retryable: true
       })
+
       const defect = new Error('legacy upstream defect')
+
       const exit = yield* collectModelTurn(
         Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.die(defect)))
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasDies(exit.cause)).toBe(true)
@@ -470,6 +500,7 @@ describe('collectModelTurn legacy success', () => {
         message: 'legacy sink interrupt',
         retryable: true
       })
+
       const exit = yield* collectModelTurn(
         Stream.make(AgentLLMTextDelta.make({ text: 'partial' })),
         {
@@ -479,6 +510,7 @@ describe('collectModelTurn legacy success', () => {
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)
@@ -493,11 +525,13 @@ describe('collectModelTurn legacy success', () => {
         message: 'legacy upstream interrupt',
         retryable: true
       })
+
       const exit = yield* collectModelTurn(
         Stream.failCause(Cause.combine(annotatedFailCause(typed), Cause.interrupt()))
       ).pipe(Effect.exit)
 
       expect(exit._tag).toBe('Failure')
+
       if (exit._tag !== 'Failure') return
       expect(Cause.hasFails(exit.cause)).toBe(true)
       expect(Cause.hasInterrupts(exit.cause)).toBe(true)

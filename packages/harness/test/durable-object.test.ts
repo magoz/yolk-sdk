@@ -93,6 +93,7 @@ describe('durable object driver', () => {
   it.effect('does not publish in-memory claims when save fails', () =>
     Effect.gen(function* () {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: () => Effect.die('save failed')
@@ -113,6 +114,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const started = yield* Deferred.make<void>()
       const cont = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: next =>
@@ -144,6 +146,7 @@ describe('durable object driver', () => {
       const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
       const started = yield* Deferred.make<void>()
       const cont = yield* Deferred.make<void>()
+
       const layer = makeDurableObjectDriverLayer({
         load: Ref.get(snapshot),
         save: next =>

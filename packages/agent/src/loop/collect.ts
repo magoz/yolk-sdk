@@ -63,9 +63,11 @@ const restoreAttemptCause = <E, E2>(
       if (!Cause.isFailReason(reason)) {
         return reason
       }
+
       if (reason.error instanceof CollectModelTurnSinkError) {
         return mapFailReason(reason, reason.error.error)
       }
+
       return mapFailReason(reason, reason.error)
     })
   )
@@ -139,12 +141,15 @@ const applyPartialAssistant = (
   event: AgentEvent
 ): AgentMessage | undefined => {
   const llmEvent = llmEventFromAgentEvent(event)
+
   if (llmEvent === undefined) return message
+
   return withAssistantParts(applyAssistantLlmEvent(assistantParts(message), llmEvent))
 }
 
 const applyModelTurnEvent = (acc: ModelTurnCollection, event: AgentEvent): ModelTurnCollection => {
   const outputStarted = acc.outputStarted || eventStartsOutput(event)
+
   const partialAssistantMessage =
     event._tag === 'AssistantMessage'
       ? event.message
@@ -189,6 +194,7 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
   Effect.gen(function* () {
     const collection = yield* Ref.make(emptyCollection(options?.initialUsage))
     const onEvent = options?.onEvent
+
     const exit = yield* stream.pipe(
       Stream.runForEach(event =>
         Ref.update(collection, current => applyModelTurnEvent(current, event)).pipe(
@@ -199,6 +205,7 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
       ),
       Effect.exit
     )
+
     const state = yield* Ref.get(collection)
 
     if (Exit.isSuccess(exit)) {
@@ -210,6 +217,7 @@ export const collectModelTurnAttempt = <E, R, E2 = never, R2 = never>(
     }
 
     const found = Cause.findError(exit.cause)
+
     if (Result.isFailure(found)) {
       return yield* Effect.failCause(restoreAttemptCause(exit.cause))
     }
@@ -233,6 +241,7 @@ export const collectModelTurn = <E, R, E2 = never, R2 = never>(
       if (outcome._tag === 'Collected') {
         return Effect.succeed(toModelTurnResult(outcome.collection))
       }
+
       return Effect.fail(outcome.error)
     })
   )

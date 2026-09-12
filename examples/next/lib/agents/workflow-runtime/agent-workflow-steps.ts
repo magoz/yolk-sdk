@@ -1,5 +1,5 @@
 import { getWorkflowMetadata, getWritable } from 'workflow'
-import { Cause, Clock, Effect, Layer, Ref, Result, Stream } from 'effect'
+import { Cause, Clock, Effect, Layer, Predicate, Ref, Result, Stream } from 'effect'
 import * as Schema from 'effect/Schema'
 import {
   makeDurableAgentEventSequencerState,
@@ -79,6 +79,7 @@ const writeSequencedWorkflowEvent = (input: {
 }) =>
   Effect.gen(function* () {
     const sequence = yield* Ref.get(input.eventSequence)
+
     const result = yield* writeDurableAgentEvent({
       writer: input.writer,
       event: input.event,
@@ -125,6 +126,7 @@ const decodeHitlResponses = (responses: ReadonlyArray<unknown> | undefined) =>
 const decodeStepRequest = (state: SerializableWorkflowState) =>
   Effect.gen(function* () {
     const request = yield* Schema.decodeUnknownEffect(AgentRouteRequest)(state.request)
+
     const messages = yield* state.messages === undefined
       ? Effect.succeed(request.messages)
       : decodeNonEmptyMessages(state.messages)
@@ -181,6 +183,7 @@ export async function runAgentWorkflowModelStep(input: {
       const runtime = yield* workflowRuntime(request, context)
       const store = yield* AgentWorkflowStore
       const eventSequence = yield* Ref.make(input.state.eventSequence ?? 0)
+
       // Stream construction can happen eagerly during retry setup. Admission belongs at
       // subscription, after the retry delay, before every provider attempt's effects.
       const {
@@ -216,7 +219,8 @@ export async function runAgentWorkflowModelStep(input: {
               Stream.unwrap(
                 assertChildAdmission(context, workflowRunId).pipe(
                   Effect.mapError(error =>
-                    error._tag === 'WorkflowRegistryError' || error._tag === 'WorkflowRunForbidden'
+                    Predicate.isTagged(error, 'WorkflowRegistryError') ||
+                    Predicate.isTagged(error, 'WorkflowRunForbidden')
                       ? new AbortError({ reason: 'user' })
                       : new LLMError({
                           cause: 'provider_error',
@@ -231,11 +235,14 @@ export async function runAgentWorkflowModelStep(input: {
           })).pipe(Layer.provideMerge(runtime.layer))
         )
       )
+
       const needsContinuation = stopReason === 'tool_use'
+
       const nextCreatedMessages =
         currentAssistantMessage === undefined
           ? createdMessages
           : [...createdMessages, currentAssistantMessage]
+
       const nextMessages =
         currentAssistantMessage === undefined
           ? runtime.input.messages
@@ -254,6 +261,7 @@ export async function runAgentWorkflowModelStep(input: {
           eventSequence
         })
       }
+
       const nextEventSequence = yield* Ref.get(eventSequence)
 
       return {
@@ -295,10 +303,12 @@ export async function runAgentWorkflowToolBatchStep(input: {
   const writable = getWritable<Uint8Array>()
   const writer = writable.getWriter()
   const workflowRunId = getWorkflowMetadata().workflowRunId
+
   const eventRunId =
     input.eventNamespace === undefined
       ? workflowRunId
       : `${workflowRunId}:tool:${input.eventNamespace}`
+
   let latestUsage = zeroAgentUsage
   let latestEventSequence = input.eventSequence
   let latestToolResultMessages: ReadonlyArray<ToolResultMessage> = []
@@ -314,11 +324,13 @@ export async function runAgentWorkflowToolBatchStep(input: {
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
       yield* assertChildAdmission(context, getWorkflowMetadata().workflowRunId)
       const runtime = yield* workflowRuntime(request, context)
+
       const prepared = yield* prepareToolBatch({
         calls,
         tools: runtime.config.tools,
         responses: hitlResponses
       })
+
       if (input.preflightOnly === true && prepared.pendingRequests.length === 0) {
         return {
           messages: [],
@@ -328,10 +340,12 @@ export async function runAgentWorkflowToolBatchStep(input: {
           executableIds: prepared.callsToExecute.map(item => item.call.id)
         }
       }
+
       const suppliedResult =
         input.result === undefined
           ? undefined
           : yield* Schema.decodeUnknownEffect(ToolResult)(input.result)
+
       const toolResultMessages = yield* Ref.make<ReadonlyArray<IndexedToolResultMessage>>([])
       const cumulativeUsage = yield* Ref.make(usage)
       const awaitingInput = yield* Ref.make<AgentAwaitingInput | undefined>(undefined)
@@ -346,6 +360,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
         turn: input.turn,
         usage
       })
+
       const executor = yield* ToolExecutor.pipe(Effect.provide(runtime.layer))
       const store = yield* AgentWorkflowStore
       yield* toolStream.pipe(
@@ -371,10 +386,11 @@ export async function runAgentWorkflowToolBatchStep(input: {
         Stream.filter(
           event =>
             input.executionStartedAtMs === undefined ||
-            (event._tag !== 'ToolExecutionStarted' && event._tag !== 'SubagentStarted')
+            (!Predicate.isTagged(event, 'ToolExecutionStarted') &&
+              !Predicate.isTagged(event, 'SubagentStarted'))
         ),
         Stream.map(event =>
-          event._tag === 'SubagentCompleted' && input.executionStartedAtMs !== undefined
+          Predicate.isTagged(event, 'SubagentCompleted') && input.executionStartedAtMs !== undefined
             ? SubagentCompleted.make({
                 ...event,
                 durationMs: Math.max(
@@ -409,21 +425,23 @@ export async function runAgentWorkflowToolBatchStep(input: {
               }
 
               if (
-                event._tag !== 'ToolExecutionCompleted' &&
-                event._tag !== 'ToolExecutionAccepted'
+                !Predicate.isTagged(event, 'ToolExecutionCompleted') &&
+                !Predicate.isTagged(event, 'ToolExecutionAccepted')
               ) {
                 return Effect.void
               }
 
               return Effect.gen(function* () {
-                if (event._tag === 'ToolExecutionCompleted') {
+                if (Predicate.isTagged(event, 'ToolExecutionCompleted')) {
                   yield* Ref.update(cumulativeUsage, current =>
                     addWorkflowToolResultUsage(current, event.result)
                   )
                 }
+
                 latestUsage = yield* Ref.get(cumulativeUsage)
                 yield* Ref.update(toolResultMessages, messages => {
                   const callIndex = calls.findIndex(call => call.id === event.result.toolCallId)
+
                   const nextMessages = [
                     ...messages,
                     {
@@ -431,6 +449,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
                       message: toolResultMessageFromResult(event.result)
                     }
                   ]
+
                   latestToolResultMessages = orderedToolResultMessages(nextMessages)
 
                   return nextMessages
@@ -472,7 +491,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
     )
   )
 
-  if (result._tag === 'Success') {
+  if (Predicate.isTagged(result, 'Success')) {
     return result.value
   }
 
@@ -481,6 +500,7 @@ export async function runAgentWorkflowToolBatchStep(input: {
   }
 
   const expectedFailure = Cause.findFail(result.cause)
+
   if (Result.isFailure(expectedFailure)) {
     return await Effect.runPromise(Effect.failCause(result.cause))
   }
@@ -536,15 +556,18 @@ export async function mergeWorkflowToolResultsStep(
   return await Effect.runPromise(
     Effect.gen(function* () {
       let usage = yield* decodeUsageOrZero(input.usage)
+
       for (const result of results)
         usage = addAgentUsage(usage, yield* decodeUsageOrZero(result.usage))
       const messages = results.flatMap(result => result.messages)
       const calls = yield* Schema.decodeUnknownEffect(Schema.Array(ToolCall))(input.calls)
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(ToolResultMessage))(messages)
+
       const complete =
         decoded.length === calls.length &&
         decoded.every((message, index) => message.toolCallId === calls[index]?.id) &&
         results.every(result => result.awaitingInput === undefined)
+
       const failure =
         (executionFailure === undefined
           ? undefined
@@ -559,6 +582,7 @@ export async function mergeWorkflowToolResultsStep(
                 retryable: false
               })
             ))
+
       return {
         messages,
         createdMessages: [...input.createdMessages, ...messages],
@@ -580,6 +604,7 @@ export async function startWorkflowChildToolStep(input: {
 }) {
   const workflowRunId = getWorkflowMetadata().workflowRunId
   const writer = getWritable<Uint8Array>().getWriter()
+
   return await Effect.runPromise(
     Effect.gen(function* () {
       const context = yield* Schema.decodeUnknownEffect(WorkflowAgentContext)(input.context)
@@ -587,10 +612,12 @@ export async function startWorkflowChildToolStep(input: {
       const call = yield* Schema.decodeUnknownEffect(ToolCall)(input.call)
       const startedAtMs = yield* Clock.currentTimeMillis
       const events: AgentEvent[] = [ToolExecutionStarted.make({ call, createdAtMs: startedAtMs })]
+
       if (call.name === 'subagent' && input.childModel !== null) {
         const params = yield* Schema.decodeUnknownEffect(
           Schema.Struct({ subagent_type: Schema.String, description: Schema.String })
         )(call.params)
+
         events.push(
           SubagentStarted.make({
             parentToolCallId: call.id,
@@ -602,7 +629,9 @@ export async function startWorkflowChildToolStep(input: {
           })
         )
       }
+
       const eventSequence = yield* Ref.make(0)
+
       for (const event of events)
         yield* writeSequencedWorkflowEvent({
           writer,
@@ -611,6 +640,7 @@ export async function startWorkflowChildToolStep(input: {
           turn: input.turn ?? 0,
           eventSequence
         })
+
       return { startedAtMs, eventSequence: yield* Ref.get(eventSequence) }
     }).pipe(
       Effect.ensuring(releaseWorkflowWriter(writer)),
