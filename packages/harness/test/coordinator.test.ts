@@ -1,4 +1,4 @@
-import { Deferred, Effect, Ref } from 'effect'
+import { Deferred, Effect, Fiber, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { makeCoordinator } from '../src/coordinator.ts'
 
@@ -105,6 +105,45 @@ describe('makeCoordinator', () => {
 
         expect(interrupted).toBe(true)
         expect(yield* Ref.get(drains)).toBe(1)
+      })
+    )
+  )
+
+  it.effect('awaitIdle waits for successor drains before resolving', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const drains = yield* Ref.make(0)
+        const started = yield* Deferred.make<void>()
+        const firstRelease = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        const secondRelease = yield* Deferred.make<void>()
+        const coordinator = yield* makeCoordinator<string, never>({
+          started: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
+          drain: () =>
+            Ref.update(drains, count => count + 1).pipe(
+              Effect.andThen(Ref.get(drains)),
+              Effect.flatMap(count =>
+                count === 1
+                  ? Deferred.await(firstRelease)
+                  : Deferred.succeed(secondStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(secondRelease))
+                    )
+              )
+            )
+        })
+
+        yield* coordinator.wake('a')
+        yield* Deferred.await(started)
+        const idle = yield* coordinator.awaitIdle('a').pipe(Effect.forkChild)
+        yield* coordinator.wake('a')
+        expect(idle.pollUnsafe()).toBeUndefined()
+        yield* Deferred.succeed(firstRelease, undefined)
+        yield* Deferred.await(secondStarted)
+        expect(idle.pollUnsafe()).toBeUndefined()
+        yield* Deferred.succeed(secondRelease, undefined)
+        yield* Fiber.join(idle)
+
+        expect(yield* Ref.get(drains)).toBe(2)
       })
     )
   )

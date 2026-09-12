@@ -27,7 +27,6 @@ export type StepOutcome =
       readonly requests: ReadonlyArray<HitlRequest>
       readonly usage: AgentUsage
     }
-  | { readonly _tag: 'Failed'; readonly message: string }
 
 const completedOutcome = (
   result: ModelTurnResult

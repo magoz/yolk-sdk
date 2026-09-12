@@ -1,5 +1,5 @@
 import * as Cloudflare from 'alchemy/Cloudflare'
-import { Clock, Effect, Ref } from 'effect'
+import { Clock, Effect } from 'effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -42,6 +42,7 @@ import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-o
 import type { DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
 import { makeAnthropicClaudeProviderLayer } from '@yolk-sdk/agent/providers/anthropic/claude-provider'
 import { makeCodexWsProviderLayer } from './codex-ws-provider.ts'
+import { makeDrainOccupancy } from './drain-occupancy.ts'
 import {
   agentTextModel,
   agentTextModelMaxOutputTokens,
@@ -184,18 +185,8 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
         get: () => state.storage.get<RuntimeSessionEventLog>(runtimeEventsStorageKey),
         put: log => state.storage.put(runtimeEventsStorageKey, log)
       }
-      type DrainSlot =
-        | { readonly _tag: 'Idle' }
-        | { readonly _tag: 'Held'; readonly work: Effect.Effect<void> }
-      const drainSlot = yield* Ref.make<DrainSlot>({ _tag: 'Idle' })
-      const occupyDrain = (work: Effect.Effect<void>) =>
-        Ref.modify(drainSlot, current => {
-          if (current._tag !== 'Idle') {
-            return [false, current]
-          }
-          const held: DrainSlot = { _tag: 'Held', work }
-          return [true, held]
-        })
+      const occupancy = yield* makeDrainOccupancy()
+      const occupyDrain = occupancy.occupy
       const sendConflict = (socket: Cloudflare.DurableWebSocket) =>
         sendEvent(
           socket,
@@ -208,16 +199,7 @@ export default class YolkAgent extends Cloudflare.DurableObjectNamespace<YolkAge
       const harnessLayer = makeDurableObjectDriverLayer({
         load: state.storage.get<DurableRunStoreSnapshot>(harnessStoreKey),
         save: snapshot => state.storage.put(harnessStoreKey, snapshot),
-        drain: () =>
-          Ref.get(drainSlot).pipe(
-            Effect.flatMap(slot => {
-              if (slot._tag === 'Idle') {
-                return Effect.void
-              }
-              const idle: DrainSlot = { _tag: 'Idle' }
-              return slot.work.pipe(Effect.ensuring(Ref.set(drainSlot, idle)))
-            })
-          )
+        drain: () => occupancy.drain
       })
 
       const loadLogOrEmpty = (sessionId: string) =>

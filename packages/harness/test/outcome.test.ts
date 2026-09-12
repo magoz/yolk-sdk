@@ -1,7 +1,13 @@
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { ToolCall, ToolDef, UserMessage } from '@yolk-sdk/agent/protocol'
-import { ContextTransformer, LoopConfig, ToolExecutor } from '@yolk-sdk/agent/loop'
+import {
+  AbortError,
+  ContextTransformer,
+  LLMProvider,
+  LoopConfig,
+  ToolExecutor
+} from '@yolk-sdk/agent/loop'
 import { FauxProvider, Reply, TestToolExecutor } from '@yolk-sdk/agent/loop/testing'
 import { attemptModelTurn, attemptToolBatch } from '../src/outcome.ts'
 
@@ -43,6 +49,34 @@ describe('attemptModelTurn', () => {
       Effect.provide(
         Layer.mergeAll(
           FauxProvider.layer(Reply.toolCall({ id: 'call_1', name: 'weather', params: {} })),
+          loopLayer
+        )
+      )
+    )
+  )
+
+  it.effect('keeps AbortError on the error channel', () =>
+    Effect.gen(function* () {
+      const error = yield* attemptModelTurn({
+        messages: [UserMessage.make({ content: 'hello' })],
+        systemPrompt: 'Be brief.',
+        tools: [],
+        model: 'faux',
+        turn: 1
+      }).pipe(Effect.flip)
+
+      expect(error._tag).toBe('AbortError')
+      if (error._tag !== 'AbortError') return
+      expect(error.reason).toBe('user')
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(
+            LLMProvider,
+            LLMProvider.of({
+              stream: () => Stream.fail(new AbortError({ reason: 'user' }))
+            })
+          ),
           loopLayer
         )
       )
