@@ -40,7 +40,7 @@ export type Coordinator<Key, E, Reason = never> = {
   readonly wake: (key: Key, scope?: Promotable) => Effect.Effect<void>
   /**
    * Stops the active execution and clears its doorbell. No-op when idle.
-   * Resolves once interruption is accepted, not when cleanup settles.
+   * Resolves once the interruption request is delivered, not when cleanup settles.
    * First accepted `reason` is kept; use `terminalStop` to escalate.
    */
   readonly interrupt: (
@@ -52,7 +52,8 @@ export type Coordinator<Key, E, Reason = never> = {
    * Terminal stop receipt. Always clears pendingWake. Settling means the owner
    * is already gone and the settled callback is chosen; Driver may release the
    * claim under the Inbox gate. LiveStopping/Interrupted leave release to that
-   * owner's future settled callback.
+   * owner's future settled callback. LiveStopping joins the same outstanding
+   * interruption request rather than forking a second one.
    */
   readonly terminalStop: (key: Key, reason: Reason) => Effect.Effect<StopReceipt>
   /** Resolves once no execution is active. Never starts work. */
@@ -62,6 +63,7 @@ export type Coordinator<Key, E, Reason = never> = {
 type Execution<E, Reason> = {
   readonly done: Deferred.Deferred<void, E>
   owner?: Fiber.Fiber<void>
+  request?: Fiber.Fiber<void>
   scope: Promotable
   pendingWake?: Promotable
   stopping: boolean
@@ -85,7 +87,10 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       execution: Execution<E, Reason>,
       force: boolean
     ): Effect.Effect<void, E> =>
-      Effect.suspend(() => options.drain(key, force, execution.scope)).pipe(
+      Effect.suspend(() => {
+        if (execution.stopping) return Effect.void
+        return options.drain(key, force, execution.scope)
+      }).pipe(
         Effect.andThen(
           Effect.suspend(() => {
             if (execution.stopping || execution.pendingWake === undefined) return Effect.void
@@ -111,7 +116,9 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       executions.set(key, execution)
       execution.owner = fork(
         Effect.yieldNow.pipe(
-          Effect.andThen(Effect.uninterruptible(options.started?.(key) ?? Effect.void)),
+          Effect.andThen(
+            Effect.uninterruptible(Effect.suspend(() => options.started?.(key) ?? Effect.void))
+          ),
           Effect.andThen(loop(key, execution, force)),
           Effect.onExit(exit =>
             Effect.suspend(() => {
@@ -127,19 +134,29 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       return execution
     }
 
+    const forkInterruptionRequest = (owner: Fiber.Fiber<void>): Fiber.Fiber<void> =>
+      fork(Effect.yieldNow.pipe(Effect.andThen(Effect.sync(() => owner.interruptUnsafe()))))
+
     const interruptNow = (key: Key, reason?: Reason): Effect.Effect<boolean> =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         const execution = executions.get(key)
-        if (execution === undefined || execution.stopping) return false
+        if (execution === undefined || execution.stopping) return Effect.succeed(false)
         if (execution.owner === undefined) {
           execution.pendingWake = undefined
-          return false
+          return Effect.succeed(false)
         }
+        const owner = execution.owner
         execution.stopping = true
         execution.pendingWake = undefined
         execution.interruptionReason = reason
-        fork(Fiber.interrupt(execution.owner))
-        return true
+        // Capture the exact old owner and fork the request in this same lazy
+        // transition so cancellation cannot leave stopping=true with no request.
+        // Initial yield breaks owner -> resumed caller -> owner reentrancy.
+        // Join the request fiber only; interruptUnsafe may run interruptible
+        // finalizers inline until they suspend. Do not await owner settlement.
+        const request = forkInterruptionRequest(owner)
+        execution.request = request
+        return Fiber.join(request).pipe(Effect.as(true))
       })
 
     const awaitIdle = (key: Key): Effect.Effect<void> =>
@@ -208,19 +225,26 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           )
         }),
       terminalStop: (key, reason) =>
-        Effect.sync(() => {
+        Effect.suspend((): Effect.Effect<StopReceipt> => {
           const execution = executions.get(key)
-          if (execution === undefined) return { _tag: 'Idle' } as const
+          if (execution === undefined) return Effect.succeed({ _tag: 'Idle' } as const)
           execution.pendingWake = undefined
           if (execution.owner === undefined) {
             execution.stopping = true
-            return { _tag: 'Settling' } as const
+            return Effect.succeed({ _tag: 'Settling' } as const)
           }
           execution.interruptionReason = reason
-          if (execution.stopping) return { _tag: 'LiveStopping' } as const
+          if (execution.stopping) {
+            const request = execution.request
+            return request === undefined
+              ? Effect.succeed({ _tag: 'LiveStopping' } as const)
+              : Fiber.join(request).pipe(Effect.as({ _tag: 'LiveStopping' } as const))
+          }
+          const owner = execution.owner
           execution.stopping = true
-          fork(Fiber.interrupt(execution.owner))
-          return { _tag: 'Interrupted' } as const
+          const request = forkInterruptionRequest(owner)
+          execution.request = request
+          return Fiber.join(request).pipe(Effect.as({ _tag: 'Interrupted' } as const))
         }),
       awaitIdle
     }
