@@ -1,4 +1,4 @@
 {
   "title": "Vercel Workflows",
-  "pages": ["index", "step-contracts", "routes", "hitl-resume", "testing"]
+  "pages": ["index", "step-contracts", "harness-composition", "routes", "hitl-resume", "testing"]
 }
