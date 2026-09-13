@@ -10,6 +10,12 @@
 import { Deferred, Effect, Fiber, FiberSet } from 'effect'
 import type { Exit, Scope } from 'effect'
 
+// Private settlement receipt: succeed the Deferred with Exit as a value so
+// interrupt fan-out does not skip Effect 4.0.0-beta.80 Deferred listeners.
+// Public waiters flatten that Exit; this is not a global Deferred fix.
+const awaitDone = <E>(done: Deferred.Deferred<Exit.Exit<void, E>>): Effect.Effect<void, E> =>
+  Deferred.await(done).pipe(Effect.flatMap(exit => exit))
+
 /** `"input"` subsumes `"steer"` when coalescing wakes. */
 export type Promotable = 'input' | 'steer'
 
@@ -61,7 +67,7 @@ export type Coordinator<Key, E, Reason = never> = {
 }
 
 type Execution<E, Reason> = {
-  readonly done: Deferred.Deferred<void, E>
+  readonly done: Deferred.Deferred<Exit.Exit<void, E>>
   owner?: Fiber.Fiber<void>
   request?: Fiber.Fiber<void>
   scope: Promotable
@@ -104,12 +110,12 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
     const settle = (key: Key, execution: Execution<E, Reason>, exit: Exit.Exit<void, E>) => {
       if (execution.pendingWake !== undefined) start(key, false, execution.pendingWake)
       else executions.delete(key)
-      return Deferred.done(execution.done, exit).pipe(Effect.asVoid)
+      return Deferred.succeed(execution.done, exit).pipe(Effect.asVoid)
     }
 
     const start = (key: Key, force: boolean, scope: Promotable) => {
       const execution: Execution<E, Reason> = {
-        done: Deferred.makeUnsafe<void, E>(),
+        done: Deferred.makeUnsafe<Exit.Exit<void, E>>(),
         scope,
         stopping: false
       }
@@ -163,10 +169,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       Effect.suspend(() => {
         const execution = executions.get(key)
         if (execution === undefined) return Effect.void
-        return Deferred.await(execution.done).pipe(
-          Effect.ignoreCause,
-          Effect.andThen(awaitIdle(key))
-        )
+        return awaitDone(execution.done).pipe(Effect.ignoreCause, Effect.andThen(awaitIdle(key)))
       })
 
     return {
@@ -175,16 +178,16 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
       run: key =>
         Effect.suspend(() => {
           const execution = executions.get(key)
-          if (execution === undefined) return Deferred.await(start(key, true, 'input').done)
-          if (!execution.stopping) return Deferred.await(execution.done)
-          return Deferred.await(execution.done).pipe(
+          if (execution === undefined) return awaitDone(start(key, true, 'input').done)
+          if (!execution.stopping) return awaitDone(execution.done)
+          return awaitDone(execution.done).pipe(
             Effect.ignoreCause,
             Effect.andThen(
               Effect.suspend(() => {
                 const next = executions.get(key)
                 return next === undefined
-                  ? Deferred.await(start(key, true, 'input').done)
-                  : Deferred.await(next.done)
+                  ? awaitDone(start(key, true, 'input').done)
+                  : awaitDone(next.done)
               })
             )
           )
@@ -194,14 +197,14 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           const execution = executions.get(key)
           if (execution === undefined) {
             const started = start(key, true, 'input')
-            return { _tag: 'Started' as const, join: Deferred.await(started.done) }
+            return { _tag: 'Started' as const, join: awaitDone(started.done) }
           }
           if (!execution.stopping) {
-            return { _tag: 'Joined' as const, join: Deferred.await(execution.done) }
+            return { _tag: 'Joined' as const, join: awaitDone(execution.done) }
           }
           return {
             _tag: 'Stopping' as const,
-            awaitSettlement: Deferred.await(execution.done).pipe(Effect.ignoreCause)
+            awaitSettlement: awaitDone(execution.done).pipe(Effect.ignoreCause)
           }
         }),
       wake: (key, scope = 'input') =>
@@ -219,7 +222,7 @@ export const makeCoordinator = <Key, E, Reason = never>(options: {
           return interruptNow(key, reason).pipe(
             Effect.tap(() =>
               options?.awaitSettlement === true && execution !== undefined
-                ? Deferred.await(execution.done).pipe(Effect.ignoreCause)
+                ? awaitDone(execution.done).pipe(Effect.ignoreCause)
                 : Effect.void
             )
           )

@@ -1,9 +1,10 @@
-import { Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from 'effect'
 import { describe, expect, it } from '@effect/vitest'
 import { Driver, makeDriverLayer } from '@yolk-sdk/harness/driver'
+import { makeDurableObjectDriverLayer } from '@yolk-sdk/harness/driver/durable-object'
 import { makeInMemoryHarnessLayer } from '@yolk-sdk/harness/driver/memory'
 import { makeInMemoryInboxLayer } from '@yolk-sdk/harness/inbox'
-import { RunStore } from '@yolk-sdk/harness/store'
+import { RunStore, type DurableRunStoreSnapshot } from '@yolk-sdk/harness/store'
 import { makeLiveDrain, notifyRejectedStart } from '../src/drain-lifecycle.ts'
 
 const makeHarnessLayer = (
@@ -692,5 +693,104 @@ describe('notifyRejectedStart', () => {
         expect(yield* Ref.get(workRan)).toBe(true)
       }).pipe(Effect.provide(layer))
     })
+  )
+})
+
+describe('delayed Driver.run report', () => {
+  it.effect(
+    'reconnect and runOwned both finish when Driver.run reports after actual settlement',
+    () =>
+      Effect.gen(function* () {
+        const live = yield* makeLiveDrain()
+        const snapshot = yield* Ref.make<DurableRunStoreSnapshot | undefined>(undefined)
+        const started = yield* Deferred.make<void>()
+        const saveEntered = yield* Deferred.make<void>()
+        const saveHold = yield* Deferred.make<void>()
+        const reportEntered = yield* Deferred.make<void>()
+        const reportHold = yield* Deferred.make<void>()
+        const queuedWorkStarted = yield* Ref.make(false)
+        const delaySave = yield* Ref.make(false)
+        const finalized = yield* Ref.make(false)
+        const layer = makeDurableObjectDriverLayer({
+          load: Ref.get(snapshot),
+          save: next =>
+            Ref.get(delaySave).pipe(
+              Effect.flatMap(enabled =>
+                enabled && next.claimed.length === 0
+                  ? Deferred.succeed(saveEntered, undefined).pipe(
+                      Effect.andThen(Deferred.await(saveHold)),
+                      Effect.andThen(Ref.set(snapshot, next))
+                    )
+                  : Ref.set(snapshot, next)
+              )
+            ),
+          drain: () => live.runHeld
+        })
+
+        yield* Effect.gen(function* () {
+          const raw = yield* Driver
+          const driver = {
+            ...raw,
+            run: (runId: string) =>
+              raw
+                .run(runId)
+                .pipe(
+                  Effect.onExit(() =>
+                    Deferred.succeed(reportEntered, undefined).pipe(
+                      Effect.andThen(Deferred.await(reportHold))
+                    )
+                  )
+                )
+          }
+          const prepare = yield* live.beginPrepare()
+          const running = yield* live
+            .runOwned(
+              prepare,
+              'sock_1',
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+              driver,
+              'session_1'
+            )
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+          yield* Ref.set(delaySave, true)
+
+          const reconnecting = yield* live
+            .reconnect(driver, 'session_1', Ref.set(finalized, true))
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(saveEntered)
+          const queued = yield* live
+            .runOwned(prepare, 'sock_queued', Ref.set(queuedWorkStarted, true), driver, 'session_1')
+            .pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          expect(reconnecting.pollUnsafe()).toBeUndefined()
+          expect(queued.pollUnsafe()).toBeUndefined()
+          expect(yield* Ref.get(queuedWorkStarted)).toBe(false)
+          expect(yield* Ref.get(finalized)).toBe(false)
+
+          yield* Deferred.succeed(saveHold, undefined)
+          yield* Deferred.await(reportEntered)
+          expect(reconnecting.pollUnsafe()).toBeUndefined()
+          expect(running.pollUnsafe()).toBeUndefined()
+          expect(yield* Ref.get(finalized)).toBe(false)
+
+          yield* Deferred.succeed(reportHold, undefined)
+          yield* Fiber.join(reconnecting)
+          expect(yield* Fiber.join(queued)).toEqual({ _tag: 'Stale' })
+          expect(yield* Ref.get(queuedWorkStarted)).toBe(false)
+          const ownerExit = yield* Fiber.await(running)
+          expect(Exit.isFailure(ownerExit) && Cause.hasInterruptsOnly(ownerExit.cause)).toBe(true)
+          expect(yield* Ref.get(finalized)).toBe(true)
+          expect(yield* driver.isActive('session_1')).toBe(false)
+        }).pipe(
+          Effect.ensuring(
+            Effect.zip(
+              Deferred.done(saveHold, Exit.void),
+              Deferred.done(reportHold, Exit.void)
+            ).pipe(Effect.asVoid)
+          ),
+          Effect.provide(layer)
+        )
+      })
   )
 })
